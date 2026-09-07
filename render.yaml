@@ -19,8 +19,10 @@ services:
       # SSO client id is public
       - key: SSO_CLIENT_ID
         value: cli_168eb7414da1a2e2
-      # SECRET — set the real value in the Render dashboard (never committed to git)
+      # SECRETS — set the real values in the Render dashboard (never committed to git)
       - key: CENTRAL_API_KEY
+        sync: false
+      - key: SSO_CLIENT_SECRET
         sync: false
       # session-cookie signing secret — Render generates a strong random value
       - key: SESSION_SECRET

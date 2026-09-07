@@ -28,18 +28,20 @@ export async function GET(request: NextRequest) {
   if (!state || !cookieState || state !== cookieState)
     return fail(request, "state_mismatch");
 
-  const key = process.env.CENTRAL_API_KEY;
-  if (!key) return fail(request, "server_not_configured");
+  const clientSecret = process.env.SSO_CLIENT_SECRET;
+  if (!clientSecret) return fail(request, "server_not_configured");
 
   let identity: Record<string, unknown>;
   try {
+    // verify authenticates the app with client_id + client_secret (in the body)
     const res = await fetch(SSO.verifyUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ code, client_id: SSO.clientId }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        client_id: SSO.clientId,
+        client_secret: clientSecret,
+      }),
       cache: "no-store",
     });
     if (!res.ok) return fail(request, `verify_${res.status}`);
