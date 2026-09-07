@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: shdservice
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://izypdfhjbqctbopxhrqq.supabase.co
+      # publishable key is client-safe (it is sent to the browser anyway)
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_dAvafH_VnmK7OrlY1cWQEg_iO5M0NxB
