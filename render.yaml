@@ -16,3 +16,12 @@ services:
       # publishable key is client-safe (it is sent to the browser anyway)
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         value: sb_publishable_dAvafH_VnmK7OrlY1cWQEg_iO5M0NxB
+      # SSO client id is public
+      - key: SSO_CLIENT_ID
+        value: cli_168eb7414da1a2e2
+      # SECRET — set the real value in the Render dashboard (never committed to git)
+      - key: CENTRAL_API_KEY
+        sync: false
+      # session-cookie signing secret — Render generates a strong random value
+      - key: SESSION_SECRET
+        generateValue: true

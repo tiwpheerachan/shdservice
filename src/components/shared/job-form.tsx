@@ -19,7 +19,6 @@ import {
   CHANNELS,
   COURIERS,
   RECEIVE_METHODS,
-  TECHNICIANS,
   WARRANTY_OPTIONS,
   JOB_STATUS_OPTIONS,
   type Customer,
@@ -32,6 +31,7 @@ import {
   useProductTypes,
   useSymptoms,
 } from "@/data/db";
+import { PeoplePicker, type Person } from "./people-picker";
 import { baht, cn } from "@/lib/utils";
 
 /* ---------------- lookup bar ---------------- */
@@ -463,6 +463,7 @@ export function CostSummary({ partsTotal = 0 }: { partsTotal?: number }) {
 /* ---------------- other info ---------------- */
 
 export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
+  const [assignee, setAssignee] = React.useState<Person | null>(null);
   return (
     <Section title="ข้อมูลอื่นๆ" icon={ClipboardList}>
       <FieldGrid>
@@ -489,12 +490,8 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
           />
         </Field>
         {showTech && (
-          <Field label="มอบหมายงานนี้ให้">
-            <Select>
-              {TECHNICIANS.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </Select>
+          <Field label="มอบหมายงานนี้ให้" hint="พิมพ์ชื่อเพื่อค้นหาจากไดเรกทอรีกลาง">
+            <PeoplePicker value={assignee} onChange={setAssignee} />
           </Field>
         )}
         <Field label="วันประเมินซ่อมเสร็จ">

@@ -9,6 +9,8 @@ import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
 import { cn } from "@/lib/utils";
 
+type Me = { name: string; email: string; avatar?: string };
+
 export function Topbar({
   onOpenMobile,
   onOpenPalette,
@@ -22,6 +24,24 @@ export function Topbar({
 }) {
   const pathname = usePathname();
   const crumb = findBreadcrumb(pathname);
+
+  const [me, setMe] = React.useState<Me | null>(null);
+  React.useEffect(() => {
+    let active = true;
+    fetch("/api/sso/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (active && d?.user) setMe(d.user);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const initials = me?.name
+    ? me.name.replace(/^(คุณ|นาย|นาง|นางสาว)\s*/u, "").slice(0, 2).toUpperCase()
+    : "··";
 
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
@@ -91,14 +111,14 @@ export function Topbar({
 
       <div className="ml-1 flex items-center gap-2 border-l border-border pl-2 sm:pl-3">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
-          MP
+          {initials}
         </div>
         <div className="hidden leading-tight lg:block">
-          <p className="text-xs font-medium">May - Pradit</p>
-          <p className="text-2xs text-muted-foreground">System Admin</p>
+          <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
+          <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>
         </div>
         <Link
-          href="/logout"
+          href="/api/sso/logout"
           title="ออกจากระบบ"
           className={cn(
             "rounded-md p-2 text-muted-foreground transition-colors",
