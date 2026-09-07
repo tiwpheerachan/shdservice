@@ -6,11 +6,62 @@ import {
   SESSION_TTL_MS,
   type SessionUser,
 } from "@/lib/session";
+import { lookupByEmail } from "@/lib/directory";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+const PENDING_ROLE = "รออนุมัติ";
+
+function nowStamp() {
+  // "YYYY-MM-DD HH:mm" — matches the lastLogin format used elsewhere
+  return new Date().toISOString().slice(0, 16).replace("T", " ");
+}
+
+/**
+ * Auto-provision the signed-in employee into the `users` table. New users get the
+ * PENDING_ROLE (no access until an admin assigns a real role); existing users keep
+ * their role/status and only get profile fields + lastLogin refreshed. Best-effort:
+ * never blocks login if the DB or secret key is unavailable.
+ */
+async function provision(
+  email: string,
+  name: string,
+  larkId: string,
+  department: string,
+  phone: string
+) {
+  try {
+    const db = supabaseAdmin();
+    const { data: existing } = await db
+      .from("users")
+      .select("id, role, status")
+      .eq("email", email)
+      .maybeSingle();
+
+    const id = existing?.id ?? `U-${crypto.randomUUID().slice(0, 8)}`;
+    await db.from("users").upsert(
+      {
+        id,
+        code: larkId,
+        name,
+        username: email.split("@")[0],
+        role: existing?.role ?? PENDING_ROLE,
+        branch: department,
+        email,
+        phone,
+        status: existing?.status ?? "Active",
+        lastLogin: nowStamp(),
+      },
+      { onConflict: "id" }
+    );
+  } catch {
+    // ignore — provisioning is best-effort
+  }
+}
 
 function fail(request: NextRequest, reason: string) {
   const to = new URL("/login", appOrigin(request));
@@ -60,10 +111,20 @@ export async function GET(request: NextRequest) {
   const email = str(u.email);
   if (!email) return fail(request, "no_email");
 
+  // Enrich with the full directory profile (department, title, phone, avatar).
+  const prof = await lookupByEmail(email);
+
+  const name =
+    str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
+  const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
+
+  // Auto-provision into the users table (best-effort; won't block login).
+  await provision(email, name, prof?.id ?? "", prof?.department ?? "", prof?.phone ?? "");
+
   const user: SessionUser = {
     email,
-    name: str(u.name) || str(u.en_name) || email.split("@")[0],
-    avatar: str(u.avatar_url) || str(u.avatar),
+    name,
+    avatar,
     sid: str(identity.sid) || str(identity.session_id) || str(u.union_id),
     exp: Date.now() + SESSION_TTL_MS,
   };

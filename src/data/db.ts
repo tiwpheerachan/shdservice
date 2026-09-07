@@ -24,12 +24,19 @@ import type {
  * React hook wrapping the shared fetchTable() reader.
  * ------------------------------------------------------------------ */
 
-export type TableState<T> = { data: T[]; loading: boolean; error: string | null };
+export type TableState<T> = {
+  data: T[];
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+};
 
 export function useTable<T>(table: string, order?: Order): TableState<T> {
   const [data, setData] = React.useState<T[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [nonce, setNonce] = React.useState(0);
+  const refetch = React.useCallback(() => setNonce((n) => n + 1), []);
 
   const col = order?.column;
   const asc = order?.ascending;
@@ -55,9 +62,9 @@ export function useTable<T>(table: string, order?: Order): TableState<T> {
     return () => {
       active = false;
     };
-  }, [table, col, asc]);
+  }, [table, col, asc, nonce]);
 
-  return { data, loading, error };
+  return { data, loading, error, refetch };
 }
 
 /* ------------------------------------------------------------------ *

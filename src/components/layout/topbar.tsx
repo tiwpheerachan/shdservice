@@ -26,6 +26,7 @@ export function Topbar({
   const crumb = findBreadcrumb(pathname);
 
   const [me, setMe] = React.useState<Me | null>(null);
+  const [avatarError, setAvatarError] = React.useState(false);
   React.useEffect(() => {
     let active = true;
     fetch("/api/sso/me")
@@ -110,9 +111,19 @@ export function Topbar({
       <ThemeToggle />
 
       <div className="ml-1 flex items-center gap-2 border-l border-border pl-2 sm:pl-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
-          {initials}
-        </div>
+        {me?.avatar && !avatarError ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={me.avatar}
+            alt={me.name}
+            onError={() => setAvatarError(true)}
+            className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
+          />
+        ) : (
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
+            {initials}
+          </div>
+        )}
         <div className="hidden leading-tight lg:block">
           <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
           <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>

@@ -24,6 +24,9 @@ services:
         sync: false
       - key: SSO_CLIENT_SECRET
         sync: false
+      # Supabase secret key — server-only, used to write users/master data (bypasses RLS)
+      - key: SUPABASE_SECRET_KEY
+        sync: false
       # session-cookie signing secret — Render generates a strong random value
       - key: SESSION_SECRET
         generateValue: true

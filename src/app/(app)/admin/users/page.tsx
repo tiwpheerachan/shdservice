@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download, KeyRound, Mail, Phone } from "lucide-react";
+import { Plus, Download, ShieldCheck, Mail, Phone, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -10,15 +10,112 @@ import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
+import { PeoplePicker, type Person } from "@/components/shared/people-picker";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type User } from "@/data/mock";
 import { useUsers } from "@/data/db";
 
+type UserForm = {
+  id: string;
+  code: string;
+  name: string;
+  username: string;
+  role: string;
+  branch: string;
+  email: string;
+  phone: string;
+  status: string;
+};
+
+const EMPTY: UserForm = {
+  id: "",
+  code: "",
+  name: "",
+  username: "",
+  role: ROLES[0],
+  branch: "",
+  email: "",
+  phone: "",
+  status: "Active",
+};
+
 export default function UsersPage() {
   const { push } = useToast();
-  const { data: USERS, loading } = useUsers();
+  const { data: USERS, loading, refetch } = useUsers();
   const [open, setOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<User | null>(null);
+  const [editing, setEditing] = React.useState(false);
+  const [form, setForm] = React.useState<UserForm>(EMPTY);
+  const [saving, setSaving] = React.useState(false);
+
+  const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  const openAdd = () => {
+    setForm(EMPTY);
+    setEditing(false);
+    setOpen(true);
+  };
+
+  const openEdit = (r: User) => {
+    setForm({
+      id: r.id,
+      code: r.code ?? "",
+      name: r.name ?? "",
+      username: r.username ?? "",
+      role: r.role ?? ROLES[0],
+      branch: r.branch ?? "",
+      email: r.email ?? "",
+      phone: r.phone ?? "",
+      status: r.status ?? "Active",
+    });
+    setEditing(true);
+    setOpen(true);
+  };
+
+  // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
+  const pickPerson = (p: Person | null) => {
+    if (!p) return;
+    setForm((f) => ({
+      ...f,
+      name: p.name || f.name,
+      email: (p.email || f.email).toLowerCase(),
+      username: p.email ? p.email.split("@")[0] : f.username,
+      code: p.id || f.code,
+      branch: p.department || f.branch,
+    }));
+  };
+
+  const save = async () => {
+    if (!form.name.trim() || !form.role.trim()) {
+      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องมีชื่อและประเภทผู้ใช้งาน" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `error ${res.status}`);
+      push({
+        kind: "success",
+        title: data.created ? "เพิ่มผู้ใช้งานแล้ว" : "บันทึกการแก้ไขแล้ว",
+        desc: `${form.name} · ${form.role}`,
+      });
+      setOpen(false);
+      refetch();
+    } catch (e) {
+      push({
+        kind: "error",
+        title: "บันทึกไม่สำเร็จ",
+        desc: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const columns: Column<User>[] = [
     {
@@ -40,7 +137,8 @@ export default function UsersPage() {
           <div className="min-w-0">
             <p className="truncate font-medium">{r.name}</p>
             <p className="num truncate text-2xs text-muted-foreground">
-              {r.username} · {r.code}
+              {r.username}
+              {r.code ? ` · ${r.code}` : ""}
             </p>
           </div>
         </div>
@@ -48,7 +146,7 @@ export default function UsersPage() {
     },
     {
       key: "role",
-      header: "ประเภทผู้ใช้งาน",
+      header: "ประเภทผู้ใช้งาน / สิทธิ์",
       cell: (r) => <Badge tone="primary">{r.role}</Badge>,
     },
     { key: "branch", header: "สาขา / หน่วยงาน", hideBelow: "lg" },
@@ -61,9 +159,11 @@ export default function UsersPage() {
           <p className="flex items-center gap-1.5">
             <Mail className="h-3 w-3" /> {r.email}
           </p>
-          <p className="num flex items-center gap-1.5">
-            <Phone className="h-3 w-3" /> {r.phone}
-          </p>
+          {r.phone && (
+            <p className="num flex items-center gap-1.5">
+              <Phone className="h-3 w-3" /> {r.phone}
+            </p>
+          )}
         </div>
       ),
     },
@@ -71,7 +171,7 @@ export default function UsersPage() {
       key: "lastLogin",
       header: "เข้าใช้งานล่าสุด",
       hideBelow: "md",
-      cell: (r) => <span className="num text-xs">{r.lastLogin}</span>,
+      cell: (r) => <span className="num text-xs">{r.lastLogin || "—"}</span>,
     },
     {
       key: "status",
@@ -86,20 +186,10 @@ export default function UsersPage() {
     {
       key: "action",
       header: "Action",
-      width: "110px",
+      width: "88px",
       align: "center",
       sortable: false,
-      cell: (r) => (
-        <RowActions
-          onEdit={() => {
-            setEditing(r);
-            setOpen(true);
-          }}
-          onCancel={() =>
-            push({ kind: "info", title: "รีเซ็ตรหัสผ่าน", desc: `ส่งลิงก์ไปที่ ${r.email}` })
-          }
-        />
-      ),
+      cell: (r) => <RowActions onEdit={() => openEdit(r)} />,
     },
   ];
 
@@ -107,20 +197,14 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="ผู้ใช้ระบบ"
-        description="จัดการบัญชีผู้ใช้ สิทธิ์การเข้าถึง และสถานะการใช้งาน"
+        description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
             <Button variant="outline" size="sm">
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditing(null);
-                setOpen(true);
-              }}
-            >
+            <Button size="sm" onClick={openAdd}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มผู้ใช้งาน
             </Button>
@@ -143,67 +227,71 @@ export default function UsersPage() {
         size="lg"
         footer={
           <>
-            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={saving}>
               ยกเลิก
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setOpen(false);
-                push({ kind: "success", title: "บันทึกข้อมูลผู้ใช้แล้ว" });
-              }}
-            >
-              บันทึกข้อมูล
+            <Button size="sm" onClick={save} disabled={saving}>
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {editing ? "บันทึกข้อมูล" : "เพิ่มผู้ใช้งาน"}
             </Button>
           </>
         }
       >
+        {!editing && (
+          <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
+            <label className="mb-1.5 block text-xs font-medium text-foreground">
+              ค้นหาพนักงานจากไดเรกทอรี Lark
+            </label>
+            <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
+            <p className="mt-1.5 text-2xs text-muted-foreground">
+              เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ
+            </p>
+          </div>
+        )}
+
         <FieldGrid cols={2}>
-          <Field label="รหัสพนักงาน" required>
-            <Input defaultValue={editing?.code ?? ""} placeholder="EMP-000" />
-          </Field>
           <Field label="ชื่อ-สกุล" required>
-            <Input defaultValue={editing?.name ?? ""} />
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
-          <Field label="Username" required>
-            <Input defaultValue={editing?.username ?? ""} />
+          <Field label="อีเมล">
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => set("email", e.target.value)}
+            />
           </Field>
-          <Field label="ประเภทผู้ใช้งาน" required>
-            <Select defaultValue={editing?.role ?? ROLES[0]}>
+          <Field label="Username">
+            <Input value={form.username} onChange={(e) => set("username", e.target.value)} />
+          </Field>
+          <Field label="รหัสพนักงาน / Lark ID">
+            <Input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="—" />
+          </Field>
+          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
+            <Select value={form.role} onChange={(e) => set("role", e.target.value)}>
               {ROLES.map((r) => (
                 <option key={r}>{r}</option>
               ))}
             </Select>
           </Field>
-          <Field label="อีเมล">
-            <Input type="email" defaultValue={editing?.email ?? ""} />
+          <Field label="สาขา / หน่วยงาน">
+            <Input value={form.branch} onChange={(e) => set("branch", e.target.value)} />
           </Field>
           <Field label="เบอร์โทรศัพท์">
-            <Input defaultValue={editing?.phone ?? ""} />
-          </Field>
-          <Field label="สาขา / หน่วยงาน">
-            <Input defaultValue={editing?.branch ?? ""} />
+            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} />
           </Field>
           <Field label="สถานะ">
-            <Select defaultValue={editing?.status ?? "Active"}>
+            <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
               <option>Active</option>
               <option>Inactive</option>
             </Select>
           </Field>
-          <Field
-            label="รหัสผ่าน"
-            hint="เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน"
-            wide
-          >
-            <div className="flex gap-2">
-              <Input type="password" placeholder="••••••••" className="flex-1" />
-              <Button variant="outline" size="md" type="button">
-                <KeyRound className="h-3.5 w-3.5" />
-                สุ่มรหัส
-              </Button>
-            </div>
-          </Field>
         </FieldGrid>
+
+        <p className="mt-4 flex items-start gap-2 rounded-md bg-primary-soft/60 px-3 py-2 text-2xs text-primary">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          ผู้ใช้เข้าสู่ระบบด้วย SHD SSO — ไม่มีรหัสผ่านในระบบนี้ สิทธิ์การใช้งานกำหนดจากบทบาทที่เลือก
+          (จัดการรายละเอียดสิทธิ์ได้ที่หน้า “สิทธิ์การใช้งาน”)
+        </p>
       </Modal>
     </>
   );
