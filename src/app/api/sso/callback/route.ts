@@ -70,6 +70,9 @@ export async function GET(request: NextRequest) {
 
   const next = state.split("|")[1] || DEFAULT_AFTER_LOGIN;
   const res = NextResponse.redirect(new URL(next, appOrigin(request)));
+  // set ONLY the session cookie here — a single Set-Cookie on the redirect,
+  // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.
+  // os_state has Max-Age=600 and expires on its own.
   res.cookies.set(SESSION_COOKIE, await signSession(user), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -77,6 +80,5 @@ export async function GET(request: NextRequest) {
     path: "/",
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
-  res.cookies.set(STATE_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }
