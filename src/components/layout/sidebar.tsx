@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Wrench, X, PanelLeftClose } from "lucide-react";
+import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
 import { NAV, type NavGroup } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -97,9 +97,9 @@ export function Sidebar({
           {collapsed ? (
             <div
               className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-sm ring-1 ring-inset ring-white/15"
-              style={{ backgroundColor: "#001599" }}
+              style={{ background: "linear-gradient(135deg,#43a6f8,#55d5a1)" }}
             >
-              <Wrench className="h-[18px] w-[18px]" />
+              <Check className="h-5 w-5" strokeWidth={3} />
             </div>
           ) : (
             <Link
