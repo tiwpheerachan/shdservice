@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN } from "@/lib/sso";
+import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
 import {
   signSession,
   SESSION_COOKIE,
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 function fail(request: NextRequest, reason: string) {
-  const to = new URL("/login", request.url);
+  const to = new URL("/login", appOrigin(request));
   to.searchParams.set("error", reason);
   return NextResponse.redirect(to);
 }
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
   };
 
   const next = state.split("|")[1] || DEFAULT_AFTER_LOGIN;
-  const res = NextResponse.redirect(new URL(next, request.url));
+  const res = NextResponse.redirect(new URL(next, appOrigin(request)));
   res.cookies.set(SESSION_COOKIE, await signSession(user), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

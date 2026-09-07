@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN } from "@/lib/sso";
+import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   // CSRF state = random nonce + where to return afterwards
   const state = `${crypto.randomUUID()}|${next}`;
-  const redirectUri = `${url.origin}/api/sso/callback`;
+  const redirectUri = `${appOrigin(request)}/api/sso/callback`;
 
   const authorize = new URL(SSO.authorizeUrl);
   authorize.searchParams.set("client_id", SSO.clientId);
