@@ -11,8 +11,13 @@ export async function middleware(request: NextRequest) {
   const user = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (user) return NextResponse.next();
 
-  const login = new URL("/login", request.url);
+  // No valid session → go STRAIGHT to the central SSO login (sso.shd-technology.co.th),
+  // never via the app's own /login page. /api/sso/login sets the CSRF state and
+  // redirects to the central portal, returning to `next` after login.
+  const to = request.nextUrl.clone();
   const path = request.nextUrl.pathname + request.nextUrl.search;
-  if (path && path !== "/") login.searchParams.set("next", path);
-  return NextResponse.redirect(login);
+  to.pathname = "/api/sso/login";
+  to.search = "";
+  if (path && path !== "/") to.searchParams.set("next", path);
+  return NextResponse.redirect(to);
 }
