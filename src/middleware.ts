@@ -34,8 +34,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(to);
   }
 
-  // Approved user shouldn't sit on the pending screen.
-  if (pathname === PENDING_PATH) {
+  // Approved user shouldn't sit on the pending screen — unless previewing it
+  // on purpose (/pending?preview=1), so admins can review the design.
+  if (pathname === PENDING_PATH && !request.nextUrl.searchParams.has("preview")) {
     const to = request.nextUrl.clone();
     to.pathname = DEFAULT_AFTER_LOGIN;
     to.search = "";

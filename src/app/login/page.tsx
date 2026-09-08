@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { LogIn, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
+import { AuthSplit } from "@/components/ui/sign-in";
 
 export const metadata = { title: "เข้าสู่ระบบ" };
 export const dynamic = "force-dynamic";
+
+const HERO = "/hero-shd.jpg";
 
 const ERRORS: Record<string, string> = {
   state_mismatch: "เซสชันหมดอายุระหว่างเข้าสู่ระบบ กรุณาลองใหม่",
@@ -25,49 +28,46 @@ export default async function LoginPage({
     : null;
 
   return (
-    <div className="grid min-h-screen place-items-center bg-background p-6">
-      <div className="w-full max-w-sm">
-        <div className="mx-auto mb-6 flex justify-center">
-          <Logo className="h-9 w-auto" />
-        </div>
+    <main className="auth-page">
+      <AuthSplit heroImageSrc={HERO} fit="contain">
+        <div className="flex flex-col gap-6">
+          <Logo variant="navy" className="h-9 w-auto self-start animate-element" />
 
-        <div className="surface p-7">
-          <h1 className="text-center text-lg font-semibold tracking-tight">
-            ระบบบริหารงานบริการ
-          </h1>
-          <p className="mt-1 text-center text-sm text-muted-foreground">
-            เข้าสู่ระบบด้วยบัญชีพนักงาน SHD
-          </p>
+          <div>
+            <h1 className="animate-element animate-delay-100 text-3xl font-semibold tracking-tight sm:text-4xl">
+              ยินดีต้อนรับ
+            </h1>
+            <p className="animate-element animate-delay-200 mt-2 text-muted-foreground">
+              ระบบบริหารงานบริการหลังการขาย SHD — เข้าสู่ระบบด้วยบัญชีพนักงานผ่าน Single Sign-On
+            </p>
+          </div>
 
           {sp.bye && (
-            <p className="mt-4 rounded-md bg-muted/60 px-3 py-2 text-center text-xs text-muted-foreground">
+            <p className="animate-element rounded-xl border border-border bg-muted/50 px-3 py-2 text-center text-xs text-muted-foreground">
               ออกจากระบบเรียบร้อยแล้ว
             </p>
           )}
           {err && (
-            <p className="mt-4 rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-center text-xs text-danger">
+            <p className="animate-element rounded-xl border border-danger/25 bg-danger-soft px-3 py-2 text-center text-xs text-danger">
               {err}
             </p>
           )}
 
           <Link
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
-            className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
+            style={{ background: "linear-gradient(90deg,#43a6f8,#55d5a1)" }}
           >
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO
           </Link>
 
-          <p className="mt-4 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
+          <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
             ยืนยันตัวตนผ่าน sso.shd-technology.co.th
           </p>
         </div>
-
-        <p className="mt-5 text-center text-2xs text-muted-foreground">
-          © 2026 SHD Technology Co., Ltd.
-        </p>
-      </div>
-    </div>
+      </AuthSplit>
+    </main>
   );
 }
