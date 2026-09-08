@@ -87,14 +87,10 @@ export default function UsersPage() {
     setOpen(true);
   };
 
-  // Approve = open the editor with a real role pre-selected, so simply saving
-  // grants access (never accidentally re-saves "รออนุมัติ").
-  const openApprove = (r: User) => {
-    const f = toForm(r);
-    setForm({ ...f, role: f.role === "รออนุมัติ" ? "เจ้าหน้าที่รับงาน" : f.role, status: "Active" });
-    setEditing(true);
-    setOpen(true);
-  };
+  // Approve in ONE click — assign a default real role + Active immediately.
+  // (Change the role afterwards via the edit pencil if needed.)
+  const approveNow = (r: User) =>
+    quickSet(r, { role: "เจ้าหน้าที่รับงาน", status: "Active" }, "อนุมัติแล้ว");
 
   // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
   const pickPerson = (p: Person | null) => {
@@ -330,7 +326,7 @@ export default function UsersPage() {
             {r.role === "รออนุมัติ" ? (
               <button
                 disabled={busyId === r.id}
-                onClick={() => openApprove(r)}
+                onClick={() => approveNow(r)}
                 className="rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 อนุมัติ

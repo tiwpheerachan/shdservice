@@ -225,11 +225,6 @@
   --danger-soft: 0 90% 96%;
 
   color: hsl(var(--foreground));
-  /* match the poster's own near-white background so the two sides read as one */
-  background-color: #fafafa;
-  background-image:
-    linear-gradient(to right, rgba(20, 26, 45, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(20, 26, 45, 0.035) 1px, transparent 1px);
-  background-size: 34px 34px, 34px 34px;
-  background-attachment: fixed;
+  /* plain near-white, same tone as the poster background — no grid, no glow */
+  background: #fafafa;
 }
