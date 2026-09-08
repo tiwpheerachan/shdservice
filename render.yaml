@@ -30,3 +30,6 @@ services:
       # session-cookie signing secret — Render generates a strong random value
       - key: SESSION_SECRET
         generateValue: true
+      # emails that are always System Admin (comma-separated) — optional bootstrap
+      - key: OWNER_EMAILS
+        sync: false

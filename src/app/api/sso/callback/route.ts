@@ -12,13 +12,12 @@ import {
   findUserIdByEmail,
   upsertUserRow,
 } from "@/lib/supabase-admin";
+import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
-
-const PENDING_ROLE = "รออนุมัติ";
 
 function nowStamp() {
   // "YYYY-MM-DD HH:mm" — matches the lastLogin format used elsewhere
@@ -26,10 +25,11 @@ function nowStamp() {
 }
 
 /**
- * Auto-provision the signed-in employee into the `users` table. New users get the
- * PENDING_ROLE (no access until an admin assigns a real role); existing users keep
- * their role/status and only get profile fields + lastLogin refreshed. Best-effort:
- * never blocks login if the DB or secret key is unavailable.
+ * Auto-provision the signed-in employee into the `users` table and return their
+ * effective { role, status }. New users start as PENDING_ROLE (no access until an
+ * admin assigns a real role); existing users keep their role/status. Owner emails
+ * are always forced to System Admin. Best-effort: never blocks login if the DB or
+ * secret key is unavailable (returns the owner/pending default in that case).
  */
 async function provision(opts: {
   email: string;
@@ -39,10 +39,10 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}) {
+}): Promise<{ role: string; status: string }> {
+  const owner = isOwner(opts.email);
   try {
     const existingId = await findUserIdByEmail(opts.email);
-    // preserve an existing user's role/status; only new users start as PENDING
     let role = PENDING_ROLE;
     let status = "Active";
     if (existingId) {
@@ -53,6 +53,11 @@ async function provision(opts: {
         .maybeSingle();
       role = (data?.role as string) ?? PENDING_ROLE;
       status = (data?.status as string) ?? "Active";
+    }
+    // owners are always admins — force it (and persist it)
+    if (owner) {
+      role = ADMIN_ROLE;
+      status = "Active";
     }
     const id = existingId ?? `U-${crypto.randomUUID().slice(0, 8)}`;
     await upsertUserRow({
@@ -69,8 +74,12 @@ async function provision(opts: {
       avatar: opts.avatar,
       title: opts.title,
     });
+    return { role, status };
   } catch {
-    // ignore — provisioning is best-effort
+    // DB unavailable — owners still get in; everyone else waits for approval
+    return owner
+      ? { role: ADMIN_ROLE, status: "Active" }
+      : { role: PENDING_ROLE, status: "Active" };
   }
 }
 
@@ -129,8 +138,8 @@ export async function GET(request: NextRequest) {
     str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
-  // Auto-provision into the users table (best-effort; won't block login).
-  await provision({
+  // Auto-provision into the users table and get the effective role/status.
+  const { role, status } = await provision({
     email,
     name,
     larkId: prof?.id ?? "",
@@ -145,6 +154,8 @@ export async function GET(request: NextRequest) {
     name,
     avatar,
     sid: str(identity.sid) || str(identity.session_id) || str(u.union_id),
+    role,
+    approved: isApproved(role, status),
     exp: Date.now() + SESSION_TTL_MS,
   };
 

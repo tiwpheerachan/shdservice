@@ -13,6 +13,8 @@ export type SessionUser = {
   name: string;
   avatar?: string;
   sid?: string; // central session id (for Single-Logout checks)
+  role?: string; // OneService role (from the users table); baked in at login
+  approved?: boolean; // may this user actually enter the app?
   exp: number; // epoch ms
 };
 
