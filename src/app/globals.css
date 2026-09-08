@@ -225,6 +225,6 @@
   --danger-soft: 0 90% 96%;
 
   color: hsl(var(--foreground));
-  /* plain near-white, same tone as the poster background — no grid, no glow */
-  background: #fafafa;
+  /* plain white, exact shade of the poster background — no grid, no glow */
+  background: #fefefe;
 }

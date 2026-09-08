@@ -31,7 +31,7 @@ export function AuthSplit({
               ? `url(${heroImageSrc})`
               : "linear-gradient(135deg,#43a6f8,#55d5a1)",
             backgroundSize: fit,
-            backgroundColor: "#fafafa",
+            backgroundColor: "#fefefe",
           }}
         >
           {overlayCard && (
