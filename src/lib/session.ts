@@ -32,11 +32,22 @@ function unb64url(s: string) {
   return arr;
 }
 
-async function hmacKey() {
-  const secret =
-    process.env.SESSION_SECRET ||
-    process.env.CENTRAL_API_KEY ||
-    "dev-only-insecure-secret-change-me";
+// Candidate signing secrets, in priority order. CENTRAL_API_KEY is preferred
+// because it is STABLE across deploys — unlike a Render `generateValue` secret,
+// which can rotate on redeploy and silently invalidate every existing session
+// (the cause of sessions dying after a deploy). We SIGN with the first candidate
+// and VERIFY against all of them, so cookies signed with any of these keep
+// working — no forced re-login when the priority changes.
+function candidateSecrets(): string[] {
+  const list = [
+    process.env.CENTRAL_API_KEY,
+    process.env.SESSION_SECRET,
+    "dev-only-insecure-secret-change-me",
+  ].filter((s): s is string => !!s);
+  return list.length ? list : ["dev-only-insecure-secret-change-me"];
+}
+
+function importKey(secret: string) {
   return crypto.subtle.importKey(
     "raw",
     enc.encode(secret),
@@ -48,8 +59,9 @@ async function hmacKey() {
 
 export async function signSession(user: SessionUser): Promise<string> {
   const payload = b64url(enc.encode(JSON.stringify(user)));
+  const key = await importKey(candidateSecrets()[0]);
   const sig = new Uint8Array(
-    await crypto.subtle.sign("HMAC", await hmacKey(), enc.encode(payload))
+    await crypto.subtle.sign("HMAC", key, enc.encode(payload))
   );
   return `${payload}.${b64url(sig)}`;
 }
@@ -59,13 +71,18 @@ export async function verifySession(
 ): Promise<SessionUser | null> {
   if (!token || !token.includes(".")) return null;
   const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
   try {
-    const ok = await crypto.subtle.verify(
-      "HMAC",
-      await hmacKey(),
-      unb64url(sig),
-      enc.encode(payload)
-    );
+    let ok = false;
+    for (const secret of candidateSecrets()) {
+      ok = await crypto.subtle.verify(
+        "HMAC",
+        await importKey(secret),
+        unb64url(sig),
+        enc.encode(payload)
+      );
+      if (ok) break;
+    }
     if (!ok) return null;
     const user = JSON.parse(dec.decode(unb64url(payload))) as SessionUser;
     if (!user.exp || user.exp < Date.now()) return null;
