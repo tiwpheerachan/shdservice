@@ -10,8 +10,12 @@
 create table if not exists "users" (
   "id" text primary key,
   "code" text, "name" text, "username" text, "role" text, "branch" text,
-  "email" text, "phone" text, "lastLogin" text, "status" text
+  "email" text, "phone" text, "lastLogin" text, "status" text,
+  "avatar" text, "title" text
 );
+-- for existing installs: add the profile columns if they are missing
+alter table "users" add column if not exists "avatar" text;
+alter table "users" add column if not exists "title" text;
 
 create table if not exists "permissions" (
   "id" text primary key,

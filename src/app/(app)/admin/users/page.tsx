@@ -97,7 +97,13 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        // session expired → send back through central SSO, then return here
+        window.location.href =
+          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `error ${res.status}`);
       push({
         kind: "success",
@@ -131,9 +137,21 @@ export default function UsersPage() {
       header: "ชื่อผู้ใช้งาน",
       cell: (r) => (
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-2xs font-semibold text-primary">
-            {r.name.slice(0, 2).toUpperCase()}
-          </span>
+          {r.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={r.avatar}
+              alt={r.name}
+              className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-2xs font-semibold text-primary">
+              {r.name.slice(0, 2).toUpperCase()}
+            </span>
+          )}
           <div className="min-w-0">
             <p className="truncate font-medium">{r.name}</p>
             <p className="num truncate text-2xs text-muted-foreground">

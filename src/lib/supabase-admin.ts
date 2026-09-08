@@ -21,3 +21,38 @@ export function supabaseAdmin(): SupabaseClient {
   }
   return client;
 }
+
+/** Find an existing user's row id by email (case-insensitive), or null. */
+export async function findUserIdByEmail(email: string): Promise<string | null> {
+  if (!email) return null;
+  const db = supabaseAdmin();
+  const { data } = await db
+    .from("users")
+    .select("id")
+    .ilike("email", email)
+    .maybeSingle();
+  return (data?.id as string) ?? null;
+}
+
+/**
+ * Upsert a user row. If the DB doesn't yet have the optional `avatar` / `title`
+ * columns (migration not run), it retries without them so the core write still
+ * succeeds. Returns an error message string, or null on success.
+ */
+export async function upsertUserRow(
+  row: Record<string, unknown>
+): Promise<string | null> {
+  const db = supabaseAdmin();
+  const { error } = await db.from("users").upsert(row, { onConflict: "id" });
+  if (!error) return null;
+
+  const missingColumn = /column|schema cache|does not exist/i.test(error.message);
+  if (missingColumn && ("avatar" in row || "title" in row)) {
+    const rest = { ...row };
+    delete rest.avatar;
+    delete rest.title;
+    const retry = await db.from("users").upsert(rest, { onConflict: "id" });
+    return retry.error ? retry.error.message : null;
+  }
+  return error.message;
+}

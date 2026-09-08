@@ -7,7 +7,11 @@ import {
   type SessionUser,
 } from "@/lib/session";
 import { lookupByEmail } from "@/lib/directory";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  supabaseAdmin,
+  findUserIdByEmail,
+  upsertUserRow,
+} from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,37 +31,44 @@ function nowStamp() {
  * their role/status and only get profile fields + lastLogin refreshed. Best-effort:
  * never blocks login if the DB or secret key is unavailable.
  */
-async function provision(
-  email: string,
-  name: string,
-  larkId: string,
-  department: string,
-  phone: string
-) {
+async function provision(opts: {
+  email: string;
+  name: string;
+  larkId: string;
+  department: string;
+  phone: string;
+  avatar: string;
+  title: string;
+}) {
   try {
-    const db = supabaseAdmin();
-    const { data: existing } = await db
-      .from("users")
-      .select("id, role, status")
-      .eq("email", email)
-      .maybeSingle();
-
-    const id = existing?.id ?? `U-${crypto.randomUUID().slice(0, 8)}`;
-    await db.from("users").upsert(
-      {
-        id,
-        code: larkId,
-        name,
-        username: email.split("@")[0],
-        role: existing?.role ?? PENDING_ROLE,
-        branch: department,
-        email,
-        phone,
-        status: existing?.status ?? "Active",
-        lastLogin: nowStamp(),
-      },
-      { onConflict: "id" }
-    );
+    const existingId = await findUserIdByEmail(opts.email);
+    // preserve an existing user's role/status; only new users start as PENDING
+    let role = PENDING_ROLE;
+    let status = "Active";
+    if (existingId) {
+      const { data } = await supabaseAdmin()
+        .from("users")
+        .select("role, status")
+        .eq("id", existingId)
+        .maybeSingle();
+      role = (data?.role as string) ?? PENDING_ROLE;
+      status = (data?.status as string) ?? "Active";
+    }
+    const id = existingId ?? `U-${crypto.randomUUID().slice(0, 8)}`;
+    await upsertUserRow({
+      id,
+      code: opts.larkId,
+      name: opts.name,
+      username: opts.email.split("@")[0],
+      role,
+      branch: opts.department,
+      email: opts.email,
+      phone: opts.phone,
+      status,
+      lastLogin: nowStamp(),
+      avatar: opts.avatar,
+      title: opts.title,
+    });
   } catch {
     // ignore — provisioning is best-effort
   }
@@ -119,7 +130,15 @@ export async function GET(request: NextRequest) {
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table (best-effort; won't block login).
-  await provision(email, name, prof?.id ?? "", prof?.department ?? "", prof?.phone ?? "");
+  await provision({
+    email,
+    name,
+    larkId: prof?.id ?? "",
+    department: prof?.department ?? "",
+    phone: prof?.phone ?? "",
+    avatar,
+    title: prof?.title ?? "",
+  });
 
   const user: SessionUser = {
     email,

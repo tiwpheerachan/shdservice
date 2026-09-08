@@ -27,6 +27,8 @@ export type User = {
   phone: string;
   lastLogin: string;
   status: Status;
+  avatar?: string | null;
+  title?: string | null;
 };
 
 export type Permission = {

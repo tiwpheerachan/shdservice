@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { findUserIdByEmail, upsertUserRow } from "@/lib/supabase-admin";
+import { lookupByEmail } from "@/lib/directory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,34 +36,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name and role are required" }, { status: 400 });
   }
 
-  const db = supabaseAdmin();
+  // Enrich avatar/title (and fill blanks) from the directory when we have an email.
+  const prof = email ? await lookupByEmail(email) : null;
 
-  // Resolve the target row id: explicit id (edit) → existing by email → new id.
-  let id = str(body.id);
-  if (!id && email) {
-    const { data } = await db.from("users").select("id").eq("email", email).maybeSingle();
-    if (data?.id) id = data.id as string;
+  try {
+    // Resolve the target row id: explicit id (edit) → existing by email → new id.
+    let id = str(body.id);
+    if (!id && email) {
+      id = (await findUserIdByEmail(email)) ?? "";
+    }
+    const isNew = !id;
+    if (!id) id = `U-${crypto.randomUUID().slice(0, 8)}`;
+
+    const row: Record<string, unknown> = {
+      id,
+      code: str(body.code) || prof?.id || "",
+      name,
+      username: str(body.username) || (email ? email.split("@")[0] : ""),
+      role,
+      branch: str(body.branch) || prof?.department || "",
+      email,
+      phone: str(body.phone) || prof?.phone || "",
+      status: str(body.status) || "Active",
+      avatar: str(body.avatar) || prof?.avatar || "",
+      title: str(body.title) || prof?.title || "",
+    };
+    // Only set lastLogin on create so we never wipe an existing user's value.
+    if (isNew) row.lastLogin = "";
+
+    const errMsg = await upsertUserRow(row);
+    if (errMsg) return NextResponse.json({ error: errMsg }, { status: 500 });
+    return NextResponse.json({ ok: true, user: row, created: isNew });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "server database is not configured" },
+      { status: 503 }
+    );
   }
-  const isNew = !id;
-  if (!id) id = `U-${crypto.randomUUID().slice(0, 8)}`;
-
-  // Only include lastLogin on create so we never wipe an existing user's value.
-  const row: Record<string, unknown> = {
-    id,
-    code: str(body.code),
-    name,
-    username: str(body.username) || (email ? email.split("@")[0] : ""),
-    role,
-    branch: str(body.branch),
-    email,
-    phone: str(body.phone),
-    status: str(body.status) || "Active",
-  };
-  if (isNew) row.lastLogin = "";
-
-  const { error } = await db.from("users").upsert(row, { onConflict: "id" });
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true, user: row, created: isNew });
 }
