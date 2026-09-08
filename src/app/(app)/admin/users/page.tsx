@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download, ShieldCheck, Mail, Phone, Loader2 } from "lucide-react";
+import { Plus, Download, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -42,6 +42,12 @@ const EMPTY: UserForm = {
 export default function UsersPage() {
   const { push } = useToast();
   const { data: USERS, loading, refetch } = useUsers();
+  const pendingCount = USERS.filter((u) => u.role === "รออนุมัติ").length;
+  // auto-refresh so users who just signed in (pending) show up without a reload
+  React.useEffect(() => {
+    const id = setInterval(() => refetch(), 25000);
+    return () => clearInterval(id);
+  }, [refetch]);
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState<UserForm>(EMPTY);
@@ -165,7 +171,14 @@ export default function UsersPage() {
     {
       key: "role",
       header: "ประเภทผู้ใช้งาน / สิทธิ์",
-      cell: (r) => <Badge tone="primary">{r.role}</Badge>,
+      cell: (r) =>
+        r.role === "รออนุมัติ" ? (
+          <Badge tone="warning" dot>
+            {r.role}
+          </Badge>
+        ) : (
+          <Badge tone="primary">{r.role}</Badge>
+        ),
     },
     { key: "branch", header: "สาขา / หน่วยงาน", hideBelow: "lg" },
     {
@@ -204,10 +217,22 @@ export default function UsersPage() {
     {
       key: "action",
       header: "Action",
-      width: "88px",
+      width: "150px",
       align: "center",
       sortable: false,
-      cell: (r) => <RowActions onEdit={() => openEdit(r)} />,
+      cell: (r) => (
+        <div className="flex items-center justify-center gap-1.5">
+          {r.role === "รออนุมัติ" && (
+            <button
+              onClick={() => openEdit(r)}
+              className="rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              อนุมัติ
+            </button>
+          )}
+          <RowActions onEdit={() => openEdit(r)} />
+        </div>
+      ),
     },
   ];
 
@@ -229,6 +254,25 @@ export default function UsersPage() {
           </>
         }
       />
+
+      {pendingCount > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-3">
+          <Clock className="h-4 w-4 shrink-0 text-warning" />
+          <span className="text-sm font-medium text-warning">
+            มี {pendingCount} บัญชีรอการอนุมัติ
+          </span>
+          <span className="text-2xs text-warning/80">
+            กด “อนุมัติ” ที่แถวนั้นเพื่อกำหนดบทบาทและเปิดสิทธิ์ใช้งาน
+          </span>
+          <button
+            onClick={() => refetch()}
+            className="ml-auto flex items-center gap-1.5 rounded-md border border-warning/30 px-2.5 py-1 text-2xs font-medium text-warning transition-colors hover:bg-warning/10"
+          >
+            <RefreshCw className="h-3 w-3" />
+            รีเฟรช
+          </button>
+        </div>
+      )}
 
       <DataTable
         columns={columns}

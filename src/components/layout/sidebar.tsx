@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
 import { NAV, type NavGroup } from "@/lib/nav";
+import { Logo } from "@/components/shared/logo";
 import { cn } from "@/lib/utils";
 
 type Flyout = { id: string; top: number; left: number };
@@ -106,14 +107,9 @@ export function Sidebar({
               href="/jobs/dashboard"
               onClick={onCloseMobile}
               aria-label="OneService — หน้าแรก"
-              className="flex min-w-0 flex-1 items-center rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-black/5 transition-shadow hover:shadow-sm"
+              className="flex min-w-0 flex-1 items-center rounded-lg px-1 py-1 text-sidebar-foreground transition-opacity hover:opacity-90"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/logo.png"
-                alt="OneService"
-                className="h-6 w-auto max-w-full object-contain"
-              />
+              <Logo className="h-7 w-auto max-w-full" />
             </Link>
           )}
           <button

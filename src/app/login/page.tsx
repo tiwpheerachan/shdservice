@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LogIn, ShieldCheck } from "lucide-react";
+import { Logo } from "@/components/shared/logo";
 
 export const metadata = { title: "เข้าสู่ระบบ" };
 export const dynamic = "force-dynamic";
@@ -27,8 +28,7 @@ export default async function LoginPage({
     <div className="grid min-h-screen place-items-center bg-background p-6">
       <div className="w-full max-w-sm">
         <div className="mx-auto mb-6 flex justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="OneService" className="h-9 w-auto" />
+          <Logo className="h-9 w-auto" />
         </div>
 
         <div className="surface p-7">
