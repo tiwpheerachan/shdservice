@@ -10,6 +10,7 @@ export type Person = {
   email: string;
   department?: string;
   title?: string;
+  avatar?: string;
 };
 
 /**
@@ -91,9 +92,18 @@ export function PeoplePicker({
           className
         )}
       >
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft text-2xs font-semibold text-primary">
-          {value.name.slice(0, 2).toUpperCase() || <User className="h-3 w-3" />}
-        </span>
+        {value.avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={value.avatar}
+            alt={value.name}
+            className="h-6 w-6 shrink-0 rounded-full object-cover"
+          />
+        ) : (
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft text-2xs font-semibold text-primary">
+            {value.name.slice(0, 2).toUpperCase() || <User className="h-3 w-3" />}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-sm">
           {value.name}
           {value.email && (
@@ -163,9 +173,18 @@ export function PeoplePicker({
                       i === active ? "bg-accent" : "hover:bg-accent/60"
                     )}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted text-2xs font-semibold text-muted-foreground">
-                      {p.name.slice(0, 2).toUpperCase() || <User className="h-3.5 w-3.5" />}
-                    </span>
+                    {p.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.avatar}
+                        alt={p.name}
+                        className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-border"
+                      />
+                    ) : (
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted text-2xs font-semibold text-muted-foreground">
+                        {p.name.slice(0, 2).toUpperCase() || <User className="h-3.5 w-3.5" />}
+                      </span>
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{p.name}</span>
                       <span className="block truncate text-2xs text-muted-foreground">

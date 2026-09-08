@@ -25,6 +25,7 @@ type UserForm = {
   email: string;
   phone: string;
   status: string;
+  avatar: string;
 };
 
 const EMPTY: UserForm = {
@@ -37,6 +38,7 @@ const EMPTY: UserForm = {
   email: "",
   phone: "",
   status: "Active",
+  avatar: "",
 };
 
 export default function UsersPage() {
@@ -73,6 +75,7 @@ export default function UsersPage() {
       email: r.email ?? "",
       phone: r.phone ?? "",
       status: r.status ?? "Active",
+      avatar: r.avatar ?? "",
     });
     setEditing(true);
     setOpen(true);
@@ -88,6 +91,7 @@ export default function UsersPage() {
       username: p.email ? p.email.split("@")[0] : f.username,
       code: p.id || f.code,
       branch: p.department || f.branch,
+      avatar: p.avatar || f.avatar,
     }));
   };
 
@@ -308,6 +312,27 @@ export default function UsersPage() {
             <p className="mt-1.5 text-2xs text-muted-foreground">
               เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ
             </p>
+          </div>
+        )}
+
+        {(form.avatar || form.name) && (
+          <div className="mb-4 flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+            {form.avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={form.avatar}
+                alt={form.name}
+                className="h-12 w-12 rounded-full object-cover ring-1 ring-border"
+              />
+            ) : (
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-primary-soft text-sm font-semibold text-primary">
+                {form.name.slice(0, 2).toUpperCase()}
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{form.name || "—"}</p>
+              <p className="truncate text-2xs text-muted-foreground">{form.email || "ยังไม่ได้เลือกพนักงาน"}</p>
+            </div>
           </div>
         )}
 

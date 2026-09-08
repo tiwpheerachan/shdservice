@@ -11,6 +11,7 @@ type Person = {
   email: string;
   department: string;
   title: string;
+  avatar: string;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -55,6 +56,8 @@ export async function GET(request: Request) {
       email: str(p.email),
       department: str(p.department) || str(p.dept),
       title: str(p.title) || str(p.position),
+      avatar:
+        str(p.avatar_url) || str(p.avatar) || str(p.photo) || str(p.picture),
     }));
 
     return NextResponse.json({ items });
