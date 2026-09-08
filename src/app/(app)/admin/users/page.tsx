@@ -64,19 +64,30 @@ export default function UsersPage() {
     setOpen(true);
   };
 
+  const toForm = (r: User): UserForm => ({
+    id: r.id,
+    code: r.code ?? "",
+    name: r.name ?? "",
+    username: r.username ?? "",
+    role: r.role ?? ROLES[0],
+    branch: r.branch ?? "",
+    email: r.email ?? "",
+    phone: r.phone ?? "",
+    status: r.status ?? "Active",
+    avatar: r.avatar ?? "",
+  });
+
   const openEdit = (r: User) => {
-    setForm({
-      id: r.id,
-      code: r.code ?? "",
-      name: r.name ?? "",
-      username: r.username ?? "",
-      role: r.role ?? ROLES[0],
-      branch: r.branch ?? "",
-      email: r.email ?? "",
-      phone: r.phone ?? "",
-      status: r.status ?? "Active",
-      avatar: r.avatar ?? "",
-    });
+    setForm(toForm(r));
+    setEditing(true);
+    setOpen(true);
+  };
+
+  // Approve = open the editor with a real role pre-selected, so simply saving
+  // grants access (never accidentally re-saves "รออนุมัติ").
+  const openApprove = (r: User) => {
+    const f = toForm(r);
+    setForm({ ...f, role: f.role === "รออนุมัติ" ? "เจ้าหน้าที่รับงาน" : f.role, status: "Active" });
     setEditing(true);
     setOpen(true);
   };
@@ -236,7 +247,7 @@ export default function UsersPage() {
         <div className="flex items-center justify-center gap-1.5">
           {r.role === "รออนุมัติ" && (
             <button
-              onClick={() => openEdit(r)}
+              onClick={() => openApprove(r)}
               className="rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
               อนุมัติ
