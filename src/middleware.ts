@@ -1,19 +1,20 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { SESSION_COOKIE } from "@/lib/session";
 
-// Middleware only checks AUTHENTICATION (is there a valid session cookie?).
-// AUTHORIZATION (is the user approved?) is done fresh from the DB in the (app)
-// layout on every request, so an admin's approval takes effect immediately and
-// never depends on a stale cookie flag.
+// Middleware runs in the EDGE runtime, where the HMAC secret (CENTRAL_API_KEY)
+// is NOT reliably available — so it must NOT verify the cookie signature here,
+// or every navigation would be wrongly rejected. It only checks that a session
+// cookie is PRESENT. The real verification (signature, expiry, approval) happens
+// in the Node-runtime (app) layout and API routes, which do have the secret.
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|login|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|ico|webp)$).*)"],
 };
 
-export async function middleware(request: NextRequest) {
-  const user = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (user) return NextResponse.next();
+export function middleware(request: NextRequest) {
+  const hasCookie = !!request.cookies.get(SESSION_COOKIE)?.value;
+  if (hasCookie) return NextResponse.next();
 
-  // Not signed in → go straight to central SSO login.
+  // No cookie at all → straight to central SSO login.
   const to = request.nextUrl.clone();
   const path = request.nextUrl.pathname + request.nextUrl.search;
   to.pathname = "/api/sso/login";
