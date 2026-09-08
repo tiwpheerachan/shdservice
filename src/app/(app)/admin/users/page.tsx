@@ -102,13 +102,21 @@ export default function UsersPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      const doPost = () =>
+        fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+      let res = await doPost();
       if (res.status === 401) {
-        // session expired → send back through central SSO, then return here
+        // transient/expiring session → refresh the cookie and retry once
+        // before giving up, so a valid add is never silently lost.
+        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 400));
+        res = await doPost();
+      }
+      if (res.status === 401) {
         window.location.href =
           "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
         return;

@@ -71,11 +71,18 @@ export default function PermissionsPage() {
     setSaving(true);
     try {
       const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
-      const res = await fetch("/api/admin/permissions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
-      });
+      const doPost = () =>
+        fetch("/api/admin/permissions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+      let res = await doPost();
+      if (res.status === 401) {
+        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 400));
+        res = await doPost();
+      }
       if (res.status === 401) {
         window.location.href =
           "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
