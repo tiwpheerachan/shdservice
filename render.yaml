@@ -27,9 +27,12 @@ services:
       # Supabase secret key — server-only, used to write users/master data (bypasses RLS)
       - key: SUPABASE_SECRET_KEY
         sync: false
-      # session-cookie signing secret — Render generates a strong random value
+      # Session-cookie signing: the app signs with the STABLE CENTRAL_API_KEY, so
+      # SESSION_SECRET is optional. Do NOT use generateValue here — it can rotate
+      # on deploys and invalidate every active session. Leave unset, or set one
+      # fixed value in the dashboard (sync:false) if you want a dedicated secret.
       - key: SESSION_SECRET
-        generateValue: true
+        sync: false
       # emails that are always System Admin (comma-separated) — optional bootstrap
       - key: OWNER_EMAILS
         sync: false
