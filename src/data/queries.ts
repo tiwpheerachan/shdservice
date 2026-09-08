@@ -6,10 +6,27 @@ import type { MasterRow, Symptom } from "./mock";
 
 export type Order = { column: string; ascending?: boolean };
 
-export async function fetchTable<T>(table: string, order?: Order): Promise<T[]> {
-  let query = supabase.from(table).select("*");
-  if (order) query = query.order(order.column, { ascending: order.ascending ?? true });
-  const { data, error } = await query;
+// Soft-delete view: hide deleted rows (default), show only deleted, or show all.
+export type DeletedMode = "exclude" | "only" | "all";
+
+export async function fetchTable<T>(
+  table: string,
+  order?: Order,
+  deleted: DeletedMode = "exclude"
+): Promise<T[]> {
+  const build = (applyFilter: boolean) => {
+    let q = supabase.from(table).select("*");
+    if (order) q = q.order(order.column, { ascending: order.ascending ?? true });
+    if (applyFilter && deleted === "exclude") q = q.or("deleted.is.null,deleted.eq.false");
+    if (applyFilter && deleted === "only") q = q.eq("deleted", true);
+    return q;
+  };
+  let { data, error } = await build(deleted !== "all");
+  // If the `deleted` column hasn't been migrated yet, retry without the filter
+  // so nothing breaks before the migration is applied.
+  if (error && /deleted/i.test(error.message)) {
+    ({ data, error } = await build(false));
+  }
   if (error) throw new Error(`[${table}] ${error.message}`);
   return (data ?? []) as T[];
 }

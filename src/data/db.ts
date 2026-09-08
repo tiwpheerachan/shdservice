@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { fetchTable, type Order } from "./queries";
+import { fetchTable, type Order, type DeletedMode } from "./queries";
 import type {
   User,
   Permission,
@@ -31,7 +31,11 @@ export type TableState<T> = {
   refetch: () => void;
 };
 
-export function useTable<T>(table: string, order?: Order): TableState<T> {
+export function useTable<T>(
+  table: string,
+  order?: Order,
+  deleted: DeletedMode = "exclude"
+): TableState<T> {
   const [data, setData] = React.useState<T[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -44,7 +48,7 @@ export function useTable<T>(table: string, order?: Order): TableState<T> {
   React.useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchTable<T>(table, col ? { column: col, ascending: asc } : undefined)
+    fetchTable<T>(table, col ? { column: col, ascending: asc } : undefined, deleted)
       .then((rows) => {
         if (!active) return;
         setData(rows);
@@ -62,7 +66,7 @@ export function useTable<T>(table: string, order?: Order): TableState<T> {
     return () => {
       active = false;
     };
-  }, [table, col, asc, nonce]);
+  }, [table, col, asc, nonce, deleted]);
 
   return { data, loading, error, refetch };
 }
@@ -71,7 +75,8 @@ export function useTable<T>(table: string, order?: Order): TableState<T> {
  * Named hooks — one per table, with the display order used by the UI.
  * ------------------------------------------------------------------ */
 
-export const useUsers = () => useTable<User>("users", { column: "id" });
+export const useUsers = (deleted: DeletedMode = "exclude") =>
+  useTable<User>("users", { column: "id" }, deleted);
 export const usePermissions = () => useTable<Permission>("permissions", { column: "id" });
 export const useCategories = () => useTable<MasterRow>("categories", { column: "id" });
 export const useManufacturers = () =>

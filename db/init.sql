@@ -17,6 +17,22 @@ create table if not exists "users" (
 alter table "users" add column if not exists "avatar" text;
 alter table "users" add column if not exists "title" text;
 
+-- soft-delete flag for every list table (hidden by default, restorable from the
+-- "รายการที่ลบ" view). Safe to re-run.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'users','jobs','quotations','sale_orders','customers','products','models',
+    'movements','categories','manufacturers','colors','job_types',
+    'product_types','symptoms','permissions'
+  ] loop
+    if to_regclass('"'||t||'"') is not null then
+      execute format('alter table %I add column if not exists "deleted" boolean not null default false', t);
+    end if;
+  end loop;
+end $$;
+
 create table if not exists "permissions" (
   "id" text primary key,
   "role" text, "menu" text,
