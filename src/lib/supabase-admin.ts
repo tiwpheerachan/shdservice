@@ -22,16 +22,38 @@ export function supabaseAdmin(): SupabaseClient {
   return client;
 }
 
-/** Find an existing user's row id by email (case-insensitive), or null. */
+/**
+ * Find an existing user's row id by email (case-insensitive), or null.
+ * Robust to duplicate rows (never throws like maybeSingle): if several rows share
+ * the email, it prefers the one with a real assigned role so re-provisioning
+ * reuses the approved row instead of resurrecting a pending duplicate.
+ */
 export async function findUserIdByEmail(email: string): Promise<string | null> {
   if (!email) return null;
   const db = supabaseAdmin();
-  const { data } = await db
-    .from("users")
-    .select("id")
-    .ilike("email", email)
-    .maybeSingle();
-  return (data?.id as string) ?? null;
+  const { data } = await db.from("users").select("id, role").ilike("email", email);
+  const rows = (data as { id: string; role: string }[] | null) ?? [];
+  if (rows.length === 0) return null;
+  const withRealRole = rows.find((r) => r.role && r.role !== "รออนุมัติ");
+  return (withRealRole ?? rows[0]).id;
+}
+
+/**
+ * Remove duplicate rows that share this email, keeping only `keepId`.
+ * Best-effort — one row per person keeps approval checks unambiguous.
+ */
+export async function dedupeUsersByEmail(email: string, keepId: string): Promise<void> {
+  if (!email || !keepId) return;
+  try {
+    const db = supabaseAdmin();
+    const { data } = await db.from("users").select("id").ilike("email", email);
+    const extras = ((data as { id: string }[] | null) ?? [])
+      .map((r) => r.id)
+      .filter((id) => id && id !== keepId);
+    if (extras.length) await db.from("users").delete().in("id", extras);
+  } catch {
+    // best-effort
+  }
 }
 
 /**

@@ -29,14 +29,21 @@ export async function GET(request: NextRequest) {
     approved = true;
   } else {
     try {
+      // read ALL rows for this email (robust to duplicates); the user is approved
+      // if ANY row has a real role + Active status.
       const { data } = await supabaseAdmin()
         .from("users")
         .select("role, status")
-        .ilike("email", current.email)
-        .maybeSingle();
-      if (data) {
-        role = (data.role as string) ?? PENDING_ROLE;
-        approved = isApproved(data.role as string, data.status as string);
+        .ilike("email", current.email);
+      const rows =
+        (data as { role: string; status: string }[] | null) ?? [];
+      const approvedRow = rows.find((r) => isApproved(r.role, r.status));
+      if (approvedRow) {
+        role = approvedRow.role;
+        approved = true;
+      } else if (rows[0]) {
+        role = rows[0].role ?? PENDING_ROLE;
+        approved = false;
       }
       // if no row found, keep the current cookie values (don't downgrade on a race)
     } catch {

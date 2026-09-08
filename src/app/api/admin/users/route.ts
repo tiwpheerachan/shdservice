@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { findUserIdByEmail, upsertUserRow } from "@/lib/supabase-admin";
+import {
+  findUserIdByEmail,
+  upsertUserRow,
+  dedupeUsersByEmail,
+} from "@/lib/supabase-admin";
 import { lookupByEmail } from "@/lib/directory";
 
 export const runtime = "nodejs";
@@ -66,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     const errMsg = await upsertUserRow(row);
     if (errMsg) return NextResponse.json({ error: errMsg }, { status: 500 });
+    if (email) await dedupeUsersByEmail(email, id);
     return NextResponse.json({ ok: true, user: row, created: isNew });
   } catch (e) {
     return NextResponse.json(

@@ -11,6 +11,7 @@ import {
   supabaseAdmin,
   findUserIdByEmail,
   upsertUserRow,
+  dedupeUsersByEmail,
 } from "@/lib/supabase-admin";
 import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
 
@@ -74,6 +75,7 @@ async function provision(opts: {
       avatar: opts.avatar,
       title: opts.title,
     });
+    await dedupeUsersByEmail(opts.email, id);
     return { role, status };
   } catch {
     // DB unavailable — owners still get in; everyone else waits for approval
