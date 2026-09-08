@@ -106,6 +106,32 @@ export default function UsersPage() {
     }));
   };
 
+  // POST a user with one automatic session-refresh + retry on 401, so a valid
+  // write is never silently lost to an expiring cookie. Returns the parsed data
+  // or throws; returns null if it had to redirect to re-login.
+  const postUser = async (body: Record<string, unknown>) => {
+    const doPost = () =>
+      fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    let res = await doPost();
+    if (res.status === 401) {
+      await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 400));
+      res = await doPost();
+    }
+    if (res.status === 401) {
+      window.location.href =
+        "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
+      return null;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `error ${res.status}`);
+    return data;
+  };
+
   const save = async () => {
     if (!form.name.trim() || !form.role.trim()) {
       push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องมีชื่อและประเภทผู้ใช้งาน" });
@@ -113,27 +139,8 @@ export default function UsersPage() {
     }
     setSaving(true);
     try {
-      const doPost = () =>
-        fetch("/api/admin/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        });
-      let res = await doPost();
-      if (res.status === 401) {
-        // transient/expiring session → refresh the cookie and retry once
-        // before giving up, so a valid add is never silently lost.
-        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 400));
-        res = await doPost();
-      }
-      if (res.status === 401) {
-        window.location.href =
-          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `error ${res.status}`);
+      const data = await postUser(form);
+      if (!data) return;
       push({
         kind: "success",
         title: data.created ? "เพิ่มผู้ใช้งานแล้ว" : "บันทึกการแก้ไขแล้ว",
@@ -149,6 +156,26 @@ export default function UsersPage() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Quick inline actions (revoke / restore) — write straight to the DB and refetch.
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const quickSet = async (r: User, patch: Partial<UserForm>, okTitle: string) => {
+    setBusyId(r.id);
+    try {
+      const data = await postUser({ ...toForm(r), ...patch });
+      if (!data) return;
+      push({ kind: "success", title: okTitle, desc: r.name });
+      refetch();
+    } catch (e) {
+      push({
+        kind: "error",
+        title: "ทำรายการไม่สำเร็จ",
+        desc: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -245,12 +272,29 @@ export default function UsersPage() {
       sortable: false,
       cell: (r) => (
         <div className="flex items-center justify-center gap-1.5">
-          {r.role === "รออนุมัติ" && (
+          {r.role === "รออนุมัติ" ? (
             <button
+              disabled={busyId === r.id}
               onClick={() => openApprove(r)}
-              className="rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              className="rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               อนุมัติ
+            </button>
+          ) : r.status === "Active" ? (
+            <button
+              disabled={busyId === r.id}
+              onClick={() => quickSet(r, { status: "Inactive" }, "ถอนสิทธิ์แล้ว")}
+              className="rounded-md border border-danger/30 px-2.5 py-1 text-2xs font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-50"
+            >
+              ถอนสิทธิ์
+            </button>
+          ) : (
+            <button
+              disabled={busyId === r.id}
+              onClick={() => quickSet(r, { status: "Active" }, "คืนสิทธิ์แล้ว")}
+              className="rounded-md border border-success/30 px-2.5 py-1 text-2xs font-medium text-success transition-colors hover:bg-success-soft disabled:opacity-50"
+            >
+              คืนสิทธิ์
             </button>
           )}
           <RowActions onEdit={() => openEdit(r)} />
