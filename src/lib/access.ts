@@ -13,6 +13,7 @@ export const ADMIN_ROLE = "System Admin";
 const DEFAULT_OWNERS = [
   "the.dataverse@shd-technology.co.th",
   "tiw.pheerachan@shd-technology.co.th",
+  "safe.sun@shd-technology.co.th",
 ];
 
 export function ownerEmails(): string[] {
