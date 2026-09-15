@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/badge";
 import { type Job } from "@/data/mock";
-import { useJobs, useSymptoms, useStaff } from "@/data/db";
+import { useJobsPage, useJobSummary, useSymptoms, useStaff } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -22,12 +23,18 @@ const columns: Column<Job>[] = [
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), engineer: "", symptom: "" });
   // "วันที่ซ่อม" = job_repaired_date
-  const { data: JOBS, loading } = useJobs({ from: f.from, to: f.to, dateBy: "repaired", engineer: f.engineer, symptom: f.symptom, limit: 20000 });
+  const filters = { from: f.from, to: f.to, dateBy: "repaired", engineer: f.engineer, symptom: f.symptom };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useJobSummary(filters);
+  const { rows: JOBS, total: totalRows, loading } = useJobsPage({ ...pageArgs, ...filters });
   const { data: SYMPTOMS } = useSymptoms();
   const { data: STAFF } = useStaff();
-  const done = JOBS.filter((j) => j.statusGroup === "Repaired" || j.statusGroup === "Finished").length;
-  const total = JOBS.reduce((s, j) => s + j.amount, 0);
-  const doneRate = JOBS.length ? ((done / JOBS.length) * 100).toFixed(1) : "0";
+  const S = sum[0];
+  const count = S?.total ?? 0;
+  const done = S?.done ?? 0;
+  const total = S?.amount ?? 0;
+  const doneRate = count ? ((done / count) * 100).toFixed(1) : "0";
   return (
     <ReportView
       title="รายงานการซ่อม"
@@ -40,7 +47,7 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "งานที่ดำเนินการ", value: int(JOBS.length), tone: "primary" },
+        { label: "งานที่ดำเนินการ", value: int(count), tone: "primary" },
         { label: "ซ่อมสำเร็จ", value: int(done), tone: "success" },
         { label: "มูลค่างานซ่อมรวม", value: baht(total) },
         { label: "อัตราซ่อมสำเร็จ", value: `${doneRate}%`, tone: "success" },
@@ -49,6 +56,7 @@ export default function Page() {
       rows={JOBS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total: totalRows, onChange: setTable }}
     />
   );
 }

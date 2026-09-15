@@ -29,6 +29,13 @@
       "when": 1757900003000,
       "tag": "0003_record_status",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1757900004000,
+      "tag": "0004_indexes",
+      "breakpoints": true
     }
   ]
 }

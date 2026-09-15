@@ -15,6 +15,8 @@ import type { MasterRow, Symptom, Model } from "@/data/mock";
 import { HttpError } from "@/server/auth";
 import { fmtDateTime, money, nowThai, num, str } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { count, desc, ilike, or } from "drizzle-orm";
+import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode, type RecordStatus } from "@/server/record-status";
 
 export type DeletedMode = StatusMode;
@@ -266,3 +268,57 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
 }
 
 export { runningNo };
+
+/* ------------------------------------------------------------------ *
+ * Paged models (รุ่นสินค้า — 1.1k rows)
+ * ------------------------------------------------------------------ */
+const MODEL_SORT = {
+  code: model.modelCode,
+  name: model.modelName,
+  brand: manufacturer.manufacturerName,
+  price: model.marketPrice,
+  updated: model.lastUpdate,
+  status: model.recordStatus,
+};
+
+export async function pageModels(p: PageQuery, mode: StatusMode = "exclude"): Promise<Page<Model>> {
+  const term = p.q.trim();
+  const w = and(
+    statusFilter(model.recordStatus, mode),
+    term ? or(ilike(model.modelCode, `%${term}%`), ilike(model.modelName, `%${term}%`), ilike(manufacturer.manufacturerName, `%${term}%`)) : undefined
+  );
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(model)
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+    .where(w);
+  const rows = await db
+    .select({
+      code: model.modelCode,
+      name: model.modelName,
+      brand: manufacturer.manufacturerName,
+      price: model.marketPrice,
+      updated: model.lastUpdate,
+      active: model.recordStatus,
+      id: model.modelId,
+    })
+    .from(model)
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+    .where(w)
+    .orderBy(...orderByCols(p.sort, MODEL_SORT, [desc(model.modelId)]))
+    .limit(p.pageSize)
+    .offset(offsetOf(p));
+  return {
+    rows: rows.map((r) => ({
+      code: r.code ?? String(r.id),
+      name: r.name ?? "",
+      brand: r.brand ?? "",
+      price: num(r.price),
+      updated: fmtDateTime(r.updated),
+      status: status(r.active),
+    })),
+    total: Number(total),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}

@@ -101,9 +101,9 @@ const SORT = {
   type: quotationHd.quotationType,
 };
 
-export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string };
+export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string; type?: string };
 
-function where(q: string, f: QuotationFilters) {
+export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
   return and(
     statusFilter(quotationHd.recordStatus, f.deleted ?? "exclude"),
@@ -119,12 +119,13 @@ function where(q: string, f: QuotationFilters) {
     f.status ? eq(quotationStatus.quotationStatusName, f.status) : undefined,
     f.from ? gte(quotationHd.createDate, `${f.from} 00:00:00`) : undefined,
     f.to ? lte(quotationHd.createDate, `${f.to} 23:59:59`) : undefined,
-    f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined
+    f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
+    f.type ? eq(quotationHd.quotationType, f.type.includes("VIP") ? "VIP" : f.type.includes("Normal") ? "Normal" : f.type) : undefined
   );
 }
 
 export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise<Page<Quotation>> {
-  const w = where(p.q, f);
+  const w = quotationWhere(p.q, f);
   const [{ total }] = await db
     .select({ total: count() })
     .from(quotationHd)
@@ -142,7 +143,7 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
 
 export async function listQuotations(f: QuotationFilters & { q?: string; limit?: number } = {}): Promise<Quotation[]> {
   const rows = await base()
-    .where(where(f.q ?? "", f))
+    .where(quotationWhere(f.q ?? "", f))
     .orderBy(desc(quotationHd.createDate))
     .limit(Math.min(f.limit ?? 5000, 20000));
   return rows.map(toQuotation);

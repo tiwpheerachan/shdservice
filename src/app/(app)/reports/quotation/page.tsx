@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { QUOTATION_STATUS_OPTIONS, type Quotation } from "@/data/mock";
-import { useQuotations } from "@/data/db";
+import { useQuotationsPage, useQuotationSummary } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -19,7 +20,6 @@ const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"
   "พ้นกำหนดเสนอราคา": "danger",
   "ยกเลิกใบเสนอราคา": "neutral",
 };
-const AGREED = new Set(["ลูกค้าตกลงซ่อม", "ลูกค้าตกลงซ่อม รอชำระเงิน", "ลูกค้าตกลงซ่อม รออะไหล่"]);
 
 const columns: Column<Quotation>[] = [
   { key: "no", header: "เลขที่ใบเสนอราคา", width: "150px", cell: (r) => <span className="num font-medium">{r.no}</span> },
@@ -33,11 +33,14 @@ const columns: Column<Quotation>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: "", status: "" });
-  const { data: ALL, loading } = useQuotations({ from: f.from, to: f.to, status: f.status, limit: 20000 });
-  const QUOTATIONS = React.useMemo(() => ALL.filter((q) => !f.type || q.type === f.type), [ALL, f.type]);
-  const approved = QUOTATIONS.filter((q) => AGREED.has(q.status));
-  const total = QUOTATIONS.reduce((s, q) => s + q.amount, 0);
-  const approvedTotal = approved.reduce((s, q) => s + q.amount, 0);
+  const filters = { from: f.from, to: f.to, status: f.status, type: f.type };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useQuotationSummary(filters);
+  const { rows: QUOTATIONS, total: totalRows, loading } = useQuotationsPage({ ...pageArgs, ...filters });
+  const S = sum[0];
+  const total = S?.amount ?? 0;
+  const approvedTotal = S?.agreedAmount ?? 0;
   return (
     <ReportView
       title="รายงานการเสนอราคา"
@@ -50,8 +53,8 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "ใบเสนอราคาทั้งหมด", value: int(QUOTATIONS.length), tone: "primary" },
-        { label: "ลูกค้าตกลงซ่อม", value: int(approved.length), tone: "success" },
+        { label: "ใบเสนอราคาทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
+        { label: "ลูกค้าตกลงซ่อม", value: int(S?.agreed ?? 0), tone: "success" },
         { label: "มูลค่ารวม", value: baht(total) },
         { label: "มูลค่าที่ตกลง", value: baht(approvedTotal), tone: "success" },
       ]}
@@ -59,6 +62,7 @@ export default function Page() {
       rows={QUOTATIONS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total: totalRows, onChange: setTable }}
     />
   );
 }

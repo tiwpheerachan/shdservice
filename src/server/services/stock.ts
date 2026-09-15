@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db, type Tx } from "@/db/client";
 import {
   appUser,
@@ -724,4 +725,349 @@ export async function listIssuedLines(opts: { from?: string; to?: string; catego
       value: qty * price,
     };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
+ * ------------------------------------------------------------------ */
+import { count as countFn } from "drizzle-orm";
+import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
+
+export type ProductFilters = {
+  mode?: DeletedMode;
+  status?: string; // Active | Inactive (UI)
+  sysCode?: string;
+  mfgCode?: string;
+  name?: string;
+  brand?: string;
+  category?: string;
+  creator?: string;
+  date?: string; // create_date = YYYY-MM-DD
+  stock?: "in" | "low" | "out"; // มีสินค้า / ใกล้หมด / หมด
+};
+
+const creatorUser = alias(appUser, "product_creator");
+
+function productWhere(q: string, f: ProductFilters) {
+  const term = q.trim();
+  const rs = f.status === "Inactive" ? eq(product.recordStatus, "INACTIVE") : f.status === "Active" ? eq(product.recordStatus, "ACTIVE") : statusFilter(product.recordStatus, f.mode ?? "exclude");
+  return and(
+    rs,
+    term
+      ? or(ilike(product.productCode, `%${term}%`), ilike(product.productName, `%${term}%`), ilike(product.productVenderCode, `%${term}%`))
+      : undefined,
+    f.sysCode ? ilike(product.productCode, `%${f.sysCode}%`) : undefined,
+    f.mfgCode ? ilike(product.productVenderCode, `%${f.mfgCode}%`) : undefined,
+    f.name ? ilike(product.productName, `%${f.name}%`) : undefined,
+    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    f.category ? eq(category.categoryName, f.category) : undefined,
+    f.creator ? sql`trim(coalesce(${creatorUser.firstName},'') || ' ' || coalesce(${creatorUser.lastName},'')) ilike ${"%" + f.creator + "%"}` : undefined,
+    f.date ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
+    f.stock === "in" ? sql`coalesce(${productNoneSerial.quantityRemain},0) > 3` : undefined,
+    f.stock === "low" ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3` : undefined,
+    f.stock === "out" ? sql`coalesce(${productNoneSerial.quantityRemain},0) <= 0` : undefined
+  );
+}
+
+const productPagedQuery = () =>
+  db
+    .select({ ...productSelect, creatorFirst: creatorUser.firstName, creatorLast: creatorUser.lastName })
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy));
+
+const PRODUCT_SORT = {
+  sysCode: product.productCode,
+  mfgCode: product.productVenderCode,
+  name: product.productName,
+  category: category.categoryName,
+  brand: manufacturer.manufacturerName,
+  onhand: productNoneSerial.quantityRemain,
+  price: productNoneSerial.retailPrice,
+  status: product.recordStatus,
+  value: sql`coalesce(${productNoneSerial.quantityRemain},0) * coalesce(${productNoneSerial.retailPrice},0)`,
+};
+
+export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Page<Product & { value: number }>> {
+  const w = productWhere(p.q, f);
+  const [{ total }] = await db
+    .select({ total: countFn() })
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
+    .where(w);
+  const rows = await productPagedQuery()
+    .where(w)
+    .orderBy(...orderByCols(p.sort, PRODUCT_SORT, [asc(product.productCode)]))
+    .limit(p.pageSize)
+    .offset(offsetOf(p));
+  return {
+    rows: rows.map((r) => {
+      const pr = toProduct(r, fullName(r.creatorFirst, r.creatorLast));
+      return { ...pr, value: Math.max(0, pr.onhand) * pr.price };
+    }),
+    total: Number(total),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+/** KPI tiles of the product list / on-hand report for the same filter set. */
+export async function productStats(q: string, f: ProductFilters) {
+  const [r] = await db
+    .select({
+      total: countFn(),
+      qty: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0)),0)`,
+      value: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0) * coalesce(${productNoneSerial.retailPrice},0)),0)`,
+      low: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3)`,
+      out: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) <= 0)`,
+    })
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
+    .where(productWhere(q, f));
+  return { total: Number(r.total), qty: num(r.qty), value: num(r.value), low: num(r.low), out: num(r.out) };
+}
+
+/** Lite rows for dropdowns / pickers — 5 fields instead of ~25 (1.2 MB → ~150 KB). */
+export type ProductLite = Pick<Product, "sysCode" | "mfgCode" | "name" | "onhand" | "price" | "status" | "category" | "brand">;
+export async function listProductsLite(q = ""): Promise<ProductLite[]> {
+  const term = q.trim();
+  const rows = await db
+    .select({
+      sysCode: product.productCode,
+      mfgCode: product.productVenderCode,
+      name: product.productName,
+      onhand: productNoneSerial.quantityRemain,
+      price: productNoneSerial.retailPrice,
+      category: category.categoryName,
+      brand: manufacturer.manufacturerName,
+    })
+    .from(product)
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .where(
+      and(
+        eq(product.recordStatus, "ACTIVE"),
+        term ? or(ilike(product.productCode, `%${term}%`), ilike(product.productName, `%${term}%`), ilike(product.productVenderCode, `%${term}%`)) : undefined
+      )
+    )
+    .orderBy(asc(product.productCode));
+  return rows.map((r) => ({
+    sysCode: r.sysCode ?? "",
+    mfgCode: r.mfgCode ?? "",
+    name: r.name ?? "",
+    onhand: r.onhand ?? 0,
+    price: num(r.price),
+    status: "Active",
+    category: r.category ?? "",
+    brand: r.brand ?? "",
+  }));
+}
+
+/* ------------------------------------------------------------------ *
+ * Paged movements (ประวัติสต๊อก) and issued lines (รายงานเบิกจ่าย)
+ * ------------------------------------------------------------------ */
+export type MovementFilters = { q?: string; from?: string; to?: string; type?: string; code?: string; doc?: string; ref?: string };
+
+function movementWhere(f: MovementFilters) {
+  const term = (f.q ?? "").trim();
+  return and(
+    ne(inventoryHd.isActive, false),
+    term
+      ? or(
+          ilike(inventoryHd.inventoryNo, `%${term}%`),
+          ilike(inventoryHd.referenceDocumentNo, `%${term}%`),
+          sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${"%" + term + "%"})`
+        )
+      : undefined,
+    f.doc ? ilike(inventoryHd.inventoryNo, `%${f.doc}%`) : undefined,
+    f.ref ? ilike(inventoryHd.referenceDocumentNo, `%${f.ref}%`) : undefined,
+    f.code ? sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${"%" + f.code + "%"})` : undefined,
+    f.from ? gte(inventoryHd.createDate, `${f.from} 00:00:00`) : undefined,
+    f.to ? lte(inventoryHd.createDate, `${f.to} 23:59:59`) : undefined,
+    f.type ? eq(inventoryType.inventoryTypeName, f.type) : undefined
+  );
+}
+
+const MOVE_SORT = {
+  doc: inventoryHd.inventoryNo,
+  type: inventoryType.inventoryTypeName,
+  ref: inventoryHd.referenceDocumentNo,
+  date: inventoryHd.createDate,
+  by: appUser.firstName,
+};
+
+export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<Page<Movement>> {
+  const w = movementWhere({ ...f, q: p.q || f.q });
+  const [{ total }] = await db
+    .select({ total: countFn() })
+    .from(inventoryHd)
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .where(w);
+  const rows = await db
+    .select({
+      doc: inventoryHd.inventoryNo,
+      type: inventoryType.inventoryTypeName,
+      typeId: inventoryHd.inventoryTypeId,
+      ref: inventoryHd.referenceDocumentNo,
+      outTo: inventoryHd.referenceOutTo,
+      date: inventoryHd.createDate,
+      remark: inventoryHd.inventoryRemark,
+      byFirst: appUser.firstName,
+      byLast: appUser.lastName,
+      qty: sql<string>`(select coalesce(sum(d.item_quantity),0) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+      items: sql<string>`(select string_agg(d.item_code || ' x' || d.item_quantity::int, ', ' order by d.inventory_dt_id) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+    })
+    .from(inventoryHd)
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
+    .where(w)
+    .orderBy(...orderByCols(p.sort, MOVE_SORT, [desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId)]))
+    .limit(p.pageSize)
+    .offset(offsetOf(p));
+  const wh = "คลังสินค้าดี";
+  return {
+    rows: rows.map((r) => {
+      const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
+      return {
+        doc: r.doc ?? "",
+        type: r.type ?? "",
+        ref: r.ref ?? "",
+        date: fmtDateTime(r.date),
+        by: fullName(r.byFirst, r.byLast),
+        from: isIn ? r.outTo || r.ref || "Supplier" : wh,
+        to: isIn ? wh : r.outTo || r.ref || "",
+        remark: [r.items ? r.items : "", r.remark ?? ""].filter(Boolean).join(" · "),
+        qty: num(r.qty),
+        items: r.items ?? "",
+      };
+    }),
+    total: Number(total),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+export type IssuedFilters = { from?: string; to?: string; category?: string; code?: string };
+
+function issuedWhere(q: string, f: IssuedFilters) {
+  const code = (f.code || q).trim();
+  return and(
+    inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER]),
+    ne(inventoryHd.isActive, false),
+    f.from ? gte(inventoryHd.createDate, `${f.from} 00:00:00`) : undefined,
+    f.to ? lte(inventoryHd.createDate, `${f.to} 23:59:59`) : undefined,
+    f.category ? eq(category.categoryName, f.category) : undefined,
+    code ? or(ilike(inventoryDt.itemCode, `%${code}%`), ilike(product.productName, `%${code}%`), ilike(inventoryHd.inventoryNo, `%${code}%`)) : undefined
+  );
+}
+
+const issuedBase = () =>
+  db
+    .select({
+      doc: inventoryHd.inventoryNo,
+      date: inventoryHd.createDate,
+      type: inventoryType.inventoryTypeName,
+      ref: inventoryHd.referenceDocumentNo,
+      code: inventoryDt.itemCode,
+      item: product.productName,
+      category: category.categoryName,
+      qty: inventoryDt.itemQuantity,
+      price: productNoneSerial.retailPrice,
+      byFirst: appUser.firstName,
+      byLast: appUser.lastName,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy));
+
+const issuedCountBase = () =>
+  db
+    .select({ total: countFn() })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId));
+
+const ISSUED_SORT = {
+  doc: inventoryHd.inventoryNo,
+  date: inventoryHd.createDate,
+  type: inventoryType.inventoryTypeName,
+  code: inventoryDt.itemCode,
+  item: product.productName,
+  qty: inventoryDt.itemQuantity,
+  value: sql`${inventoryDt.itemQuantity} * coalesce(${productNoneSerial.retailPrice},0)`,
+  by: appUser.firstName,
+};
+
+export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
+  const w = issuedWhere(p.q, f);
+  const [{ total }] = await issuedCountBase().where(w);
+  const rows = await issuedBase()
+    .where(w)
+    .orderBy(...orderByCols(p.sort, ISSUED_SORT, [desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId)]))
+    .limit(p.pageSize)
+    .offset(offsetOf(p));
+  return {
+    rows: rows.map((r) => {
+      const qty = num(r.qty);
+      return {
+        doc: r.doc ?? "",
+        date: fmtDateTime(r.date),
+        type: r.type ?? "",
+        ref: r.ref ?? "",
+        by: fullName(r.byFirst, r.byLast),
+        from: "คลังสินค้าดี",
+        to: r.ref ?? "",
+        remark: "",
+        code: r.code ?? "",
+        item: r.item ?? "",
+        category: r.category ?? "",
+        qty,
+        value: qty * num(r.price),
+      };
+    }),
+    total: Number(total),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+export async function issuedStats(q: string, f: IssuedFilters) {
+  const w = issuedWhere(q, f);
+  const [r] = await db
+    .select({
+      lines: countFn(),
+      qty: sql<string>`coalesce(sum(${inventoryDt.itemQuantity}),0)`,
+      value: sql<string>`coalesce(sum(${inventoryDt.itemQuantity} * coalesce(${productNoneSerial.retailPrice},0)),0)`,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(w);
+  const [top] = await db
+    .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${inventoryDt.itemQuantity})` })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .where(w)
+    .groupBy(inventoryDt.itemCode)
+    .orderBy(desc(sql`sum(${inventoryDt.itemQuantity})`))
+    .limit(1);
+  return { lines: Number(r.lines), qty: num(r.qty), value: num(r.value), top: top?.code ?? "—" };
 }

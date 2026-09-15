@@ -3,22 +3,31 @@
 import * as React from "react";
 import { Search, UserCheck, ListChecks, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Input, Checkbox } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { type Job } from "@/data/mock";
-import { useJobs } from "@/data/db";
+import { useJobsPage } from "@/data/db";
 import { cn } from "@/lib/utils";
-import { postJson, errMsg } from "@/lib/api";
+import { api, postJson, errMsg, qs } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 export default function AssignPage() {
   const { push } = useToast();
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
   const { name: CURRENT_TECH, userId } = useAccess();
-  const { data: JOBS, loading, refetch } = useJobs({ unassigned: 1, limit: 1000 });
+  // open jobs without an engineer / still "งานใหม่" — server-side paging
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: JOBS, total, loading, refetch } = useJobsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    unassigned: 1,
+  });
   const [saving, setSaving] = React.useState(false);
 
   const [q, setQ] = React.useState("");
@@ -40,15 +49,28 @@ export default function AssignPage() {
   const toggleAll = () =>
     setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
 
-  const go = () => {
-    const v = q.trim();
+  // type a job no → verify on the server that it is still waiting, then tick it
+  const go = async () => {
+    const v = q.trim().toUpperCase();
     if (!v) return;
-    const hit = pool.find((j) => j.no.toLowerCase() === v.toLowerCase());
-    if (hit) {
-      setPicked((s) => new Set(s).add(hit.no));
-      push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
-    } else {
-      push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+    const local = pool.find((j) => j.no === v);
+    if (local) {
+      setPicked((s) => new Set(s).add(local.no));
+      push({ kind: "success", title: "เลือกงานแล้ว", desc: local.no });
+      setQ("");
+      return;
+    }
+    try {
+      const d = await api<{ rows: Job[] }>(`/api/data/jobs${qs({ paged: 1, pageSize: 1, q: v, unassigned: 1 })}`);
+      const hit = d.rows.find((j) => j.no === v);
+      if (hit) {
+        setPicked((s) => new Set(s).add(hit.no));
+        push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
+      } else {
+        push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+      }
+    } catch (e) {
+      push({ kind: "error", title: "ค้นหาไม่สำเร็จ", desc: errMsg(e) });
     }
     setQ("");
   };
@@ -180,7 +202,7 @@ export default function AssignPage() {
             <span className="num rounded-md bg-primary/10 px-2 py-0.5 text-primary">
               {picked.size}
             </span>
-            / {pool.length} งาน
+            / {total.toLocaleString("en-US")} งาน
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Wrench className="h-3.5 w-3.5" />
@@ -227,6 +249,7 @@ export default function AssignPage() {
             </span>
           ) : undefined
         }
+        server={{ total, onChange: setTable }}
       />
     </>
   );

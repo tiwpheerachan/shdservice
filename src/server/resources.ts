@@ -3,10 +3,11 @@ import type { NextRequest } from "next/server";
 import { requireAdmin, requireUser } from "@/server/auth";
 import { parsePageQuery, type Page } from "@/server/paging";
 import { parseStatusMode } from "@/server/record-status";
-import { listSimple, isSimpleKind, listSymptoms, listModels } from "@/server/services/masters";
+import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from "@/server/services/masters";
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from "@/server/services/users";
 import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
-import { listProducts, listMovements, listIssuedLines } from "@/server/services/stock";
+import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters } from "@/server/services/stock";
+import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
 import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats } from "@/server/services/jobs";
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
@@ -39,7 +40,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     case "symptoms":
       return listSymptoms(deleted);
     case "models":
-      return listModels(deleted);
+      return paged ? pageModels(p, deleted) : listModels(deleted);
     case "staff":
       return listStaff();
     case "provinces":
@@ -52,19 +53,60 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return listOutsourceVendors();
     case "job_nos":
       return recentJobNos(Number(sp.get("limit") ?? 50));
-    case "products":
-      return listProducts({ deleted, q: p.q });
+    case "products": {
+      if (sp.get("fields") === "lite") return listProductsLite(p.q);
+      const pf: ProductFilters = {
+        mode: deleted,
+        status: p.f.status,
+        sysCode: p.f.sysCode,
+        mfgCode: p.f.mfgCode,
+        name: p.f.name,
+        brand: p.f.brand,
+        category: p.f.category,
+        creator: p.f.creator,
+        date: p.f.date,
+        stock: p.f.stock === "in" || p.f.stock === "low" || p.f.stock === "out" ? p.f.stock : undefined,
+      };
+      return paged ? pageProducts(p, pf) : listProducts({ deleted, q: p.q });
+    }
+    case "product_stats": {
+      const pf: ProductFilters = {
+        mode: deleted,
+        status: p.f.status,
+        sysCode: p.f.sysCode,
+        mfgCode: p.f.mfgCode,
+        name: p.f.name,
+        brand: p.f.brand,
+        category: p.f.category,
+        creator: p.f.creator,
+        date: p.f.date,
+        stock: p.f.stock === "in" || p.f.stock === "low" || p.f.stock === "out" ? p.f.stock : undefined,
+      };
+      return [await productStats(p.q, pf)];
+    }
     case "customers":
       return paged ? pageCustomers(p, deleted) : listCustomers({ q: p.q, deleted, limit: Number(sp.get("limit") ?? 500) });
     case "issued_lines":
-      return listIssuedLines({ from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code || p.q, limit: Number(sp.get("limit") ?? 5000) });
+      return paged
+        ? pageIssuedLines(p, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })
+        : listIssuedLines({ from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code || p.q, limit: Number(sp.get("limit") ?? 5000) });
+    case "issued_stats":
+      return [await issuedStats(p.q, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })];
     case "movements":
-      return listMovements({ q: p.q, from: p.f.from, to: p.f.to, type: p.f.type, limit: Number(sp.get("limit") ?? 1000) });
+      return paged
+        ? pageMovements(p, { from: p.f.from, to: p.f.to, type: p.f.type, code: p.f.code, doc: p.f.doc, ref: p.f.ref })
+        : listMovements({ q: p.q, from: p.f.from, to: p.f.to, type: p.f.type, limit: Number(sp.get("limit") ?? 1000) });
+    case "job_summary":
+      return [await jobReportSummary(filtersFromQuery(p.f), p.q)];
+    case "quotation_summary":
+      return [await quotationReportSummary({ status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type }, p.q)];
+    case "sale_order_summary":
+      return [await saleOrderReportSummary({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted }, p.q)];
     case "jobs":
       return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "quotations":
       return paged
-        ? pageQuotations(p, { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo })
+        ? pageQuotations(p, { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type })
         : listQuotations({ status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "sale_orders":
       return paged

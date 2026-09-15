@@ -228,7 +228,16 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - API: `POST /api/admin/records {table,id,status}` — DELETED ต้องมีสิทธิ์ `del`, ACTIVE/INACTIVE ต้องมี `edit` (master/ผู้ใช้ = System Admin) · การอ่านรับ `?deleted=active|exclude|only|all`
 - กู้คืน: `update <table> set record_status='ACTIVE', is_active=true where …` (งาน: ตั้ง `job_status_id` กลับเองด้วย)
 
-## 14. ลำดับทำงาน (ทำครบแล้ว)
+## 14. ประสิทธิภาพ / pagination (2026-09-15)
+
+วัดจริงกับ dump 420k แถว ก่อน→หลัง:
+- ค้นหาข้อความรายการงาน 165 ms → 15 ms, ลูกค้า 90 → 7 ms (migration `0004_indexes`: `pg_trgm` GIN 16 ตัว + btree ที่ขาด: `job_closed_date`, `job_repaired_date`, `product_symptom_id`, `job_type_id`, อำเภอ/ตำบล, ประเภทเอกสารสต๊อก, สถานะอนุมัติ SO)
+- Dashboard กราฟรายเดือน 838 ms → 12 ms (query เดียว group by month)
+- **Pagination ฝั่ง server ทุกตารางที่โต**: รายการงาน, ลูกค้า, ใบเสนอราคา, ใบสั่งขาย, อะไหล่, รุ่นสินค้า, ประวัติสต๊อก, จนท.รับมอบหมายงาน, รายงานทั้ง 7 (KPI คำนวณที่ DB ด้วย `*_summary` / `*_stats` endpoint บน filter ชุดเดียวกับตาราง — ไม่มีเพดาน 20,000 แถวอีก) · ที่ยังโหลดทั้งหมด: master ≤ 300 แถว และผู้ใช้ระบบ ~110 แถว (server paging ไม่ช่วยอะไร)
+- dropdown อะไหล่ทุกหน้าใช้ `products?fields=lite` (5 field, ACTIVE เท่านั้น) 1.2 MB → 540 KB (≈ 80 KB หลัง gzip)
+- ต้นทุนเครือข่าย Render↔Supabase ≈ 75 ms/query — หน้ารายการ = auth + count + rows ≈ 250 ms
+
+## 15. ลำดับทำงาน (ทำครบแล้ว)
 
 1. **Infra**: drizzle + schema 52 ตาราง + migrations + `db:migrate` (ทดสอบกับ Postgres local ที่โหลด dump แล้ว)
 2. **Auth**: provision → `app_user`, approval gate, `can()`, permission API, sidebar/ปุ่ม

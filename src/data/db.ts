@@ -162,9 +162,18 @@ export const useProductTypes = (mode: DeletedMode = "active") =>
   useTable<MasterRow>("product_types", { column: "id" }, mode);
 export const useSymptoms = (mode: DeletedMode = "active") => useTable<Symptom>("symptoms", { column: "id" }, mode);
 export const useModels = (mode: DeletedMode = "active") => useTable<Model>("models", { column: "code" }, mode);
-export const useProducts = (params: Params = {}) => useTable<Product>("products", { column: "sysCode" }, "active", params);
+export const useModelsPage = (params: PageParams, mode: DeletedMode = "exclude") => usePagedTable<Model>("models", params, mode);
+/** Dropdown/picker list: ACTIVE products, lite fields only (code/name/onhand/price/brand/category). */
+export const useProducts = (params: Params = {}) =>
+  useTable<Product>("products", { column: "sysCode" }, "active", { fields: "lite", ...params });
+export const useProductsPage = (params: PageParams, mode: DeletedMode = "exclude") =>
+  usePagedTable<Product & { value: number }>("products", params, mode);
+export type ProductStats = { total: number; qty: number; value: number; low: number; out: number };
+export const useProductStats = (params: Params = {}, mode: DeletedMode = "exclude") =>
+  useTable<ProductStats>("product_stats", undefined, mode, params);
 export const useMovements = (params: Params = {}) =>
   useTable<Movement>("movements", undefined, "exclude", params);
+export const useMovementsPage = (params: PageParams) => usePagedTable<Movement>("movements", params);
 /** Recent customers (server caps the list); pass { q } to search the whole table. */
 export const useCustomers = (params: Params = {}) => useTable<Customer>("customers", undefined, "exclude", params);
 export const useCustomersPage = (params: PageParams, deleted: DeletedMode = "exclude") =>
@@ -195,6 +204,17 @@ export const useJobStatuses = () =>
 export const useVendors = () => useTable<string>("vendors");
 export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
 export const useIssuedLines = (params: Params = {}) => useTable<IssuedLine>("issued_lines", undefined, "exclude", params);
+export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>("issued_lines", params);
+export type IssuedStats = { lines: number; qty: number; value: number; top: string };
+export const useIssuedStats = (params: Params = {}) => useTable<IssuedStats>("issued_stats", undefined, "exclude", params);
+
+/* ---- report KPI summaries (same filters as the paged tables) ---- */
+export type JobSummary = { total: number; fresh: number; done: number; amount: number; paid: number; avgTat: number; over30: number; topChannel: string };
+export const useJobSummary = (params: Params = {}) => useTable<JobSummary>("job_summary", undefined, "exclude", params);
+export type QuotationSummary = { total: number; agreed: number; amount: number; agreedAmount: number };
+export const useQuotationSummary = (params: Params = {}) => useTable<QuotationSummary>("quotation_summary", undefined, "exclude", params);
+export type SaleOrderSummary = { total: number; approved: number; amount: number; avg: number };
+export const useSaleOrderSummary = (params: Params = {}) => useTable<SaleOrderSummary>("sale_order_summary", undefined, "exclude", params);
 export const useJobStats = () =>
   useTable<{ total: number; fresh: number; done: number; progress: number }>("job_stats");
 export const useJobNos = (limit = 50) => useTable<string>("job_nos", undefined, "exclude", { limit });

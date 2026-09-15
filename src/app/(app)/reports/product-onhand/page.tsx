@@ -1,9 +1,10 @@
 "use client";
 
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { type Product } from "@/data/mock";
-import { useProducts, useCategories, useManufacturers } from "@/data/db";
+import { useProductsPage, useProductStats, useCategories, useManufacturers } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int, cn } from "@/lib/utils";
 import * as React from "react";
@@ -33,30 +34,21 @@ const columns: Column<Row>[] = [
 ];
 
 export default function Page() {
-  const { data: PRODUCTS, loading } = useProducts();
   const { data: CATEGORIES } = useCategories();
   const { data: MANUFACTURERS } = useManufacturers();
   const [f, setF] = React.useState<ReportValues>({ category: "", brand: "", stock: "", q: "" });
-
-  const rows: Row[] = React.useMemo(
-    () =>
-      PRODUCTS.filter(
-        (p) =>
-          (!f.category || p.category === f.category) &&
-          (!f.brand || p.brand === f.brand) &&
-          (!f.stock ||
-            (f.stock === "มีสินค้า" && p.onhand > 3) ||
-            (f.stock === "ใกล้หมด (≤3)" && p.onhand > 0 && p.onhand <= 3) ||
-            (f.stock === "หมดสต๊อก" && p.onhand <= 0)) &&
-          (!f.q || p.sysCode.toLowerCase().includes(f.q.toLowerCase()) || p.name.toLowerCase().includes(f.q.toLowerCase()))
-      ).map((p) => ({ ...p, value: Math.max(0, p.onhand) * p.price })),
-    [PRODUCTS, f]
-  );
-
-  const totalValue = rows.reduce((s, r) => s + r.value, 0);
-  const totalQty = rows.reduce((s, r) => s + Math.max(0, r.onhand), 0);
-  const low = rows.filter((r) => r.onhand > 0 && r.onhand <= 3).length;
-  const out = rows.filter((r) => r.onhand <= 0).length;
+  const stockKey = f.stock === "มีสินค้า" ? "in" : f.stock === "ใกล้หมด (≤3)" ? "low" : f.stock === "หมดสต๊อก" ? "out" : "";
+  // ACTIVE products only; filters + KPIs on the server, table paged
+  const filters = { category: f.category, brand: f.brand, stock: stockKey, status: "Active" };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useProductStats({ ...filters, q: f.q });
+  const { rows, total, loading } = useProductsPage({ ...pageArgs, q: table.q || f.q, ...filters });
+  const S = sum[0];
+  const totalValue = S?.value ?? 0;
+  const totalQty = S?.qty ?? 0;
+  const low = S?.low ?? 0;
+  const out = S?.out ?? 0;
   return (
     <ReportView
       title="รายงานอะไหล่คงเหลือ"
@@ -78,6 +70,7 @@ export default function Page() {
       rows={rows}
       loading={loading}
       rowKey={(r) => r.sysCode}
+      server={{ total, onChange: setTable }}
     />
   );
 }

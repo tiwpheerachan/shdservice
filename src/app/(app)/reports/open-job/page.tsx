@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { CHANNELS, type Job } from "@/data/mock";
-import { useJobs, useJobTypes } from "@/data/db";
+import { useJobsPage, useJobSummary, useJobTypes } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -22,15 +23,17 @@ const columns: Column<Job>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: "", channel: "" });
-  const { data: JOBS, loading } = useJobs({ from: f.from, to: f.to, type: f.type, channel: f.channel, limit: 20000 });
+  const filters = { from: f.from, to: f.to, type: f.type, channel: f.channel };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  // KPIs over the whole range (1 query) + one page of rows
+  const { data: sum } = useJobSummary(filters);
+  const { rows: JOBS, total, loading } = useJobsPage({ ...pageArgs, ...filters });
   const { data: JOB_TYPES } = useJobTypes();
-  const newJobs = JOBS.filter((j) => j.status === "งานใหม่").length;
+  const S = sum[0];
+  const newJobs = S?.fresh ?? 0;
   const days = Math.max(1, Math.round((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) + 1);
-  const topChannel = React.useMemo(() => {
-    const m = new Map<string, number>();
-    for (const j of JOBS) m.set(j.channel ?? "", (m.get(j.channel ?? "") ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  }, [JOBS]);
+  const topChannel = S?.topChannel ?? "—";
   return (
     <ReportView
       title="รายงานการเปิดงานซ่อม"
@@ -43,15 +46,16 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "งานที่เปิดทั้งหมด", value: int(JOBS.length), tone: "primary" },
+        { label: "งานที่เปิดทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
         { label: "งานใหม่ (ยังไม่เริ่ม)", value: int(newJobs), tone: "warning" },
-        { label: "เฉลี่ยต่อวัน", value: (JOBS.length / days).toFixed(1) },
+        { label: "เฉลี่ยต่อวัน", value: ((S?.total ?? 0) / days).toFixed(1) },
         { label: "ช่องทางหลัก", value: topChannel },
       ]}
       columns={columns}
       rows={JOBS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total, onChange: setTable }}
     />
   );
 }

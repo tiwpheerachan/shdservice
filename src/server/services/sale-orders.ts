@@ -84,7 +84,7 @@ const SORT = {
 
 export type SaleOrderFilters = { approve?: string; from?: string; to?: string; sales?: string; deleted?: StatusMode };
 
-function where(q: string, f: SaleOrderFilters) {
+export function saleOrderWhere(q: string, f: SaleOrderFilters) {
   const term = q.trim();
   return and(
     statusFilter(saleOutHd.recordStatus, f.deleted ?? "exclude"),
@@ -105,7 +105,7 @@ function where(q: string, f: SaleOrderFilters) {
 }
 
 export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise<Page<SaleOrder>> {
-  const w = where(p.q, f);
+  const w = saleOrderWhere(p.q, f);
   const [{ total }] = await db
     .select({ total: count() })
     .from(saleOutHd)
@@ -122,7 +122,7 @@ export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise
 
 export async function listSaleOrders(f: SaleOrderFilters & { q?: string; limit?: number } = {}): Promise<SaleOrder[]> {
   const rows = await base()
-    .where(where(f.q ?? "", f))
+    .where(saleOrderWhere(f.q ?? "", f))
     .orderBy(desc(saleOutHd.documentCreateDate))
     .limit(Math.min(f.limit ?? 5000, 20000));
   return rows.map(toSaleOrder);

@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { RETURN_METHODS, type Job } from "@/data/mock";
-import { useJobs } from "@/data/db";
+import { useJobsPage, useJobSummary } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -43,11 +44,15 @@ const columns: Column<Job>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), returnType: "", no: "" });
-  const { data: JOBS, loading } = useJobs({ closedFrom: f.from, closedTo: f.to, statusGroup: "Finished", returnType: f.returnType, q: f.no, limit: 20000 });
-  const total = JOBS.reduce((s, j) => s + (j.paymentAmount ?? 0), 0);
-  const tats = JOBS.map(tatDays);
-  const avg = tats.length ? (tats.reduce((s, x) => s + x, 0) / tats.length).toFixed(1) : "0";
-  const over30 = tats.filter((d) => d > 30).length;
+  const filters = { closedFrom: f.from, closedTo: f.to, statusGroup: "Finished", returnType: f.returnType };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useJobSummary({ ...filters, q: f.no });
+  const { rows: JOBS, total: totalRows, loading } = useJobsPage({ ...pageArgs, q: table.q || f.no, ...filters });
+  const S = sum[0];
+  const total = S?.paid ?? 0;
+  const avg = String(S?.avgTat ?? 0);
+  const over30 = S?.over30 ?? 0;
   return (
     <ReportView
       title="รายงานการปิดงานซ่อม"
@@ -60,7 +65,7 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "งานที่ปิดแล้ว", value: int(JOBS.length), tone: "success" },
+        { label: "งานที่ปิดแล้ว", value: int(S?.total ?? 0), tone: "success" },
         { label: "ยอดรับชำระรวม", value: baht(total) },
         { label: "TAT เฉลี่ย (วัน)", value: avg },
         { label: "เกิน 30 วัน", value: int(over30), tone: "danger" },
@@ -69,6 +74,7 @@ export default function Page() {
       rows={JOBS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total: totalRows, onChange: setTable }}
     />
   );
 }

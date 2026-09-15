@@ -4,7 +4,7 @@ import * as React from "react";
 import { Download, Eye } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
@@ -12,7 +12,7 @@ import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
-import { useMovements } from "@/data/db";
+import { useMovementsPage } from "@/data/db";
 import { int } from "@/lib/utils";
 import { api, errMsg } from "@/lib/api";
 
@@ -34,18 +34,21 @@ export default function InventoryPage() {
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  // inventory_hd (latest 1,000 unless filtered) — filters run on the server
-  const { data: ALL, loading } = useMovements({ from: filters.from, to: filters.to, type: filters.type, q: filters.code || filters.doc || filters.ref });
-  const MOVEMENTS = React.useMemo(
-    () =>
-      ALL.filter(
-        (m) =>
-          (!filters.doc || m.doc.toLowerCase().includes(filters.doc.toLowerCase())) &&
-          (!filters.ref || m.ref.toLowerCase().includes(filters.ref.toLowerCase())) &&
-          (!filters.code || (m.items ?? "").toLowerCase().includes(filters.code.toLowerCase()))
-      ),
-    [ALL, filters]
-  );
+  // inventory_hd (20k rows) — server-side paging; filters + table search run on the server
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: MOVEMENTS, total, loading } = useMovementsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    from: filters.from,
+    to: filters.to,
+    type: filters.type,
+    code: filters.code,
+    doc: filters.doc,
+    ref: filters.ref,
+  });
 
   const [viewDoc, setViewDoc] = React.useState<Movement | null>(null);
   const [lines, setLines] = React.useState<LineRow[]>([]);
@@ -181,6 +184,7 @@ export default function InventoryPage() {
         loading={loading}
         rowKey={(r) => r.doc}
         searchPlaceholder="ค้นหาเอกสาร / ผู้ทำรายการ…"
+        server={{ total, onChange: setTable }}
       />
 
       {/* document line-items modal */}

@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import { useIssuedLines, useCategories, type IssuedLine } from "@/data/db";
+import { useIssuedLinesPage, useIssuedStats, useCategories, type IssuedLine } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -23,17 +24,17 @@ const columns: Column<Row>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), category: "", code: "" });
-  // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ)
-  const { data: rows, loading } = useIssuedLines({ from: f.from, to: f.to, category: f.category, code: f.code, limit: 20000 });
+  // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ) — paged + KPIs on the server
+  const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useIssuedStats(filters);
+  const { rows, total, loading } = useIssuedLinesPage({ ...pageArgs, ...filters });
   const { data: CATEGORIES } = useCategories();
-
-  const qty = rows.reduce((s, r) => s + r.qty, 0);
-  const value = rows.reduce((s, r) => s + r.value, 0);
-  const top = React.useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of rows) m.set(r.code, (m.get(r.code) ?? 0) + r.qty);
-    return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  }, [rows]);
+  const S = sum[0];
+  const qty = S?.qty ?? 0;
+  const value = S?.value ?? 0;
+  const top = S?.top ?? "—";
   return (
     <ReportView
       title="รายงานการเบิกจ่ายอะไหล่"
@@ -46,7 +47,7 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "รายการเคลื่อนไหว", value: int(rows.length), tone: "primary" },
+        { label: "รายการเคลื่อนไหว", value: int(S?.lines ?? 0), tone: "primary" },
         { label: "จำนวนที่เบิกรวม", value: `${int(qty)} ชิ้น` },
         { label: "มูลค่ารวม", value: baht(value) },
         { label: "อะไหล่ที่ใช้บ่อยสุด", value: top },
@@ -55,6 +56,7 @@ export default function Page() {
       rows={rows}
       loading={loading}
       rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
+      server={{ total, onChange: setTable }}
     />
   );
 }

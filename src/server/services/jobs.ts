@@ -269,7 +269,7 @@ export type JobFilters = {
 
 const dateCol = (by?: JobFilters["dateBy"]) => (by === "repaired" ? job.jobRepairedDate : by === "closed" ? job.jobClosedDate : job.jobCreateDate);
 
-function jobWhere(q: string, f: JobFilters) {
+export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   return and(
     // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for
@@ -1310,13 +1310,21 @@ async function computeDashboard() {
     over30: Number(r.over30),
   }));
 
+  // one pass over the last 12 months (was 24 correlated subqueries ≈ 800 ms)
   const monthly = await db.execute(sql`
-    WITH m AS (SELECT to_char(date_trunc('month', current_date) - (n || ' month')::interval, 'YYYY-MM') AS ym
-                 FROM generate_series(11, 0, -1) n)
-    SELECT m.ym,
-           (SELECT count(*) FROM job WHERE record_status <> 'DELETED' AND to_char(job_create_date, 'YYYY-MM') = m.ym) AS open,
-           (SELECT count(*) FROM job WHERE record_status <> 'DELETED' AND job_closed_date > '1901-01-01' AND to_char(job_closed_date, 'YYYY-MM') = m.ym) AS close
-      FROM m ORDER BY m.ym`);
+    WITH m AS (SELECT date_trunc('month', current_date) - (n || ' month')::interval AS mo
+                 FROM generate_series(11, 0, -1) n),
+    o AS (SELECT date_trunc('month', job_create_date) AS mo, count(*) AS n
+            FROM job WHERE record_status <> 'DELETED'
+             AND job_create_date >= date_trunc('month', current_date) - interval '11 month'
+           GROUP BY 1),
+    c AS (SELECT date_trunc('month', job_closed_date) AS mo, count(*) AS n
+            FROM job WHERE record_status <> 'DELETED'
+             AND job_closed_date >= date_trunc('month', current_date) - interval '11 month'
+           GROUP BY 1)
+    SELECT to_char(m.mo, 'YYYY-MM') AS ym, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
+      FROM m LEFT JOIN o ON o.mo = m.mo LEFT JOIN c ON c.mo = m.mo
+     ORDER BY m.mo`);
   const TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const monthlyRows = (monthly.rows as { ym: string; open: string; close: string }[]).map((r) => {
     const [y, mo] = r.ym.split("-");

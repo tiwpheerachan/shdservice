@@ -15,14 +15,14 @@ import {
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { ProductDetailModal, type ProductMode } from "@/components/shared/product-detail-modal";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Product } from "@/data/mock";
-import { useProducts, useManufacturers, useCategories } from "@/data/db";
+import { useProductsPage, useProductStats, useManufacturers, useCategories } from "@/data/db";
 import { baht, int, cn } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
@@ -63,8 +63,6 @@ function Kpi({
 export default function ProductsPage() {
   const { push } = useToast();
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath("/stock/products");
-  // inactive parts are included so the "สถานะ" filter can show them
-  const { data: ALL, loading, refetch } = useProducts({ deleted: "exclude" });
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: CATEGORIES } = useCategories();
 
@@ -78,26 +76,29 @@ export default function ProductsPage() {
   const [filters, setFilters] = React.useState<Filters>({ ...NO_FILTER, status: "Active" });
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
 
-  const PRODUCTS = React.useMemo(
-    () =>
-      ALL.filter(
-        (p) =>
-          (!filters.status || p.status === filters.status) &&
-          (!filters.sysCode || p.sysCode.toLowerCase().includes(filters.sysCode.toLowerCase())) &&
-          (!filters.mfgCode || p.mfgCode.toLowerCase().includes(filters.mfgCode.toLowerCase())) &&
-          (!filters.name || p.name.toLowerCase().includes(filters.name.toLowerCase())) &&
-          (!filters.brand || p.brand === filters.brand) &&
-          (!filters.category || p.category === filters.category) &&
-          (!filters.creator || (p.createdBy ?? "").toLowerCase().includes(filters.creator.toLowerCase())) &&
-          (!filters.date || (p.createdDate ?? "").startsWith(filters.date))
-      ),
-    [ALL, filters]
+  // server-side paging + filters (product table 2.5k rows; INACTIVE shown, DELETED hidden)
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const query = React.useMemo(
+    () => ({ q: table.q, ...filters }),
+    [table.q, filters]
   );
-
-  const total = PRODUCTS.length;
-  const outOfStock = PRODUCTS.filter((p) => p.onhand <= 0).length;
-  const low = PRODUCTS.filter((p) => p.onhand > 0 && p.onhand <= 3).length;
-  const qty = PRODUCTS.reduce((s, p) => s + Math.max(0, p.onhand), 0);
+  const { rows: PRODUCTS, total: totalRows, loading, refetch } = useProductsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    ...query,
+  });
+  const { data: statRows, refetch: refetchStats } = useProductStats(query);
+  const stats = statRows[0] ?? { total: 0, qty: 0, low: 0, out: 0, value: 0 };
+  const total = stats.total;
+  const outOfStock = stats.out;
+  const low = stats.low;
+  const qty = stats.qty;
+  const reload = () => {
+    refetch();
+    refetchStats();
+  };
 
   // ยกเลิก = product.is_active = false (+ cancel_date / cancel_by)
   const cancelProduct = async (r: Product) => {
@@ -109,7 +110,7 @@ export default function ProductsPage() {
     try {
       await postJson("/api/admin/records", { table: "products", id: r.sysCode, status: "DELETED" });
       push({ kind: "success", title: "ยกเลิกรายการอะไหล่แล้ว", desc: r.sysCode });
-      refetch();
+      reload();
     } catch (e) {
       push({ kind: "error", title: "ยกเลิกไม่สำเร็จ", desc: errMsg(e) });
     }
@@ -316,6 +317,7 @@ export default function ProductsPage() {
         loading={loading}
         rowKey={(r) => r.sysCode}
         searchPlaceholder="ค้นหารหัส / ชื่ออะไหล่ / ยี่ห้อ…"
+        server={{ total: totalRows, onChange: setTable }}
       />
 
       <ProductDetailModal
@@ -323,7 +325,7 @@ export default function ProductsPage() {
         onClose={() => setDetail(null)}
         product={detail?.product ?? null}
         mode={detail?.mode ?? "view"}
-        onSave={() => refetch()}
+        onSave={() => reload()}
       />
     </>
   );

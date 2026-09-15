@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { type SaleOrder } from "@/data/mock";
-import { useSaleOrders, useStaff } from "@/data/db";
+import { useSaleOrdersPage, useSaleOrderSummary, useStaff } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
@@ -31,10 +32,14 @@ export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), sales: "", approve: "" });
   const { data: STAFF } = useStaff();
   const salesId = STAFF.find((s) => s.name === f.sales)?.id;
-  const { data: SALE_ORDERS, loading } = useSaleOrders({ from: f.from, to: f.to, sales: salesId ?? f.sales, approve: f.approve, limit: 20000 });
-  const total = SALE_ORDERS.reduce((s, o) => s + o.amount, 0);
-  const approved = SALE_ORDERS.filter((o) => o.approve === "อนุมัติแล้ว");
-  const avg = SALE_ORDERS.length ? total / SALE_ORDERS.length : 0;
+  const filters = { from: f.from, to: f.to, sales: salesId ?? f.sales, approve: f.approve };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useSaleOrderSummary(filters);
+  const { rows: SALE_ORDERS, total: totalRows, loading } = useSaleOrdersPage({ ...pageArgs, ...filters });
+  const S = sum[0];
+  const total = S?.amount ?? 0;
+  const avg = S?.avg ?? 0;
   return (
     <ReportView
       title="รายงานการขาย"
@@ -47,8 +52,8 @@ export default function Page() {
       ]}
       onApply={setF}
       kpis={[
-        { label: "ใบสั่งขายทั้งหมด", value: int(SALE_ORDERS.length), tone: "primary" },
-        { label: "อนุมัติแล้ว", value: int(approved.length), tone: "success" },
+        { label: "ใบสั่งขายทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
+        { label: "อนุมัติแล้ว", value: int(S?.approved ?? 0), tone: "success" },
         { label: "ยอดขายรวม", value: baht(total) },
         { label: "ยอดเฉลี่ย/ใบ", value: baht(avg) },
       ]}
@@ -56,6 +61,7 @@ export default function Page() {
       rows={SALE_ORDERS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total: totalRows, onChange: setTable }}
     />
   );
 }

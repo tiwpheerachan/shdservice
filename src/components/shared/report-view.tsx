@@ -4,7 +4,7 @@ import * as React from "react";
 import { Download, Printer, FileSpreadsheet } from "lucide-react";
 import { PageHeader } from "./page-header";
 import { FilterBar } from "./filter-bar";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTable } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
@@ -30,6 +30,7 @@ export function ReportView<T extends Record<string, unknown>>({
   rowKey,
   loading = false,
   onApply,
+  server,
 }: {
   title: string;
   description: string;
@@ -41,6 +42,8 @@ export function ReportView<T extends Record<string, unknown>>({
   loading?: boolean;
   /** called with the current filter values when the user presses ค้นหา / reset */
   onApply?: (values: ReportValues) => void;
+  /** server-side paging for the report table (rows = current page) */
+  server?: ServerTable;
 }) {
   const { push } = useToast();
   const keyOf = (f: ReportFilter) => f.key ?? f.label;
@@ -140,7 +143,7 @@ export function ReportView<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <DataTable columns={columns} rows={rows} loading={loading} rowKey={rowKey} searchPlaceholder="ค้นหาในรายงาน…" />
+      <DataTable columns={columns} rows={rows} loading={loading} rowKey={rowKey} searchPlaceholder="ค้นหาในรายงาน…" server={server} />
     </>
   );
 }

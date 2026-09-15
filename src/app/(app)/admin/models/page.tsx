@@ -4,7 +4,7 @@ import * as React from "react";
 import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
@@ -12,7 +12,7 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Model } from "@/data/mock";
-import { useModels, useManufacturers, useProductTypes } from "@/data/db";
+import { useModelsPage, useManufacturers, useProductTypes } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 
@@ -20,7 +20,15 @@ type ModelForm = { code: string; name: string; brand: string; productType: strin
 
 export default function ModelsPage() {
   const { push } = useToast();
-  const { data: MODELS, loading, refetch } = useModels("exclude");
+  // 1.1k models — server-side paging/search (ACTIVE + INACTIVE, DELETED hidden)
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: MODELS, total, loading, refetch } = useModelsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+  });
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const [open, setOpen] = React.useState(false);
@@ -143,6 +151,7 @@ export default function ModelsPage() {
         loading={loading}
         rowKey={(r) => r.code}
         searchPlaceholder="ค้นหา Model Code / Model Name / Brand…"
+        server={{ total, onChange: setTable }}
       />
 
       <Modal
