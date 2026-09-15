@@ -3,7 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Search, CornerDownLeft } from "lucide-react";
-import { ALL_LINKS } from "@/lib/nav";
+import { ALL_LINKS as EVERY_LINK } from "@/lib/nav";
+import { useAccess } from "@/lib/use-access";
 import { cn } from "@/lib/utils";
 
 export function CommandPalette({
@@ -18,6 +19,8 @@ export function CommandPalette({
   const [idx, setIdx] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
+  const { canPath } = useAccess();
+  const ALL_LINKS = React.useMemo(() => EVERY_LINK.filter((l) => canPath(l.href)), [canPath]);
   const results = React.useMemo(() => {
     const n = q.trim().toLowerCase();
     const list = n
@@ -27,7 +30,7 @@ export function CommandPalette({
         )
       : ALL_LINKS;
     return list.slice(0, 12);
-  }, [q]);
+  }, [q, ALL_LINKS]);
 
   React.useEffect(() => {
     if (open) {

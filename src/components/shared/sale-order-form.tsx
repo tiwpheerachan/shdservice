@@ -6,218 +6,350 @@ import { Section } from "./section";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Radio, NumberInput } from "@/components/ui/input";
-import { PAYMENT_METHODS } from "@/data/mock";
-import { useProducts, useUsers } from "@/data/db";
+import { useToast } from "@/components/ui/toast";
+import { PAYMENT_METHODS, type Customer } from "@/data/mock";
+import { useProducts, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { api, errMsg, qs } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
-type Line = { id: number; code: string; name: string; qty: number; price: number };
+type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
 
-export function SaleOrderForm({ soNo }: { soNo?: string }) {
-  const { data: PRODUCTS } = useProducts();
-  const { data: USERS } = useUsers();
-  const [lines, setLines] = React.useState<Line[]>([]);
-  const [code, setCode] = React.useState("");
-  const [qty, setQty] = React.useState(1);
-  const idRef = React.useRef(0);
+/** GET /api/sale-orders/:no (subset the form uses) */
+export type SaleOrderLoaded = {
+  no: string;
+  date: string;
+  sales: string;
+  createdBy: string;
+  approve: string;
+  approveId?: number;
+  paymentType?: string;
+  paymentAmount?: number;
+  remark?: string;
+  slip: string;
+  customerDetail: { code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string };
+  lines: { code: string; name: string; type: "SparePart" | "Service"; qty: number; price: number }[];
+};
 
-  const add = () => {
-    const p = PRODUCTS.find((x) => x.sysCode === code);
-    if (!p) return;
-    setLines((s) => [
-      ...s,
-      { id: ++idRef.current, code: p.sysCode, name: p.name, qty, price: p.price },
-    ]);
-    setCode("");
-    setQty(1);
-  };
+export type SaleOrderPayload = {
+  no?: string;
+  customerCode: string;
+  salesId?: number;
+  lines: { code: string; qty: number; price: number; name: string; type: "SparePart" | "Service" }[];
+  paymentType: string;
+  paymentAmount: string;
+  slip: string;
+  remark: string;
+  submit: boolean;
+};
 
-  const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
+export type SaleOrderFormHandle = { payload: () => SaleOrderPayload };
 
-  return (
-    <>
-      <Section title="Customer Info" icon={UserRound}>
-        <FieldGrid>
-          <Field label="รหัสลูกค้า" required>
-            <Input className="num" placeholder="C0010234" />
-          </Field>
-          <Field label="เลขผู้เสียภาษี">
-            <Input className="num" />
-          </Field>
-          <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-            <Input />
-          </Field>
-          <Field label="ที่อยู่ลูกค้า" wide>
-            <Textarea rows={2} />
-          </Field>
-          <Field label="เบอร์โทรศัพท์ลูกค้า" required>
-            <Input className="num" />
-          </Field>
-          <Field label="Line ID">
-            <Input />
-          </Field>
-          <Field label="Email" className="lg:col-span-2">
-            <Input type="email" />
-          </Field>
-        </FieldGrid>
-      </Section>
+export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
+  function SaleOrderForm({ soNo, initial }, ref) {
+    const { push } = useToast();
+    const { name: me } = useAccess();
+    const { data: PRODUCTS } = useProducts();
+    const { data: STAFF } = useStaff();
+    const [lines, setLines] = React.useState<Line[]>([]);
+    const [code, setCode] = React.useState("");
+    const [qty, setQty] = React.useState(1);
+    const [customer, setCustomer] = React.useState<Customer | null>(null);
+    const [salesId, setSalesId] = React.useState<number>(0);
+    const [payment, setPayment] = React.useState(PAYMENT_METHODS[0]);
+    const [payAmount, setPayAmount] = React.useState("");
+    const [remark, setRemark] = React.useState("");
+    const [slip, setSlip] = React.useState("");
+    const [submit, setSubmit] = React.useState(false);
+    const [date, setDate] = React.useState("");
+    const [pickQ, setPickQ] = React.useState("");
+    const idRef = React.useRef(0);
 
-      <Section title="Sale Order Info" icon={FileText}>
-        <FieldGrid>
-          <Field label="เลขใบสั่งขาย">
-            <ReadOnly>
-              <span className="num">{soNo ?? "Generate Auto"}</span>
-            </ReadOnly>
-          </Field>
-          <Field label="วันที่สร้าง">
-            <ReadOnly><span className="num">2026-09-04 12:17</span></ReadOnly>
-          </Field>
-          <Field label="สร้างโดย">
-            <ReadOnly>May - Pradit</ReadOnly>
-          </Field>
-          <Field label="พนักงานขาย" required>
-            <Select defaultValue="">
-              <option value="">- - ยังไม่ระบุ - -</option>
-              {USERS.map((u) => (
-                <option key={u.id}>{u.name}</option>
-              ))}
-            </Select>
-          </Field>
-        </FieldGrid>
-      </Section>
+    React.useEffect(() => {
+      const d = new Date();
+      const p = (n: number) => String(n).padStart(2, "0");
+      setDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`);
+    }, []);
 
-      <Section
-        title="รายการสินค้า"
-        icon={ShoppingCart}
-        bodyClassName="p-0"
-      >
-        <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
-          <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1">
-            <Select value={code} onChange={(e) => setCode(e.target.value)}>
-              <option value="">- - เลือกสินค้า - -</option>
-              {PRODUCTS.map((p) => (
-                <option key={p.sysCode} value={p.sysCode}>
-                  {p.sysCode} — {p.name.slice(0, 60)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="จำนวน" className="sm:w-28">
-            <NumberInput
-              min={1}
-              placeholder="1"
-              value={qty}
-              onChange={(n) => setQty(n)}
-            />
-          </Field>
-          <Field label="หน่วยนับ" className="sm:w-28">
-            <Input readOnly value="Pcs." />
-          </Field>
-          <Button size="md" onClick={add} disabled={!code}>
-            <Plus className="h-3.5 w-3.5" />
-            เพิ่มรายการ
-          </Button>
-        </div>
+    // prefill from an existing SO
+    React.useEffect(() => {
+      if (!initial) return;
+      setLines(initial.lines.map((l) => ({ id: ++idRef.current, code: l.code, name: l.name, qty: l.qty, price: l.price, type: l.type })));
+      const c = initial.customerDetail;
+      setCustomer({ code: c.code, name: c.name, address: c.address, phone: c.phone, email: c.email, line: c.line, taxId: c.taxId, status: "Active" });
+      setPayment(initial.paymentType || PAYMENT_METHODS[0]);
+      setPayAmount(initial.paymentAmount ? String(initial.paymentAmount) : "");
+      setRemark(initial.remark ?? "");
+      setSlip(initial.slip);
+      setSubmit((initial.approveId ?? 0) >= 2);
+      setDate(initial.date);
+      const s = STAFF.find((x) => x.name === initial.sales);
+      if (s) setSalesId(s.id);
+    }, [initial, STAFF]);
 
-        <div className="table-scroll rounded-none">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 px-3 py-2 text-left">#</th>
-                <th className="w-28 px-3 py-2 text-left">Item Code</th>
-                <th className="px-3 py-2 text-left">รายละเอียดสินค้า</th>
-                <th className="w-20 px-3 py-2 text-right">จำนวน</th>
-                <th className="w-28 px-3 py-2 text-right">ราคาขาย/หน่วย</th>
-                <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
-                <th className="w-16 px-3 py-2 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    ยังไม่มีรายการสินค้า
-                  </td>
+    const add = () => {
+      const p = PRODUCTS.find((x) => x.sysCode === code);
+      if (!p) return;
+      setLines((s) => [...s, { id: ++idRef.current, code: p.sysCode, name: p.name, qty, price: p.price, type: "SparePart" }]);
+      setCode("");
+      setQty(1);
+    };
+
+    const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
+
+    const findCustomer = async (q: string) => {
+      if (!q.trim()) return;
+      try {
+        const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q })}`);
+        if (d.rows[0]) setCustomer(d.rows[0]);
+        else push({ kind: "warning", title: "ไม่พบลูกค้า", desc: q });
+      } catch (e) {
+        push({ kind: "error", title: "ค้นหาลูกค้าไม่สำเร็จ", desc: errMsg(e) });
+      }
+    };
+
+    React.useImperativeHandle(ref, () => ({
+      payload: () => ({
+        no: soNo || initial?.no || undefined,
+        customerCode: customer?.code ?? "",
+        salesId: salesId || undefined,
+        lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
+        paymentType: payment,
+        paymentAmount: payAmount,
+        slip,
+        remark,
+        submit,
+      }),
+    }));
+
+    const productOptions = React.useMemo(() => {
+      const t = pickQ.trim().toLowerCase();
+      const list = t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t)) : PRODUCTS;
+      return list.slice(0, 300);
+    }, [PRODUCTS, pickQ]);
+
+    return (
+      <>
+        <Section title="Customer Info" icon={UserRound}>
+          <FieldGrid>
+            <Field label="รหัสลูกค้า" required>
+              <Input
+                className="num"
+                placeholder="พิมพ์รหัสลูกค้าแล้วกด Enter"
+                key={customer?.code ?? "new"}
+                defaultValue={customer?.code ?? ""}
+                onKeyDown={(e) => e.key === "Enter" && findCustomer((e.target as HTMLInputElement).value)}
+                onBlur={(e) => e.target.value && e.target.value !== customer?.code && findCustomer(e.target.value)}
+              />
+            </Field>
+            <Field label="เลขผู้เสียภาษี">
+              <Input className="num" value={customer?.taxId ?? ""} readOnly />
+            </Field>
+            <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
+              <Input value={customer?.name ?? ""} readOnly />
+            </Field>
+            <Field label="ที่อยู่ลูกค้า" wide>
+              <Textarea rows={2} value={customer?.address ?? ""} readOnly />
+            </Field>
+            <Field label="เบอร์โทรศัพท์ลูกค้า" required>
+              <Input className="num" value={customer?.phone ?? ""} readOnly />
+            </Field>
+            <Field label="Line ID">
+              <Input value={customer?.line ?? ""} readOnly />
+            </Field>
+            <Field label="Email" className="lg:col-span-2">
+              <Input type="email" value={customer?.email ?? ""} readOnly />
+            </Field>
+          </FieldGrid>
+        </Section>
+
+        <Section title="Sale Order Info" icon={FileText}>
+          <FieldGrid>
+            <Field label="เลขใบสั่งขาย">
+              <ReadOnly>
+                <span className="num">{soNo ?? initial?.no ?? "Generate Auto"}</span>
+              </ReadOnly>
+            </Field>
+            <Field label="วันที่สร้าง">
+              <ReadOnly><span className="num">{date}</span></ReadOnly>
+            </Field>
+            <Field label="สร้างโดย">
+              <ReadOnly>{initial?.createdBy || me || "—"}</ReadOnly>
+            </Field>
+            <Field label="พนักงานขาย" required>
+              <Select value={salesId ? String(salesId) : ""} onChange={(e) => setSalesId(Number(e.target.value) || 0)}>
+                <option value="">- - ยังไม่ระบุ - -</option>
+                {STAFF.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </FieldGrid>
+        </Section>
+
+        <Section
+          title="รายการสินค้า"
+          icon={ShoppingCart}
+          bodyClassName="p-0"
+        >
+          <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
+            <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1">
+              <div className="flex gap-2">
+                <Input value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="ค้นหา…" className="w-32 sm:w-40" />
+                <Select value={code} onChange={(e) => setCode(e.target.value)} className="flex-1">
+                  <option value="">- - เลือกสินค้า - -</option>
+                  {productOptions.map((p) => (
+                    <option key={p.sysCode} value={p.sysCode}>
+                      {p.sysCode} — {p.name.slice(0, 60)} (คงเหลือ {p.onhand})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </Field>
+            <Field label="จำนวน" className="sm:w-28">
+              <NumberInput
+                min={1}
+                placeholder="1"
+                value={qty}
+                onChange={(n) => setQty(n)}
+              />
+            </Field>
+            <Field label="หน่วยนับ" className="sm:w-28">
+              <Input readOnly value="Pcs." />
+            </Field>
+            <Button size="md" onClick={add} disabled={!code}>
+              <Plus className="h-3.5 w-3.5" />
+              เพิ่มรายการ
+            </Button>
+          </div>
+
+          <div className="table-scroll rounded-none">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
+                  <th className="w-10 px-3 py-2 text-left">#</th>
+                  <th className="w-28 px-3 py-2 text-left">Item Code</th>
+                  <th className="px-3 py-2 text-left">รายละเอียดสินค้า</th>
+                  <th className="w-20 px-3 py-2 text-right">จำนวน</th>
+                  <th className="w-28 px-3 py-2 text-right">ราคาขาย/หน่วย</th>
+                  <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
+                  <th className="w-16 px-3 py-2 text-center">Action</th>
                 </tr>
-              ) : (
-                lines.map((l, i) => (
-                  <tr key={l.id} className="border-b border-border/70 last:border-0">
-                    <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
-                    <td className="num px-3 py-2 font-medium">{l.code}</td>
-                    <td className="px-3 py-2">
-                      <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
-                    </td>
-                    <td className="num px-3 py-2 text-right">{l.qty}</td>
-                    <td className="num px-3 py-2 text-right">{baht(l.price)}</td>
-                    <td className="num px-3 py-2 text-right font-medium">
-                      {baht(l.qty * l.price)}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                        aria-label="ลบ"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+              </thead>
+              <tbody>
+                {lines.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                      ยังไม่มีรายการสินค้า
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-            <tfoot>
-              <tr className="bg-muted/50 font-semibold">
-                <td colSpan={5} className="px-3 py-2 text-right">
-                  รวมเป็นเงินทั้งสิ้น
-                </td>
-                <td className="num px-3 py-2 text-right text-primary">{baht(total)}</td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </Section>
+                ) : (
+                  lines.map((l, i) => (
+                    <tr key={l.id} className="border-b border-border/70 last:border-0">
+                      <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
+                      <td className="num px-3 py-2 font-medium">{l.code}</td>
+                      <td className="px-3 py-2">
+                        <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <NumberInput
+                          min={1}
+                          value={l.qty}
+                          onChange={(n) => setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))}
+                          className="ml-auto h-8 w-16 text-right text-xs"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <NumberInput
+                          step="0.01"
+                          value={l.price}
+                          onChange={(n) => setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)))}
+                          className="ml-auto h-8 w-24 text-right text-xs"
+                        />
+                      </td>
+                      <td className="num px-3 py-2 text-right font-medium">
+                        {baht(l.qty * l.price)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                          aria-label="ลบ"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="bg-muted/50 font-semibold">
+                  <td colSpan={5} className="px-3 py-2 text-right">
+                    รวมเป็นเงินทั้งสิ้น
+                  </td>
+                  <td className="num px-3 py-2 text-right text-primary">{baht(total)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Section>
 
-      <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
-        <FieldGrid>
-          <Field label="วิธีการชำระเงิน" required className="lg:col-span-2">
-            <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
-              {PAYMENT_METHODS.map((p, i) => (
-                <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Radio name="payment" defaultChecked={i === 0} />
-                  {p}
-                </label>
-              ))}
-            </div>
-          </Field>
-          <Field label="จำนวนเงินที่ชำระ (บาท)">
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              inputMode="decimal"
-              placeholder="0.00"
-              onFocus={(e) => e.currentTarget.select()}
-              className="num text-right"
-            />
-          </Field>
-          <Field label="สลิปหลักฐานการโอน">
-            <Input type="file" className="h-9 py-1.5 text-xs" />
-          </Field>
-          <Field label="หมายเหตุ" wide>
-            <Textarea rows={2} />
-          </Field>
-          <Field label="Action" required wide>
-            <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
-              {["กำลังดำเนินการจัดทำ (In Progress)", "Send To Approve"].map((a, i) => (
-                <label key={a} className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Radio name="so-action" defaultChecked={i === 0} />
-                  {a}
-                </label>
-              ))}
-            </div>
-          </Field>
-        </FieldGrid>
-      </Section>
-    </>
-  );
-}
+        <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
+          <FieldGrid>
+            <Field label="วิธีการชำระเงิน" required className="lg:col-span-2">
+              <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+                {PAYMENT_METHODS.map((p) => (
+                  <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Radio name="payment" checked={payment === p} onChange={() => setPayment(p)} />
+                    {p}
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <Field label="จำนวนเงินที่ชำระ (บาท)">
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                inputMode="decimal"
+                placeholder={total ? total.toFixed(2) : "0.00"}
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                onFocus={(e) => e.currentTarget.select()}
+                className="num text-right"
+              />
+            </Field>
+            <Field label="สลิปหลักฐานการโอน">
+              <Input
+                type="file"
+                className="h-9 py-1.5 text-xs"
+                accept=".jpg,.jpeg,.png,.pdf"
+                onChange={(e) => setSlip(e.target.files?.[0]?.name ?? "")}
+              />
+            </Field>
+            <Field label="หมายเหตุ" wide>
+              <Textarea rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />
+            </Field>
+            <Field label="Action" required wide>
+              <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+                {[
+                  { k: false, l: "กำลังดำเนินการจัดทำ (In Progress)" },
+                  { k: true, l: "Send To Approve" },
+                ].map((a) => (
+                  <label key={a.l} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Radio name="so-action" checked={submit === a.k} onChange={() => setSubmit(a.k)} />
+                    {a.l}
+                  </label>
+                ))}
+              </div>
+            </Field>
+          </FieldGrid>
+        </Section>
+      </>
+    );
+  }
+);

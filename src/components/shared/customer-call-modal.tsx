@@ -22,11 +22,12 @@ import { useToast } from "@/components/ui/toast";
 import { useJobs } from "@/data/db";
 import type { Customer } from "@/data/mock";
 import { baht, cn } from "@/lib/utils";
+import { api, postJson, errMsg } from "@/lib/api";
 
 type CallLog = { id: number; detail: string; date: string; by: string };
 
-const CURRENT_USER = "May - Pradit";
-const DONE = new Set(["ปิดงาน", "ซ่อมเสร็จ"]);
+// job_status_group Finished/Repaired = done
+const DONE_GROUPS = new Set(["Finished", "Repaired"]);
 
 function initials(name: string) {
   const clean = name.replace(/^(คุณ|บริษัท|ห้างหุ้นส่วนจำกัด|ร้าน)\s*/u, "").trim();
@@ -72,41 +73,47 @@ export function CustomerCallModal({
   jobNo?: string;
 }) {
   const { push } = useToast();
-  const { data: JOBS } = useJobs();
+  // job history of this customer (server-filtered by customer code)
+  const { data: JOBS } = useJobs(customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 });
   const [tab, setTab] = React.useState("history");
   const [log, setLog] = React.useState<CallLog[]>([]);
   const [text, setText] = React.useState("");
   const [copied, setCopied] = React.useState(false);
 
-  // reset call log + draft whenever a different customer is opened
+  // reset draft + load this job's call log (job_call_log) whenever opened
   React.useEffect(() => {
     setLog([]);
     setText("");
     setCopied(false);
     setTab("history");
-  }, [customer?.code, open]);
+    if (!open || !jobNo) return;
+    let active = true;
+    api<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`)
+      .then((d) => active && setLog(d.rows))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [customer?.code, open, jobNo]);
 
-  const history = React.useMemo(
-    () => (customer ? JOBS.filter((j) => j.customer === customer.name) : []),
-    [JOBS, customer]
-  );
+  const history = React.useMemo(() => (customer ? JOBS : []), [JOBS, customer]);
   const hist = {
     total: history.length,
-    done: history.filter((j) => DONE.has(j.status)).length,
+    done: history.filter((j) => DONE_GROUPS.has(j.statusGroup ?? "")).length,
     value: history.reduce((s, j) => s + j.amount, 0),
   };
 
-  const addLog = () => {
+  const addLog = async () => {
     const v = text.trim();
-    if (!v) return;
-    const now = new Date();
-    const date =
-      now.toISOString().slice(0, 10) +
-      " " +
-      now.toTimeString().slice(0, 5);
-    setLog((l) => [{ id: l.length + 1, detail: v, date, by: CURRENT_USER }, ...l]);
-    setText("");
-    push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: "ระบบสาธิต — ไม่บันทึกจริง" });
+    if (!v || !jobNo) return;
+    try {
+      const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
+      setLog(d.rows);
+      setText("");
+      push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: jobNo });
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
   const copyPhone = async () => {

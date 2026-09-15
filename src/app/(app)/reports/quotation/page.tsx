@@ -1,19 +1,25 @@
 "use client";
 
-import { ReportView } from "@/components/shared/report-view";
+import * as React from "react";
+import { ReportView, type ReportValues } from "@/components/shared/report-view";
 import { Badge } from "@/components/ui/badge";
-import { type Quotation } from "@/data/mock";
+import { QUOTATION_STATUS_OPTIONS, type Quotation } from "@/data/mock";
 import { useQuotations } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
+import { daysAgo, today } from "@/lib/dates";
 
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
   "รอเสนอราคา": "warning",
   "เสนอราคาแล้ว": "info",
-  "ลูกค้าอนุมัติ": "success",
-  "ลูกค้าไม่อนุมัติ": "danger",
-  "ยกเลิก": "neutral",
+  "ลูกค้าตกลงซ่อม": "success",
+  "ลูกค้าตกลงซ่อม รอชำระเงิน": "success",
+  "ลูกค้าตกลงซ่อม รออะไหล่": "success",
+  "ลูกค้าไม่ตกลงซ่อม": "danger",
+  "พ้นกำหนดเสนอราคา": "danger",
+  "ยกเลิกใบเสนอราคา": "neutral",
 };
+const AGREED = new Set(["ลูกค้าตกลงซ่อม", "ลูกค้าตกลงซ่อม รอชำระเงิน", "ลูกค้าตกลงซ่อม รออะไหล่"]);
 
 const columns: Column<Quotation>[] = [
   { key: "no", header: "เลขที่ใบเสนอราคา", width: "150px", cell: (r) => <span className="num font-medium">{r.no}</span> },
@@ -26,8 +32,10 @@ const columns: Column<Quotation>[] = [
 ];
 
 export default function Page() {
-  const { data: QUOTATIONS, loading } = useQuotations();
-  const approved = QUOTATIONS.filter((q) => q.status === "ลูกค้าอนุมัติ");
+  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: "", status: "" });
+  const { data: ALL, loading } = useQuotations({ from: f.from, to: f.to, status: f.status, limit: 20000 });
+  const QUOTATIONS = React.useMemo(() => ALL.filter((q) => !f.type || q.type === f.type), [ALL, f.type]);
+  const approved = QUOTATIONS.filter((q) => AGREED.has(q.status));
   const total = QUOTATIONS.reduce((s, q) => s + q.amount, 0);
   const approvedTotal = approved.reduce((s, q) => s + q.amount, 0);
   return (
@@ -35,16 +43,17 @@ export default function Page() {
       title="รายงานการเสนอราคา"
       description="สรุปใบเสนอราคา อัตราการอนุมัติ และมูลค่ารวม"
       filters={[
-        { kind: "date", label: "วันที่สร้าง (ตั้งแต่)", value: "2026-08-05" },
-        { kind: "date", label: "วันที่สร้าง (ถึง)", value: "2026-09-04" },
-        { kind: "select", label: "ประเภท", options: ["ALL", "Type A (Normal)", "Type B (VIP)"] },
-        { kind: "select", label: "สถานะ", options: ["- - Select All - -", ...Object.keys(TONE)] },
+        { kind: "date", key: "from", label: "วันที่สร้าง (ตั้งแต่)", value: f.from },
+        { kind: "date", key: "to", label: "วันที่สร้าง (ถึง)", value: f.to },
+        { kind: "select", key: "type", label: "ประเภท", options: ["ALL", "Type A (Normal)", "Type B (VIP)"] },
+        { kind: "select", key: "status", label: "สถานะ", options: ["- - Select All - -", ...QUOTATION_STATUS_OPTIONS] },
       ]}
+      onApply={setF}
       kpis={[
         { label: "ใบเสนอราคาทั้งหมด", value: int(QUOTATIONS.length), tone: "primary" },
-        { label: "ลูกค้าอนุมัติ", value: int(approved.length), tone: "success" },
+        { label: "ลูกค้าตกลงซ่อม", value: int(approved.length), tone: "success" },
         { label: "มูลค่ารวม", value: baht(total) },
-        { label: "มูลค่าที่อนุมัติ", value: baht(approvedTotal), tone: "success" },
+        { label: "มูลค่าที่ตกลง", value: baht(approvedTotal), tone: "success" },
       ]}
       columns={columns}
       rows={QUOTATIONS}

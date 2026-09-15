@@ -9,21 +9,24 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type Permission } from "@/data/mock";
-import { usePermissions } from "@/data/db";
+import { usePermissions, useRoles, useModules } from "@/data/db";
 
-// เมนูงานหลักของระบบ — ใช้สร้าง matrix สิทธิ์ให้ครบทุก role
-const MENUS = [
-  "ข้อมูลระบบ",
-  "ข้อมูลอะไหล่",
-  "ข้อมูลลูกค้า",
-  "ข้อมูลงานบริการ",
-  "ข้อมูลเสนอราคา",
-  "ข้อมูลใบสั่งขาย",
-  "รายงาน",
+// เมนูงาน (module) และบทบาท (user_type) มาจากตาราง app_config ของระบบเดิม
+// — ค่า fallback ด้านล่างใช้เฉพาะระหว่างโหลด
+const FALLBACK_MENUS = [
+  "Job Management",
+  "Job Assign",
+  "Job Repair",
+  "Job Closing",
+  "Product",
+  "Product Onhand",
+  "Product Receive Stock",
+  "Product Pick Stock",
+  "Customer",
+  "Quotation",
+  "Sale Order",
 ];
-
-// role ที่กำหนดสิทธิ์ได้ (ตัด "รออนุมัติ" ออก — เป็นสถานะรอ ไม่ใช่บทบาทใช้งาน)
-const ASSIGNABLE_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
+const FALLBACK_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
 
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;
@@ -33,6 +36,10 @@ type Cell = { add: boolean; edit: boolean; del: boolean; view: boolean };
 export default function PermissionsPage() {
   const { push } = useToast();
   const { data: perms, loading, refetch } = usePermissions();
+  const { data: dbRoles } = useRoles();
+  const { data: dbModules } = useModules();
+  const ASSIGNABLE_ROLES = dbRoles.length ? dbRoles : FALLBACK_ROLES;
+  const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
   const [map, setMap] = React.useState<Record<Key, Cell>>({});
   const [role, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
   const [saving, setSaving] = React.useState(false);

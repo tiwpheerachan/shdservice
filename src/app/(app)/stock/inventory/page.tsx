@@ -12,8 +12,13 @@ import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
-import { useMovements, useProducts } from "@/data/db";
+import { useMovements } from "@/data/db";
 import { int } from "@/lib/utils";
+import { api, errMsg } from "@/lib/api";
+
+type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
+type Filters = { from: string; to: string; type: string; warehouse: string; code: string; doc: string; ref: string };
+const NO_FILTER: Filters = { from: "", to: "", type: "", warehouse: "", code: "", doc: "", ref: "" };
 
 const DOC_TYPES = STOCK_MOVE_TYPES;
 
@@ -26,23 +31,35 @@ function typeTone(type: string): Tone {
 
 export default function InventoryPage() {
   const { push } = useToast();
-  const { data: MOVEMENTS, loading } = useMovements();
-  const { data: PRODUCTS } = useProducts();
+  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
+  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
+  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  // inventory_hd (latest 1,000 unless filtered) — filters run on the server
+  const { data: ALL, loading } = useMovements({ from: filters.from, to: filters.to, type: filters.type, q: filters.code || filters.doc || filters.ref });
+  const MOVEMENTS = React.useMemo(
+    () =>
+      ALL.filter(
+        (m) =>
+          (!filters.doc || m.doc.toLowerCase().includes(filters.doc.toLowerCase())) &&
+          (!filters.ref || m.ref.toLowerCase().includes(filters.ref.toLowerCase())) &&
+          (!filters.code || (m.items ?? "").toLowerCase().includes(filters.code.toLowerCase()))
+      ),
+    [ALL, filters]
+  );
 
   const [viewDoc, setViewDoc] = React.useState<Movement | null>(null);
-
-  // demo line items for the selected document
-  const lines = viewDoc
-    ? PRODUCTS.slice(0, 2).map((p) => ({
-        code: p.sysCode,
-        name: p.name,
-        supplier: "",
-        lot: "",
-        inv: "",
-        qty: 1,
-        unit: "Pcs.",
-      }))
-    : [];
+  const [lines, setLines] = React.useState<LineRow[]>([]);
+  React.useEffect(() => {
+    if (!viewDoc) return;
+    let active = true;
+    setLines([]);
+    api<{ rows: LineRow[] }>(`/api/stock/movements/${encodeURIComponent(viewDoc.doc)}`)
+      .then((d) => active && setLines(d.rows))
+      .catch((e) => push({ kind: "error", title: "โหลดรายการไม่สำเร็จ", desc: errMsg(e) }));
+    return () => {
+      active = false;
+    };
+  }, [viewDoc, push]);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
 
   const columns: Column<Movement>[] = [
@@ -115,39 +132,46 @@ export default function InventoryPage() {
       />
 
       <FilterBar
-        onSearch={() => push({ kind: "info", title: "ค้นหาข้อมูลแล้ว" })}
-        onReset={() => push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" })}
+        onSearch={() => {
+          setFilters(draft);
+          push({ kind: "info", title: "ค้นหาข้อมูลแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilters(NO_FILTER);
+          push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
+        }}
       >
         <Field label="วันที่สร้างเอกสาร (ตั้งแต่)">
-          <Input type="date" defaultValue="2026-08-05" />
+          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
         </Field>
         <Field label="วันที่สร้างเอกสาร (ถึง)">
-          <Input type="date" defaultValue="2026-09-07" />
+          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
         </Field>
         <Field label="ประเภทเอกสาร">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {DOC_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </Select>
         </Field>
         <Field label="คลังสินค้า">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.warehouse} onChange={(e) => setD("warehouse", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {WAREHOUSES.map((w) => (
               <option key={w}>{w}</option>
             ))}
           </Select>
         </Field>
         <Field label="รหัสอะไหล่">
-          <Input placeholder="P02534" className="num" />
+          <Input placeholder="P02534" className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
         </Field>
         <Field label="หมายเลขเอกสาร">
-          <Input placeholder="WHO2602139" className="num" />
+          <Input placeholder="WHO2602139" className="num" value={draft.doc} onChange={(e) => setD("doc", e.target.value)} />
         </Field>
         <Field label="อ้างอิงเอกสาร">
-          <Input placeholder="J2611143 / SO2600730" className="num" />
+          <Input placeholder="J2611143 / SO2600730" className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
         </Field>
       </FilterBar>
 
@@ -203,8 +227,8 @@ export default function InventoryPage() {
                           <span className="line-clamp-1 max-w-[320px]">{l.name}</span>
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">{l.supplier || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{l.lot || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{l.inv || "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">—</td>
+                        <td className="px-3 py-2 text-muted-foreground">{l.ref || "—"}</td>
                         <td className="num px-3 py-2 text-right">{int(l.qty)}</td>
                         <td className="px-3 py-2">{l.unit}</td>
                         <td className="px-3 py-2 text-muted-foreground">—</td>

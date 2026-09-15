@@ -9,7 +9,9 @@
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
+cp .env.example .env      # ใส่ DATABASE_URL (Supabase Session pooler :5432), SSO และ Supabase Storage key
+npm run db:migrate        # สร้าง/อัปเดต schema (รันซ้ำได้ ไม่ทำลายข้อมูล)
+npm run dev               # http://localhost:3000
 ```
 
 Build production:
@@ -23,11 +25,36 @@ npm start
 
 ---
 
+## ฐานข้อมูล (drizzle + migrations)
+
+แอปอ่าน/เขียนฐานข้อมูล **SHDElectronicServiceDB เดิม** (52 ตาราง snake_case ที่แปลงมาจาก SQL Server ด้วย `../setupdata/convert.py`) ผ่าน **drizzle ORM** บน `DATABASE_URL` เท่านั้น — ไม่มีการอ่านผ่าน PostgREST/anon key จาก browser อีกต่อไป
+
+| ที่ | หน้าที่ |
+|---|---|
+| `src/db/schema/legacy.ts` | drizzle schema ของ 52 ตาราง legacy (+ คอลัมน์ที่แอปเพิ่ม) |
+| `src/db/client.ts` | pool + `db` (server-only, session time zone Asia/Bangkok) |
+| `src/db/running-no.ts` | ออกเลขเอกสารจาก `running_no` (J/Q/SO/WHI/WHO รายปี, C/P/MD ต่อเนื่อง) |
+| `drizzle/0000_baseline.sql` | schema legacy แบบ idempotent (no-op ถ้ามีอยู่แล้ว) |
+| `drizzle/0001_app.sql` | คอลัมน์ SSO ใน `app_user`, ย้าย `users` เก่า → `app_user`, drop ตาราง mock, index |
+| `drizzle/0002_job_symptom.sql` | ตาราง `job_symptom` (หลายอาการต่อ 1 งาน) |
+| `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
+
+**หลัง re-dump / reload ข้อมูลจากระบบเก่า** (`../setupdata/load_supabase.sh`) ให้รัน `npm run db:migrate` อีกครั้ง — migration ทุกไฟล์เขียนแบบรันซ้ำได้ และ script จะ reset journal ให้เมื่อพบว่าตาราง legacy ถูกสร้างใหม่
+
+### ผู้ใช้ / สิทธิ์
+- login ผ่าน Central SSO เหมือนเดิม → จับคู่กับ `app_user` ด้วยอีเมล (สร้างแถวใหม่แบบรออนุมัติถ้าไม่พบ)
+- บทบาท = `app_user.user_type` · สิทธิ์เมนู = `app_config` (user_type × module × add/edit/del/view) — บังคับใช้ที่ API ทุก route ที่เขียน และซ่อนเมนู/ปุ่มใน UI
+- หน้า **ข้อมูลระบบ** และ **รายงาน** ใช้ได้เฉพาะ System Admin · owner emails ใน `src/lib/access.ts` / `OWNER_EMAILS` เป็น System Admin เสมอ
+
+รายละเอียด business rule ที่อนุมานจากข้อมูลจริง (สถานะงาน, สต๊อก, ใบเสนอราคา, ใบสั่งขาย) อยู่ใน [`docs/backend-rebase-plan.md`](docs/backend-rebase-plan.md)
+
+---
+
 ## สิ่งที่ให้ความสำคัญเรื่องความเสถียร
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Dependency | มีเพียง `next`, `react`, `react-dom`, `lucide-react` — **ไม่มี UI library ภายนอก** จึงไม่มี breaking change จาก third-party |
+| Dependency | UI: `next`, `react`, `react-dom`, `lucide-react` — **ไม่มี UI library ภายนอก** · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage |
 | Version | ตรึงเวอร์ชันแบบ exact (ไม่มี `^`) ทุกตัว — `npm install` ได้ผลลัพธ์เดิมเสมอ |
 | Type Safety | TypeScript `strict: true` ผ่าน `next build` โดยไม่มี error |
 | Dark mode | สคริปต์ inline ใน `<head>` ตั้ง class ก่อน paint → **ไม่มีจอกระพริบ (FOUC)** |
@@ -61,8 +88,14 @@ src/
 │   └── shared/                 # PageHeader, Section, FilterBar, StatCard,
 │                               # MasterTable, JobForm, QuotationForm,
 │                               # SaleOrderForm, ReportView, Attachments
-├── lib/                        # utils (cn, baht, int), nav config, useTheme
-└── data/mock.ts                # ข้อมูลตัวอย่างทั้งหมด (จุดเดียวที่ต้องเปลี่ยนเป็น API)
+├── lib/                        # utils, nav, modules (permission map), api (fetch), use-access, use-job
+├── data/
+│   ├── db.ts                   # React hooks → /api/data/<resource> (server paging สำหรับตารางใหญ่)
+│   ├── queries.ts              # server-component getters (master data)
+│   └── mock.ts                 # TYPE + option list เท่านั้น (ไม่มีข้อมูลตัวอย่างแล้ว)
+├── db/                         # drizzle client / schema / running number
+├── server/                     # auth + permission, services (business logic), paging
+└── app/api/**                  # route handlers (ทุกการเขียนตรวจสิทธิ์จาก app_config)
 ```
 
 ---
@@ -96,14 +129,11 @@ src/
 
 ---
 
-## การต่อ API จริง
+## โครงสร้าง API
 
-ทุกหน้าอ่านข้อมูลจาก `src/data/mock.ts` เพียงไฟล์เดียว
-เปลี่ยนเป็นระบบจริงได้โดย:
-
-1. สร้าง route handlers ใน `src/app/api/**/route.ts` (หรือชี้ไป backend เดิม)
-2. แทน `import { JOBS } from "@/data/mock"` ด้วย `fetch` / Server Component / React Query
-3. โครงสร้าง type ทั้งหมด (`Job`, `Product`, `Customer`, `Quotation`, `SaleOrder`, …) export อยู่แล้วใน `mock.ts` — ใช้เป็น API contract ได้ทันที
+- อ่าน: `GET /api/data/<resource>` (`jobs`, `customers`, `products`, `movements`, `quotations`, `sale_orders`, master ทุกตัว, `staff`, `roles`, `modules`, `dash_groups`, …) — ใส่ `?paged=1&page=&pageSize=&q=&sort=&dir=` สำหรับตารางใหญ่
+- เขียน: `/api/jobs`, `/api/jobs/:no/{repair,outsource,swap-refund,close,calls}`, `/api/jobs/assign`, `/api/customers`, `/api/products`, `/api/stock/{receive,issue,pick-lines}`, `/api/quotations`, `/api/sale-orders/:no/approve`, `/api/masters/:kind`, `/api/admin/{users,permissions,records}`, `/api/attachments`
+- ทุก route ตรวจ session (SSO cookie) และสิทธิ์ `app_config` ก่อนเขียน — ดู `src/server/auth.ts`
 
 ---
 

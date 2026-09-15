@@ -6,28 +6,61 @@ import { Plus, Download, Printer } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { WARRANTY_OPTIONS, type Quotation } from "@/data/mock";
-import { useQuotations, useManufacturers } from "@/data/db";
+import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from "@/data/mock";
+import { useQuotationsPage, useManufacturers } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { useAccess } from "@/lib/use-access";
 
+// quotation_status names (DB) → badge tone
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
   "รอเสนอราคา": "warning",
   "เสนอราคาแล้ว": "info",
-  "ลูกค้าอนุมัติ": "success",
-  "ลูกค้าไม่อนุมัติ": "danger",
-  "ยกเลิก": "neutral",
+  "ลูกค้าตกลงซ่อม": "success",
+  "ลูกค้าตกลงซ่อม รอชำระเงิน": "success",
+  "ลูกค้าตกลงซ่อม รออะไหล่": "success",
+  "ลูกค้าไม่ตกลงซ่อม": "danger",
+  "พ้นกำหนดเสนอราคา": "danger",
+  "ยกเลิกใบเสนอราคา": "neutral",
 };
+
+type Filters = { no: string; type: string; customer: string; customerCode: string; jobNo: string; imei: string; warranty: string; brand: string; from: string; to: string; status: string };
+const NO_FILTER: Filters = { no: "", type: "", customer: "", customerCode: "", jobNo: "", imei: "", warranty: "", brand: "", from: "", to: "", status: "" };
 
 export default function QuotationListPage() {
   const { push } = useToast();
-  const { data: QUOTATIONS, loading } = useQuotations();
+  const { add: canAdd, edit: canEdit } = useAccess().forPath("/quotation/list");
   const { data: MANUFACTURERS } = useManufacturers();
+  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
+  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
+  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: PAGE, total: totalRows, loading } = useQuotationsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    status: filters.status,
+    from: filters.from,
+    to: filters.to,
+  });
+  // filters the server does not index are applied on the loaded page
+  const QUOTATIONS = React.useMemo(
+    () =>
+      PAGE.filter(
+        (r) =>
+          (!filters.type || r.type === filters.type) &&
+          (!filters.warranty || r.warranty === filters.warranty) &&
+          (!filters.brand || r.brandModel.startsWith(filters.brand))
+      ),
+    [PAGE, filters]
+  );
 
   const columns: Column<Quotation>[] = [
     {
@@ -35,7 +68,7 @@ export default function QuotationListPage() {
       header: "หมายเลขใบเสนอราคา",
       width: "150px",
       cell: (r) => (
-        <Link href="/quotation/edit" className="num font-medium text-primary hover:underline">
+        <Link href={`/quotation/edit?no=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -99,8 +132,8 @@ export default function QuotationListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: r.customer })}
-          onEdit={() => push({ kind: "info", title: "แก้ไขใบเสนอราคา", desc: r.no })}
+          onView={() => push({ kind: "info", title: r.no, desc: `${r.customer} · ${r.status}` })}
+          onEdit={canEdit ? () => (window.location.href = `/quotation/edit?no=${encodeURIComponent(r.no)}`) : undefined}
         />
       ),
     },
@@ -123,65 +156,77 @@ export default function QuotationListPage() {
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Link href="/quotation/new">
-              <Button size="sm">
-                <Plus className="h-3.5 w-3.5" />
-                สร้างใบเสนอราคา
-              </Button>
-            </Link>
+            {canAdd && (
+              <Link href="/quotation/new">
+                <Button size="sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  สร้างใบเสนอราคา
+                </Button>
+              </Link>
+            )}
           </>
         }
       />
 
-      <FilterBar onSearch={() => push({ kind: "info", title: "กรองข้อมูลแล้ว" })} defaultOpen={false}>
+      <FilterBar
+        onSearch={() => {
+          setFilters(draft);
+          push({ kind: "info", title: "กรองข้อมูลแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilters(NO_FILTER);
+        }}
+        defaultOpen={false}
+      >
         <Field label="หมายเลขใบเสนอราคา">
-          <Input className="num" placeholder="QT2601200" />
+          <Input className="num" placeholder="Q2600462" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
         </Field>
         <Field label="ประเภท">
-          <Select>
-            <option>ALL</option>
+          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+            <option value="">ALL</option>
             <option>Type A (Normal)</option>
             <option>Type B (VIP)</option>
           </Select>
         </Field>
         <Field label="ชื่อ-สกุลลูกค้า">
-          <Input />
+          <Input value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
         </Field>
         <Field label="รหัสลูกค้า">
-          <Input className="num" />
+          <Input className="num" value={draft.customerCode} onChange={(e) => setD("customerCode", e.target.value)} />
         </Field>
         <Field label="หมายเลขงานซ่อม">
-          <Input className="num" />
+          <Input className="num" value={draft.jobNo} onChange={(e) => setD("jobNo", e.target.value)} />
         </Field>
         <Field label="IMEI No.">
-          <Input className="num" />
+          <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
         </Field>
         <Field label="Warranty">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.warranty} onChange={(e) => setD("warranty", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {WARRANTY_OPTIONS.map((w) => (
               <option key={w}>{w}</option>
             ))}
           </Select>
         </Field>
         <Field label="ยี่ห้อ">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.brand} onChange={(e) => setD("brand", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {MANUFACTURERS.map((m) => (
               <option key={m.id}>{m.name}</option>
             ))}
           </Select>
         </Field>
         <Field label="วันที่สร้าง (ตั้งแต่)">
-          <Input type="date" defaultValue="2026-08-05" />
+          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
         </Field>
         <Field label="วันที่สร้าง (ถึง)">
-          <Input type="date" defaultValue="2026-09-04" />
+          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
         </Field>
         <Field label="สถานะใบเสนอราคา">
-          <Select>
-            <option>- - Select ALL - -</option>
-            {Object.keys(TONE).map((s) => (
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+            <option value="">- - Select ALL - -</option>
+            {QUOTATION_STATUS_OPTIONS.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </Select>
@@ -195,8 +240,9 @@ export default function QuotationListPage() {
         rowKey={(r) => r.no}
         searchPlaceholder="ค้นหาเลขที่ใบเสนอราคา / ลูกค้า / งานซ่อม…"
         footerNote={
-          <span className="font-medium text-foreground">· มูลค่ารวม {baht(total)} ฿</span>
+          <span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>
         }
+        server={{ total: totalRows, onChange: setTable }}
       />
     </>
   );

@@ -1,65 +1,31 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { handle, requireAdmin, requireCan, readJson, HttpError } from "@/server/auth";
+import { setUserDeleted } from "@/server/services/users";
+import { setRecordDeleted, RECORD_MODULES, type RecordTable } from "@/server/services/records";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Allowed tables and their primary-key column. Only these can be soft-deleted.
-const PK: Record<string, string> = {
-  users: "id",
-  jobs: "no",
-  quotations: "no",
-  sale_orders: "no",
-  customers: "code",
-  products: "sysCode",
-  models: "code",
-  movements: "id",
-  categories: "id",
-  manufacturers: "id",
-  colors: "id",
-  job_types: "id",
-  product_types: "id",
-  symptoms: "id",
-  permissions: "id",
-};
-
 /**
- * Soft-delete or restore a record: sets the `deleted` flag instead of removing
- * the row, so it can be recovered from each list's "รายการที่ลบ" view.
+ * Soft-delete or restore a record. The legacy DB has no `deleted` flag; each
+ * table has its own convention (is_active=false, job status 0 …) implemented in
+ * services/records.ts. Permission: `del` on the table's module (users: admin).
  */
-export async function POST(req: NextRequest) {
-  const me = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
-  if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  let body: { table?: string; id?: string | number; deleted?: boolean };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
-  }
-
-  const table = String(body.table ?? "");
-  const pk = PK[table];
+export const POST = handle(async (req: NextRequest) => {
+  const body = await readJson<{ table?: string; id?: string | number; deleted?: boolean }>(req);
+  const table = String(body.table ?? "") as RecordTable;
   const id = body.id;
-  if (!pk) return NextResponse.json({ error: `table not allowed: ${table}` }, { status: 400 });
-  if (id === undefined || id === null || id === "")
-    return NextResponse.json({ error: "id required" }, { status: 400 });
+  if (id === undefined || id === null || id === "") throw new HttpError(400, "id required");
+  const deleted = body.deleted === true;
 
-  let db;
-  try {
-    db = supabaseAdmin();
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "server database is not configured" },
-      { status: 503 }
-    );
+  if (table === "users") {
+    await requireAdmin(req);
+    await setUserDeleted(Number(id), deleted);
+    return NextResponse.json({ ok: true });
   }
-
-  const { error } = await db
-    .from(table)
-    .update({ deleted: body.deleted === true })
-    .eq(pk, id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const module = RECORD_MODULES[table];
+  if (module === undefined) throw new HttpError(400, `table not allowed: ${table}`);
+  const user = module === null ? await requireAdmin(req) : await requireCan(req, module, "del");
+  await setRecordDeleted(table, id, deleted, user.userId);
   return NextResponse.json({ ok: true });
-}
+});

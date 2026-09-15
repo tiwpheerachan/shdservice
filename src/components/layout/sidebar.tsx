@@ -4,9 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
-import { NAV, type NavGroup } from "@/lib/nav";
+import { NAV as ALL_NAV, type NavGroup } from "@/lib/nav";
 import { Logo } from "@/components/shared/logo";
 import { cn } from "@/lib/utils";
+import { useAccess } from "@/lib/use-access";
 
 type Flyout = { id: string; top: number; left: number };
 
@@ -22,6 +23,15 @@ export function Sidebar({
   onToggleCollapse: () => void;
 }) {
   const pathname = usePathname();
+  // hide menus the user has no `view` grant for (app_config); admin sees all
+  const { canPath } = useAccess();
+  const NAV = React.useMemo(
+    () =>
+      ALL_NAV.map((g) => ({ ...g, items: g.items.filter((i) => canPath(i.href)) }))
+        .filter((g) => g.items.length > 0)
+        .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : g.items[0].href })),
+    [canPath]
+  );
   const activeGroup = NAV.find((g) =>
     g.items.some((i) => i.href === pathname)
   )?.id;

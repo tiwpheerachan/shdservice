@@ -11,26 +11,21 @@ import { useToast } from "@/components/ui/toast";
 import { type Job } from "@/data/mock";
 import { useJobs } from "@/data/db";
 import { cn } from "@/lib/utils";
-
-const CURRENT_TECH = "May - Pradit";
+import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 export default function AssignPage() {
   const { push } = useToast();
-  const { data: JOBS, loading } = useJobs();
+  // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
+  const { name: CURRENT_TECH, userId } = useAccess();
+  const { data: JOBS, loading, refetch } = useJobs({ unassigned: 1, limit: 1000 });
+  const [saving, setSaving] = React.useState(false);
 
   const [q, setQ] = React.useState("");
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [removed, setRemoved] = React.useState<Set<string>>(new Set());
 
-  const pool = React.useMemo(
-    () =>
-      JOBS.filter(
-        (j) =>
-          (j.owner === "- ยังไม่ระบุ -" || j.status === "งานใหม่") &&
-          !removed.has(j.no)
-      ),
-    [JOBS, removed]
-  );
+  const pool = React.useMemo(() => JOBS.filter((j) => !removed.has(j.no)), [JOBS, removed]);
 
   const allSelected = pool.length > 0 && pool.every((j) => picked.has(j.no));
 
@@ -58,15 +53,26 @@ export default function AssignPage() {
     setQ("");
   };
 
-  const confirm = () => {
+  // POST /api/jobs/assign → engineer_id + status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  const confirm = async () => {
     const list = [...picked];
-    setRemoved((r) => new Set([...r, ...list]));
-    setPicked(new Set());
-    push({
-      kind: "success",
-      title: `ยืนยันรับงานแล้ว ${list.length} รายการ`,
-      desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ' (ระบบสาธิต)",
-    });
+    if (!list.length) return;
+    setSaving(true);
+    try {
+      const d = await postJson<{ assigned: number }>("/api/jobs/assign", { jobNos: list, engineerId: userId });
+      setRemoved((r) => new Set([...r, ...list]));
+      setPicked(new Set());
+      push({
+        kind: "success",
+        title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
+        desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ'",
+      });
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "รับงานไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns: Column<Job>[] = [
@@ -110,7 +116,7 @@ export default function AssignPage() {
       width: "130px",
       hideBelow: "lg",
       sortable: false,
-      cell: (r) => <span className="num text-xs">{r.openDate.slice(0, 10)}</span>,
+      cell: (r) => <span className="num text-xs">{r.receptionDate || r.openDate.slice(0, 10)}</span>,
     },
     {
       key: "customer",
@@ -198,7 +204,7 @@ export default function AssignPage() {
           >
             ล้างการเลือก
           </Button>
-          <Button size="sm" disabled={picked.size === 0} onClick={confirm}>
+          <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
             <UserCheck className="h-3.5 w-3.5" />
             ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
           </Button>

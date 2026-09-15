@@ -24,6 +24,11 @@ import { useToast } from "@/components/ui/toast";
 import { type Product } from "@/data/mock";
 import { useProducts, useManufacturers, useCategories } from "@/data/db";
 import { baht, int, cn } from "@/lib/utils";
+import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
+
+type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; category: string; creator: string; date: string };
+const NO_FILTER: Filters = { sysCode: "", mfgCode: "", name: "", status: "", brand: "", category: "", creator: "", date: "" };
 
 function Kpi({
   icon: Icon,
@@ -57,19 +62,58 @@ function Kpi({
 
 export default function ProductsPage() {
   const { push } = useToast();
-  const { data: PRODUCTS, loading } = useProducts();
+  const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath("/stock/products");
+  // inactive parts are included so the "สถานะ" filter can show them
+  const { data: ALL, loading, refetch } = useProducts({ deleted: "all" });
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: CATEGORIES } = useCategories();
 
   const [detail, setDetail] = React.useState<{
-    product: Product;
+    product: Product | null;
     mode: ProductMode;
   } | null>(null);
 
+  // FilterBar (applied on "ค้นหา")
+  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
+  const [filters, setFilters] = React.useState<Filters>({ ...NO_FILTER, status: "Active" });
+  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+
+  const PRODUCTS = React.useMemo(
+    () =>
+      ALL.filter(
+        (p) =>
+          (!filters.status || p.status === filters.status) &&
+          (!filters.sysCode || p.sysCode.toLowerCase().includes(filters.sysCode.toLowerCase())) &&
+          (!filters.mfgCode || p.mfgCode.toLowerCase().includes(filters.mfgCode.toLowerCase())) &&
+          (!filters.name || p.name.toLowerCase().includes(filters.name.toLowerCase())) &&
+          (!filters.brand || p.brand === filters.brand) &&
+          (!filters.category || p.category === filters.category) &&
+          (!filters.creator || (p.createdBy ?? "").toLowerCase().includes(filters.creator.toLowerCase())) &&
+          (!filters.date || (p.createdDate ?? "").startsWith(filters.date))
+      ),
+    [ALL, filters]
+  );
+
   const total = PRODUCTS.length;
-  const outOfStock = PRODUCTS.filter((p) => p.onhand === 0).length;
+  const outOfStock = PRODUCTS.filter((p) => p.onhand <= 0).length;
   const low = PRODUCTS.filter((p) => p.onhand > 0 && p.onhand <= 3).length;
-  const qty = PRODUCTS.reduce((s, p) => s + p.onhand, 0);
+  const qty = PRODUCTS.reduce((s, p) => s + Math.max(0, p.onhand), 0);
+
+  // ยกเลิก = product.is_active = false (+ cancel_date / cancel_by)
+  const cancelProduct = async (r: Product) => {
+    if (!canDel) {
+      push({ kind: "warning", title: "ยกเลิกรายการอะไหล่", desc: `${r.sysCode} — ต้องมีสิทธิ์ยกเลิก` });
+      return;
+    }
+    if (!window.confirm(`ยกเลิกรายการอะไหล่ ${r.sysCode} — ${r.name}?`)) return;
+    try {
+      await postJson("/api/admin/records", { table: "products", id: r.sysCode, deleted: true });
+      push({ kind: "success", title: "ยกเลิกรายการอะไหล่แล้ว", desc: r.sysCode });
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "ยกเลิกไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
 
   const columns: Column<Product>[] = [
     {
@@ -161,29 +205,27 @@ export default function ProductsPage() {
             <Eye className="h-3.5 w-3.5" />
             View
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDetail({ product: r, mode: "edit" })}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            แก้ไข
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-danger hover:bg-danger-soft"
-            onClick={() =>
-              push({
-                kind: "warning",
-                title: "ยกเลิกรายการอะไหล่",
-                desc: `${r.sysCode} — ต้องมีสิทธิ์ยกเลิก (ระบบสาธิต)`,
-              })
-            }
-          >
-            <Ban className="h-3.5 w-3.5" />
-            ยกเลิก
-          </Button>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDetail({ product: r, mode: "edit" })}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              แก้ไข
+            </Button>
+          )}
+          {canDel && r.status === "Active" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-danger hover:bg-danger-soft"
+              onClick={() => cancelProduct(r)}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              ยกเลิก
+            </Button>
+          )}
         </div>
       ),
     },
@@ -200,10 +242,12 @@ export default function ProductsPage() {
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Button size="sm">
-              <Plus className="h-3.5 w-3.5" />
-              เพิ่มอะไหล่
-            </Button>
+            {canAdd && (
+              <Button size="sm" onClick={() => setDetail({ product: null, mode: "add" })}>
+                <Plus className="h-3.5 w-3.5" />
+                เพิ่มอะไหล่
+              </Button>
+            )}
           </>
         }
       />
@@ -216,46 +260,53 @@ export default function ProductsPage() {
       </div>
 
       <FilterBar
-        onSearch={() => push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" })}
+        onSearch={() => {
+          setFilters(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilters({ ...NO_FILTER, status: "Active" });
+        }}
         defaultOpen={false}
       >
         <Field label="รหัสอะไหล่ (ระบบ)">
-          <Input placeholder="P02534" className="num" />
+          <Input placeholder="P02534" className="num" value={draft.sysCode} onChange={(e) => setD("sysCode", e.target.value)} />
         </Field>
         <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-          <Input className="num" />
+          <Input className="num" value={draft.mfgCode} onChange={(e) => setD("mfgCode", e.target.value)} />
         </Field>
         <Field label="ชื่ออะไหล่">
-          <Input placeholder="ชื่ออะไหล่…" />
+          <Input placeholder="ชื่ออะไหล่…" value={draft.name} onChange={(e) => setD("name", e.target.value)} />
         </Field>
         <Field label="สถานะอะไหล่">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+            <option value="">- - Select All - -</option>
             <option>Active</option>
             <option>Inactive</option>
           </Select>
         </Field>
         <Field label="ยี่ห้อ (ผู้ผลิต)">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.brand} onChange={(e) => setD("brand", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {MANUFACTURERS.map((m) => (
               <option key={m.id}>{m.name}</option>
             ))}
           </Select>
         </Field>
         <Field label="หมวดหมู่">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.category} onChange={(e) => setD("category", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {CATEGORIES.map((c) => (
               <option key={c.id}>{c.name}</option>
             ))}
           </Select>
         </Field>
         <Field label="ผู้สร้างรหัส">
-          <Input placeholder="ชื่อผู้สร้าง" />
+          <Input placeholder="ชื่อผู้สร้าง" value={draft.creator} onChange={(e) => setD("creator", e.target.value)} />
         </Field>
         <Field label="วันที่สร้างรหัสอะไหล่">
-          <Input type="date" />
+          <Input type="date" value={draft.date} onChange={(e) => setD("date", e.target.value)} />
         </Field>
       </FilterBar>
 
@@ -272,6 +323,7 @@ export default function ProductsPage() {
         onClose={() => setDetail(null)}
         product={detail?.product ?? null}
         mode={detail?.mode ?? "view"}
+        onSave={() => refetch()}
       />
     </>
   );

@@ -15,18 +15,21 @@ import {
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { CustomerCallModal } from "@/components/shared/customer-call-modal";
-import { JOB_STATUS_OPTIONS, TECHNICIANS, type Job, type Customer } from "@/data/mock";
-import { useJobs, useJobTypes, useCustomers } from "@/data/db";
+import { JOB_STATUS_OPTIONS, type Job, type Customer } from "@/data/mock";
+import { useJobsPage, useJobTypes, useStaff, useJobStats } from "@/data/db";
 import { baht, cn } from "@/lib/utils";
+import { api, qs } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
-const DONE = new Set(["ปิดงาน", "ซ่อมเสร็จ"]);
+type Filters = { no: string; customer: string; from: string; to: string; type: string; status: string; engineer: string; imei: string };
+const NO_FILTER: Filters = { no: "", customer: "", from: "", to: "", type: "", status: "", engineer: "", imei: "" };
 
 function StatChip({
   icon: Icon,
@@ -64,27 +67,49 @@ function StatChip({
 
 export default function JobListPage() {
   const { push } = useToast();
-  const { data: JOBS, loading } = useJobs();
+  const { add: canAdd, edit: canEdit } = useAccess().forPath("/jobs/list");
   const { data: JOB_TYPES } = useJobTypes();
-  const { data: CUSTOMERS } = useCustomers();
+  const { data: STAFF } = useStaff();
+  const { data: statRows, loading: statsLoading } = useJobStats();
+
+  // FilterBar (applied on ค้นหา) + table state → one server query per change
+  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
+  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
+  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: JOBS, total, loading } = useJobsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    // table search box wins; otherwise the first filled text filter (all search the same columns)
+    q: table.q || filters.no || filters.customer || filters.imei,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    from: filters.from,
+    to: filters.to,
+    type: filters.type,
+    status: filters.status,
+    engineer: filters.engineer,
+  });
 
   const [callFor, setCallFor] = React.useState<{
     customer: Customer | null;
     jobNo: string;
   } | null>(null);
 
-  const openCall = (job: Job) =>
-    setCallFor({
-      customer: CUSTOMERS.find((c) => c.name === job.customer) ?? null,
-      jobNo: job.no,
-    });
+  // customer_detail = "C12150 ชื่อ เบอร์" → look the customer up by code
+  const openCall = async (job: Job) => {
+    const code = job.customer.split(/\s+/)[0] ?? "";
+    let customer: Customer | null = null;
+    try {
+      const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
+      customer = d.rows[0] ?? null;
+    } catch {
+      customer = null;
+    }
+    setCallFor({ customer, jobNo: job.no });
+  };
 
-  const stats = React.useMemo(() => {
-    const total = JOBS.length;
-    const fresh = JOBS.filter((j) => j.status === "งานใหม่").length;
-    const done = JOBS.filter((j) => DONE.has(j.status)).length;
-    return { total, fresh, done, progress: total - fresh - done };
-  }, [JOBS]);
+  const stats = statRows[0] ?? { total: 0, fresh: 0, done: 0, progress: 0 };
 
   const columns: Column<Job>[] = [
     {
@@ -92,7 +117,7 @@ export default function JobListPage() {
       header: "เลขที่งาน",
       width: "130px",
       cell: (r) => (
-        <Link href="/jobs/repair" className="num font-medium text-primary hover:underline">
+        <Link href={`/jobs/repair?job=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -159,8 +184,8 @@ export default function JobListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: r.brandModel })}
-          onEdit={() => push({ kind: "info", title: "แก้ไขงาน", desc: r.no })}
+          onView={() => (window.location.href = `/jobs/repair?job=${encodeURIComponent(r.no)}`)}
+          onEdit={canEdit ? () => (window.location.href = `/jobs/edit?job=${encodeURIComponent(r.no)}`) : undefined}
         />
       ),
     },
@@ -170,7 +195,7 @@ export default function JobListPage() {
     <>
       <PageHeader
         title="รายการงานทั้งหมด"
-        description={`ทะเบียนงานบริการทั้งหมด ${JOBS.length} รายการในระบบ`}
+        description={`ทะเบียนงานบริการทั้งหมด ${stats.total.toLocaleString("en-US")} รายการในระบบ`}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
@@ -181,65 +206,76 @@ export default function JobListPage() {
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Link href="/jobs/new">
-              <Button size="sm">
-                <Plus className="h-3.5 w-3.5" />
-                เปิดงานใหม่
-              </Button>
-            </Link>
+            {canAdd && (
+              <Link href="/jobs/new">
+                <Button size="sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  เปิดงานใหม่
+                </Button>
+              </Link>
+            )}
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatChip icon={Layers} label="งานทั้งหมด" value={stats.total} tone="primary" loading={loading} />
-        <StatChip icon={Sparkles} label="งานใหม่" value={stats.fresh} tone="info" loading={loading} />
-        <StatChip icon={Loader2} label="กำลังดำเนินการ" value={stats.progress} tone="warning" loading={loading} />
-        <StatChip icon={CheckCircle2} label="ซ่อมเสร็จ / ปิดงาน" value={stats.done} tone="success" loading={loading} />
+        <StatChip icon={Layers} label="งานทั้งหมด" value={stats.total} tone="primary" loading={statsLoading} />
+        <StatChip icon={Sparkles} label="งานใหม่" value={stats.fresh} tone="info" loading={statsLoading} />
+        <StatChip icon={Loader2} label="กำลังดำเนินการ" value={stats.progress} tone="warning" loading={statsLoading} />
+        <StatChip icon={CheckCircle2} label="ซ่อมเสร็จ / ปิดงาน" value={stats.done} tone="success" loading={statsLoading} />
       </div>
 
       <FilterBar
-        onSearch={() => push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" })}
+        onSearch={() => {
+          setFilters(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilters(NO_FILTER);
+        }}
         defaultOpen={false}
       >
         <Field label="เลขที่งาน">
-          <Input placeholder="JOB2604460" className="num" />
+          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
         </Field>
         <Field label="ชื่อ / รหัสลูกค้า">
-          <Input placeholder="ชื่อลูกค้า หรือ C00xxxxx" />
+          <Input placeholder="ชื่อลูกค้า หรือ C00xxxxx" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
         </Field>
         <Field label="วันที่เปิดงาน (ตั้งแต่)">
-          <Input type="date" defaultValue="2026-08-05" />
+          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
         </Field>
         <Field label="วันที่เปิดงาน (ถึง)">
-          <Input type="date" defaultValue="2026-09-04" />
+          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
         </Field>
         <Field label="ประเภทงาน">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {JOB_TYPES.map((j) => (
               <option key={j.id}>{j.name}</option>
             ))}
           </Select>
         </Field>
         <Field label="สถานะงาน">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {JOB_STATUS_OPTIONS.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </Select>
         </Field>
         <Field label="ผู้รับผิดชอบ">
-          <Select>
-            <option>- - Select All - -</option>
-            {TECHNICIANS.slice(1).map((t) => (
-              <option key={t}>{t}</option>
+          <Select value={draft.engineer} onChange={(e) => setD("engineer", e.target.value)}>
+            <option value="">- - Select All - -</option>
+            {STAFF.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="IMEI / Serial No.">
-          <Input className="num" />
+          <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
         </Field>
       </FilterBar>
 
@@ -249,6 +285,7 @@ export default function JobListPage() {
         loading={loading}
         rowKey={(r) => r.no}
         searchPlaceholder="ค้นหาเลขที่งาน / ลูกค้า / รุ่น…"
+        server={{ total, onChange: setTable }}
       />
 
       <CustomerCallModal

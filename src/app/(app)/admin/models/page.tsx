@@ -14,14 +14,58 @@ import { useToast } from "@/components/ui/toast";
 import { type Model } from "@/data/mock";
 import { useModels, useManufacturers, useProductTypes } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { postJson, errMsg } from "@/lib/api";
+
+type ModelForm = { code: string; name: string; brand: string; productType: string; price: string; status: string };
 
 export default function ModelsPage() {
   const { push } = useToast();
-  const { data: MODELS, loading } = useModels();
+  const { data: MODELS, loading, refetch } = useModels();
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Model | null>(null);
+  const [form, setForm] = React.useState<ModelForm>({ code: "", name: "", brand: "", productType: "", price: "", status: "Active" });
+  const [saving, setSaving] = React.useState(false);
+  const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const openForm = (m: Model | null) => {
+    setEditing(m);
+    setForm({
+      code: m?.code ?? "",
+      name: m?.name ?? "",
+      brand: m?.brand ?? MANUFACTURERS[0]?.name ?? "",
+      productType: PRODUCT_TYPES[0]?.name ?? "",
+      price: m?.price ? String(m.price) : "",
+      status: m?.status ?? "Active",
+    });
+    setOpen(true);
+  };
+
+  // model_code มาจาก running_no "Model" (MD00001) — สร้างอัตโนมัติตอนเพิ่ม
+  const save = async () => {
+    if (!form.name.trim() || !form.brand) {
+      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุ Model Name และยี่ห้อ" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await postJson<{ row: Model }>("/api/masters/models", {
+        code: editing?.code || undefined,
+        name: form.name.trim(),
+        brand: form.brand,
+        price: form.price,
+        status: form.status,
+      });
+      setOpen(false);
+      push({ kind: "success", title: "บันทึกรุ่นสินค้าแล้ว", desc: `${d.row.code} · ${d.row.name}` });
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const columns: Column<Model>[] = [
     {
@@ -68,10 +112,7 @@ export default function ModelsPage() {
       cell: (r) => (
         <RowActions
           onView={() => push({ kind: "info", title: r.code, desc: r.name })}
-          onEdit={() => {
-            setEditing(r);
-            setOpen(true);
-          }}
+          onEdit={() => openForm(r)}
         />
       ),
     },
@@ -88,13 +129,7 @@ export default function ModelsPage() {
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditing(null);
-                setOpen(true);
-              }}
-            >
+            <Button size="sm" onClick={() => openForm(null)}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มรุ่นสินค้า
             </Button>
@@ -120,13 +155,7 @@ export default function ModelsPage() {
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
               ยกเลิก
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setOpen(false);
-                push({ kind: "success", title: "บันทึกรุ่นสินค้าแล้ว" });
-              }}
-            >
+            <Button size="sm" onClick={save} disabled={saving}>
               บันทึกข้อมูล
             </Button>
           </>
@@ -134,20 +163,20 @@ export default function ModelsPage() {
       >
         <FieldGrid cols={2}>
           <Field label="Model Code" required>
-            <Input defaultValue={editing?.code ?? ""} />
+            <Input value={form.code || "Generate Auto"} readOnly />
           </Field>
           <Field label="Model Name" required>
-            <Input defaultValue={editing?.name ?? ""} />
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
           <Field label="ยี่ห้อ" required>
-            <Select defaultValue={editing?.brand ?? ""}>
+            <Select value={form.brand} onChange={(e) => set("brand", e.target.value)}>
               {MANUFACTURERS.map((m) => (
                 <option key={m.id}>{m.name}</option>
               ))}
             </Select>
           </Field>
           <Field label="ประเภทเครื่อง">
-            <Select>
+            <Select value={form.productType} onChange={(e) => set("productType", e.target.value)}>
               {PRODUCT_TYPES.map((p) => (
                 <option key={p.id}>{p.name}</option>
               ))}
@@ -160,13 +189,14 @@ export default function ModelsPage() {
               min={0}
               inputMode="decimal"
               placeholder="0.00"
-              defaultValue={editing?.price ? editing.price : undefined}
+              value={form.price}
+              onChange={(e) => set("price", e.target.value)}
               onFocus={(e) => e.currentTarget.select()}
               className="text-right num"
             />
           </Field>
           <Field label="สถานะ">
-            <Select defaultValue={editing?.status ?? "Active"}>
+            <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
               <option>Active</option>
               <option>Inactive</option>
             </Select>

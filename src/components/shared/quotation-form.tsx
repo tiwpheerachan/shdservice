@@ -7,40 +7,149 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
 import { useProducts } from "@/data/db";
-import { QUOTATION_STATUS_OPTIONS } from "@/data/mock";
+import { QUOTATION_STATUS_OPTIONS, type Customer } from "@/data/mock";
 import { baht } from "@/lib/utils";
+import { api, errMsg, qs } from "@/lib/api";
+import type { JobDetail } from "@/lib/use-job";
 
-type Line = { id: number; code: string; name: string; qty: number; price: number };
+type Line = { id: number; code: string; name: string; qty: number; price: number; itemType: "SparePart" | "Service" | "Delivery" };
 
-export function QuotationForm({
-  mode,
-  quotationNo,
-}: {
-  mode: "new" | "edit";
-  quotationNo?: string;
-}) {
+/** Shape returned by GET /api/quotations/:no (subset the form uses). */
+export type QuotationLoaded = {
+  no: string;
+  date: string;
+  type: string;
+  status: string;
+  customerCode?: string;
+  contactName: string;
+  jobRef: string;
+  remark: string;
+  serviceAmount?: number;
+  discountType: string;
+  discountFormula: string;
+  vatRate: number;
+  lines: { id?: number; itemType: string; code: string; detail: string; qty: number; unitPrice: number }[];
+  customerDetail: Customer | null;
+  job: JobDetail | null;
+};
+
+/** What the page posts to /api/quotations. */
+export type QuotationPayload = {
+  no?: string;
+  type: string;
+  customerCode: string;
+  contactName: string;
+  jobNo: string;
+  lines: { code: string; detail: string; qty: number; unitPrice: number; itemType: string; unit: string; discount: number; discountPercent: number }[];
+  serviceAmount: number;
+  discountType: string;
+  discountValue: number;
+  discountUnit: "บาท" | "%";
+  vatRate: number;
+  remark: string;
+  status: string;
+};
+
+export type QuotationFormHandle = { payload: () => QuotationPayload; customer: () => Customer | null };
+
+export const QuotationForm = React.forwardRef<
+  QuotationFormHandle,
+  {
+    mode: "new" | "edit";
+    quotationNo?: string;
+    initial?: QuotationLoaded | null;
+    /** job to prefill from (?job= on the new page) */
+    jobNo?: string;
+  }
+>(function QuotationForm({ mode, quotationNo, initial, jobNo }, ref) {
+  const { push } = useToast();
   const { data: PRODUCTS } = useProducts();
   const [type, setType] = React.useState<"A" | "B">("A");
-  const [lines, setLines] = React.useState<Line[]>([
-    {
-      id: 1,
-      code: "P02535",
-      name: "อะไหล่-Levoit Core300S Main Board (แผงวงจรหลัก)",
-      qty: 1,
-      price: 890,
-    },
-  ]);
-  const [service, setService] = React.useState(500);
+  const [lines, setLines] = React.useState<Line[]>([]);
+  const [service, setService] = React.useState(0);
   const [discount, setDiscount] = React.useState(0);
-  const [vatRate, setVatRate] = React.useState(7);
+  const [vatRate, setVatRate] = React.useState(0);
+  const [remark, setRemark] = React.useState("");
+  const [status, setStatus] = React.useState(QUOTATION_STATUS_OPTIONS[0]);
+  const [customer, setCustomer] = React.useState<Customer | null>(null);
+  const [contact, setContact] = React.useState("");
+  const [fax, setFax] = React.useState("");
+  const [jobRef, setJobRef] = React.useState("");
+  const [job, setJob] = React.useState<JobDetail | null>(null);
+  const [date, setDate] = React.useState("");
   const idRef = React.useRef(1);
+  const [pickQ, setPickQ] = React.useState("");
+
+  React.useEffect(() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    setDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`);
+  }, []);
+
+  // load a job → customer + device info (+ parts flagged "เสนอ" in the repair screen become lines)
+  const loadJob = React.useCallback(
+    async (no: string, withParts: boolean) => {
+      const v = no.trim().toUpperCase();
+      if (!v) return;
+      try {
+        const d = await api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(v)}`);
+        setJob(d.job);
+        setJobRef(d.job.no);
+        if (d.job.customer) {
+          const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: d.job.customer.code })}`);
+          setCustomer(c.rows[0] ?? null);
+        }
+        if (withParts) {
+          const quoted = d.job.parts.filter((p) => p.isQuotation && p.requested > 0);
+          if (quoted.length) {
+            setLines(
+              quoted.map((p) => ({ id: ++idRef.current, code: p.code, name: p.name, qty: p.requested, price: p.unitPrice, itemType: "SparePart" as const }))
+            );
+          }
+          if (d.job.serviceCost) setService(d.job.serviceCost);
+        }
+      } catch (e) {
+        push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: errMsg(e) });
+      }
+    },
+    [push]
+  );
+
+  // prefill from an existing quotation
+  React.useEffect(() => {
+    if (!initial) return;
+    setType(initial.type.startsWith("Type B") || initial.type === "VIP" ? "B" : "A");
+    setLines(
+      initial.lines.map((l) => ({
+        id: ++idRef.current,
+        code: l.code,
+        name: l.detail,
+        qty: l.qty,
+        price: l.unitPrice,
+        itemType: (l.itemType as Line["itemType"]) || "SparePart",
+      }))
+    );
+    setService(initial.serviceAmount ?? 0);
+    const pct = initial.discountFormula.match(/^([\d.]+)%$/);
+    setDiscount(pct ? Number(pct[1]) : 0);
+    setVatRate(initial.vatRate ?? 0);
+    setRemark(initial.remark);
+    setStatus(initial.status || QUOTATION_STATUS_OPTIONS[0]);
+    setCustomer(initial.customerDetail);
+    setContact(initial.contactName);
+    setJobRef(initial.jobRef);
+    setJob(initial.job);
+    setDate(initial.date);
+  }, [initial]);
+
+  React.useEffect(() => {
+    if (jobNo && !initial) void loadJob(jobNo, true);
+  }, [jobNo, initial, loadJob]);
 
   const add = () =>
-    setLines((s) => [
-      ...s,
-      { id: ++idRef.current + 100, code: "", name: "", qty: 1, price: 0 },
-    ]);
+    setLines((s) => [...s, { id: ++idRef.current + 100, code: "", name: "", qty: 1, price: 0, itemType: "SparePart" }]);
 
   const upd = (id: number, patch: Partial<Line>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -51,6 +160,43 @@ export function QuotationForm({
   const beforeVat = subtotal - discountAmt;
   const vat = (beforeVat * vatRate) / 100;
   const net = beforeVat + vat;
+
+  const findCustomer = async (q: string) => {
+    if (!q.trim()) return;
+    try {
+      const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q })}`);
+      if (d.rows[0]) setCustomer(d.rows[0]);
+      else push({ kind: "warning", title: "ไม่พบลูกค้า", desc: q });
+    } catch (e) {
+      push({ kind: "error", title: "ค้นหาลูกค้าไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
+
+  React.useImperativeHandle(ref, () => ({
+    customer: () => customer,
+    payload: () => ({
+      no: quotationNo || initial?.no || undefined,
+      type: type === "A" ? "Type A (Normal)" : "Type B (VIP)",
+      customerCode: customer?.code ?? "",
+      contactName: contact,
+      jobNo: jobRef,
+      lines: lines
+        .filter((l) => l.code || l.name)
+        .map((l) => ({ code: l.code, detail: l.name, qty: l.qty, unitPrice: l.price, itemType: l.itemType, unit: "หน่วย", discount: 0, discountPercent: 0 })),
+      serviceAmount: service,
+      discountType: discount > 0 ? "ส่วนลดรวม" : "ไม่มีส่วนลด",
+      discountValue: discount,
+      discountUnit: "%",
+      vatRate,
+      remark,
+      status,
+    }),
+  }));
+
+  const productOptions = React.useMemo(() => {
+    const t = pickQ.trim().toLowerCase();
+    return t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t)).slice(0, 300) : PRODUCTS;
+  }, [PRODUCTS, pickQ]);
 
   return (
     <>
@@ -87,25 +233,32 @@ export function QuotationForm({
       <Section title="ข้อมูลลูกค้า" icon={UserRound}>
         <FieldGrid>
           <Field label="รหัสลูกค้า" required>
-            <Input className="num" defaultValue="C0010234" />
+            <Input
+              className="num"
+              defaultValue={customer?.code ?? ""}
+              key={customer?.code ?? "new"}
+              placeholder="พิมพ์รหัสแล้วกด Enter"
+              onKeyDown={(e) => e.key === "Enter" && findCustomer((e.target as HTMLInputElement).value)}
+              onBlur={(e) => e.target.value && e.target.value !== customer?.code && findCustomer(e.target.value)}
+            />
           </Field>
           <Field label="เลขบัตรประชาชน / ผู้เสียภาษี">
-            <Input className="num" defaultValue="1100200334455" />
+            <Input className="num" value={customer?.taxId ?? ""} readOnly />
           </Field>
           <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-            <Input defaultValue="คุณ สมหญิง ใจดี" />
+            <Input value={customer?.name ?? ""} readOnly />
           </Field>
           <Field label="ที่อยู่ลูกค้า" wide>
-            <Textarea rows={2} defaultValue="88/12 ถ.รัชดาภิเษก แขวงดินแดง เขตดินแดง กรุงเทพฯ 10400" />
+            <Textarea rows={2} value={customer?.address ?? ""} readOnly />
           </Field>
           <Field label="เบอร์โทรศัพท์">
-            <Input className="num" defaultValue="081-555-0123" />
+            <Input className="num" value={customer?.phone ?? ""} readOnly />
           </Field>
           <Field label="แฟกซ์">
-            <Input className="num" />
+            <Input className="num" value={fax} onChange={(e) => setFax(e.target.value)} />
           </Field>
           <Field label="ชื่อผู้ติดต่อ" className="lg:col-span-2">
-            <Input />
+            <Input value={contact} onChange={(e) => setContact(e.target.value)} />
           </Field>
         </FieldGrid>
       </Section>
@@ -114,18 +267,25 @@ export function QuotationForm({
         <FieldGrid>
           <Field label="หมายเลขใบเสนอราคา">
             <ReadOnly>
-              <span className="num">{quotationNo ?? (mode === "new" ? "Generate Auto" : "—")}</span>
+              <span className="num">{quotationNo ?? initial?.no ?? (mode === "new" ? "Generate Auto" : "—")}</span>
             </ReadOnly>
           </Field>
           <Field label="วันที่">
-            <ReadOnly><span className="num">2026-09-04 12:20 น.</span></ReadOnly>
+            <ReadOnly><span className="num">{date} น.</span></ReadOnly>
           </Field>
           <Field label="อ้างถึง หมายเลขงานซ่อม" required>
-            <Input className="num" placeholder="JOB2604460" />
+            <Input
+              className="num"
+              placeholder="J2612164"
+              value={jobRef}
+              onChange={(e) => setJobRef(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && loadJob(jobRef, lines.length === 0)}
+              onBlur={() => jobRef && jobRef.toUpperCase() !== job?.no && loadJob(jobRef, lines.length === 0)}
+            />
           </Field>
           <Field label="สถานะงานซ่อม (ปัจจุบัน)">
             <ReadOnly>
-              <Badge tone="warning" dot>อยู่ระหว่างดำเนินการ</Badge>
+              <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
             </ReadOnly>
           </Field>
         </FieldGrid>
@@ -134,40 +294,40 @@ export function QuotationForm({
       <Section title="ข้อมูลเครื่องซ่อม" icon={Wrench}>
         <FieldGrid>
           <Field label="เลขคำสั่งซื้อ">
-            <Input className="num" defaultValue="SO2600727" />
+            <Input className="num" value={job?.so ?? ""} readOnly />
           </Field>
           <Field label="หมายเลขอ้างอิง (เลขพัสดุ)">
-            <Input className="num" />
+            <Input className="num" value={job?.receptionTrackingNo ?? ""} readOnly />
           </Field>
           <Field label="เปิดงานวันที่">
-            <Input type="date" defaultValue="2026-09-04" />
+            <Input value={job?.createDate ?? ""} readOnly className="num" />
           </Field>
           <Field label="IMEI No.">
-            <Input className="num" />
+            <Input className="num" value={job?.imei ?? ""} readOnly />
           </Field>
           <Field label="ประเภทเครื่องซ่อม">
-            <Input defaultValue="เครื่องฟอกอากาศ" />
+            <Input value={job?.productType ?? ""} readOnly />
           </Field>
           <Field label="ยี่ห้อ">
-            <Input defaultValue="Levoit." />
+            <Input value={job?.brand ?? ""} readOnly />
           </Field>
           <Field label="รุ่น">
-            <Input defaultValue="Core300S" />
+            <Input value={job ? [job.modelCode, job.modelName].filter(Boolean).join(" — ") : ""} readOnly />
           </Field>
           <Field label="Warranty">
-            <Input defaultValue="In Warranty" />
+            <Input value={job?.warranty === "IN" ? "In Warranty" : job?.warranty === "OUT" ? "Out Warranty" : job?.warranty ?? ""} readOnly />
           </Field>
           <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
-            <Textarea rows={2} defaultValue="เปิดเครื่องไม่ติด" />
+            <Textarea rows={2} value={job?.symptoms.join(", ") ?? ""} readOnly />
           </Field>
           <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-            <Textarea rows={2} />
+            <Textarea rows={2} value={job?.symptomOther ?? ""} readOnly />
           </Field>
           <Field label="จุดตำหนิ" className="lg:col-span-2">
-            <Textarea rows={2} />
+            <Textarea rows={2} value={job?.fault ?? ""} readOnly />
           </Field>
           <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
-            <Textarea rows={2} />
+            <Textarea rows={2} value={job?.equipment ?? ""} readOnly />
           </Field>
         </FieldGrid>
       </Section>
@@ -214,14 +374,17 @@ export function QuotationForm({
                           const p = PRODUCTS.find((x) => x.sysCode === e.target.value);
                           upd(l.id, {
                             code: e.target.value,
-                            name: p?.name ?? "",
-                            price: p?.price ?? 0,
+                            name: p?.name ?? l.name,
+                            price: p?.price ?? l.price,
+                            itemType: e.target.value === "SVD0001" ? "Delivery" : "SparePart",
                           });
                         }}
                         className="h-8 text-xs"
                       >
                         <option value="">- เลือก -</option>
-                        {PRODUCTS.map((p) => (
+                        {l.code && !productOptions.some((p) => p.sysCode === l.code) && <option value={l.code}>{l.code}</option>}
+                        <option value="SVD0001">SVD0001 — ค่าขนส่ง</option>
+                        {productOptions.map((p) => (
                           <option key={p.sysCode} value={p.sysCode}>
                             {p.sysCode}
                           </option>
@@ -271,17 +434,23 @@ export function QuotationForm({
             </tbody>
           </table>
         </div>
+        {lines.length > 0 && (
+          <div className="border-t border-border px-4 py-2">
+            <Input value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="กรองรายการอะไหล่ใน dropdown (รหัส / ชื่อ)…" className="h-8 text-xs sm:max-w-sm" />
+          </div>
+        )}
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
           <FieldGrid cols={2}>
             <Field label="หมายเหตุ" wide>
-              <Textarea rows={4} placeholder="เงื่อนไขการเสนอราคา ระยะเวลายืนราคา ฯลฯ" />
+              <Textarea rows={4} placeholder="เงื่อนไขการเสนอราคา ระยะเวลายืนราคา ฯลฯ" value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
             <Field label="สถานะใบเสนอราคา" wide>
-              <Select defaultValue="รอเสนอราคา">
+              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
                 {QUOTATION_STATUS_OPTIONS.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
+                {status && !QUOTATION_STATUS_OPTIONS.includes(status) && <option>{status}</option>}
               </Select>
             </Field>
           </FieldGrid>
@@ -332,7 +501,7 @@ export function QuotationForm({
       </Section>
     </>
   );
-}
+});
 
 function Row({ label, value }: { label: string; value: string }) {
   return (

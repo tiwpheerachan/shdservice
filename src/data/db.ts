@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { fetchTable, type Order, type DeletedMode } from "./queries";
+import { api, qs } from "@/lib/api";
+import type { Order, DeletedMode } from "./queries";
 import type {
   User,
   Permission,
@@ -20,8 +21,12 @@ import type {
   TopSymptom,
 } from "./mock";
 
+export type { Order, DeletedMode };
+
 /* ------------------------------------------------------------------ *
- * React hook wrapping the shared fetchTable() reader.
+ * React hooks over the app's read API (/api/data/<resource>). The hook names
+ * and return shapes are the ones the pages already use; data now comes from
+ * the legacy tables through drizzle on the server.
  * ------------------------------------------------------------------ */
 
 export type TableState<T> = {
@@ -31,10 +36,25 @@ export type TableState<T> = {
   refetch: () => void;
 };
 
+export type Params = Record<string, string | number | boolean | undefined | null>;
+
+function sortRows<T>(rows: T[], order?: Order): T[] {
+  if (!order?.column) return rows;
+  const col = order.column as keyof T;
+  const dir = order.ascending === false ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const x = a[col] as unknown;
+    const y = b[col] as unknown;
+    if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
+    return String(x ?? "").localeCompare(String(y ?? ""), "th") * dir;
+  });
+}
+
 export function useTable<T>(
   table: string,
   order?: Order,
-  deleted: DeletedMode = "exclude"
+  deleted: DeletedMode = "exclude",
+  params: Params = {}
 ): TableState<T> {
   const [data, setData] = React.useState<T[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -44,21 +64,23 @@ export function useTable<T>(
 
   const col = order?.column;
   const asc = order?.ascending;
+  const paramKey = JSON.stringify(params);
 
   React.useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchTable<T>(table, col ? { column: col, ascending: asc } : undefined, deleted)
+    const p = JSON.parse(paramKey) as Params;
+    api<T[]>(`/api/data/${table}${qs({ deleted, ...p })}`)
       .then((rows) => {
         if (!active) return;
-        setData(rows);
+        setData(sortRows(Array.isArray(rows) ? rows : [], col ? { column: col, ascending: asc } : undefined));
         setError(null);
       })
       .catch((e: unknown) => {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
         // eslint-disable-next-line no-console
-        console.error("Supabase fetch failed:", e);
+        console.error("fetch failed:", e);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -66,13 +88,65 @@ export function useTable<T>(
     return () => {
       active = false;
     };
-  }, [table, col, asc, nonce, deleted]);
+  }, [table, col, asc, nonce, deleted, paramKey]);
 
   return { data, loading, error, refetch };
 }
 
+/* ---- server-side paging (big tables) ---- */
+export type PageState<T> = {
+  rows: T[];
+  total: number;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+};
+
+export type PageParams = {
+  page: number;
+  pageSize: number;
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+} & Params;
+
+export function usePagedTable<T>(table: string, params: PageParams, deleted: DeletedMode = "exclude"): PageState<T> {
+  const [rows, setRows] = React.useState<T[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [nonce, setNonce] = React.useState(0);
+  const refetch = React.useCallback(() => setNonce((n) => n + 1), []);
+  const key = JSON.stringify(params);
+
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    const p = JSON.parse(key) as PageParams;
+    api<{ rows: T[]; total: number }>(`/api/data/${table}${qs({ paged: 1, deleted, ...p })}`)
+      .then((d) => {
+        if (!active) return;
+        setRows(d.rows ?? []);
+        setTotal(d.total ?? 0);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [table, key, nonce, deleted]);
+
+  return { rows, total, loading, error, refetch };
+}
+
 /* ------------------------------------------------------------------ *
- * Named hooks — one per table, with the display order used by the UI.
+ * Named hooks — one per resource, with the display order used by the UI.
  * ------------------------------------------------------------------ */
 
 export const useUsers = (deleted: DeletedMode = "exclude") =>
@@ -80,26 +154,46 @@ export const useUsers = (deleted: DeletedMode = "exclude") =>
 export const usePermissions = () => useTable<Permission>("permissions", { column: "id" });
 export const useCategories = () => useTable<MasterRow>("categories", { column: "id" });
 export const useManufacturers = () =>
-  useTable<MasterRow>("manufacturers", { column: "id" });
+  useTable<MasterRow>("manufacturers", { column: "name" });
 export const useColors = () => useTable<MasterRow>("colors", { column: "id" });
 export const useJobTypes = () => useTable<MasterRow>("job_types", { column: "id" });
 export const useProductTypes = () =>
   useTable<MasterRow>("product_types", { column: "id" });
 export const useSymptoms = () => useTable<Symptom>("symptoms", { column: "id" });
 export const useModels = () => useTable<Model>("models", { column: "code" });
-export const useProducts = () => useTable<Product>("products", { column: "sysCode" });
-export const useMovements = () =>
-  useTable<Movement>("movements", { column: "date", ascending: false });
-export const useCustomers = () => useTable<Customer>("customers", { column: "code" });
-export const useJobs = () => useTable<Job>("jobs", { column: "no", ascending: false });
-export const useQuotations = () =>
-  useTable<Quotation>("quotations", { column: "no" });
-export const useSaleOrders = () =>
-  useTable<SaleOrder>("sale_orders", { column: "no", ascending: false });
+export const useProducts = (params: Params = {}) => useTable<Product>("products", { column: "sysCode" }, "exclude", params);
+export const useMovements = (params: Params = {}) =>
+  useTable<Movement>("movements", undefined, "exclude", params);
+/** Recent customers (server caps the list); pass { q } to search the whole table. */
+export const useCustomers = (params: Params = {}) => useTable<Customer>("customers", undefined, "exclude", params);
+export const useCustomersPage = (params: PageParams, deleted: DeletedMode = "exclude") =>
+  usePagedTable<Customer>("customers", params, deleted);
+/** Server-filtered job list (reports, dropdowns). Use useJobsPage for the big list. */
+export const useJobs = (params: Params = {}) => useTable<Job>("jobs", undefined, "exclude", params);
+export const useJobsPage = (params: PageParams) => usePagedTable<Job>("jobs", params);
+export const useQuotations = (params: Params = {}) =>
+  useTable<Quotation>("quotations", undefined, "exclude", params);
+export const useQuotationsPage = (params: PageParams) => usePagedTable<Quotation>("quotations", params);
+export const useSaleOrders = (params: Params = {}) =>
+  useTable<SaleOrder>("sale_orders", undefined, "exclude", params);
+export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>("sale_orders", params);
 
-export const useDashGroups = () =>
-  useTable<DashGroup>("dash_groups", { column: "ord" });
-export const useTatRows = () => useTable<TatRow>("tat_rows", { column: "ord" });
-export const useMonthly = () => useTable<MonthlyRow>("monthly", { column: "ord" });
-export const useTopSymptoms = () =>
-  useTable<TopSymptom>("top_symptoms", { column: "ord" });
+export const useDashGroups = () => useTable<DashGroup>("dash_groups", { column: "ord" });
+export const useTatRows = () => useTable<TatRow>("tat_rows");
+export const useMonthly = () => useTable<MonthlyRow>("monthly");
+export const useTopSymptoms = () => useTable<TopSymptom>("top_symptoms");
+
+/* ---- lookups added for the real backend ---- */
+export type Staff = { id: number; name: string; userType: string };
+export const useStaff = () => useTable<Staff>("staff");
+export const useRoles = () => useTable<string>("roles");
+export const useModules = () => useTable<string>("modules");
+export const useProvinces = () => useTable<{ id: number; name: string }>("provinces");
+export const useJobStatuses = () =>
+  useTable<{ id: number; name: string; group: string; order: number; active: boolean }>("job_statuses");
+export const useVendors = () => useTable<string>("vendors");
+export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
+export const useIssuedLines = (params: Params = {}) => useTable<IssuedLine>("issued_lines", undefined, "exclude", params);
+export const useJobStats = () =>
+  useTable<{ total: number; fresh: number; done: number; progress: number }>("job_stats");
+export const useJobNos = (limit = 50) => useTable<string>("job_nos", undefined, "exclude", { limit });

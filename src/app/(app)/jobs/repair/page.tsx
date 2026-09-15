@@ -11,6 +11,9 @@ import {
   OtherInfoSection,
   AttachmentSection,
   FormActions,
+  JobFormProvider,
+  useJobForm,
+  fromJob,
 } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +24,12 @@ import { useToast } from "@/components/ui/toast";
 import { REPAIR_STATUS_OPTIONS } from "@/data/mock";
 import { useProducts, useSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { useJob, type JobDetail } from "@/lib/use-job";
+import { postJson, errMsg } from "@/lib/api";
 
 type Line = {
   id: number;
+  logId?: number; // existing job_order_spare_part_log row
   code: string;
   name: string;
   price: number;
@@ -34,20 +40,94 @@ type Line = {
   bQuote: boolean;
   bQty: number;
   status: string;
+  locked?: boolean; // already issued / returned — read-only
 };
 
-export default function RepairPage() {
+function RepairForm() {
   const { push } = useToast();
   const { data: PRODUCTS } = useProducts();
   const { data: SYMPTOMS } = useSymptoms();
+  const { jobNo, job, find, setJob } = useJob();
+  const { s: form, reset } = useJobForm();
   const [lines, setLines] = React.useState<Line[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [q, setQ] = React.useState("");
+  const [pickQ, setPickQ] = React.useState("");
+  const [q, setQ] = React.useState(jobNo);
+  const [detail, setDetail] = React.useState({ engineerSymptom: "", repairDetail: "", engineerRemark: "", newSerial: "", status: "" });
+  const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(0);
 
-  const go = () => {
-    const v = q.trim() || "JOB2604460";
-    push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: v });
+  React.useEffect(() => setQ(jobNo), [jobNo]);
+
+  // prefill form, repair details and spare-part requests from the loaded job
+  React.useEffect(() => {
+    if (!job) return;
+    reset(fromJob(job));
+    setDetail({
+      engineerSymptom: job.engineerSymptom,
+      repairDetail: job.repairDetail,
+      engineerRemark: job.engineerRemark,
+      newSerial: "",
+      status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : "",
+    });
+    setLines(
+      job.parts.map((p) => ({
+        id: ++idRef.current,
+        logId: p.logId,
+        code: p.code,
+        name: p.name,
+        price: p.unitPrice,
+        aPick: p.isSpecial,
+        aQuote: p.isQuotation,
+        aQty: p.requested,
+        bPick: p.isSpecialB,
+        bQuote: p.isQuotationB,
+        bQty: p.requestQtyB,
+        status: p.status,
+        locked: p.statusId !== 1 || p.granted > 0,
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job]);
+
+  const go = async () => {
+    const v = q.trim();
+    if (!v) return;
+    const j = await find(v);
+    if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
+    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+  };
+
+  // POST /api/jobs/:no/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
+  const save = async () => {
+    if (!job) {
+      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
+        ...detail,
+        status: detail.status || undefined,
+        serviceCost: form.serviceCost,
+        toolCost: form.toolCost,
+        deliveryCost: form.deliveryCost,
+        boxCost: form.boxCost,
+        parts: lines.map((l) => ({
+          logId: l.logId,
+          code: l.code,
+          unitPrice: l.price,
+          a: { pick: l.aPick, quote: l.aQuote, qty: l.aQty },
+          b: { pick: l.bPick, quote: l.bQuote, qty: l.bQty },
+        })),
+      });
+      setJob(d.job);
+      push({ kind: "success", title: "บันทึกงานซ่อมเรียบร้อย", desc: `${d.job.no} · ${d.job.status}` });
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addPart = (code: string) => {
@@ -71,6 +151,12 @@ export default function RepairPage() {
     ]);
     setPickerOpen(false);
   };
+
+  const pickerRows = React.useMemo(() => {
+    const t = pickQ.trim().toLowerCase();
+    const list = t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || p.mfgCode.toLowerCase().includes(t)) : PRODUCTS;
+    return list.slice(0, 200);
+  }, [PRODUCTS, pickQ]);
 
   const upd = (id: number, patch: Partial<Line>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -97,7 +183,7 @@ export default function RepairPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="JOB2604460"
+                placeholder="J2612164"
                 className="num h-9 w-44 pr-8"
               />
               <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -114,20 +200,20 @@ export default function RepairPage() {
       <Section title="ข้อมูลการเปิดงานซ่อม" icon={Wrench}>
         <FieldGrid>
           <Field label="หมายเลขงานซ่อม">
-            <ReadOnly><span className="num">JOB2604460</span></ReadOnly>
+            <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
           </Field>
           <Field label="วันที่เปิดงานซ่อม">
-            <ReadOnly><span className="num">2026-09-04 09:12 น.</span></ReadOnly>
+            <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
           </Field>
           <Field label="เปิดงานซ่อมโดย">
-            <ReadOnly>Kanokwan S.</ReadOnly>
+            <ReadOnly>{job?.createByName || "—"}</ReadOnly>
           </Field>
           <Field label="ประเภทงานซ่อม">
-            <ReadOnly>ซ่อมในประกัน (In-Warranty)</ReadOnly>
+            <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
           </Field>
           <Field label="สถานะงานซ่อม (ปัจจุบัน)" wide>
             <ReadOnly>
-              <Badge tone="warning" dot>อยู่ระหว่างดำเนินการ</Badge>
+              <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
             </ReadOnly>
           </Field>
         </FieldGrid>
@@ -193,16 +279,17 @@ export default function RepairPage() {
                     <td className="num px-2 py-2 text-right">{baht(l.price)}</td>
 
                     <td className="border-l border-border px-2 py-2 text-center">
-                      <Checkbox checked={l.aPick} onChange={() => upd(l.id, { aPick: !l.aPick })} />
+                      <Checkbox checked={l.aPick} disabled={l.locked} onChange={() => upd(l.id, { aPick: !l.aPick })} />
                     </td>
                     <td className="px-2 py-2 text-center">
-                      <Checkbox checked={l.aQuote} onChange={() => upd(l.id, { aQuote: !l.aQuote })} />
+                      <Checkbox checked={l.aQuote} disabled={l.locked} onChange={() => upd(l.id, { aQuote: !l.aQuote })} />
                     </td>
                     <td className="px-2 py-2">
                       <NumberInput
                         min={0}
                         placeholder="0"
                         value={l.aQty}
+                        disabled={l.locked}
                         onChange={(n) => upd(l.id, { aQty: n })}
                         className="h-7 w-14 px-1.5 text-xs"
                       />
@@ -212,16 +299,17 @@ export default function RepairPage() {
                     </td>
 
                     <td className="border-l border-border px-2 py-2 text-center">
-                      <Checkbox checked={l.bPick} onChange={() => upd(l.id, { bPick: !l.bPick })} />
+                      <Checkbox checked={l.bPick} disabled={l.locked} onChange={() => upd(l.id, { bPick: !l.bPick })} />
                     </td>
                     <td className="px-2 py-2 text-center">
-                      <Checkbox checked={l.bQuote} onChange={() => upd(l.id, { bQuote: !l.bQuote })} />
+                      <Checkbox checked={l.bQuote} disabled={l.locked} onChange={() => upd(l.id, { bQuote: !l.bQuote })} />
                     </td>
                     <td className="px-2 py-2">
                       <NumberInput
                         min={0}
                         placeholder="0"
                         value={l.bQty}
+                        disabled={l.locked}
                         onChange={(n) => upd(l.id, { bQty: n })}
                         className="h-7 w-14 px-1.5 text-xs"
                       />
@@ -231,18 +319,20 @@ export default function RepairPage() {
                     </td>
 
                     <td className="px-2 py-2">
-                      <Badge tone={l.status === "พร้อมเบิก" ? "success" : "danger"} dot>
+                      <Badge tone={/พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status) ? "success" : /รออะไหล่/.test(l.status) ? "danger" : "warning"} dot>
                         {l.status}
                       </Badge>
                     </td>
                     <td className="px-2 py-2 text-center">
-                      <button
-                        onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                        aria-label="ลบ"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {!l.locked && (
+                        <button
+                          onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                          aria-label="ลบ"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -270,27 +360,32 @@ export default function RepairPage() {
       <Section title="รายละเอียดการซ่อม" icon={Wrench}>
         <FieldGrid>
           <Field label="อาการเสียที่ตรวจพบ" wide>
-            <Select defaultValue="">
+            <Select value={detail.engineerSymptom} onChange={(e) => setDetail((d) => ({ ...d, engineerSymptom: e.target.value }))}>
               <option value="">- - เลือกอาการเสีย - -</option>
-              {SYMPTOMS.map((s) => (
-                <option key={s.id}>{s.name}</option>
+              {SYMPTOMS.map((sy) => (
+                <option key={sy.id}>{sy.name}</option>
               ))}
             </Select>
           </Field>
           <Field label="วิธีการซ่อม" className="lg:col-span-2">
-            <Textarea rows={3} placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ" />
+            <Textarea
+              rows={3}
+              placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ"
+              value={detail.repairDetail}
+              onChange={(e) => setDetail((d) => ({ ...d, repairDetail: e.target.value }))}
+            />
           </Field>
           <Field label="หมายเหตุ" className="lg:col-span-2">
-            <Textarea rows={3} />
+            <Textarea rows={3} value={detail.engineerRemark} onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))} />
           </Field>
           <Field label="New Serial No.">
-            <Input className="num" />
+            <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
           </Field>
           <Field label="สถานะงานซ่อม" required>
-            <Select defaultValue="">
+            <Select value={detail.status} onChange={(e) => setDetail((d) => ({ ...d, status: e.target.value }))}>
               <option value="">- - Please Select - -</option>
-              {REPAIR_STATUS_OPTIONS.map((s) => (
-                <option key={s}>{s}</option>
+              {REPAIR_STATUS_OPTIONS.map((st) => (
+                <option key={st}>{st}</option>
               ))}
             </Select>
           </Field>
@@ -299,12 +394,9 @@ export default function RepairPage() {
 
       <CostSummary partsTotal={totalA} />
       <OtherInfoSection />
-      <AttachmentSection />
+      <AttachmentSection jobNo={job?.no} />
 
-      <FormActions
-        saveLabel="บันทึกงานซ่อม"
-        onSave={() => push({ kind: "success", title: "บันทึกงานซ่อมเรียบร้อย" })}
-      />
+      <FormActions saveLabel="บันทึกงานซ่อม" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
 
       <Modal
         open={pickerOpen}
@@ -313,6 +405,12 @@ export default function RepairPage() {
         description="คลิกที่รายการเพื่อเพิ่มเข้าใบงานซ่อม"
         size="xl"
       >
+        <Input
+          value={pickQ}
+          onChange={(e) => setPickQ(e.target.value)}
+          placeholder="ค้นหารหัส / ชื่ออะไหล่…"
+          className="mb-3"
+        />
         <div className="table-scroll border border-border">
           <table className="w-full text-sm">
             <thead>
@@ -325,7 +423,7 @@ export default function RepairPage() {
               </tr>
             </thead>
             <tbody>
-              {PRODUCTS.map((p) => (
+              {pickerRows.map((p) => (
                 <tr key={p.sysCode} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
                   <td className="num px-3 py-2 font-medium">{p.sysCode}</td>
                   <td className="px-3 py-2">
@@ -345,5 +443,15 @@ export default function RepairPage() {
         </div>
       </Modal>
     </>
+  );
+}
+
+export default function RepairPage() {
+  return (
+    <JobFormProvider>
+      <React.Suspense fallback={null}>
+        <RepairForm />
+      </React.Suspense>
+    </JobFormProvider>
   );
 }

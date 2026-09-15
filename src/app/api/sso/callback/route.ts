@@ -7,12 +7,7 @@ import {
   type SessionUser,
 } from "@/lib/session";
 import { lookupByEmail } from "@/lib/directory";
-import {
-  supabaseAdmin,
-  findUserIdByEmail,
-  upsertUserRow,
-  dedupeUsersByEmail,
-} from "@/lib/supabase-admin";
+import { provisionSsoUser } from "@/server/services/users";
 import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
 
 export const runtime = "nodejs";
@@ -20,17 +15,11 @@ export const dynamic = "force-dynamic";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-function nowStamp() {
-  // "YYYY-MM-DD HH:mm" — matches the lastLogin format used elsewhere
-  return new Date().toISOString().slice(0, 16).replace("T", " ");
-}
-
 /**
- * Auto-provision the signed-in employee into the `users` table and return their
- * effective { role, status }. New users start as PENDING_ROLE (no access until an
- * admin assigns a real role); existing users keep their role/status. Owner emails
- * are always forced to System Admin. Best-effort: never blocks login if the DB or
- * secret key is unavailable (returns the owner/pending default in that case).
+ * Auto-provision the signed-in employee into `app_user` (the single user table)
+ * and return their effective role/status. New users start pending (user_type
+ * NULL) until an admin assigns a role; owner emails are always System Admin.
+ * Best-effort: never blocks login if the DB is unavailable.
  */
 async function provision(opts: {
   email: string;
@@ -41,45 +30,13 @@ async function provision(opts: {
   avatar: string;
   title: string;
 }): Promise<{ role: string; status: string }> {
-  const owner = isOwner(opts.email);
   try {
-    const existingId = await findUserIdByEmail(opts.email);
-    let role = PENDING_ROLE;
-    let status = "Active";
-    if (existingId) {
-      const { data } = await supabaseAdmin()
-        .from("users")
-        .select("role, status")
-        .eq("id", existingId)
-        .maybeSingle();
-      role = (data?.role as string) ?? PENDING_ROLE;
-      status = (data?.status as string) ?? "Active";
-    }
-    // owners are always admins — force it (and persist it)
-    if (owner) {
-      role = ADMIN_ROLE;
-      status = "Active";
-    }
-    const id = existingId ?? `U-${crypto.randomUUID().slice(0, 8)}`;
-    await upsertUserRow({
-      id,
-      code: opts.larkId,
-      name: opts.name,
-      username: opts.email.split("@")[0],
-      role,
-      branch: opts.department,
-      email: opts.email,
-      phone: opts.phone,
-      status,
-      lastLogin: nowStamp(),
-      avatar: opts.avatar,
-      title: opts.title,
-    });
-    await dedupeUsersByEmail(opts.email, id);
-    return { role, status };
-  } catch {
-    // DB unavailable — owners still get in; everyone else waits for approval
-    return owner
+    const r = await provisionSsoUser(opts);
+    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive" };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] provision failed:", e instanceof Error ? e.message : e);
+    return isOwner(opts.email)
       ? { role: ADMIN_ROLE, status: "Active" }
       : { role: PENDING_ROLE, status: "Active" };
   }

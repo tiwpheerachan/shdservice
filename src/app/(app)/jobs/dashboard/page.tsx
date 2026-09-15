@@ -64,7 +64,7 @@ export default function DashboardPage() {
   const { data: TAT_ROWS } = useTatRows();
   const { data: MONTHLY } = useMonthly();
   const { data: TOP_SYMPTOMS } = useTopSymptoms();
-  const { data: JOBS } = useJobs();
+  const { data: JOBS } = useJobs({ limit: 6 }); // latest 6 for the "งานล่าสุด" list
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));
 

@@ -12,6 +12,8 @@ import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useProducts } from "@/data/db";
 import { int } from "@/lib/utils";
+import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 type Row = {
   sysCode: string;
@@ -23,12 +25,26 @@ type Row = {
 
 export default function ReceivePage() {
   const { push } = useToast();
-  const { data: PRODUCTS, loading } = useProducts();
+  const { name: me } = useAccess();
+  const { data: PRODUCTS, loading, refetch } = useProducts();
   const [rows, setRows] = React.useState<Row[]>([]);
+  const [po, setPo] = React.useState("");
+  const [date, setDate] = React.useState("");
+  const [supplier, setSupplier] = React.useState("");
+  const [remark, setRemark] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
 
+  // today's date on the client only (avoids SSR/hydration mismatch)
+  React.useEffect(() => {
+    const n = new Date();
+    const p = (x: number) => String(x).padStart(2, "0");
+    setDate(`${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`);
+  }, []);
+
+  // every active part is a candidate line; use the table search to find one
   React.useEffect(() => {
     setRows(
-      PRODUCTS.slice(0, 6).map((p) => ({
+      PRODUCTS.map((p) => ({
         sysCode: p.sysCode,
         name: p.name,
         status: p.status,
@@ -37,6 +53,32 @@ export default function ReceivePage() {
       }))
     );
   }, [PRODUCTS]);
+
+  // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
+  const save = async () => {
+    const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
+    if (!lines.length) {
+      push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนรับเข้า" });
+      return;
+    }
+    if (!po.trim()) {
+      push({ kind: "warning", title: "กรุณาระบุอ้างอิงใบสั่งซื้อ (PO)" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await postJson<{ no: string; total: number }>("/api/stock/receive", { date, poRef: po, supplier, remark, lines });
+      push({ kind: "success", title: "บันทึกการรับเข้าแล้ว", desc: `${d.no} · รวม ${int(d.total)} ชิ้น` });
+      setPo("");
+      setSupplier("");
+      setRemark("");
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const setQty = (code: string, v: number) =>
     setRows((s) => s.map((r) => (r.sysCode === code ? { ...r, qty: Math.max(0, v) } : r)));
@@ -101,16 +143,7 @@ export default function ReceivePage() {
         title="รับเข้าอะไหล่"
         description="บันทึกการรับอะไหล่เข้าคลัง อ้างอิงใบสั่งซื้อหรือใบส่งของจากผู้ผลิต"
         actions={
-          <Button
-            size="sm"
-            onClick={() =>
-              push({
-                kind: totalQty > 0 ? "success" : "warning",
-                title: totalQty > 0 ? "บันทึกการรับเข้าแล้ว" : "ยังไม่ได้ระบุจำนวนรับเข้า",
-                desc: totalQty > 0 ? `รวม ${int(totalQty)} ชิ้น` : undefined,
-              })
-            }
-          >
+          <Button size="sm" onClick={save} disabled={saving}>
             <Save className="h-3.5 w-3.5" />
             บันทึกการรับเข้า
           </Button>
@@ -123,26 +156,29 @@ export default function ReceivePage() {
             <Input readOnly value="Generate Auto" />
           </Field>
           <Field label="อ้างอิงใบสั่งซื้อ (PO)" required>
-            <Input placeholder="PO2600000" />
+            <Input placeholder="PO2600000" value={po} onChange={(e) => setPo(e.target.value)} />
           </Field>
           <Field label="วันที่รับเข้า" required>
-            <Input type="date" defaultValue="2026-09-04" />
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="รับเข้าคลัง" required>
-            <Select>
-              <option>คลังกลาง</option>
-              <option>ศูนย์ซ่อม รังสิต</option>
-              <option>ศูนย์ซ่อม บางนา</option>
+            <Select defaultValue="คลังสินค้าดี">
+              <option>คลังสินค้าดี</option>
             </Select>
           </Field>
           <Field label="ผู้จัดส่ง / Supplier">
-            <Input placeholder="ชื่อผู้จัดส่ง" />
+            <Input placeholder="ชื่อผู้จัดส่ง" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
           </Field>
           <Field label="รับเข้าโดย">
-            <Input readOnly value="May - Pradit" />
+            <Input readOnly value={me || "—"} />
           </Field>
           <Field label="หมายเหตุ" wide>
-            <Textarea rows={2} placeholder="รายละเอียดเพิ่มเติม เช่น เลข Lot, สภาพสินค้า" />
+            <Textarea
+              rows={2}
+              placeholder="รายละเอียดเพิ่มเติม เช่น เลข Lot, สภาพสินค้า"
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+            />
           </Field>
         </FieldGrid>
       </Section>

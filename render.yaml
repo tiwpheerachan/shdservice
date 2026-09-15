@@ -6,7 +6,8 @@ services:
     plan: free
     branch: main
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
-    buildCommand: npm install --include=dev && npm run build
+    # db:migrate is idempotent (see scripts/migrate.ts) — safe to run on every deploy
+    buildCommand: npm install --include=dev && npm run db:migrate && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
@@ -24,7 +25,10 @@ services:
         sync: false
       - key: SSO_CLIENT_SECRET
         sync: false
-      # Supabase secret key — server-only, used to write users/master data (bypasses RLS)
+      # Postgres connection for drizzle (Supabase *Session pooler*, port 5432) — set in the dashboard
+      - key: DATABASE_URL
+        sync: false
+      # Supabase secret key — server-only, used for Storage (attachments / slips)
       - key: SUPABASE_SECRET_KEY
         sync: false
       # Session-cookie signing: the app signs with the STABLE CENTRAL_API_KEY, so

@@ -8,18 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { useProducts, useJobs } from "@/data/db";
-import { TECHNICIANS, STOCK_PICK_TYPES } from "@/data/mock";
+import { useProducts, useJobNos, useSaleOrders, useStaff } from "@/data/db";
+import { STOCK_PICK_TYPES } from "@/data/mock";
 import { int, cn } from "@/lib/utils";
+import { api, postJson, errMsg, qs } from "@/lib/api";
 
-const DOC_TYPES = STOCK_PICK_TYPES;
-
-const RECIPIENTS = [
-  "ศูนย์ซ่อม รังสิต",
-  "ศูนย์ซ่อม บางนา",
-  "คลังกลาง",
-  ...TECHNICIANS.slice(1),
-];
+const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 
 type Line = {
   docNo: string;
@@ -29,12 +23,20 @@ type Line = {
   onhand: number;
   need: number;
   issue: number;
+  logId?: number; // job_order_spare_part_log id (จ่ายออกตามงานซ่อม)
+  dtId?: number; // sale_out_dt id (จ่ายออกตามใบสั่งขาย)
 };
+
+type PartLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; need: number; status: string };
+type SoLine = { dtId: number; code: string; name: string; onhand: number; need: number; picked: boolean };
 
 export default function PickPage() {
   const { push } = useToast();
-  const { data: PRODUCTS } = useProducts();
-  const { data: JOBS } = useJobs();
+  const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
+  const { data: JOB_NOS } = useJobNos(100);
+  const { data: SALE_ORDERS } = useSaleOrders({ approve: "อนุมัติแล้ว", limit: 100 });
+  const { data: STAFF } = useStaff();
+  const [saving, setSaving] = React.useState(false);
 
   const [docType, setDocType] = React.useState(DOC_TYPES[0]);
   const [ref, setRef] = React.useState("");
@@ -54,31 +56,87 @@ export default function PickPage() {
     );
   }, []);
 
-  const refOptions = JOBS.slice(0, 15).map((j) => j.no);
+  const kind: "job" | "sale" | "other" =
+    docType === "จ่ายออกตามงานซ่อม" ? "job" : docType === "จ่ายออกตามใบสั่งขาย" ? "sale" : "other";
+  // อ้างอิง: งานที่ยังไม่ปิด / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
+  const refOptions = kind === "job" ? JOB_NOS : kind === "sale" ? SALE_ORDERS.map((s) => s.no) : [];
+  const RECIPIENTS = React.useMemo(
+    () => ["คลังสินค้าดี", ...STAFF.map((s) => s.name)],
+    [STAFF]
+  );
 
-  const getData = () => {
+  React.useEffect(() => {
+    setRef("");
+    setLines([]);
+    setLoaded(false);
+  }, [docType]);
+
+  // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
+  const getData = async () => {
+    if (kind === "other") {
+      // จ่ายออกอื่นๆ: เลือกจากรายการอะไหล่ทั้งหมด (ใส่จำนวนเฉพาะที่ต้องการจ่าย)
+      setLines(
+        PRODUCTS.filter((p) => p.onhand > 0).map((p) => ({
+          docNo: "-",
+          code: p.sysCode,
+          name: p.name,
+          pickStatus: "พร้อมจ่าย",
+          onhand: p.onhand,
+          need: p.onhand,
+          issue: 0,
+        }))
+      );
+      setLoaded(true);
+      return;
+    }
     if (!ref) {
       push({ kind: "warning", title: "กรุณาเลือกอ้างอิงเลขเอกสารก่อน" });
       return;
     }
-    const items = PRODUCTS.slice(0, 4).map((p, i) => ({
-      docNo: ref,
-      code: p.sysCode,
-      name: p.name,
-      pickStatus: p.onhand === 0 ? "รออะไหล่" : i % 3 === 0 ? "เบิกบางส่วน" : "รอเบิก",
-      onhand: p.onhand,
-      need: (i % 3) + 1,
-      issue: 0,
-    }));
-    setLines(items);
-    setLoaded(true);
-    push({ kind: "success", title: "ดึงรายการเบิกแล้ว", desc: `${ref} — ${items.length} รายการ` });
+    try {
+      if (kind === "job") {
+        const d = await api<{ rows: PartLine[] }>(`/api/stock/pick-lines${qs({ type: "job", ref })}`);
+        setLines(
+          d.rows.map((r) => ({
+            docNo: r.jobNo,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.status,
+            onhand: r.onhand,
+            need: r.need,
+            issue: 0,
+            logId: r.logId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการเบิกแล้ว", desc: `${ref} — ${d.rows.length} รายการ` });
+      } else {
+        const d = await api<{ rows: SoLine[] }>(`/api/stock/pick-lines${qs({ type: "sale", ref })}`);
+        const rows = d.rows.filter((r) => !r.picked);
+        setLines(
+          rows.map((r) => ({
+            docNo: ref,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.onhand === 0 ? "รออะไหล่" : "รอจ่าย",
+            onhand: r.onhand,
+            need: r.need,
+            issue: 0,
+            dtId: r.dtId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการแล้ว", desc: `${ref} — ${rows.length} รายการ` });
+      }
+    } catch (e) {
+      push({ kind: "error", title: "ดึงรายการไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
-  const setIssue = (code: string, v: number) =>
+  const setIssue = (key: number | string, v: number) =>
     setLines((s) =>
       s.map((l) =>
-        l.code === code
+        (l.logId ?? l.dtId ?? l.code) === key
           ? { ...l, issue: Math.max(0, Math.min(v, Math.min(l.need, l.onhand))) }
           : l
       )
@@ -86,16 +144,36 @@ export default function PickPage() {
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
 
-  const save = () => {
+  // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
+  const save = async () => {
     if (totalIssue === 0) {
       push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนจ่ายออก" });
       return;
     }
-    push({
-      kind: "success",
-      title: `บันทึกการจ่ายออกแล้ว ${totalIssue} ชิ้น`,
-      desc: "ระบบสาธิต — ไม่ตัดสต๊อกจริง",
-    });
+    if (!payTo) {
+      push({ kind: "warning", title: "กรุณาระบุ จ่ายให้" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await postJson<{ no: string; total: number }>("/api/stock/issue", {
+        type: kind,
+        ref,
+        payTo,
+        remark,
+        lines: lines.filter((l) => l.issue > 0).map((l) => ({ logId: l.logId, dtId: l.dtId, code: l.code, qty: l.issue })),
+      });
+      push({ kind: "success", title: `บันทึกการจ่ายออกแล้ว ${d.total} ชิ้น`, desc: d.no });
+      setLines([]);
+      setLoaded(false);
+      setRef("");
+      setRemark("");
+      refetchProducts();
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -125,14 +203,15 @@ export default function PickPage() {
               ))}
             </Select>
           </Field>
-          <Field label="อ้างอิงเลขเอกสาร" required>
+          <Field label="อ้างอิงเลขเอกสาร" required={kind !== "other"}>
             <div className="flex gap-2">
               <Select
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 className="flex-1"
+                disabled={kind === "other"}
               >
-                <option value="">- - Please Select - -</option>
+                <option value="">{kind === "other" ? "- - ไม่ต้องอ้างอิง - -" : "- - Please Select - -"}</option>
                 {refOptions.map((r) => (
                   <option key={r}>{r}</option>
                 ))}
@@ -175,7 +254,7 @@ export default function PickPage() {
               ) : (
                 lines.map((l, i) => (
                   <tr
-                    key={l.code}
+                    key={l.logId ?? l.dtId ?? l.code}
                     className="border-b border-border/70 last:border-0 hover:bg-accent/50"
                   >
                     <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
@@ -205,7 +284,7 @@ export default function PickPage() {
                         placeholder="0"
                         value={l.issue}
                         disabled={l.onhand === 0}
-                        onChange={(n) => setIssue(l.code, n)}
+                        onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
                         className="ml-auto h-8 w-24"
                       />
                     </td>
@@ -245,7 +324,7 @@ export default function PickPage() {
       </div>
 
       <div className="flex justify-end">
-        <Button size="md" onClick={save} disabled={lines.length === 0}>
+        <Button size="md" onClick={save} disabled={lines.length === 0 || saving}>
           <Save className="h-4 w-4" />
           บันทึกการจ่ายออก
         </Button>
