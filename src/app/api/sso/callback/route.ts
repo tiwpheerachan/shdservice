@@ -74,8 +74,18 @@ export async function GET(request: NextRequest) {
       }),
       cache: "no-store",
     });
-    if (!res.ok) return fail(request, `verify_${res.status}`);
+    if (!res.ok) {
+      // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
+      const body = await res.text().catch(() => "");
+      // eslint-disable-next-line no-console
+      console.error(`[sso] verify failed ${res.status} for client ${SSO.clientId}: ${body.slice(0, 300)}`);
+      return fail(request, `verify_${res.status}`);
+    }
     identity = await res.json();
+    if (process.env.SSO_DEBUG === "1") {
+      // eslint-disable-next-line no-console
+      console.log("[sso] identity keys:", Object.keys(identity));
+    }
   } catch {
     return fail(request, "verify_unreachable");
   }
@@ -88,7 +98,11 @@ export async function GET(request: NextRequest) {
     identity;
 
   const email = str(u.email);
-  if (!email) return fail(request, "no_email");
+  if (!email) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] no email in verify response; top-level keys:", Object.keys(identity), "user keys:", Object.keys(u ?? {}));
+    return fail(request, "no_email");
+  }
 
   // Enrich with the full directory profile (department, title, phone, avatar).
   const prof = await lookupByEmail(email);
