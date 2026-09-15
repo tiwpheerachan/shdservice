@@ -23,11 +23,11 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 });
 
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
-  await requireCan(req, "Job Management", "edit");
+  const me = await requireCan(req, "Job Management", "edit");
   const { id } = await ctx.params;
   const [row] = await db.select().from(documentAttach).where(eq(documentAttach.documentAttachId, Number(id)));
   if (!row) throw new HttpError(404, "not found");
-  await removeAttachment(row.documentAttachId);
+  await removeAttachment(row.documentAttachId, me.userId);
   await removeFile(`jobs/${row.referenceItemCode}/${row.systemFileName}`);
   return NextResponse.json({ ok: true });
 });

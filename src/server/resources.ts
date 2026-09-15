@@ -2,6 +2,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { requireAdmin, requireUser } from "@/server/auth";
 import { parsePageQuery, type Page } from "@/server/paging";
+import { parseStatusMode } from "@/server/record-status";
 import { listSimple, isSimpleKind, listSymptoms, listModels } from "@/server/services/masters";
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from "@/server/services/users";
 import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
@@ -10,7 +11,6 @@ import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutso
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
-type DeletedMode = "exclude" | "only" | "all";
 
 /**
  * Read side for the UI hooks in src/data/db.ts. One endpoint per table name the
@@ -19,7 +19,7 @@ type DeletedMode = "exclude" | "only" | "all";
  */
 export async function readResource(req: NextRequest, resource: string): Promise<unknown[] | Page<unknown>> {
   const sp = new URL(req.url).searchParams;
-  const deleted = (sp.get("deleted") ?? "exclude") as DeletedMode;
+  const deleted = parseStatusMode(sp.get("deleted"));
   const paged = sp.get("paged") === "1";
   const p = parsePageQuery(sp);
 

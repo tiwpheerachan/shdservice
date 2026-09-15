@@ -20,8 +20,9 @@ import type { Movement, Product } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
-export type DeletedMode = "exclude" | "only" | "all";
+export type DeletedMode = StatusMode;
 
 /** The legacy system runs a single warehouse / condition and no serial control. */
 export const STORE_LOCATION_ID = 1;
@@ -55,7 +56,7 @@ const productSelect = {
   category: category.categoryName,
   manufacturerId: product.manufacturerId,
   brand: manufacturer.manufacturerName,
-  active: product.isActive,
+  active: product.recordStatus,
   createDate: product.createDate,
   createBy: product.createBy,
   ubOnly: product.isUbRepairOnly,
@@ -83,7 +84,7 @@ function toProduct(r: ProductRow, creator?: string): Product {
     brand: r.brand ?? "",
     onhand: r.onhand ?? 0,
     price: num(r.retail),
-    status: r.active === false ? "Inactive" : "Active",
+    status: uiStatus(r.active),
     id: r.id ?? 0,
     nameEn: r.nameEn ?? "",
     nameCn: r.nameCn ?? "",
@@ -110,7 +111,7 @@ const productQuery = () =>
 
 export async function listProducts(opts: { deleted?: DeletedMode; q?: string } = {}): Promise<Product[]> {
   const { deleted = "exclude", q = "" } = opts;
-  const active = deleted === "exclude" ? ne(product.isActive, false) : deleted === "only" ? eq(product.isActive, false) : undefined;
+  const active = statusFilter(product.recordStatus, deleted);
   const term = q.trim();
   const search = term
     ? or(ilike(product.productCode, `%${term}%`), ilike(product.productName, `%${term}%`), ilike(product.productVenderCode, `%${term}%`))
@@ -169,7 +170,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       productDescription: str(i.description).slice(0, 200),
       categoryId: cat?.id ?? 1,
       manufacturerId: mfg?.id ?? null,
-      isActive: (i.status ?? "Active") !== "Inactive",
+      ...statusStamp(fromUiStatus(i.status), byUserId),
       isUbRepairOnly: !!i.ubRepairOnly,
       forModelColor: str(i.forModelColor).slice(0, 50),
     };

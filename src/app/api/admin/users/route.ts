@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handle, requireAdmin, readJson, HttpError } from "@/server/auth";
 import { lookupByEmail } from "@/lib/directory";
-import { listSystemUsers, upsertUser, type DeletedMode } from "@/server/services/users";
+import { listSystemUsers, upsertUser } from "@/server/services/users";
+import { parseStatusMode } from "@/server/record-status";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 /** List system users (people who signed in via SSO). Admin only. */
 export const GET = handle(async (req: NextRequest) => {
   await requireAdmin(req);
-  const deleted = (new URL(req.url).searchParams.get("deleted") ?? "exclude") as DeletedMode;
+  const deleted = parseStatusMode(new URL(req.url).searchParams.get("deleted"));
   return NextResponse.json({ rows: await listSystemUsers(deleted) });
 });
 
@@ -20,7 +21,7 @@ export const GET = handle(async (req: NextRequest) => {
  * the Lark directory and assign a role (= legacy user_type). Admin only.
  */
 export const POST = handle(async (req: NextRequest) => {
-  await requireAdmin(req);
+  const me = await requireAdmin(req);
   const body = await readJson(req);
 
   const name = str(body.name);
@@ -43,6 +44,6 @@ export const POST = handle(async (req: NextRequest) => {
     status: str(body.status) || undefined,
     avatar: str(body.avatar) || prof?.avatar || undefined,
     title: str(body.title) || prof?.title || undefined,
-  });
+  }, me.userId);
   return NextResponse.json({ ok: true, user, created });
 });

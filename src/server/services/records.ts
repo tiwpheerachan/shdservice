@@ -1,11 +1,12 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { customer, job, jobLog, product, quotationHd, saleOutHd } from "@/db/schema";
+import { appUser, customer, job, jobLog, product, quotationHd, saleOutHd } from "@/db/schema";
 import type { Module } from "@/lib/modules";
 import { HttpError } from "@/server/auth";
 import { nowThai, SENTINEL_TS } from "@/server/mappers/format";
-import { isSimpleKind, setModelActive, setSimpleActive, setSymptomActive } from "./masters";
+import { RS, statusStamp, type RecordStatus } from "@/server/record-status";
+import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from "./masters";
 
 export type RecordTable =
   | "users"
@@ -39,49 +40,64 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, "users">, Module | null
 };
 
 const JOB_STATUS_CANCELLED = 0;
-const JOB_STATUS_NEW = 1;
 
 /**
- * "Delete" in the legacy schema is a per-table convention, never a row delete:
- *   masters/customers/products/quotations → is_active = false
- *   jobs → job_status 0 "ยกเลิกข้อมูล" (+ job_log); restore → back to 1 "งานใหม่"
- *   sale orders → document_status = false + cancel stamp
+ * Set record_status (ACTIVE / INACTIVE / DELETED) on any entity. Nothing is ever
+ * hard-deleted. The legacy flag each table used before is mirrored so the old
+ * reports still agree:
+ *   masters / customers / products / quotations → is_active
+ *   users → is_active + deleted
+ *   jobs → DELETED also sets job_status 0 "ยกเลิกข้อมูล" (+ job_log), as the old app did
+ *   sale orders → document_status + cancel stamp
+ * Restoring a DELETED row is done in SQL only (by decision) — the API still
+ * accepts ACTIVE so the existing users-page restore button keeps working.
  */
-export async function setRecordDeleted(
-  table: Exclude<RecordTable, "users">,
+export async function setRecordStatus(
+  table: RecordTable,
   id: string | number,
-  deleted: boolean,
+  rs: RecordStatus,
   byUserId: number
 ): Promise<void> {
-  const active = !deleted;
-  if (isSimpleKind(table)) return setSimpleActive(table, Number(id), active);
+  const stamp = statusStamp(rs, byUserId);
+  if (isSimpleKind(table)) return setSimpleStatus(table, Number(id), rs, byUserId);
   switch (table) {
     case "symptoms":
-      return setSymptomActive(Number(id), active);
+      return setSymptomStatus(Number(id), rs, byUserId);
     case "models":
-      return setModelActive(String(id), active);
+      return setModelStatus(String(id), rs, byUserId);
+    case "users":
+      await db
+        .update(appUser)
+        .set({ ...stamp, deleted: rs === RS.DELETED })
+        .where(eq(appUser.userId, Number(id)));
+      return;
     case "products":
       await db
         .update(product)
         .set(
-          deleted
-            ? { isActive: false, cancelDate: nowThai(), cancelBy: byUserId }
-            : { isActive: true, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: "" }
+          rs === RS.DELETED
+            ? { ...stamp, cancelDate: nowThai(), cancelBy: byUserId }
+            : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: "" }
         )
         .where(eq(product.productCode, String(id)));
       return;
     case "customers":
-      await db.update(customer).set({ isActive: active }).where(eq(customer.customerCode, String(id)));
+      await db.update(customer).set(stamp).where(eq(customer.customerCode, String(id)));
       return;
     case "quotations":
-      await db.update(quotationHd).set({ isActive: active }).where(eq(quotationHd.quotationNo, String(id)));
+      await db.update(quotationHd).set(stamp).where(eq(quotationHd.quotationNo, String(id)));
       return;
     case "jobs": {
-      const status = deleted ? JOB_STATUS_CANCELLED : JOB_STATUS_NEW;
       await db.transaction(async (tx) => {
-        const r = await tx.update(job).set({ jobStatusId: status }).where(eq(job.jobNo, String(id))).returning({ no: job.jobNo });
-        if (!r[0]) throw new HttpError(404, "job not found");
-        await tx.insert(jobLog).values({ jobNo: String(id), jobStatusId: status, jobLogDate: nowThai(), jobActionBy: byUserId });
+        const [cur] = await tx.select({ st: job.jobStatusId }).from(job).where(eq(job.jobNo, String(id)));
+        if (!cur) throw new HttpError(404, "job not found");
+        await tx
+          .update(job)
+          .set({ ...statusStamp(rs, byUserId, false), ...(rs === RS.DELETED ? { jobStatusId: JOB_STATUS_CANCELLED } : {}) })
+          .where(eq(job.jobNo, String(id)));
+        if (rs === RS.DELETED && cur.st !== JOB_STATUS_CANCELLED) {
+          await tx.insert(jobLog).values({ jobNo: String(id), jobStatusId: JOB_STATUS_CANCELLED, jobLogDate: nowThai(), jobActionBy: byUserId });
+        }
       });
       return;
     }
@@ -89,9 +105,9 @@ export async function setRecordDeleted(
       await db
         .update(saleOutHd)
         .set(
-          deleted
-            ? { documentStatus: false, documentCancelDate: nowThai(), documentCancelBy: byUserId }
-            : { documentStatus: true, documentCancelDate: SENTINEL_TS, documentCancelBy: -1, documentCancelRemark: "" }
+          rs === RS.DELETED
+            ? { ...statusStamp(rs, byUserId, false), documentStatus: false, documentCancelDate: nowThai(), documentCancelBy: byUserId }
+            : { ...statusStamp(rs, byUserId, false), documentStatus: true, documentCancelDate: SENTINEL_TS, documentCancelBy: -1, documentCancelRemark: "" }
         )
         .where(eq(saleOutHd.saleOutHdNo, String(id)));
       return;

@@ -81,7 +81,7 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
     };
   }
   const userType = owner ? ADMIN_USER_TYPE : row.userType?.trim() || null;
-  const isActive = row.isActive !== false && !row.deleted;
+  const isActive = row.recordStatus === "ACTIVE";
   const isAdmin = userType === ADMIN_USER_TYPE;
   return {
     userId: row.userId,

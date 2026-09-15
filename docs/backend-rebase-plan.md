@@ -218,7 +218,17 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - **มอบหมายช่าง** ต้องชี้ `app_user`: เลือกจาก dropdown ผู้ใช้ระบบ หรือเลือกจากไดเรกทอรี Lark แล้ว server หา/สร้าง `app_user` ด้วยอีเมล
 - **Storage**: อัปโหลดขึ้น Supabase Storage bucket `attachments` (path `jobs/{job_no}/{system_file_name}`) — key ใน `.env` ปัจจุบันถูกปฏิเสธ (401) ต้องอัปเดตก่อนใช้แนบไฟล์
 
-## 13. ลำดับทำงาน (ทำครบแล้ว)
+## 13. Soft delete แบบเดียวทั้งระบบ — `record_status` (เพิ่ม 2026-09-15, migration `0003`)
+
+- ตาราง lookup **`record_status`**: `ACTIVE` ใช้งาน · `INACTIVE` ปิดใช้งาน (ยังเห็นในรายการ/หน้า admin แต่ไม่ขึ้น dropdown) · `DELETED` ลบแล้ว (ซ่อนทุกหน้า **กู้คืนทาง SQL เท่านั้น** ตามที่ตกลง)
+- คอลัมน์ `record_status` (FK) + `status_changed_at` + `status_changed_by` ใน 14 ตาราง: category, manufacturer, color, job_type, product_type, symptom, model, product, customer, app_user, job, quotation_hd, sale_out_hd, document_attach
+- **ไม่มี hard delete ที่ไหนเลย** — ทุกปุ่มลบ/ยกเลิก → `DELETED`; toggle สถานะ → `ACTIVE`/`INACTIVE`
+- ยัง mirror flag เดิมของ legacy: `is_active = (ACTIVE)`, `app_user.deleted = (DELETED)`, ใบสั่งขาย `document_status=false` เมื่อ DELETED, งานที่ DELETED ตั้ง `job_status_id=0` + `job_log` ตามระบบเก่า
+- backfill (รันซ้ำได้หลัง re-dump, แตะเฉพาะแถวที่ยังเป็น ACTIVE): `is_active=false` → INACTIVE · job สถานะ 0 → DELETED · SO `document_status=false` → DELETED · `app_user.deleted` → DELETED · ไฟล์แนบ `is_active=false` → DELETED
+- API: `POST /api/admin/records {table,id,status}` — DELETED ต้องมีสิทธิ์ `del`, ACTIVE/INACTIVE ต้องมี `edit` (master/ผู้ใช้ = System Admin) · การอ่านรับ `?deleted=active|exclude|only|all`
+- กู้คืน: `update <table> set record_status='ACTIVE', is_active=true where …` (งาน: ตั้ง `job_status_id` กลับเองด้วย)
+
+## 14. ลำดับทำงาน (ทำครบแล้ว)
 
 1. **Infra**: drizzle + schema 52 ตาราง + migrations + `db:migrate` (ทดสอบกับ Postgres local ที่โหลด dump แล้ว)
 2. **Auth**: provision → `app_user`, approval gate, `can()`, permission API, sidebar/ปุ่ม

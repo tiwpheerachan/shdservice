@@ -46,6 +46,10 @@ export const modelTier = pgTable("model_tier", {
 });
 
 export const product = pgTable("product", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	productId: integer("product_id").primaryKey().generatedByDefaultAsIdentity(),
 	productCode: varchar("product_code", { length: 50 }),
 	productVenderCode: varchar("product_vender_code", { length: 50 }),
@@ -155,6 +159,10 @@ export const mtDistrict = pgTable("mt_district", {
 ]);
 
 export const customer = pgTable("customer", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	customerId: integer("customer_id").primaryKey().generatedByDefaultAsIdentity(),
 	customerCode: varchar("customer_code", { length: 50 }),
 	customerCardId: varchar("customer_card_id", { length: 20 }),
@@ -229,6 +237,10 @@ export const approveStatus = pgTable("approve_status", {
 });
 
 export const category = pgTable("category", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	categoryId: integer("category_id").primaryKey().generatedByDefaultAsIdentity(),
 	categoryName: varchar("category_name", { length: 50 }),
 	categoryDescription: varchar("category_description", { length: 50 }),
@@ -239,6 +251,10 @@ export const category = pgTable("category", {
 ]);
 
 export const color = pgTable("color", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	id: integer().primaryKey().generatedByDefaultAsIdentity(),
 	colorName: varchar("color_name", { length: 50 }),
 	description: varchar({ length: 100 }),
@@ -253,6 +269,10 @@ export const condition = pgTable("condition", {
 });
 
 export const documentAttach = pgTable("document_attach", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	documentAttachId: integer("document_attach_id").primaryKey().generatedByDefaultAsIdentity(),
 	referenceTopic: varchar("reference_topic", { length: 50 }),
 	referenceItemCode: varchar("reference_item_code", { length: 50 }),
@@ -274,6 +294,10 @@ export const inventoryDt = pgTable("inventory_dt", {
 });
 
 export const job = pgTable("job", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	jobNo: varchar("job_no", { length: 50 }).primaryKey().notNull(),
 	companyId: integer("company_id"),
 	branchId: integer("branch_id"),
@@ -470,6 +494,10 @@ export const jobStatus = pgTable("job_status", {
 });
 
 export const jobType = pgTable("job_type", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	jobTypeId: integer("job_type_id").primaryKey().generatedByDefaultAsIdentity(),
 	jobTypeName: varchar("job_type_name", { length: 50 }),
 	jobTypeDescription: varchar("job_type_description", { length: 100 }),
@@ -479,6 +507,10 @@ export const jobType = pgTable("job_type", {
 ]);
 
 export const manufacturer = pgTable("manufacturer", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	manufacturerId: integer("manufacturer_id").primaryKey().generatedByDefaultAsIdentity(),
 	manufacturerName: varchar("manufacturer_name", { length: 50 }),
 	logoName: varchar("logo_name", { length: 50 }),
@@ -488,6 +520,10 @@ export const manufacturer = pgTable("manufacturer", {
 ]);
 
 export const model = pgTable("model", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	modelId: integer("model_id").primaryKey().generatedByDefaultAsIdentity(),
 	modelCode: varchar("model_code", { length: 50 }),
 	modelName: varchar("model_name", { length: 50 }),
@@ -526,6 +562,10 @@ export const productModel = pgTable("product_model", {
 });
 
 export const productType = pgTable("product_type", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	productTypeId: integer("product_type_id").primaryKey().generatedByDefaultAsIdentity(),
 	productTypeName: varchar("product_type_name", { length: 50 }),
 	isActive: boolean("is_active"),
@@ -551,6 +591,10 @@ export const quotationDt = pgTable("quotation_dt", {
 ]);
 
 export const quotationHd = pgTable("quotation_hd", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	quotationHdId: integer("quotation_hd_id").primaryKey().generatedByDefaultAsIdentity(),
 	quotationNo: varchar("quotation_no", { length: 50 }),
 	customerCode: varchar("customer_code", { length: 50 }),
@@ -633,6 +677,10 @@ export const saleInHd = pgTable("sale_in_hd", {
 });
 
 export const saleOutHd = pgTable("sale_out_hd", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	saleOutHdId: integer("sale_out_hd_id").primaryKey().generatedByDefaultAsIdentity(),
 	saleOutHdNo: varchar("sale_out_hd_no", { length: 50 }),
 	documentType: varchar("document_type", { length: 50 }),
@@ -690,6 +738,10 @@ export const storeLocation = pgTable("store_location", {
 ]);
 
 export const symptom = pgTable("symptom", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	symptomId: integer("symptom_id").primaryKey().generatedByDefaultAsIdentity(),
 	symptomName: varchar("symptom_name", { length: 50 }),
 	symptomDescription: varchar("symptom_description", { length: 100 }),
@@ -718,6 +770,10 @@ export const tempSparePart = pgTable("temp_spare_part", {
 });
 
 export const appUser = pgTable("app_user", {
+	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
+	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
+	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
+	statusChangedBy: integer("status_changed_by"),
 	userId: integer("user_id").primaryKey().generatedByDefaultAsIdentity(),
 	username: varchar({ length: 50 }),
 	password: varchar({ length: 50 }),
@@ -772,3 +828,10 @@ export const jobSymptom = pgTable("job_symptom", {
 	primaryKey({ columns: [table.jobNo, table.symptomId] }),
 	index("ix_job_symptom_symptom").using("btree", table.symptomId.asc().nullsLast().op("int4_ops")),
 ]);
+
+export const recordStatus = pgTable("record_status", {
+	code: varchar({ length: 10 }).primaryKey().notNull(),
+	nameTh: varchar("name_th", { length: 50 }).notNull(),
+	nameEn: varchar("name_en", { length: 50 }).notNull(),
+	sortOrder: integer("sort_order").notNull(),
+});

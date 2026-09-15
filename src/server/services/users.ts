@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appConfig, appUser } from "@/db/schema";
 import { isOwner, PENDING_ROLE } from "@/lib/access";
@@ -7,6 +7,7 @@ import { ADMIN_USER_TYPE } from "@/lib/modules";
 import { findAppUserByEmail, fullName, HttpError, invalidateGrantCache } from "@/server/auth";
 import type { User, Permission } from "@/data/mock";
 import { nowThai, fmtDateTime } from "@/server/mappers/format";
+import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
 const DEFAULT_APPROVED_TYPE = "Customer Service";
 
@@ -58,8 +59,8 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
         lastName: existing.lastName?.trim() ? existing.lastName : last,
         phoneNo: existing.phoneNo?.trim() ? existing.phoneNo : p.phone.slice(0, 50) || null,
         userType: owner ? ADMIN_USER_TYPE : existing.userType,
-        isActive: owner ? true : existing.isActive,
-        deleted: owner ? false : existing.deleted,
+        // owners are always ACTIVE; everyone else keeps their record_status
+        ...(owner ? { ...statusStamp(RS.ACTIVE, existing.userId), deleted: false } : {}),
         // only overwrite profile fields we actually received
         larkId: profile.larkId ?? existing.larkId,
         department: profile.department ?? existing.department,
@@ -71,7 +72,7 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
     return {
       userId: existing.userId,
       userType,
-      isActive: owner ? true : existing.isActive !== false && !existing.deleted,
+      isActive: owner ? true : existing.recordStatus === RS.ACTIVE,
     };
   }
 
@@ -84,6 +85,7 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
       lastName: last,
       userType: owner ? ADMIN_USER_TYPE : null,
       isActive: true,
+      recordStatus: RS.ACTIVE,
       phoneNo: p.phone.slice(0, 50) || null,
       emailAddress: email,
       ...profile,
@@ -108,13 +110,13 @@ export function toUser(r: AppUserRow): User {
     email: r.emailAddress?.trim() ?? "",
     phone: r.phoneNo ?? "",
     lastLogin: fmtDateTime(r.lastLogin),
-    status: r.isActive === false ? "Inactive" : "Active",
+    status: uiStatus(r.recordStatus),
     avatar: r.avatar ?? null,
     title: r.title ?? null,
   };
 }
 
-export type DeletedMode = "exclude" | "only" | "all";
+export type DeletedMode = StatusMode;
 
 /**
  * "ผู้ใช้ระบบ" = every app_user row (legacy staff + SSO-provisioned people).
@@ -123,9 +125,7 @@ export type DeletedMode = "exclude" | "only" | "all";
  * the role already assigned.
  */
 export async function listSystemUsers(deleted: DeletedMode = "exclude"): Promise<User[]> {
-  const del =
-    deleted === "exclude" ? eq(appUser.deleted, false) : deleted === "only" ? eq(appUser.deleted, true) : undefined;
-  const rows = await db.select().from(appUser).where(del).orderBy(asc(appUser.userId));
+  const rows = await db.select().from(appUser).where(statusFilter(appUser.recordStatus, deleted)).orderBy(asc(appUser.userId));
   return rows.map(toUser);
 }
 
@@ -140,7 +140,7 @@ export async function listStaff(): Promise<{ id: number; name: string; userType:
       userType: appUser.userType,
     })
     .from(appUser)
-    .where(and(ne(appUser.isActive, false), eq(appUser.deleted, false)))
+    .where(eq(appUser.recordStatus, RS.ACTIVE))
     .orderBy(asc(appUser.firstName), asc(appUser.lastName));
   return rows.map((r) => ({
     id: r.id,
@@ -164,10 +164,10 @@ export type UpsertUserInput = {
 };
 
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
-export async function upsertUser(input: UpsertUserInput): Promise<{ user: User; created: boolean }> {
+export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
   const email = (input.email ?? "").trim().toLowerCase();
   const userType = input.role.trim() === PENDING_ROLE ? null : input.role.trim() || null;
-  const isActive = (input.status ?? "Active").toLowerCase() === "active";
+  const rs = fromUiStatus(input.status);
   const { first, last } = splitName(input.name);
 
   let targetId = input.id ? Number(input.id) : NaN;
@@ -183,7 +183,8 @@ export async function upsertUser(input: UpsertUserInput): Promise<{ user: User; 
         firstName: first,
         lastName: last,
         userType,
-        isActive,
+        ...statusStamp(rs, actorId),
+        deleted: false,
         emailAddress: email || undefined,
         phoneNo: input.phone?.slice(0, 50) || undefined,
         larkId: input.code || undefined,
@@ -206,7 +207,7 @@ export async function upsertUser(input: UpsertUserInput): Promise<{ user: User; 
       firstName: first,
       lastName: last,
       userType,
-      isActive,
+      ...statusStamp(rs, actorId),
       emailAddress: email || null,
       phoneNo: input.phone?.slice(0, 50) || null,
       larkId: input.code || null,
@@ -219,18 +220,21 @@ export async function upsertUser(input: UpsertUserInput): Promise<{ user: User; 
 }
 
 /** One-click approve: first real role + Active. */
-export async function approveUser(userId: number, role?: string): Promise<User> {
+export async function approveUser(userId: number, role?: string, actorId = 0): Promise<User> {
   const [row] = await db
     .update(appUser)
-    .set({ userType: role?.trim() || DEFAULT_APPROVED_TYPE, isActive: true, deleted: false })
+    .set({ userType: role?.trim() || DEFAULT_APPROVED_TYPE, ...statusStamp(RS.ACTIVE, actorId), deleted: false })
     .where(eq(appUser.userId, userId))
     .returning();
   if (!row) throw new HttpError(404, "user not found");
   return toUser(row);
 }
 
-export async function setUserDeleted(userId: number, deleted: boolean) {
-  await db.update(appUser).set({ deleted }).where(eq(appUser.userId, userId));
+export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
+  await db
+    .update(appUser)
+    .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
+    .where(eq(appUser.userId, userId));
 }
 
 /* ------------------------------------------------------------------ *

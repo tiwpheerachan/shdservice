@@ -96,7 +96,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     if (!r) return;
     const next = r.status === "Active" ? "Inactive" : "Active";
     try {
-      await postJson("/api/admin/records", { table: config.kind, id, deleted: next === "Inactive" });
+      await postJson("/api/admin/records", { table: config.kind, id, status: next === "Inactive" ? "INACTIVE" : "ACTIVE" });
       setRows((s) => s.map((x) => (x.id === id ? { ...x, status: next } : x)));
       push({ kind: "info", title: "เปลี่ยนสถานะเรียบร้อย", desc: `${r.name} → ${next}` });
     } catch (e) {
@@ -109,10 +109,11 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       push({ kind: "warning", title: "ต้องมีสิทธิ์ลบข้อมูล", desc: r.name });
       return;
     }
+    if (!window.confirm(`ลบ "${r.name}"? (ซ่อนจากทุกหน้า กู้คืนได้ทาง SQL เท่านั้น)`)) return;
     try {
-      await postJson("/api/admin/records", { table: config.kind, id: r.id, deleted: true });
-      setRows((s) => s.map((x) => (x.id === r.id ? { ...x, status: "Inactive" } : x)));
-      push({ kind: "success", title: "ปิดการใช้งานแล้ว", desc: r.name });
+      await postJson("/api/admin/records", { table: config.kind, id: r.id, status: "DELETED" });
+      setRows((s) => s.filter((x) => x.id !== r.id));
+      push({ kind: "success", title: "ลบข้อมูลแล้ว", desc: r.name });
     } catch (e) {
       push({ kind: "error", title: "ลบไม่สำเร็จ", desc: errMsg(e) });
     }

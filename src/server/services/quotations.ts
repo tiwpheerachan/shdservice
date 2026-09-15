@@ -9,6 +9,7 @@ import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
 import { getJob } from "./jobs";
+import { RS, statusFilter, statusStamp, type StatusMode } from "@/server/record-status";
 
 /** quotation_status ids (from the dump) */
 export const QS = { WAIT: 1, SENT: 2, AGREED: 3, DECLINED: 4, CANCELLED: 5, AGREED_WAIT_PAY: 6, EXPIRED: 8, AGREED_WAIT_PARTS: 9 } as const;
@@ -44,7 +45,7 @@ const listSelect = {
   amount: quotationHd.netAmount,
   status: quotationStatus.quotationStatusName,
   statusId: quotationHd.quotationStatusId,
-  active: quotationHd.isActive,
+  active: quotationHd.recordStatus,
   warranty: job.productWarranty,
   parts: quotationHd.sparePartAmount,
   service: quotationHd.serviceAmount,
@@ -76,7 +77,7 @@ function toQuotation(r: ListRow): Quotation {
     vatAmount: num(r.vat),
     approveDate: fmtDateTime(r.approveDate),
     createdBy: fullName(r.createBy, r.createByLast),
-    active: r.active !== false,
+    active: r.active !== RS.DELETED,
   };
 }
 
@@ -100,12 +101,12 @@ const SORT = {
   type: quotationHd.quotationType,
 };
 
-export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: "exclude" | "only" | "all"; jobNo?: string };
+export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string };
 
 function where(q: string, f: QuotationFilters) {
   const term = q.trim();
   return and(
-    f.deleted === "only" ? eq(quotationHd.isActive, false) : f.deleted === "all" ? undefined : ne(quotationHd.isActive, false),
+    statusFilter(quotationHd.recordStatus, f.deleted ?? "exclude"),
     term
       ? or(
           ilike(quotationHd.quotationNo, `%${term}%`),
@@ -310,7 +311,8 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         .set({
           ...values,
           customerApproveDate: AGREED.has(statusId) && !AGREED.has(prev.st ?? 0) ? nowThai() : prev.ap,
-          isActive: statusId === QS.CANCELLED ? false : true,
+          // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API
+          ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
         })
         .where(eq(quotationHd.quotationNo, no));
       await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
@@ -322,7 +324,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         createDate: nowThai(),
         createBy: byUserId,
         customerApproveDate: AGREED.has(statusId) ? nowThai() : SENTINEL_TS,
-        isActive: true,
+        ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
       });
     }
     if (lines.length) {

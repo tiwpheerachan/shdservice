@@ -10,6 +10,7 @@ import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
 import { issueForSaleOrder } from "./stock";
+import { RS, statusFilter, type StatusMode } from "@/server/record-status";
 
 /** approve_status ids */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
@@ -31,7 +32,7 @@ const listSelect = {
   tracking: saleOutHd.deliveryTrackingNo,
   paymentType: saleOutHd.paymentType,
   paymentAmount: saleOutHd.paymentAmount,
-  status: saleOutHd.documentStatus,
+  status: saleOutHd.recordStatus,
   approveDate: saleOutHd.approveDate,
   approverFirst: approver.firstName,
   approverLast: approver.lastName,
@@ -54,7 +55,7 @@ function toSaleOrder(r: ListRow): SaleOrder {
     customerCode: r.customerCode ?? "",
     paymentType: r.paymentType ?? "",
     paymentAmount: num(r.paymentAmount),
-    cancelled: r.status === false,
+    cancelled: r.status === RS.DELETED,
     approveDate: fmtDateTime(r.approveDate),
     approvedBy: fullName(r.approverFirst, r.approverLast),
     deliveryDate: fmtDateTime(r.deliveryDate),
@@ -81,12 +82,12 @@ const SORT = {
   tracking: saleOutHd.deliveryTrackingNo,
 };
 
-export type SaleOrderFilters = { approve?: string; from?: string; to?: string; sales?: string; deleted?: "exclude" | "only" | "all" };
+export type SaleOrderFilters = { approve?: string; from?: string; to?: string; sales?: string; deleted?: StatusMode };
 
 function where(q: string, f: SaleOrderFilters) {
   const term = q.trim();
   return and(
-    f.deleted === "only" ? eq(saleOutHd.documentStatus, false) : f.deleted === "all" ? undefined : ne(saleOutHd.documentStatus, false),
+    statusFilter(saleOutHd.recordStatus, f.deleted ?? "exclude"),
     term
       ? or(
           ilike(saleOutHd.saleOutHdNo, `%${term}%`),

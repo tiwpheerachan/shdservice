@@ -1,31 +1,34 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handle, requireAdmin, requireCan, readJson, HttpError } from "@/server/auth";
-import { setUserDeleted } from "@/server/services/users";
-import { setRecordDeleted, RECORD_MODULES, type RecordTable } from "@/server/services/records";
+import { setRecordStatus, RECORD_MODULES, type RecordTable } from "@/server/services/records";
+import { isRecordStatus, RS, type RecordStatus } from "@/server/record-status";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type Body = { table?: string; id?: string | number; status?: string; deleted?: boolean };
+
 /**
- * Soft-delete or restore a record. The legacy DB has no `deleted` flag; each
- * table has its own convention (is_active=false, job status 0 …) implemented in
- * services/records.ts. Permission: `del` on the table's module (users: admin).
+ * Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete —
+ * nothing is ever removed). Accepts `status`, or the older `deleted` boolean.
+ * Permission: DELETED needs `del` on the table's module (users / masters: admin);
+ * ACTIVE ↔ INACTIVE needs `edit`.
  */
 export const POST = handle(async (req: NextRequest) => {
-  const body = await readJson<{ table?: string; id?: string | number; deleted?: boolean }>(req);
+  const body = await readJson<Body>(req);
   const table = String(body.table ?? "") as RecordTable;
   const id = body.id;
   if (id === undefined || id === null || id === "") throw new HttpError(400, "id required");
-  const deleted = body.deleted === true;
+  const rs: RecordStatus = isRecordStatus(body.status) ? body.status : body.deleted === true ? RS.DELETED : RS.ACTIVE;
 
   if (table === "users") {
-    await requireAdmin(req);
-    await setUserDeleted(Number(id), deleted);
-    return NextResponse.json({ ok: true });
+    const me = await requireAdmin(req);
+    await setRecordStatus("users", Number(id), rs, me.userId);
+    return NextResponse.json({ ok: true, status: rs });
   }
   const module = RECORD_MODULES[table];
   if (module === undefined) throw new HttpError(400, `table not allowed: ${table}`);
-  const user = module === null ? await requireAdmin(req) : await requireCan(req, module, "del");
-  await setRecordDeleted(table, id, deleted, user.userId);
-  return NextResponse.json({ ok: true });
+  const user = module === null ? await requireAdmin(req) : await requireCan(req, module, rs === RS.DELETED ? "del" : "edit");
+  await setRecordStatus(table, id, rs, user.userId);
+  return NextResponse.json({ ok: true, status: rs });
 });

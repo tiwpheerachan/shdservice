@@ -5,8 +5,8 @@ import type { MasterRow, Symptom } from "./mock";
 
 export type Order = { column: string; ascending?: boolean };
 
-// Soft-delete view: hide deleted rows (default), show only deleted, or show all.
-export type DeletedMode = "exclude" | "only" | "all";
+// record_status view: active = ACTIVE only (dropdowns) · exclude = hide DELETED (lists) · only = DELETED · all
+export type DeletedMode = "active" | "exclude" | "only" | "all";
 
 /**
  * Resilient wrapper for server components: if the DB is unreachable (e.g.
@@ -24,14 +24,14 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
 }
 
 export const getCategories = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("categories", "all"));
+  safe(async () => (await import("@/server/services/masters")).listSimple("categories", "exclude"));
 export const getManufacturers = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("manufacturers", "all"));
+  safe(async () => (await import("@/server/services/masters")).listSimple("manufacturers", "exclude"));
 export const getColors = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("colors", "all"));
+  safe(async () => (await import("@/server/services/masters")).listSimple("colors", "exclude"));
 export const getJobTypes = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("job_types", "all"));
+  safe(async () => (await import("@/server/services/masters")).listSimple("job_types", "exclude"));
 export const getProductTypes = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("product_types", "all"));
+  safe(async () => (await import("@/server/services/masters")).listSimple("product_types", "exclude"));
 export const getSymptoms = (): Promise<Symptom[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSymptoms("all"));
+  safe(async () => (await import("@/server/services/masters")).listSymptoms("exclude"));

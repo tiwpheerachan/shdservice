@@ -152,16 +152,17 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
 export const useUsers = (deleted: DeletedMode = "exclude") =>
   useTable<User>("users", { column: "id" }, deleted);
 export const usePermissions = () => useTable<Permission>("permissions", { column: "id" });
-export const useCategories = () => useTable<MasterRow>("categories", { column: "id" });
-export const useManufacturers = () =>
-  useTable<MasterRow>("manufacturers", { column: "name" });
-export const useColors = () => useTable<MasterRow>("colors", { column: "id" });
-export const useJobTypes = () => useTable<MasterRow>("job_types", { column: "id" });
-export const useProductTypes = () =>
-  useTable<MasterRow>("product_types", { column: "id" });
-export const useSymptoms = () => useTable<Symptom>("symptoms", { column: "id" });
-export const useModels = () => useTable<Model>("models", { column: "code" });
-export const useProducts = (params: Params = {}) => useTable<Product>("products", { column: "sysCode" }, "exclude", params);
+// Master lookups feed dropdowns → ACTIVE rows only (INACTIVE stay visible on the admin pages).
+export const useCategories = (mode: DeletedMode = "active") => useTable<MasterRow>("categories", { column: "id" }, mode);
+export const useManufacturers = (mode: DeletedMode = "active") =>
+  useTable<MasterRow>("manufacturers", { column: "name" }, mode);
+export const useColors = (mode: DeletedMode = "active") => useTable<MasterRow>("colors", { column: "id" }, mode);
+export const useJobTypes = (mode: DeletedMode = "active") => useTable<MasterRow>("job_types", { column: "id" }, mode);
+export const useProductTypes = (mode: DeletedMode = "active") =>
+  useTable<MasterRow>("product_types", { column: "id" }, mode);
+export const useSymptoms = (mode: DeletedMode = "active") => useTable<Symptom>("symptoms", { column: "id" }, mode);
+export const useModels = (mode: DeletedMode = "active") => useTable<Model>("models", { column: "code" }, mode);
+export const useProducts = (params: Params = {}) => useTable<Product>("products", { column: "sysCode" }, "active", params);
 export const useMovements = (params: Params = {}) =>
   useTable<Movement>("movements", undefined, "exclude", params);
 /** Recent customers (server caps the list); pass { q } to search the whole table. */

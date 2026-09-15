@@ -37,6 +37,7 @@ import {
 } from "@/server/mappers/format";
 import { getCustomerByCode, getCustomerById } from "./customers";
 import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
+import { RS, statusStamp } from "@/server/record-status";
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -271,7 +272,8 @@ const dateCol = (by?: JobFilters["dateBy"]) => (by === "repaired" ? job.jobRepai
 function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   return and(
-    f.includeCancelled ? undefined : ne(job.jobStatusId, JS.CANCELLED),
+    // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for
+    f.includeCancelled ? undefined : ne(job.recordStatus, RS.DELETED),
     term
       ? or(
           ilike(job.jobNo, `%${term}%`),
@@ -523,7 +525,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     db
       .select()
       .from(documentAttach)
-      .where(and(eq(documentAttach.referenceTopic, "Jobs"), eq(documentAttach.referenceItemCode, jobNo), ne(documentAttach.isActive, false)))
+      .where(and(eq(documentAttach.referenceTopic, "Jobs"), eq(documentAttach.referenceItemCode, jobNo), ne(documentAttach.recordStatus, RS.DELETED)))
       .orderBy(asc(documentAttach.documentAttachId)),
     db
       .select({ statusId: jobLog.jobStatusId, status: jobStatus.jobStatusName, date: jobLog.jobLogDate, f: appUser.firstName, l: appUser.lastName })
@@ -1249,8 +1251,8 @@ export async function addAttachment(jobNo: string, originalName: string, systemN
   return row.id;
 }
 
-export async function removeAttachment(id: number) {
-  await db.update(documentAttach).set({ isActive: false }).where(eq(documentAttach.documentAttachId, id));
+export async function removeAttachment(id: number, byUserId = 0) {
+  await db.update(documentAttach).set(statusStamp(RS.DELETED, byUserId)).where(eq(documentAttach.documentAttachId, id));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1269,6 +1271,7 @@ async function computeDashboard() {
     .select({ group: jobStatus.jobStatusGroup, n: count() })
     .from(job)
     .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+    .where(ne(job.recordStatus, RS.DELETED))
     .groupBy(jobStatus.jobStatusGroup);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
   const G: Record<string, { key: string; label: string; sub: string; tone: "primary" | "warning" | "info" | "success" | "danger"; ord: number }> = {
@@ -1293,7 +1296,7 @@ async function computeDashboard() {
            count(*) FILTER (WHERE d BETWEEN 15 AND 30) AS d1530,
            count(*) FILTER (WHERE d > 30) AS over30
       FROM (SELECT job_status_id, GREATEST(1, (current_date - job_create_date::date)) AS d
-              FROM job) j
+              FROM job WHERE record_status <> 'DELETED') j
       JOIN job_status s ON s.job_status_id = j.job_status_id
      WHERE s.job_status_group NOT IN ('Finished','Cancel')
      GROUP BY s.job_status_name, s.display_order
@@ -1311,8 +1314,8 @@ async function computeDashboard() {
     WITH m AS (SELECT to_char(date_trunc('month', current_date) - (n || ' month')::interval, 'YYYY-MM') AS ym
                  FROM generate_series(11, 0, -1) n)
     SELECT m.ym,
-           (SELECT count(*) FROM job WHERE to_char(job_create_date, 'YYYY-MM') = m.ym) AS open,
-           (SELECT count(*) FROM job WHERE job_closed_date > '1901-01-01' AND to_char(job_closed_date, 'YYYY-MM') = m.ym) AS close
+           (SELECT count(*) FROM job WHERE record_status <> 'DELETED' AND to_char(job_create_date, 'YYYY-MM') = m.ym) AS open,
+           (SELECT count(*) FROM job WHERE record_status <> 'DELETED' AND job_closed_date > '1901-01-01' AND to_char(job_closed_date, 'YYYY-MM') = m.ym) AS close
       FROM m ORDER BY m.ym`);
   const TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const monthlyRows = (monthly.rows as { ym: string; open: string; close: string }[]).map((r) => {
@@ -1324,7 +1327,7 @@ async function computeDashboard() {
     .select({ name: symptom.symptomName, n: count() })
     .from(job)
     .innerJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-    .where(sql`${job.jobCreateDate} >= current_date - interval '365 day'`)
+    .where(and(ne(job.recordStatus, RS.DELETED), sql`${job.jobCreateDate} >= current_date - interval '365 day'`))
     .groupBy(symptom.symptomName)
     .orderBy(desc(count()))
     .limit(8);
@@ -1368,7 +1371,7 @@ export async function jobStats() {
   let fresh = 0;
   let done = 0;
   for (const r of rows) {
-    if (r.id === JS.CANCELLED) continue;
+    if (r.id === JS.CANCELLED) continue; // = DELETED
     const n = Number(r.n);
     total += n;
     if (r.id === JS.NEW) fresh += n;

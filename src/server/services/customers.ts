@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { db } from "@/db/client";
 import type { Tx } from "@/db/client";
@@ -8,8 +8,9 @@ import type { Customer } from "@/data/mock";
 import { HttpError } from "@/server/auth";
 import { nowThai, str } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
-export type DeletedMode = "exclude" | "only" | "all";
+export type DeletedMode = StatusMode;
 
 type Row = typeof customer.$inferSelect;
 
@@ -32,7 +33,7 @@ export function toCustomer(r: Row): Customer {
     email: r.email ?? "",
     line: r.lineId ?? "",
     taxId: r.customerCardId ?? "",
-    status: r.isActive === false ? "Inactive" : "Active",
+    status: uiStatus(r.recordStatus),
     // extra DB-backed fields (optional on the UI type)
     id: r.customerId,
     type: r.customerType ?? "Normal",
@@ -57,22 +58,10 @@ export async function listCustomers(opts: {
   limit?: number;
 } = {}): Promise<Customer[]> {
   const { q = "", deleted = "exclude", limit = 500 } = opts;
-  const active =
-    deleted === "exclude" ? ne(customer.isActive, false) : deleted === "only" ? eq(customer.isActive, false) : undefined;
-  const term = q.trim();
-  const search = term
-    ? or(
-        ilike(customer.customerCode, `%${term}%`),
-        ilike(customer.customerName, `%${term}%`),
-        ilike(customer.phoneNumber, `%${term}%`),
-        ilike(customer.email, `%${term}%`),
-        ilike(customer.customerCardId, `%${term}%`)
-      )
-    : undefined;
   const rows = await db
     .select()
     .from(customer)
-    .where(and(active, search))
+    .where(customerWhere(q, deleted))
     .orderBy(desc(customer.customerId))
     .limit(Math.min(limit, 5000));
   return rows.map(toCustomer);
@@ -83,13 +72,12 @@ const SORT = {
   name: customer.customerName,
   phone: customer.phoneNumber,
   email: customer.email,
-  status: customer.isActive,
+  status: customer.recordStatus,
   address: customer.customerAddress,
 };
 
 function customerWhere(q: string, deleted: DeletedMode) {
-  const active =
-    deleted === "exclude" ? ne(customer.isActive, false) : deleted === "only" ? eq(customer.isActive, false) : undefined;
+  const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
   const search = term
     ? or(
@@ -189,7 +177,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       email: str(i.email).slice(0, 50),
       lineId: str(i.line).slice(0, 50),
       usePriceGroup: PRICE_GROUP_VALUE[str(i.priceGroup)] ?? (str(i.priceGroup) || "Retail"),
-      isActive: (i.status ?? "Active") !== "Inactive",
+      ...statusStamp(fromUiStatus(i.status), byUserId),
     };
     if (i.code) {
       const [row] = await tx.update(customer).set(values).where(eq(customer.customerCode, i.code)).returning();

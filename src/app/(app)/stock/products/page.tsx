@@ -64,7 +64,7 @@ export default function ProductsPage() {
   const { push } = useToast();
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath("/stock/products");
   // inactive parts are included so the "สถานะ" filter can show them
-  const { data: ALL, loading, refetch } = useProducts({ deleted: "all" });
+  const { data: ALL, loading, refetch } = useProducts({ deleted: "exclude" });
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: CATEGORIES } = useCategories();
 
@@ -107,7 +107,7 @@ export default function ProductsPage() {
     }
     if (!window.confirm(`ยกเลิกรายการอะไหล่ ${r.sysCode} — ${r.name}?`)) return;
     try {
-      await postJson("/api/admin/records", { table: "products", id: r.sysCode, deleted: true });
+      await postJson("/api/admin/records", { table: "products", id: r.sysCode, status: "DELETED" });
       push({ kind: "success", title: "ยกเลิกรายการอะไหล่แล้ว", desc: r.sysCode });
       refetch();
     } catch (e) {

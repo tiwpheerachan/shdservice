@@ -1,6 +1,5 @@
 import "server-only";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
 import {
   category,
@@ -16,13 +15,11 @@ import type { MasterRow, Symptom, Model } from "@/data/mock";
 import { HttpError } from "@/server/auth";
 import { fmtDateTime, money, nowThai, num, str } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode, type RecordStatus } from "@/server/record-status";
 
-export type DeletedMode = "exclude" | "only" | "all";
+export type DeletedMode = StatusMode;
 
-const activeFilter = (col: PgColumn, deleted: DeletedMode) =>
-  deleted === "exclude" ? ne(col, false) : deleted === "only" ? eq(col, false) : undefined;
-
-const status = (active: boolean | null) => (active === false ? "Inactive" : "Active") as MasterRow["status"];
+const status = (rs: string | null) => uiStatus(rs) as MasterRow["status"];
 
 /* ------------------------------------------------------------------ *
  * Simple id/name/detail/is_active masters
@@ -36,7 +33,7 @@ const SIMPLE = {
     name: category.categoryName,
     detail: category.categoryDescription,
     extra: category.shotCode,
-    active: category.isActive,
+    active: category.recordStatus,
     // drizzle insert/update keys (TS property names, not DB column names)
     keys: { name: "categoryName", detail: "categoryDescription", extra: "shotCode", active: "isActive" },
     nameLen: 50,
@@ -47,7 +44,7 @@ const SIMPLE = {
     name: manufacturer.manufacturerName,
     detail: manufacturer.logoName,
     extra: null,
-    active: manufacturer.isActive,
+    active: manufacturer.recordStatus,
     keys: { name: "manufacturerName", detail: "logoName", extra: null, active: "isActive" },
     nameLen: 50,
   },
@@ -57,7 +54,7 @@ const SIMPLE = {
     name: color.colorName,
     detail: color.description,
     extra: null,
-    active: color.isActive,
+    active: color.recordStatus,
     keys: { name: "colorName", detail: "description", extra: null, active: "isActive" },
     nameLen: 50,
   },
@@ -67,7 +64,7 @@ const SIMPLE = {
     name: jobType.jobTypeName,
     detail: jobType.jobTypeDescription,
     extra: null,
-    active: jobType.isActive,
+    active: jobType.recordStatus,
     keys: { name: "jobTypeName", detail: "jobTypeDescription", extra: null, active: "isActive" },
     nameLen: 50,
   },
@@ -77,7 +74,7 @@ const SIMPLE = {
     name: productType.productTypeName,
     detail: null,
     extra: null,
-    active: productType.isActive,
+    active: productType.recordStatus,
     keys: { name: "productTypeName", detail: null, extra: null, active: "isActive" },
     nameLen: 50,
   },
@@ -98,7 +95,7 @@ export async function listSimple(kind: SimpleKind, deleted: DeletedMode = "exclu
       active: d.active,
     })
     .from(d.table)
-    .where(activeFilter(d.active, deleted))
+    .where(statusFilter(d.active, deleted))
     .orderBy(asc(d.id));
   return rows.map((r) => ({
     id: String(r.id),
@@ -111,12 +108,14 @@ export async function listSimple(kind: SimpleKind, deleted: DeletedMode = "exclu
 
 export async function saveSimple(
   kind: SimpleKind,
-  input: { id?: string; name: string; detail?: string; extra?: string; status?: string }
+  input: { id?: string; name: string; detail?: string; extra?: string; status?: string },
+  byUserId = 0
 ): Promise<MasterRow> {
   const d = SIMPLE[kind];
   const name = str(input.name).slice(0, d.nameLen);
   if (!name) throw new HttpError(400, "ต้องระบุชื่อ");
-  const values: Record<string, unknown> = { [d.keys.name]: name, [d.keys.active]: (input.status ?? "Active") !== "Inactive" };
+  const rs = fromUiStatus(input.status);
+  const values: Record<string, unknown> = { [d.keys.name]: name, [d.keys.active]: rs === "ACTIVE", recordStatus: rs, statusChangedAt: nowThai(), statusChangedBy: byUserId };
   if (d.keys.detail) values[d.keys.detail] = str(input.detail).slice(0, 100);
   if (d.keys.extra) values[d.keys.extra] = str(input.extra).slice(0, 50);
 
@@ -130,17 +129,18 @@ export async function saveSimple(
 
   if (input.id) {
     await db.update(d.table).set(values).where(eq(d.id, Number(input.id)));
-    const rows = await listSimple(kind, "all");
+    const rows = await listSimple(kind, "exclude");
     return rows.find((r) => r.id === input.id)!;
   }
   const [row] = await db.insert(d.table).values(values).returning({ id: d.id });
-  const rows = await listSimple(kind, "all");
+  const rows = await listSimple(kind, "exclude");
   return rows.find((r) => r.id === String(row.id))!;
 }
 
-export async function setSimpleActive(kind: SimpleKind, id: number, active: boolean) {
+/** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
+export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
-  await db.update(d.table).set({ [d.keys.active]: active }).where(eq(d.id, id));
+  await db.update(d.table).set({ [d.keys.active]: rs === "ACTIVE", ...statusStamp(rs, byUserId, false) }).where(eq(d.id, id));
 }
 
 /* ------------------------------------------------------------------ *
@@ -150,32 +150,35 @@ export async function listSymptoms(deleted: DeletedMode = "exclude"): Promise<Sy
   const rows = await db
     .select()
     .from(symptom)
-    .where(activeFilter(symptom.isActive, deleted))
+    .where(statusFilter(symptom.recordStatus, deleted))
     .orderBy(asc(symptom.symptomId));
   return rows.map((r) => ({
     id: String(r.symptomId),
     name: r.symptomName ?? "",
     detail: r.symptomDescription ?? "",
     group: r.symptomGroupName ?? "",
-    status: status(r.isActive),
+    status: status(r.recordStatus),
     extra: "",
   }));
 }
 
-export async function saveSymptom(input: {
-  id?: string;
-  name: string;
-  detail?: string;
-  group?: string;
-  status?: string;
-}): Promise<Symptom> {
+export async function saveSymptom(
+  input: {
+    id?: string;
+    name: string;
+    detail?: string;
+    group?: string;
+    status?: string;
+  },
+  byUserId = 0
+): Promise<Symptom> {
   const name = str(input.name).slice(0, 50);
   if (!name) throw new HttpError(400, "ต้องระบุชื่ออาการเสีย");
   const values = {
     symptomName: name,
     symptomDescription: str(input.detail).slice(0, 100),
     symptomGroupName: str(input.group).slice(0, 50),
-    isActive: (input.status ?? "Active") !== "Inactive",
+    ...statusStamp(fromUiStatus(input.status), byUserId),
   };
   let id: number;
   if (input.id) {
@@ -185,11 +188,11 @@ export async function saveSymptom(input: {
     const [row] = await db.insert(symptom).values(values).returning({ id: symptom.symptomId });
     id = row.id;
   }
-  return (await listSymptoms("all")).find((r) => r.id === String(id))!;
+  return (await listSymptoms("exclude")).find((r) => r.id === String(id))!;
 }
 
-export async function setSymptomActive(id: number, active: boolean) {
-  await db.update(symptom).set({ isActive: active }).where(eq(symptom.symptomId, id));
+export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
+  await db.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
 }
 
 /* ------------------------------------------------------------------ *
@@ -203,12 +206,12 @@ export async function listModels(deleted: DeletedMode = "exclude"): Promise<Mode
       brand: manufacturer.manufacturerName,
       price: model.marketPrice,
       updated: model.lastUpdate,
-      active: model.isActive,
+      active: model.recordStatus,
       id: model.modelId,
     })
     .from(model)
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
-    .where(activeFilter(model.isActive, deleted))
+    .where(statusFilter(model.recordStatus, deleted))
     .orderBy(asc(model.modelCode));
   return rows.map((r) => ({
     code: r.code ?? String(r.id),
@@ -220,13 +223,16 @@ export async function listModels(deleted: DeletedMode = "exclude"): Promise<Mode
   }));
 }
 
-export async function saveModel(input: {
-  code?: string;
-  name: string;
-  brand: string;
-  price?: number | string;
-  status?: string;
-}): Promise<Model> {
+export async function saveModel(
+  input: {
+    code?: string;
+    name: string;
+    brand: string;
+    price?: number | string;
+    status?: string;
+  },
+  byUserId = 0
+): Promise<Model> {
   const name = str(input.name).slice(0, 50);
   if (!name) throw new HttpError(400, "ต้องระบุ Model Name");
   const brand = await db
@@ -235,13 +241,11 @@ export async function saveModel(input: {
     .where(eq(manufacturer.manufacturerName, str(input.brand)))
     .limit(1);
   if (!brand[0]) throw new HttpError(400, "ไม่พบยี่ห้อ " + str(input.brand));
-  const active = (input.status ?? "Active") !== "Inactive";
-
   const values = {
     modelName: name,
     manufacturerId: brand[0].id,
     marketPrice: money(num(input.price)),
-    isActive: active,
+    ...statusStamp(fromUiStatus(input.status), byUserId),
     lastUpdate: nowThai(),
   };
 
@@ -254,11 +258,11 @@ export async function saveModel(input: {
     await tx.insert(model).values({ ...values, modelCode: c, tierId: 0 });
     return c;
   });
-  return (await listModels("all")).find((r) => r.code === code)!;
+  return (await listModels("exclude")).find((r) => r.code === code)!;
 }
 
-export async function setModelActive(code: string, active: boolean) {
-  await db.update(model).set({ isActive: active, lastUpdate: nowThai() }).where(eq(model.modelCode, code));
+export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
+  await db.update(model).set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() }).where(eq(model.modelCode, code));
 }
 
 export { runningNo };

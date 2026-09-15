@@ -20,7 +20,7 @@ type ModelForm = { code: string; name: string; brand: string; productType: strin
 
 export default function ModelsPage() {
   const { push } = useToast();
-  const { data: MODELS, loading, refetch } = useModels();
+  const { data: MODELS, loading, refetch } = useModels("exclude");
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const [open, setOpen] = React.useState(false);
