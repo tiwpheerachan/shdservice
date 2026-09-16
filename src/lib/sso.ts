@@ -5,6 +5,10 @@ export const SSO = {
   authorizeUrl: "https://sso.shd-technology.co.th/api/v1/sso/authorize",
   verifyUrl: "https://sso.shd-technology.co.th/api/v1/sso/verify",
   sessionUrl: "https://sso.shd-technology.co.th/api/v1/sso/session",
+  // Central sign-out (POST, top-level navigation only): clears sso_session and
+  // lands on the SSO login page. The SSO ignores prompt=login/max_age, so this is
+  // the only way to "เข้าสู่ระบบด้วยบัญชีอื่น". Accepts no return URL.
+  logoutUrl: "https://sso.shd-technology.co.th/api/auth/logout",
 };
 
 export const STATE_COOKIE = "os_state";
