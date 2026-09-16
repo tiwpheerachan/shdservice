@@ -11,6 +11,10 @@ import { SSO } from "@/lib/sso";
 // the form into a new tab, then send this tab back through /api/sso/login, which
 // now lands on the SSO login page (with next= back to our callback).
 const DELAY_MS = 2500;
+const CONFIRM_TEXT =
+  "การเข้าสู่ระบบด้วยบัญชีอื่นจะออกจากระบบ SSO กลางของ SHD ด้วย\n" +
+  "แอปอื่นที่เข้าสู่ระบบด้วย SSO บนเบราว์เซอร์นี้จะต้องเข้าสู่ระบบใหม่\n\n" +
+  "ดำเนินการต่อหรือไม่?";
 
 export function SwitchAccountButton({ next, className }: { next: string; className: string }) {
   const [phase, setPhase] = React.useState<"idle" | "wait">("idle");
@@ -27,6 +31,9 @@ export function SwitchAccountButton({ next, className }: { next: string; classNa
   }, [phase, proceed]);
 
   const start = () => {
+    // central sign-out = every SSO app on this browser is signed out too — make
+    // the user confirm (a native confirm keeps the user gesture for the new tab)
+    if (!window.confirm(CONFIRM_TEXT)) return;
     // must run synchronously inside the click so the new tab is not popup-blocked
     const f = document.createElement("form");
     f.method = "post";
