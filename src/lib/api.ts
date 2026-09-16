@@ -58,3 +58,21 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 }
 
 export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Open an .xlsx download of a list under the given filters (same params as the data hook). */
+export function exportXlsx(resource: string, params: Record<string, string | number | boolean | undefined | null> = {}) {
+  if (typeof window === "undefined") return;
+  window.location.href = `/api/export/${resource}${qs(params)}`;
+}
+
+/** Upload one file (product image / payment slip) → stored path. */
+export async function uploadFile(kind: "product-image" | "sale-order-slip" | "job-slip", id: string, file: File) {
+  const fd = new FormData();
+  fd.append("kind", kind);
+  fd.append("id", id);
+  fd.append("file", file);
+  return api<{ ok: true; path: string; file: string }>("/api/upload", { method: "POST", body: fd });
+}
+
+/** URL that serves a stored file through the app (signed URL behind login). */
+export const fileUrl = (path: string) => `/api/files${qs({ path })}`;
