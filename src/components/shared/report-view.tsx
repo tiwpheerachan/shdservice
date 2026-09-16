@@ -31,6 +31,7 @@ export function ReportView<T extends Record<string, unknown>>({
   loading = false,
   onApply,
   server,
+  onExport,
 }: {
   title: string;
   description: string;
@@ -44,6 +45,8 @@ export function ReportView<T extends Record<string, unknown>>({
   onApply?: (values: ReportValues) => void;
   /** server-side paging for the report table (rows = current page) */
   server?: ServerTable;
+  /** download the whole report (same filters) as .xlsx */
+  onExport?: () => void;
 }) {
   const { push } = useToast();
   const keyOf = (f: ReportFilter) => f.key ?? f.label;
@@ -78,14 +81,15 @@ export function ReportView<T extends Record<string, unknown>>({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => push({ kind: "success", title: "กำลังส่งออกไฟล์ Excel" })}
+              onClick={() => (onExport ? onExport() : push({ kind: "warning", title: "หน้านี้ยังไม่รองรับการส่งออก" }))}
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
               Excel
             </Button>
             <Button
               size="sm"
-              onClick={() => push({ kind: "success", title: "กำลังสร้างไฟล์ PDF" })}
+              onClick={() => window.print()}
+              title="เปิดหน้าต่างพิมพ์ — เลือก 'บันทึกเป็น PDF'"
             >
               <Download className="h-3.5 w-3.5" />
               PDF

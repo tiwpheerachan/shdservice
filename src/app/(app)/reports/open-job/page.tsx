@@ -9,6 +9,7 @@ import { useJobsPage, useJobSummary, useJobTypes } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 const columns: Column<Job>[] = [
   { key: "no", header: "เลขที่งาน", width: "130px", cell: (r) => <span className="num font-medium">{r.no}</span> },
@@ -45,6 +46,7 @@ export default function Page() {
         { kind: "select", key: "channel", label: "ช่องทางการขาย", options: ["- - Select All - -", ...CHANNELS] },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("jobs", { ...filters, q: table.q })}
       kpis={[
         { label: "งานที่เปิดทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
         { label: "งานใหม่ (ยังไม่เริ่ม)", value: int(newJobs), tone: "warning" },

@@ -9,6 +9,7 @@ import { useSaleOrdersPage, useSaleOrderSummary, useStaff } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 const TONE: Record<string, "warning" | "success" | "danger" | "info"> = {
   "รออนุมัติ": "warning",
@@ -51,6 +52,7 @@ export default function Page() {
         { kind: "select", key: "approve", label: "สถานะอนุมัติ", options: ["- - Select All - -", ...Object.keys(TONE)] },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("sale_orders", { ...filters, q: table.q })}
       kpis={[
         { label: "ใบสั่งขายทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
         { label: "อนุมัติแล้ว", value: int(S?.approved ?? 0), tone: "success" },

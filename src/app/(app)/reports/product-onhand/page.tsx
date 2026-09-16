@@ -7,6 +7,7 @@ import { type Product } from "@/data/mock";
 import { useProductsPage, useProductStats, useCategories, useManufacturers } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int, cn } from "@/lib/utils";
+import { exportXlsx } from "@/lib/api";
 import * as React from "react";
 
 type Row = Product & { value: number };
@@ -60,6 +61,7 @@ export default function Page() {
         { kind: "text", key: "q", label: "รหัส / ชื่ออะไหล่", placeholder: "P02534" },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("products", { q: table.q || f.q, deleted: "active" })}
       kpis={[
         { label: "จำนวนคงเหลือรวม", value: `${int(totalQty)} ชิ้น`, tone: "primary" },
         { label: "มูลค่าสต๊อกรวม", value: baht(totalValue), tone: "success" },

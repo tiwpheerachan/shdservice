@@ -9,6 +9,7 @@ import { useQuotationsPage, useQuotationSummary } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
   "รอเสนอราคา": "warning",
@@ -52,6 +53,7 @@ export default function Page() {
         { kind: "select", key: "status", label: "สถานะ", options: ["- - Select All - -", ...QUOTATION_STATUS_OPTIONS] },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("quotations", { ...filters, q: table.q })}
       kpis={[
         { label: "ใบเสนอราคาทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
         { label: "ลูกค้าตกลงซ่อม", value: int(S?.agreed ?? 0), tone: "success" },

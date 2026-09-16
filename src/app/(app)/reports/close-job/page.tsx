@@ -9,6 +9,7 @@ import { useJobsPage, useJobSummary } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 // TAT = วันที่ปิดงาน − วันที่เปิดงาน
 const tatDays = (r: Job) => {
@@ -64,6 +65,7 @@ export default function Page() {
         { kind: "text", key: "no", label: "เลขที่งาน", placeholder: "J2612164" },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("jobs", { ...filters, q: table.q || f.no })}
       kpis={[
         { label: "งานที่ปิดแล้ว", value: int(S?.total ?? 0), tone: "success" },
         { label: "ยอดรับชำระรวม", value: baht(total) },

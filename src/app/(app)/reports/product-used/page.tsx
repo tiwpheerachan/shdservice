@@ -8,6 +8,7 @@ import { useIssuedLinesPage, useIssuedStats, useCategories, type IssuedLine } fr
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 type Row = IssuedLine;
 
@@ -46,6 +47,7 @@ export default function Page() {
         { kind: "text", key: "code", label: "รหัสอะไหล่", placeholder: "P02534" },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("issued_lines", { ...filters, q: table.q })}
       kpis={[
         { label: "รายการเคลื่อนไหว", value: int(S?.lines ?? 0), tone: "primary" },
         { label: "จำนวนที่เบิกรวม", value: `${int(qty)} ชิ้น` },

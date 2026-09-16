@@ -9,6 +9,7 @@ import { useJobsPage, useJobSummary, useSymptoms, useStaff } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 const columns: Column<Job>[] = [
   { key: "no", header: "เลขที่งาน", width: "130px", cell: (r) => <span className="num font-medium">{r.no}</span> },
@@ -46,6 +47,7 @@ export default function Page() {
         { kind: "select", key: "symptom", label: "อาการเสีย", options: ["- - Select All - -", ...SYMPTOMS.map((s) => s.name)] },
       ]}
       onApply={setF}
+      onExport={() => exportXlsx("jobs", { ...filters, q: table.q })}
       kpis={[
         { label: "งานที่ดำเนินการ", value: int(count), tone: "primary" },
         { label: "ซ่อมสำเร็จ", value: int(done), tone: "success" },
