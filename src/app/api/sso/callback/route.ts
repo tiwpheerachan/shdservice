@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { SSO, STATE_COOKIE, STATE_SEP, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
 import {
   signSession,
+  verifySession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
   type SessionUser,
@@ -52,11 +53,18 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const cookieState = request.cookies.get(STATE_COOKIE)?.value;
+  const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? "").split(STATE_SEP).filter(Boolean);
+  const nextFromState = state?.split("|")[1] || DEFAULT_AFTER_LOGIN;
 
-  if (!code) return fail(request, "missing_code");
-  if (!state || !cookieState || state !== cookieState)
-    return fail(request, "state_mismatch");
+  // Reloading the callback URL (or a second tab finishing after the first) must
+  // not throw the user out: if this browser already holds a valid session, go on.
+  const existing = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  const continueIfSignedIn = () =>
+    existing ? NextResponse.redirect(new URL(nextFromState, appOrigin(request))) : null;
+
+  if (!code) return continueIfSignedIn() ?? fail(request, "missing_code");
+  if (!state || !cookieStates.includes(state))
+    return continueIfSignedIn() ?? fail(request, "state_mismatch");
 
   const clientSecret = process.env.SSO_CLIENT_SECRET;
   if (!clientSecret) return fail(request, "server_not_configured");
@@ -79,7 +87,8 @@ export async function GET(request: NextRequest) {
       const body = await res.text().catch(() => "");
       // eslint-disable-next-line no-console
       console.error(`[sso] verify failed ${res.status} for client ${SSO.clientId}: ${body.slice(0, 300)}`);
-      return fail(request, `verify_${res.status}`);
+      // a code that was already exchanged (page reload) while a session exists → just continue
+      return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
     }
     identity = await res.json();
     if (process.env.SSO_DEBUG === "1") {
@@ -132,8 +141,7 @@ export async function GET(request: NextRequest) {
     exp: Date.now() + SESSION_TTL_MS,
   };
 
-  const next = state.split("|")[1] || DEFAULT_AFTER_LOGIN;
-  const res = NextResponse.redirect(new URL(next, appOrigin(request)));
+  const res = NextResponse.redirect(new URL(nextFromState, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.
   // os_state has Max-Age=600 and expires on its own.

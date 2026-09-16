@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { NextResponse, type NextRequest } from "next/server";
+import { SSO, STATE_COOKIE, STATE_SEP, MAX_STATES, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const next = url.searchParams.get("next") || DEFAULT_AFTER_LOGIN;
 
@@ -23,8 +23,14 @@ export async function GET(request: Request) {
     authorize.searchParams.set("max_age", "0");
   }
 
+  // Several logins can start within seconds (link prefetch, a second tab, two
+  // 401 handlers racing) — each used to overwrite the cookie and the earlier
+  // flow then failed with state_mismatch. Keep the last few states instead.
+  const prev = request.cookies.get(STATE_COOKIE)?.value ?? "";
+  const states = [state, ...prev.split(STATE_SEP).filter(Boolean)].slice(0, MAX_STATES);
+
   const res = NextResponse.redirect(authorize.toString());
-  res.cookies.set(STATE_COOKIE, state, {
+  res.cookies.set(STATE_COOKIE, states.join(STATE_SEP), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

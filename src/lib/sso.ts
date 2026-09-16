@@ -8,6 +8,9 @@ export const SSO = {
 };
 
 export const STATE_COOKIE = "os_state";
+/** os_state holds the last few login states (newest first), separated by this. */
+export const STATE_SEP = ";";
+export const MAX_STATES = 5;
 export const DEFAULT_AFTER_LOGIN = "/jobs/dashboard";
 
 /**

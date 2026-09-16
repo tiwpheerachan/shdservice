@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const HERO = "/hero-shd.jpg";
 
 const ERRORS: Record<string, string> = {
-  state_mismatch: "เซสชันหมดอายุระหว่างเข้าสู่ระบบ กรุณาลองใหม่",
+  state_mismatch: "ลิงก์เข้าสู่ระบบหมดอายุหรือถูกใช้ไปแล้ว กรุณากดเข้าสู่ระบบอีกครั้ง",
   missing_code: "ไม่ได้รับรหัสยืนยันจากระบบกลาง",
   no_email: "บัญชีนี้ไม่มีอีเมลในระบบกลาง",
   server_not_configured: "ยังไม่ได้ตั้งค่า CENTRAL_API_KEY บนเซิร์ฟเวอร์",
@@ -53,14 +53,15 @@ export default async function LoginPage({
             </p>
           )}
 
-          <Link
+          {/* plain <a>: a Next <Link> would prefetch /api/sso/login and mint a stray state */}
+          <a
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
             className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
             style={{ background: "linear-gradient(90deg,#43a6f8,#55d5a1)" }}
           >
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO
-          </Link>
+          </a>
 
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
