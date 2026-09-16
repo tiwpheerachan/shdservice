@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { AppShell } from "@/components/layout/app-shell";
 import { AccessProvider } from "@/lib/use-access";
 import { userFromCookies, grantsForUserType } from "@/server/auth";
@@ -19,7 +20,15 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const user = await userFromCookies();
-  if (!user) redirect("/api/sso/login");
+  if (!user) {
+    // soft navigation / prefetch → our /login page; real navigation → SSO directly
+    const h = await headers();
+    if (h.get("rsc") || h.get("next-router-prefetch")) {
+      const next = h.get("next-url") || "";
+      redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
+    }
+    redirect("/api/sso/login");
+  }
   if (!user.approved) redirect("/pending");
 
   let grants = {};

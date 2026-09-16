@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, STATE_SEP, MAX_STATES, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { SSO, STATE_COOKIE, STATE_SEP, MAX_STATES, DEFAULT_AFTER_LOGIN, appOrigin, isRouterFetch } from "@/lib/sso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,6 +7,15 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const next = url.searchParams.get("next") || DEFAULT_AFTER_LOGIN;
+
+  // A soft navigation / prefetch landed here (session gone mid-session): send the
+  // router to the app's own /login page instead of the SSO — the user clicks once
+  // and the real flow runs as a top-level navigation with cookies intact.
+  if (isRouterFetch(request)) {
+    const to = new URL("/login", appOrigin(request));
+    to.searchParams.set("next", next);
+    return NextResponse.redirect(to);
+  }
 
   // CSRF state = random nonce + where to return afterwards
   const state = `${crypto.randomUUID()}|${next}`;

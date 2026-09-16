@@ -14,10 +14,13 @@ export function middleware(request: NextRequest) {
   const hasCookie = !!request.cookies.get(SESSION_COOKIE)?.value;
   if (hasCookie) return NextResponse.next();
 
-  // No cookie at all → straight to central SSO login.
+  // No cookie at all → straight to central SSO login (a real navigation), or to
+  // our /login page when this is the client router / a link prefetch — those
+  // must not start an SSO flow (see isRouterFetch in lib/sso.ts).
+  const routerFetch = !!(request.headers.get("rsc") || request.headers.get("next-router-prefetch"));
   const to = request.nextUrl.clone();
   const path = request.nextUrl.pathname + request.nextUrl.search;
-  to.pathname = "/api/sso/login";
+  to.pathname = routerFetch ? "/login" : "/api/sso/login";
   to.search = "";
   if (path && path !== "/") to.searchParams.set("next", path);
   return NextResponse.redirect(to);

@@ -34,3 +34,14 @@ export function appOrigin(request: Request): string {
   }
   return new URL(request.url).origin;
 }
+
+/**
+ * True for requests made by Next's client router (soft navigation / link
+ * prefetch) rather than a real top-level navigation. Such requests must never
+ * start or end an SSO flow: the browser drops cookies on their cross-site redirect
+ * chain and every prefetched link would mint its own login state.
+ */
+export function isRouterFetch(request: Request): boolean {
+  return !!(request.headers.get("rsc") || request.headers.get("next-router-prefetch"));
+}
+

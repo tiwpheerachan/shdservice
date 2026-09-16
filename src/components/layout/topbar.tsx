@@ -128,7 +128,9 @@ export function Topbar({
           <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
           <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>
         </div>
-        <Link
+        {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
+            /api/sso/logout silently signed the user out after every page load */}
+        <a
           href="/api/sso/logout"
           title="ออกจากระบบ"
           className={cn(
@@ -137,7 +139,7 @@ export function Topbar({
           )}
         >
           <LogOut className="h-4 w-4" />
-        </Link>
+        </a>
       </div>
     </header>
   );
