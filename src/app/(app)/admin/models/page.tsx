@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { type Model } from "@/data/mock";
 import { useModelsPage, useManufacturers, useProductTypes } from "@/data/db";
 import { baht } from "@/lib/utils";
-import { postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg, exportXlsx } from "@/lib/api";
 
 type ModelForm = { code: string; name: string; brand: string; productType: string; price: string; status: string };
 
@@ -33,11 +33,13 @@ export default function ModelsPage() {
   const { data: PRODUCT_TYPES } = useProductTypes();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Model | null>(null);
+  const [viewOnly, setViewOnly] = React.useState(false);
   const [form, setForm] = React.useState<ModelForm>({ code: "", name: "", brand: "", productType: "", price: "", status: "Active" });
   const [saving, setSaving] = React.useState(false);
   const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
-  const openForm = (m: Model | null) => {
+  const openForm = (m: Model | null, readOnly = false) => {
+    setViewOnly(readOnly);
     setEditing(m);
     setForm({
       code: m?.code ?? "",
@@ -119,7 +121,7 @@ export default function ModelsPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.code, desc: r.name })}
+          onView={() => openForm(r, true)}
           onEdit={() => openForm(r)}
         />
       ),
@@ -133,7 +135,7 @@ export default function ModelsPage() {
         description="ทะเบียนรุ่นสินค้าและราคาตลาด ใช้อ้างอิงตอนเปิดงานและเสนอราคา"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("models", { deleted: "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -157,19 +159,22 @@ export default function ModelsPage() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "แก้ไขรุ่นสินค้า" : "เพิ่มรุ่นสินค้า"}
+        title={viewOnly ? "รายละเอียดรุ่นสินค้า" : editing ? "แก้ไขรุ่นสินค้า" : "เพิ่มรุ่นสินค้า"}
         size="lg"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
-              ยกเลิก
+              {viewOnly ? "ปิด" : "ยกเลิก"}
             </Button>
-            <Button size="sm" onClick={save} disabled={saving}>
-              บันทึกข้อมูล
-            </Button>
+            {!viewOnly && (
+              <Button size="sm" onClick={save} disabled={saving}>
+                บันทึกข้อมูล
+              </Button>
+            )}
           </>
         }
       >
+        <fieldset disabled={viewOnly} className="contents">
         <FieldGrid cols={2}>
           <Field label="Model Code" required>
             <Input value={form.code || "Generate Auto"} readOnly />
@@ -211,6 +216,7 @@ export default function ModelsPage() {
             </Select>
           </Field>
         </FieldGrid>
+        </fieldset>
       </Modal>
     </>
   );

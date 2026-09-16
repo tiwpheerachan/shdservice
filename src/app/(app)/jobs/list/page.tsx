@@ -25,7 +25,7 @@ import { CustomerCallModal } from "@/components/shared/customer-call-modal";
 import { JOB_STATUS_OPTIONS, type Job, type Customer } from "@/data/mock";
 import { useJobsPage, useJobTypes, useStaff, useJobStats } from "@/data/db";
 import { baht, cn } from "@/lib/utils";
-import { api, qs } from "@/lib/api";
+import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Filters = { no: string; customer: string; from: string; to: string; type: string; status: string; engineer: string; imei: string };
@@ -202,7 +202,7 @@ export default function JobListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("jobs", { q: table.q || filters.no || filters.customer || filters.imei, from: filters.from, to: filters.to, type: filters.type, status: filters.status, engineer: filters.engineer })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
 import { useMovementsPage } from "@/data/db";
 import { int } from "@/lib/utils";
-import { api, errMsg } from "@/lib/api";
+import { api, errMsg, exportXlsx } from "@/lib/api";
 
 type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
 type Filters = { from: string; to: string; type: string; warehouse: string; code: string; doc: string; ref: string };
@@ -127,7 +127,11 @@ export default function InventoryPage() {
         title="ประวัติการเคลื่อนไหวเข้า-ออก"
         description="Stock Module » ประวัติการเคลื่อนไหวเข้า-ออก ของอะไหล่ทั้งหมด"
         actions={
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => exportXlsx("movements", { q: table.q, from: filters.from, to: filters.to, type: filters.type, code: filters.code, doc: filters.doc, ref: filters.ref })}
+          >
             <Download className="h-3.5 w-3.5" />
             ส่งออก Excel
           </Button>

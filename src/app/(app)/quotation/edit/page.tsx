@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { QuotationForm, type QuotationFormHandle, type QuotationLoaded } from "@/components/shared/quotation-form";
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { useToast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
 import { api, postJson, errMsg } from "@/lib/api";
 
 function EditQuotation() {
@@ -68,7 +69,16 @@ function EditQuotation() {
         onFind={(v) => load(v)}
       />
       <QuotationForm ref={form} mode="edit" quotationNo={no || undefined} initial={loaded} />
-      <FormActions saveLabel="บันทึกการแก้ไข" onSave={save} saving={saving} />
+      <FormActions
+        saveLabel="บันทึกการแก้ไข"
+        onSave={save}
+        saving={saving}
+        extra={
+          <Button variant="outline" size="md" type="button" disabled={!no} onClick={() => no && window.open(`/print/quotation/${encodeURIComponent(no)}`, "_blank")}>
+            พิมพ์ใบเสนอราคา
+          </Button>
+        }
+      />
     </>
   );
 }

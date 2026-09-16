@@ -13,7 +13,9 @@ import {
   JobFormProvider,
   useJobForm,
   fromJob,
+  saveCommonSections,
 } from "@/components/shared/job-form";
+import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,7 @@ function SwapRefundForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
   const [mode, setMode] = React.useState("swap");
   const [q, setQ] = React.useState(jobNo);
@@ -97,6 +100,7 @@ function SwapRefundForm() {
     }
     setSaving(true);
     try {
+      await saveCommonSections(job.no, form, can("Job Management", "edit"));
       const body =
         mode === "swap"
           ? { inspection: d.inspection, newSerial: d.newSerial, newModel: d.newModel, swapDate: d.swapDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined }

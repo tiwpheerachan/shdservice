@@ -14,6 +14,7 @@ import { PeoplePicker, type Person } from "@/components/shared/people-picker";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type User } from "@/data/mock";
 import { useUsers, useRoles } from "@/data/db";
+import { exportXlsx } from "@/lib/api";
 
 type UserForm = {
   id: string;
@@ -367,7 +368,7 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

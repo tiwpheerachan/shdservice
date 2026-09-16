@@ -16,6 +16,7 @@ import { type SaleOrder } from "@/data/mock";
 import { useSaleOrdersPage, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
+import { exportXlsx } from "@/lib/api";
 
 // approve_status.approve_name_th → badge tone
 const TONE: Record<string, "warning" | "success" | "danger" | "info"> = {
@@ -110,7 +111,7 @@ export default function SaleOrderPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: `${r.customer} · ${r.approve}` })}
+          onView={() => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`)}
           onEdit={canEdit ? () => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`) : undefined}
         />
       ),
@@ -124,7 +125,7 @@ export default function SaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("sale_orders", { q: table.q || filters.no || filters.customer || filters.code, from: filters.from, to: filters.to, sales: filters.sales, approve: filters.approve })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

@@ -14,7 +14,9 @@ import {
   JobFormProvider,
   useJobForm,
   fromJob,
+  saveCommonSections,
 } from "@/components/shared/job-form";
+import { useAccess } from "@/lib/use-access";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
@@ -49,6 +51,7 @@ function RepairForm() {
   const { data: SYMPTOMS } = useSymptoms();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const { can } = useAccess();
   const [lines, setLines] = React.useState<Line[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickQ, setPickQ] = React.useState("");
@@ -106,6 +109,8 @@ function RepairForm() {
     }
     setSaving(true);
     try {
+      // product / other-info sections shown on this screen are saved too
+      await saveCommonSections(job.no, form, can("Job Management", "edit"));
       const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
         ...detail,
         status: detail.status || undefined,
@@ -396,7 +401,17 @@ function RepairForm() {
       <OtherInfoSection />
       <AttachmentSection jobNo={job?.no} />
 
-      <FormActions saveLabel="บันทึกงานซ่อม" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+      <FormActions
+        saveLabel="บันทึกงานซ่อม"
+        onSave={save}
+        saving={saving}
+        onCancel={() => job && reset(fromJob(job))}
+        extra={
+          <Button variant="outline" size="md" type="button" disabled={!job} onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}`, "_blank")}>
+            พิมพ์ใบรับงาน
+          </Button>
+        }
+      />
 
       <Modal
         open={pickerOpen}

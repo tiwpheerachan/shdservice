@@ -12,7 +12,7 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import type { MasterRow } from "@/data/mock";
-import { postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
@@ -195,7 +195,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         description={config.description}
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx(config.kind, { deleted: "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

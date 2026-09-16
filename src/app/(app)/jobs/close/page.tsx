@@ -11,7 +11,9 @@ import {
   JobFormProvider,
   useJobForm,
   fromJob,
+  saveCommonSections,
 } from "@/components/shared/job-form";
+import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +23,13 @@ import { useToast } from "@/components/ui/toast";
 import { RETURN_METHODS, COURIERS, PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
-import { postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 
 function CloseForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
   const [q, setQ] = React.useState(jobNo);
   const [saving, setSaving] = React.useState(false);
@@ -44,6 +47,18 @@ function CloseForm() {
     status: "",
   });
   const upd = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
+  const [slip, setSlip] = React.useState("");
+  // สลิปชำระเงิน → bucket oneservice/jobs/{no}/slip/… (path เก็บใน job.job_payment_slip_file_name)
+  const onPickSlip = async (f: File | undefined) => {
+    if (!f || !job) return;
+    try {
+      const r = await uploadFile("job-slip", job.no, f);
+      setSlip(r.path);
+      push({ kind: "success", title: "อัปโหลดสลิปแล้ว", desc: f.name });
+    } catch (e) {
+      push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
 
   // cost summary straight from the job row
   const SUMMARY = [
@@ -59,6 +74,7 @@ function CloseForm() {
   React.useEffect(() => {
     if (!job) return;
     reset(fromJob(job));
+    setSlip(job.payment.slip);
     const today = new Date().toISOString().slice(0, 10);
     upd({
       payType: job.payment.type || PAYMENT_METHODS[0],
@@ -100,6 +116,7 @@ function CloseForm() {
     }
     setSaving(true);
     try {
+      await saveCommonSections(job.no, form, can("Job Management", "edit"));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
         payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
         return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail },
@@ -141,7 +158,12 @@ function CloseForm() {
             <Button size="md" onClick={go}>
               GO
             </Button>
-            <Button variant="outline" size="md" onClick={() => window.print()}>
+            <Button
+              variant="outline"
+              size="md"
+              disabled={!job}
+              onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}/return`, "_blank")}
+            >
               <Printer className="h-3.5 w-3.5" />
               พิมพ์ใบส่งคืน
             </Button>
@@ -245,6 +267,16 @@ function CloseForm() {
               </Field>
               <Field label="เลขที่ใบเสร็จ">
                 <Input className="num" value={d.payNo} onChange={(e) => upd({ payNo: e.target.value })} />
+              </Field>
+              <Field label="สลิปหลักฐานการชำระ" wide>
+                <div className="flex items-center gap-2">
+                  <Input type="file" className="h-9 py-1.5 text-xs" accept=".jpg,.jpeg,.png,.webp,.pdf" disabled={!job} onChange={(e) => onPickSlip(e.target.files?.[0])} />
+                  {slip && (
+                    <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
+                      ดูสลิป
+                    </a>
+                  )}
+                </div>
               </Field>
               <Field label="หมายเหตุ" wide>
                 <Textarea rows={2} value={d.payDetail} onChange={(e) => upd({ payDetail: e.target.value })} />

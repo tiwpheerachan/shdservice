@@ -33,7 +33,7 @@ import {
 } from "@/data/db";
 import { PeoplePicker, type Person } from "./people-picker";
 import { baht, cn } from "@/lib/utils";
-import { api, errMsg, qs } from "@/lib/api";
+import { api, errMsg, qs, patchJson } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useToast } from "@/components/ui/toast";
 import type { JobDetail } from "@/lib/use-job";
@@ -227,6 +227,18 @@ export function toJobInput(s: JobFormState) {
     engineerName: s.engineerName || undefined,
     dueDate: s.dueDate,
   };
+}
+
+/**
+ * The job screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) also show the
+ * editable product / other-info / cost sections. Persist those through the
+ * generic PATCH first so nothing typed there is lost; the page then posts its
+ * own action. Skipped (not failed) when the user lacks "Job Management" edit.
+ */
+export async function saveCommonSections(jobNo: string, s: JobFormState, allowed: boolean) {
+  if (!allowed) return;
+  const body = toJobInput(s);
+  await patchJson(`/api/jobs/${encodeURIComponent(jobNo)}`, { ...body, status: undefined });
 }
 
 type Ctx = {
@@ -508,7 +520,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     <Section title={title} icon={PackageSearch}>
       <FieldGrid>
         <Field label="Sale Order No." required>
-          <Input placeholder="SO2600727" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
+          <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
         </Field>
         <Field label="Channel" required>
           <Select value={s.channel} onChange={(e) => set("channel", e.target.value)}>

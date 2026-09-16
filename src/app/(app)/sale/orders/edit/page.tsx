@@ -97,7 +97,11 @@ function EditSaleOrder() {
         onSave={save}
         saving={saving || approved}
         extra={
-          loaded && !approved && canApprove ? (
+          <>
+            <Button variant="outline" size="md" type="button" disabled={!no} onClick={() => no && window.open(`/print/sale-order/${encodeURIComponent(no)}`, "_blank")}>
+              พิมพ์ใบสั่งขาย
+            </Button>
+            {loaded && !approved && canApprove ? (
             <>
               <Button variant="outline" size="md" type="button" onClick={() => decide("reject")} disabled={saving}>
                 ส่งกลับแก้ไข
@@ -109,7 +113,8 @@ function EditSaleOrder() {
                 อนุมัติ (ตัดสต๊อก)
               </Button>
             </>
-          ) : null
+            ) : null}
+          </>
         }
       />
     </>

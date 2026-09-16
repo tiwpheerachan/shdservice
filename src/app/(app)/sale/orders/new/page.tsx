@@ -29,6 +29,7 @@ export default function NewSaleOrderPage() {
     setSaving(true);
     try {
       const d = await postJson<{ order: { no: string } }>("/api/sale-orders", p);
+      await form.current?.uploadPendingSlip(d.order.no);
       push({ kind: "success", title: "สร้างใบสั่งขายแล้ว", desc: d.order.no });
       router.push(`/sale/orders/edit?no=${encodeURIComponent(d.order.no)}`);
     } catch (e) {

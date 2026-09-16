@@ -24,7 +24,7 @@ import { useToast } from "@/components/ui/toast";
 import { type Product } from "@/data/mock";
 import { useProductsPage, useProductStats, useManufacturers, useCategories } from "@/data/db";
 import { baht, int, cn } from "@/lib/utils";
-import { postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; category: string; creator: string; date: string };
@@ -239,7 +239,7 @@ export default function ProductsPage() {
         description="ทะเบียนอะไหล่และอุปกรณ์เสริม พร้อมยอดคงเหลือที่พร้อมใช้งาน"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("products", { q: table.q, deleted: "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

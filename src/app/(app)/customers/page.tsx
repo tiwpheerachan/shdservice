@@ -13,7 +13,7 @@ import { Input, Textarea, Select, Radio } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from "@/data/mock";
 import { useCustomersPage, useProvinces } from "@/data/db";
-import { api, postJson, errMsg, qs } from "@/lib/api";
+import { api, postJson, errMsg, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Opt = { id: number; name: string; postal?: string };
@@ -76,6 +76,7 @@ export default function CustomersPage() {
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Customer | null>(null);
+  const [viewOnly, setViewOnly] = React.useState(false);
   const [form, setForm] = React.useState<CustomerForm>(EMPTY);
   const [saving, setSaving] = React.useState(false);
   const set = <K extends keyof CustomerForm>(k: K, v: CustomerForm[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -96,7 +97,8 @@ export default function CustomersPage() {
     } else setSubDistricts([]);
   }, [form.districtId]);
 
-  const openForm = (c: Customer | null) => {
+  const openForm = (c: Customer | null, readOnly = false) => {
+    setViewOnly(readOnly);
     setEditing(c);
     setForm(
       c
@@ -200,7 +202,7 @@ export default function CustomersPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.name, desc: r.address })}
+          onView={() => openForm(r, true)}
           onEdit={canEdit ? () => openForm(r) : undefined}
         />
       ),
@@ -214,7 +216,7 @@ export default function CustomersPage() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("customers", { q: table.q })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -240,24 +242,29 @@ export default function CustomersPage() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "แก้ไขข้อมูลลูกค้า" : "เพิ่มลูกค้าใหม่"}
+        title={viewOnly ? "ข้อมูลลูกค้า" : editing ? "แก้ไขข้อมูลลูกค้า" : "เพิ่มลูกค้าใหม่"}
         description={
-          editing
-            ? `Mode: Edit Data · Customer Id #${editing.code}`
-            : "Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ"
+          viewOnly
+            ? `Mode: View · Customer Id #${editing?.code}`
+            : editing
+              ? `Mode: Edit Data · Customer Id #${editing.code}`
+              : "Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ"
         }
         size="xl"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
-              ยกเลิก
+              {viewOnly ? "ปิด" : "ยกเลิก"}
             </Button>
-            <Button size="sm" onClick={save} disabled={saving}>
-              บันทึกข้อมูล
-            </Button>
+            {!viewOnly && (
+              <Button size="sm" onClick={save} disabled={saving}>
+                บันทึกข้อมูล
+              </Button>
+            )}
           </>
         }
       >
+        <fieldset disabled={viewOnly} className="contents">
         <FieldGrid cols={2}>
           <Field label="รหัสลูกค้า" required>
             <Input value={editing?.code ?? "Generate Auto"} readOnly />
@@ -373,6 +380,7 @@ export default function CustomersPage() {
             </Select>
           </Field>
         </FieldGrid>
+        </fieldset>
       </Modal>
     </>
   );

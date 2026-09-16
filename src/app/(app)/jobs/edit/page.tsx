@@ -98,7 +98,17 @@ function EditJobForm() {
       <OtherInfoSection />
       <AttachmentSection jobNo={job?.no} />
 
-      <FormActions saveLabel="บันทึกการแก้ไข" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+      <FormActions
+        saveLabel="บันทึกการแก้ไข"
+        onSave={save}
+        saving={saving}
+        onCancel={() => job && reset(fromJob(job))}
+        extra={
+          <Button variant="outline" size="md" type="button" disabled={!job} onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}`, "_blank")}>
+            พิมพ์ใบรับงาน
+          </Button>
+        }
+      />
     </>
   );
 }

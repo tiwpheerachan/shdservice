@@ -16,6 +16,7 @@ import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from "@/da
 import { useQuotationsPage, useManufacturers } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
+import { exportXlsx } from "@/lib/api";
 
 // quotation_status names (DB) → badge tone
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
@@ -132,7 +133,7 @@ export default function QuotationListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: `${r.customer} · ${r.status}` })}
+          onView={() => (window.location.href = `/quotation/edit?no=${encodeURIComponent(r.no)}`)}
           onEdit={canEdit ? () => (window.location.href = `/quotation/edit?no=${encodeURIComponent(r.no)}`) : undefined}
         />
       ),
@@ -152,7 +153,7 @@ export default function QuotationListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("quotations", { q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei, status: filters.status, from: filters.from, to: filters.to, type: filters.type })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

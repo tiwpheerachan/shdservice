@@ -13,6 +13,7 @@ import {
   JobFormProvider,
   useJobForm,
   fromJob,
+  saveCommonSections,
 } from "@/components/shared/job-form";
 import { Tabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +34,7 @@ function OutsourceForm() {
   const { push } = useToast();
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
-  const { name: me } = useAccess();
+  const { name: me, can } = useAccess();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
   const [tab, setTab] = React.useState("device");
@@ -102,6 +103,7 @@ function OutsourceForm() {
     }
     setSaving(true);
     try {
+      await saveCommonSections(job.no, form, can("Job Management", "edit"));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, {
         symptomOther: form.symptomOther,
         repairDetail: d.repairDetail,
