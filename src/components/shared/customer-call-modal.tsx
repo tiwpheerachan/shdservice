@@ -53,7 +53,7 @@ function InfoRow({
       </span>
       <div className="min-w-0">
         <p className="text-2xs text-muted-foreground">{label}</p>
-        <p className={cn("break-words text-sm text-foreground", mono && "num")}>
+        <p className={cn("wrap-break-word text-sm text-foreground", mono && "num")}>
           {value?.trim() ? value : <span className="text-muted-foreground/60">—</span>}
         </p>
       </div>
@@ -147,8 +147,8 @@ export function CustomerCallModal({
       ) : (
         <div className="space-y-5">
           {/* identity header */}
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-gradient-to-br from-primary/8 to-info/8 p-3">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-sm">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-linear-to-br from-primary/8 to-info/8 p-3">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-linear-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-xs">
               {initials(customer.name) || <User className="h-5 w-5" />}
             </span>
             <div className="min-w-0 flex-1">
@@ -299,7 +299,7 @@ export function CustomerCallModal({
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addLog()}
                 placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
-                className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               />
               <Button size="sm" onClick={addLog}>
                 <Plus className="h-3.5 w-3.5" />

@@ -752,7 +752,7 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
               placeholder="0.00"
               onFocus={(e) => e.currentTarget.select()}
               onChange={(e) => set(f.key, Number(e.target.value) || 0)}
-              className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-none transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             />
           </CostRow>
         ))}

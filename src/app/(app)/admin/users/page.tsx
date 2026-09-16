@@ -388,7 +388,7 @@ export default function UsersPage() {
             className={
               "rounded-md px-3.5 py-1.5 font-medium transition-colors " +
               (view === v
-                ? "bg-card text-foreground shadow-sm"
+                ? "bg-card text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground")
             }
           >

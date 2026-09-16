@@ -259,3 +259,11 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - แก้: รุ่นสินค้า — ตัดช่อง "ประเภทเครื่อง" (ไม่มีใน DB) และ dropdown ยี่ห้อรวมยี่ห้อ Inactive ของรุ่นที่แก้ (152 รุ่น Active สังกัดยี่ห้อ Inactive); ประเภทเครื่องซ่อม — เพิ่มคอลัมน์ `product_type_description` (migration 0005); อาการเสีย — ช่องกลุ่มพิมพ์ใหม่ได้ + datalist ค่าเดิม
 - ตัดสินใจไม่ทำ (ผู้ใช้): แยกชื่อ/สกุล/title ในผู้ใช้ระบบ, `category.shot_code`, `manufacturer.logo_name` (ว่างทั้งหมด)
 
+## 18. UI: Tailwind v4 + shadcn/ui (2026-09-16)
+- ตัดสินใจ: "shadcn ข้างใน หน้าตาเดิมข้างนอก" — `components/ui/*` คงชื่อ/props เดิม (หน้าเพจ 42 หน้าไม่แก้), ข้างในเป็น Radix/shadcn; ไฟล์ shadcn ต้นฉบับอยู่ `components/shadcn/*`
+- Tailwind 3.4 → 4.3 ด้วย `@tailwindcss/upgrade` แล้วแก้มือ: `@theme inline` (token อ้าง HSL var เดิม เพื่อให้ `.auth-page`/`.dark` override ได้), ฟอนต์ย้ายเข้า `@theme`, ลบ compat border block, คง `cursor:pointer` ให้ปุ่ม, ตัว upgrade เปลี่ยน variant `"outline"` ของ Button เป็น `"outline-solid"` ผิด → แก้กลับ
+- แทนแล้ว: Modal→Dialog, Toast→Sonner, Tabs→Radix, Checkbox→Radix, Button/Badge→cva, CommandPalette→cmdk · คงเดิม: native Select/Radio, DataTable, Field, Sidebar/Topbar, ฟอร์ม, print
+- `cn()` เป็น twMerge → class ที่หน้าเพจส่งมาชนะ base เสมอ (เดิมแพ้ตามลำดับ CSS): ผลที่มองเห็น = DataTable ช่องค้นหา/page-size สูง 32px ตาม `h-8`, ช่องตัวเลขในสรุปราคามีความกว้างตาม `w-*` (label ไม่ขึ้นบรรทัดใหม่แล้ว), การ์ด TAT/งานล่าสุดบน dashboard ใช้ `p-0` ตามที่หน้าเพจสั่ง — ถือเป็นการทำให้ตรงเจตนาเดิมของโค้ด
+- ทดสอบ: screenshot 40 หน้า × light/dark + modal states เทียบก่อน/หลังด้วย headless Chrome (สคริปต์ใน scratchpad), ทดสอบ interaction (dialog focus/Esc, toast, tabs keyboard, checkbox, ⌘K) ผ่าน; build/tsc ผ่าน
+- `next.config.mjs` เพิ่ม `distDir` จาก `NEXT_DIST_DIR` เพื่อ build production ทดสอบคู่กับ `next dev` ได้ (`.next-*` ถูก ignore)
+

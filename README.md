@@ -57,7 +57,7 @@ npm start
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Dependency | UI: `next`, `react`, `react-dom`, `lucide-react` — **ไม่มี UI library ภายนอก** · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage |
+| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage |
 | Version | ตรึงเวอร์ชันแบบ exact (ไม่มี `^`) ทุกตัว — `npm install` ได้ผลลัพธ์เดิมเสมอ |
 | Type Safety | TypeScript `strict: true` ผ่าน `next build` โดยไม่มี error |
 | Dark mode | สคริปต์ inline ใน `<head>` ตั้ง class ก่อน paint → **ไม่มีจอกระพริบ (FOUC)** |
@@ -145,3 +145,13 @@ src/
 แก้ CSS variables ที่ `src/app/globals.css` — เปลี่ยน `--primary` เพียงบรรทัดเดียว สีทั้งระบบจะเปลี่ยนตาม
 (ทั้งโหมดสว่างและมืดกำหนดแยกกันในไฟล์เดียวกัน)
 # shdservice
+
+## UI kit (Tailwind v4 + shadcn/ui)
+
+- **Tailwind CSS v4** — ไม่มี `tailwind.config.ts` แล้ว; token ทั้งหมดอยู่ใน `src/app/globals.css` (`@theme inline` map สี `--color-*` → ตัวแปร HSL เดิม `--background/--primary/…` จึงยังสลับ light/dark และ override ใน `.auth-page` ได้เหมือนเดิม) · dark mode = `@custom-variant dark (&:where(.dark, .dark *))`
+- **สองชั้น**:
+  - `src/components/shadcn/*` = ไฟล์ shadcn ต้นฉบับ (เพิ่มตัวใหม่ด้วย `npx shadcn add <name>` — `components.json` ชี้ `ui` มาที่โฟลเดอร์นี้) ใช้กับงานใหม่
+  - `src/components/ui/*` = **app kit** ที่ทุกหน้าเรียกอยู่ — ชื่อ/props เดิมทั้งหมด แต่ข้างในเป็น shadcn/Radix แล้ว: `Modal`→Radix Dialog (focus-trap/Esc/scroll-lock), `Toast`→Sonner (API `useToast().push({kind,title,desc})` เดิม), `Tabs`→Radix Tabs (คีย์บอร์ด ←/→), `Checkbox`→Radix Checkbox (รับ `onChange(e.target.checked)` เดิม), `Button`/`Badge`→cva variants ชื่อเดิม (`primary/outline/…`, `tone`) · `CommandPalette` (⌘K) → cmdk
+  - คงไว้ตามเดิมโดยตั้งใจ: `Select` เป็น native `<select>`, `Radio` native, `DataTable`, `Field/FieldGrid`, Sidebar/Topbar, ฟอร์มงาน, หน้า print
+- `cn()` = `twMerge(clsx())` — class ที่ชนกันตัวหลังชนะ (เดิมขึ้นกับลำดับใน CSS) → ค่าที่หน้าเพจส่งมา เช่น `h-8`, `w-24`, `p-0` มีผลจริงแล้ว
+

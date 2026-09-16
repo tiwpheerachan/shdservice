@@ -67,7 +67,7 @@ export function KV({ items, cols = 2 }: { items: { k: string; v?: string | numbe
       {items.map((it) => (
         <div key={it.k} className="flex gap-2">
           <dt className="w-32 shrink-0 text-neutral-500">{it.k}</dt>
-          <dd className="min-w-0 flex-1 break-words">{it.v === null || it.v === undefined || it.v === "" ? "—" : it.v}</dd>
+          <dd className="min-w-0 flex-1 wrap-break-word">{it.v === null || it.v === undefined || it.v === "" ? "—" : it.v}</dd>
         </div>
       ))}
     </dl>

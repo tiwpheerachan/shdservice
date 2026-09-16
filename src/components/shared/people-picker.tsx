@@ -141,7 +141,7 @@ export function PeoplePicker({
             else if (e.key === "Escape") setOpen(false);
           }}
           placeholder={placeholder}
-          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
         />
         {loading && (
           <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />

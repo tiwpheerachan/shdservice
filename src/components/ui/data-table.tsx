@@ -310,7 +310,7 @@ export function DataTable<T extends Record<string, unknown>>({
           <Select
             value={String(pageSize)}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            className="h-8 w-24 text-xs"
+            className="h-8 w-28 text-xs"
             aria-label="จำนวนต่อหน้า"
           >
             {[10, 25, 50, 100].map((n) => (
