@@ -38,6 +38,7 @@ npm start
 | `drizzle/0001_app.sql` | คอลัมน์ SSO ใน `app_user`, ย้าย `users` เก่า → `app_user`, drop ตาราง mock, index |
 | `drizzle/0002_job_symptom.sql` | ตาราง `job_symptom` (หลายอาการต่อ 1 งาน) |
 | `drizzle/0004_indexes.sql` | index สำหรับ filter/รายงาน + `pg_trgm` GIN สำหรับช่องค้นหา (ILIKE) |
+| `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
 | `drizzle/0003_record_status.sql` | soft delete แบบเดียวทั้งระบบ: lookup `record_status` (ACTIVE/INACTIVE/DELETED) + คอลัมน์ในทุกตารางที่ลบได้ — ไม่มี hard delete, กู้คืนทาง SQL |
 | `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
 

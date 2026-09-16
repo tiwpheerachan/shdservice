@@ -237,10 +237,25 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - dropdown อะไหล่ทุกหน้าใช้ `products?fields=lite` (5 field, ACTIVE เท่านั้น) 1.2 MB → 540 KB (≈ 80 KB หลัง gzip)
 - ต้นทุนเครือข่าย Render↔Supabase ≈ 75 ms/query — หน้ารายการ = auth + count + rows ≈ 250 ms
 
-## 15. ลำดับทำงาน (ทำครบแล้ว)
+## 15. งานตาม UI audit (2026-09-16)
+
+- **ส่งออก Excel**: `exceljs` (MIT) → `GET /api/export/<resource>?<filter เดียวกับหน้า>` ไฟล์ .xlsx (header/freeze/auto-filter/number format, เพดาน 50k แถว) ผูก 9 ปุ่ม + Excel ในรายงาน 7 ตัว · สิทธิ์ = `view` ของ module · ปุ่ม PDF ในรายงาน = เปิดหน้าต่างพิมพ์ของเบราว์เซอร์ (บันทึกเป็น PDF)
+- **ไฟล์**: bucket private **`oneservice`** โครง `jobs/{no}/attachments|slip/…`, `sale-orders/{no}/slip/…`, `products/{code}/…` · เสิร์ฟผ่าน `GET /api/files?path=` (signed URL 1 ชม. ต้อง login) · อัปโหลดผ่าน `POST /api/upload {kind,id,file}` (รูปอะไหล่ → `product.pictrue_file_name`, สลิป SO → `sale_out_hd.slip_file_name`, สลิปปิดงาน → `job.job_payment_slip_file_name`) จำกัด 10 MB jpg/png/webp/pdf
+- **พิมพ์ (CSS print-view, A4, ไม่มี lib)**: `/print/job/:no` ใบรับงานซ่อม · `/print/job/:no/return` ใบส่งคืนสินค้า · `/print/quotation/:no` · `/print/sale-order/:no` — ข้อมูลบริษัท/เงื่อนไขแก้ที่ `src/lib/company.ts` (ที่อยู่/เลขผู้เสียภาษียังว่าง รอข้อมูลจริง) · ปุ่มเรียกจากหน้า บันทึกซ่อม/แก้ไขงาน/ปิดงาน/ใบเสนอราคา/ใบสั่งขาย
+- **Login ด้วยบัญชีอื่น**: SSO กลางไม่สนใจ `prompt=login&max_age=0` แต่มี `POST https://sso.shd-technology.co.th/api/auth/logout` (ล้าง cookie `sso_session` แล้ว 303 ไป `/login?out=1`; ไม่รับ return URL; ต้องเป็น top-level navigation เพราะ cookie เป็น SameSite=Lax) → ปุ่มบนหน้า login (`switch-account.tsx`) submit form นั้นไปแท็บใหม่ แล้วแท็บเดิมวิ่งไป `/api/sso/login` หลัง 2.5 วิ (หรือกดข้าม) ซึ่ง authorize จะพาไปหน้า login ของ SSO พร้อม `next=` กลับมา callback ของเรา; logout ของแอปยังล้างเฉพาะ cookie ของแอปตามที่ตกลง
+- **Session Timer** ผูกกับ `exp` จริงของ cookie, ต่ออายุอัตโนมัติเมื่อใช้งาน (≤ 1 ครั้ง/10 นาที), หมด → login
+- ทุกหน้างานบันทึกส่วนข้อมูลเครื่อง/ข้อมูลอื่น/ค่าใช้จ่ายผ่าน PATCH ก่อน action ของหน้า · ปุ่มตา = modal อ่านอย่างเดียว / ไปหน้าแก้ไข · ข้ามกระดิ่งแจ้งเตือนไว้ก่อน
+
+## 16. ลำดับทำงาน (ทำครบแล้ว)
 
 1. **Infra**: drizzle + schema 52 ตาราง + migrations + `db:migrate` (ทดสอบกับ Postgres local ที่โหลด dump แล้ว)
 2. **Auth**: provision → `app_user`, approval gate, `can()`, permission API, sidebar/ปุ่ม
 3. **Read ทุกหน้า**: services + mappers + hook เดิม → ทุกหน้าแสดงข้อมูลจริง (dashboard/รายงานคำนวณสด)
 4. **Write**: master → customers → products/stock → jobs (เปิด/แก้/มอบหมาย/ซ่อม/outsource/swap/ปิด) → quotation → sale order → attachments
 5. ตรวจ `next build` + ทดสอบ flow เต็มกับ DB local → ส่ง
+
+## 17. ตรวจข้อมูลระบบ (admin masters) เทียบ DB จริง — 2026-09-16
+- จำนวนแถวทุกตารางดึงครบ (app_user 107, app_config 64/10 บทบาท/17 โมดูล, category 11, manufacturer 95, model 1,171, color 10, job_type 10, product_type 11, symptom 302)
+- แก้: รุ่นสินค้า — ตัดช่อง "ประเภทเครื่อง" (ไม่มีใน DB) และ dropdown ยี่ห้อรวมยี่ห้อ Inactive ของรุ่นที่แก้ (152 รุ่น Active สังกัดยี่ห้อ Inactive); ประเภทเครื่องซ่อม — เพิ่มคอลัมน์ `product_type_description` (migration 0005); อาการเสีย — ช่องกลุ่มพิมพ์ใหม่ได้ + datalist ค่าเดิม
+- ตัดสินใจไม่ทำ (ผู้ใช้): แยกชื่อ/สกุล/title ในผู้ใช้ระบบ, `category.shot_code`, `manufacturer.logo_name` (ว่างทั้งหมด)
+
