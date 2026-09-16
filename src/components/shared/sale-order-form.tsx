@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { PAYMENT_METHODS, type Customer } from "@/data/mock";
 import { useProducts, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
-import { api, errMsg, qs } from "@/lib/api";
+import { api, errMsg, qs, uploadFile, fileUrl } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
@@ -43,7 +43,11 @@ export type SaleOrderPayload = {
   submit: boolean;
 };
 
-export type SaleOrderFormHandle = { payload: () => SaleOrderPayload };
+export type SaleOrderFormHandle = {
+  payload: () => SaleOrderPayload;
+  /** upload a slip chosen before the SO existed (new page calls this after create) */
+  uploadPendingSlip: (soNo: string) => Promise<void>;
+};
 
 export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
   function SaleOrderForm({ soNo, initial }, ref) {
@@ -60,7 +64,26 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [payAmount, setPayAmount] = React.useState("");
     const [remark, setRemark] = React.useState("");
     const [slip, setSlip] = React.useState("");
+    const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
     const [submit, setSubmit] = React.useState(false);
+
+    // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
+    const onPickSlip = async (f: File | undefined) => {
+      if (!f) return;
+      const no = soNo || initial?.no;
+      if (!no) {
+        setPendingSlip(f);
+        setSlip(f.name);
+        return;
+      }
+      try {
+        const d = await uploadFile("sale-order-slip", no, f);
+        setSlip(d.path);
+        push({ kind: "success", title: "อัปโหลดสลิปแล้ว", desc: f.name });
+      } catch (e) {
+        push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+      }
+    };
     const [date, setDate] = React.useState("");
     const [pickQ, setPickQ] = React.useState("");
     const idRef = React.useRef(0);
@@ -109,6 +132,15 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     };
 
     React.useImperativeHandle(ref, () => ({
+      uploadPendingSlip: async (no: string) => {
+        if (!pendingSlip) return;
+        try {
+          await uploadFile("sale-order-slip", no, pendingSlip);
+          setPendingSlip(null);
+        } catch (e) {
+          push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+        }
+      },
       payload: () => ({
         no: soNo || initial?.no || undefined,
         customerCode: customer?.code ?? "",
@@ -116,7 +148,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
         paymentType: payment,
         paymentAmount: payAmount,
-        slip,
+        slip: slip.includes("/") ? slip : "",
         remark,
         submit,
       }),
@@ -323,13 +355,20 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 className="num text-right"
               />
             </Field>
-            <Field label="สลิปหลักฐานการโอน">
-              <Input
-                type="file"
-                className="h-9 py-1.5 text-xs"
-                accept=".jpg,.jpeg,.png,.pdf"
-                onChange={(e) => setSlip(e.target.files?.[0]?.name ?? "")}
-              />
+            <Field label="สลิปหลักฐานการโอน" hint={slip.includes("/") ? undefined : slip ? `จะอัปโหลดหลังบันทึก: ${slip}` : undefined}>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  className="h-9 py-1.5 text-xs"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf"
+                  onChange={(e) => onPickSlip(e.target.files?.[0])}
+                />
+                {slip.includes("/") && (
+                  <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
+                    ดูสลิป
+                  </a>
+                )}
+              </div>
             </Field>
             <Field label="หมายเหตุ" wide>
               <Textarea rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />

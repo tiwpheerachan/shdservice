@@ -264,7 +264,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       remarkHd: str(i.remark).slice(0, 100),
       paymentType: str(i.paymentType) || "โอนเงิน",
       paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== "" ? num(i.paymentAmount) : net),
-      slipFileName: str(i.slip).slice(0, 100),
+      ...(str(i.slip) ? { slipFileName: str(i.slip).slice(0, 100) } : {}),
       deliveryTrackingNo: str(i.tracking).slice(0, 50),
     };
     let no = i.no;

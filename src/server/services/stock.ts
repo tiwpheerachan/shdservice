@@ -62,6 +62,7 @@ const productSelect = {
   createBy: product.createBy,
   ubOnly: product.isUbRepairOnly,
   forModelColor: product.forModelColor,
+  picture: product.pictrueFileName,
   onhand: productNoneSerial.quantityRemain,
   available: productNoneSerial.quantityAvailable,
   used: productNoneSerial.quantityUsed,
@@ -99,6 +100,7 @@ function toProduct(r: ProductRow, creator?: string): Product {
     forModelColor: r.forModelColor ?? "",
     createdDate: fmtDateTime(r.createDate),
     createdBy: creator ?? "",
+    image: r.picture ? (r.picture.includes("/") ? r.picture : `products/${r.sysCode}/${r.picture}`) : "",
   };
 }
 

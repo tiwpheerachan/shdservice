@@ -4,7 +4,7 @@ import { db } from "@/db/client";
 import { documentAttach } from "@/db/schema";
 import { handle, requireCan, requireUser, HttpError } from "@/server/auth";
 import { removeAttachment } from "@/server/services/jobs";
-import { removeFile, signedUrl } from "@/server/storage";
+import { removeFile, signedUrl, filePath, resolvePath } from "@/server/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
   const [row] = await db.select().from(documentAttach).where(eq(documentAttach.documentAttachId, Number(id)));
   if (!row) throw new HttpError(404, "not found");
-  const url = await signedUrl(`jobs/${row.referenceItemCode}/${row.systemFileName}`);
+  const url = await signedUrl(resolvePath(row.systemFileName ?? "", (f) => filePath.attachment(row.referenceItemCode ?? "", f)));
   if (!url) throw new HttpError(404, "ไฟล์นี้อยู่บนระบบเก่า ยังไม่ได้ย้ายมา");
   return NextResponse.redirect(url);
 });
@@ -28,6 +28,6 @@ export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const [row] = await db.select().from(documentAttach).where(eq(documentAttach.documentAttachId, Number(id)));
   if (!row) throw new HttpError(404, "not found");
   await removeAttachment(row.documentAttachId, me.userId);
-  await removeFile(`jobs/${row.referenceItemCode}/${row.systemFileName}`);
+  await removeFile(resolvePath(row.systemFileName ?? "", (f) => filePath.attachment(row.referenceItemCode ?? "", f)));
   return NextResponse.json({ ok: true });
 });

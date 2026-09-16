@@ -77,6 +77,7 @@ export type Product = {
   createdDate?: string;
   createdBy?: string;
   models?: string[];
+  image?: string; // products/{code}/{file} — serve via fileUrl()
 };
 
 export type Movement = {

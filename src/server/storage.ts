@@ -2,13 +2,31 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * File storage for attachments (job documents, payment slips). Files go to the
- * Supabase Storage bucket `attachments` (private) using the server-only secret
- * key; the DB rows (document_attach.system_file_name etc.) keep the object path.
+ * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
+ * through /api/files (signed URL, login required). Layout:
+ *   jobs/{jobNo}/attachments/{file}   document_attach.system_file_name  (file name only, 50 chars)
+ *   jobs/{jobNo}/slip/{file}          job.job_payment_slip_file_name    (full path)
+ *   sale-orders/{soNo}/slip/{file}    sale_out_hd.slip_file_name        (full path)
+ *   products/{code}/{file}            product.pictrue_file_name         (file name only, 50 chars)
  * Legacy files from the old Windows server were never migrated — those rows
  * only show their file name.
  */
-export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "attachments";
+export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "oneservice";
+
+export const filePath = {
+  attachment: (jobNo: string, file: string) => `jobs/${jobNo}/attachments/${file}`,
+  jobSlip: (jobNo: string, file: string) => `jobs/${jobNo}/slip/${file}`,
+  saleOrderSlip: (soNo: string, file: string) => `sale-orders/${soNo}/slip/${file}`,
+  productImage: (code: string, file: string) => `products/${code}/${file}`,
+};
+
+/** Accept either a stored full path or a bare file name (legacy / short columns). */
+export function resolvePath(stored: string, fallback: (file: string) => string): string {
+  return stored.includes("/") ? stored : fallback(stored);
+}
+
+export const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 let client: SupabaseClient | null = null;
 function storage() {

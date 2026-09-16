@@ -16,7 +16,7 @@ import {
 } from "@/data/db";
 import type { Product } from "@/data/mock";
 import { int } from "@/lib/utils";
-import { api, postJson, errMsg } from "@/lib/api";
+import { api, postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 
 export type ProductMode = "view" | "edit" | "add";
 
@@ -93,6 +93,23 @@ export function ProductDetailModal({
   const [stockCard, setStockCard] = React.useState<Card[]>([]);
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
+  const [image, setImage] = React.useState("");
+  const [uploading, setUploading] = React.useState(false);
+
+  // รูปอะไหล่ → bucket oneservice/products/{code}/… แล้วเก็บชื่อไฟล์ใน product.pictrue_file_name
+  const onPickImage = async (f: File | undefined) => {
+    if (!f || !code) return;
+    setUploading(true);
+    try {
+      const d = await uploadFile("product-image", code, f);
+      setImage(d.path);
+      push({ kind: "success", title: "อัปโหลดรูปแล้ว", desc: f.name });
+    } catch (e) {
+      push({ kind: "error", title: "อัปโหลดรูปไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setUploading(false);
+    }
+  };
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   React.useEffect(() => {
@@ -100,6 +117,7 @@ export function ProductDetailModal({
     if (mode === "add" || !code) {
       setDetail(null);
       setStockCard([]);
+      setImage("");
       setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? "", brand: MANUFACTURERS[0]?.name ?? "" });
       return;
     }
@@ -109,6 +127,7 @@ export function ProductDetailModal({
         if (!active) return;
         setDetail(d.product);
         setStockCard(d.card);
+        setImage(d.product.image ?? "");
         setForm({
           mfgCode: d.product.mfgCode,
           name: d.product.name,
@@ -196,16 +215,30 @@ export function ProductDetailModal({
           {/* image */}
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground">Part Image</p>
-            <div className="grid aspect-square place-items-center rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
-              <div className="text-center">
-                <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
-                <p className="mt-1 text-2xs">NO IMAGE</p>
-              </div>
+            <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
+              {image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={fileUrl(image)} alt={p.name} className="h-full w-full object-contain" />
+              ) : (
+                <div className="text-center">
+                  <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
+                  <p className="mt-1 text-2xs">NO IMAGE</p>
+                </div>
+              )}
             </div>
             {!ro && (
-              <label className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground">
-                <Upload className="h-3.5 w-3.5" /> เลือกไฟล์
-                <input type="file" className="hidden" />
+              <label
+                className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
+                title={code ? "อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)" : "บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป"}
+              >
+                <Upload className="h-3.5 w-3.5" /> {uploading ? "กำลังอัปโหลด…" : "เลือกไฟล์"}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={!code || uploading}
+                  onChange={(e) => onPickImage(e.target.files?.[0])}
+                />
               </label>
             )}
           </div>
