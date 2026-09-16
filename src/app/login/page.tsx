@@ -2,7 +2,6 @@ import Link from "next/link";
 import { LogIn, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { AuthSplit } from "@/components/ui/sign-in";
-import { SwitchAccountButton } from "@/components/shared/switch-account";
 
 export const metadata = { title: "เข้าสู่ระบบ" };
 export const dynamic = "force-dynamic";
@@ -62,11 +61,6 @@ export default async function LoginPage({
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO
           </Link>
-
-          <SwitchAccountButton
-            next={next}
-            className="animate-element animate-delay-300 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-border bg-card text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          />
 
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
