@@ -9,5 +9,6 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ user: null }, { status: 401 });
   return NextResponse.json({
     user: { email: user.email, name: user.name, avatar: user.avatar },
+    exp: user.exp,
   });
 }

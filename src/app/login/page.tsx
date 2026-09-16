@@ -62,6 +62,15 @@ export default async function LoginPage({
             เข้าสู่ระบบด้วย SHD SSO
           </Link>
 
+          {sp.bye && (
+            <Link
+              href={`/api/sso/login?next=${encodeURIComponent(next)}&prompt=login`}
+              className="animate-element animate-delay-300 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-border bg-card text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              เข้าสู่ระบบด้วยบัญชีอื่น
+            </Link>
+          )}
+
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
             ยืนยันตัวตนผ่าน sso.shd-technology.co.th

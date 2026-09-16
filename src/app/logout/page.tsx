@@ -12,7 +12,7 @@ export default function LogoutPage() {
         </div>
         <h1 className="mt-4 text-lg font-semibold">ออกจากระบบเรียบร้อย</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
-          เซสชันของ May - Pradit ถูกปิดแล้ว ขอบคุณที่ใช้งานระบบ
+          เซสชันของคุณถูกปิดแล้ว ขอบคุณที่ใช้งานระบบ
         </p>
         <Link
           href="/jobs/dashboard"

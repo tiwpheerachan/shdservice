@@ -16,6 +16,12 @@ export async function GET(request: Request) {
   authorize.searchParams.set("client_id", SSO.clientId);
   authorize.searchParams.set("redirect_uri", redirectUri);
   authorize.searchParams.set("state", state);
+  // "เข้าสู่ระบบด้วยบัญชีอื่น": ask Central SSO to re-authenticate (standard OIDC
+  // hints; harmless if the SSO ignores them — it then behaves like a normal login)
+  if (url.searchParams.get("prompt") === "login") {
+    authorize.searchParams.set("prompt", "login");
+    authorize.searchParams.set("max_age", "0");
+  }
 
   const res = NextResponse.redirect(authorize.toString());
   res.cookies.set(STATE_COOKIE, state, {
