@@ -12,11 +12,11 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Model } from "@/data/mock";
-import { useModelsPage, useManufacturers, useProductTypes } from "@/data/db";
+import { useModelsPage, useManufacturers } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 
-type ModelForm = { code: string; name: string; brand: string; productType: string; price: string; status: string };
+type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
 
 export default function ModelsPage() {
   const { push } = useToast();
@@ -30,11 +30,10 @@ export default function ModelsPage() {
     dir: table.sort?.dir,
   });
   const { data: MANUFACTURERS } = useManufacturers();
-  const { data: PRODUCT_TYPES } = useProductTypes();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Model | null>(null);
   const [viewOnly, setViewOnly] = React.useState(false);
-  const [form, setForm] = React.useState<ModelForm>({ code: "", name: "", brand: "", productType: "", price: "", status: "Active" });
+  const [form, setForm] = React.useState<ModelForm>({ code: "", name: "", brand: "", price: "", status: "Active" });
   const [saving, setSaving] = React.useState(false);
   const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -45,12 +44,18 @@ export default function ModelsPage() {
       code: m?.code ?? "",
       name: m?.name ?? "",
       brand: m?.brand ?? MANUFACTURERS[0]?.name ?? "",
-      productType: PRODUCT_TYPES[0]?.name ?? "",
       price: m?.price ? String(m.price) : "",
       status: m?.status ?? "Active",
     });
     setOpen(true);
   };
+
+  // ยี่ห้อให้เลือก = ยี่ห้อ Active + ยี่ห้อเดิมของรุ่นที่กำลังแก้ (152 รุ่นสังกัดยี่ห้อ Inactive —
+  // ไม่ให้ dropdown เปลี่ยนยี่ห้อโดยไม่ตั้งใจ)
+  const brandOptions = React.useMemo(() => {
+    const names = MANUFACTURERS.map((m) => m.name);
+    return editing?.brand && !names.includes(editing.brand) ? [editing.brand, ...names] : names;
+  }, [MANUFACTURERS, editing]);
 
   // model_code มาจาก running_no "Model" (MD00001) — สร้างอัตโนมัติตอนเพิ่ม
   const save = async () => {
@@ -184,15 +189,8 @@ export default function ModelsPage() {
           </Field>
           <Field label="ยี่ห้อ" required>
             <Select value={form.brand} onChange={(e) => set("brand", e.target.value)}>
-              {MANUFACTURERS.map((m) => (
-                <option key={m.id}>{m.name}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="ประเภทเครื่อง">
-            <Select value={form.productType} onChange={(e) => set("productType", e.target.value)}>
-              {PRODUCT_TYPES.map((p) => (
-                <option key={p.id}>{p.name}</option>
+              {brandOptions.map((name) => (
+                <option key={name}>{name}</option>
               ))}
             </Select>
           </Field>

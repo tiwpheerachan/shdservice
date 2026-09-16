@@ -74,10 +74,10 @@ const SIMPLE = {
     table: productType,
     id: productType.productTypeId,
     name: productType.productTypeName,
-    detail: null,
+    detail: productType.productTypeDescription,
     extra: null,
     active: productType.recordStatus,
-    keys: { name: "productTypeName", detail: null, extra: null, active: "isActive" },
+    keys: { name: "productTypeName", detail: "productTypeDescription", extra: null, active: "isActive" },
     nameLen: 50,
   },
 } as const;

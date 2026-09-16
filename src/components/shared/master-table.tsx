@@ -251,13 +251,18 @@ export function MasterTable({ config }: { config: MasterConfig }) {
           </Field>
           {config.extraLabel && (
             <Field label={config.extraLabel}>
-              <Select value={form.group} onChange={(e) => setForm((f) => ({ ...f, group: e.target.value }))}>
-                {groupOptions.map((o) => (
-                  <option key={o} value={o}>
-                    {o || "- - ไม่ระบุ - -"}
-                  </option>
+              {/* พิมพ์กลุ่มใหม่ได้ + เลือกจากค่าที่มีอยู่แล้วใน DB (datalist) */}
+              <Input
+                list={`${config.kind}-group-options`}
+                value={form.group}
+                onChange={(e) => setForm((f) => ({ ...f, group: e.target.value }))}
+                placeholder="- - ไม่ระบุ - -"
+              />
+              <datalist id={`${config.kind}-group-options`}>
+                {groupOptions.filter(Boolean).map((o) => (
+                  <option key={o} value={o} />
                 ))}
-              </Select>
+              </datalist>
             </Field>
           )}
           {config.detailLabel && (

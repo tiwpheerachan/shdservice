@@ -568,6 +568,8 @@ export const productType = pgTable("product_type", {
 	statusChangedBy: integer("status_changed_by"),
 	productTypeId: integer("product_type_id").primaryKey().generatedByDefaultAsIdentity(),
 	productTypeName: varchar("product_type_name", { length: 50 }),
+	// added by this app (drizzle/0005_product_type_description.sql)
+	productTypeDescription: varchar("product_type_description", { length: 100 }).notNull().default(""),
 	isActive: boolean("is_active"),
 }, (table) => [
 	uniqueIndex("ix_product_type_name").using("btree", table.productTypeName.asc().nullsLast().op("text_ops")),
