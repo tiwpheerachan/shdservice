@@ -15,6 +15,7 @@ import type { MasterRow, Symptom, Model } from "@/data/mock";
 import { HttpError } from "@/server/auth";
 import { fmtDateTime, money, nowThai, num, str } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff } from "@/server/audit";
 import { count, desc, ilike, or } from "drizzle-orm";
 import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode, type RecordStatus } from "@/server/record-status";
@@ -130,11 +131,14 @@ export async function saveSimple(
   if (dup[0]) throw new HttpError(409, `มีชื่อ "${name}" อยู่แล้ว`);
 
   if (input.id) {
+    const [before] = await db.select().from(d.table).where(eq(d.id, Number(input.id)));
     await db.update(d.table).set(values).where(eq(d.id, Number(input.id)));
+    await audit(db, byUserId, { action: "UPDATE", module: "Admin", entity: kind, key: input.id, summary: `แก้ไข ${kind}: ${name}`, changes: diff(before as Record<string, unknown>, values) });
     const rows = await listSimple(kind, "exclude");
     return rows.find((r) => r.id === input.id)!;
   }
   const [row] = await db.insert(d.table).values(values).returning({ id: d.id });
+  await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: kind, key: row.id, summary: `เพิ่ม ${kind}: ${name}` });
   const rows = await listSimple(kind, "exclude");
   return rows.find((r) => r.id === String(row.id))!;
 }
@@ -143,6 +147,7 @@ export async function saveSimple(
 export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
   await db.update(d.table).set({ [d.keys.active]: rs === "ACTIVE", ...statusStamp(rs, byUserId, false) }).where(eq(d.id, id));
+  await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: kind, key: id, summary: `${kind} #${id} → ${rs}`, changes: { recordStatus: [null, rs] } });
 }
 
 /* ------------------------------------------------------------------ *
@@ -185,16 +190,20 @@ export async function saveSymptom(
   let id: number;
   if (input.id) {
     id = Number(input.id);
+    const [before] = await db.select().from(symptom).where(eq(symptom.symptomId, id));
     await db.update(symptom).set(values).where(eq(symptom.symptomId, id));
+    await audit(db, byUserId, { action: "UPDATE", module: "Admin", entity: "symptom", key: id, summary: `แก้ไขอาการเสีย: ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
   } else {
     const [row] = await db.insert(symptom).values(values).returning({ id: symptom.symptomId });
     id = row.id;
+    await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: "symptom", key: id, summary: `เพิ่มอาการเสีย: ${name}` });
   }
   return (await listSymptoms("exclude")).find((r) => r.id === String(id))!;
 }
 
 export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
   await db.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
+  await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: "symptom", key: id, summary: `อาการเสีย #${id} → ${rs}`, changes: { recordStatus: [null, rs] } });
 }
 
 /* ------------------------------------------------------------------ *
@@ -253,11 +262,14 @@ export async function saveModel(
 
   const code = await db.transaction(async (tx) => {
     if (input.code) {
+      const [before] = await tx.select().from(model).where(eq(model.modelCode, input.code));
       await tx.update(model).set(values).where(eq(model.modelCode, input.code));
+      await audit(tx, byUserId, { action: "UPDATE", module: "Admin", entity: "model", key: input.code, summary: `แก้ไขรุ่นสินค้า ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
       return input.code;
     }
     const c = await nextRunningNo(tx, "Model");
     await tx.insert(model).values({ ...values, modelCode: c, tierId: 0 });
+    await audit(tx, byUserId, { action: "CREATE", module: "Admin", entity: "model", key: c, summary: `เพิ่มรุ่นสินค้า ${name} (${str(input.brand)})` });
     return c;
   });
   return (await listModels("exclude")).find((r) => r.code === code)!;
@@ -265,6 +277,7 @@ export async function saveModel(
 
 export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
   await db.update(model).set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() }).where(eq(model.modelCode, code));
+  await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: "model", key: code, summary: `รุ่นสินค้า ${code} → ${rs}`, changes: { recordStatus: [null, rs] } });
 }
 
 export { runningNo };

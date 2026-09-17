@@ -21,6 +21,7 @@ import type { Movement, Product } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff } from "@/server/audit";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
 export type DeletedMode = StatusMode;
@@ -194,9 +195,11 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
     let productId: number;
     let code = i.sysCode;
     if (code) {
+      const [before] = await tx.select().from(product).where(eq(product.productCode, code));
       const [row] = await tx.update(product).set(values).where(eq(product.productCode, code)).returning({ id: product.productId });
       if (!row) throw new HttpError(404, "product not found");
       productId = row.id;
+      await audit(tx, byUserId, { action: "UPDATE", module: "Product", entity: "product", key: code, summary: `แก้ไขอะไหล่ ${name}`, changes: diff(before as Record<string, unknown>, { ...values, retailPrice: i.price, capitalPrice: i.capitalPrice, wholesalePrice: i.wholesalePrice } as Record<string, unknown>) });
     } else {
       code = await nextRunningNo(tx, "Product");
       const [row] = await tx
@@ -250,6 +253,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       const codes = Array.from(new Set(i.models.map((m) => str(m)).filter(Boolean)));
       if (codes.length) await tx.insert(productModel).values(codes.map((c) => ({ productId, modelCode: c })));
     }
+    if (!i.sysCode) await audit(tx, byUserId, { action: "CREATE", module: "Product", entity: "product", key: code!, summary: `เพิ่มอะไหล่ ${name}` });
     return code!;
   });
   return (await getProduct(code))!;
@@ -346,7 +350,9 @@ export async function receiveStock(
     }
     const remark = [i.supplier ? `Supplier: ${i.supplier}` : "", i.remark ?? ""].filter(Boolean).join(" · ");
     const no = await insertMovement(tx, { typeId: INV.RECEIVE, ref: i.poRef, remark, date: i.date }, lines, byUserId);
-    return { no, total: lines.reduce((s, l) => s + l.qty, 0) };
+    const total = lines.reduce((s, l) => s + l.qty, 0);
+    await audit(tx, byUserId, { action: "RECEIVE", module: "Product Receive Stock", entity: "inventory_hd", key: no, summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${str(i.poRef)}` : ""}`, changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] } });
+    return { no, total };
   });
 }
 
@@ -365,7 +371,9 @@ export async function issueOther(
       await adjustQty(tx, p.id, { used: l.qty });
     }
     const no = await insertMovement(tx, { typeId: INV.OUT_OTHER, outTo: i.payTo, remark: i.remark }, lines, byUserId);
-    return { no, total: lines.reduce((s, l) => s + l.qty, 0) };
+    const total = lines.reduce((s, l) => s + l.qty, 0);
+    await audit(tx, byUserId, { action: "ISSUE", module: "Product Pick Stock", entity: "inventory_hd", key: no, summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`, changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] } });
+    return { no, total };
   });
 }
 
@@ -494,6 +502,7 @@ export async function issueForJob(
       mvLines.push({ code: r.sparePartCode ?? "", qty: l.qty });
     }
     const no = await insertMovement(tx, { typeId: INV.OUT_JOB, ref: i.jobNo, outTo: i.payTo, remark: i.remark }, mvLines, byUserId);
+    await audit(tx, byUserId, { action: "ISSUE", module: "Job PickStock", entity: "job", key: i.jobNo, summary: `ตัดจ่ายอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`, changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)] } });
     const [pending] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(jobOrderSparePartLog)
@@ -615,6 +624,7 @@ export async function returnFromJob(
       mvLines.push({ code: r.sparePartCode ?? "", qty: l.qty });
     }
     const no = await insertMovement(tx, { typeId: INV.RETURN_FROM_JOB, ref: i.jobNo, outTo: i.from, remark: i.remark }, mvLines, byUserId);
+    await audit(tx, byUserId, { action: "RETURN", module: "Job ReturnStock", entity: "job", key: i.jobNo, summary: `รับคืนอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`, changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)] } });
     return { no, total: mvLines.reduce((s, l) => s + l.qty, 0) };
   });
 }
@@ -675,6 +685,7 @@ export async function issueForSaleOrder(
     }
     if (!mv.length) throw new HttpError(400, "ไม่มีรายการที่ต้องจ่ายออก");
     const no = await insertMovement(t, { typeId: INV.OUT_SALE, ref: i.soNo, outTo: i.payTo, remark: i.remark }, mv, byUserId);
+    await audit(t, byUserId, { action: "ISSUE", module: "Sale Order", entity: "sale_out_hd", key: i.soNo, summary: `ตัดสต๊อกตามใบสั่งขาย ${no} · ${mv.reduce((s, l) => s + l.qty, 0)} ชิ้น`, changes: { lines: [null, mv.map((l) => `${l.code} x${l.qty}`)] } });
     await t.update(saleOutDt).set({ pickInventoryNo: no }).where(inArray(saleOutDt.saleOutDtId, picked));
     await t.update(saleOutHd).set({ referenceNo: no }).where(eq(saleOutHd.saleOutHdNo, i.soNo));
     return { no, total: mv.reduce((s, l) => s + l.qty, 0) };

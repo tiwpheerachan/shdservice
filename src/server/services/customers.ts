@@ -8,6 +8,7 @@ import type { Customer } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff } from "@/server/audit";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
 export type DeletedMode = StatusMode;
@@ -183,8 +184,10 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       ...statusStamp(fromUiStatus(i.status), byUserId),
     };
     if (i.code) {
+      const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code));
       const [row] = await tx.update(customer).set(values).where(eq(customer.customerCode, i.code)).returning();
       if (!row) throw new HttpError(404, "customer not found");
+      await audit(tx, byUserId, { action: "UPDATE", module: "Customer", entity: "customer", key: i.code, summary: `แก้ไขลูกค้า ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
       return toCustomer(row);
     }
     const code = await nextRunningNo(tx, "Customer");
@@ -192,6 +195,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       .insert(customer)
       .values({ ...values, customerCode: code, createdDate: nowThai(), createBy: byUserId, faxNumber: "" })
       .returning();
+    await audit(tx, byUserId, { action: "CREATE", module: "Customer", entity: "customer", key: code, summary: `เพิ่มลูกค้า ${name} · ${phone}` });
     return toCustomer(row);
   });
 }

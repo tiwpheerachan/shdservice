@@ -22,6 +22,7 @@ import {
 import type { Job } from "@/data/mock";
 import { HttpError, fullName, findAppUserByEmail } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff, auditFor, type AuditRow } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import {
   dateOrNull,
@@ -127,6 +128,15 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
   }
   await tx.update(job).set({ jobStatusId: statusId, ...extra }).where(eq(job.jobNo, jobNo));
   await logStatus(tx, jobNo, statusId, byUserId);
+  const name = (await jobStatuses()).find((r) => r.id === statusId)?.name ?? String(statusId);
+  await audit(tx, byUserId, {
+    action: "STATUS",
+    module: "Job Management",
+    entity: "job",
+    key: jobNo,
+    summary: `เปลี่ยนสถานะงาน → ${name}`,
+    changes: { jobStatusId: [current ?? null, statusId] },
+  });
   return true;
 }
 
@@ -464,6 +474,8 @@ export type JobDetail = {
   parts: Awaited<ReturnType<typeof listPartRequests>>;
   attachments: { id: number; name: string; file: string; remark: string }[];
   logs: { statusId: number; status: string; date: string; by: string }[];
+  /** audit_log entries for this job (newest first) — ประวัติการแก้ไข */
+  history: AuditRow[];
 };
 
 export async function getJob(jobNo: string): Promise<JobDetail | null> {
@@ -499,7 +511,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
   if (!r) return null;
   const j = r.j;
 
-  const [cust, syms, fwd, parts, atts, logs] = await Promise.all([
+  const [cust, syms, fwd, parts, atts, logs, history] = await Promise.all([
     j.customerId ? getCustomerById(j.customerId) : Promise.resolve(null),
     db
       .select({ id: jobSymptom.symptomId, name: symptom.symptomName })
@@ -536,6 +548,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       .leftJoin(appUser, eq(appUser.userId, jobLog.jobActionBy))
       .where(eq(jobLog.jobNo, jobNo))
       .orderBy(asc(jobLog.jobLogDate), asc(jobLog.jobLogId)),
+    auditFor("job", jobNo, 100),
   ]);
 
   const symptomIds = syms.length ? syms.map((s) => s.id) : j.productSymptomId && j.productSymptomId > 0 ? [j.productSymptomId] : [];
@@ -632,6 +645,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     parts,
     attachments: atts.map((a) => ({ id: a.documentAttachId, name: a.originalFileName ?? "", file: a.systemFileName ?? "", remark: a.remark ?? "" })),
     logs: logs.map((l) => ({ statusId: l.statusId ?? 0, status: l.status?.trim() ?? "", date: fmtDateTime(l.date), by: fullName(l.f, l.l) })),
+    history,
   };
 }
 
@@ -811,6 +825,13 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
     });
     await logStatus(tx, no, JS.NEW, byUserId);
     await writeSymptoms(tx, no, lk.symIds);
+    await audit(tx, byUserId, {
+      action: "CREATE",
+      module: "Job Management",
+      entity: "job",
+      key: no,
+      summary: `เปิดงานใหม่ · ${cust.code} ${cust.name} · ${str(i.brand)} ${str(i.modelCode)}`.trim(),
+    });
     if (engineerId > 0) await setStatus(tx, no, JS.IN_PROGRESS, byUserId, JS.NEW);
     return no;
   });
@@ -827,11 +848,9 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
   const engineerId = i.engineerId !== undefined || i.engineerEmail ? await resolveEngineer(i) : undefined;
 
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select({ parts: job.sparePartTotalCost }).from(job).where(eq(job.jobNo, jobNo));
-    const parts = num(existing?.parts);
-    await tx
-      .update(job)
-      .set({
+    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
+    const parts = num(existing?.sparePartTotalCost);
+    const values = {
         ...(cust ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) } : {}),
         customerDueDate: dateOrSentinel(i.dueDate),
         ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
@@ -868,8 +887,16 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
         jobReceptionShipper: str(i.receptionShipper).slice(0, 50),
         productSaleOutShopName: str(i.shopName).slice(0, 100),
         ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
-      })
-      .where(eq(job.jobNo, jobNo));
+      };
+    await tx.update(job).set(values).where(eq(job.jobNo, jobNo));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: "Job Management",
+      entity: "job",
+      key: jobNo,
+      summary: "แก้ไขข้อมูลงาน",
+      changes: diff(existing as Record<string, unknown>, values as Record<string, unknown>),
+    });
     if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) await writeSymptoms(tx, jobNo, lk.symIds);
     if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
   });
@@ -887,6 +914,14 @@ export async function assignJobs(jobNos: string[], engineerId: number, byUserId:
     const rows = await tx.select({ no: job.jobNo, status: job.jobStatusId }).from(job).where(inArray(job.jobNo, jobNos));
     for (const r of rows) {
       await tx.update(job).set({ engineerId }).where(eq(job.jobNo, r.no));
+      await audit(tx, byUserId, {
+        action: "ASSIGN",
+        module: "Job Assign",
+        entity: "job",
+        key: r.no,
+        summary: `มอบหมายงานให้ช่าง #${engineerId}`,
+        changes: { engineerId: [null, engineerId] },
+      });
       if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
       n++;
     }
@@ -1025,9 +1060,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     const tool = i.toolCost !== undefined ? num(i.toolCost) : num(j.serviceToolCost);
     const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
     const box = i.boxCost !== undefined ? num(i.boxCost) : num(j.cartonBoxCost);
-    await tx
-      .update(job)
-      .set({
+    const repairValues = {
         ...(es ? { engineerSymptomId: es.id } : {}),
         ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
         ...(i.engineerRemark !== undefined ? { engineerRemark: str(i.engineerRemark).slice(0, 200) } : {}),
@@ -1039,8 +1072,16 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         deliveryCost: money(delivery),
         cartonBoxCost: money(box),
         jobTotalCost: money(partsTotal + service + tool + delivery + box),
-      })
-      .where(eq(job.jobNo, jobNo));
+      };
+    await tx.update(job).set(repairValues).where(eq(job.jobNo, jobNo));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: "Job Repair",
+      entity: "job",
+      key: jobNo,
+      summary: `บันทึกงานซ่อม${i.parts ? ` · อะไหล่ ${i.parts.length} รายการ` : ""}`,
+      changes: diff(j as unknown as Record<string, unknown>, repairValues as Record<string, unknown>),
+    });
 
     // ---- status: explicit choice wins; new stock requests move a new/in-progress job to 11 ----
     let target = newStatus;
@@ -1085,6 +1126,14 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
     };
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: "Job Repair",
+      entity: "job",
+      key: jobNo,
+      summary: i.send ? `ส่งซ่อมต่อ → ${str(i.send.to)}` : i.receive ? `รับคืนจาก Out-Source (${str(i.receive.from)})` : "บันทึกงานส่งซ่อมต่อ",
+      changes: diff(null, { ...fields, ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date) } : {}), ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date) } : {}) }),
+    });
 
     let target = newStatus;
     const open = await tx
@@ -1196,9 +1245,8 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i.detail ? `รายละเอียด: ${str(i.detail)}` : "",
   ].filter(Boolean);
   await db.transaction(async (tx) => {
-    await tx
-      .update(job)
-      .set({
+    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
+    const swapValues = {
         ...(i.inspection !== undefined ? { engineerRepairDetail: str(i.inspection).slice(0, 200) } : {}),
         swapRefundDetail: lines.join("\n"),
         swapRefundDocumentNo: str(i.docNo).slice(0, 100),
@@ -1211,8 +1259,16 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
               jobPaymentDetail: `Refund ${str(i.refundDate)}`.slice(0, 100),
             }
           : {}),
-      })
-      .where(eq(job.jobNo, jobNo));
+      };
+    await tx.update(job).set(swapValues).where(eq(job.jobNo, jobNo));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: "Job Management",
+      entity: "job",
+      key: jobNo,
+      summary: num(i.refundAmount) > 0 ? `บันทึก Refund ${num(i.refundAmount).toFixed(2)} บาท` : "บันทึก Swap / เปลี่ยนเครื่อง",
+      changes: diff(before as Record<string, unknown>, swapValues as Record<string, unknown>),
+    });
     if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
   });
   return (await getJob(jobNo))!;
@@ -1255,7 +1311,16 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
             }
           : {}),
     };
+    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: "Job Closing",
+      entity: "job",
+      key: jobNo,
+      summary: "บันทึกปิดงาน / ส่งคืนสินค้า",
+      changes: diff(before as Record<string, unknown>, fields as Record<string, unknown>),
+    });
     await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
   });
   return (await getJob(jobNo))!;
@@ -1264,23 +1329,30 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
 /* ------------------------------------------------------------------ *
  * Attachments (document_attach) — files live in Supabase Storage
  * ------------------------------------------------------------------ */
-export async function addAttachment(jobNo: string, originalName: string, systemName: string, remark = "") {
-  const [row] = await db
-    .insert(documentAttach)
-    .values({
-      referenceTopic: "Jobs",
-      referenceItemCode: jobNo,
-      originalFileName: originalName.slice(0, 50),
-      systemFileName: systemName.slice(0, 50),
-      remark: remark.slice(0, 100),
-      isActive: true,
-    })
-    .returning({ id: documentAttach.documentAttachId });
-  return row.id;
+export async function addAttachment(jobNo: string, originalName: string, systemName: string, remark = "", byUserId = 0) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(documentAttach)
+      .values({
+        referenceTopic: "Jobs",
+        referenceItemCode: jobNo,
+        originalFileName: originalName.slice(0, 50),
+        systemFileName: systemName.slice(0, 50),
+        remark: remark.slice(0, 100),
+        isActive: true,
+      })
+      .returning({ id: documentAttach.documentAttachId });
+    await audit(tx, byUserId, { action: "UPLOAD", module: "Job Management", entity: "job", key: jobNo, summary: `แนบไฟล์ ${originalName}`, changes: { file: [null, systemName] } });
+    return row.id;
+  });
 }
 
 export async function removeAttachment(id: number, byUserId = 0) {
-  await db.update(documentAttach).set(statusStamp(RS.DELETED, byUserId)).where(eq(documentAttach.documentAttachId, id));
+  await db.transaction(async (tx) => {
+    const [row] = await tx.select({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName }).from(documentAttach).where(eq(documentAttach.documentAttachId, id));
+    await tx.update(documentAttach).set(statusStamp(RS.DELETED, byUserId)).where(eq(documentAttach.documentAttachId, id));
+    await audit(tx, byUserId, { action: "DELETE", module: "Job Management", entity: "job", key: row?.jobNo ?? String(id), summary: `ลบไฟล์แนบ ${row?.name ?? id}` });
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -1392,7 +1464,10 @@ export async function addCallLog(jobNo: string, detail: string, byUserId: number
   const { jobCallLog } = await import("@/db/schema");
   const text = str(detail).slice(0, 200);
   if (!text) throw new HttpError(400, "ต้องระบุรายละเอียด");
-  await db.insert(jobCallLog).values({ jobNo, callLogDescription: text, callLogDate: nowThai(), callLogBy: byUserId });
+  await db.transaction(async (tx) => {
+    await tx.insert(jobCallLog).values({ jobNo, callLogDescription: text, callLogDate: nowThai(), callLogBy: byUserId });
+    await audit(tx, byUserId, { action: "CREATE", module: "Job Management", entity: "job", key: jobNo, summary: `บันทึกการโทร: ${text}`.slice(0, 200) });
+  });
   return listCallLogs(jobNo);
 }
 

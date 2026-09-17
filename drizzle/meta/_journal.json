@@ -43,6 +43,13 @@
       "when": 1757900005000,
       "tag": "0005_product_type_description",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1757900006000,
+      "tag": "0006_audit_log",
+      "breakpoints": true
     }
   ]
 }

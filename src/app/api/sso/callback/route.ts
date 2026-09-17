@@ -9,6 +9,8 @@ import {
 } from "@/lib/session";
 import { lookupByEmail } from "@/lib/directory";
 import { provisionSsoUser } from "@/server/services/users";
+import { audit } from "@/server/audit";
+import { db } from "@/db/client";
 import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
 
 export const runtime = "nodejs";
@@ -30,16 +32,16 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}): Promise<{ role: string; status: string }> {
+}): Promise<{ role: string; status: string; userId: number }> {
   try {
     const r = await provisionSsoUser(opts);
-    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive" };
+    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId };
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error("[sso] provision failed:", e instanceof Error ? e.message : e);
     return isOwner(opts.email)
-      ? { role: ADMIN_ROLE, status: "Active" }
-      : { role: PENDING_ROLE, status: "Active" };
+      ? { role: ADMIN_ROLE, status: "Active", userId: 0 }
+      : { role: PENDING_ROLE, status: "Active", userId: 0 };
   }
 }
 
@@ -121,7 +123,7 @@ export async function GET(request: NextRequest) {
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table and get the effective role/status.
-  const { role, status } = await provision({
+  const { role, status, userId } = await provision({
     email,
     name,
     larkId: prof?.id ?? "",
@@ -130,6 +132,21 @@ export async function GET(request: NextRequest) {
     avatar,
     title: prof?.title ?? "",
   });
+
+  // audit: LOGIN (best-effort — never blocks sign-in)
+  try {
+    await audit(db, userId, {
+      action: "LOGIN",
+      module: "Auth",
+      entity: "app_user",
+      key: userId || email,
+      summary: `เข้าสู่ระบบ ${email} · ${role}`,
+      meta: { ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] audit login failed:", e instanceof Error ? e.message : e);
+  }
 
   const user: SessionUser = {
     email,

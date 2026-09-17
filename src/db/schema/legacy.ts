@@ -5,7 +5,7 @@
 //   - app_user gained the SSO profile columns (see drizzle/0001_app.sql)
 // Column names are the DB's snake_case names; property names are camelCase.
 // The DB is the source of truth — do not "fix" legacy types here.
-import { pgTable, integer, varchar, timestamp, boolean, numeric, foreignKey, uniqueIndex, text, date, bigint, index, doublePrecision, pgView, primaryKey } from "drizzle-orm/pg-core"
+import { pgTable, integer, varchar, timestamp, boolean, numeric, foreignKey, uniqueIndex, text, date, bigint, index, doublePrecision, pgView, primaryKey, jsonb, bigserial } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -837,3 +837,24 @@ export const recordStatus = pgTable("record_status", {
 	nameEn: varchar("name_en", { length: 50 }).notNull(),
 	sortOrder: integer("sort_order").notNull(),
 });
+
+/** Application audit trail (drizzle/0006_audit_log.sql) — append-only, one row per write. */
+export const auditLog = pgTable("audit_log", {
+	id: bigserial("id", { mode: "number" }).primaryKey().notNull(),
+	at: timestamp("at", { mode: "string" }).notNull(),
+	userId: integer("user_id").notNull().default(0),
+	userName: varchar("user_name", { length: 100 }).notNull().default(""),
+	action: varchar("action", { length: 20 }).notNull(),
+	module: varchar("module", { length: 50 }).notNull().default(""),
+	entity: varchar("entity", { length: 50 }).notNull(),
+	entityKey: varchar("entity_key", { length: 100 }).notNull().default(""),
+	summary: varchar("summary", { length: 200 }).notNull().default(""),
+	changes: jsonb("changes"),
+	meta: jsonb("meta"),
+}, (table) => [
+	index("ix_audit_log_entity").using("btree", table.entity.asc(), table.entityKey.asc(), table.at.desc()),
+	index("ix_audit_log_user").using("btree", table.userId.asc(), table.at.desc()),
+	index("ix_audit_log_at").using("btree", table.at.desc()),
+	index("ix_audit_log_module").using("btree", table.module.asc(), table.at.desc()),
+]);
+

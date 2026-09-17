@@ -5,6 +5,7 @@ import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotati
 import type { Quotation } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
@@ -312,18 +313,25 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     };
     let no = i.no;
     if (no) {
-      const [prev] = await tx.select({ st: quotationHd.quotationStatusId, ap: quotationHd.customerApproveDate }).from(quotationHd).where(eq(quotationHd.quotationNo, no));
+      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no));
       if (!prev) throw new HttpError(404, "ไม่พบใบเสนอราคา " + no);
-      await tx
-        .update(quotationHd)
-        .set({
-          ...values,
-          customerApproveDate: AGREED.has(statusId) && !AGREED.has(prev.st ?? 0) ? nowThai() : prev.ap,
-          // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API
-          ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
-        })
-        .where(eq(quotationHd.quotationNo, no));
+      const upd = {
+        ...values,
+        customerApproveDate: AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,
+        // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API
+        ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
+      };
+      await tx.update(quotationHd).set(upd).where(eq(quotationHd.quotationNo, no));
       await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
+      const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? "";
+      await audit(tx, byUserId, {
+        action: prev.quotationStatusId !== statusId ? "STATUS" : "UPDATE",
+        module: "Quotation",
+        entity: "quotation_hd",
+        key: no,
+        summary: prev.quotationStatusId !== statusId ? `สถานะใบเสนอราคา → ${statusName}` : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
+        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, { skip: ["customerApproveDate"] }),
+      });
     } else {
       no = await nextRunningNo(tx, "Quotation");
       await tx.insert(quotationHd).values({
@@ -333,6 +341,13 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         createBy: byUserId,
         customerApproveDate: AGREED.has(statusId) ? nowThai() : SENTINEL_TS,
         ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
+      });
+      await audit(tx, byUserId, {
+        action: "CREATE",
+        module: "Quotation",
+        entity: "quotation_hd",
+        key: no,
+        summary: `สร้างใบเสนอราคา · งาน ${values.referenceJobNo || "-"} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
       });
     }
     if (lines.length) {

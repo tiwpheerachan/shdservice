@@ -25,6 +25,6 @@ export const POST = handle(async (req: NextRequest) => {
   if (file.type && !ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "รองรับเฉพาะ JPG, PNG, WEBP, PDF");
   const sys = systemFileName(file.name);
   await uploadFile(filePath.attachment(jobNo, sys), file);
-  const id = await addAttachment(jobNo, file.name, sys, remark);
+  const id = await addAttachment(jobNo, file.name, sys, remark, user.userId);
   return NextResponse.json({ ok: true, row: { id, name: file.name, file: sys, remark } });
 });

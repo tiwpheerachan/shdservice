@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { appUser, customer, job, jobLog, product, quotationHd, saleOutHd } from "@/db/schema";
 import type { Module } from "@/lib/modules";
 import { HttpError } from "@/server/auth";
+import { audit } from "@/server/audit";
 import { nowThai, SENTINEL_TS } from "@/server/mappers/format";
 import { RS, statusStamp, type RecordStatus } from "@/server/record-status";
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from "./masters";
@@ -59,6 +60,22 @@ export async function setRecordStatus(
   byUserId: number
 ): Promise<void> {
   const stamp = statusStamp(rs, byUserId);
+  const ENTITY: Record<string, [string, string]> = {
+    users: ["app_user", "Admin"], products: ["product", "Product"], customers: ["customer", "Customer"],
+    jobs: ["job", "Job Management"], quotations: ["quotation_hd", "Quotation"], sale_orders: ["sale_out_hd", "Sale Order"],
+  };
+  const log = async (w: Parameters<typeof audit>[0] = db) => {
+    const e = ENTITY[table];
+    if (!e) return;
+    await audit(w, byUserId, {
+      action: rs === RS.DELETED ? "DELETE" : "STATUS",
+      module: e[1],
+      entity: e[0],
+      key: id,
+      summary: rs === RS.DELETED ? `ลบ (soft delete) ${e[0]} ${id}` : `${e[0]} ${id} → ${rs}`,
+      changes: { recordStatus: [null, rs] },
+    });
+  };
   if (isSimpleKind(table)) return setSimpleStatus(table, Number(id), rs, byUserId);
   switch (table) {
     case "symptoms":
@@ -70,6 +87,7 @@ export async function setRecordStatus(
         .update(appUser)
         .set({ ...stamp, deleted: rs === RS.DELETED })
         .where(eq(appUser.userId, Number(id)));
+      await log();
       return;
     case "products":
       await db
@@ -80,12 +98,15 @@ export async function setRecordStatus(
             : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: "" }
         )
         .where(eq(product.productCode, String(id)));
+      await log();
       return;
     case "customers":
       await db.update(customer).set(stamp).where(eq(customer.customerCode, String(id)));
+      await log();
       return;
     case "quotations":
       await db.update(quotationHd).set(stamp).where(eq(quotationHd.quotationNo, String(id)));
+      await log();
       return;
     case "jobs": {
       await db.transaction(async (tx) => {
@@ -98,6 +119,7 @@ export async function setRecordStatus(
         if (rs === RS.DELETED && cur.st !== JOB_STATUS_CANCELLED) {
           await tx.insert(jobLog).values({ jobNo: String(id), jobStatusId: JOB_STATUS_CANCELLED, jobLogDate: nowThai(), jobActionBy: byUserId });
         }
+        await log(tx);
       });
       return;
     }
@@ -110,6 +132,7 @@ export async function setRecordStatus(
             : { ...statusStamp(rs, byUserId, false), documentStatus: true, documentCancelDate: SENTINEL_TS, documentCancelBy: -1, documentCancelRemark: "" }
         )
         .where(eq(saleOutHd.saleOutHdNo, String(id)));
+      await log();
       return;
   }
 }

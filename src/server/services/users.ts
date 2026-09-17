@@ -1,3 +1,4 @@
+import { audit, diff } from "@/server/audit";
 import "server-only";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -177,9 +178,8 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   }
 
   if (Number.isFinite(targetId)) {
-    const [row] = await db
-      .update(appUser)
-      .set({
+    const [before] = await db.select().from(appUser).where(eq(appUser.userId, targetId));
+    const userValues = {
         firstName: first,
         lastName: last,
         userType,
@@ -192,10 +192,10 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
         title: input.title || undefined,
         avatar: input.avatar || undefined,
         username: input.username?.slice(0, 50) || undefined,
-      })
-      .where(eq(appUser.userId, targetId))
-      .returning();
+      };
+    const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
     if (!row) throw new HttpError(404, "user not found");
+    await audit(db, actorId, { action: "UPDATE", module: "Admin", entity: "app_user", key: targetId, summary: `แก้ไขผู้ใช้ ${fullName(first, last)} · สิทธิ์ ${userType ?? PENDING_ROLE}`, changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, { skip: ["deleted", "isActive", "recordStatus"] }) });
     return { user: toUser(row), created: false };
   }
 
@@ -216,6 +216,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       avatar: input.avatar || null,
     })
     .returning();
+  await audit(db, actorId, { action: "CREATE", module: "Admin", entity: "app_user", key: row.userId, summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || "-"} · สิทธิ์ ${userType ?? PENDING_ROLE}` });
   return { user: toUser(row), created: true };
 }
 
@@ -227,6 +228,7 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
     .where(eq(appUser.userId, userId))
     .returning();
   if (!row) throw new HttpError(404, "user not found");
+  await audit(db, actorId, { action: "APPROVE", module: "Admin", entity: "app_user", key: userId, summary: `อนุมัติผู้ใช้ ${fullName(row.firstName, row.lastName)} → ${row.userType}`, changes: { userType: [null, row.userType] } });
   return toUser(row);
 }
 
@@ -235,6 +237,7 @@ export async function setUserDeleted(userId: number, deleted: boolean, actorId =
     .update(appUser)
     .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
     .where(eq(appUser.userId, userId));
+  await audit(db, actorId, { action: deleted ? "DELETE" : "STATUS", module: "Admin", entity: "app_user", key: userId, summary: deleted ? `ลบผู้ใช้ #${userId}` : `กู้คืนผู้ใช้ #${userId}`, changes: { recordStatus: [null, deleted ? RS.DELETED : RS.ACTIVE] } });
 }
 
 /* ------------------------------------------------------------------ *
@@ -272,10 +275,14 @@ export async function listPermissions(): Promise<Permission[]> {
 }
 
 export async function savePermissions(
-  items: { role: string; menu: string; add: boolean; edit: boolean; del: boolean; view: boolean }[]
+  items: { role: string; menu: string; add: boolean; edit: boolean; del: boolean; view: boolean }[],
+  actorId = 0
 ): Promise<number> {
   let n = 0;
   await db.transaction(async (tx) => {
+    const beforeRows = await tx.select().from(appConfig);
+    const beforeMap = new Map(beforeRows.map((r) => [`${r.userType?.trim()}::${r.moduleName?.trim()}`, r]));
+    const changed: Record<string, [unknown, unknown]> = {};
     for (const it of items) {
       const existing = await tx
         .select({ id: appConfig.configId })
@@ -288,7 +295,17 @@ export async function savePermissions(
       } else {
         await tx.insert(appConfig).values({ userType: it.role, moduleName: it.menu, ...values });
       }
+      const b = beforeMap.get(`${it.role}::${it.menu}`);
+      const pack = (g: { canInsert?: boolean | null; canEdit?: boolean | null; canDelete?: boolean | null; canView?: boolean | null } | undefined) =>
+        g ? `${g.canView ? "V" : "-"}${g.canInsert ? "A" : "-"}${g.canEdit ? "E" : "-"}${g.canDelete ? "D" : "-"}` : null;
+      const was = pack(b);
+      const now = pack(values);
+      if (was !== now) changed[it.menu] = [was, now];
       n++;
+    }
+    const role = items[0]?.role ?? "";
+    if (Object.keys(changed).length) {
+      await audit(tx, actorId, { action: "UPDATE", module: "Admin", entity: "app_config", key: role, summary: `แก้สิทธิ์บทบาท ${role} · ${Object.keys(changed).length} เมนู (V=ดู A=เพิ่ม E=แก้ D=ลบ)`, changes: changed });
     }
   });
   invalidateGrantCache();

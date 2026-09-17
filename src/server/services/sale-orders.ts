@@ -6,6 +6,7 @@ import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutH
 import type { SaleOrder } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
+import { audit, diff } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
@@ -269,16 +270,29 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     };
     let no = i.no;
     if (no) {
-      const [prev] = await tx.select({ st: saleOutHd.approveStatusId }).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no));
+      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no));
       if (!prev) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
-      if (prev.st === AS.APPROVED) throw new HttpError(409, "ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้");
-      await tx
-        .update(saleOutHd)
-        .set({ ...hdValues, approveStatusId: approveId, ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}) })
-        .where(eq(saleOutHd.saleOutHdNo, no));
+      if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, "ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้");
+      const upd = { ...hdValues, approveStatusId: approveId, ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}) };
+      await tx.update(saleOutHd).set(upd).where(eq(saleOutHd.saleOutHdNo, no));
       await tx.delete(saleOutDt).where(eq(saleOutDt.saleOutHdNo, no));
+      await audit(tx, byUserId, {
+        action: "UPDATE",
+        module: "Sale Order",
+        entity: "sale_out_hd",
+        key: no,
+        summary: `แก้ไขใบสั่งขาย · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
+        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>),
+      });
     } else {
       no = await nextRunningNo(tx, "SaleOrder");
+      await audit(tx, byUserId, {
+        action: "CREATE",
+        module: "Sale Order",
+        entity: "sale_out_hd",
+        key: no,
+        summary: `สร้างใบสั่งขาย · ${cust.code} ${cust.name} · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
+      });
       await tx.insert(saleOutHd).values({
         ...hdValues,
         saleOutHdNo: no,
@@ -343,6 +357,14 @@ export async function approveSaleOrder(no: string, decision: "approve" | "deny" 
       .update(saleOutHd)
       .set({ approveStatusId: statusId, approveDate: nowThai(), approveBy: byUserId, approveRemark: str(remark).slice(0, 100) })
       .where(eq(saleOutHd.saleOutHdNo, no));
+    await audit(tx, byUserId, {
+      action: "APPROVE",
+      module: "Sale Order",
+      entity: "sale_out_hd",
+      key: no,
+      summary: decision === "approve" ? "อนุมัติใบสั่งขาย (ตัดสต๊อก)" : decision === "deny" ? `ปฏิเสธใบสั่งขาย${remark ? ` · ${remark}` : ""}` : `ส่งกลับแก้ไข${remark ? ` · ${remark}` : ""}`,
+      changes: { approveStatusId: [hd.approveStatusId, statusId] },
+    });
     if (decision === "approve") {
       const hasGoods = await tx
         .select({ n: count() })
@@ -355,13 +377,15 @@ export async function approveSaleOrder(no: string, decision: "approve" | "deny" 
 }
 
 export async function setTracking(no: string, tracking: string, byUserId: number): Promise<SaleOrderDetail> {
-  const r = await db
-    .update(saleOutHd)
-    .set({ deliveryTrackingNo: str(tracking).slice(0, 50), deliveryDate: nowThai() })
-    .where(eq(saleOutHd.saleOutHdNo, no))
-    .returning({ no: saleOutHd.saleOutHdNo });
-  if (!r[0]) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
-  void byUserId;
+  await db.transaction(async (tx) => {
+    const r = await tx
+      .update(saleOutHd)
+      .set({ deliveryTrackingNo: str(tracking).slice(0, 50), deliveryDate: nowThai() })
+      .where(eq(saleOutHd.saleOutHdNo, no))
+      .returning({ no: saleOutHd.saleOutHdNo });
+    if (!r[0]) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
+    await audit(tx, byUserId, { action: "UPDATE", module: "Sale Order", entity: "sale_out_hd", key: no, summary: `บันทึกเลขพัสดุ ${str(tracking)}`, changes: { deliveryTrackingNo: [null, str(tracking)] } });
+  });
   return (await getSaleOrder(no))!;
 }
 

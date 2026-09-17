@@ -17,7 +17,7 @@ export const GET = handle(async (req: NextRequest) => {
 
 /** Upsert app_config rows by (user_type, module_name). Admin only. */
 export const POST = handle(async (req: NextRequest) => {
-  await requireAdmin(req);
+  const me = await requireAdmin(req);
   const body = await readJson<{ items?: unknown }>(req);
   const items = Array.isArray(body.items)
     ? (body.items as Record<string, unknown>[])
@@ -32,6 +32,6 @@ export const POST = handle(async (req: NextRequest) => {
         .filter((r) => r.role && r.menu)
     : [];
   if (items.length === 0) throw new HttpError(400, "no items");
-  const saved = await savePermissions(items);
+  const saved = await savePermissions(items, me.userId);
   return NextResponse.json({ ok: true, saved });
 });
