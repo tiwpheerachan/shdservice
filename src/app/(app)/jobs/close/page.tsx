@@ -151,6 +151,16 @@ function CloseForm() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์ใบส่งคืน
             </Button>
+            <Button
+              variant="outline"
+              size="md"
+              disabled={!job}
+              title="ใบปะหน้าพัสดุ A5 สำหรับส่งคืนทางขนส่ง"
+              onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}/label`, "_blank")}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              พิมพ์ใบปะหน้าพัสดุ
+            </Button>
           </div>
         }
       />

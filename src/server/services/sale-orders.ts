@@ -9,7 +9,7 @@ import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
-import { getCustomerByCode } from "./customers";
+import { getCustomerByCode, addressNames } from "./customers";
 import { issueForSaleOrder } from "./stock";
 import { RS, statusFilter, type StatusMode } from "@/server/record-status";
 
@@ -144,7 +144,11 @@ export type SaleOrderLine = {
 };
 
 export type SaleOrderDetail = SaleOrder & {
-  customerDetail: { code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string };
+  customerDetail: {
+    code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string;
+    /** ตำบล / อำเภอ / จังหวัด names from the customer master (blank when the customer has no province picked) — for the shipping label's "ต. อ. จ." line */
+    subDistrict: string; district: string; province: string;
+  };
   lines: SaleOrderLine[];
   totalBase: number;
   fee: number;
@@ -164,6 +168,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     .where(eq(saleOutDt.saleOutHdNo, no))
     .orderBy(asc(saleOutDt.listNo), asc(saleOutDt.saleOutDtId));
   const cust = hd.customerCode ? await getCustomerByCode(hd.customerCode) : null;
+  const { subDistrict, district, province } = await addressNames(cust);
   return {
     ...toSaleOrder(r),
     customerDetail: {
@@ -174,6 +179,9 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       phone: hd.customerPhoneNumber ?? "",
       line: cust?.line ?? "",
       email: cust?.email ?? "",
+      subDistrict,
+      district,
+      province,
     },
     lines: dts.map(({ d, name }) => ({
       id: d.saleOutDtId,

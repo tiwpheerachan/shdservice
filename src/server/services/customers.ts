@@ -157,6 +157,18 @@ async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
   return parts.filter(Boolean).join(" ").slice(0, 200);
 }
 
+/** ตำบล / อำเภอ / จังหวัด names for a customer's ids — blanks when not picked (legacy customers). */
+export async function addressNames(c: { cityId?: number; districtId?: number; subDistrictId?: number } | null | undefined) {
+  const pick = async (q: Promise<{ n: string }[]> | null) => (q ? ((await q)[0]?.n ?? "") : "");
+  const sdId = c?.subDistrictId ?? 0, dId = c?.districtId ?? 0, cId = c?.cityId ?? 0;
+  const [subDistrict, district, province] = await Promise.all([
+    pick(sdId > 0 ? db.select({ n: mtSubDistrict.nameTh }).from(mtSubDistrict).where(eq(mtSubDistrict.subDistrictId, sdId)).limit(1) : null),
+    pick(dId > 0 ? db.select({ n: mtDistrict.nameTh }).from(mtDistrict).where(eq(mtDistrict.districtId, dId)).limit(1) : null),
+    pick(cId > 0 ? db.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, cId)).limit(1) : null),
+  ]);
+  return { subDistrict, district, province };
+}
+
 export type CustomerConflict = { field: "phone" | "email" | "taxId"; value: string; code: string; name: string; phone: string; email: string; taxId: string };
 
 const digits = (v: unknown) => str(v).replace(/\D/g, "");

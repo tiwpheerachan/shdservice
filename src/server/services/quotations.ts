@@ -184,6 +184,9 @@ export type QuotationDetail = Quotation & {
   rounding: number;
   netAmount: number;
   approveRemark: string;
+  /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
+  createdByPhone: string;
+  createdByEmail: string;
 };
 
 export async function getQuotation(no: string): Promise<QuotationDetail | null> {
@@ -191,7 +194,11 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   if (!r) return null;
   const [hd] = await db.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).limit(1);
   const dts = await db.select().from(quotationDt).where(eq(quotationDt.quotationNo, no)).orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
-  const [cust, jb] = await Promise.all([hd.customerCode ? getCustomerByCode(hd.customerCode) : null, hd.referenceJobNo ? getJob(hd.referenceJobNo) : null]);
+  const [cust, jb, [creator]] = await Promise.all([
+    hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
+    hd.referenceJobNo ? getJob(hd.referenceJobNo) : null,
+    hd.createBy ? db.select({ phone: appUser.phoneNo, email: appUser.emailAddress }).from(appUser).where(eq(appUser.userId, hd.createBy)).limit(1) : Promise.resolve([undefined]),
+  ]);
   return {
     ...toQuotation(r),
     contactName: hd.customerContactName ?? "",
@@ -221,6 +228,8 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     rounding: num(hd.roundingAmount),
     netAmount: num(hd.netAmount),
     approveRemark: hd.customerApproveRemark ?? "",
+    createdByPhone: creator?.phone ?? "",
+    createdByEmail: creator?.email ?? "",
   };
 }
 
