@@ -23,7 +23,7 @@ async function tryRefresh(): Promise<boolean> {
 
 function toLogin() {
   if (typeof window === "undefined") return;
-  window.location.href = "/api/sso/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname + window.location.search);
 }
 
 export async function api<T = unknown>(url: string, init: RequestInit = {}, retry = true): Promise<T> {

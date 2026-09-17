@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/session";
+import { SESSION_COOKIE, SEEN_COOKIE } from "@/lib/session";
 import { appOrigin, isRouterFetch } from "@/lib/sso";
 
 export const runtime = "nodejs";
@@ -11,5 +11,6 @@ export async function GET(request: NextRequest) {
   if (isRouterFetch(request)) return new NextResponse(null, { status: 204 });
   const res = NextResponse.redirect(new URL("/login?bye=1", appOrigin(request)));
   res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(SEEN_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

@@ -18,7 +18,7 @@ const ERRORS: Record<string, string> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; bye?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; bye?: string; expired?: string }>;
 }) {
   const sp = await searchParams;
   const next = sp.next ?? "/jobs/dashboard";
@@ -41,6 +41,11 @@ export default async function LoginPage({
             </p>
           </div>
 
+          {sp.expired && !sp.bye && (
+            <p className="animate-element rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs text-warning">
+              เซสชันหมดอายุเนื่องจากไม่มีการใช้งานเกิน 30 นาที กรุณาเข้าสู่ระบบอีกครั้ง
+            </p>
+          )}
           {sp.bye && (
             <p className="animate-element rounded-xl border border-border bg-muted/50 px-3 py-2 text-center text-xs text-muted-foreground">
               ออกจากระบบเรียบร้อยแล้ว

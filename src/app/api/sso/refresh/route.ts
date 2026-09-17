@@ -4,6 +4,8 @@ import {
   signSession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
+  SEEN_COOKIE,
+  SEEN_TTL_S,
   type SessionUser,
 } from "@/lib/session";
 import { resolveUser } from "@/server/auth";
@@ -39,5 +41,6 @@ export async function GET(request: NextRequest) {
     path: "/",
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
+  res.cookies.set(SEEN_COOKIE, "1", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: SEEN_TTL_S });
   return res;
 }

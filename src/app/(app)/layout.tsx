@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
+import { SESSION_COOKIE } from "@/lib/session";
 import { AppShell } from "@/components/layout/app-shell";
 import { AccessProvider } from "@/lib/use-access";
 import { userFromCookies, grantsForUserType } from "@/server/auth";
@@ -23,9 +24,14 @@ export default async function AppLayout({
   if (!user) {
     // soft navigation / prefetch → our /login page; real navigation → SSO directly
     const h = await headers();
+    const next = h.get("next-url") || "";
     if (h.get("rsc") || h.get("next-router-prefetch")) {
-      const next = h.get("next-url") || "";
       redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
+    }
+    // a cookie was sent (middleware let it through) but it no longer verifies →
+    // the session expired: show /login rather than bouncing through SSO silently
+    if ((await cookies()).get(SESSION_COOKIE)?.value) {
+      redirect(next ? `/login?expired=1&next=${encodeURIComponent(next)}` : "/login?expired=1");
     }
     redirect("/api/sso/login");
   }

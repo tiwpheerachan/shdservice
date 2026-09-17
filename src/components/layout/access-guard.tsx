@@ -34,8 +34,7 @@ export function AccessGuard() {
         const r = await fetch("/api/sso/refresh", { cache: "no-store" });
         if (!active) return;
         if (r.status === 401) {
-          window.location.href =
-            "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
+          window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
           return;
         }
         const d = await r.json().catch(() => ({}));

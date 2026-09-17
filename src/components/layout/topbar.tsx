@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import { Menu, Search, LogOut, ChevronRight, Bell, PanelLeft } from "lucide-react";
+import { Menu, Search, LogOut, ChevronRight, PanelLeft } from "lucide-react";
 import { findBreadcrumb } from "@/lib/nav";
 import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
@@ -98,14 +98,6 @@ export function Topbar({
       </button>
 
       <SessionTimer />
-
-      <button
-        className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        aria-label="การแจ้งเตือน"
-      >
-        <Bell className="h-4 w-4" />
-        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger ring-2 ring-background" />
-      </button>
 
       <ThemeToggle />
 
