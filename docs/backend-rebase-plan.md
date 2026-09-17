@@ -350,3 +350,11 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - middleware แยก "หมดอายุ" กับ "มาครั้งแรก" ด้วยคุกกี้ marker `os_seen` (30 วัน, ตั้งจาก `/api/sso/me` และ `/refresh` ที่เป็น JSON — ไม่ตั้งบน callback redirect ตามข้อควรระวังเรื่อง Set-Cookie หลายตัวผ่าน proxy) · มา marker → `/login?expired=1` · ไม่มี marker → ตรงไป SSO เหมือนเดิม · logout ล้างทั้งคู่
 - ตัดปุ่มกระดิ่งแจ้งเตือน (จุดแดง) ออกจาก topbar — ยังไม่มีระบบแจ้งเตือนรองรับ
 - ทดสอบ curl: มาครั้งแรก → SSO ✓ · มี marker ไม่มี session → /login?expired=1 ✓ · session ใช้ได้ 200 + /me ตั้ง os_seen ✓ · refresh Max-Age=1800 ✓ · คุกกี้หมดอายุ → /login?expired=1 ✓ · API 401 ✓ · logout ล้าง 2 คุกกี้ ✓ · กระดิ่งหายจากหน้า ✓
+
+## 27. ไดเรกทอรี Lark ใช้ได้แล้ว (2026-09-17)
+- ติด `403 missing_scope: directory:read:people` → เจ้าของแอปติ๊ก scope ที่แท็บ Scopes บน SSO เอง (คู่มือขั้น G) — ไม่ต้องเปลี่ยน key / deploy
+- รูปแบบจริง: `search` → `{ok, synced_at, stale, count, max, items[]}` · `user?email=` → `{…, person}` · person = `{union_id, name, en_name, email, job_title, departments[], city, country, manager, manager_union_id, avatar_url, status}` — โค้ดเดิมเดาชื่อฟิลด์ (`title`, `department`, `id`) ทำให้ ตำแหน่ง/แผนก ว่าง
+- `src/lib/directory.ts` เขียนใหม่: `mapPerson` ตามฟิลด์จริง (`id` = **union_id** ลง `app_user.lark_id`, `department` = departments join " / ", `title` = job_title, `status`, `manager`) · `searchDirectory()` คืน `{items, syncedAt, stale}` และ throw พร้อม status/เหตุผลจาก upstream · `lookupByEmail()` เรียก `/directory/user?email=` ตรง (เดิมค้นแล้วเลือกเอง)
+- `/api/directory/search` ส่ง `stale`, `synced_at`, `status` เพิ่ม · `PeoplePicker` แสดงแถบเตือนเมื่อ `stale` ("รายชื่ออาจไม่ครบ") + badge สถานะเมื่อไม่ active + ข้อความเฉพาะกรณี missing_scope
+- ผลจริง: ค้น "tiw" → ชื่อ/อีเมล/แผนก Dataverse/รูป ครบ, union_id 35 ตัวอักษร (คอลัมน์ 50) · login callback / เพิ่มผู้ใช้ ได้แผนก+ตำแหน่ง+lark_id จากไดเรกทอรีอัตโนมัติ
+- PDPA (คู่มือท้ายขั้น G): เก็บเฉพาะคนที่ถูกเพิ่มเป็นผู้ใช้ระบบ ไม่คัดลอกทั้งชุด
