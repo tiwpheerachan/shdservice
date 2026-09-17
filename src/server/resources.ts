@@ -1,6 +1,7 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import { requireAdmin, requireUser } from "@/server/auth";
+import { pageAudit, listAudit, auditModules } from "@/server/audit";
 import { parsePageQuery, type Page } from "@/server/paging";
 import { parseStatusMode } from "@/server/record-status";
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from "@/server/services/masters";
@@ -25,6 +26,12 @@ export async function readResource(req: NextRequest, resource: string): Promise<
   const p = parsePageQuery(sp);
 
   // admin-only resources
+  if (resource === "audit_log" || resource === "audit_modules") {
+    await requireAdmin(req);
+    if (resource === "audit_modules") return auditModules();
+    const f = { from: p.f.from, to: p.f.to, user: p.f.user, module: p.f.module, entity: p.f.entity, key: p.f.key, action: p.f.action };
+    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit: Number(sp.get("limit") ?? 500) });
+  }
   if (resource === "users" || resource === "permissions" || resource === "roles" || resource === "modules") {
     await requireAdmin(req);
     if (resource === "users") return listSystemUsers(deleted);

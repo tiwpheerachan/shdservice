@@ -163,6 +163,21 @@ export const useProductTypes = (mode: DeletedMode = "active") =>
 export const useSymptoms = (mode: DeletedMode = "active") => useTable<Symptom>("symptoms", { column: "id" }, mode);
 export const useModels = (mode: DeletedMode = "active") => useTable<Model>("models", { column: "code" }, mode);
 export const useModelsPage = (params: PageParams, mode: DeletedMode = "exclude") => usePagedTable<Model>("models", params, mode);
+/** Audit trail (System Admin) — see src/server/audit.ts */
+export type AuditRow = {
+  id: number;
+  at: string;
+  userId: number;
+  user: string;
+  action: string;
+  module: string;
+  entity: string;
+  key: string;
+  summary: string;
+  changes: Record<string, [unknown, unknown]> | null;
+};
+export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>("audit_log", params, "all");
+export const useAuditModules = () => useTable<string>("audit_modules");
 /** Dropdown/picker list: ACTIVE products, lite fields only (code/name/onhand/price/brand/category). */
 export const useProducts = (params: Params = {}) =>
   useTable<Product>("products", { column: "sysCode" }, "active", { fields: "lite", ...params });

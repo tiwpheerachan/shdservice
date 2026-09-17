@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobHistorySection } from "@/components/shared/job-history";
 import {
   CustomerSection,
   JobOpenSection,
@@ -97,6 +98,7 @@ function EditJobForm() {
       <ProductSection />
       <OtherInfoSection />
       <AttachmentSection jobNo={job?.no} />
+      <JobHistorySection job={job} />
 
       <FormActions
         saveLabel="บันทึกการแก้ไข"

@@ -9,6 +9,7 @@ import { listSimple, isSimpleKind, listSymptoms, listModels } from "@/server/ser
 import { listSystemUsers } from "@/server/services/users";
 import { listCustomers } from "@/server/services/customers";
 import { pageProducts, listMovements, listIssuedLines, type ProductFilters } from "@/server/services/stock";
+import { listAudit } from "@/server/audit";
 import { listJobs, filtersFromQuery } from "@/server/services/jobs";
 import { listQuotations } from "@/server/services/quotations";
 import { listSaleOrders } from "@/server/services/sale-orders";
@@ -187,6 +188,21 @@ const SPECS: Record<string, { title: string; module: Module | null | "any"; cols
   },
 };
 
+SPECS.audit_log = {
+  title: "ประวัติการใช้งาน",
+  module: null,
+  cols: [
+    { key: "at", header: "เวลา", width: 18 },
+    { key: "user", header: "ผู้ใช้", width: 24 },
+    { key: "action", header: "การกระทำ", width: 10 },
+    { key: "module", header: "โมดูล", width: 20 },
+    { key: "entity", header: "ตาราง", width: 16 },
+    { key: "key", header: "เลขที่/รหัส", width: 16 },
+    { key: "summary", header: "รายละเอียด", width: 60 },
+    { key: "changesText", header: "ค่าที่เปลี่ยน", width: 60 },
+  ],
+};
+
 for (const k of ["categories", "manufacturers", "colors", "job_types", "product_types", "symptoms"]) {
   SPECS[k] = { title: k, module: null, cols: MASTER_COLS };
 }
@@ -233,6 +249,11 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
       return listMovements({ q: p.q || f.code || f.doc || f.ref, from: f.from, to: f.to, type: f.type, limit: MAX_ROWS }) as unknown as Row[];
     case "issued_lines":
       return listIssuedLines({ from: f.from, to: f.to, category: f.category, code: f.code || p.q, limit: MAX_ROWS }) as unknown as Row[];
+    case "audit_log":
+      return (await listAudit({ q: p.q, from: f.from, to: f.to, user: f.user, module: f.module, entity: f.entity, key: f.key, action: f.action, limit: MAX_ROWS })).map((r) => ({
+        ...r,
+        changesText: r.changes ? Object.entries(r.changes).map(([k, [a, b]]) => `${k}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`).join("; ") : "",
+      })) as unknown as Row[];
   }
   throw new HttpError(404, `unknown export: ${resource}`);
 }
