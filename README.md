@@ -39,6 +39,7 @@ npm start
 | `drizzle/0002_job_symptom.sql` | ตาราง `job_symptom` (หลายอาการต่อ 1 งาน) |
 | `drizzle/0004_indexes.sql` | index สำหรับ filter/รายงาน + `pg_trgm` GIN สำหรับช่องค้นหา (ILIKE) |
 | `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
+| `drizzle/0006_audit_log.sql` | ตาราง `audit_log` (append-only, trigger กัน UPDATE/DELETE) — ประวัติทุกการเขียนของแอป ดูที่ ข้อมูลระบบ → ประวัติการใช้งาน |
 | `drizzle/0003_record_status.sql` | soft delete แบบเดียวทั้งระบบ: lookup `record_status` (ACTIVE/INACTIVE/DELETED) + คอลัมน์ในทุกตารางที่ลบได้ — ไม่มี hard delete, กู้คืนทาง SQL |
 | `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
 
@@ -154,4 +155,12 @@ src/
   - `src/components/ui/*` = **app kit** ที่ทุกหน้าเรียกอยู่ — ชื่อ/props เดิมทั้งหมด แต่ข้างในเป็น shadcn/Radix แล้ว: `Modal`→Radix Dialog (focus-trap/Esc/scroll-lock), `Toast`→Sonner (API `useToast().push({kind,title,desc})` เดิม), `Tabs`→Radix Tabs (คีย์บอร์ด ←/→), `Checkbox`→Radix Checkbox (รับ `onChange(e.target.checked)` เดิม), `Button`/`Badge`→cva variants ชื่อเดิม (`primary/outline/…`, `tone`) · `CommandPalette` (⌘K) → cmdk
   - คงไว้ตามเดิมโดยตั้งใจ: `Select` เป็น native `<select>`, `Radio` native, `DataTable`, `Field/FieldGrid`, Sidebar/Topbar, ฟอร์มงาน, หน้า print
 - `cn()` = `twMerge(clsx())` — class ที่ชนกันตัวหลังชนะ (เดิมขึ้นกับลำดับใน CSS) → ค่าที่หน้าเพจส่งมา เช่น `h-8`, `w-24`, `p-0` มีผลจริงแล้ว
+
+## Audit trail (`audit_log`)
+
+- ทุกการเขียนผ่านแอป (เพิ่ม/แก้/ลบ/เปลี่ยนสถานะ/อนุมัติ/มอบหมาย/จ่าย-รับสต๊อก/แนบไฟล์/เข้าสู่ระบบ) เรียก `audit(tx, userId, {...})` จาก `src/server/audit.ts` **ใน transaction เดียวกับข้อมูล** — log กับข้อมูลจึงไม่มีทางไม่ตรงกัน
+- เก็บ ใคร (`user_id`, `user_name` snapshot) / เมื่อไร / `action` / `module` (ชื่อตาม app_config) / `entity` (ชื่อตาราง) / `entity_key` (เลขงาน, เลขใบ, รหัส) / `summary` ภาษาไทย / `changes` = เฉพาะฟิลด์ที่เปลี่ยน `{"field": [เดิม, ใหม่]}` (คำนวณด้วย `diff(before, values)`)
+- ตารางเป็น append-only (trigger `audit_log_readonly`) · การแก้ผ่าน SQL ตรง ๆ ไม่ถูกบันทึก (ตามที่ตกลง)
+- ดู: `ข้อมูลระบบ → ประวัติการใช้งาน` (System Admin, กรอง วันที่/ผู้ใช้/โมดูล/การกระทำ/เลขที่ + Excel) และส่วน "ประวัติการแก้ไข" ในหน้าแก้ไขข้อมูลงาน (`JobDetail.history`)
+- เพิ่มจุดเขียนใหม่เมื่อไร ต้องเรียก `audit()` ด้วยเสมอ (ดูตัวอย่างใน `services/jobs.ts`)
 
