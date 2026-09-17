@@ -71,14 +71,22 @@ const productSelect = {
   wholesale: productNoneSerial.wholesalePrice,
   retail: productNoneSerial.retailPrice,
   onhandItemId: productNoneSerial.itemId,
+  stockRemark: productNoneSerial.remark,
+  cancelRemark: product.cancelRemark,
+  cancelDate: product.cancelDate,
+  cancelBy: product.cancelBy,
 };
 
 type ProductRow = {
   [K in keyof typeof productSelect]: (typeof productSelect)[K]["_"]["data"] | null;
 };
 
-function toProduct(r: ProductRow, creator?: string): Product {
+function toProduct(r: ProductRow, creator?: string, canceller?: string): Product {
   return {
+    stockRemark: r.stockRemark ?? "",
+    cancelRemark: r.cancelRemark ?? "",
+    cancelDate: r.cancelDate && !r.cancelDate.startsWith("1899") && !r.cancelDate.startsWith("1900") ? fmtDateTime(r.cancelDate) : "",
+    cancelBy: canceller ?? "",
     sysCode: r.sysCode ?? "",
     mfgCode: r.mfgCode ?? "",
     name: r.name ?? "",
@@ -129,11 +137,17 @@ export async function getProduct(code: string): Promise<(Product & { models: str
   const [creator] = r.createBy
     ? await db.select({ f: appUser.firstName, l: appUser.lastName }).from(appUser).where(eq(appUser.userId, r.createBy))
     : [];
+  const [canceller] = r.cancelBy && r.cancelBy > 0
+    ? await db.select({ f: appUser.firstName, l: appUser.lastName }).from(appUser).where(eq(appUser.userId, r.cancelBy))
+    : [];
   const models = await db
     .select({ code: productModel.modelCode })
     .from(productModel)
     .where(eq(productModel.productId, r.id!));
-  return { ...toProduct(r, creator ? fullName(creator.f, creator.l) : ""), models: models.map((m) => m.code ?? "").filter(Boolean) };
+  return {
+    ...toProduct(r, creator ? fullName(creator.f, creator.l) : "", canceller ? fullName(canceller.f, canceller.l) : ""),
+    models: models.map((m) => m.code ?? "").filter(Boolean),
+  };
 }
 
 export type ProductInput = {
@@ -491,6 +505,117 @@ export async function issueForJob(
         )
       );
     return { no, total: mvLines.reduce((s, l) => s + l.qty, 0), allGranted: (pending?.n ?? 0) === 0 };
+  });
+}
+
+/* ---- job lists for the pick page reference dropdown ---- */
+/** Jobs that still have parts waiting to be issued (any job status), newest request first. */
+export async function jobsWithPendingParts(limit = 300): Promise<string[]> {
+  const rows = await db
+    .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.requestDate})` })
+    .from(jobOrderSparePartLog)
+    .where(and(eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED), sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`))
+    .groupBy(jobOrderSparePartLog.jobNo)
+    .orderBy(sql`max(${jobOrderSparePartLog.requestDate}) desc`)
+    .limit(limit);
+  return rows.map((r) => r.jobNo ?? "").filter(Boolean);
+}
+
+/** Jobs with issued parts that can still be returned to stock (granted > returned), newest first. */
+export async function jobsWithReturnableParts(limit = 300): Promise<string[]> {
+  const rows = await db
+    .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.grantDate})` })
+    .from(jobOrderSparePartLog)
+    .where(and(inArray(jobOrderSparePartLog.orderStatusId, [PART.GRANTED, PART.RETURN_REQUESTED]), sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`))
+    .groupBy(jobOrderSparePartLog.jobNo)
+    .orderBy(sql`max(${jobOrderSparePartLog.grantDate}) desc`)
+    .limit(limit);
+  return rows.map((r) => r.jobNo ?? "").filter(Boolean);
+}
+
+/* ---- return from job (รับคืนจากการเบิก, inventory_type 2) ---- */
+export type ReturnLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; granted: number; returned: number; returnable: number; status: string };
+
+export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> {
+  const rows = await db
+    .select({
+      logId: jobOrderSparePartLog.jobOrderLogId,
+      code: jobOrderSparePartLog.sparePartCode,
+      name: product.productName,
+      onhand: productNoneSerial.quantityRemain,
+      granted: jobOrderSparePartLog.grantQty,
+      returned: jobOrderSparePartLog.returnQty,
+      statusId: jobOrderSparePartLog.orderStatusId,
+    })
+    .from(jobOrderSparePartLog)
+    .leftJoin(product, eq(product.productCode, jobOrderSparePartLog.sparePartCode))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(
+      and(
+        eq(jobOrderSparePartLog.jobNo, jobNo),
+        inArray(jobOrderSparePartLog.orderStatusId, [PART.GRANTED, PART.RETURN_REQUESTED]),
+        sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`
+      )
+    )
+    .orderBy(asc(jobOrderSparePartLog.jobOrderLogId));
+  return rows.map((r) => ({
+    logId: r.logId,
+    jobNo,
+    code: r.code ?? "",
+    name: r.name ?? "",
+    onhand: r.onhand ?? 0,
+    granted: r.granted ?? 0,
+    returned: r.returned ?? 0,
+    returnable: Math.max(0, (r.granted ?? 0) - (r.returned ?? 0)),
+    status: PART_STATUS_NAME[r.statusId ?? 3] ?? "",
+  }));
+}
+
+/**
+ * รับคืนจากการเบิก → WHI (type 2), reverses the issue on the counters
+ * (used -= qty → remain += qty) and records return_qty/date/by on the ใบเบิก row;
+ * a fully returned line becomes status 5 (คืนแล้ว).
+ */
+export async function returnFromJob(
+  i: { jobNo: string; remark?: string; from?: string; lines: { logId: number; qty: number }[] },
+  byUserId: number
+): Promise<{ no: string; total: number }> {
+  const lines = i.lines.filter((l) => l.qty > 0);
+  if (!lines.length) throw new HttpError(400, "ยังไม่ได้ระบุจำนวนรับคืน");
+  return db.transaction(async (tx) => {
+    const reqs = await tx
+      .select()
+      .from(jobOrderSparePartLog)
+      .where(and(eq(jobOrderSparePartLog.jobNo, i.jobNo), inArray(jobOrderSparePartLog.jobOrderLogId, lines.map((l) => l.logId))))
+      .for("update");
+    const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+    const mvLines: StockLine[] = [];
+    const now = nowThai();
+    for (const l of lines) {
+      const r = byId.get(l.logId);
+      if (!r || (r.orderStatusId !== PART.GRANTED && r.orderStatusId !== PART.RETURN_REQUESTED))
+        throw new HttpError(400, `รายการ #${l.logId} ไม่อยู่ในสถานะที่รับคืนได้`);
+      const returnable = (r.grantQty ?? 0) - (r.returnQty ?? 0);
+      if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
+      const map = await productsByCode(tx, [r.sparePartCode ?? ""]);
+      const p = map.get(r.sparePartCode ?? "");
+      if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
+      await adjustQty(tx, p.id, { used: -l.qty });
+      const returned = (r.returnQty ?? 0) + l.qty;
+      await tx
+        .update(jobOrderSparePartLog)
+        .set({
+          returnQty: returned,
+          returnDate: now,
+          returnBy: byUserId,
+          returnStockId: STORE_LOCATION_ID,
+          orderStatusId: returned >= (r.grantQty ?? 0) ? PART.RETURNED : r.orderStatusId,
+        })
+        .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
+      mvLines.push({ code: r.sparePartCode ?? "", qty: l.qty });
+    }
+    const no = await insertMovement(tx, { typeId: INV.RETURN_FROM_JOB, ref: i.jobNo, outTo: i.from, remark: i.remark }, mvLines, byUserId);
+    return { no, total: mvLines.reduce((s, l) => s + l.qty, 0) };
   });
 }
 

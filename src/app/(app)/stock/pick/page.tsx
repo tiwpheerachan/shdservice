@@ -29,11 +29,14 @@ type Line = {
 
 type PartLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; need: number; status: string };
 type SoLine = { dtId: number; code: string; name: string; onhand: number; need: number; picked: boolean };
+type ReturnLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; granted: number; returned: number; returnable: number; status: string };
 
 export default function PickPage() {
   const { push } = useToast();
   const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
-  const { data: JOB_NOS } = useJobNos(100);
+  // งานที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (ไม่ผูกกับสถานะงาน)
+  const { data: PENDING_JOB_NOS } = useJobNos(300, "pending_parts");
+  const { data: RETURNABLE_JOB_NOS } = useJobNos(300, "returnable");
   const { data: SALE_ORDERS } = useSaleOrders({ approve: "อนุมัติแล้ว", limit: 100 });
   const { data: STAFF } = useStaff();
   const [saving, setSaving] = React.useState(false);
@@ -56,10 +59,12 @@ export default function PickPage() {
     );
   }, []);
 
-  const kind: "job" | "sale" | "other" =
-    docType === "จ่ายออกตามงานซ่อม" ? "job" : docType === "จ่ายออกตามใบสั่งขาย" ? "sale" : "other";
-  // อ้างอิง: งานที่ยังไม่ปิด / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
-  const refOptions = kind === "job" ? JOB_NOS : kind === "sale" ? SALE_ORDERS.map((s) => s.no) : [];
+  const kind: "job" | "sale" | "other" | "return" =
+    docType === "จ่ายออกตามงานซ่อม" ? "job" : docType === "จ่ายออกตามใบสั่งขาย" ? "sale" : docType === "รับคืนจากการเบิก" ? "return" : "other";
+  // อ้างอิง: งานที่ค้างเบิก / งานที่รับคืนได้ / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
+  const refOptions =
+    kind === "job" ? PENDING_JOB_NOS : kind === "return" ? RETURNABLE_JOB_NOS : kind === "sale" ? SALE_ORDERS.map((s) => s.no) : [];
+  const isReturn = kind === "return";
   const RECIPIENTS = React.useMemo(
     () => ["คลังสินค้าดี", ...STAFF.map((s) => s.name)],
     [STAFF]
@@ -94,7 +99,23 @@ export default function PickPage() {
       return;
     }
     try {
-      if (kind === "job") {
+      if (kind === "return") {
+        const d = await api<{ rows: ReturnLine[] }>(`/api/stock/pick-lines${qs({ type: "return", ref })}`);
+        setLines(
+          d.rows.map((r) => ({
+            docNo: r.jobNo,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.status,
+            onhand: r.onhand,
+            need: r.returnable,
+            issue: 0,
+            logId: r.logId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการที่รับคืนได้แล้ว", desc: `${ref} — ${d.rows.length} รายการ` });
+      } else if (kind === "job") {
         const d = await api<{ rows: PartLine[] }>(`/api/stock/pick-lines${qs({ type: "job", ref })}`);
         setLines(
           d.rows.map((r) => ({
@@ -137,7 +158,7 @@ export default function PickPage() {
     setLines((s) =>
       s.map((l) =>
         (l.logId ?? l.dtId ?? l.code) === key
-          ? { ...l, issue: Math.max(0, Math.min(v, Math.min(l.need, l.onhand))) }
+          ? { ...l, issue: Math.max(0, Math.min(v, isReturn ? l.need : Math.min(l.need, l.onhand))) }
           : l
       )
     );
@@ -147,11 +168,11 @@ export default function PickPage() {
   // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
   const save = async () => {
     if (totalIssue === 0) {
-      push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนจ่ายออก" });
+      push({ kind: "warning", title: isReturn ? "ยังไม่ได้ระบุจำนวนรับคืน" : "ยังไม่ได้ระบุจำนวนจ่ายออก" });
       return;
     }
     if (!payTo) {
-      push({ kind: "warning", title: "กรุณาระบุ จ่ายให้" });
+      push({ kind: "warning", title: isReturn ? "กรุณาระบุ รับคืนจาก" : "กรุณาระบุ จ่ายให้" });
       return;
     }
     setSaving(true);
@@ -163,7 +184,7 @@ export default function PickPage() {
         remark,
         lines: lines.filter((l) => l.issue > 0).map((l) => ({ logId: l.logId, dtId: l.dtId, code: l.code, qty: l.issue })),
       });
-      push({ kind: "success", title: `บันทึกการจ่ายออกแล้ว ${d.total} ชิ้น`, desc: d.no });
+      push({ kind: "success", title: isReturn ? `บันทึกการรับคืนแล้ว ${d.total} ชิ้น` : `บันทึกการจ่ายออกแล้ว ${d.total} ชิ้น`, desc: d.no });
       setLines([]);
       setLoaded(false);
       setRef("");
@@ -205,6 +226,24 @@ export default function PickPage() {
           </Field>
           <Field label="อ้างอิงเลขเอกสาร" required={kind !== "other"}>
             <div className="flex gap-2">
+              {kind === "job" || kind === "return" ? (
+                // พิมพ์เลขงานเองได้ + รายการแนะนำ = งานที่ค้างเบิก / รับคืนได้ (ไม่จำกัดแค่ 100 งานล่าสุด)
+                <div className="relative flex-1">
+                  <Input
+                    list="pick-ref-options"
+                    value={ref}
+                    onChange={(e) => setRef(e.target.value.trim().toUpperCase())}
+                    onKeyDown={(e) => e.key === "Enter" && getData()}
+                    placeholder={kind === "job" ? "เลือกหรือพิมพ์เลขงานที่ค้างเบิก เช่น J2612088" : "เลือกหรือพิมพ์เลขงานที่จ่ายอะไหล่ไปแล้ว"}
+                    className="num"
+                  />
+                  <datalist id="pick-ref-options">
+                    {refOptions.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
+                </div>
+              ) : (
               <Select
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
@@ -216,6 +255,7 @@ export default function PickPage() {
                   <option key={r}>{r}</option>
                 ))}
               </Select>
+              )}
               <Button size="md" variant="outline" onClick={getData}>
                 <Search className="h-3.5 w-3.5" />
                 Get Data
@@ -237,8 +277,8 @@ export default function PickPage() {
                 <th className="px-3 py-2.5 text-left">Item Name</th>
                 <th className="px-3 py-2.5 text-left">สถานะการเบิก</th>
                 <th className="px-3 py-2.5 text-right">คงเหลือ</th>
-                <th className="px-3 py-2.5 text-right">ต้องการ</th>
-                <th className="px-3 py-2.5 text-right">จำนวนจ่ายออก</th>
+                <th className="px-3 py-2.5 text-right">{isReturn ? "รับคืนได้" : "ต้องการ"}</th>
+                <th className="px-3 py-2.5 text-right">{isReturn ? "จำนวนรับคืน" : "จำนวนจ่ายออก"}</th>
               </tr>
             </thead>
             <tbody>
@@ -264,7 +304,7 @@ export default function PickPage() {
                       <span className="line-clamp-1 max-w-[320px]">{l.name}</span>
                     </td>
                     <td className="px-3 py-2">
-                      <Badge tone={l.pickStatus === "รออะไหล่" ? "danger" : "warning"} dot>
+                      <Badge tone={l.pickStatus === "รออะไหล่" ? "danger" : isReturn ? "info" : "warning"} dot>
                         {l.pickStatus}
                       </Badge>
                     </td>
@@ -280,10 +320,10 @@ export default function PickPage() {
                     <td className="px-3 py-2">
                       <NumberInput
                         min={0}
-                        max={Math.min(l.need, l.onhand)}
+                        max={isReturn ? l.need : Math.min(l.need, l.onhand)}
                         placeholder="0"
                         value={l.issue}
-                        disabled={l.onhand === 0}
+                        disabled={!isReturn && l.onhand === 0}
                         onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
                         className="ml-auto h-8 w-24"
                       />
@@ -296,7 +336,7 @@ export default function PickPage() {
         </div>
         {lines.length > 0 && (
           <div className="flex justify-end gap-3 border-t border-border px-3 py-2.5 text-sm">
-            <span className="text-muted-foreground">รวมจำนวนจ่ายออก</span>
+            <span className="text-muted-foreground">{isReturn ? "รวมจำนวนรับคืน" : "รวมจำนวนจ่ายออก"}</span>
             <span className="num font-semibold text-primary">{int(totalIssue)} ชิ้น</span>
           </div>
         )}
@@ -305,7 +345,7 @@ export default function PickPage() {
       {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
-          <Field label="จ่ายให้" required>
+          <Field label={isReturn ? "รับคืนจาก" : "จ่ายให้"} required>
             <Select value={payTo} onChange={(e) => setPayTo(e.target.value)}>
               <option value="">- - Please Select - -</option>
               {RECIPIENTS.map((r) => (
@@ -317,7 +357,7 @@ export default function PickPage() {
             <Input
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
-              placeholder="หมายเหตุการจ่ายออก…"
+              placeholder={isReturn ? "หมายเหตุการรับคืน…" : "หมายเหตุการจ่ายออก…"}
             />
           </Field>
         </FieldGrid>
@@ -326,7 +366,7 @@ export default function PickPage() {
       <div className="flex justify-end">
         <Button size="md" onClick={save} disabled={lines.length === 0 || saving}>
           <Save className="h-4 w-4" />
-          บันทึกการจ่ายออก
+          {isReturn ? "บันทึกการรับคืน" : "บันทึกการจ่ายออก"}
         </Button>
       </div>
     </>

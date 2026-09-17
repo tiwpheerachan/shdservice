@@ -8,8 +8,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  *   jobs/{jobNo}/slip/{file}          job.job_payment_slip_file_name    (full path)
  *   sale-orders/{soNo}/slip/{file}    sale_out_hd.slip_file_name        (full path)
  *   products/{code}/{file}            product.pictrue_file_name         (file name only, 50 chars)
- * Legacy files from the old Windows server were never migrated — those rows
- * only show their file name.
+ * Legacy files were copied into the same layout (2026-09-16): product images
+ * 786/822 and job attachments from the old server's FileUpload folder; rows
+ * whose file was missing on the old server just show their file name.
  */
 export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "oneservice";
 

@@ -412,6 +412,26 @@ export function ProductDetailModal({
           </p>
         )}
 
+        {/* legacy read-only notes: stock-adjustment log (product_none_serial.remark) + cancel reason */}
+        {mode !== "add" && (detail?.stockRemark || detail?.cancelRemark || detail?.cancelDate) && (
+          <FieldGrid cols={2}>
+            {detail?.stockRemark && (
+              <Field label="หมายเหตุสต๊อก (จากระบบเดิม)" wide>
+                <Textarea rows={2} readOnly value={detail.stockRemark} />
+              </Field>
+            )}
+            {(detail?.cancelRemark || detail?.cancelDate) && (
+              <Field label="เหตุผลที่ยกเลิก" wide>
+                <Textarea
+                  rows={2}
+                  readOnly
+                  value={[detail?.cancelRemark, detail?.cancelDate ? `${detail.cancelDate}${detail.cancelBy ? ` · โดย ${detail.cancelBy}` : ""}` : ""].filter(Boolean).join("\n")}
+                />
+              </Field>
+            )}
+          </FieldGrid>
+        )}
+
         {/* view-only stock tables */}
         {mode === "view" && (
           <div className="space-y-4 border-t border-border pt-4">

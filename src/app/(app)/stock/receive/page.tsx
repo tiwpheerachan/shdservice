@@ -61,10 +61,6 @@ export default function ReceivePage() {
       push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนรับเข้า" });
       return;
     }
-    if (!po.trim()) {
-      push({ kind: "warning", title: "กรุณาระบุอ้างอิงใบสั่งซื้อ (PO)" });
-      return;
-    }
     setSaving(true);
     try {
       const d = await postJson<{ no: string; total: number }>("/api/stock/receive", { date, poRef: po, supplier, remark, lines });
@@ -155,7 +151,8 @@ export default function ReceivePage() {
           <Field label="เลขที่เอกสารรับเข้า">
             <Input readOnly value="Generate Auto" />
           </Field>
-          <Field label="อ้างอิงใบสั่งซื้อ (PO)" required>
+          {/* ระบบเดิมไม่เคยบันทึก PO (reference_document_no ว่างทั้ง 6,309 ใบ) → ไม่บังคับ */}
+          <Field label="อ้างอิงใบสั่งซื้อ (PO)">
             <Input placeholder="PO2600000" value={po} onChange={(e) => setPo(e.target.value)} />
           </Field>
           <Field label="วันที่รับเข้า" required>

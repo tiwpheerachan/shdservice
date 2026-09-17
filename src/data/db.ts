@@ -202,6 +202,9 @@ export const useProvinces = () => useTable<{ id: number; name: string }>("provin
 export const useJobStatuses = () =>
   useTable<{ id: number; name: string; group: string; order: number; active: boolean }>("job_statuses");
 export const useVendors = () => useTable<string>("vendors");
+/** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
+export const useJobTypeDetails = () => useTable<string>("job_type_details");
+export const useShippers = () => useTable<string>("shippers");
 export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
 export const useIssuedLines = (params: Params = {}) => useTable<IssuedLine>("issued_lines", undefined, "exclude", params);
 export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>("issued_lines", params);
@@ -217,4 +220,6 @@ export type SaleOrderSummary = { total: number; approved: number; amount: number
 export const useSaleOrderSummary = (params: Params = {}) => useTable<SaleOrderSummary>("sale_order_summary", undefined, "exclude", params);
 export const useJobStats = () =>
   useTable<{ total: number; fresh: number; done: number; progress: number }>("job_stats");
-export const useJobNos = (limit = 50) => useTable<string>("job_nos", undefined, "exclude", { limit });
+/** Job numbers for reference dropdowns: recent open jobs (default), or `mode` = "pending_parts" / "returnable" (ตัดจ่าย / รับคืน). */
+export const useJobNos = (limit = 50, mode?: "pending_parts" | "returnable") =>
+  useTable<string>("job_nos", undefined, "exclude", mode ? { limit, mode } : { limit });

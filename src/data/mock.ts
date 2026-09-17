@@ -78,6 +78,10 @@ export type Product = {
   createdBy?: string;
   models?: string[];
   image?: string; // products/{code}/{file} — serve via fileUrl()
+  stockRemark?: string; // product_none_serial.remark — legacy stock-adjustment log
+  cancelRemark?: string; // product.cancel_remark / cancel_date / cancel_by (เหตุผลที่ยกเลิกอะไหล่)
+  cancelDate?: string;
+  cancelBy?: string;
 };
 
 export type Movement = {
@@ -114,6 +118,8 @@ export type Customer = {
   subDistrictId?: number;
   postalCode?: string;
   priceGroup?: string;
+  createdDate?: string;
+  createdBy?: string;
 };
 
 export type Job = {
@@ -130,6 +136,7 @@ export type Job = {
   // DB-backed extras (job table)
   statusId?: number;
   statusGroup?: string;
+  isBounce?: boolean; // job.is_job_bounce — งานเด้ง (สินค้ากลับมาซ่อมซ้ำ)
   customerId?: number;
   engineerId?: number;
   serial?: string;
@@ -358,6 +365,8 @@ export const RETURN_METHODS = [
 
 /* วิธีชำระเงิน (3) */
 export const PAYMENT_METHODS = ["โอนเงิน", "เงินสด", "บัตรเครดิต"]; // = sale_out_hd.payment_type
+/* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
+export const JOB_PAYMENT_METHODS = ["เงินโอน", "เงินสด", "บัตรเครดิต"];
 
 /* ค่าบริการการซ่อม (ค่าคงที่ให้เลือก) */
 export const SERVICE_FEES = [0, 98, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
@@ -378,6 +387,7 @@ export const STOCK_PICK_TYPES = [
   "จ่ายออกตามงานซ่อม",
   "จ่ายออกตามใบสั่งขาย",
   "จ่ายออกอื่นๆ",
+  "รับคืนจากการเบิก", // inventory_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
 ];
 
 /* หมวดหมู่อะไหล่ (ตรงกับระบบจริง) */

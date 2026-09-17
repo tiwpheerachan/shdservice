@@ -6,9 +6,9 @@ import { parseStatusMode } from "@/server/record-status";
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from "@/server/services/masters";
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from "@/server/services/users";
 import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
-import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters } from "@/server/services/stock";
+import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters, jobsWithPendingParts, jobsWithReturnableParts } from "@/server/services/stock";
 import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
-import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats } from "@/server/services/jobs";
+import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers } from "@/server/services/jobs";
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
@@ -51,8 +51,16 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return quotationStatuses();
     case "vendors":
       return listOutsourceVendors();
-    case "job_nos":
+    case "job_type_details":
+      return listJobTypeDetails();
+    case "shippers":
+      return listShippers();
+    case "job_nos": {
+      const mode = sp.get("mode");
+      if (mode === "pending_parts") return jobsWithPendingParts(Number(sp.get("limit") ?? 300));
+      if (mode === "returnable") return jobsWithReturnableParts(Number(sp.get("limit") ?? 300));
       return recentJobNos(Number(sp.get("limit") ?? 50));
+    }
     case "products": {
       if (sp.get("fields") === "lite") return listProductsLite(p.q);
       const pf: ProductFilters = {
@@ -106,7 +114,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "quotations":
       return paged
-        ? pageQuotations(p, { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type })
+        ? pageQuotations(p, { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type, warranty: p.f.warranty, brand: p.f.brand })
         : listQuotations({ status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "sale_orders":
       return paged
