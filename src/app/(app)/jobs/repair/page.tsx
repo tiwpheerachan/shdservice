@@ -20,11 +20,11 @@ import {
 import { useAccess } from "@/lib/use-access";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { REPAIR_STATUS_OPTIONS } from "@/data/mock";
+import { ProductPicker } from "@/components/shared/product-picker";
 import { SymptomPicker } from "@/components/shared/symptom-picker";
 import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
@@ -57,8 +57,6 @@ function RepairForm() {
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
   const [lines, setLines] = React.useState<Line[]>([]);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [pickQ, setPickQ] = React.useState("");
   const [detail, setDetail] = React.useState({ engineerSymptom: "", repairDetail: "", engineerRemark: "", newSerial: "", status: "" });
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(0);
@@ -155,14 +153,7 @@ function RepairForm() {
         status: p.onhand > 0 ? "พร้อมเบิก" : "รออะไหล่",
       },
     ]);
-    setPickerOpen(false);
   };
-
-  const pickerRows = React.useMemo(() => {
-    const t = pickQ.trim().toLowerCase();
-    const list = t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || p.mfgCode.toLowerCase().includes(t)) : PRODUCTS;
-    return list.slice(0, 200);
-  }, [PRODUCTS, pickQ]);
 
   const upd = (id: number, patch: Partial<Line>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -215,14 +206,17 @@ function RepairForm() {
         title="การใช้อะไหล่ และการเสนอราคา"
         icon={Stethoscope}
         description="เสนอราคาแบบ A (Normal) และแบบ B (VIP)"
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
-            <Plus className="h-3.5 w-3.5" />
-            เลือกรายการอะไหล่
-          </Button>
-        }
         bodyClassName="p-0"
       >
+        <div className="flex items-center gap-2 border-b border-border p-3">
+          <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ProductPicker
+            products={PRODUCTS}
+            onPick={(p) => p && addPart(p.code)}
+            placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
+            className="sm:max-w-xl"
+          />
+        </div>
         <div className="table-scroll rounded-none">
           <table className="w-full min-w-[1080px] text-sm">
             <thead>
@@ -255,7 +249,7 @@ function RepairForm() {
               {lines.length === 0 ? (
                 <tr>
                   <td colSpan={14} className="px-3 py-10 text-center text-xs text-muted-foreground">
-                    ยังไม่มีรายการอะไหล่ — กด “เลือกรายการอะไหล่” เพื่อเพิ่ม
+                    ยังไม่มีรายการอะไหล่ — ค้นหาในช่องด้านบนเพื่อเพิ่ม
                   </td>
                 </tr>
               ) : (
@@ -401,50 +395,6 @@ function RepairForm() {
         }
       />
 
-      <Modal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        title="เลือกรายการอะไหล่"
-        description="คลิกที่รายการเพื่อเพิ่มเข้าใบงานซ่อม"
-        size="xl"
-      >
-        <Input
-          value={pickQ}
-          onChange={(e) => setPickQ(e.target.value)}
-          placeholder="ค้นหารหัส / ชื่ออะไหล่…"
-          className="mb-3"
-        />
-        <div className="table-scroll border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/60 text-2xs uppercase text-muted-foreground">
-                <th className="px-3 py-2 text-left">รหัส</th>
-                <th className="px-3 py-2 text-left">ชื่ออะไหล่</th>
-                <th className="px-3 py-2 text-right">คงเหลือ</th>
-                <th className="px-3 py-2 text-right">ราคา</th>
-                <th className="px-3 py-2 text-center">เลือก</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pickerRows.map((p) => (
-                <tr key={p.sysCode} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
-                  <td className="num px-3 py-2 font-medium">{p.sysCode}</td>
-                  <td className="px-3 py-2">
-                    <span className="line-clamp-1 max-w-[380px]">{p.name}</span>
-                  </td>
-                  <td className="num px-3 py-2 text-right">{p.onhand}</td>
-                  <td className="num px-3 py-2 text-right">{baht(p.price)}</td>
-                  <td className="px-3 py-2 text-center">
-                    <Button size="sm" variant="outline" onClick={() => addPart(p.sysCode)}>
-                      เพิ่ม
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
     </>
   );
 }

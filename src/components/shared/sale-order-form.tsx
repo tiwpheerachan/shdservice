@@ -4,6 +4,7 @@ import * as React from "react";
 import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from "lucide-react";
 import { Section } from "./section";
 import { CustomerSelect } from "./customer-select";
+import { ProductPicker } from "./product-picker";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Radio, NumberInput } from "@/components/ui/input";
@@ -86,7 +87,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       }
     };
     const [date, setDate] = React.useState("");
-    const [pickQ, setPickQ] = React.useState("");
     const idRef = React.useRef(0);
 
     React.useEffect(() => {
@@ -145,12 +145,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       }),
     }));
 
-    const productOptions = React.useMemo(() => {
-      const t = pickQ.trim().toLowerCase();
-      const list = t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t)) : PRODUCTS;
-      return list.slice(0, 300);
-    }, [PRODUCTS, pickQ]);
-
     return (
       <>
         <Section title="Customer Info" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
@@ -190,17 +184,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         >
           <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
             <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1">
-              <div className="flex gap-2">
-                <Input value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="ค้นหา…" className="w-32 sm:w-40" />
-                <Select value={code} onChange={(e) => setCode(e.target.value)} className="flex-1">
-                  <option value="">- - เลือกสินค้า - -</option>
-                  {productOptions.map((p) => (
-                    <option key={p.sysCode} value={p.sysCode}>
-                      {p.sysCode} — {p.name.slice(0, 60)} (คงเหลือ {p.onhand})
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              <ProductPicker id="so-product" products={PRODUCTS} value={code} clearable onPick={(p) => setCode(p?.code ?? "")} placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…" />
             </Field>
             <Field label="จำนวน" className="sm:w-28">
               <NumberInput

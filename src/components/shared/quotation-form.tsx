@@ -4,6 +4,7 @@ import * as React from "react";
 import { Plus, Trash2, FileText, UserRound, Wrench, Calculator } from "lucide-react";
 import { Section } from "./section";
 import { CustomerSelect } from "./customer-select";
+import { ProductPicker, type ExtraItem } from "./product-picker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -57,6 +58,9 @@ export type QuotationPayload = {
 
 export type QuotationFormHandle = { payload: () => QuotationPayload; customer: () => Customer | null };
 
+/** non-stock line the quotation may carry (legacy SVD0001 = delivery charge, kept out of spare_part_amount) */
+const DELIVERY_EXTRA: ExtraItem[] = [{ code: "SVD0001", name: "ค่าขนส่ง" }];
+
 export const QuotationForm = React.forwardRef<
   QuotationFormHandle,
   {
@@ -83,7 +87,6 @@ export const QuotationForm = React.forwardRef<
   const [job, setJob] = React.useState<JobDetail | null>(null);
   const [date, setDate] = React.useState("");
   const idRef = React.useRef(1);
-  const [pickQ, setPickQ] = React.useState("");
 
   React.useEffect(() => {
     const d = new Date();
@@ -186,11 +189,6 @@ export const QuotationForm = React.forwardRef<
       status,
     }),
   }));
-
-  const productOptions = React.useMemo(() => {
-    const t = pickQ.trim().toLowerCase();
-    return t ? PRODUCTS.filter((p) => p.sysCode.toLowerCase().includes(t) || p.name.toLowerCase().includes(t)).slice(0, 300) : PRODUCTS;
-  }, [PRODUCTS, pickQ]);
 
   return (
     <>
@@ -321,7 +319,7 @@ export const QuotationForm = React.forwardRef<
             <thead>
               <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
                 <th className="w-10 px-3 py-2 text-left">#</th>
-                <th className="w-40 px-3 py-2 text-left">รหัสอะไหล่</th>
+                <th className="w-72 px-3 py-2 text-left">รหัสอะไหล่ / ชื่อ</th>
                 <th className="px-3 py-2 text-left">รายละเอียด</th>
                 <th className="w-20 px-3 py-2 text-right">จำนวน</th>
                 <th className="w-28 px-3 py-2 text-right">ราคา/หน่วย</th>
@@ -341,28 +339,21 @@ export const QuotationForm = React.forwardRef<
                   <tr key={l.id} className="border-b border-border/70 last:border-0">
                     <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
                     <td className="px-3 py-2">
-                      <Select
+                      <ProductPicker
+                        products={PRODUCTS}
                         value={l.code}
-                        onChange={(e) => {
-                          const p = PRODUCTS.find((x) => x.sysCode === e.target.value);
+                        fallbackName={l.name}
+                        extras={DELIVERY_EXTRA}
+                        size="sm"
+                        onPick={(p) =>
                           upd(l.id, {
-                            code: e.target.value,
-                            name: p?.name ?? l.name,
-                            price: p?.price ?? l.price,
-                            itemType: e.target.value === "SVD0001" ? "Delivery" : "SparePart",
-                          });
-                        }}
-                        className="h-8 text-xs"
-                      >
-                        <option value="">- เลือก -</option>
-                        {l.code && !productOptions.some((p) => p.sysCode === l.code) && <option value={l.code}>{l.code}</option>}
-                        <option value="SVD0001">SVD0001 — ค่าขนส่ง</option>
-                        {productOptions.map((p) => (
-                          <option key={p.sysCode} value={p.sysCode}>
-                            {p.sysCode}
-                          </option>
-                        ))}
-                      </Select>
+                            code: p?.code ?? "",
+                            name: p ? p.name : l.name,
+                            price: p && p.price !== undefined ? p.price : l.price,
+                            itemType: p?.code === "SVD0001" ? "Delivery" : "SparePart",
+                          })
+                        }
+                      />
                     </td>
                     <td className="px-3 py-2">
                       <Input
@@ -407,11 +398,6 @@ export const QuotationForm = React.forwardRef<
             </tbody>
           </table>
         </div>
-        {lines.length > 0 && (
-          <div className="border-t border-border px-4 py-2">
-            <Input value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="กรองรายการอะไหล่ใน dropdown (รหัส / ชื่อ)…" className="h-8 text-xs sm:max-w-sm" />
-          </div>
-        )}
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
           <FieldGrid cols={2}>
