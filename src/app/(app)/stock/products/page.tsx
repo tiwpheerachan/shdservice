@@ -239,7 +239,7 @@ export default function ProductsPage() {
         description="ทะเบียนอะไหล่และอุปกรณ์เสริม พร้อมยอดคงเหลือที่พร้อมใช้งาน"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("products", { q: table.q, deleted: "exclude" })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("products", { ...query, deleted: "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

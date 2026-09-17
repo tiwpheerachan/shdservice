@@ -50,18 +50,11 @@ export default function QuotationListPage() {
     status: filters.status,
     from: filters.from,
     to: filters.to,
+    type: filters.type,
+    warranty: filters.warranty,
+    brand: filters.brand,
   });
-  // filters the server does not index are applied on the loaded page
-  const QUOTATIONS = React.useMemo(
-    () =>
-      PAGE.filter(
-        (r) =>
-          (!filters.type || r.type === filters.type) &&
-          (!filters.warranty || r.warranty === filters.warranty) &&
-          (!filters.brand || r.brandModel.startsWith(filters.brand))
-      ),
-    [PAGE, filters]
-  );
+  const QUOTATIONS = PAGE;
 
   const columns: Column<Quotation>[] = [
     {
@@ -116,6 +109,13 @@ export default function QuotationListPage() {
       cell: (r) => <span className="font-medium">{baht(r.amount)}</span>,
     },
     {
+      key: "approveDate",
+      header: "วันที่ตอบรับ",
+      hideBelow: "xl",
+      width: "130px",
+      cell: (r) => <span className="num text-xs">{r.approveDate || "—"}</span>,
+    },
+    {
       key: "status",
       header: "สถานะ",
       width: "140px",
@@ -153,7 +153,7 @@ export default function QuotationListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("quotations", { q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei, status: filters.status, from: filters.from, to: filters.to, type: filters.type })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("quotations", { q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei, status: filters.status, from: filters.from, to: filters.to, type: filters.type, warranty: filters.warranty, brand: filters.brand })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>

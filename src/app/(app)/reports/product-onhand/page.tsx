@@ -61,7 +61,7 @@ export default function Page() {
         { kind: "text", key: "q", label: "รหัส / ชื่ออะไหล่", placeholder: "P02534" },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx("products", { q: table.q || f.q, deleted: "active" })}
+      onExport={() => exportXlsx("products", { ...filters, q: table.q || f.q, deleted: "active" })}
       kpis={[
         { label: "จำนวนคงเหลือรวม", value: `${int(totalQty)} ชิ้น`, tone: "primary" },
         { label: "มูลค่าสต๊อกรวม", value: baht(totalValue), tone: "success" },

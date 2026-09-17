@@ -33,6 +33,8 @@ export type QuotationLoaded = {
   lines: { id?: number; itemType: string; code: string; detail: string; qty: number; unitPrice: number }[];
   customerDetail: Customer | null;
   job: JobDetail | null;
+  approveDate?: string; // quotation_hd.customer_approve_date
+  createdBy?: string;
 };
 
 /** What the page posts to /api/quotations. */
@@ -154,8 +156,9 @@ export const QuotationForm = React.forwardRef<
   const upd = (id: number, patch: Partial<Line>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
-  const partsTotal = lines.reduce((s, l) => s + l.qty * l.price, 0);
-  const subtotal = partsTotal + service;
+  const partsTotal = lines.filter((l) => l.itemType !== "Delivery").reduce((s, l) => s + l.qty * l.price, 0);
+  const deliveryTotal = lines.filter((l) => l.itemType === "Delivery").reduce((s, l) => s + l.qty * l.price, 0);
+  const subtotal = partsTotal + service + deliveryTotal;
   const discountAmt = (subtotal * discount) / 100;
   const beforeVat = subtotal - discountAmt;
   const vat = (beforeVat * vatRate) / 100;
@@ -453,6 +456,17 @@ export const QuotationForm = React.forwardRef<
                 {status && !QUOTATION_STATUS_OPTIONS.includes(status) && <option>{status}</option>}
               </Select>
             </Field>
+            {initial && (
+              <>
+                {/* quotation_hd.customer_approve_date — stamped by the server the first time the customer agrees */}
+                <Field label="วันที่ลูกค้าตอบรับ">
+                  <Input readOnly className="num" value={initial.approveDate || "—"} />
+                </Field>
+                <Field label="สร้างโดย">
+                  <Input readOnly value={initial.createdBy || "—"} />
+                </Field>
+              </>
+            )}
           </FieldGrid>
 
           <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -467,6 +481,7 @@ export const QuotationForm = React.forwardRef<
                   className="h-8 w-32 text-xs"
                 />
               </div>
+              {deliveryTotal > 0 && <Row label="ค่าขนส่ง" value={baht(deliveryTotal)} />}
               <Row label="รวมเป็นเงิน" value={baht(subtotal)} />
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ส่วนลด (%)</dt>

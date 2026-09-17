@@ -8,7 +8,7 @@ import type { Module } from "@/lib/modules";
 import { listSimple, isSimpleKind, listSymptoms, listModels } from "@/server/services/masters";
 import { listSystemUsers } from "@/server/services/users";
 import { listCustomers } from "@/server/services/customers";
-import { listProducts, listMovements, listIssuedLines } from "@/server/services/stock";
+import { pageProducts, listMovements, listIssuedLines, type ProductFilters } from "@/server/services/stock";
 import { listJobs, filtersFromQuery } from "@/server/services/jobs";
 import { listQuotations } from "@/server/services/quotations";
 import { listSaleOrders } from "@/server/services/sale-orders";
@@ -210,11 +210,25 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
     case "jobs":
       return listJobs({ ...filtersFromQuery(f), q: p.q, limit: MAX_ROWS }) as unknown as Row[];
     case "quotations":
-      return listQuotations({ status: f.status, from: f.from, to: f.to, type: f.type, jobNo: f.jobNo, deleted: mode, q: p.q, limit: MAX_ROWS }) as unknown as Row[];
+      return listQuotations({ status: f.status, from: f.from, to: f.to, type: f.type, warranty: f.warranty, brand: f.brand, jobNo: f.jobNo, deleted: mode, q: p.q, limit: MAX_ROWS }) as unknown as Row[];
     case "sale_orders":
       return listSaleOrders({ approve: f.approve, from: f.from, to: f.to, sales: f.sales, deleted: mode, q: p.q, limit: MAX_ROWS }) as unknown as Row[];
-    case "products":
-      return listProducts({ deleted: mode, q: p.q }) as unknown as Row[];
+    case "products": {
+      // same filters as the products list / stock report tables (category, brand, stock state, …)
+      const pf: ProductFilters = {
+        mode,
+        status: f.status,
+        sysCode: f.sysCode,
+        mfgCode: f.mfgCode,
+        name: f.name,
+        brand: f.brand,
+        category: f.category,
+        creator: f.creator,
+        date: f.date,
+        stock: f.stock === "in" || f.stock === "low" || f.stock === "out" ? f.stock : undefined,
+      };
+      return (await pageProducts({ ...p, page: 1, pageSize: MAX_ROWS }, pf)).rows as unknown as Row[];
+    }
     case "movements":
       return listMovements({ q: p.q || f.code || f.doc || f.ref, from: f.from, to: f.to, type: f.type, limit: MAX_ROWS }) as unknown as Row[];
     case "issued_lines":

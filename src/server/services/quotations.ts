@@ -101,7 +101,7 @@ const SORT = {
   type: quotationHd.quotationType,
 };
 
-export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string; type?: string };
+export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string; type?: string; warranty?: string; brand?: string };
 
 export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
@@ -120,7 +120,10 @@ export function quotationWhere(q: string, f: QuotationFilters) {
     f.from ? gte(quotationHd.createDate, `${f.from} 00:00:00`) : undefined,
     f.to ? lte(quotationHd.createDate, `${f.to} 23:59:59`) : undefined,
     f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
-    f.type ? eq(quotationHd.quotationType, f.type.includes("VIP") ? "VIP" : f.type.includes("Normal") ? "Normal" : f.type) : undefined
+    f.type ? eq(quotationHd.quotationType, f.type.includes("VIP") ? "VIP" : f.type.includes("Normal") ? "Normal" : f.type) : undefined,
+    // ข้อมูลเครื่องมาจากงานที่อ้างถึง (job) — กรองที่ server ให้ครบทุกหน้า ไม่ใช่เฉพาะหน้าที่โหลด
+    f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
+    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined
   );
 }
 
@@ -131,6 +134,7 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
     .from(quotationHd)
     .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
     .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
     .where(w);
   const rows = await base()
@@ -240,12 +244,14 @@ export type QuotationInput = {
 export function computeTotals(i: {
   parts: number;
   service: number;
+  /** Delivery lines (SVD0001) — legacy keeps them out of spare_part_amount but inside sum_exclude_amount */
+  delivery?: number;
   discountType: string;
   discountValue: number;
   discountUnit: "บาท" | "%";
   vatRate: number;
 }) {
-  const sumExclude = i.parts + i.service;
+  const sumExclude = i.parts + i.service + (i.delivery ?? 0);
   let baseForDiscount = sumExclude;
   if (i.discountType === "ส่วนลดค่าบริการ") baseForDiscount = i.service;
   else if (i.discountType === "ส่วนลดค่าอะไหล่") baseForDiscount = i.parts;
@@ -270,13 +276,14 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     const disc = num(l.discount);
     return { ...l, lineNumber: idx + 1, qty, unitPrice: price, discount: disc, total: Math.round((qty * price - disc) * 100) / 100 };
   });
-  const parts = lines.reduce((s, l) => s + l.total, 0);
+  const parts = lines.filter((l) => (l.itemType ?? "SparePart") !== "Delivery").reduce((s, l) => s + l.total, 0);
+  const delivery = lines.filter((l) => l.itemType === "Delivery").reduce((s, l) => s + l.total, 0);
   const service = num(i.serviceAmount);
   const discountType = str(i.discountType) || "ไม่มีส่วนลด";
   const discountValue = num(i.discountValue);
   const discountUnit: "บาท" | "%" = i.discountUnit === "%" ? "%" : "บาท";
   const vatRate = num(i.vatRate);
-  const t = computeTotals({ parts, service, discountType, discountValue, discountUnit, vatRate });
+  const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || "Normal");
 
