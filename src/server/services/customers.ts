@@ -3,10 +3,10 @@ import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { db } from "@/db/client";
 import type { Tx } from "@/db/client";
-import { customer, mtCity, mtDistrict, mtSubDistrict } from "@/db/schema";
+import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from "@/db/schema";
 import type { Customer } from "@/data/mock";
-import { HttpError } from "@/server/auth";
-import { nowThai, str } from "@/server/mappers/format";
+import { HttpError, fullName } from "@/server/auth";
+import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
 
@@ -24,8 +24,10 @@ const PRICE_GROUP_VALUE: Record<string, string> = Object.fromEntries(
   Object.entries(PRICE_GROUP_LABEL).map(([k, v]) => [v, k])
 );
 
-export function toCustomer(r: Row): Customer {
+export function toCustomer(r: Row, createdBy = ""): Customer {
   return {
+    createdDate: fmtDateTime(r.createdDate),
+    createdBy,
     code: r.customerCode ?? "",
     name: r.customerName ?? "",
     address: r.customerAddress ?? "",
@@ -64,7 +66,7 @@ export async function listCustomers(opts: {
     .where(customerWhere(q, deleted))
     .orderBy(desc(customer.customerId))
     .limit(Math.min(limit, 5000));
-  return rows.map(toCustomer);
+  return rows.map((r) => toCustomer(r));
 }
 
 const SORT = {
@@ -96,13 +98,14 @@ export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclud
   const w = customerWhere(p.q, deleted);
   const [{ total }] = await db.select({ total: count() }).from(customer).where(w);
   const rows = await db
-    .select()
+    .select({ c: customer, f: appUser.firstName, l: appUser.lastName })
     .from(customer)
+    .leftJoin(appUser, eq(appUser.userId, customer.createBy))
     .where(w)
     .orderBy(...orderBy(p.sort, SORT, [desc(customer.customerId)]))
     .limit(p.pageSize)
     .offset(offsetOf(p));
-  return { rows: rows.map(toCustomer), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 
 export async function getCustomerByCode(code: string): Promise<Customer | null> {

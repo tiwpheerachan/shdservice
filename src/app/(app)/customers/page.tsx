@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Download, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
@@ -58,6 +59,7 @@ const EMPTY: CustomerForm = {
 
 export default function CustomersPage() {
   const { push } = useToast();
+  const router = useRouter();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/customers");
 
   // server-side paging / search over the customer table (43k rows)
@@ -136,6 +138,23 @@ export default function CustomersPage() {
     }
     setSaving(true);
     try {
+      // เบอร์ซ้ำ (ระบบเดิมมีลูกค้าซ้ำ ~1,800 เบอร์): เตือนตอนเพิ่มใหม่ แต่ไม่บล็อก
+      if (!editing) {
+        try {
+          const phone = form.phone.trim();
+          const dup = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: phone })}`);
+          const same = dup.rows.filter((c) => c.phone.replace(/\D/g, "") === phone.replace(/\D/g, ""));
+          if (same.length) {
+            push({
+              kind: "warning",
+              title: `เบอร์ ${phone} มีลูกค้าอยู่แล้ว ${same.length} ราย`,
+              desc: same.slice(0, 3).map((c) => `${c.code} ${c.name}`).join(" · ") + (same.length > 3 ? " …" : ""),
+            });
+          }
+        } catch {
+          /* lookup failure must not block saving */
+        }
+      }
       const d = await postJson<{ row: Customer }>("/api/customers", { ...form, code: editing?.code || undefined });
       setOpen(false);
       push({ kind: "success", title: "บันทึกข้อมูลลูกค้าแล้ว", desc: `${d.row.code} · ${d.row.name}` });
@@ -204,6 +223,7 @@ export default function CustomersPage() {
         <RowActions
           onView={() => openForm(r, true)}
           onEdit={canEdit ? () => openForm(r) : undefined}
+          onHistory={() => router.push(`/jobs/list?customer=${encodeURIComponent(r.code)}`)}
         />
       ),
     },
@@ -295,7 +315,15 @@ export default function CustomersPage() {
             <Input value={form.taxId} onChange={(e) => set("taxId", e.target.value)} className="num" />
           </Field>
 
-          <Field label="ที่อยู่ เลขที่" wide>
+          <Field
+            label="ที่อยู่ เลขที่"
+            wide
+            hint={
+              editing && (editing.cityId ?? -1) <= 0 && form.address1
+                ? "ที่อยู่เดิมจากระบบเก่ายังไม่แยกจังหวัด/อำเภอ — ถ้าจะเลือกจังหวัดด้านล่าง กรุณาตัดส่วนตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ออกจากช่องนี้ก่อน ไม่เช่นนั้นที่อยู่จะซ้ำ"
+                : undefined
+            }
+          >
             <Textarea
               rows={2}
               value={form.address1}
@@ -379,6 +407,16 @@ export default function CustomersPage() {
               <option>Inactive</option>
             </Select>
           </Field>
+          {viewOnly && editing && (
+            <>
+              <Field label="วันที่สร้าง">
+                <Input readOnly value={editing.createdDate || "—"} className="num" />
+              </Field>
+              <Field label="สร้างโดย">
+                <Input readOnly value={editing.createdBy || "—"} />
+              </Field>
+            </>
+          )}
         </FieldGrid>
         </fieldset>
       </Modal>

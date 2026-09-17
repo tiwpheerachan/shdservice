@@ -75,6 +75,14 @@ export default function JobListPage() {
   // FilterBar (applied on ค้นหา) + table state → one server query per change
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
+  // deep link from the customer page: /jobs/list?customer=C43600 → prefilled ลูกค้า filter
+  React.useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get("customer")?.trim();
+    if (c) {
+      setDraft((f) => ({ ...f, customer: c }));
+      setFilters((f) => ({ ...f, customer: c }));
+    }
+  }, []);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   const { rows: JOBS, total, loading } = useJobsPage({
@@ -174,7 +182,16 @@ export default function JobListPage() {
       key: "status",
       header: "สถานะงาน",
       width: "150px",
-      cell: (r) => <StatusBadge status={r.status} />,
+      cell: (r) => (
+        <span className="flex flex-wrap items-center gap-1">
+          <StatusBadge status={r.status} />
+          {r.isBounce && (
+            <Badge tone="warning" className="px-1.5">
+              งานเด้ง
+            </Badge>
+          )}
+        </span>
+      ),
     },
     {
       key: "action",
