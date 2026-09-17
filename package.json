@@ -10,7 +10,9 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:reset": "tsx scripts/migrate.ts --reset",
     "db:generate": "drizzle-kit generate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "files:validate": "tsx scripts/legacy-files.mts validate",
+    "files:upload": "tsx scripts/legacy-files.mts upload all"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",
