@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from "lucide-react";
 import { Section } from "./section";
+import { CustomerSelect } from "./customer-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Radio, NumberInput } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import { useToast } from "@/components/ui/toast";
 import { PAYMENT_METHODS, type Customer } from "@/data/mock";
 import { useProducts, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
-import { api, errMsg, qs, uploadFile, fileUrl } from "@/lib/api";
+import { errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
@@ -120,16 +121,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
 
-    const findCustomer = async (q: string) => {
-      if (!q.trim()) return;
-      try {
-        const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q })}`);
-        if (d.rows[0]) setCustomer(d.rows[0]);
-        else push({ kind: "warning", title: "ไม่พบลูกค้า", desc: q });
-      } catch (e) {
-        push({ kind: "error", title: "ค้นหาลูกค้าไม่สำเร็จ", desc: errMsg(e) });
-      }
-    };
 
     React.useImperativeHandle(ref, () => ({
       uploadPendingSlip: async (no: string) => {
@@ -162,37 +153,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
     return (
       <>
-        <Section title="Customer Info" icon={UserRound}>
-          <FieldGrid>
-            <Field label="รหัสลูกค้า" required>
-              <Input
-                className="num"
-                placeholder="พิมพ์รหัสลูกค้าแล้วกด Enter"
-                key={customer?.code ?? "new"}
-                defaultValue={customer?.code ?? ""}
-                onKeyDown={(e) => e.key === "Enter" && findCustomer((e.target as HTMLInputElement).value)}
-                onBlur={(e) => e.target.value && e.target.value !== customer?.code && findCustomer(e.target.value)}
-              />
-            </Field>
-            <Field label="เลขผู้เสียภาษี">
-              <Input className="num" value={customer?.taxId ?? ""} readOnly />
-            </Field>
-            <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-              <Input value={customer?.name ?? ""} readOnly />
-            </Field>
-            <Field label="ที่อยู่ลูกค้า" wide>
-              <Textarea rows={2} value={customer?.address ?? ""} readOnly />
-            </Field>
-            <Field label="เบอร์โทรศัพท์ลูกค้า" required>
-              <Input className="num" value={customer?.phone ?? ""} readOnly />
-            </Field>
-            <Field label="Line ID">
-              <Input value={customer?.line ?? ""} readOnly />
-            </Field>
-            <Field label="Email" className="lg:col-span-2">
-              <Input type="email" value={customer?.email ?? ""} readOnly />
-            </Field>
-          </FieldGrid>
+        <Section title="Customer Info" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
+          <CustomerSelect value={customer} onChange={setCustomer} />
         </Section>
 
         <Section title="Sale Order Info" icon={FileText}>

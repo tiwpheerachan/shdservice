@@ -10,6 +10,8 @@ import {
   Paperclip,
 } from "lucide-react";
 import { Section } from "./section";
+import { SymptomPicker } from "./symptom-picker";
+import { CustomerSelect } from "./customer-select";
 import { Attachments, type AttachmentsHandle } from "./attachments";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -26,6 +28,8 @@ import {
   useJobTypes,
   useJobTypeDetails,
   useShippers,
+  useSymptomStats,
+  useModelSymptoms,
   useManufacturers,
   useModels,
   useProductTypes,
@@ -34,9 +38,8 @@ import {
 } from "@/data/db";
 import { PeoplePicker, type Person } from "./people-picker";
 import { baht, cn } from "@/lib/utils";
-import { api, errMsg, qs, patchJson } from "@/lib/api";
+import { patchJson } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
-import { useToast } from "@/components/ui/toast";
 import type { JobDetail } from "@/lib/use-job";
 
 /* ------------------------------------------------------------------ *
@@ -324,94 +327,18 @@ export function JobLookupBar({
 
 export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
   const { s, set } = useJobForm();
-  const { push } = useToast();
   const c = s.customer;
-  const [q, setQ] = React.useState("");
-  const [hits, setHits] = React.useState<Customer[]>([]);
-
-  // server lookup: exact code first, then name / tax id / phone (customer table)
-  const find = async () => {
-    const term = q.trim();
-    if (!term) return;
-    try {
-      const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: term })}`);
-      if (d.rows.length === 0) {
-        push({ kind: "warning", title: "ไม่พบลูกค้า", desc: term });
-        setHits([]);
-        return;
-      }
-      set("customer", d.rows[0]);
-      setHits(d.rows.length > 1 ? d.rows : []);
-    } catch (e) {
-      push({ kind: "error", title: "ค้นหาลูกค้าไม่สำเร็จ", desc: errMsg(e) });
-    }
-  };
-
   return (
     <Section
       title="ข้อมูลลูกค้า"
       icon={UserRound}
-      description="ค้นหาด้วยรหัสลูกค้า หมายเลขบัตร หรือชื่อ-สกุล"
+      description={c ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่ เพื่อเพิ่มข้อมูลก่อนเปิดงาน"}
       actions={c && <Badge tone="success" dot>พบข้อมูลลูกค้า</Badge>}
     >
-      {!readOnly && (
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && find()}
-            placeholder="รหัส หรือ หมายเลขบัตร หรือ ชื่อสกุล ลูกค้า"
-            className="sm:max-w-md"
-          />
-          <Button variant="outline" size="md" onClick={find}>
-            <Search className="h-3.5 w-3.5" />
-            ค้นหาลูกค้า
-          </Button>
-          {hits.length > 1 && (
-            <Select
-              value={c?.code ?? ""}
-              onChange={(e) => set("customer", hits.find((h) => h.code === e.target.value) ?? null)}
-              className="sm:max-w-xs"
-              aria-label="เลือกลูกค้าที่ตรงกัน"
-            >
-              {hits.map((h) => (
-                <option key={h.code} value={h.code}>
-                  {h.code} · {h.name} · {h.phone}
-                </option>
-              ))}
-            </Select>
-          )}
-        </div>
-      )}
-
-      <FieldGrid>
-        <Field label="รหัสลูกค้า" required>
-          <Input readOnly value={c?.code ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="เลขผู้เสียภาษี / เลขบัตรประชาชน">
-          <Input readOnly value={c?.taxId ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-          <Input readOnly value={c?.name ?? ""} placeholder="—" />
-        </Field>
-        <Field label="ที่อยู่ลูกค้า" wide>
-          <Textarea readOnly rows={2} value={c?.address ?? ""} placeholder="—" />
-        </Field>
-        <Field label="เบอร์โทรศัพท์" required>
-          <Input readOnly value={c?.phone ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="Line ID">
-          <Input readOnly value={c?.line ?? ""} placeholder="—" />
-        </Field>
-        <Field label="Email" className="lg:col-span-2">
-          <Input readOnly value={c?.email ?? ""} placeholder="—" />
-        </Field>
-      </FieldGrid>
+      <CustomerSelect value={c} onChange={(cust) => set("customer", cust)} readOnly={readOnly} />
     </Section>
   );
 }
-
-/* ---------------- job open info ---------------- */
 
 export function JobOpenSection({
   status,
@@ -507,10 +434,9 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: MODELS } = useModels();
   const { data: SYMPTOMS } = useSymptoms();
+  const { data: SYMPTOM_STATS } = useSymptomStats();
+  const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
   const symptoms = s.symptoms;
-
-  const toggle = (name: string) =>
-    set("symptoms", symptoms.includes(name) ? symptoms.filter((x) => x !== name) : [...symptoms, name]);
 
   // models of the chosen brand first (still allows any model)
   const modelOptions = React.useMemo(() => {
@@ -667,28 +593,16 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
           label="อาการเสียหลัก (มาตรฐาน)"
           required
           wide
-          hint={`เลือกแล้ว ${symptoms.length} อาการ`}
+          hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
         >
-          <div className="flex flex-wrap gap-2 rounded-md border border-border bg-muted/40 p-2.5">
-            {SYMPTOMS.map((sy) => {
-              const on = symptoms.includes(sy.name);
-              return (
-                <button
-                  key={sy.id}
-                  type="button"
-                  onClick={() => toggle(sy.name)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-xs transition-colors",
-                    on
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-muted-foreground hover:border-primary hover:text-primary"
-                  )}
-                >
-                  {sy.name}
-                </button>
-              );
-            })}
-          </div>
+          {/* searchable multi-select, ordered by real usage; top symptoms of the chosen model on top */}
+          <SymptomPicker
+            value={symptoms}
+            onChange={(names) => set("symptoms", names)}
+            options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+            suggested={MODEL_SYMPTOMS}
+            suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
+          />
         </Field>
 
         <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">

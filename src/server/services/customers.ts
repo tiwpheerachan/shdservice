@@ -157,12 +157,61 @@ async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
   return parts.filter(Boolean).join(" ").slice(0, 200);
 }
 
+export type CustomerConflict = { field: "phone" | "email" | "taxId"; value: string; code: string; name: string; phone: string; email: string; taxId: string };
+
+const digits = (v: unknown) => str(v).replace(/\D/g, "");
+const normEmail = (v: unknown) => str(v).toLowerCase();
+
+/**
+ * Identity fields that may never be shared by two customers: phone, email, tax/citizen id.
+ * Compared after normalisation (digits only / lower-case); DELETED rows are ignored;
+ * `excludeCode` = the row being edited.
+ */
+export async function findCustomerConflicts(
+  v: { phone?: string; email?: string; taxId?: string },
+  excludeCode?: string
+): Promise<CustomerConflict[]> {
+  const phone = digits(v.phone);
+  const email = normEmail(v.email);
+  const taxId = digits(v.taxId);
+  const checks: { field: CustomerConflict["field"]; value: string; cond: ReturnType<typeof sql> }[] = [];
+  if (phone.length >= 6) checks.push({ field: "phone", value: phone, cond: sql`regexp_replace(coalesce(${customer.phoneNumber},''), '\\D', '', 'g') = ${phone}` });
+  if (email) checks.push({ field: "email", value: email, cond: sql`lower(trim(coalesce(${customer.email},''))) = ${email}` });
+  if (taxId.length >= 5) checks.push({ field: "taxId", value: taxId, cond: sql`regexp_replace(coalesce(${customer.customerCardId},''), '\\D', '', 'g') = ${taxId}` });
+  if (!checks.length) return [];
+  const out: CustomerConflict[] = [];
+  for (const c of checks) {
+    const rows = await db
+      .select({ code: customer.customerCode, name: customer.customerName, phone: customer.phoneNumber, email: customer.email, taxId: customer.customerCardId })
+      .from(customer)
+      .where(and(c.cond, sql`${customer.recordStatus} <> 'DELETED'`, excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined))
+      .limit(5);
+    for (const r of rows) out.push({ field: c.field, value: c.value, code: r.code ?? "", name: r.name ?? "", phone: r.phone ?? "", email: r.email ?? "", taxId: r.taxId ?? "" });
+  }
+  return out;
+}
+
 /** Create/update a customer. New codes come from running "Customer" (C00001). */
 export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
   const name = str(i.name).slice(0, 200);
   if (!name) throw new HttpError(400, "ต้องระบุชื่อลูกค้า");
   const phone = str(i.phone).slice(0, 50);
   if (!phone && !i.code) throw new HttpError(400, "ต้องระบุเบอร์โทรศัพท์");
+
+  // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
+  // the fields that actually change are checked (legacy data already holds duplicates)
+  const prev = i.code ? await getCustomerByCode(i.code) : null;
+  const check = {
+    phone: !prev || digits(prev.phone) !== digits(phone) ? phone : undefined,
+    email: !prev || normEmail(prev.email) !== normEmail(i.email) ? str(i.email) : undefined,
+    taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? str(i.taxId) : undefined,
+  };
+  const conflicts = await findCustomerConflicts(check, i.code);
+  if (conflicts.length) {
+    const label = { phone: "เบอร์โทรศัพท์", email: "อีเมล", taxId: "เลขบัตร/ผู้เสียภาษี" };
+    const first = conflicts[0];
+    throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, { conflicts });
+  }
 
   return db.transaction(async (tx) => {
     const values = {

@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Trash2, Wrench, Stethoscope, Search } from "lucide-react";
+import { Plus, Trash2, Wrench, Stethoscope } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobSearch } from "@/components/shared/job-search";
 import { Section } from "@/components/shared/section";
 import {
   CustomerSection,
@@ -24,7 +25,8 @@ import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { REPAIR_STATUS_OPTIONS } from "@/data/mock";
-import { useProducts, useSymptoms } from "@/data/db";
+import { SymptomPicker } from "@/components/shared/symptom-picker";
+import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg } from "@/lib/api";
@@ -49,18 +51,18 @@ function RepairForm() {
   const { push } = useToast();
   const { data: PRODUCTS } = useProducts();
   const { data: SYMPTOMS } = useSymptoms();
+  const { data: SYMPTOM_STATS } = useSymptomStats();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
   const [lines, setLines] = React.useState<Line[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickQ, setPickQ] = React.useState("");
-  const [q, setQ] = React.useState(jobNo);
   const [detail, setDetail] = React.useState({ engineerSymptom: "", repairDetail: "", engineerRemark: "", newSerial: "", status: "" });
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(0);
 
-  React.useEffect(() => setQ(jobNo), [jobNo]);
 
   // prefill form, repair details and spare-part requests from the loaded job
   React.useEffect(() => {
@@ -93,8 +95,7 @@ function RepairForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
 
-  const go = async () => {
-    const v = q.trim();
+  const go = async (v: string) => {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
@@ -176,26 +177,10 @@ function RepairForm() {
         description="ข้อมูลงาน » บันทึกการทำงาน — บันทึกอะไหล่ที่ใช้ วิธีการซ่อม และค่าใช้จ่าย"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="repair-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="repair-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงาน
             </label>
-            <div className="relative">
-              <Input
-                id="repair-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="J2612164"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="repair-job-no" value={jobNo} scope="open" onPick={go} />
           </div>
         }
       />
@@ -364,13 +349,16 @@ function RepairForm() {
 
       <Section title="รายละเอียดการซ่อม" icon={Wrench}>
         <FieldGrid>
-          <Field label="อาการเสียที่ตรวจพบ" wide>
-            <Select value={detail.engineerSymptom} onChange={(e) => setDetail((d) => ({ ...d, engineerSymptom: e.target.value }))}>
-              <option value="">- - เลือกอาการเสีย - -</option>
-              {SYMPTOMS.map((sy) => (
-                <option key={sy.id}>{sy.name}</option>
-              ))}
-            </Select>
+          <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ (engineer_symptom_id)">
+            <SymptomPicker
+              multiple={false}
+              value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
+              onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? "" }))}
+              options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+              suggested={MODEL_SYMPTOMS}
+              suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
+              placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
+            />
           </Field>
           <Field label="วิธีการซ่อม" className="lg:col-span-2">
             <Textarea

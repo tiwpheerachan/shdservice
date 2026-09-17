@@ -203,10 +203,12 @@ export const useSaleOrders = (params: Params = {}) =>
   useTable<SaleOrder>("sale_orders", undefined, "exclude", params);
 export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>("sale_orders", params);
 
-export const useDashGroups = () => useTable<DashGroup>("dash_groups", { column: "ord" });
+/** Dashboard — `range` = { from, to } (YYYY-MM-DD, both empty = all time); TAT is always a live snapshot */
+export type DashRange = { from?: string; to?: string };
+export const useDashGroups = (range: DashRange = {}) => useTable<DashGroup>("dash_groups", { column: "ord" }, "exclude", range);
 export const useTatRows = () => useTable<TatRow>("tat_rows");
-export const useMonthly = () => useTable<MonthlyRow>("monthly");
-export const useTopSymptoms = () => useTable<TopSymptom>("top_symptoms");
+export const useMonthly = (range: DashRange = {}) => useTable<MonthlyRow & { granularity?: "day" | "month" }>("monthly", undefined, "exclude", range);
+export const useTopSymptoms = (range: DashRange = {}) => useTable<TopSymptom>("top_symptoms", undefined, "exclude", range);
 
 /* ---- lookups added for the real backend ---- */
 export type Staff = { id: number; name: string; userType: string };
@@ -220,6 +222,10 @@ export const useVendors = () => useTable<string>("vendors");
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
 export const useJobTypeDetails = () => useTable<string>("job_type_details");
 export const useShippers = () => useTable<string>("shippers");
+/** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
+export type SymptomStat = { id: number; name: string; group: string; count: number };
+export const useSymptomStats = () => useTable<SymptomStat>("symptom_stats");
+export const useModelSymptoms = (model: string) => useTable<{ id: number; name: string; count: number }>("model_symptoms", undefined, "exclude", { model });
 export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
 export const useIssuedLines = (params: Params = {}) => useTable<IssuedLine>("issued_lines", undefined, "exclude", params);
 export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>("issued_lines", params);

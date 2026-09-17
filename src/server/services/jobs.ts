@@ -273,6 +273,8 @@ export type JobFilters = {
   includeCancelled?: boolean;
   /** open jobs with no engineer yet, or still "งานใหม่" (assign screen) */
   unassigned?: boolean;
+  /** jobs the close screen can act on: Repaired group, or closed but still waiting for a tracking no / pickup */
+  closable?: boolean;
   /** which date column from/to apply to (default create) */
   dateBy?: "create" | "repaired" | "closed";
   symptom?: string; // symptom name (engineer's or customer's)
@@ -319,6 +321,9 @@ export function jobWhere(q: string, f: JobFilters) {
           sql`${jobStatus.jobStatusGroup} not in ('Finished','Cancel')`,
           or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`)
         )
+      : undefined,
+    f.closable
+      ? or(eq(jobStatus.jobStatusGroup, "Repaired"), inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]))
       : undefined
   );
 }
@@ -339,6 +344,7 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
     customerCode: f.customerCode,
     includeCancelled: f.includeCancelled === "1",
     unassigned: f.unassigned === "1",
+    closable: f.closable === "1",
     dateBy: f.dateBy === "repaired" || f.dateBy === "closed" ? f.dateBy : undefined,
     symptom: f.symptom,
     returnType: f.returnType,
@@ -1358,20 +1364,40 @@ export async function removeAttachment(id: number, byUserId = 0) {
 /* ------------------------------------------------------------------ *
  * Dashboard — computed live from job / job_log
  * ------------------------------------------------------------------ */
-let dashCache: { at: number; value: Awaited<ReturnType<typeof computeDashboard>> } | null = null;
-export async function dashboard() {
-  if (dashCache && Date.now() - dashCache.at < 30_000) return dashCache.value;
-  const value = await computeDashboard();
-  dashCache = { at: Date.now(), value };
+export type DashRange = { from?: string; to?: string };
+
+// 30 s memo per date range (the dashboard is opened constantly; the queries scan job by date)
+const dashCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof computeDashboard>> }>();
+export async function dashboard(range: DashRange = {}) {
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(range.from ?? "") ? range.from! : "";
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(range.to ?? "") ? range.to! : "";
+  const key = `${from}|${to}`;
+  const hit = dashCache.get(key);
+  if (hit && Date.now() - hit.at < 30_000) return hit.value;
+  const value = await computeDashboard(from, to);
+  dashCache.set(key, { at: Date.now(), value });
+  if (dashCache.size > 50) dashCache.delete(dashCache.keys().next().value!);
   return value;
 }
 
-async function computeDashboard() {
+const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+/**
+ * Everything except the TAT table follows the date range (job_create_date;
+ * the "closed" line of the chart uses job_closed_date). Empty from/to = all time.
+ * TAT is a snapshot of the jobs still open right now, by design.
+ */
+async function computeDashboard(from: string, to: string) {
+  const createdIn = and(
+    ne(job.recordStatus, RS.DELETED),
+    from ? gte(job.jobCreateDate, `${from} 00:00:00`) : undefined,
+    to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined
+  );
   const groups = await db
     .select({ group: jobStatus.jobStatusGroup, n: count() })
     .from(job)
     .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .where(ne(job.recordStatus, RS.DELETED))
+    .where(createdIn)
     .groupBy(jobStatus.jobStatusGroup);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
   const G: Record<string, { key: string; label: string; sub: string; tone: "primary" | "warning" | "info" | "success" | "danger"; ord: number }> = {
@@ -1387,7 +1413,7 @@ async function computeDashboard() {
     })
     .sort((a, b) => a.ord - b.ord);
 
-  // TAT buckets for open jobs (days since job_create_date) per status
+  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound
   const tat = await db.execute(sql`
     SELECT s.job_status_name AS status, s.display_order AS ord,
            count(*) FILTER (WHERE d <= 3)  AS d13,
@@ -1410,38 +1436,90 @@ async function computeDashboard() {
     over30: Number(r.over30),
   }));
 
-  // one pass over the last 12 months (was 24 correlated subqueries ≈ 800 ms)
-  const monthly = await db.execute(sql`
-    WITH m AS (SELECT date_trunc('month', current_date) - (n || ' month')::interval AS mo
-                 FROM generate_series(11, 0, -1) n),
-    o AS (SELECT date_trunc('month', job_create_date) AS mo, count(*) AS n
-            FROM job WHERE record_status <> 'DELETED'
-             AND job_create_date >= date_trunc('month', current_date) - interval '11 month'
-           GROUP BY 1),
-    c AS (SELECT date_trunc('month', job_closed_date) AS mo, count(*) AS n
-            FROM job WHERE record_status <> 'DELETED'
-             AND job_closed_date >= date_trunc('month', current_date) - interval '11 month'
-           GROUP BY 1)
-    SELECT to_char(m.mo, 'YYYY-MM') AS ym, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
-      FROM m LEFT JOIN o ON o.mo = m.mo LEFT JOIN c ON c.mo = m.mo
-     ORDER BY m.mo`);
-  const TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-  const monthlyRows = (monthly.rows as { ym: string; open: string; close: string }[]).map((r) => {
-    const [y, mo] = r.ym.split("-");
-    return { m: `${TH[Number(mo) - 1]} ${String(Number(y) + 543).slice(-2)}`, open: Number(r.open), close: Number(r.close) };
+  // open / close trend: daily when the range is ≤ 62 days, otherwise monthly (all time = from the first job)
+  const spanDays = from && to ? Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 : Infinity;
+  const daily = spanDays <= 62;
+  const lo = from ? sql`${from}::date` : sql`(SELECT coalesce(min(job_create_date)::date, current_date) FROM job)`;
+  const hi = to ? sql`${to}::date` : sql`current_date`;
+  const trend = await db.execute(
+    daily
+      ? sql`
+    WITH d AS (SELECT generate_series(${lo}, ${hi}, interval '1 day')::date AS dt),
+    o AS (SELECT job_create_date::date AS dt, count(*) AS n FROM job
+           WHERE record_status <> 'DELETED' AND job_create_date >= ${lo} AND job_create_date < ${hi} + 1 GROUP BY 1),
+    c AS (SELECT job_closed_date::date AS dt, count(*) AS n FROM job
+           WHERE record_status <> 'DELETED' AND job_closed_date >= ${lo} AND job_closed_date < ${hi} + 1 GROUP BY 1)
+    SELECT to_char(d.dt, 'YYYY-MM-DD') AS k, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
+      FROM d LEFT JOIN o ON o.dt = d.dt LEFT JOIN c ON c.dt = d.dt ORDER BY d.dt`
+      : sql`
+    WITH m AS (SELECT generate_series(date_trunc('month', ${lo}), date_trunc('month', ${hi}), interval '1 month') AS mo),
+    o AS (SELECT date_trunc('month', job_create_date) AS mo, count(*) AS n FROM job
+           WHERE record_status <> 'DELETED' AND job_create_date >= date_trunc('month', ${lo}) AND job_create_date < ${hi} + 1 GROUP BY 1),
+    c AS (SELECT date_trunc('month', job_closed_date) AS mo, count(*) AS n FROM job
+           WHERE record_status <> 'DELETED' AND job_closed_date >= date_trunc('month', ${lo}) AND job_closed_date < ${hi} + 1 GROUP BY 1)
+    SELECT to_char(m.mo, 'YYYY-MM') AS k, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
+      FROM m LEFT JOIN o ON o.mo = m.mo LEFT JOIN c ON c.mo = m.mo ORDER BY m.mo`
+  );
+  const monthlyRows = (trend.rows as { k: string; open: string; close: string }[]).map((r) => {
+    const [y, mo, d] = r.k.split("-");
+    const label = daily ? `${Number(d)} ${TH_MONTH[Number(mo) - 1]}` : `${TH_MONTH[Number(mo) - 1]} ${String(Number(y) + 543).slice(-2)}`;
+    return { m: label, open: Number(r.open), close: Number(r.close) };
   });
 
   const top = await db
     .select({ name: symptom.symptomName, n: count() })
     .from(job)
     .innerJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-    .where(and(ne(job.recordStatus, RS.DELETED), sql`${job.jobCreateDate} >= current_date - interval '365 day'`))
+    .where(createdIn)
     .groupBy(symptom.symptomName)
     .orderBy(desc(count()))
     .limit(8);
   const topSymptoms = top.map((t) => ({ name: t.name ?? "", count: Number(t.n) }));
 
-  return { groups: dashGroups, tat: tatRows, monthly: monthlyRows, topSymptoms };
+  return { groups: dashGroups, tat: tatRows, monthly: monthlyRows, granularity: daily ? ("day" as const) : ("month" as const), topSymptoms };
+}
+
+/* ------------------------------------------------------------------ *
+ * Symptom picker data — usage counts (job.product_symptom_id ∪ job_symptom)
+ * ------------------------------------------------------------------ */
+let symptomStatsCache: { at: number; value: { id: number; name: string; group: string; count: number }[] } | null = null;
+/** Active symptoms ordered by how often they were used, most common first (5 min memo). */
+export async function symptomStats() {
+  if (symptomStatsCache && Date.now() - symptomStatsCache.at < 300_000) return symptomStatsCache.value;
+  const r = await db.execute(sql`
+    WITH u AS (
+      SELECT product_symptom_id AS sid FROM job WHERE record_status <> 'DELETED' AND product_symptom_id > 0
+      UNION ALL
+      SELECT js.symptom_id FROM job_symptom js JOIN job j ON j.job_no = js.job_no
+       WHERE j.record_status <> 'DELETED' AND js.symptom_id <> j.product_symptom_id
+    )
+    SELECT s.symptom_id AS id, s.symptom_name AS name, coalesce(s.symptom_group_name, '') AS grp, count(u.sid) AS n
+      FROM symptom s LEFT JOIN u ON u.sid = s.symptom_id
+     WHERE s.record_status = 'ACTIVE'
+     GROUP BY s.symptom_id, s.symptom_name, s.symptom_group_name
+     ORDER BY count(u.sid) DESC, s.symptom_name`);
+  const value = (r.rows as { id: number; name: string; grp: string; n: string }[]).map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), group: x.grp ?? "", count: Number(x.n) }));
+  symptomStatsCache = { at: Date.now(), value };
+  return value;
+}
+
+/** Top symptoms seen on jobs of one product model (by model_code) — "อาการที่พบบ่อยของรุ่นนี้". */
+export async function modelSymptoms(modelCode: string, limit = 5) {
+  if (!modelCode) return [];
+  const r = await db.execute(sql`
+    WITH u AS (
+      SELECT j.product_symptom_id AS sid FROM job j JOIN model m ON m.model_id = j.product_model_id
+       WHERE m.model_code = ${modelCode} AND j.record_status <> 'DELETED' AND j.product_symptom_id > 0
+      UNION ALL
+      SELECT js.symptom_id FROM job_symptom js JOIN job j ON j.job_no = js.job_no JOIN model m ON m.model_id = j.product_model_id
+       WHERE m.model_code = ${modelCode} AND j.record_status <> 'DELETED' AND js.symptom_id <> j.product_symptom_id
+    )
+    SELECT s.symptom_id AS id, s.symptom_name AS name, count(*) AS n
+      FROM u JOIN symptom s ON s.symptom_id = u.sid
+     WHERE s.record_status = 'ACTIVE'
+     GROUP BY s.symptom_id, s.symptom_name
+     ORDER BY count(*) DESC LIMIT ${limit}`);
+  return (r.rows as { id: number; name: string; n: string }[]).map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), count: Number(x.n) }));
 }
 
 export { eq };

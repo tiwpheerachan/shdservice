@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { PackageCheck, ClipboardList, Wallet, Printer, Search } from "lucide-react";
+import { PackageCheck, ClipboardList, Wallet, Printer } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobSearch } from "@/components/shared/job-search";
 import { Section } from "@/components/shared/section";
 import {
   CustomerSection,
@@ -33,7 +34,6 @@ function CloseForm() {
   const { s: form, reset } = useJobForm();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
-  const [q, setQ] = React.useState(jobNo);
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
     payType: JOB_PAYMENT_METHODS[0],
@@ -72,7 +72,6 @@ function CloseForm() {
   ];
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
 
-  React.useEffect(() => setQ(jobNo), [jobNo]);
   React.useEffect(() => {
     if (!job) return;
     reset(fromJob(job));
@@ -94,8 +93,7 @@ function CloseForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
 
-  const go = async () => {
-    const v = q.trim();
+  const go = async (v: string) => {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
@@ -140,26 +138,10 @@ function CloseForm() {
         description="ข้อมูลงานบริการ » ปิดงาน-ส่งคืนสินค้า"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <label
-              htmlFor="close-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="close-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงาน
             </label>
-            <div className="relative">
-              <Input
-                id="close-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="J2612164"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="close-job-no" value={jobNo} scope="closable" onPick={go} />
             <Button
               variant="outline"
               size="md"

@@ -9,7 +9,7 @@ import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } f
 import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
 import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters, jobsWithPendingParts, jobsWithReturnableParts } from "@/server/services/stock";
 import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
-import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers } from "@/server/services/jobs";
+import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers, symptomStats, modelSymptoms } from "@/server/services/jobs";
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
@@ -60,6 +60,10 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return listOutsourceVendors();
     case "job_type_details":
       return listJobTypeDetails();
+    case "symptom_stats":
+      return symptomStats();
+    case "model_symptoms":
+      return modelSymptoms(sp.get("model") ?? "");
     case "shippers":
       return listShippers();
     case "job_nos": {
@@ -128,15 +132,17 @@ export async function readResource(req: NextRequest, resource: string): Promise<
         ? pageSaleOrders(p, { approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted })
         : listSaleOrders({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "dash_groups":
-      return (await dashboard()).groups;
+      return (await dashboard({ from: p.f.from, to: p.f.to })).groups;
     case "tat_rows":
-      return (await dashboard()).tat;
-    case "monthly":
-      return (await dashboard()).monthly;
+      return (await dashboard({ from: p.f.from, to: p.f.to })).tat;
+    case "monthly": {
+      const d = await dashboard({ from: p.f.from, to: p.f.to });
+      return d.monthly.map((r) => ({ ...r, granularity: d.granularity }));
+    }
     case "top_symptoms":
-      return (await dashboard()).topSymptoms;
+      return (await dashboard({ from: p.f.from, to: p.f.to })).topSymptoms;
     case "dashboard":
-      return [await dashboard()];
+      return [await dashboard({ from: p.f.from, to: p.f.to })];
     case "job_stats":
       return [await jobStats()];
   }

@@ -7,7 +7,7 @@
  *  - 403 → surfaces the server's Thai permission message
  */
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public details?: unknown) {
     super(message);
   }
 }
@@ -33,8 +33,8 @@ export async function api<T = unknown>(url: string, init: RequestInit = {}, retr
     toLogin();
     throw new ApiError(401, "กรุณาเข้าสู่ระบบใหม่");
   }
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string })?.error || `เกิดข้อผิดพลาด (${res.status})`);
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string; details?: unknown };
+  if (!res.ok) throw new ApiError(res.status, (data as { error?: string })?.error || `เกิดข้อผิดพลาด (${res.status})`, (data as { details?: unknown })?.details);
   return data as T;
 }
 

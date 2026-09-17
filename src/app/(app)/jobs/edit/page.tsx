@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobSearch } from "@/components/shared/job-search";
 import { JobHistorySection } from "@/components/shared/job-history";
 import {
   CustomerSection,
@@ -17,7 +17,6 @@ import {
   toJobInput,
 } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { patchJson, errMsg } from "@/lib/api";
@@ -26,18 +25,15 @@ function EditJobForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
   const { s, reset } = useJobForm();
-  const [q, setQ] = React.useState(jobNo);
   const [saving, setSaving] = React.useState(false);
 
-  React.useEffect(() => setQ(jobNo), [jobNo]);
   // prefill the form whenever a job is loaded (from ?job= or the GO button)
   React.useEffect(() => {
     if (job) reset(fromJob(job));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
 
-  const go = async () => {
-    const v = q.trim();
+  const go = async (v: string) => {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
@@ -69,26 +65,10 @@ function EditJobForm() {
         description="ข้อมูลงานบริการ » แก้ไขข้อมูลงาน — ระบุหมายเลขงานเพื่อเรียกข้อมูลมาแก้ไข"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="edit-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="edit-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงาน
             </label>
-            <div className="relative">
-              <Input
-                id="edit-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="J2612164"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="edit-job-no" value={jobNo} scope="all" onPick={go} />
           </div>
         }
       />

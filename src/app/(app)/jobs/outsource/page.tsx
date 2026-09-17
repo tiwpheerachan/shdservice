@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Truck, PackageCheck, ClipboardList, Search } from "lucide-react";
+import { Truck, PackageCheck, ClipboardList } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobSearch } from "@/components/shared/job-search";
 import { Section } from "@/components/shared/section";
 import {
   CustomerSection,
@@ -38,7 +39,6 @@ function OutsourceForm() {
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
   const [tab, setTab] = React.useState("device");
-  const [q, setQ] = React.useState(jobNo);
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
     repairDetail: "",
@@ -55,7 +55,6 @@ function OutsourceForm() {
   });
   const upd = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
 
-  React.useEffect(() => setQ(jobNo), [jobNo]);
 
   // prefill from the job + its latest job_send_forward_dt row
   React.useEffect(() => {
@@ -79,8 +78,7 @@ function OutsourceForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job, VENDORS.length]);
 
-  const go = async () => {
-    const v = q.trim();
+  const go = async (v: string) => {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
@@ -132,26 +130,10 @@ function OutsourceForm() {
         description="ข้อมูลงานซ่อม » บันทึกข้อมูลส่งซ่อม Out-Source"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="outsource-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="outsource-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงานซ่อม
             </label>
-            <div className="relative">
-              <Input
-                id="outsource-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="J2612164"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="outsource-job-no" value={jobNo} scope="open" onPick={go} />
           </div>
         }
       />

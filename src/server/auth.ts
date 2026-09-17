@@ -33,7 +33,8 @@ export type CurrentUser = {
 };
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /** `details` is passed through to the JSON body (e.g. 409 conflicts the UI can act on) */
+  constructor(public status: number, message: string, public details?: unknown) {
     super(message);
   }
 }
@@ -184,7 +185,7 @@ export function handle<T extends unknown[]>(
       return await fn(...args);
     } catch (e) {
       if (e instanceof HttpError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return NextResponse.json(e.details === undefined ? { error: e.message } : { error: e.message, details: e.details }, { status: e.status });
       }
       const msg = e instanceof Error ? e.message : String(e);
       // eslint-disable-next-line no-console

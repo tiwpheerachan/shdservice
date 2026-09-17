@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Plus, Trash2, FileText, UserRound, Wrench, Calculator } from "lucide-react";
 import { Section } from "./section";
+import { CustomerSelect } from "./customer-select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -164,16 +165,6 @@ export const QuotationForm = React.forwardRef<
   const vat = (beforeVat * vatRate) / 100;
   const net = beforeVat + vat;
 
-  const findCustomer = async (q: string) => {
-    if (!q.trim()) return;
-    try {
-      const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q })}`);
-      if (d.rows[0]) setCustomer(d.rows[0]);
-      else push({ kind: "warning", title: "ไม่พบลูกค้า", desc: q });
-    } catch (e) {
-      push({ kind: "error", title: "ค้นหาลูกค้าไม่สำเร็จ", desc: errMsg(e) });
-    }
-  };
 
   React.useImperativeHandle(ref, () => ({
     customer: () => customer,
@@ -233,30 +224,9 @@ export const QuotationForm = React.forwardRef<
         </div>
       </Section>
 
-      <Section title="ข้อมูลลูกค้า" icon={UserRound}>
-        <FieldGrid>
-          <Field label="รหัสลูกค้า" required>
-            <Input
-              className="num"
-              defaultValue={customer?.code ?? ""}
-              key={customer?.code ?? "new"}
-              placeholder="พิมพ์รหัสแล้วกด Enter"
-              onKeyDown={(e) => e.key === "Enter" && findCustomer((e.target as HTMLInputElement).value)}
-              onBlur={(e) => e.target.value && e.target.value !== customer?.code && findCustomer(e.target.value)}
-            />
-          </Field>
-          <Field label="เลขบัตรประชาชน / ผู้เสียภาษี">
-            <Input className="num" value={customer?.taxId ?? ""} readOnly />
-          </Field>
-          <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-            <Input value={customer?.name ?? ""} readOnly />
-          </Field>
-          <Field label="ที่อยู่ลูกค้า" wide>
-            <Textarea rows={2} value={customer?.address ?? ""} readOnly />
-          </Field>
-          <Field label="เบอร์โทรศัพท์">
-            <Input className="num" value={customer?.phone ?? ""} readOnly />
-          </Field>
+      <Section title="ข้อมูลลูกค้า" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
+        <CustomerSelect value={customer} onChange={setCustomer} />
+        <FieldGrid className="mt-4">
           <Field label="แฟกซ์">
             <Input className="num" value={fax} onChange={(e) => setFax(e.target.value)} />
           </Field>
