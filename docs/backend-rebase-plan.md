@@ -267,3 +267,37 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - ทดสอบ: screenshot 40 หน้า × light/dark + modal states เทียบก่อน/หลังด้วย headless Chrome (สคริปต์ใน scratchpad), ทดสอบ interaction (dialog focus/Esc, toast, tabs keyboard, checkbox, ⌘K) ผ่าน; build/tsc ผ่าน
 - `next.config.mjs` เพิ่ม `distDir` จาก `NEXT_DIST_DIR` เพื่อ build production ทดสอบคู่กับ `next dev` ได้ (`.next-*` ถูก ignore)
 
+## 19. ตรวจข้อมูลทีละส่วน (2026-09-16) — ส่วน 1 อะไหล่ / ส่วน 2 ลูกค้า
+**อะไหล่** (จำนวนแถวดึงครบทุกตาราง)
+- ตัดจ่ายอะไหล่: อ้างอิงเลขงานเป็นช่องพิมพ์ + datalist จาก `job_nos?mode=pending_parts` (งานที่มีรายการค้างเบิก ไม่สนสถานะงาน — เดิมโชว์แค่ 100 งานล่าสุดที่ยังไม่ปิด ทำให้ 34/36 งานที่ค้างเบิกเลือกไม่ได้)
+- เพิ่มประเภทเอกสาร "รับคืนจากการเบิก" (inventory_type 2) ในหน้าตัดจ่าย: `job_nos?mode=returnable`, `pick-lines?type=return`, `POST /api/stock/issue type=return` → `returnFromJob` (used −= qty, log.return_qty/date/by/return_stock_id, สถานะ 5 คืนแล้วเมื่อคืนครบ, WHI จาก running "Inventory-In", ไม่แตะสถานะงาน)
+- รับเข้า: PO ไม่บังคับ (ระบบเดิมว่างทั้ง 6,309 ใบ)
+- modal อะไหล่: แสดง `product_none_serial.remark` (log ปรับสต๊อกเดิม 971 แถว) และ `cancel_remark/date/by` แบบอ่านอย่างเดียว
+- รูปอะไหล่เดิม: อัปโหลด 786/822 ไฟล์จาก `~/Downloads/ImagesProduct` ขึ้น bucket `oneservice` ที่ `products/{code}/{ชื่อไฟล์เดิม}` (ไม่แก้ DB); 36 รายการไม่มีไฟล์ต้นทาง (รายชื่อในแชท) สคริปต์ `img-upload.mts` อยู่ใน scratchpad
+- ไม่ทำ: `category.shot_code`, `manufacturer.logo_name`, `model.tier_id`, `product_serial`/`model_part` (ว่างทั้งหมด); ไม่มีหน้า "ปรับยอด" (ใช้รับเข้า/จ่ายอื่นๆ แทน); ข้อมูลเก่าผิดปกติ (remain ติดลบ 5, drift 6, SO อนุมัติแล้วไม่ตัดสต๊อก 3 ใบปี 2024) รอเคลียร์ตอน re-dump
+**ลูกค้า** (43,529 แถว ครบ; ทุก job.customer_id มีลูกค้า)
+- ปุ่ม "ประวัติงานซ่อม" ในแถวลูกค้า → `/jobs/list?customer=CODE` (หน้ารายการงานอ่าน param มาเติมฟิลเตอร์ลูกค้า)
+- เพิ่มลูกค้าใหม่: ถ้าเบอร์ซ้ำกับลูกค้าเดิม (ซ้ำอยู่ 1,843 เบอร์/3,973 ราย) แสดง toast เตือนพร้อมรหัสเดิม ไม่บล็อก
+- แก้ลูกค้าเก่าที่ยังไม่มีจังหวัด (26,020 ราย): hint ใต้ช่องที่อยู่เตือนให้ตัดส่วนท้ายก่อนเลือกจังหวัด (กันที่อยู่ซ้ำตอนประกอบ `customer_address`)
+- modal โหมดดู: แสดงวันที่สร้าง/สร้างโดย (`created_date`, `create_by` join app_user)
+- ไม่ทำ: `fax_number` (ว่างหมด)
+**งานบริการ (ส่วน 3)** — job 48,613 / job_log 224,555 สอดคล้อง 100% (สถานะล่าสุดใน log = job) · referential ครบ · job_symptom ว่าง แต่ fallback product_symptom_id
+- `is_job_bounce` (งานเด้ง 16%): checkbox ในส่วน "ข้อมูลการเปิดงาน" (เปิดใหม่/แก้ไข) + badge "งานเด้ง" ในรายการงาน; `JobInput.isBounce`, list select
+- งานย่อย: Input + datalist จาก `job_type_details` (24 ค่าจริงใน DB แทน 5 ค่าตายตัว), พิมพ์ใหม่ได้
+- บริษัทขนส่ง (รับเข้า + ส่งคืนตอนปิดงาน): Input + datalist จาก `shippers` (top 15 ใน DB, ตัดค่าที่สั้นกว่า 2 ตัวอักษร) — free text เหมือนระบบเดิม
+- วิธีชำระเงินตอนปิดงาน: `JOB_PAYMENT_METHODS` = เงินโอน / เงินสด / บัตรเครดิต (ตรง `job.job_payment_type` เดิม; ใบสั่งขายยังใช้ "โอนเงิน")
+- รอ: โฟลเดอร์ไฟล์แนบงานจากระบบเดิม (document_attach 5,866 ไฟล์ → `jobs/{no}/attachments/{system_file_name}`)
+- ไม่ทำ: product_color, job_reference_no_gspn, job_payment_no (ว่าง); job_return_hd/dt, job_service_code, temp tables (ไม่เคยใช้)
+**ใบเสนอราคา (ส่วน 4)** — hd 3,035 / dt 3,989 · สูตรยอดเงินตรง 100% · ผูกงานสองทางครบ
+- ฟิลเตอร์ ประเภท/Warranty/ยี่ห้อ ย้ายไปกรองที่ server (`QuotationFilters.warranty/brand`, count query join manufacturer) — เดิมกรองเฉพาะหน้าที่โหลด
+- แสดง `customer_approve_date` + ผู้สร้าง ในฟอร์ม (อ่านอย่างเดียว) และคอลัมน์ "วันที่ตอบรับ" ในรายการ; export รับฟิลเตอร์ครบ
+- ไม่ทำ: customer_approve_remark (ว่าง), quotation_temp (ไม่ใช้)
+**ใบสั่งขาย (ส่วน 5)** — sale_out_hd 3,866 / dt 4,100 · ยอดเงินตรง 100% · อนุมัติแล้ว 3,759 ทุกใบมี WHO type 4 (ยกเว้น 3 ใบปี 2024 ค้างจากระบบเดิม) · ชื่อสถานะอนุมัติตรง approve_status
+- ทดสอบ create → approve (WHO type 4, reference_no, pick_inventory_no, used+1) → tracking → deny ผ่านครบ; บรรทัด Service (SV0001) ไม่มี product_id เหมือนเดิม
+- ไฟล์สลิปเดิมจากโฟลเดอร์ FileUpload: SO 2,828/3,808 และสลิปงาน 19/75 อัปโหลดขึ้น `sale-orders/{no}/slip/` และ `jobs/{no}/slip/` แล้ว (ที่เหลือไม่มีไฟล์ต้นทาง)
+- ใบเสนอราคา: บรรทัดค่าขนส่ง (Delivery) แยกจาก spare_part_amount ตามกติกาเดิม (sum_exclude = อะไหล่ + บริการ + ขนส่ง)
+- ไม่ทำ: sale_in_hd/dt (ว่าง), document_credit_note_*/cancel_* (ว่าง), fee_amount/rounding (ว่าง)
+**รายงาน (ส่วน 6)** — KPI ทั้ง 7 รายงานคำนวณจาก where เดียวกับตาราง; เทียบกับ SQL ตรง ๆ (ส.ค. 2026) ตรงทุกตัว: เปิดงาน 1,947/ใหม่ 16, ปิดงาน 1,837/รับชำระ 75,200/TAT 8.7/เกิน30วัน 29, ซ่อม 1,879/83,700, ใบเสนอราคา 63/40/86,500, SO 103/103/42,280, เบิกอะไหล่ 497 บรรทัด/620 ชิ้น
+- สต๊อกคงเหลือ: KPI ใช้ `greatest(remain,0)` (ตัด 5 แถวติดลบจากระบบเดิม −544 ชิ้น) — ตั้งใจ
+- แก้: Export "อะไหล่" (หน้ารายการอะไหล่ + รายงานสต๊อก) รับฟิลเตอร์ หมวด/ยี่ห้อ/สถานะสต๊อก/… เหมือนตาราง (เดิม export ทั้งหมดเสมอ) — ใช้ `pageProducts` + `ProductFilters` ใน export.ts
+
