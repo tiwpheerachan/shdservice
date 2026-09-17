@@ -147,6 +147,7 @@ const listSelect = {
   engFirst: eng.firstName,
   engLast: eng.lastName,
   engineerId: job.engineerId,
+  isBounce: job.isJobBounce,
   status: jobStatus.jobStatusName,
   statusId: job.jobStatusId,
   statusGroup: jobStatus.jobStatusGroup,
@@ -194,6 +195,7 @@ function toJob(r: ListRow): Job {
     statusGroup: r.statusGroup ?? "",
     customerId: r.customerId ?? 0,
     engineerId: r.engineerId ?? 0,
+    isBounce: !!r.isBounce,
     serial: r.serial ?? "",
     channel: r.channel ?? "",
     receptionType: r.receptionType ?? "",
@@ -640,6 +642,8 @@ export type JobInput = {
   customerCode: string;
   jobType: string; // name
   jobTypeDetail?: string;
+  /** งานเด้ง — สินค้ากลับมาซ่อมซ้ำ (job.is_job_bounce) */
+  isBounce?: boolean;
   status?: string; // name (edit page only)
   so?: string;
   channel?: string;
@@ -802,7 +806,7 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       swapRefundDetail: "",
       jobPaymentSlipFileName: "",
       swapRefundDocumentNo: "",
-      isJobBounce: false,
+      isJobBounce: !!i.isBounce,
       productSaleOutShopName: str(i.shopName).slice(0, 100),
     });
     await logStatus(tx, no, JS.NEW, byUserId);
@@ -863,6 +867,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
         jobReceptionTrackingNo: str(i.receptionTrackingNo).slice(0, 50),
         jobReceptionShipper: str(i.receptionShipper).slice(0, 50),
         productSaleOutShopName: str(i.shopName).slice(0, 100),
+        ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
       })
       .where(eq(job.jobNo, jobNo));
     if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) await writeSymptoms(tx, jobNo, lk.symIds);
@@ -1134,6 +1139,29 @@ export async function listOutsourceVendors(): Promise<string[]> {
     .groupBy(jobSendForwardDt.sendToName)
     .orderBy(desc(count()));
   return rows.map((r) => r.name?.trim() ?? "").filter(Boolean);
+}
+
+/** งานย่อย (job.job_type_detail) — every value the legacy data uses, most common first. */
+export async function listJobTypeDetails(): Promise<string[]> {
+  const rows = await db
+    .select({ v: job.jobTypeDetail, n: count() })
+    .from(job)
+    .where(sql`coalesce(${job.jobTypeDetail},'') <> ''`)
+    .groupBy(job.jobTypeDetail)
+    .orderBy(desc(count()));
+  return rows.map((r) => r.v?.trim() ?? "").filter(Boolean);
+}
+
+/** บริษัทขนส่ง (job.job_reception_shipper) — free text in the legacy app; top values as suggestions. */
+export async function listShippers(limit = 15): Promise<string[]> {
+  const rows = await db
+    .select({ v: job.jobReceptionShipper, n: count() })
+    .from(job)
+    .where(sql`length(trim(coalesce(${job.jobReceptionShipper},''))) >= 2`)
+    .groupBy(job.jobReceptionShipper)
+    .orderBy(desc(count()))
+    .limit(limit);
+  return rows.map((r) => r.v?.trim() ?? "").filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ *

@@ -17,7 +17,6 @@ import { Input, Select, Textarea, Radio, Checkbox } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge";
 import {
   CHANNELS,
-  COURIERS,
   RECEIVE_METHODS,
   WARRANTY_OPTIONS,
   JOB_STATUS_OPTIONS,
@@ -25,6 +24,8 @@ import {
 } from "@/data/mock";
 import {
   useJobTypes,
+  useJobTypeDetails,
+  useShippers,
   useManufacturers,
   useModels,
   useProductTypes,
@@ -51,6 +52,7 @@ export type JobFormState = {
   status: string;
   jobType: string;
   jobTypeDetail: string;
+  isBounce: boolean; // งานเด้ง (job.is_job_bounce)
   so: string;
   channel: string;
   shopName: string;
@@ -94,6 +96,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   status: "งานใหม่",
   jobType: "",
   jobTypeDetail: "",
+  isBounce: false,
   so: "",
   channel: "",
   shopName: "",
@@ -152,6 +155,7 @@ export function fromJob(j: JobDetail): JobFormState {
     status: j.status,
     jobType: j.jobType,
     jobTypeDetail: j.jobTypeDetail,
+    isBounce: j.isBounce,
     so: j.so,
     channel: j.channel,
     shopName: j.shopName,
@@ -193,6 +197,7 @@ export function toJobInput(s: JobFormState) {
     customerCode: s.customer?.code ?? "",
     jobType: s.jobType,
     jobTypeDetail: s.jobTypeDetail,
+    isBounce: s.isBounce,
     status: s.status,
     so: s.so,
     channel: s.channel,
@@ -419,6 +424,7 @@ export function JobOpenSection({
 }) {
   const { s, set } = useJobForm();
   const { data: JOB_TYPES } = useJobTypes();
+  const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { name: me } = useAccess();
   const shownStatus = s.status || status || "งานใหม่";
   const [now, setNow] = React.useState("");
@@ -468,19 +474,24 @@ export function JobOpenSection({
           </Select>
         </Field>
         <Field label="งานย่อย" className="lg:col-span-2">
-          <Select value={s.jobTypeDetail} onChange={(e) => set("jobTypeDetail", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {/* ค่าที่ใช้ในระบบเดิม (job.job_type_detail) */}
-            <option>Normal Repair</option>
-            <option>สินค้าเสีย ซ่อมไม่ได้</option>
-            <option>สินค้ามีปัญหาภายใน 7 วัน</option>
-            <option>ส่งซ่อม Synnex</option>
-            <option>อื่นๆ</option>
-            {s.jobTypeDetail &&
-              !["Normal Repair", "สินค้าเสีย ซ่อมไม่ได้", "สินค้ามีปัญหาภายใน 7 วัน", "ส่งซ่อม Synnex", "อื่นๆ"].includes(s.jobTypeDetail) && (
-                <option>{s.jobTypeDetail}</option>
-              )}
-          </Select>
+          {/* ค่าที่ใช้ในระบบเดิมทั้ง 24 ค่า (job.job_type_detail) เป็นรายการแนะนำ + พิมพ์ค่าใหม่ได้ */}
+          <Input
+            list="job-type-detail-options"
+            value={s.jobTypeDetail}
+            onChange={(e) => set("jobTypeDetail", e.target.value)}
+            placeholder="- - เลือกหรือพิมพ์ - -"
+          />
+          <datalist id="job-type-detail-options">
+            {JOB_TYPE_DETAILS.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="งานเด้ง" wide>
+          <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
+            <Checkbox checked={s.isBounce} onChange={(e) => set("isBounce", e.target.checked)} disabled={!editable} />
+            สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ (is_job_bounce)
+          </label>
         </Field>
       </FieldGrid>
     </Section>
@@ -491,6 +502,7 @@ export function JobOpenSection({
 
 export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า" }: { title?: string }) {
   const { s, set, patch } = useJobForm();
+  const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: MODELS } = useModels();
@@ -619,13 +631,18 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
           <Input className="num" value={s.receptionTrackingNo} onChange={(e) => set("receptionTrackingNo", e.target.value)} />
         </Field>
         <Field label="โดยบริษัทขนส่ง">
-          <Select value={s.receptionShipper} onChange={(e) => set("receptionShipper", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {COURIERS.map((c) => (
-              <option key={c}>{c}</option>
+          {/* ระบบเดิมเป็นข้อความอิสระ — แนะนำจากค่าที่ใช้บ่อยใน DB (Flash, ไปรษณีย์, THAIPOST, KEX, J&T …) */}
+          <Input
+            list="shipper-options"
+            value={s.receptionShipper}
+            onChange={(e) => set("receptionShipper", e.target.value)}
+            placeholder="- - เลือกหรือพิมพ์ - -"
+          />
+          <datalist id="shipper-options">
+            {SHIPPERS.map((c) => (
+              <option key={c} value={c} />
             ))}
-            {s.receptionShipper && !COURIERS.includes(s.receptionShipper) && <option>{s.receptionShipper}</option>}
-          </Select>
+          </datalist>
         </Field>
 
         <Field label="รับสินค้าเข้าโดย" wide>

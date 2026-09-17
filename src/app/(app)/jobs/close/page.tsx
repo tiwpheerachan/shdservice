@@ -20,13 +20,15 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { RETURN_METHODS, COURIERS, PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
+import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
+import { useShippers } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 
 function CloseForm() {
   const { push } = useToast();
+  const { data: SHIPPERS } = useShippers();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
   const { can } = useAccess();
@@ -34,7 +36,7 @@ function CloseForm() {
   const [q, setQ] = React.useState(jobNo);
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
-    payType: PAYMENT_METHODS[0],
+    payType: JOB_PAYMENT_METHODS[0],
     payAmount: "",
     payDate: "",
     payNo: "",
@@ -77,14 +79,14 @@ function CloseForm() {
     setSlip(job.payment.slip);
     const today = new Date().toISOString().slice(0, 10);
     upd({
-      payType: job.payment.type || PAYMENT_METHODS[0],
+      payType: job.payment.type || JOB_PAYMENT_METHODS[0],
       payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : "",
       payDate: today,
       payNo: job.payment.no,
       payDetail: job.payment.detail,
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
-      courier: COURIERS.find((c) => job.return.detail.includes(c)) ?? "",
+      courier: SHIPPERS.find((c) => job.return.detail.includes(c)) ?? (job.return.detail.includes(" · ") ? job.return.detail.split(" · ")[0] : ""),
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
       status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : "",
@@ -243,10 +245,10 @@ function CloseForm() {
             <FieldGrid cols={2}>
               <Field label="วิธีการชำระเงิน" required>
                 <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
-                  {PAYMENT_METHODS.map((p) => (
+                  {JOB_PAYMENT_METHODS.map((p) => (
                     <option key={p}>{p}</option>
                   ))}
-                  {d.payType && !PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
+                  {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
                 </Select>
               </Field>
               <Field label="จำนวนเงินที่ชำระ (บาท)">
@@ -301,12 +303,18 @@ function CloseForm() {
             <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
           </Field>
           <Field label="บริษัทขนส่ง">
-            <Select value={d.courier} onChange={(e) => upd({ courier: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {COURIERS.map((c) => (
-                <option key={c}>{c}</option>
+            {/* free text เหมือนระบบเดิม + แนะนำจากค่าที่ใช้บ่อยใน DB */}
+            <Input
+              list="close-shipper-options"
+              value={d.courier}
+              onChange={(e) => upd({ courier: e.target.value })}
+              placeholder="- - เลือกหรือพิมพ์ - -"
+            />
+            <datalist id="close-shipper-options">
+              {SHIPPERS.map((c) => (
+                <option key={c} value={c} />
               ))}
-            </Select>
+            </datalist>
           </Field>
           <Field label="หมายเลขพัสดุ">
             <Input className="num" value={d.tracking} onChange={(e) => upd({ tracking: e.target.value })} />
