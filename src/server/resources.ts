@@ -9,6 +9,7 @@ import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } f
 import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
 import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters, jobsWithPendingParts, jobsWithReturnableParts } from "@/server/services/stock";
 import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
+import { listDocumentProfiles } from "@/server/services/document-profiles";
 import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers, symptomStats, modelSymptoms } from "@/server/services/jobs";
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
@@ -66,6 +67,8 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return modelSymptoms(sp.get("model") ?? "");
     case "shippers":
       return listShippers();
+    case "document_profiles":
+      return listDocumentProfiles(true);
     case "job_nos": {
       const mode = sp.get("mode");
       if (mode === "pending_parts") return jobsWithPendingParts(Number(sp.get("limit") ?? 300));

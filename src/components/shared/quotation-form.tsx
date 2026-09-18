@@ -5,6 +5,7 @@ import { Plus, Trash2, FileText, UserRound, Wrench, Calculator } from "lucide-re
 import { Section } from "./section";
 import { CustomerSelect } from "./customer-select";
 import { ProductPicker, type ExtraItem } from "./product-picker";
+import { ProfileSelect } from "./profile-select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -37,11 +38,13 @@ export type QuotationLoaded = {
   job: JobDetail | null;
   approveDate?: string; // quotation_hd.customer_approve_date
   createdBy?: string;
+  documentProfileId?: number; // ออกเอกสารในนาม
 };
 
 /** What the page posts to /api/quotations. */
 export type QuotationPayload = {
   no?: string;
+  documentProfileId?: number;
   type: string;
   customerCode: string;
   contactName: string;
@@ -74,6 +77,7 @@ export const QuotationForm = React.forwardRef<
   const { push } = useToast();
   const { data: PRODUCTS } = useProducts();
   const [type, setType] = React.useState<"A" | "B">("A");
+  const [profileId, setProfileId] = React.useState(0); // ออกเอกสารในนาม — from the job when raised from one
   const [lines, setLines] = React.useState<Line[]>([]);
   const [service, setService] = React.useState(0);
   const [discount, setDiscount] = React.useState(0);
@@ -102,6 +106,7 @@ export const QuotationForm = React.forwardRef<
       try {
         const d = await api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(v)}`);
         setJob(d.job);
+        if (mode === "new") setProfileId(d.job.documentProfileId || 0);
         setJobRef(d.job.no);
         if (d.job.customer) {
           const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: d.job.customer.code })}`);
@@ -146,6 +151,7 @@ export const QuotationForm = React.forwardRef<
     setCustomer(initial.customerDetail);
     setContact(initial.contactName);
     setJobRef(initial.jobRef);
+    setProfileId(initial.documentProfileId ?? 0);
     setJob(initial.job);
     setDate(initial.date);
   }, [initial]);
@@ -173,6 +179,7 @@ export const QuotationForm = React.forwardRef<
     customer: () => customer,
     payload: () => ({
       no: quotationNo || initial?.no || undefined,
+      documentProfileId: profileId || undefined,
       type: type === "A" ? "Type A (Normal)" : "Type B (VIP)",
       customerCode: customer?.code ?? "",
       contactName: contact,
@@ -197,6 +204,9 @@ export const QuotationForm = React.forwardRef<
         icon={FileText}
         actions={<Badge tone="primary">{type === "A" ? "Type A (Normal)" : "Type B (VIP)"}</Badge>}
       >
+        <div className="mb-3 sm:max-w-md">
+          <ProfileSelect value={profileId} onChange={setProfileId} locked={mode === "edit" || !!initial?.no} />
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           {(["A", "B"] as const).map((t) => (
             <button

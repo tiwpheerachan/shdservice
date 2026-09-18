@@ -221,6 +221,9 @@ export const useJobStatuses = () =>
 export const useVendors = () => useTable<string>("vendors");
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
 export const useJobTypeDetails = () => useTable<string>("job_type_details");
+export type DocumentProfileLite = { id: number; code: string; nameTh: string; nameEn: string; isDefault: boolean; prefixJob: string; prefixQuotation: string; prefixSaleOrder: string; logoUrl: string };
+/** โปรไฟล์ผู้ออกเอกสาร (active) — dropdown "ออกเอกสารในนาม" */
+export const useDocumentProfiles = () => useTable<DocumentProfileLite>("document_profiles", undefined, "exclude");
 export const useShippers = () => useTable<string>("shippers");
 /** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
 export type SymptomStat = { id: number; name: string; group: string; count: number };

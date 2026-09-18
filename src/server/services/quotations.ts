@@ -9,6 +9,7 @@ import { audit, diff } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
+import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { getJob } from "./jobs";
 import { RS, statusFilter, statusStamp, type StatusMode } from "@/server/record-status";
 
@@ -184,6 +185,8 @@ export type QuotationDetail = Quotation & {
   rounding: number;
   netAmount: number;
   approveRemark: string;
+  /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
+  documentProfileId: number;
   /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
   createdByPhone: string;
   createdByEmail: string;
@@ -228,6 +231,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     rounding: num(hd.roundingAmount),
     netAmount: num(hd.netAmount),
     approveRemark: hd.customerApproveRemark ?? "",
+    documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     createdByPhone: creator?.phone ?? "",
     createdByEmail: creator?.email ?? "",
   };
@@ -235,6 +239,8 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
 
 export type QuotationInput = {
   no?: string;
+  /** ออกเอกสารในนาม (document_profile.id) — new quotations only; fixed once numbered */
+  documentProfileId?: number;
   type?: string; // UI label or legacy value
   customerCode: string;
   contactName?: string;
@@ -296,6 +302,10 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || "Normal");
+  // a quotation raised from a job is issued under the job's profile unless the user picked another
+  const jobProfileId = !i.no && str(i.jobNo)
+    ? (await db.select({ p: job.documentProfileId }).from(job).where(eq(job.jobNo, str(i.jobNo).toUpperCase())).limit(1))[0]?.p ?? undefined
+    : undefined;
 
   const no = await db.transaction(async (tx) => {
     const values = {
@@ -342,9 +352,11 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, { skip: ["customerApproveDate"] }),
       });
     } else {
-      no = await nextRunningNo(tx, "Quotation");
+      const profile = await issuingProfile(i.documentProfileId ?? jobProfileId);
+      no = await nextRunningNo(tx, "Quotation", { id: profile.id, prefix: profile.prefixQuotation });
       await tx.insert(quotationHd).values({
         ...values,
+        documentProfileId: profile.id,
         quotationNo: no,
         createDate: nowThai(),
         createBy: byUserId,

@@ -23,7 +23,8 @@ const SCOPE: Record<JobSearchScope, { params: Record<string, string | number>; h
   closable: { params: { closable: 1 }, hint: "แสดงเฉพาะงานที่ซ่อมเสร็จ / รอลงเลขพัสดุ / รอลูกค้ามารับ" },
 };
 
-const JOB_NO = /^J\d{7}$/;
+// full job no = profile prefix (J, HJ, …) + yy + 5 digits
+const JOB_NO = /^[A-Z]{1,6}\d{7}$/;
 
 export function JobSearch({
   id,
@@ -158,7 +159,7 @@ export function JobSearch({
               </CommandPrimitive.Item>
             ))}
           </CommandPrimitive.List>
-          {hint && <p className="border-t border-border px-3 py-1.5 text-2xs text-muted-foreground">{hint} · พิมพ์เลขงานเต็ม (J#######) เพื่อเรียกงานอื่น</p>}
+          {hint && <p className="border-t border-border px-3 py-1.5 text-2xs text-muted-foreground">{hint} · พิมพ์เลขงานเต็ม (เช่น J2612164) เพื่อเรียกงานอื่น</p>}
         </CommandPrimitive>
       </PopoverContent>
     </Popover>

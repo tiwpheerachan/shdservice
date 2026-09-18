@@ -10,6 +10,7 @@ import { audit, diff } from "@/server/audit";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode, addressNames } from "./customers";
+import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { issueForSaleOrder } from "./stock";
 import { RS, statusFilter, type StatusMode } from "@/server/record-status";
 
@@ -155,6 +156,8 @@ export type SaleOrderDetail = SaleOrder & {
   slip: string;
   approveRemark: string;
   createdBy: string;
+  /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
+  documentProfileId: number;
 };
 
 export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> {
@@ -201,10 +204,13 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     slip: hd.slipFileName ?? "",
     approveRemark: hd.approveRemark ?? "",
     createdBy: fullName(r.salesFirst, r.salesLast),
+    documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
   };
 }
 
 export type SaleOrderInput = {
+  /** ออกเอกสารในนาม (document_profile.id) — new orders only; fixed once numbered */
+  documentProfileId?: number;
   no?: string;
   customerCode: string;
   salesId?: number | string; // app_user id of the salesperson (document_create_by)
@@ -293,7 +299,8 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>),
       });
     } else {
-      no = await nextRunningNo(tx, "SaleOrder");
+      const profile = await issuingProfile(i.documentProfileId);
+      no = await nextRunningNo(tx, "SaleOrder", { id: profile.id, prefix: profile.prefixSaleOrder });
       await audit(tx, byUserId, {
         action: "CREATE",
         module: "Sale Order",
@@ -303,6 +310,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       });
       await tx.insert(saleOutHd).values({
         ...hdValues,
+        documentProfileId: profile.id,
         saleOutHdNo: no,
         documentType: "SaleOrder",
         documentCreateDate: now,

@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { getQuotation } from "@/server/services/quotations";
 import { AutoPrint } from "@/components/print/auto-print";
 import { money } from "@/components/print/print-frame";
-import { COMPANY, QUOTATION_VALIDITY } from "@/lib/company";
+import { QUOTATION_VALIDITY } from "@/lib/company";
+import { profileForDocument } from "@/server/services/document-profiles";
 import { bahtText } from "@/lib/thai-baht";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   const { no } = await params;
   const q = await getQuotation(decodeURIComponent(no).toUpperCase());
   if (!q) notFound();
+  const co = await profileForDocument(q.documentProfileId); // ออกเอกสารในนาม
   const c = q.customerDetail;
   const j = q.job;
 
@@ -70,12 +72,12 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
       {/* ── company header ── */}
       <header className="flex items-start gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={COMPANY.logoMark} alt="SHD" className="h-[38px] w-auto shrink-0" />
+        <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
-          <p className="text-[14px] font-bold">{COMPANY.nameTh}</p>
-          <p>{COMPANY.address}</p>
+          <p className="text-[14px] font-bold">{co.nameTh}</p>
+          <p>{co.address}</p>
           <p>
-            โทรศัพท์ {COMPANY.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{COMPANY.taxId || "xxxxxxxxxxxxx"}</span>
+            โทรศัพท์ {co.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId || "xxxxxxxxxxxxx"}</span>
           </p>
         </div>
       </header>
@@ -205,8 +207,8 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
             <td rowSpan={hasDiscount ? 5 : 4} style={{ width: "58%" }}>
               <p>รายละเอียดการโอนเงินชำระค่าสินค้าและบริการผ่านบัญชีบริษัทฯ ดังนี้</p>
               <p className="mt-1 text-[10.5px]">
-                1. {COMPANY.bank.name} {COMPANY.bank.accountType} เลขที่&nbsp;&nbsp;<span className="num">{COMPANY.bank.accountNo || "XXXXXXX"}</span>
-                {COMPANY.bank.accountName ? ` ชื่อบัญชี ${COMPANY.bank.accountName}` : ""}
+                1. {co.bankName || "—"} {co.bankAccountType} เลขที่&nbsp;&nbsp;<span className="num">{co.bankAccountNo || "XXXXXXX"}</span>
+                {co.bankAccountName ? ` ชื่อบัญชี ${co.bankAccountName}` : ""}
               </p>
             </td>
             <td className="w-[154px] text-right font-semibold">รวมเงิน / Total :</td>
@@ -249,13 +251,13 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
           <tr>
             <td className="w-[58%] br sig text-center">
               <p className="text-[10.5px]">กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้มาที่</p>
-              <p className="mt-1">Email : {q.createdByEmail || COMPANY.email || "—"}</p>
+              <p className="mt-1">Email : {q.createdByEmail || co.email || "—"}</p>
               <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
               <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5"><span>(</span><span>)</span></p>
               <p className="mt-2">วันที่ <span className="inline-block w-[120px] border-b border-black text-center">&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;</span></p>
             </td>
             <td className="sig">
-              <p className="text-center font-semibold">ในนาม<br />{COMPANY.nameTh}</p>
+              <p className="text-center font-semibold">ในนาม<br />{co.nameTh}</p>
               <div className="mt-5 flex items-end gap-2">
                 <span className="font-semibold">เสนอราคาโดย :</span>
                 <span className="flex-1 border-b border-black" />

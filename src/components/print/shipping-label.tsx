@@ -1,5 +1,5 @@
 import { AutoPrint } from "./auto-print";
-import { COMPANY } from "@/lib/company";
+import type { DocumentProfile } from "@/server/services/document-profiles";
 
 /**
  * ใบปะหน้าพัสดุ A5 แนวนอน — the legacy "พิมพ์ใบสั่งขาย" sheet
@@ -7,6 +7,7 @@ import { COMPANY } from "@/lib/company";
  * Framed sheet: SHD logomark, doc no top-right, sender block, "กรุณานำส่ง" + recipient.
  */
 export function ShippingLabel({
+  profile,
   docNo,
   name,
   address,
@@ -15,6 +16,8 @@ export function ShippingLabel({
   district = "",
   province = "",
 }: {
+  /** ออกเอกสารในนาม — sender block + logo */
+  profile: Pick<DocumentProfile, "code" | "nameTh" | "addressLine1" | "addressLine2" | "phone" | "logoUrl">;
   docNo: string;
   name: string;
   address: string;
@@ -39,15 +42,15 @@ export function ShippingLabel({
       <div className="so-sheet text-[12.5px] leading-[1.35]">
         <div className="so-frame">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={COMPANY.logoMark} alt="SHD" className="absolute left-[4mm] top-[3.5mm] h-[8mm] w-auto" />
+          <img src={profile.logoUrl} alt={profile.code} className="absolute left-[4mm] top-[3.5mm] h-[8mm] w-auto" />
           <span className="num absolute right-[6mm] top-[3.5mm] text-[14px]">{docNo}</span>
 
           <div className="absolute left-[4.5mm] top-[15mm] text-[11.5px] leading-[1.35]">
-            <p>{COMPANY.nameTh}</p>
-            {COMPANY.addressLines.map((l) => (
+            <p>{profile.nameTh}</p>
+            {[profile.addressLine1, profile.addressLine2].filter(Boolean).map((l) => (
               <p key={l}>{l}</p>
             ))}
-            <p>โทร.{COMPANY.phone}</p>
+            <p>โทร.{profile.phone}</p>
           </div>
 
           <div className="absolute left-[60mm] right-[8mm] top-[44mm] text-[14.5px] leading-[1.35]">

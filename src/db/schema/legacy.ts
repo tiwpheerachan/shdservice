@@ -5,7 +5,7 @@
 //   - app_user gained the SSO profile columns (see drizzle/0001_app.sql)
 // Column names are the DB's snake_case names; property names are camelCase.
 // The DB is the source of truth — do not "fix" legacy types here.
-import { pgTable, integer, varchar, timestamp, boolean, numeric, foreignKey, uniqueIndex, text, date, bigint, index, doublePrecision, pgView, primaryKey, jsonb, bigserial } from "drizzle-orm/pg-core"
+import { pgTable, integer, varchar, timestamp, boolean, numeric, foreignKey, uniqueIndex, text, date, bigint, index, doublePrecision, pgView, primaryKey, jsonb, bigserial, serial } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -294,6 +294,8 @@ export const inventoryDt = pgTable("inventory_dt", {
 });
 
 export const job = pgTable("job", {
+	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
+	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
 	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
 	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
@@ -593,6 +595,8 @@ export const quotationDt = pgTable("quotation_dt", {
 ]);
 
 export const quotationHd = pgTable("quotation_hd", {
+	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
+	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
 	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
 	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
@@ -679,6 +683,8 @@ export const saleInHd = pgTable("sale_in_hd", {
 });
 
 export const saleOutHd = pgTable("sale_out_hd", {
+	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
+	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
 	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
 	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
@@ -858,3 +864,29 @@ export const auditLog = pgTable("audit_log", {
 	index("ix_audit_log_module").using("btree", table.module.asc(), table.at.desc()),
 ]);
 
+// --- document_profile (drizzle/0007_document_profile.sql) — "ออกเอกสารในนาม" ---
+export const documentProfile = pgTable("document_profile", {
+	id: serial("id").primaryKey().notNull(),
+	code: varchar("code", { length: 20 }).notNull(),
+	nameTh: varchar("name_th", { length: 200 }).notNull(),
+	nameEn: varchar("name_en", { length: 200 }).notNull().default(""),
+	addressLine1: varchar("address_line1", { length: 200 }).notNull().default(""),
+	addressLine2: varchar("address_line2", { length: 200 }).notNull().default(""),
+	phone: varchar("phone", { length: 50 }).notNull().default(""),
+	email: varchar("email", { length: 100 }).notNull().default(""),
+	taxId: varchar("tax_id", { length: 20 }).notNull().default(""),
+	bankName: varchar("bank_name", { length: 100 }).notNull().default(""),
+	bankAccountType: varchar("bank_account_type", { length: 50 }).notNull().default(""),
+	bankAccountNo: varchar("bank_account_no", { length: 50 }).notNull().default(""),
+	bankAccountName: varchar("bank_account_name", { length: 200 }).notNull().default(""),
+	logoPath: varchar("logo_path", { length: 200 }).notNull().default(""),
+	stampPath: varchar("stamp_path", { length: 200 }).notNull().default(""),
+	prefixJob: varchar("prefix_job", { length: 10 }).notNull(),
+	prefixQuotation: varchar("prefix_quotation", { length: 10 }).notNull(),
+	prefixSaleOrder: varchar("prefix_sale_order", { length: 10 }).notNull(),
+	isDefault: boolean("is_default").notNull().default(false),
+	isActive: boolean("is_active").notNull().default(true),
+	sortOrder: integer("sort_order").notNull().default(0),
+	createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});

@@ -1,4 +1,5 @@
 import { COMPANY } from "@/lib/company";
+import type { DocumentProfile } from "@/server/services/document-profiles";
 import { AutoPrint } from "./auto-print";
 
 /**
@@ -9,28 +10,32 @@ export function PrintFrame({
   title,
   docNo,
   meta,
+  company,
   children,
 }: {
   title: string;
   docNo: string;
   meta: { label: string; value: string }[];
+  /** ออกเอกสารในนาม — falls back to the static COMPANY block */
+  company?: Pick<DocumentProfile, "code" | "nameTh" | "nameEn" | "address" | "phone" | "email" | "taxId" | "logoUrl">;
   children: React.ReactNode;
 }) {
+  const co = company ?? { code: "SHD", nameTh: COMPANY.nameTh, nameEn: COMPANY.nameEn, address: COMPANY.address, phone: COMPANY.phone, email: COMPANY.email, taxId: COMPANY.taxId, logoUrl: COMPANY.logoMark };
   return (
     <div className="print-page">
       <AutoPrint />
       <header className="flex items-start justify-between gap-6 border-b-2 border-black pb-3">
         <div className="flex items-start gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={COMPANY.logo} alt="" className="h-10 w-auto" />
+          <img src={co.logoUrl} alt={co.code} className="h-10 w-auto" />
           <div className="text-[11px] leading-snug">
-            <p className="text-sm font-semibold">{COMPANY.nameTh}</p>
-            <p>{COMPANY.nameEn}</p>
-            {COMPANY.address && <p>{COMPANY.address}</p>}
+            <p className="text-sm font-semibold">{co.nameTh}</p>
+            <p>{co.nameEn}</p>
+            {co.address && <p>{co.address}</p>}
             <p>
-              {COMPANY.phone && <>โทร {COMPANY.phone} </>}
-              {COMPANY.email && <>· {COMPANY.email} </>}
-              {COMPANY.taxId && <>· เลขประจำตัวผู้เสียภาษี {COMPANY.taxId}</>}
+              {co.phone && <>โทร {co.phone} </>}
+              {co.email && <>· {co.email} </>}
+              {co.taxId && <>· เลขประจำตัวผู้เสียภาษี {co.taxId}</>}
             </p>
           </div>
         </div>

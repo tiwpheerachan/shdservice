@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getJob } from "@/server/services/jobs";
 import { PrintFrame, Box, KV, Signatures, money } from "@/components/print/print-frame";
 import { REPAIR_TERMS } from "@/lib/company";
+import { profileForDocument } from "@/server/services/document-profiles";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,10 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   const j = await getJob(decodeURIComponent(no).toUpperCase());
   if (!j) notFound();
   const c = j.customer;
+  const co = await profileForDocument(j.documentProfileId);
   return (
     <PrintFrame
+      company={co}
       title="ใบรับงานซ่อม"
       docNo={j.no}
       meta={[

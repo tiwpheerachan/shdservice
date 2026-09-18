@@ -5,7 +5,8 @@ import { appUser } from "@/db/schema";
 import { getJob } from "@/server/services/jobs";
 import { AutoPrint } from "@/components/print/auto-print";
 import { money } from "@/components/print/print-frame";
-import { COMPANY, RETURN_TERMS } from "@/lib/company";
+import { RETURN_TERMS } from "@/lib/company";
+import { profileForDocument } from "@/server/services/document-profiles";
 import { bahtText } from "@/lib/thai-baht";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   const { no } = await params;
   const j = await getJob(decodeURIComponent(no).toUpperCase());
   if (!j) notFound();
+  const co = await profileForDocument(j.documentProfileId); // ออกเอกสารในนาม
   const c = j.customer;
   const parts = j.parts.filter((p) => p.statusId === 3 || p.granted > 0);
   const [eng] = j.engineerId > 0
@@ -73,12 +75,12 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
       {/* ── company header ── */}
       <header className="flex items-start gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={COMPANY.logoMark} alt="SHD" className="h-[38px] w-auto shrink-0" />
+        <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
-          <p className="text-[14px] font-bold">{COMPANY.nameTh}</p>
-          <p>{COMPANY.address}</p>
+          <p className="text-[14px] font-bold">{co.nameTh}</p>
+          <p>{co.address}</p>
           <p>
-            โทรศัพท์ {COMPANY.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{COMPANY.taxId || "xxxxxxxxxxxxx"}</span>
+            โทรศัพท์ {co.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId || "xxxxxxxxxxxxx"}</span>
           </p>
         </div>
       </header>
@@ -281,7 +283,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
               <p className="mt-2">วันที่ <span className="inline-block w-[120px] border-b border-black text-center">&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;</span></p>
             </td>
             <td className="sig">
-              <p className="text-center font-semibold">ในนาม<br />{COMPANY.nameTh}</p>
+              <p className="text-center font-semibold">ในนาม<br />{co.nameTh}</p>
               <div className="mt-5 flex items-end gap-2">
                 <span className="font-semibold">ผู้ส่งคืน / ช่าง :</span>
                 <span className="flex-1 border-b border-black" />

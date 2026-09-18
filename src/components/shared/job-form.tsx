@@ -12,6 +12,7 @@ import {
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
 import { CustomerSelect } from "./customer-select";
+import { ProfileSelect } from "./profile-select";
 import { Attachments, type AttachmentsHandle } from "./attachments";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -56,6 +57,7 @@ export type JobFormState = {
   jobType: string;
   jobTypeDetail: string;
   isBounce: boolean; // งานเด้ง (job.is_job_bounce)
+  documentProfileId: number; // ออกเอกสารในนาม (0 = default)
   so: string;
   channel: string;
   shopName: string;
@@ -100,6 +102,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   jobType: "",
   jobTypeDetail: "",
   isBounce: false,
+  documentProfileId: 0,
   so: "",
   channel: "",
   shopName: "",
@@ -159,6 +162,7 @@ export function fromJob(j: JobDetail): JobFormState {
     jobType: j.jobType,
     jobTypeDetail: j.jobTypeDetail,
     isBounce: j.isBounce,
+    documentProfileId: j.documentProfileId,
     so: j.so,
     channel: j.channel,
     shopName: j.shopName,
@@ -200,6 +204,7 @@ export function toJobInput(s: JobFormState) {
     customerCode: s.customer?.code ?? "",
     jobType: s.jobType,
     jobTypeDetail: s.jobTypeDetail,
+    documentProfileId: s.documentProfileId || undefined,
     isBounce: s.isBounce,
     status: s.status,
     so: s.so,
@@ -368,6 +373,7 @@ export function JobOpenSection({
             <span className="num">{s.jobNo || jobNo || "Generate Auto"}</span>
           </ReadOnly>
         </Field>
+        <ProfileSelect value={s.documentProfileId} onChange={(id) => set("documentProfileId", id)} locked={!!(s.jobNo || jobNo)} />
         <Field label="วันที่">
           <ReadOnly>
             <span className="num">{s.createDate || now} น.</span>

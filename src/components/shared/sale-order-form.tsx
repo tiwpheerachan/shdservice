@@ -5,6 +5,7 @@ import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from "lucide-
 import { Section } from "./section";
 import { CustomerSelect } from "./customer-select";
 import { ProductPicker } from "./product-picker";
+import { ProfileSelect } from "./profile-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Radio, NumberInput } from "@/components/ui/input";
@@ -29,12 +30,14 @@ export type SaleOrderLoaded = {
   paymentAmount?: number;
   remark?: string;
   slip: string;
+  documentProfileId?: number; // ออกเอกสารในนาม
   customerDetail: { code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string };
   lines: { code: string; name: string; type: "SparePart" | "Service"; qty: number; price: number }[];
 };
 
 export type SaleOrderPayload = {
   no?: string;
+  documentProfileId?: number;
   customerCode: string;
   salesId?: number;
   lines: { code: string; qty: number; price: number; name: string; type: "SparePart" | "Service" }[];
@@ -59,6 +62,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const { data: STAFF } = useStaff();
     const [lines, setLines] = React.useState<Line[]>([]);
     const [code, setCode] = React.useState("");
+    const [profileId, setProfileId] = React.useState(0); // ออกเอกสารในนาม
     const [qty, setQty] = React.useState(1);
     const [customer, setCustomer] = React.useState<Customer | null>(null);
     const [salesId, setSalesId] = React.useState<number>(0);
@@ -105,6 +109,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       setPayAmount(initial.paymentAmount ? String(initial.paymentAmount) : "");
       setRemark(initial.remark ?? "");
       setSlip(initial.slip);
+      setProfileId(initial.documentProfileId ?? 0);
       setSubmit((initial.approveId ?? 0) >= 2);
       setDate(initial.date);
       const s = STAFF.find((x) => x.name === initial.sales);
@@ -134,6 +139,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       },
       payload: () => ({
         no: soNo || initial?.no || undefined,
+        documentProfileId: profileId || undefined,
         customerCode: customer?.code ?? "",
         salesId: salesId || undefined,
         lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
@@ -158,6 +164,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 <span className="num">{soNo ?? initial?.no ?? "Generate Auto"}</span>
               </ReadOnly>
             </Field>
+            <ProfileSelect value={profileId} onChange={setProfileId} locked={!!(soNo || initial?.no)} />
             <Field label="วันที่สร้าง">
               <ReadOnly><span className="num">{date}</span></ReadOnly>
             </Field>

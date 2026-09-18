@@ -37,6 +37,7 @@ import {
   str,
 } from "@/server/mappers/format";
 import { getCustomerByCode, getCustomerById } from "./customers";
+import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
 import { RS, statusStamp } from "@/server/record-status";
 
@@ -395,6 +396,8 @@ export async function recentJobNos(limit = 50): Promise<string[]> {
  * ------------------------------------------------------------------ */
 export type JobDetail = {
   no: string;
+  /** ออกเอกสารในนาม — document_profile.id (NULL in legacy rows = SHD) */
+  documentProfileId: number;
   statusId: number;
   status: string;
   statusGroup: string;
@@ -562,6 +565,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
 
   return {
     no: j.jobNo,
+    documentProfileId: j.documentProfileId ?? SHD_PROFILE_ID,
     statusId: j.jobStatusId ?? 0,
     status: r.status?.trim() ?? "",
     statusGroup: r.statusGroup ?? "",
@@ -660,6 +664,8 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
  * ------------------------------------------------------------------ */
 export type JobInput = {
   customerCode: string;
+  /** ออกเอกสารในนาม (document_profile.id) — decides the J-number series; fixed once issued */
+  documentProfileId?: number;
   jobType: string; // name
   jobTypeDetail?: string;
   /** งานเด้ง — สินค้ากลับมาซ่อมซ้ำ (job.is_job_bounce) */
@@ -756,12 +762,14 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
   const c = costFields(i);
   const now = nowThai();
   const engineerId = await resolveEngineer(i);
+  const profile = await issuingProfile(i.documentProfileId);
 
   const jobNo = await db.transaction(async (tx) => {
-    const no = await nextRunningNo(tx, "Job");
+    const no = await nextRunningNo(tx, "Job", { id: profile.id, prefix: profile.prefixJob });
     await tx.insert(job).values({
       jobNo: no,
-      companyId: 1,
+      documentProfileId: profile.id,
+      companyId: profile.id,
       branchId: 1,
       customerId: cust.id,
       customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200),

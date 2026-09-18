@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { job, product, saleOutHd } from "@/db/schema";
-import { handle, requireCan, HttpError } from "@/server/auth";
+import { handle, requireCan, requireAdmin, HttpError } from "@/server/auth";
+import { getDocumentProfile, setDocumentProfileLogo } from "@/server/services/document-profiles";
 import { systemFileName, uploadFile, removeFile, filePath, resolvePath, ALLOWED_TYPES, MAX_FILE_BYTES } from "@/server/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Kind = "product-image" | "sale-order-slip" | "job-slip";
+type Kind = "product-image" | "sale-order-slip" | "job-slip" | "profile-logo";
 
 /**
  * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
@@ -28,10 +29,22 @@ export const POST = handle(async (req: NextRequest) => {
   if (!id) throw new HttpError(400, "id required");
   if (file.size > MAX_FILE_BYTES) throw new HttpError(413, "ไฟล์ใหญ่เกิน 10MB");
   if (file.type && !ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "รองรับเฉพาะ JPG, PNG, WEBP, PDF");
-  if (kind === "product-image" && file.type === "application/pdf") throw new HttpError(415, "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
+  if ((kind === "product-image" || kind === "profile-logo") && file.type === "application/pdf") throw new HttpError(415, kind === "profile-logo" ? "โลโก้ต้องเป็นไฟล์ภาพ" : "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
 
   const sys = systemFileName(file.name);
   switch (kind) {
+    case "profile-logo": {
+      // ออกเอกสารในนาม — logo printed on quotations / labels / return notes (System Admin)
+      const me = await requireAdmin(req);
+      const pid = Number(id);
+      const prof = await getDocumentProfile(pid);
+      if (!prof || prof.id !== pid) throw new HttpError(404, "ไม่พบโปรไฟล์ " + id);
+      const path = filePath.profileLogo(pid, sys);
+      await uploadFile(path, file);
+      await setDocumentProfileLogo(pid, path, me.userId);
+      if (prof.logoPath) await removeFile(prof.logoPath);
+      return NextResponse.json({ ok: true, path, file: sys });
+    }
     case "product-image": {
       await requireCan(req, "Product", "edit");
       const [row] = await db.select({ old: product.pictrueFileName }).from(product).where(eq(product.productCode, id));
