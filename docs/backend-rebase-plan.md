@@ -376,3 +376,10 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - ยอดฝั่งขวาใช้ `job.*_cost` ตาม DB (ไม่ได้บวกจากบรรทัดอะไหล่ — ระบบเดิมเก็บแยก บางงานสองค่านี้ไม่เท่ากัน เช่น J2611312 อะไหล่ 800 แต่ค่าอะไหล่บันทึก 1,200)
 - ใบปะหน้าพัสดุ: แยก `ShippingLabel` (`src/components/print/shipping-label.tsx`) ใช้ทั้ง `/print/sale-order/[no]` และใหม่ `/print/job/[no]/label` (เลขมุมขวา = เลขงาน, ผู้รับ = ลูกค้าของงาน, ต./อ./จ. ผ่าน `addressNames()` ใน customers.ts ที่แยกออกมาใช้ร่วม) · ปุ่ม "พิมพ์ใบปะหน้าพัสดุ" เพิ่มในหน้าปิดงานข้างปุ่มพิมพ์ใบส่งคืน
 - บทเรียน: ตารางซ้อนในช่องยอดรวม ต้อง scope border เป็น `.sum > tbody > tr > td` ไม่งั้นตารางลูกได้เส้นไปด้วย
+
+## 31. ปิดช่องเสี่ยงต่อการโดน abuse report / ทรัพยากรพุ่ง (2026-09-18)
+- **Open redirect**: `safeNext()` ใน `lib/sso.ts` — `next` ต้องเป็น path ภายใน (ขึ้นต้น `/` ไม่ใช่ `//` หรือ `/\`) ไม่งั้นใช้ dashboard · ใช้ที่ `/api/sso/login`, callback (`nextFromState`), หน้า `/login` (ลิงก์ปุ่ม) — ทดสอบ `next=https://evil`, `//evil` → dashboard, path ภายในคงเดิม
+- **`/api/directory/search`**: เดิมไม่ต้อง login (open proxy ไป SSO กลางด้วย API key ของเรา + เผยรายชื่อพนักงาน) → `requireAdmin` (System Admin ตามที่ตกลงว่าเมนูผู้ใช้เป็นของ admin) + rate limit 30/นาที
+- **`/api/health`**: คนนอกได้แค่ `{ok}` (200/503) · รายละเอียด env/จำนวนผู้ใช้/error DB เฉพาะ System Admin
+- **Rate limit** `server/rate-limit.ts` (in-memory sliding window, key = อีเมลใน session หรือ IP, 429 + `retryAfter`): export 5/นาที · `/api/data/*` 240/นาที · `/api/customers/lookup` 120/นาที · directory 30/นาที — กันสคริปต์/แท็บค้างยิงจน CPU/RAM พุ่ง (instance เดียวบน Render จึงพอ; reset ตอน deploy; ไม่ใช่ security boundary — auth ยังทำงานตามเดิม)
+- ตรวจแล้วไม่ต้องแก้: upload มี auth + 10MB + whitelist + bucket private + signed URL · `.env*`/`data.sql`/โฟลเดอร์ไฟล์อยู่นอก git · ขาออกมีแค่ SSO กลาง + Supabase · ไม่มี cron/loop ฝั่ง server

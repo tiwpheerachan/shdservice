@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, STATE_SEP, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from "@/lib/sso";
 import {
   signSession,
   verifySession,
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? "").split(STATE_SEP).filter(Boolean);
-  const nextFromState = state?.split("|")[1] || DEFAULT_AFTER_LOGIN;
+  const nextFromState = safeNext(state?.split("|")[1]);
 
   // Reloading the callback URL (or a second tab finishing after the first) must
   // not throw the user out: if this browser already holds a valid session, go on.

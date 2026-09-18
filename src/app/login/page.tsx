@@ -1,3 +1,4 @@
+import { safeNext } from "@/lib/sso";
 import { LogIn, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { AuthSplit } from "@/components/ui/sign-in";
@@ -21,7 +22,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; error?: string; bye?: string; expired?: string }>;
 }) {
   const sp = await searchParams;
-  const next = sp.next ?? "/jobs/dashboard";
+  const next = safeNext(sp.next);
   const err = sp.error
     ? ERRORS[sp.error] ?? `เข้าสู่ระบบไม่สำเร็จ (${sp.error})`
     : null;

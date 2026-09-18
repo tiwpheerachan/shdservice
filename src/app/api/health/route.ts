@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { ownerEmails } from "@/lib/access";
+import { userFromRequest } from "@/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,17 @@ export const dynamic = "force-dynamic";
  * server can reach Postgres, whether the app migrations were applied, and how
  * many app_user rows exist (so a "stuck on /pending" can be diagnosed).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // anonymous callers (uptime checks) get only up/down — config and counts are for System Admin
+  const me = await userFromRequest(request).catch(() => null);
+  if (!me?.isAdmin) {
+    try {
+      await db.execute(sql`select 1`);
+      return NextResponse.json({ ok: true });
+    } catch {
+      return NextResponse.json({ ok: false }, { status: 503 });
+    }
+  }
   const out: Record<string, unknown> = {
     hasDatabaseUrl: !!process.env.DATABASE_URL,
     hasCentralApiKey: !!process.env.CENTRAL_API_KEY,

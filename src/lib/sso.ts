@@ -14,6 +14,17 @@ export const MAX_STATES = 5;
 export const DEFAULT_AFTER_LOGIN = "/jobs/dashboard";
 
 /**
+ * Only ever bounce to a path inside this app. `next` comes from the URL, so an
+ * absolute URL ("https://evil…"), a protocol-relative one ("//evil…") or a
+ * backslash trick would turn the login flow into an open redirect for phishing.
+ */
+export function safeNext(v: string | null | undefined): string {
+  const s = (v ?? "").trim();
+  if (!s.startsWith("/") || s.startsWith("//") || s.startsWith("/\\") || /[\r\n]/.test(s)) return DEFAULT_AFTER_LOGIN;
+  return s;
+}
+
+/**
  * The app's PUBLIC origin (scheme + host), for building redirect_uri and
  * post-login redirects. Behind a proxy (Render) `request.url` is the internal
  * address (e.g. https://localhost:10000), so we must derive it from:
