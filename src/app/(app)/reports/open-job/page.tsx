@@ -1,11 +1,15 @@
 "use client";
 
-import { ReportView } from "@/components/shared/report-view";
+import * as React from "react";
+import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { CHANNELS, type Job } from "@/data/mock";
-import { useJobs, useJobTypes } from "@/data/db";
+import { useJobsPage, useJobSummary, useJobTypes } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { int } from "@/lib/utils";
+import { daysAgo, today } from "@/lib/dates";
+import { exportXlsx } from "@/lib/api";
 
 const columns: Column<Job>[] = [
   { key: "no", header: "เลขที่งาน", width: "130px", cell: (r) => <span className="num font-medium">{r.no}</span> },
@@ -19,29 +23,41 @@ const columns: Column<Job>[] = [
 ];
 
 export default function Page() {
-  const { data: JOBS, loading } = useJobs();
+  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: "", channel: "" });
+  const filters = { from: f.from, to: f.to, type: f.type, channel: f.channel };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  // KPIs over the whole range (1 query) + one page of rows
+  const { data: sum } = useJobSummary(filters);
+  const { rows: JOBS, total, loading } = useJobsPage({ ...pageArgs, ...filters });
   const { data: JOB_TYPES } = useJobTypes();
-  const newJobs = JOBS.filter((j) => j.status === "งานใหม่").length;
+  const S = sum[0];
+  const newJobs = S?.fresh ?? 0;
+  const days = Math.max(1, Math.round((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) + 1);
+  const topChannel = S?.topChannel ?? "—";
   return (
     <ReportView
       title="รายงานการเปิดงานซ่อม"
       description="สรุปงานที่เปิดใหม่ในระบบตามช่วงเวลาที่กำหนด"
       filters={[
-        { kind: "date", label: "วันที่เปิดงาน (ตั้งแต่)", value: "2026-08-05" },
-        { kind: "date", label: "วันที่เปิดงาน (ถึง)", value: "2026-09-04" },
-        { kind: "select", label: "ประเภทงาน", options: ["- - Select All - -", ...JOB_TYPES.map((j) => j.name)] },
-        { kind: "select", label: "ช่องทางการขาย", options: ["- - Select All - -", ...CHANNELS] },
+        { kind: "date", key: "from", label: "วันที่เปิดงาน (ตั้งแต่)", value: f.from },
+        { kind: "date", key: "to", label: "วันที่เปิดงาน (ถึง)", value: f.to },
+        { kind: "select", key: "type", label: "ประเภทงาน", options: ["- - Select All - -", ...JOB_TYPES.map((j) => j.name)] },
+        { kind: "select", key: "channel", label: "ช่องทางการขาย", options: ["- - Select All - -", ...CHANNELS] },
       ]}
+      onApply={setF}
+      onExport={() => exportXlsx("jobs", { ...filters, q: table.q })}
       kpis={[
-        { label: "งานที่เปิดทั้งหมด", value: int(JOBS.length), tone: "primary" },
+        { label: "งานที่เปิดทั้งหมด", value: int(S?.total ?? 0), tone: "primary" },
         { label: "งานใหม่ (ยังไม่เริ่ม)", value: int(newJobs), tone: "warning" },
-        { label: "เฉลี่ยต่อวัน", value: (JOBS.length / 30).toFixed(1) },
-        { label: "ช่องทางหลัก", value: "Shopee" },
+        { label: "เฉลี่ยต่อวัน", value: ((S?.total ?? 0) / days).toFixed(1) },
+        { label: "ช่องทางหลัก", value: topChannel },
       ]}
       columns={columns}
       rows={JOBS}
       loading={loading}
       rowKey={(r) => r.no}
+      server={{ total, onChange: setTable }}
     />
   );
 }

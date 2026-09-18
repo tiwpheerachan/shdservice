@@ -1,10 +1,11 @@
-// Types + static UI config for the SHD Service System.
-//
-// All business data now lives in Supabase and is read through the hooks in
-// `@/data/db` (client components) or the getters in `@/data/queries`
-// (server components). This file keeps only:
-//   1. the TypeScript types used across the app (the API contract), and
-//   2. static dropdown/option config that is UI-only, not database data.
+/**
+ * Shared TypeScript types + static option lists used by the UI.
+ *
+ * All DATA comes from the legacy database (see src/server/services/*); this
+ * file no longer holds demo rows. The core fields of each type are what the
+ * screens render; the optional fields after them are extra DB-backed values the
+ * forms need for editing. Option lists mirror the legacy lookup values exactly.
+ */
 
 export type Status = "Active" | "Inactive" | "Cancel";
 
@@ -61,6 +62,26 @@ export type Product = {
   onhand: number;
   price: number;
   status: Status;
+  // DB-backed extras (product + product_none_serial)
+  id?: number;
+  nameEn?: string;
+  nameCn?: string;
+  description?: string;
+  capitalPrice?: number;
+  wholesalePrice?: number;
+  received?: number;
+  issued?: number;
+  reserved?: number;
+  ubRepairOnly?: boolean;
+  forModelColor?: string;
+  createdDate?: string;
+  createdBy?: string;
+  models?: string[];
+  image?: string; // products/{code}/{file} — serve via fileUrl()
+  stockRemark?: string; // product_none_serial.remark — legacy stock-adjustment log
+  cancelRemark?: string; // product.cancel_remark / cancel_date / cancel_by (เหตุผลที่ยกเลิกอะไหล่)
+  cancelDate?: string;
+  cancelBy?: string;
 };
 
 export type Movement = {
@@ -72,6 +93,9 @@ export type Movement = {
   from: string;
   to: string;
   remark: string;
+  // DB-backed extras (inventory_hd/dt)
+  qty?: number;
+  items?: string;
 };
 
 export type Customer = {
@@ -83,6 +107,19 @@ export type Customer = {
   line: string;
   taxId: string;
   status: Status;
+  // DB-backed extras (customer table)
+  id?: number;
+  type?: string;
+  online?: boolean;
+  address1?: string;
+  address2?: string;
+  cityId?: number;
+  districtId?: number;
+  subDistrictId?: number;
+  postalCode?: string;
+  priceGroup?: string;
+  createdDate?: string;
+  createdBy?: string;
 };
 
 export type Job = {
@@ -96,6 +133,34 @@ export type Job = {
   status: string;
   imei: string;
   amount: number;
+  // DB-backed extras (job table)
+  statusId?: number;
+  statusGroup?: string;
+  isBounce?: boolean; // job.is_job_bounce — งานเด้ง (สินค้ากลับมาซ่อมซ้ำ)
+  customerId?: number;
+  engineerId?: number;
+  serial?: string;
+  channel?: string;
+  receptionType?: string;
+  receptionDate?: string;
+  warranty?: string;
+  symptom?: string;
+  symptomOther?: string;
+  repairDetail?: string;
+  repairedDate?: string;
+  closedDate?: string;
+  returnType?: string;
+  returnTracking?: string;
+  returnDate?: string;
+  paymentType?: string;
+  paymentAmount?: number;
+  dueDate?: string;
+  openedBy?: string;
+  jobTypeDetail?: string;
+  quotationNo?: string;
+  serviceCost?: number;
+  partsCost?: number;
+  modelDetail?: string;
 };
 
 export type Quotation = {
@@ -108,6 +173,17 @@ export type Quotation = {
   brandModel: string;
   amount: number;
   status: string;
+  // DB-backed extras (quotation_hd)
+  statusId?: number;
+  customerCode?: string;
+  warranty?: string;
+  partsAmount?: number;
+  serviceAmount?: number;
+  discountAmount?: number;
+  vatAmount?: number;
+  approveDate?: string;
+  createdBy?: string;
+  active?: boolean;
 };
 
 export type SaleOrder = {
@@ -119,6 +195,16 @@ export type SaleOrder = {
   approve: string;
   stockDoc: string;
   tracking: string;
+  // DB-backed extras (sale_out_hd)
+  approveId?: number;
+  customerCode?: string;
+  paymentType?: string;
+  paymentAmount?: number;
+  cancelled?: boolean;
+  approveDate?: string;
+  approvedBy?: string;
+  deliveryDate?: string;
+  remark?: string;
 };
 
 /* ---------- Dashboard aggregate rows ---------- */
@@ -132,6 +218,7 @@ export type DashGroup = {
   jobs: number;
   percent: number;
   tone: StatTone;
+  ord?: number;
 };
 
 export type TatRow = {
@@ -149,13 +236,18 @@ export type TopSymptom = { name: string; count: number };
 
 /* ---------- Static UI config (not database data) ---------- */
 
+/* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก app_config ผ่าน useRoles) */
 export const ROLES = [
   "System Admin",
-  "Service Manager",
-  "ช่างเทคนิค",
-  "เจ้าหน้าที่รับงาน",
-  "คลังอะไหล่",
-  "พนักงานขาย",
+  "Customer Service",
+  "Engineer",
+  "Head Engineer",
+  "Stock",
+  "Salesman",
+  "Manager",
+  "Account",
+  "Audit",
+  "Call Center",
   "รออนุมัติ",
 ];
 
@@ -186,7 +278,7 @@ export const JOB_STATUS_OPTIONS = [
   "อยู่ระหว่างการซ่อม - รอเสนอราคา",
   "อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า",
   "อยู่ระหว่างการซ่อม - ลูกค้าตกลงซ่อม",
-  "อยู่ระหว่างการซ่อม - พ้นกำหนดเสนอราคา",
+  "อยู่ระหว่างการซ่อม - พันกำหนดเสนอราคา",
   "อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว",
   "ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)",
   "อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว",
@@ -209,7 +301,7 @@ export const REPAIR_STATUS_OPTIONS = [
   "อยู่ระหว่างการซ่อม - รอเสนอราคา",
   "อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า",
   "อยู่ระหว่างการซ่อม - ลูกค้าตกลงซ่อม",
-  "อยู่ระหว่างการซ่อม - พ้นกำหนดเสนอราคา",
+  "อยู่ระหว่างการซ่อม - พันกำหนดเสนอราคา",
   "ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)",
   "ซ่อมเสร็จ",
   "ซ่อมเสร็จ (ชำระเงินแล้ว)",
@@ -272,13 +364,15 @@ export const RETURN_METHODS = [
 ];
 
 /* วิธีชำระเงิน (3) */
-export const PAYMENT_METHODS = ["เงินสด", "เงินโอน", "บัตรเครดิต"];
+export const PAYMENT_METHODS = ["โอนเงิน", "เงินสด", "บัตรเครดิต"]; // = sale_out_hd.payment_type
+/* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
+export const JOB_PAYMENT_METHODS = ["เงินโอน", "เงินสด", "บัตรเครดิต"];
 
 /* ค่าบริการการซ่อม (ค่าคงที่ให้เลือก) */
 export const SERVICE_FEES = [0, 98, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
 
 /* คลังสินค้า */
-export const WAREHOUSES = ["คลังสินค้าดี", "คลังสินค้าเสีย"];
+export const WAREHOUSES = ["คลังสินค้าดี", "คลังสินค้าเสีย"]; // = store_location
 
 /* ประเภทเอกสารสต๊อก */
 export const STOCK_MOVE_TYPES = [
@@ -293,6 +387,7 @@ export const STOCK_PICK_TYPES = [
   "จ่ายออกตามงานซ่อม",
   "จ่ายออกตามใบสั่งขาย",
   "จ่ายออกอื่นๆ",
+  "รับคืนจากการเบิก", // inventory_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
 ];
 
 /* หมวดหมู่อะไหล่ (ตรงกับระบบจริง) */
@@ -311,6 +406,7 @@ export const PART_CATEGORIES = [
 
 /* ลูกค้า */
 export const CUSTOMER_TYPES = ["Dealer", "Corporate", "Normal"];
+/* ใช้กลุ่มราคา — DB เก็บ Retail / Wholesale / Special (map ใน services/customers.ts) */
 export const PRICE_GROUPS = [
   "ขายปลีก (Retail Price)",
   "ขายส่ง (Wholesale Price)",
@@ -330,25 +426,7 @@ export const VAT_RATES = [0, 7];
 /* Serial Control */
 export const SERIAL_CONTROL = ["True", "False"];
 
-export const TECHNICIANS = ["- - ยังไม่ระบุ - -", "Nattapong K.", "Anucha P.", "Somchai Thongdee"];
-export const OUTSOURCE_VENDORS = ["Vesync Service Center", "TG Electronics Repair", "Siam Tech Service", "OEM Factory (CN)"];
+/* ช่าง / ผู้รับซ่อมต่อ ดึงจาก DB (useStaff / useVendors) — ค่า placeholder ตัวแรกของ dropdown */
+export const TECHNICIAN_PLACEHOLDER = "- - ยังไม่ระบุ - -";
 
-/* 77 จังหวัด (สำหรับ dropdown ที่อยู่แบบ cascading) */
-export const PROVINCES = [
-  "กรุงเทพมหานคร", "กระบี่", "กาญจนบุรี", "กาฬสินธุ์", "กำแพงเพชร",
-  "ขอนแก่น", "จันทบุรี", "ฉะเชิงเทรา", "ชลบุรี", "ชัยนาท",
-  "ชัยภูมิ", "ชุมพร", "เชียงราย", "เชียงใหม่", "ตรัง",
-  "ตราด", "ตาก", "นครนายก", "นครปฐม", "นครพนม",
-  "นครราชสีมา", "นครศรีธรรมราช", "นครสวรรค์", "นนทบุรี", "นราธิวาส",
-  "น่าน", "บึงกาฬ", "บุรีรัมย์", "ปทุมธานี", "ประจวบคีรีขันธ์",
-  "ปราจีนบุรี", "ปัตตานี", "พระนครศรีอยุธยา", "พะเยา", "พังงา",
-  "พัทลุง", "พิจิตร", "พิษณุโลก", "เพชรบุรี", "เพชรบูรณ์",
-  "แพร่", "ภูเก็ต", "มหาสารคาม", "มุกดาหาร", "แม่ฮ่องสอน",
-  "ยโสธร", "ยะลา", "ร้อยเอ็ด", "ระนอง", "ระยอง",
-  "ราชบุรี", "ลพบุรี", "ลำปาง", "ลำพูน", "เลย",
-  "ศรีสะเกษ", "สกลนคร", "สงขลา", "สตูล", "สมุทรปราการ",
-  "สมุทรสงคราม", "สมุทรสาคร", "สระแก้ว", "สระบุรี", "สิงห์บุรี",
-  "สุโขทัย", "สุพรรณบุรี", "สุราษฎร์ธานี", "สุรินทร์", "หนองคาย",
-  "หนองบัวลำภู", "อ่างทอง", "อำนาจเจริญ", "อุดรธานี", "อุตรดิตถ์",
-  "อุทัยธานี", "อุบลราชธานี",
-];
+/* จังหวัด/อำเภอ/ตำบล ดึงจาก mt_city / mt_district / mt_sub_district (useProvinces, /api/address) */

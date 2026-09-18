@@ -26,6 +26,23 @@ export type Column<T> = {
   hideBelow?: "sm" | "md" | "lg" | "xl";
 };
 
+/**
+ * Server mode: when `server` is given the table stops filtering / sorting /
+ * slicing `rows` itself. `rows` is the current page from the API, `total` the
+ * full count, and every change of page / page size / search text / sort is
+ * reported through `onChange` so the caller can refetch. Visuals are identical.
+ */
+export type ServerTableState = {
+  page: number;
+  pageSize: number;
+  q: string;
+  sort: { key: string; dir: "asc" | "desc" } | null;
+};
+export type ServerTable = {
+  total: number;
+  onChange: (state: ServerTableState) => void;
+};
+
 const HIDE: Record<string, string> = {
   sm: "hidden sm:table-cell",
   md: "hidden md:table-cell",
@@ -48,6 +65,7 @@ export function DataTable<T extends Record<string, unknown>>({
   className,
   loading = false,
   rowClassName,
+  server,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -63,6 +81,7 @@ export function DataTable<T extends Record<string, unknown>>({
   className?: string;
   loading?: boolean;
   rowClassName?: (row: T, i: number) => string;
+  server?: ServerTable;
 }) {
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState<{ key: string; dir: "asc" | "desc" } | null>(
@@ -80,16 +99,31 @@ export function DataTable<T extends Record<string, unknown>>({
     []
   );
 
+  // server mode: debounce the search box, then let the caller refetch
+  const [dq, setDq] = React.useState("");
+  React.useEffect(() => {
+    if (!server) return;
+    const id = setTimeout(() => setDq(q), 350);
+    return () => clearTimeout(id);
+  }, [q, server]);
+  const onServerChange = server?.onChange;
+  React.useEffect(() => {
+    if (!onServerChange) return;
+    onServerChange({ page, pageSize, q: dq, sort });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, dq, sort, !!onServerChange]);
+
   const filtered = React.useMemo(() => {
+    if (server) return rows;
     if (!q.trim()) return rows;
     const needle = q.trim().toLowerCase();
     return rows.filter((r) =>
       columns.some((c) => String(getVal(r, c)).toLowerCase().includes(needle))
     );
-  }, [q, rows, columns, getVal]);
+  }, [q, rows, columns, getVal, server]);
 
   const sorted = React.useMemo(() => {
-    if (!sort) return filtered;
+    if (server || !sort) return filtered;
     const col = columns.find((c) => c.key === sort.key);
     if (!col) return filtered;
     const copy = [...filtered];
@@ -102,13 +136,19 @@ export function DataTable<T extends Record<string, unknown>>({
       return sort.dir === "asc" ? r : -r;
     });
     return copy;
-  }, [filtered, sort, columns, getVal]);
+  }, [filtered, sort, columns, getVal, server]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const current = Math.min(page, totalPages);
-  const view = sorted.slice((current - 1) * pageSize, current * pageSize);
+  const totalCount = server ? server.total : sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const current = server ? page : Math.min(page, totalPages);
+  const view = server ? rows : sorted.slice((current - 1) * pageSize, current * pageSize);
 
-  React.useEffect(() => setPage(1), [q, pageSize, rows]);
+  // reset to page 1 when the search / page size / (client) data set changes
+  React.useEffect(() => setPage(1), [q, pageSize]);
+  const rowCount = rows.length;
+  React.useEffect(() => {
+    if (!server) setPage(1);
+  }, [rowCount, server]);
 
   const toggleSort = (key: string) =>
     setSort((s) =>
@@ -261,8 +301,8 @@ export function DataTable<T extends Record<string, unknown>>({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5 text-xs text-muted-foreground">
         <div className="flex items-center gap-2">
           <span className="num">
-            แสดง {sorted.length === 0 ? 0 : (current - 1) * pageSize + 1}–
-            {Math.min(current * pageSize, sorted.length)} จาก {sorted.length} รายการ
+            แสดง {totalCount === 0 ? 0 : (current - 1) * pageSize + 1}–
+            {Math.min(current * pageSize, totalCount)} จาก {totalCount.toLocaleString("en-US")} รายการ
           </span>
           {footerNote}
         </div>
@@ -270,7 +310,7 @@ export function DataTable<T extends Record<string, unknown>>({
           <Select
             value={String(pageSize)}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            className="h-8 w-24 text-xs"
+            className="h-8 w-28 text-xs"
             aria-label="จำนวนต่อหน้า"
           >
             {[10, 25, 50, 100].map((n) => (
@@ -293,7 +333,7 @@ export function DataTable<T extends Record<string, unknown>>({
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={current === totalPages}
+              disabled={current >= totalPages}
               className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
               aria-label="ถัดไป"
             >

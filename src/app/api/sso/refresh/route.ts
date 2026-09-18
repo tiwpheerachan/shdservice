@@ -4,52 +4,27 @@ import {
   signSession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
+  SEEN_COOKIE,
+  SEEN_TTL_S,
   type SessionUser,
 } from "@/lib/session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isOwner, isApproved, ADMIN_ROLE, PENDING_ROLE } from "@/lib/access";
+import { resolveUser } from "@/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Re-read the caller's role/status from the DB and re-issue the session cookie so
- * an admin's approval takes effect without the user logging out and back in.
- * Used by the /pending screen to poll for approval.
+ * Re-read the caller's role/status from app_user and re-issue the session cookie
+ * so an admin's approval takes effect without logging out. Used by /pending and
+ * the client-side AccessGuard.
  */
 export async function GET(request: NextRequest) {
   const current = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!current) return NextResponse.json({ user: null }, { status: 401 });
 
-  let role = current.role ?? PENDING_ROLE;
-  let approved = !!current.approved;
-
-  if (isOwner(current.email)) {
-    role = ADMIN_ROLE;
-    approved = true;
-  } else {
-    try {
-      // read ALL rows for this email (robust to duplicates); the user is approved
-      // if ANY row has a real role + Active status.
-      const { data } = await supabaseAdmin()
-        .from("users")
-        .select("role, status")
-        .ilike("email", current.email);
-      const rows =
-        (data as { role: string; status: string }[] | null) ?? [];
-      const approvedRow = rows.find((r) => isApproved(r.role, r.status));
-      if (approvedRow) {
-        role = approvedRow.role;
-        approved = true;
-      } else if (rows[0]) {
-        role = rows[0].role ?? PENDING_ROLE;
-        approved = false;
-      }
-      // if no row found, keep the current cookie values (don't downgrade on a race)
-    } catch {
-      // DB unavailable — keep current values
-    }
-  }
+  const u = await resolveUser(current);
+  const role = u?.role ?? current.role ?? "";
+  const approved = u ? u.approved : !!current.approved;
 
   const updated: SessionUser = {
     ...current,
@@ -66,5 +41,6 @@ export async function GET(request: NextRequest) {
     path: "/",
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
+  res.cookies.set(SEEN_COOKIE, "1", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: SEEN_TTL_S });
   return res;
 }

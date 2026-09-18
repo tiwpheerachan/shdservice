@@ -13,7 +13,8 @@ import { Input, Select } from "@/components/ui/input";
 import { PeoplePicker, type Person } from "@/components/shared/people-picker";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type User } from "@/data/mock";
-import { useUsers } from "@/data/db";
+import { useUsers, useRoles } from "@/data/db";
+import { exportXlsx } from "@/lib/api";
 
 type UserForm = {
   id: string;
@@ -46,6 +47,12 @@ export default function UsersPage() {
   const [view, setView] = React.useState<"active" | "deleted">("active");
   const { data: USERS, loading, refetch } = useUsers(
     view === "deleted" ? "only" : "exclude"
+  );
+  // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
+  const { data: dbRoles } = useRoles();
+  const ROLE_OPTIONS = React.useMemo(
+    () => (dbRoles.length ? [...dbRoles, "รออนุมัติ"] : ROLES),
+    [dbRoles]
   );
   const pendingCount = USERS.filter((u) => u.role === "รออนุมัติ").length;
   // auto-refresh so users who just signed in (pending) show up without a reload
@@ -90,7 +97,7 @@ export default function UsersPage() {
   // Approve in ONE click — assign a default real role + Active immediately.
   // (Change the role afterwards via the edit pencil if needed.)
   const approveNow = (r: User) =>
-    quickSet(r, { role: "เจ้าหน้าที่รับงาน", status: "Active" }, "อนุมัติแล้ว");
+    quickSet(r, { role: "Customer Service", status: "Active" }, "อนุมัติแล้ว");
 
   // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
   const pickPerson = (p: Person | null) => {
@@ -361,7 +368,7 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -381,7 +388,7 @@ export default function UsersPage() {
             className={
               "rounded-md px-3.5 py-1.5 font-medium transition-colors " +
               (view === v
-                ? "bg-card text-foreground shadow-sm"
+                ? "bg-card text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground")
             }
           >
@@ -486,7 +493,7 @@ export default function UsersPage() {
           </Field>
           <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
             <Select value={form.role} onChange={(e) => set("role", e.target.value)}>
-              {ROLES.map((r) => (
+              {ROLE_OPTIONS.map((r) => (
                 <option key={r}>{r}</option>
               ))}
             </Select>

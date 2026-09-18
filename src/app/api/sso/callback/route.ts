@@ -1,18 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from "@/lib/sso";
 import {
   signSession,
+  verifySession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
   type SessionUser,
 } from "@/lib/session";
 import { lookupByEmail } from "@/lib/directory";
-import {
-  supabaseAdmin,
-  findUserIdByEmail,
-  upsertUserRow,
-  dedupeUsersByEmail,
-} from "@/lib/supabase-admin";
+import { provisionSsoUser } from "@/server/services/users";
+import { audit } from "@/server/audit";
+import { db } from "@/db/client";
 import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
 
 export const runtime = "nodejs";
@@ -20,17 +18,11 @@ export const dynamic = "force-dynamic";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-function nowStamp() {
-  // "YYYY-MM-DD HH:mm" — matches the lastLogin format used elsewhere
-  return new Date().toISOString().slice(0, 16).replace("T", " ");
-}
-
 /**
- * Auto-provision the signed-in employee into the `users` table and return their
- * effective { role, status }. New users start as PENDING_ROLE (no access until an
- * admin assigns a real role); existing users keep their role/status. Owner emails
- * are always forced to System Admin. Best-effort: never blocks login if the DB or
- * secret key is unavailable (returns the owner/pending default in that case).
+ * Auto-provision the signed-in employee into `app_user` (the single user table)
+ * and return their effective role/status. New users start pending (user_type
+ * NULL) until an admin assigns a role; owner emails are always System Admin.
+ * Best-effort: never blocks login if the DB is unavailable.
  */
 async function provision(opts: {
   email: string;
@@ -40,48 +32,16 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}): Promise<{ role: string; status: string }> {
-  const owner = isOwner(opts.email);
+}): Promise<{ role: string; status: string; userId: number }> {
   try {
-    const existingId = await findUserIdByEmail(opts.email);
-    let role = PENDING_ROLE;
-    let status = "Active";
-    if (existingId) {
-      const { data } = await supabaseAdmin()
-        .from("users")
-        .select("role, status")
-        .eq("id", existingId)
-        .maybeSingle();
-      role = (data?.role as string) ?? PENDING_ROLE;
-      status = (data?.status as string) ?? "Active";
-    }
-    // owners are always admins — force it (and persist it)
-    if (owner) {
-      role = ADMIN_ROLE;
-      status = "Active";
-    }
-    const id = existingId ?? `U-${crypto.randomUUID().slice(0, 8)}`;
-    await upsertUserRow({
-      id,
-      code: opts.larkId,
-      name: opts.name,
-      username: opts.email.split("@")[0],
-      role,
-      branch: opts.department,
-      email: opts.email,
-      phone: opts.phone,
-      status,
-      lastLogin: nowStamp(),
-      avatar: opts.avatar,
-      title: opts.title,
-    });
-    await dedupeUsersByEmail(opts.email, id);
-    return { role, status };
-  } catch {
-    // DB unavailable — owners still get in; everyone else waits for approval
-    return owner
-      ? { role: ADMIN_ROLE, status: "Active" }
-      : { role: PENDING_ROLE, status: "Active" };
+    const r = await provisionSsoUser(opts);
+    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] provision failed:", e instanceof Error ? e.message : e);
+    return isOwner(opts.email)
+      ? { role: ADMIN_ROLE, status: "Active", userId: 0 }
+      : { role: PENDING_ROLE, status: "Active", userId: 0 };
   }
 }
 
@@ -95,11 +55,18 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const cookieState = request.cookies.get(STATE_COOKIE)?.value;
+  const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? "").split(STATE_SEP).filter(Boolean);
+  const nextFromState = safeNext(state?.split("|")[1]);
 
-  if (!code) return fail(request, "missing_code");
-  if (!state || !cookieState || state !== cookieState)
-    return fail(request, "state_mismatch");
+  // Reloading the callback URL (or a second tab finishing after the first) must
+  // not throw the user out: if this browser already holds a valid session, go on.
+  const existing = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  const continueIfSignedIn = () =>
+    existing ? NextResponse.redirect(new URL(nextFromState, appOrigin(request))) : null;
+
+  if (!code) return continueIfSignedIn() ?? fail(request, "missing_code");
+  if (!state || !cookieStates.includes(state))
+    return continueIfSignedIn() ?? fail(request, "state_mismatch");
 
   const clientSecret = process.env.SSO_CLIENT_SECRET;
   if (!clientSecret) return fail(request, "server_not_configured");
@@ -117,8 +84,19 @@ export async function GET(request: NextRequest) {
       }),
       cache: "no-store",
     });
-    if (!res.ok) return fail(request, `verify_${res.status}`);
+    if (!res.ok) {
+      // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
+      const body = await res.text().catch(() => "");
+      // eslint-disable-next-line no-console
+      console.error(`[sso] verify failed ${res.status} for client ${SSO.clientId}: ${body.slice(0, 300)}`);
+      // a code that was already exchanged (page reload) while a session exists → just continue
+      return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
+    }
     identity = await res.json();
+    if (process.env.SSO_DEBUG === "1") {
+      // eslint-disable-next-line no-console
+      console.log("[sso] identity keys:", Object.keys(identity));
+    }
   } catch {
     return fail(request, "verify_unreachable");
   }
@@ -131,7 +109,11 @@ export async function GET(request: NextRequest) {
     identity;
 
   const email = str(u.email);
-  if (!email) return fail(request, "no_email");
+  if (!email) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] no email in verify response; top-level keys:", Object.keys(identity), "user keys:", Object.keys(u ?? {}));
+    return fail(request, "no_email");
+  }
 
   // Enrich with the full directory profile (department, title, phone, avatar).
   const prof = await lookupByEmail(email);
@@ -141,7 +123,7 @@ export async function GET(request: NextRequest) {
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table and get the effective role/status.
-  const { role, status } = await provision({
+  const { role, status, userId } = await provision({
     email,
     name,
     larkId: prof?.id ?? "",
@@ -150,6 +132,21 @@ export async function GET(request: NextRequest) {
     avatar,
     title: prof?.title ?? "",
   });
+
+  // audit: LOGIN (best-effort — never blocks sign-in)
+  try {
+    await audit(db, userId, {
+      action: "LOGIN",
+      module: "Auth",
+      entity: "app_user",
+      key: userId || email,
+      summary: `เข้าสู่ระบบ ${email} · ${role}`,
+      meta: { ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[sso] audit login failed:", e instanceof Error ? e.message : e);
+  }
 
   const user: SessionUser = {
     email,
@@ -161,8 +158,7 @@ export async function GET(request: NextRequest) {
     exp: Date.now() + SESSION_TTL_MS,
   };
 
-  const next = state.split("|")[1] || DEFAULT_AFTER_LOGIN;
-  const res = NextResponse.redirect(new URL(next, appOrigin(request)));
+  const res = NextResponse.redirect(new URL(nextFromState, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.
   // os_state has Max-Age=600 and expires on its own.

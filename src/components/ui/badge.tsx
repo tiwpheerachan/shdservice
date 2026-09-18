@@ -1,41 +1,38 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-export type Tone =
-  | "neutral"
-  | "primary"
-  | "success"
-  | "warning"
-  | "danger"
-  | "info";
+export type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "info";
 
-const tones: Record<Tone, string> = {
-  neutral: "bg-muted text-muted-foreground border-border",
-  primary: "bg-primary-soft text-primary border-primary/25",
-  success: "bg-success-soft text-success border-success/25",
-  warning: "bg-warning-soft text-warning border-warning/25",
-  danger: "bg-danger-soft text-danger border-danger/25",
-  info: "bg-info-soft text-info border-info/25",
-};
+/** App badge — `tone` variants in the app palette (shadcn-style cva). */
+export const badgeVariants = cva(
+  "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap",
+  {
+    variants: {
+      tone: {
+        neutral: "bg-muted text-muted-foreground border-border",
+        primary: "bg-primary-soft text-primary border-primary/25",
+        success: "bg-success-soft text-success border-success/25",
+        warning: "bg-warning-soft text-warning border-warning/25",
+        danger: "bg-danger-soft text-danger border-danger/25",
+        info: "bg-info-soft text-info border-info/25",
+      },
+    },
+    defaultVariants: { tone: "neutral" },
+  }
+);
 
 export function Badge({
-  tone = "neutral",
+  tone,
   dot,
   className,
   children,
-}: {
-  tone?: Tone;
+}: VariantProps<typeof badgeVariants> & {
   dot?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap",
-        tones[tone],
-        className
-      )}
-    >
+    <span data-slot="badge" className={cn(badgeVariants({ tone }), className)}>
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       {children}
     </span>

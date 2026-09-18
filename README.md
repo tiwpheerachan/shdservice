@@ -9,7 +9,9 @@
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
+cp .env.example .env      # ใส่ DATABASE_URL (Supabase Session pooler :5432), SSO และ Supabase Storage key
+npm run db:migrate        # สร้าง/อัปเดต schema (รันซ้ำได้ ไม่ทำลายข้อมูล)
+npm run dev               # http://localhost:3000
 ```
 
 Build production:
@@ -23,11 +25,40 @@ npm start
 
 ---
 
+## ฐานข้อมูล (drizzle + migrations)
+
+แอปอ่าน/เขียนฐานข้อมูล **SHDElectronicServiceDB เดิม** (52 ตาราง snake_case ที่แปลงมาจาก SQL Server ด้วย `../setupdata/convert.py`) ผ่าน **drizzle ORM** บน `DATABASE_URL` เท่านั้น — ไม่มีการอ่านผ่าน PostgREST/anon key จาก browser อีกต่อไป
+
+| ที่ | หน้าที่ |
+|---|---|
+| `src/db/schema/legacy.ts` | drizzle schema ของ 52 ตาราง legacy (+ คอลัมน์ที่แอปเพิ่ม) |
+| `src/db/client.ts` | pool + `db` (server-only, session time zone Asia/Bangkok) |
+| `src/db/running-no.ts` | ออกเลขเอกสารจาก `running_no` (J/Q/SO/WHI/WHO รายปี, C/P/MD ต่อเนื่อง) |
+| `drizzle/0000_baseline.sql` | schema legacy แบบ idempotent (no-op ถ้ามีอยู่แล้ว) |
+| `drizzle/0001_app.sql` | คอลัมน์ SSO ใน `app_user`, ย้าย `users` เก่า → `app_user`, drop ตาราง mock, index |
+| `drizzle/0002_job_symptom.sql` | ตาราง `job_symptom` (หลายอาการต่อ 1 งาน) |
+| `drizzle/0004_indexes.sql` | index สำหรับ filter/รายงาน + `pg_trgm` GIN สำหรับช่องค้นหา (ILIKE) |
+| `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
+| `drizzle/0006_audit_log.sql` | ตาราง `audit_log` (append-only, trigger กัน UPDATE/DELETE) — ประวัติทุกการเขียนของแอป ดูที่ ข้อมูลระบบ → ประวัติการใช้งาน |
+| `drizzle/0003_record_status.sql` | soft delete แบบเดียวทั้งระบบ: lookup `record_status` (ACTIVE/INACTIVE/DELETED) + คอลัมน์ในทุกตารางที่ลบได้ — ไม่มี hard delete, กู้คืนทาง SQL |
+| `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
+
+**หลัง re-dump / reload ข้อมูลจากระบบเก่า** (`../setupdata/load_supabase.sh`) ให้รัน `npm run db:migrate` อีกครั้ง — migration ทุกไฟล์เขียนแบบรันซ้ำได้ และ script จะ reset journal ให้เมื่อพบว่าตาราง legacy ถูกสร้างใหม่
+
+### ผู้ใช้ / สิทธิ์
+- login ผ่าน Central SSO เหมือนเดิม → จับคู่กับ `app_user` ด้วยอีเมล (สร้างแถวใหม่แบบรออนุมัติถ้าไม่พบ)
+- บทบาท = `app_user.user_type` · สิทธิ์เมนู = `app_config` (user_type × module × add/edit/del/view) — บังคับใช้ที่ API ทุก route ที่เขียน และซ่อนเมนู/ปุ่มใน UI
+- หน้า **ข้อมูลระบบ** และ **รายงาน** ใช้ได้เฉพาะ System Admin · owner emails ใน `src/lib/access.ts` / `OWNER_EMAILS` เป็น System Admin เสมอ
+
+รายละเอียด business rule ที่อนุมานจากข้อมูลจริง (สถานะงาน, สต๊อก, ใบเสนอราคา, ใบสั่งขาย) อยู่ใน [`docs/backend-rebase-plan.md`](docs/backend-rebase-plan.md)
+
+---
+
 ## สิ่งที่ให้ความสำคัญเรื่องความเสถียร
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Dependency | มีเพียง `next`, `react`, `react-dom`, `lucide-react` — **ไม่มี UI library ภายนอก** จึงไม่มี breaking change จาก third-party |
+| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage |
 | Version | ตรึงเวอร์ชันแบบ exact (ไม่มี `^`) ทุกตัว — `npm install` ได้ผลลัพธ์เดิมเสมอ |
 | Type Safety | TypeScript `strict: true` ผ่าน `next build` โดยไม่มี error |
 | Dark mode | สคริปต์ inline ใน `<head>` ตั้ง class ก่อน paint → **ไม่มีจอกระพริบ (FOUC)** |
@@ -61,8 +92,14 @@ src/
 │   └── shared/                 # PageHeader, Section, FilterBar, StatCard,
 │                               # MasterTable, JobForm, QuotationForm,
 │                               # SaleOrderForm, ReportView, Attachments
-├── lib/                        # utils (cn, baht, int), nav config, useTheme
-└── data/mock.ts                # ข้อมูลตัวอย่างทั้งหมด (จุดเดียวที่ต้องเปลี่ยนเป็น API)
+├── lib/                        # utils, nav, modules (permission map), api (fetch), use-access, use-job
+├── data/
+│   ├── db.ts                   # React hooks → /api/data/<resource> (server paging สำหรับตารางใหญ่)
+│   ├── queries.ts              # server-component getters (master data)
+│   └── mock.ts                 # TYPE + option list เท่านั้น (ไม่มีข้อมูลตัวอย่างแล้ว)
+├── db/                         # drizzle client / schema / running number
+├── server/                     # auth + permission, services (business logic), paging
+└── app/api/**                  # route handlers (ทุกการเขียนตรวจสิทธิ์จาก app_config)
 ```
 
 ---
@@ -96,14 +133,11 @@ src/
 
 ---
 
-## การต่อ API จริง
+## โครงสร้าง API
 
-ทุกหน้าอ่านข้อมูลจาก `src/data/mock.ts` เพียงไฟล์เดียว
-เปลี่ยนเป็นระบบจริงได้โดย:
-
-1. สร้าง route handlers ใน `src/app/api/**/route.ts` (หรือชี้ไป backend เดิม)
-2. แทน `import { JOBS } from "@/data/mock"` ด้วย `fetch` / Server Component / React Query
-3. โครงสร้าง type ทั้งหมด (`Job`, `Product`, `Customer`, `Quotation`, `SaleOrder`, …) export อยู่แล้วใน `mock.ts` — ใช้เป็น API contract ได้ทันที
+- อ่าน: `GET /api/data/<resource>` (`jobs`, `customers`, `products`, `movements`, `quotations`, `sale_orders`, master ทุกตัว, `staff`, `roles`, `modules`, `dash_groups`, …) — ใส่ `?paged=1&page=&pageSize=&q=&sort=&dir=` สำหรับตารางใหญ่
+- เขียน: `/api/jobs`, `/api/jobs/:no/{repair,outsource,swap-refund,close,calls}`, `/api/jobs/assign`, `/api/customers`, `/api/products`, `/api/stock/{receive,issue,pick-lines}`, `/api/quotations`, `/api/sale-orders/:no/approve`, `/api/masters/:kind`, `/api/admin/{users,permissions,records}`, `/api/attachments`
+- ทุก route ตรวจ session (SSO cookie) และสิทธิ์ `app_config` ก่อนเขียน — ดู `src/server/auth.ts`
 
 ---
 
@@ -112,3 +146,21 @@ src/
 แก้ CSS variables ที่ `src/app/globals.css` — เปลี่ยน `--primary` เพียงบรรทัดเดียว สีทั้งระบบจะเปลี่ยนตาม
 (ทั้งโหมดสว่างและมืดกำหนดแยกกันในไฟล์เดียวกัน)
 # shdservice
+
+## UI kit (Tailwind v4 + shadcn/ui)
+
+- **Tailwind CSS v4** — ไม่มี `tailwind.config.ts` แล้ว; token ทั้งหมดอยู่ใน `src/app/globals.css` (`@theme inline` map สี `--color-*` → ตัวแปร HSL เดิม `--background/--primary/…` จึงยังสลับ light/dark และ override ใน `.auth-page` ได้เหมือนเดิม) · dark mode = `@custom-variant dark (&:where(.dark, .dark *))`
+- **สองชั้น**:
+  - `src/components/shadcn/*` = ไฟล์ shadcn ต้นฉบับ (เพิ่มตัวใหม่ด้วย `npx shadcn add <name>` — `components.json` ชี้ `ui` มาที่โฟลเดอร์นี้) ใช้กับงานใหม่
+  - `src/components/ui/*` = **app kit** ที่ทุกหน้าเรียกอยู่ — ชื่อ/props เดิมทั้งหมด แต่ข้างในเป็น shadcn/Radix แล้ว: `Modal`→Radix Dialog (focus-trap/Esc/scroll-lock), `Toast`→Sonner (API `useToast().push({kind,title,desc})` เดิม), `Tabs`→Radix Tabs (คีย์บอร์ด ←/→), `Checkbox`→Radix Checkbox (รับ `onChange(e.target.checked)` เดิม), `Button`/`Badge`→cva variants ชื่อเดิม (`primary/outline/…`, `tone`) · `CommandPalette` (⌘K) → cmdk
+  - คงไว้ตามเดิมโดยตั้งใจ: `Select` เป็น native `<select>`, `Radio` native, `DataTable`, `Field/FieldGrid`, Sidebar/Topbar, ฟอร์มงาน, หน้า print
+- `cn()` = `twMerge(clsx())` — class ที่ชนกันตัวหลังชนะ (เดิมขึ้นกับลำดับใน CSS) → ค่าที่หน้าเพจส่งมา เช่น `h-8`, `w-24`, `p-0` มีผลจริงแล้ว
+
+## Audit trail (`audit_log`)
+
+- ทุกการเขียนผ่านแอป (เพิ่ม/แก้/ลบ/เปลี่ยนสถานะ/อนุมัติ/มอบหมาย/จ่าย-รับสต๊อก/แนบไฟล์/เข้าสู่ระบบ) เรียก `audit(tx, userId, {...})` จาก `src/server/audit.ts` **ใน transaction เดียวกับข้อมูล** — log กับข้อมูลจึงไม่มีทางไม่ตรงกัน
+- เก็บ ใคร (`user_id`, `user_name` snapshot) / เมื่อไร / `action` / `module` (ชื่อตาม app_config) / `entity` (ชื่อตาราง) / `entity_key` (เลขงาน, เลขใบ, รหัส) / `summary` ภาษาไทย / `changes` = เฉพาะฟิลด์ที่เปลี่ยน `{"field": [เดิม, ใหม่]}` (คำนวณด้วย `diff(before, values)`)
+- ตารางเป็น append-only (trigger `audit_log_readonly`) · การแก้ผ่าน SQL ตรง ๆ ไม่ถูกบันทึก (ตามที่ตกลง)
+- ดู: `ข้อมูลระบบ → ประวัติการใช้งาน` (System Admin, กรอง วันที่/ผู้ใช้/โมดูล/การกระทำ/เลขที่ + Excel) และส่วน "ประวัติการแก้ไข" ในหน้าแก้ไขข้อมูลงาน (`JobDetail.history`)
+- เพิ่มจุดเขียนใหม่เมื่อไร ต้องเรียก `audit()` ด้วยเสมอ (ดูตัวอย่างใน `services/jobs.ts`)
+

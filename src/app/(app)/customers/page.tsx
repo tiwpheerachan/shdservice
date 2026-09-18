@@ -1,24 +1,93 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Download, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Textarea, Select, Radio } from "@/components/ui/input";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS, PROVINCES } from "@/data/mock";
-import { useCustomers } from "@/data/db";
+import { type Customer } from "@/data/mock";
+import { useCustomersPage } from "@/data/db";
+import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, toCustomerForm, type CustomerFormValues, type CustomerConflict } from "@/components/shared/customer-form";
+import { api, postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 export default function CustomersPage() {
   const { push } = useToast();
-  const { data: CUSTOMERS, loading } = useCustomers();
+  const router = useRouter();
+  const { add: canAdd, edit: canEdit } = useAccess().forPath("/customers");
+
+  // server-side paging / search over the customer table (43k rows)
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: CUSTOMERS, total, loading, refetch } = useCustomersPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+  });
+
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Customer | null>(null);
+  const [viewOnly, setViewOnly] = React.useState(false);
+  const [form, setForm] = React.useState<CustomerFormValues>(EMPTY_CUSTOMER);
+  const [saving, setSaving] = React.useState(false);
+  const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
+
+  const openForm = (c: Customer | null, readOnly = false) => {
+    setViewOnly(readOnly);
+    setEditing(c);
+    setConflicts(null);
+    setForm(c ? toCustomerForm(c) : EMPTY_CUSTOMER);
+    setOpen(true);
+  };
+
+  // deep links: /customers?edit=C43601 (from job / quotation / SO forms) · /customers?new=1&phone=…&name=…
+  React.useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const edit = sp.get("edit")?.trim();
+    if (edit) {
+      api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: edit })}`)
+        .then((d) => { const hit = d.rows.find((c) => c.code === edit) ?? d.rows[0]; if (hit) openForm(hit, !canEdit); })
+        .catch(() => {});
+    } else if (sp.get("new") && canAdd) {
+      openForm(null);
+      setForm((f) => ({ ...f, phone: sp.get("phone") ?? "", name: sp.get("name") ?? "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    if (!form.name.trim()) {
+      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุชื่อลูกค้า" });
+      return;
+    }
+    if (!form.phone.trim()) {
+      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุเบอร์โทรศัพท์" });
+      return;
+    }
+    setSaving(true);
+    setConflicts(null);
+    try {
+      const d = await postJson<{ row: Customer }>("/api/customers", { ...form, code: editing?.code || undefined });
+      setOpen(false);
+      push({ kind: "success", title: "บันทึกข้อมูลลูกค้าแล้ว", desc: `${d.row.code} · ${d.row.name}` });
+      refetch();
+    } catch (e) {
+      // 409 = phone / email / tax id already belongs to another customer (server refuses)
+      const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
+      if (details?.conflicts?.length) setConflicts(details.conflicts);
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const columns: Column<Customer>[] = [
     {
@@ -34,7 +103,7 @@ export default function CustomersPage() {
         <div className="min-w-0">
           <p className="truncate font-medium">{r.name}</p>
           <p className="num truncate text-2xs text-muted-foreground">
-            เลขผู้เสียภาษี {r.taxId}
+            เลขผู้เสียภาษี {r.taxId || "—"}
           </p>
         </div>
       ),
@@ -75,11 +144,9 @@ export default function CustomersPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.name, desc: r.address })}
-          onEdit={() => {
-            setEditing(r);
-            setOpen(true);
-          }}
+          onView={() => openForm(r, true)}
+          onEdit={canEdit ? () => openForm(r) : undefined}
+          onHistory={() => router.push(`/jobs/list?customer=${encodeURIComponent(r.code)}`)}
         />
       ),
     },
@@ -92,20 +159,16 @@ export default function CustomersPage() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("customers", { q: table.q })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditing(null);
-                setOpen(true);
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              เพิ่มลูกค้า
-            </Button>
+            {canAdd && (
+              <Button size="sm" onClick={() => openForm(null)}>
+                <Plus className="h-3.5 w-3.5" />
+                เพิ่มลูกค้า
+              </Button>
+            )}
           </>
         }
       />
@@ -116,118 +179,54 @@ export default function CustomersPage() {
         loading={loading}
         rowKey={(r) => r.code}
         searchPlaceholder="ค้นหารหัส / ชื่อ / เบอร์โทร / อีเมล…"
+        server={{ total, onChange: setTable }}
       />
 
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "แก้ไขข้อมูลลูกค้า" : "เพิ่มลูกค้าใหม่"}
+        title={viewOnly ? "ข้อมูลลูกค้า" : editing ? "แก้ไขข้อมูลลูกค้า" : "เพิ่มลูกค้าใหม่"}
         description={
-          editing
-            ? `Mode: Edit Data · Customer Id #${editing.code}`
-            : "Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ"
+          viewOnly
+            ? `Mode: View · Customer Id #${editing?.code}`
+            : editing
+              ? `Mode: Edit Data · Customer Id #${editing.code}`
+              : "Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ"
         }
         size="xl"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
-              ยกเลิก
+              {viewOnly ? "ปิด" : "ยกเลิก"}
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setOpen(false);
-                push({ kind: "success", title: "บันทึกข้อมูลลูกค้าแล้ว" });
-              }}
-            >
-              บันทึกข้อมูล
-            </Button>
+            {!viewOnly && (
+              <Button size="sm" onClick={save} disabled={saving}>
+                บันทึกข้อมูล
+              </Button>
+            )}
           </>
         }
       >
-        <FieldGrid cols={2}>
-          <Field label="รหัสลูกค้า" required>
-            <Input defaultValue={editing?.code ?? "Generate Auto"} readOnly={!!editing} />
-          </Field>
-          <Field label="ประเภทลูกค้า">
-            <div className="flex items-center gap-3">
-              <Select defaultValue="Normal" className="flex-1">
-                {CUSTOMER_TYPES.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </Select>
-              <div className="flex shrink-0 items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name="customer-channel" defaultChecked /> On-Line
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name="customer-channel" /> Off-Line
-                </label>
-              </div>
-            </div>
-          </Field>
-
-          <Field label="ชื่อลูกค้า" required wide>
-            <Input defaultValue={editing?.name ?? ""} />
-          </Field>
-
-          <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี" wide>
-            <Input defaultValue={editing?.taxId ?? ""} className="num" />
-          </Field>
-
-          <Field label="ที่อยู่ เลขที่" wide>
-            <Textarea
-              rows={2}
-              defaultValue={editing?.address ?? ""}
-              placeholder="บ้านเลขที่ / หมู่ / หมู่บ้าน / อาคาร"
-            />
-          </Field>
-
-          <Field label="ซอย - ถนน">
-            <Input placeholder="ซอย / ถนน" />
-          </Field>
-          <Field label="จังหวัด">
-            <Select defaultValue="">
-              <option value="">- - Please Select - -</option>
-              {PROVINCES.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="เขต / อำเภอ">
-            <Input placeholder="เขต / อำเภอ" />
-          </Field>
-          <Field label="แขวง / ตำบล">
-            <Input placeholder="แขวง / ตำบล" />
-          </Field>
-          <Field label="รหัสไปรษณีย์">
-            <Input className="num" placeholder="10000" />
-          </Field>
-          <Field label="เบอร์โทรศัพท์" required>
-            <Input defaultValue={editing?.phone ?? ""} className="num" />
-          </Field>
-
-          <Field label="Email">
-            <Input type="email" defaultValue={editing?.email ?? ""} />
-          </Field>
-          <Field label="Line ID">
-            <Input defaultValue={editing?.line ?? ""} />
-          </Field>
-
-          <Field label="ใช้กลุ่มราคา">
-            <Select defaultValue={PRICE_GROUPS[0]}>
-              {PRICE_GROUPS.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="สถานะ">
-            <Select defaultValue={editing?.status ?? "Active"}>
-              <option>Active</option>
-              <option>Inactive</option>
-            </Select>
-          </Field>
-        </FieldGrid>
+        <fieldset disabled={viewOnly} className="contents">
+        <CustomerFields
+          form={form}
+          setForm={setForm}
+          editing={editing}
+          extra={
+            viewOnly && editing ? (
+              <>
+                <Field label="วันที่สร้าง">
+                  <Input readOnly value={editing.createdDate || "—"} className="num" />
+                </Field>
+                <Field label="สร้างโดย">
+                  <Input readOnly value={editing.createdBy || "—"} />
+                </Field>
+              </>
+            ) : null
+          }
+        />
+        {conflicts && <div className="mt-4"><ConflictNotice conflicts={conflicts} onPick={(code) => { const hit = CUSTOMERS.find((c) => c.code === code); if (hit) openForm(hit); }} /></div>}
+        </fieldset>
       </Modal>
     </>
   );

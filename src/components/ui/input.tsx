@@ -2,11 +2,12 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { Checkbox as ShadcnCheckbox } from "@/components/shadcn/checkbox";
 
 const base =
   "w-full rounded-md border border-input bg-card text-foreground placeholder:text-muted-foreground/70 " +
   "transition-[border-color,box-shadow] duration-150 " +
-  "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 " +
+  "focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/20 " +
   "disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground " +
   "read-only:bg-muted/60";
 
@@ -91,18 +92,39 @@ export const Select = React.forwardRef<
 ));
 Select.displayName = "Select";
 
+/**
+ * Checkbox — Radix/shadcn underneath (keyboard, indeterminate, aria-checked),
+ * but keeps the native-input props the app uses: `checked`, `defaultChecked`,
+ * `onChange(e)` (e.target.checked), `disabled`, `name`, `aria-label`.
+ */
 export function Checkbox({
   className,
+  checked,
+  defaultChecked,
+  onChange,
+  disabled,
+  name,
+  value,
+  id,
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "size">) {
   return (
-    <input
-      type="checkbox"
-      className={cn(
-        "h-4 w-4 shrink-0 rounded border-input text-primary accent-[hsl(var(--primary))] cursor-pointer",
-        className
-      )}
-      {...props}
+    <ShadcnCheckbox
+      id={id}
+      name={name}
+      value={value as string | undefined}
+      checked={checked}
+      defaultChecked={defaultChecked}
+      disabled={disabled}
+      onCheckedChange={(c) =>
+        onChange?.({
+          target: { checked: c === true, name, value },
+          currentTarget: { checked: c === true, name, value },
+        } as unknown as React.ChangeEvent<HTMLInputElement>)
+      }
+      className={cn("h-4 w-4 shrink-0 rounded-[4px] border-input shadow-none cursor-pointer", className)}
+      aria-label={props["aria-label"]}
+      title={props.title}
     />
   );
 }

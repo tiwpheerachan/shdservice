@@ -1,36 +1,40 @@
 "use client";
 
 import * as React from "react";
-import { Search, UserCheck, ListChecks, Wrench } from "lucide-react";
+import { UserCheck, ListChecks, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { JobSearch } from "@/components/shared/job-search";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
-import { Input, Checkbox } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { type Job } from "@/data/mock";
-import { useJobs } from "@/data/db";
+import { useJobsPage } from "@/data/db";
 import { cn } from "@/lib/utils";
-
-const CURRENT_TECH = "May - Pradit";
+import { api, postJson, errMsg, qs } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 export default function AssignPage() {
   const { push } = useToast();
-  const { data: JOBS, loading } = useJobs();
+  // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
+  const { name: CURRENT_TECH, userId } = useAccess();
+  // open jobs without an engineer / still "งานใหม่" — server-side paging
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: JOBS, total, loading, refetch } = useJobsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    unassigned: 1,
+  });
+  const [saving, setSaving] = React.useState(false);
 
-  const [q, setQ] = React.useState("");
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [removed, setRemoved] = React.useState<Set<string>>(new Set());
 
-  const pool = React.useMemo(
-    () =>
-      JOBS.filter(
-        (j) =>
-          (j.owner === "- ยังไม่ระบุ -" || j.status === "งานใหม่") &&
-          !removed.has(j.no)
-      ),
-    [JOBS, removed]
-  );
+  const pool = React.useMemo(() => JOBS.filter((j) => !removed.has(j.no)), [JOBS, removed]);
 
   const allSelected = pool.length > 0 && pool.every((j) => picked.has(j.no));
 
@@ -45,28 +49,49 @@ export default function AssignPage() {
   const toggleAll = () =>
     setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
 
-  const go = () => {
-    const v = q.trim();
+  // type a job no → verify on the server that it is still waiting, then tick it
+  const go = async (v: string) => {
     if (!v) return;
-    const hit = pool.find((j) => j.no.toLowerCase() === v.toLowerCase());
-    if (hit) {
-      setPicked((s) => new Set(s).add(hit.no));
-      push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
-    } else {
-      push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+    const local = pool.find((j) => j.no === v);
+    if (local) {
+      setPicked((s) => new Set(s).add(local.no));
+      push({ kind: "success", title: "เลือกงานแล้ว", desc: local.no });
+      return;
     }
-    setQ("");
+    try {
+      const d = await api<{ rows: Job[] }>(`/api/data/jobs${qs({ paged: 1, pageSize: 1, q: v, unassigned: 1 })}`);
+      const hit = d.rows.find((j) => j.no === v);
+      if (hit) {
+        setPicked((s) => new Set(s).add(hit.no));
+        push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
+      } else {
+        push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+      }
+    } catch (e) {
+      push({ kind: "error", title: "ค้นหาไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
-  const confirm = () => {
+  // POST /api/jobs/assign → engineer_id + status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  const confirm = async () => {
     const list = [...picked];
-    setRemoved((r) => new Set([...r, ...list]));
-    setPicked(new Set());
-    push({
-      kind: "success",
-      title: `ยืนยันรับงานแล้ว ${list.length} รายการ`,
-      desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ' (ระบบสาธิต)",
-    });
+    if (!list.length) return;
+    setSaving(true);
+    try {
+      const d = await postJson<{ assigned: number }>("/api/jobs/assign", { jobNos: list, engineerId: userId });
+      setRemoved((r) => new Set([...r, ...list]));
+      setPicked(new Set());
+      push({
+        kind: "success",
+        title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
+        desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ'",
+      });
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "รับงานไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns: Column<Job>[] = [
@@ -110,7 +135,7 @@ export default function AssignPage() {
       width: "130px",
       hideBelow: "lg",
       sortable: false,
-      cell: (r) => <span className="num text-xs">{r.openDate.slice(0, 10)}</span>,
+      cell: (r) => <span className="num text-xs">{r.receptionDate || r.openDate.slice(0, 10)}</span>,
     },
     {
       key: "customer",
@@ -141,32 +166,16 @@ export default function AssignPage() {
         description="เลือกงานที่ต้องการรับผิดชอบ (เลือกทีละงาน หรือทั้งหมด) แล้วกดยืนยันรับงาน"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="assign-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="assign-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงานซ่อม
             </label>
-            <div className="relative">
-              <Input
-                id="assign-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="JOB2604460"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" variant="outline" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="assign-job-no" scope="unassigned" onPick={go} />
           </div>
         }
       />
 
       {/* smart selection toolbar — sticks under the topbar like a navbar */}
-      <div className="surface sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-sm">
+      <div className="surface sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-medium">
             <ListChecks className="h-4 w-4 text-primary" />
@@ -174,7 +183,7 @@ export default function AssignPage() {
             <span className="num rounded-md bg-primary/10 px-2 py-0.5 text-primary">
               {picked.size}
             </span>
-            / {pool.length} งาน
+            / {total.toLocaleString("en-US")} งาน
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Wrench className="h-3.5 w-3.5" />
@@ -198,7 +207,7 @@ export default function AssignPage() {
           >
             ล้างการเลือก
           </Button>
-          <Button size="sm" disabled={picked.size === 0} onClick={confirm}>
+          <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
             <UserCheck className="h-3.5 w-3.5" />
             ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
           </Button>
@@ -221,6 +230,7 @@ export default function AssignPage() {
             </span>
           ) : undefined
         }
+        server={{ total, onChange: setTable }}
       />
     </>
   );

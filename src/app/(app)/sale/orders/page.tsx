@@ -6,27 +6,49 @@ import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type SaleOrder } from "@/data/mock";
-import { useSaleOrders, useUsers } from "@/data/db";
+import { useSaleOrdersPage, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { useAccess } from "@/lib/use-access";
+import { exportXlsx } from "@/lib/api";
 
+// approve_status.approve_name_th → badge tone
 const TONE: Record<string, "warning" | "success" | "danger" | "info"> = {
   "รออนุมัติ": "warning",
-  "อนุมัติ": "success",
-  "ไม่อนุมัติ": "danger",
+  "อนุมัติแล้ว": "success",
+  "ปฏิเสธ": "danger",
+  "แก้ไขข้อมูล": "danger",
   "กำลังดำเนินการจัดทำ": "info",
 };
 
+type Filters = { no: string; customer: string; from: string; to: string; code: string; sales: string; approve: string };
+const NO_FILTER: Filters = { no: "", customer: "", from: "", to: "", code: "", sales: "", approve: "" };
+
 export default function SaleOrderPage() {
   const { push } = useToast();
-  const { data: SALE_ORDERS, loading } = useSaleOrders();
-  const { data: USERS } = useUsers();
+  const { add: canAdd, edit: canEdit } = useAccess().forPath("/sale/orders");
+  const { data: USERS } = useStaff();
+  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
+  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
+  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const { rows: SALE_ORDERS, total, loading } = useSaleOrdersPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q || filters.no || filters.customer || filters.code,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    from: filters.from,
+    to: filters.to,
+    sales: filters.sales,
+    approve: filters.approve,
+  });
 
   const columns: Column<SaleOrder>[] = [
     {
@@ -34,7 +56,7 @@ export default function SaleOrderPage() {
       header: "SO No.",
       width: "120px",
       cell: (r) => (
-        <Link href="/sale/orders/edit" className="num font-medium text-primary hover:underline">
+        <Link href={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -89,8 +111,8 @@ export default function SaleOrderPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: r.customer })}
-          onEdit={() => push({ kind: "info", title: "แก้ไขใบสั่งขาย", desc: r.no })}
+          onView={() => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`)}
+          onEdit={canEdit ? () => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`) : undefined}
         />
       ),
     },
@@ -103,47 +125,61 @@ export default function SaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("sale_orders", { q: table.q || filters.no || filters.customer || filters.code, from: filters.from, to: filters.to, sales: filters.sales, approve: filters.approve })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
-            <Link href="/sale/orders/new">
-              <Button size="sm">
-                <Plus className="h-3.5 w-3.5" />
-                สร้างใบสั่งขาย
-              </Button>
-            </Link>
+            {canAdd && (
+              <Link href="/sale/orders/new">
+                <Button size="sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  สร้างใบสั่งขาย
+                </Button>
+              </Link>
+            )}
           </>
         }
       />
 
-      <FilterBar onSearch={() => push({ kind: "info", title: "กรองข้อมูลแล้ว" })} defaultOpen={false}>
+      <FilterBar
+        onSearch={() => {
+          setFilters(draft);
+          push({ kind: "info", title: "กรองข้อมูลแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilters(NO_FILTER);
+        }}
+        defaultOpen={false}
+      >
         <Field label="เลขใบสั่งขาย (SO)">
-          <Input className="num" placeholder="SO2600727" />
+          <Input className="num" placeholder="SO2600760" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
         </Field>
         <Field label="ชื่อลูกค้า">
-          <Input />
+          <Input value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
         </Field>
         <Field label="วันที่สั่งขาย (ตั้งแต่)">
-          <Input type="date" defaultValue="2026-08-05" />
+          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
         </Field>
         <Field label="วันที่สั่งขาย (ถึง)">
-          <Input type="date" defaultValue="2026-09-04" />
+          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
         </Field>
         <Field label="รหัสอะไหล่-อุปกรณ์เสริม">
-          <Input className="num" />
+          <Input className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
         </Field>
         <Field label="พนักงานขาย">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.sales} onChange={(e) => setD("sales", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {USERS.map((u) => (
-              <option key={u.id}>{u.name}</option>
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="สถานะการอนุมัติ">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.approve} onChange={(e) => setD("approve", e.target.value)}>
+            <option value="">- - Select All - -</option>
             {Object.keys(TONE).map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -157,6 +193,7 @@ export default function SaleOrderPage() {
         loading={loading}
         rowKey={(r) => r.no}
         searchPlaceholder="ค้นหา SO / ลูกค้า / พนักงานขาย…"
+        server={{ total, onChange: setTable }}
       />
     </>
   );

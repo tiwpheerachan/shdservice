@@ -4,7 +4,7 @@ import * as React from "react";
 import { Download, Printer, FileSpreadsheet } from "lucide-react";
 import { PageHeader } from "./page-header";
 import { FilterBar } from "./filter-bar";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { DataTable, type Column, type ServerTable } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
@@ -12,9 +12,13 @@ import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 export type ReportFilter =
-  | { kind: "text"; label: string; placeholder?: string }
-  | { kind: "date"; label: string; value?: string }
-  | { kind: "select"; label: string; options: string[] };
+  | { kind: "text"; key?: string; label: string; placeholder?: string; value?: string }
+  | { kind: "date"; key?: string; label: string; value?: string }
+  | { kind: "select"; key?: string; label: string; options: string[]; value?: string };
+
+/** values keyed by filter `key` (or label); "- - Select All - -" / "ALL" → "" */
+export type ReportValues = Record<string, string>;
+const ALL = new Set(["- - Select All - -", "- - Select ALL - -", "ALL"]);
 
 export function ReportView<T extends Record<string, unknown>>({
   title,
@@ -25,6 +29,9 @@ export function ReportView<T extends Record<string, unknown>>({
   rows,
   rowKey,
   loading = false,
+  onApply,
+  server,
+  onExport,
 }: {
   title: string;
   description: string;
@@ -34,8 +41,24 @@ export function ReportView<T extends Record<string, unknown>>({
   rows: T[];
   rowKey: (r: T, i: number) => string;
   loading?: boolean;
+  /** called with the current filter values when the user presses ค้นหา / reset */
+  onApply?: (values: ReportValues) => void;
+  /** server-side paging for the report table (rows = current page) */
+  server?: ServerTable;
+  /** download the whole report (same filters) as .xlsx */
+  onExport?: () => void;
 }) {
   const { push } = useToast();
+  const keyOf = (f: ReportFilter) => f.key ?? f.label;
+  const initial = React.useMemo(() => {
+    const v: ReportValues = {};
+    for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === "select" ? f.options[0] ?? "" : "");
+    return v;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.map((f) => `${keyOf(f)}=${f.value ?? ""}`).join("|")]);
+  const [values, setValues] = React.useState<ReportValues>(initial);
+  React.useEffect(() => setValues(initial), [initial]);
+  const clean = (v: ReportValues) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, ALL.has(x) ? "" : x]));
 
   const toneMap = {
     primary: "text-primary",
@@ -58,14 +81,15 @@ export function ReportView<T extends Record<string, unknown>>({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => push({ kind: "success", title: "กำลังส่งออกไฟล์ Excel" })}
+              onClick={() => (onExport ? onExport() : push({ kind: "warning", title: "หน้านี้ยังไม่รองรับการส่งออก" }))}
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
               Excel
             </Button>
             <Button
               size="sm"
-              onClick={() => push({ kind: "success", title: "กำลังสร้างไฟล์ PDF" })}
+              onClick={() => window.print()}
+              title="เปิดหน้าต่างพิมพ์ — เลือก 'บันทึกเป็น PDF'"
             >
               <Download className="h-3.5 w-3.5" />
               PDF
@@ -76,21 +100,33 @@ export function ReportView<T extends Record<string, unknown>>({
 
       <FilterBar
         title="เงื่อนไขการออกรายงาน"
-        onSearch={() => push({ kind: "info", title: "ประมวลผลรายงานแล้ว" })}
+        onSearch={() => {
+          onApply?.(clean(values));
+          push({ kind: "info", title: "ประมวลผลรายงานแล้ว" });
+        }}
+        onReset={() => {
+          setValues(initial);
+          onApply?.(clean(initial));
+        }}
       >
-        {filters.map((f) => (
-          <Field key={f.label} label={f.label}>
-            {f.kind === "text" && <Input placeholder={f.placeholder} />}
-            {f.kind === "date" && <Input type="date" defaultValue={f.value} />}
-            {f.kind === "select" && (
-              <Select>
-                {f.options.map((o) => (
-                  <option key={o}>{o}</option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        ))}
+        {filters.map((f) => {
+          const k = keyOf(f);
+          const v = values[k] ?? "";
+          const set = (x: string) => setValues((s) => ({ ...s, [k]: x }));
+          return (
+            <Field key={f.label} label={f.label}>
+              {f.kind === "text" && <Input placeholder={f.placeholder} value={v} onChange={(e) => set(e.target.value)} />}
+              {f.kind === "date" && <Input type="date" value={v} onChange={(e) => set(e.target.value)} />}
+              {f.kind === "select" && (
+                <Select value={v} onChange={(e) => set(e.target.value)}>
+                  {f.options.map((o) => (
+                    <option key={o}>{o}</option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          );
+        })}
       </FilterBar>
 
       {kpis.length > 0 && (
@@ -111,7 +147,7 @@ export function ReportView<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <DataTable columns={columns} rows={rows} loading={loading} rowKey={rowKey} searchPlaceholder="ค้นหาในรายงาน…" />
+      <DataTable columns={columns} rows={rows} loading={loading} rowKey={rowKey} searchPlaceholder="ค้นหาในรายงาน…" server={server} />
     </>
   );
 }
