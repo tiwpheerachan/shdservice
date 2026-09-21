@@ -135,17 +135,17 @@ export async function readResource(req: NextRequest, resource: string): Promise<
         ? pageSaleOrders(p, { approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted })
         : listSaleOrders({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
     case "dash_groups":
-      return (await dashboard({ from: p.f.from, to: p.f.to })).groups;
+      return (await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })).groups;
     case "tat_rows":
-      return (await dashboard({ from: p.f.from, to: p.f.to })).tat;
+      return (await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })).tat;
     case "monthly": {
-      const d = await dashboard({ from: p.f.from, to: p.f.to });
+      const d = await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type });
       return d.monthly.map((r) => ({ ...r, granularity: d.granularity }));
     }
     case "top_symptoms":
-      return (await dashboard({ from: p.f.from, to: p.f.to })).topSymptoms;
+      return (await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })).topSymptoms;
     case "dashboard":
-      return [await dashboard({ from: p.f.from, to: p.f.to })];
+      return [await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })];
     case "job_stats":
       return [await jobStats()];
   }

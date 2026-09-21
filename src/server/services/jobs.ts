@@ -1385,17 +1385,19 @@ export async function removeAttachment(id: number, byUserId = 0) {
 /* ------------------------------------------------------------------ *
  * Dashboard — computed live from job / job_log
  * ------------------------------------------------------------------ */
-export type DashRange = { from?: string; to?: string };
+/** `type` = job type NAME (same convention as the job list filter) */
+export type DashRange = { from?: string; to?: string; type?: string };
 
 // 30 s memo per date range (the dashboard is opened constantly; the queries scan job by date)
 const dashCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof computeDashboard>> }>();
 export async function dashboard(range: DashRange = {}) {
   const from = /^\d{4}-\d{2}-\d{2}$/.test(range.from ?? "") ? range.from! : "";
   const to = /^\d{4}-\d{2}-\d{2}$/.test(range.to ?? "") ? range.to! : "";
-  const key = `${from}|${to}`;
+  const type = (range.type ?? "").trim();
+  const key = `${from}|${to}|${type}`;
   const hit = dashCache.get(key);
   if (hit && Date.now() - hit.at < 30_000) return hit.value;
-  const value = await computeDashboard(from, to);
+  const value = await computeDashboard(from, to, type);
   dashCache.set(key, { at: Date.now(), value });
   if (dashCache.size > 50) dashCache.delete(dashCache.keys().next().value!);
   return value;
@@ -1408,9 +1410,13 @@ const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค
  * the "closed" line of the chart uses job_closed_date). Empty from/to = all time.
  * TAT is a snapshot of the jobs still open right now, by design.
  */
-async function computeDashboard(from: string, to: string) {
+async function computeDashboard(from: string, to: string, type = "") {
+  // optional job-type filter: resolve the name once, then filter every query by id (unknown name → no rows)
+  const typeId = type ? ((await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, type)).limit(1))[0]?.id ?? -1) : null;
+  const typeSql = typeId === null ? sql`` : sql`AND job_type_id = ${typeId}`;
   const createdIn = and(
     ne(job.recordStatus, RS.DELETED),
+    typeId === null ? undefined : eq(job.jobTypeId, typeId),
     from ? gte(job.jobCreateDate, `${from} 00:00:00`) : undefined,
     to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined
   );
@@ -1443,7 +1449,7 @@ async function computeDashboard(from: string, to: string) {
            count(*) FILTER (WHERE d BETWEEN 15 AND 30) AS d1530,
            count(*) FILTER (WHERE d > 30) AS over30
       FROM (SELECT job_status_id, GREATEST(1, (current_date - job_create_date::date)) AS d
-              FROM job WHERE record_status <> 'DELETED') j
+              FROM job WHERE record_status <> 'DELETED' ${typeSql}) j
       JOIN job_status s ON s.job_status_id = j.job_status_id
      WHERE s.job_status_group NOT IN ('Finished','Cancel')
      GROUP BY s.job_status_name, s.display_order
@@ -1467,17 +1473,17 @@ async function computeDashboard(from: string, to: string) {
       ? sql`
     WITH d AS (SELECT generate_series(${lo}, ${hi}, interval '1 day')::date AS dt),
     o AS (SELECT job_create_date::date AS dt, count(*) AS n FROM job
-           WHERE record_status <> 'DELETED' AND job_create_date >= ${lo} AND job_create_date < ${hi} + 1 GROUP BY 1),
+           WHERE record_status <> 'DELETED' ${typeSql} AND job_create_date >= ${lo} AND job_create_date < ${hi} + 1 GROUP BY 1),
     c AS (SELECT job_closed_date::date AS dt, count(*) AS n FROM job
-           WHERE record_status <> 'DELETED' AND job_closed_date >= ${lo} AND job_closed_date < ${hi} + 1 GROUP BY 1)
+           WHERE record_status <> 'DELETED' ${typeSql} AND job_closed_date >= ${lo} AND job_closed_date < ${hi} + 1 GROUP BY 1)
     SELECT to_char(d.dt, 'YYYY-MM-DD') AS k, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
       FROM d LEFT JOIN o ON o.dt = d.dt LEFT JOIN c ON c.dt = d.dt ORDER BY d.dt`
       : sql`
     WITH m AS (SELECT generate_series(date_trunc('month', ${lo}), date_trunc('month', ${hi}), interval '1 month') AS mo),
     o AS (SELECT date_trunc('month', job_create_date) AS mo, count(*) AS n FROM job
-           WHERE record_status <> 'DELETED' AND job_create_date >= date_trunc('month', ${lo}) AND job_create_date < ${hi} + 1 GROUP BY 1),
+           WHERE record_status <> 'DELETED' ${typeSql} AND job_create_date >= date_trunc('month', ${lo}) AND job_create_date < ${hi} + 1 GROUP BY 1),
     c AS (SELECT date_trunc('month', job_closed_date) AS mo, count(*) AS n FROM job
-           WHERE record_status <> 'DELETED' AND job_closed_date >= date_trunc('month', ${lo}) AND job_closed_date < ${hi} + 1 GROUP BY 1)
+           WHERE record_status <> 'DELETED' ${typeSql} AND job_closed_date >= date_trunc('month', ${lo}) AND job_closed_date < ${hi} + 1 GROUP BY 1)
     SELECT to_char(m.mo, 'YYYY-MM') AS k, coalesce(o.n, 0) AS open, coalesce(c.n, 0) AS close
       FROM m LEFT JOIN o ON o.mo = m.mo LEFT JOIN c ON c.mo = m.mo ORDER BY m.mo`
   );

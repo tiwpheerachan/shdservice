@@ -3,13 +3,14 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import {
   useDashGroups,
   useTatRows,
   useMonthly,
   useTopSymptoms,
   useJobs,
+  useJobTypes,
 } from "@/data/db";
 import { int, cn } from "@/lib/utils";
 
@@ -67,7 +68,10 @@ export default function DashboardPage() {
   // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
   const [from, setFrom] = React.useState(() => daysAgo(29));
   const [to, setTo] = React.useState(() => ymd(new Date()));
-  const range = React.useMemo(() => ({ from, to }), [from, to]);
+  // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
+  const [type, setType] = React.useState("");
+  const { data: JOB_TYPES } = useJobTypes();
+  const range = React.useMemo(() => ({ from, to, type }), [from, to, type]);
   const preset = (key: "7d" | "30d" | "90d" | "month" | "all") => {
     const today = new Date();
     if (key === "all") { setFrom(""); setTo(""); return; }
@@ -84,12 +88,12 @@ export default function DashboardPage() {
     : "";
 
   const { data: DASH_GROUPS } = useDashGroups(range);
-  const { data: TAT_ROWS } = useTatRows();
+  const { data: TAT_ROWS } = useTatRows(range);
   const { data: MONTHLY } = useMonthly(range);
   const { data: TOP_SYMPTOMS } = useTopSymptoms(range);
   const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
   const granularity = MONTHLY[0]?.granularity ?? "month";
-  const rangeText = !from && !to ? "ทั้งหมด" : `${thai(from) || "เริ่มต้น"} – ${thai(to) || "วันนี้"}`;
+  const rangeText = (!from && !to ? "ทั้งหมด" : `${thai(from) || "เริ่มต้น"} – ${thai(to) || "วันนี้"}`) + (type ? ` · ${type}` : "");
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));
 
@@ -140,6 +144,12 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <Select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-[190px]" aria-label="ประเภทงาน">
+            <option value="">ทุกประเภทงาน</option>
+            {JOB_TYPES.map((j) => (
+              <option key={j.id} value={j.name}>{j.name}</option>
+            ))}
+          </Select>
           {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
           <div className="flex items-center gap-1.5">
             <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="num h-9 w-[150px]" aria-label="วันที่เริ่ม" />
@@ -215,7 +225,7 @@ export default function DashboardPage() {
       {/* TAT matrix */}
       <Panel
         title="TAT — ระยะเวลาตั้งแต่วันเปิดงานถึงวันส่งคืน"
-        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน</span>}
+        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน · งานที่ยังไม่ปิด ณ ปัจจุบัน{type ? ` · ${type}` : ""}</span>}
         bodyClass="p-0"
       >
         <div className="table-scroll">

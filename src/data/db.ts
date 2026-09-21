@@ -208,10 +208,10 @@ export const useSaleOrders = (params: Params = {}) =>
   useTable<SaleOrder>("sale_orders", undefined, "exclude", params);
 export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>("sale_orders", params);
 
-/** Dashboard — `range` = { from, to } (YYYY-MM-DD, both empty = all time); TAT is always a live snapshot */
-export type DashRange = { from?: string; to?: string };
+/** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT is a live snapshot (date-independent, but follows `type`) */
+export type DashRange = { from?: string; to?: string; type?: string };
 export const useDashGroups = (range: DashRange = {}) => useTable<DashGroup>("dash_groups", { column: "ord" }, "exclude", range);
-export const useTatRows = () => useTable<TatRow>("tat_rows");
+export const useTatRows = (range: DashRange = {}) => useTable<TatRow>("tat_rows", undefined, "exclude", range);
 export const useMonthly = (range: DashRange = {}) => useTable<MonthlyRow & { granularity?: "day" | "month" }>("monthly", undefined, "exclude", range);
 export const useTopSymptoms = (range: DashRange = {}) => useTable<TopSymptom>("top_symptoms", undefined, "exclude", range);
 
