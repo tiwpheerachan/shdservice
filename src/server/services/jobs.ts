@@ -560,7 +560,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       .leftJoin(jobStatus, eq(jobStatus.jobStatusId, jobLog.jobStatusId))
       .leftJoin(appUser, eq(appUser.userId, jobLog.jobActionBy))
       .where(eq(jobLog.jobNo, jobNo))
-      .orderBy(asc(jobLog.jobLogDate), asc(jobLog.jobLogId)),
+      .orderBy(desc(jobLog.jobLogDate), desc(jobLog.jobLogId)), // newest first, like call log / audit
     auditFor("job", jobNo, 100),
   ]);
 

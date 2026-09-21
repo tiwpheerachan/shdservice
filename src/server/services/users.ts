@@ -134,7 +134,19 @@ export type DeletedMode = StatusMode;
  * the role already assigned.
  */
 export async function listSystemUsers(deleted: DeletedMode = "exclude"): Promise<User[]> {
-  const rows = await db.select().from(appUser).where(statusFilter(appUser.recordStatus, deleted)).orderBy(asc(appUser.userId));
+  const rows = await db.select().from(appUser).where(statusFilter(appUser.recordStatus, deleted));
+  // Default order (the table can still be re-sorted by column):
+  //   1. waiting for approval — newest request first (this is the admin's to-do)
+  //   2. active users, by name (the page is used to look people up)
+  //   3. inactive / deleted, by name, at the bottom
+  const group = (r: AppUserRow) => (!r.userType?.trim() ? 0 : r.recordStatus === RS.ACTIVE ? 1 : 2);
+  const name = (r: AppUserRow) => fullName(r.firstName, r.lastName) || r.username || "";
+  rows.sort((a, b) => {
+    const g = group(a) - group(b);
+    if (g) return g;
+    if (group(a) === 0) return b.userId - a.userId;
+    return name(a).localeCompare(name(b), "th") || a.userId - b.userId;
+  });
   return rows.map(toUser);
 }
 

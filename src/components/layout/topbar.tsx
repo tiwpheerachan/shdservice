@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Search, LogOut, ChevronRight, PanelLeft } from "lucide-react";
+import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from "lucide-react";
 import { findBreadcrumb } from "@/lib/nav";
 import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
@@ -98,6 +99,15 @@ export function Topbar({
       </button>
 
       <SessionTimer />
+
+      <Link
+        href="/admin/guide"
+        title="คู่มือการใช้งาน"
+        aria-label="คู่มือการใช้งาน"
+        className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
+      >
+        <CircleHelp className="h-4 w-4" />
+      </Link>
 
       <ThemeToggle />
 

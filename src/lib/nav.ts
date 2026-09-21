@@ -38,6 +38,7 @@ export const NAV: NavGroup[] = [
       { title: "อาการเสีย มาตรฐาน", href: "/admin/symptoms" },
       { title: "โปรไฟล์ผู้ออกเอกสาร", href: "/admin/document-profiles" },
       { title: "ประวัติการใช้งาน", href: "/admin/audit" },
+      { title: "คู่มือการใช้งาน", href: "/admin/guide" },
     ],
   },
   {

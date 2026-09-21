@@ -155,7 +155,7 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
  * ------------------------------------------------------------------ */
 
 export const useUsers = (deleted: DeletedMode = "exclude") =>
-  useTable<User>("users", { column: "id" }, deleted, {}, TTL_MASTER);
+  useTable<User>("users", undefined, deleted, {}, TTL_MASTER); // server order: pending → active (name) → inactive
 export const usePermissions = () => useTable<Permission>("permissions", { column: "id" }, "exclude", {}, TTL_MASTER);
 // Master lookups feed dropdowns → ACTIVE rows only (INACTIVE stay visible on the admin pages).
 export const useCategories = (mode: DeletedMode = "active") => useTable<MasterRow>("categories", { column: "id" }, mode, {}, TTL_MASTER);

@@ -23,15 +23,22 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
   }
 }
 
+// Admin tables list newest first (the services return id ASC, which the form
+// dropdowns keep — that is the order people know from the legacy app). Copy
+// before reversing: the service hands out its cached array.
+const newestFirst = <T,>(rows: T[]) => [...rows].reverse();
+// brands are the one master people scan alphabetically
+const byName = <T extends { name: string }>(rows: T[]) => [...rows].sort((a, b) => a.name.localeCompare(b.name, "th"));
+
 export const getCategories = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("categories", "exclude"));
+  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("categories", "exclude")));
 export const getManufacturers = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("manufacturers", "exclude"));
+  safe(async () => byName(await (await import("@/server/services/masters")).listSimple("manufacturers", "exclude")));
 export const getColors = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("colors", "exclude"));
+  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("colors", "exclude")));
 export const getJobTypes = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("job_types", "exclude"));
+  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("job_types", "exclude")));
 export const getProductTypes = (): Promise<MasterRow[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSimple("product_types", "exclude"));
+  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("product_types", "exclude")));
 export const getSymptoms = (): Promise<Symptom[]> =>
-  safe(async () => (await import("@/server/services/masters")).listSymptoms("exclude"));
+  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSymptoms("exclude")));

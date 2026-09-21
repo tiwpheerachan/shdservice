@@ -36,6 +36,8 @@ const ROUTE_MODULES: [string, Module][] = [
 
 /** Routes that only System Admin may use (no legacy module covers them). */
 export const ADMIN_ONLY_PREFIXES = ["/admin", "/reports"];
+/** Exceptions inside the admin-only prefixes that every approved user may open. */
+export const EVERYONE_PATHS = ["/admin/guide"];
 
 export const ADMIN_USER_TYPE = "System Admin";
 
@@ -45,6 +47,7 @@ export function moduleForPath(pathname: string): Module | null {
 }
 
 export function isAdminOnlyPath(pathname: string): boolean {
+  if (EVERYONE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) return false;
   return ADMIN_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
