@@ -134,7 +134,7 @@ export default function DocumentProfilesPage() {
       cell: (r) => (
         <div className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={r.logoUrl} alt="" className="h-6 w-auto max-w-[72px] rounded bg-white object-contain ring-1 ring-border" />
+          <img src={r.logoUrl} alt="" loading="lazy" decoding="async" className="h-6 w-auto max-w-[72px] rounded bg-white object-contain ring-1 ring-border" />
           <span className="font-medium">{r.code}</span>
         </div>
       ),

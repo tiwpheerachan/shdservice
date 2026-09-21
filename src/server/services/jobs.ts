@@ -1,4 +1,5 @@
 import "server-only";
+import { cached, TTL_MASTER } from "@/server/cache";
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, type Tx } from "@/db/client";
@@ -354,19 +355,22 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
 
 export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> {
   const where = jobWhere(p.q, f);
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(job)
-    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
-    .leftJoin(eng, eq(eng.userId, job.engineerId))
-    .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-    .where(where);
-  const rows = await baseQuery()
-    .where(where)
-    .orderBy(...orderBy(p.sort, SORT, [desc(job.jobCreateDate), desc(job.jobNo)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: count() })
+      .from(job)
+      .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+      .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
+      .leftJoin(eng, eq(eng.userId, job.engineerId))
+      .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
+      .where(where),
+    baseQuery()
+      .where(where)
+      .orderBy(...orderBy(p.sort, SORT, [desc(job.jobCreateDate), desc(job.jobNo)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return { rows: rows.map(toJob), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 
@@ -1195,7 +1199,10 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
 }
 
 /** Distinct outsource vendors seen in the data (for the dropdown). */
-export async function listOutsourceVendors(): Promise<string[]> {
+export function listOutsourceVendors(): Promise<string[]> {
+  return cached("jobs:vendors", 5 * TTL_MASTER, loadOutsourceVendors);
+}
+async function loadOutsourceVendors(): Promise<string[]> {
   const rows = await db
     .select({ name: jobSendForwardDt.sendToName, n: count() })
     .from(jobSendForwardDt)
@@ -1205,7 +1212,10 @@ export async function listOutsourceVendors(): Promise<string[]> {
 }
 
 /** งานย่อย (job.job_type_detail) — every value the legacy data uses, most common first. */
-export async function listJobTypeDetails(): Promise<string[]> {
+export function listJobTypeDetails(): Promise<string[]> {
+  return cached("jobs:type_details", 5 * TTL_MASTER, loadJobTypeDetails);
+}
+async function loadJobTypeDetails(): Promise<string[]> {
   const rows = await db
     .select({ v: job.jobTypeDetail, n: count() })
     .from(job)
@@ -1216,7 +1226,10 @@ export async function listJobTypeDetails(): Promise<string[]> {
 }
 
 /** บริษัทขนส่ง (job.job_reception_shipper) — free text in the legacy app; top values as suggestions. */
-export async function listShippers(limit = 15): Promise<string[]> {
+export function listShippers(limit = 15): Promise<string[]> {
+  return cached(`jobs:shippers:${limit}`, 5 * TTL_MASTER, () => loadShippers(limit));
+}
+async function loadShippers(limit: number): Promise<string[]> {
   const rows = await db
     .select({ v: job.jobReceptionShipper, n: count() })
     .from(job)

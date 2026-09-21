@@ -1,11 +1,18 @@
 import { audit, diff } from "@/server/audit";
 import "server-only";
+import { cached, invalidate, TTL_MASTER } from "@/server/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appConfig, appUser } from "@/db/schema";
 import { isOwner, PENDING_ROLE } from "@/lib/access";
 import { ADMIN_USER_TYPE } from "@/lib/modules";
-import { findAppUserByEmail, fullName, HttpError, invalidateGrantCache } from "@/server/auth";
+import { findAppUserByEmail, fullName, HttpError, invalidateGrantCache, invalidateUserCache } from "@/server/auth";
+
+/** After any app_user write: the staff dropdown and the per-request user lookup must see it now. */
+function userChanged(email?: string | null) {
+  invalidate("staff");
+  invalidateUserCache(email ?? undefined);
+}
 import type { User, Permission } from "@/data/mock";
 import { nowThai, fmtDateTime } from "@/server/mappers/format";
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
@@ -92,6 +99,7 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
       ...profile,
     })
     .returning({ userId: appUser.userId });
+  userChanged(email);
   return { userId: row.userId, userType: owner ? ADMIN_USER_TYPE : null, isActive: true };
 }
 
@@ -131,7 +139,10 @@ export async function listSystemUsers(deleted: DeletedMode = "exclude"): Promise
 }
 
 /** Everyone active — for technician / opener / salesperson dropdowns. */
-export async function listStaff(): Promise<{ id: number; name: string; userType: string }[]> {
+export function listStaff(): Promise<{ id: number; name: string; userType: string }[]> {
+  return cached("staff", TTL_MASTER, loadStaff);
+}
+async function loadStaff(): Promise<{ id: number; name: string; userType: string }[]> {
   const rows = await db
     .select({
       id: appUser.userId,
@@ -195,6 +206,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       };
     const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
     if (!row) throw new HttpError(404, "user not found");
+    userChanged(row.emailAddress);
     await audit(db, actorId, { action: "UPDATE", module: "Admin", entity: "app_user", key: targetId, summary: `แก้ไขผู้ใช้ ${fullName(first, last)} · สิทธิ์ ${userType ?? PENDING_ROLE}`, changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, { skip: ["deleted", "isActive", "recordStatus"] }) });
     return { user: toUser(row), created: false };
   }
@@ -216,6 +228,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       avatar: input.avatar || null,
     })
     .returning();
+  userChanged(row.emailAddress);
   await audit(db, actorId, { action: "CREATE", module: "Admin", entity: "app_user", key: row.userId, summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || "-"} · สิทธิ์ ${userType ?? PENDING_ROLE}` });
   return { user: toUser(row), created: true };
 }
@@ -228,6 +241,7 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
     .where(eq(appUser.userId, userId))
     .returning();
   if (!row) throw new HttpError(404, "user not found");
+  userChanged(row.emailAddress);
   await audit(db, actorId, { action: "APPROVE", module: "Admin", entity: "app_user", key: userId, summary: `อนุมัติผู้ใช้ ${fullName(row.firstName, row.lastName)} → ${row.userType}`, changes: { userType: [null, row.userType] } });
   return toUser(row);
 }
@@ -237,13 +251,17 @@ export async function setUserDeleted(userId: number, deleted: boolean, actorId =
     .update(appUser)
     .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
     .where(eq(appUser.userId, userId));
+  userChanged();
   await audit(db, actorId, { action: deleted ? "DELETE" : "STATUS", module: "Admin", entity: "app_user", key: userId, summary: deleted ? `ลบผู้ใช้ #${userId}` : `กู้คืนผู้ใช้ #${userId}`, changes: { recordStatus: [null, deleted ? RS.DELETED : RS.ACTIVE] } });
 }
 
 /* ------------------------------------------------------------------ *
  * Permissions (app_config) — role list, matrix, save
  * ------------------------------------------------------------------ */
-export async function listRoles(): Promise<string[]> {
+export function listRoles(): Promise<string[]> {
+  return cached("roles", TTL_MASTER, loadRoles);
+}
+async function loadRoles(): Promise<string[]> {
   const rows = await db
     .selectDistinct({ t: appConfig.userType })
     .from(appConfig)
@@ -253,7 +271,10 @@ export async function listRoles(): Promise<string[]> {
   return Array.from(set);
 }
 
-export async function listModules(): Promise<string[]> {
+export function listModules(): Promise<string[]> {
+  return cached("modules", TTL_MASTER, loadModules);
+}
+async function loadModules(): Promise<string[]> {
   const rows = await db
     .selectDistinct({ m: appConfig.moduleName })
     .from(appConfig)
@@ -309,6 +330,8 @@ export async function savePermissions(
     }
   });
   invalidateGrantCache();
+  invalidate("roles");
+  invalidate("modules");
   return n;
 }
 

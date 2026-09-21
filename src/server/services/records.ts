@@ -1,9 +1,10 @@
 import "server-only";
+import { invalidate } from "@/server/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appUser, customer, job, jobLog, product, quotationHd, saleOutHd } from "@/db/schema";
 import type { Module } from "@/lib/modules";
-import { HttpError } from "@/server/auth";
+import { HttpError, invalidateUserCache } from "@/server/auth";
 import { audit } from "@/server/audit";
 import { nowThai, SENTINEL_TS } from "@/server/mappers/format";
 import { RS, statusStamp, type RecordStatus } from "@/server/record-status";
@@ -87,6 +88,8 @@ export async function setRecordStatus(
         .update(appUser)
         .set({ ...stamp, deleted: rs === RS.DELETED })
         .where(eq(appUser.userId, Number(id)));
+      invalidateUserCache();
+      invalidate("staff");
       await log();
       return;
     case "products":

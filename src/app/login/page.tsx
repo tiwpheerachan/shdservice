@@ -1,9 +1,10 @@
 import { safeNext } from "@/lib/sso";
+import { COMPANY } from "@/lib/company";
 import { LogIn, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { AuthSplit } from "@/components/ui/sign-in";
 
-export const metadata = { title: "เข้าสู่ระบบ" };
+export const metadata = { title: "เข้าสู่ระบบ", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 const HERO = "/hero-shd.jpg";
@@ -23,9 +24,8 @@ export default async function LoginPage({
 }) {
   const sp = await searchParams;
   const next = safeNext(sp.next);
-  const err = sp.error
-    ? ERRORS[sp.error] ?? `เข้าสู่ระบบไม่สำเร็จ (${sp.error})`
-    : null;
+  // only known codes are shown — never echo a URL parameter back onto the page
+  const err = sp.error ? ERRORS[sp.error] ?? "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" : null;
 
   return (
     <main className="auth-page">
@@ -61,6 +61,7 @@ export default async function LoginPage({
           {/* plain <a>: a Next <Link> would prefetch /api/sso/login and mint a stray state */}
           <a
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
+            rel="nofollow"
             className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
             style={{ background: "linear-gradient(90deg,#43a6f8,#55d5a1)" }}
           >
@@ -70,8 +71,21 @@ export default async function LoginPage({
 
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            ยืนยันตัวตนผ่าน sso.shd-technology.co.th
+            ยืนยันตัวตนผ่านระบบกลางของบริษัท (sso.shd-technology.co.th) — ระบบนี้ไม่ขอรหัสผ่านของคุณ
           </p>
+
+          {/* who runs this site — a plain statement of identity for people (and reviewers) landing here */}
+          <div className="animate-element animate-delay-400 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
+            <p className="font-medium text-foreground">{COMPANY.nameTh} · {COMPANY.nameEn}</p>
+            <p>{COMPANY.address}</p>
+            <p>
+              โทร {COMPANY.phone} · เว็บไซต์{" "}
+              <a href="https://shd-technology.co.th" className="underline" rel="noopener">shd-technology.co.th</a>
+            </p>
+            <p className="mt-1">
+              OneService เป็นระบบภายในสำหรับพนักงาน SHD Technology เท่านั้น — Internal after-sales service system for SHD Technology staff. Not affiliated with Google.
+            </p>
+          </div>
         </div>
       </AuthSplit>
     </main>

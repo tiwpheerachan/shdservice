@@ -1,4 +1,5 @@
 import "server-only";
+import { cached, invalidate, TTL_MASTER } from "@/server/cache";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
@@ -87,7 +88,10 @@ export function isSimpleKind(k: string): k is SimpleKind {
   return k in SIMPLE;
 }
 
-export async function listSimple(kind: SimpleKind, deleted: DeletedMode = "exclude"): Promise<MasterRow[]> {
+export function listSimple(kind: SimpleKind, deleted: DeletedMode = "exclude"): Promise<MasterRow[]> {
+  return cached(`master:${kind}:${deleted}`, TTL_MASTER, () => loadSimple(kind, deleted));
+}
+async function loadSimple(kind: SimpleKind, deleted: DeletedMode): Promise<MasterRow[]> {
   const d = SIMPLE[kind];
   const rows = await db
     .select({
@@ -134,11 +138,13 @@ export async function saveSimple(
     const [before] = await db.select().from(d.table).where(eq(d.id, Number(input.id)));
     await db.update(d.table).set(values).where(eq(d.id, Number(input.id)));
     await audit(db, byUserId, { action: "UPDATE", module: "Admin", entity: kind, key: input.id, summary: `แก้ไข ${kind}: ${name}`, changes: diff(before as Record<string, unknown>, values) });
+    invalidate(`master:${kind}:`);
     const rows = await listSimple(kind, "exclude");
     return rows.find((r) => r.id === input.id)!;
   }
   const [row] = await db.insert(d.table).values(values).returning({ id: d.id });
   await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: kind, key: row.id, summary: `เพิ่ม ${kind}: ${name}` });
+  invalidate(`master:${kind}:`);
   const rows = await listSimple(kind, "exclude");
   return rows.find((r) => r.id === String(row.id))!;
 }
@@ -148,12 +154,16 @@ export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordSt
   const d = SIMPLE[kind];
   await db.update(d.table).set({ [d.keys.active]: rs === "ACTIVE", ...statusStamp(rs, byUserId, false) }).where(eq(d.id, id));
   await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: kind, key: id, summary: `${kind} #${id} → ${rs}`, changes: { recordStatus: [null, rs] } });
+  invalidate(`master:${kind}:`);
 }
 
 /* ------------------------------------------------------------------ *
  * Symptoms (+ group)
  * ------------------------------------------------------------------ */
-export async function listSymptoms(deleted: DeletedMode = "exclude"): Promise<Symptom[]> {
+export function listSymptoms(deleted: DeletedMode = "exclude"): Promise<Symptom[]> {
+  return cached(`master:symptoms:${deleted}`, TTL_MASTER, () => loadSymptoms(deleted));
+}
+async function loadSymptoms(deleted: DeletedMode): Promise<Symptom[]> {
   const rows = await db
     .select()
     .from(symptom)
@@ -198,18 +208,23 @@ export async function saveSymptom(
     id = row.id;
     await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: "symptom", key: id, summary: `เพิ่มอาการเสีย: ${name}` });
   }
+  invalidate("master:symptoms:");
   return (await listSymptoms("exclude")).find((r) => r.id === String(id))!;
 }
 
 export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
   await db.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
   await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: "symptom", key: id, summary: `อาการเสีย #${id} → ${rs}`, changes: { recordStatus: [null, rs] } });
+  invalidate("master:symptoms:");
 }
 
 /* ------------------------------------------------------------------ *
  * Models (code from running "Model" = MD00001)
  * ------------------------------------------------------------------ */
-export async function listModels(deleted: DeletedMode = "exclude"): Promise<Model[]> {
+export function listModels(deleted: DeletedMode = "exclude"): Promise<Model[]> {
+  return cached(`master:models:${deleted}`, TTL_MASTER, () => loadModels(deleted));
+}
+async function loadModels(deleted: DeletedMode): Promise<Model[]> {
   const rows = await db
     .select({
       code: model.modelCode,
@@ -272,12 +287,14 @@ export async function saveModel(
     await audit(tx, byUserId, { action: "CREATE", module: "Admin", entity: "model", key: c, summary: `เพิ่มรุ่นสินค้า ${name} (${str(input.brand)})` });
     return c;
   });
+  invalidate("master:models:");
   return (await listModels("exclude")).find((r) => r.code === code)!;
 }
 
 export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
   await db.update(model).set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() }).where(eq(model.modelCode, code));
   await audit(db, byUserId, { action: rs === "DELETED" ? "DELETE" : "STATUS", module: "Admin", entity: "model", key: code, summary: `รุ่นสินค้า ${code} → ${rs}`, changes: { recordStatus: [null, rs] } });
+  invalidate("master:models:");
 }
 
 export { runningNo };
@@ -300,27 +317,30 @@ export async function pageModels(p: PageQuery, mode: StatusMode = "exclude"): Pr
     statusFilter(model.recordStatus, mode),
     term ? or(ilike(model.modelCode, `%${term}%`), ilike(model.modelName, `%${term}%`), ilike(manufacturer.manufacturerName, `%${term}%`)) : undefined
   );
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(model)
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
-    .where(w);
-  const rows = await db
-    .select({
-      code: model.modelCode,
-      name: model.modelName,
-      brand: manufacturer.manufacturerName,
-      price: model.marketPrice,
-      updated: model.lastUpdate,
-      active: model.recordStatus,
-      id: model.modelId,
-    })
-    .from(model)
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
-    .where(w)
-    .orderBy(...orderByCols(p.sort, MODEL_SORT, [desc(model.modelId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: count() })
+      .from(model)
+      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+      .where(w),
+    db
+      .select({
+        code: model.modelCode,
+        name: model.modelName,
+        brand: manufacturer.manufacturerName,
+        price: model.marketPrice,
+        updated: model.lastUpdate,
+        active: model.recordStatus,
+        id: model.modelId,
+      })
+      .from(model)
+      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+      .where(w)
+      .orderBy(...orderByCols(p.sort, MODEL_SORT, [desc(model.modelId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return {
     rows: rows.map((r) => ({
       code: r.code ?? String(r.id),

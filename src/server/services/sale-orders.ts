@@ -108,17 +108,20 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
 
 export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise<Page<SaleOrder>> {
   const w = saleOrderWhere(p.q, f);
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(saleOutHd)
-    .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
-    .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
-    .where(w);
-  const rows = await base()
-    .where(w)
-    .orderBy(...orderBy(p.sort, SORT, [desc(saleOutHd.documentCreateDate), desc(saleOutHd.saleOutHdId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: count() })
+      .from(saleOutHd)
+      .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
+      .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
+      .where(w),
+    base()
+      .where(w)
+      .orderBy(...orderBy(p.sort, SORT, [desc(saleOutHd.documentCreateDate), desc(saleOutHd.saleOutHdId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return { rows: rows.map(toSaleOrder), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 

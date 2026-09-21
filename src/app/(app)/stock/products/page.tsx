@@ -14,7 +14,11 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
-import { ProductDetailModal, type ProductMode } from "@/components/shared/product-detail-modal";
+import dynamic from "next/dynamic";
+import type { ProductMode } from "@/components/shared/product-detail-modal";
+
+// 500-line modal with its own data hooks — loaded on first open, not with the list page
+const ProductDetailModal = dynamic(() => import("@/components/shared/product-detail-modal").then((m) => m.ProductDetailModal), { ssr: false });
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +74,11 @@ export default function ProductsPage() {
     product: Product | null;
     mode: ProductMode;
   } | null>(null);
+  // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
+  const [modalUsed, setModalUsed] = React.useState(false);
+  React.useEffect(() => {
+    if (detail) setModalUsed(true);
+  }, [detail]);
 
   // FilterBar (applied on "ค้นหา")
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
@@ -320,13 +329,13 @@ export default function ProductsPage() {
         server={{ total: totalRows, onChange: setTable }}
       />
 
-      <ProductDetailModal
+      {modalUsed && <ProductDetailModal
         open={!!detail}
         onClose={() => setDetail(null)}
         product={detail?.product ?? null}
         mode={detail?.mode ?? "view"}
         onSave={() => reload()}
-      />
+      />}
     </>
   );
 }

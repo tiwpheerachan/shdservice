@@ -26,6 +26,17 @@ function toLogin() {
   window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname + window.location.search);
 }
 
+/**
+ * Listeners run after every successful non-GET call (create/update/delete/
+ * upload) — the data hooks use this to drop their cached lists so the next
+ * screen shows the new rows. Registered from src/data/db.ts.
+ */
+const writeListeners = new Set<() => void>();
+export function onApiWrite(fn: () => void) {
+  writeListeners.add(fn);
+  return () => writeListeners.delete(fn);
+}
+
 export async function api<T = unknown>(url: string, init: RequestInit = {}, retry = true): Promise<T> {
   const res = await fetch(url, { cache: "no-store", ...init });
   if (res.status === 401) {
@@ -35,6 +46,7 @@ export async function api<T = unknown>(url: string, init: RequestInit = {}, retr
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string; details?: unknown };
   if (!res.ok) throw new ApiError(res.status, (data as { error?: string })?.error || `เกิดข้อผิดพลาด (${res.status})`, (data as { details?: unknown })?.details);
+  if ((init.method ?? "GET").toUpperCase() !== "GET") writeListeners.forEach((fn) => fn());
   return data as T;
 }
 

@@ -930,19 +930,22 @@ const PRODUCT_SORT = {
 
 export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Page<Product & { value: number }>> {
   const w = productWhere(p.q, f);
-  const [{ total }] = await db
-    .select({ total: countFn() })
-    .from(product)
-    .leftJoin(category, eq(category.categoryId, product.categoryId))
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
-    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
-    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
-    .where(w);
-  const rows = await productPagedQuery()
-    .where(w)
-    .orderBy(...orderByCols(p.sort, PRODUCT_SORT, [asc(product.productCode)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: countFn() })
+      .from(product)
+      .leftJoin(category, eq(category.categoryId, product.categoryId))
+      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+      .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+      .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
+      .where(w),
+    productPagedQuery()
+      .where(w)
+      .orderBy(...orderByCols(p.sort, PRODUCT_SORT, [asc(product.productCode)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return {
     rows: rows.map((r) => {
       const pr = toProduct(r, fullName(r.creatorFirst, r.creatorLast));
@@ -1045,32 +1048,35 @@ const MOVE_SORT = {
 
 export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<Page<Movement>> {
   const w = movementWhere({ ...f, q: p.q || f.q });
-  const [{ total }] = await db
-    .select({ total: countFn() })
-    .from(inventoryHd)
-    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
-    .where(w);
-  const rows = await db
-    .select({
-      doc: inventoryHd.inventoryNo,
-      type: inventoryType.inventoryTypeName,
-      typeId: inventoryHd.inventoryTypeId,
-      ref: inventoryHd.referenceDocumentNo,
-      outTo: inventoryHd.referenceOutTo,
-      date: inventoryHd.createDate,
-      remark: inventoryHd.inventoryRemark,
-      byFirst: appUser.firstName,
-      byLast: appUser.lastName,
-      qty: sql<string>`(select coalesce(sum(d.item_quantity),0) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
-      items: sql<string>`(select string_agg(d.item_code || ' x' || d.item_quantity::int, ', ' order by d.inventory_dt_id) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
-    })
-    .from(inventoryHd)
-    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
-    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
-    .where(w)
-    .orderBy(...orderByCols(p.sort, MOVE_SORT, [desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: countFn() })
+      .from(inventoryHd)
+      .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+      .where(w),
+    db
+      .select({
+        doc: inventoryHd.inventoryNo,
+        type: inventoryType.inventoryTypeName,
+        typeId: inventoryHd.inventoryTypeId,
+        ref: inventoryHd.referenceDocumentNo,
+        outTo: inventoryHd.referenceOutTo,
+        date: inventoryHd.createDate,
+        remark: inventoryHd.inventoryRemark,
+        byFirst: appUser.firstName,
+        byLast: appUser.lastName,
+        qty: sql<string>`(select coalesce(sum(d.item_quantity),0) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+        items: sql<string>`(select string_agg(d.item_code || ' x' || d.item_quantity::int, ', ' order by d.inventory_dt_id) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+      })
+      .from(inventoryHd)
+      .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+      .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
+      .where(w)
+      .orderBy(...orderByCols(p.sort, MOVE_SORT, [desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   const wh = "คลังสินค้าดี";
   return {
     rows: rows.map((r) => {
@@ -1152,12 +1158,15 @@ const ISSUED_SORT = {
 
 export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
   const w = issuedWhere(p.q, f);
-  const [{ total }] = await issuedCountBase().where(w);
-  const rows = await issuedBase()
-    .where(w)
-    .orderBy(...orderByCols(p.sort, ISSUED_SORT, [desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    issuedCountBase().where(w),
+    issuedBase()
+      .where(w)
+      .orderBy(...orderByCols(p.sort, ISSUED_SORT, [desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return {
     rows: rows.map((r) => {
       const qty = num(r.qty);

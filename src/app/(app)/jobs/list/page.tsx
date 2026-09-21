@@ -20,8 +20,12 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
-import { CustomerCallModal } from "@/components/shared/customer-call-modal";
+import dynamic from "next/dynamic";
+
+// call-log modal — loaded on first open, not with the list page
+const CustomerCallModal = dynamic(() => import("@/components/shared/customer-call-modal").then((m) => m.CustomerCallModal), { ssr: false });
 import { JOB_STATUS_OPTIONS, type Job, type Customer } from "@/data/mock";
 import { useJobsPage, useJobTypes, useStaff, useJobStats } from "@/data/db";
 import { baht, cn } from "@/lib/utils";
@@ -57,9 +61,11 @@ function StatChip({
       </span>
       <div className="min-w-0">
         <p className="truncate text-2xs text-muted-foreground">{label}</p>
-        <p className="num text-lg font-semibold leading-tight tabular-nums">
-          {loading ? "—" : value.toLocaleString("en-US")}
-        </p>
+        {loading ? (
+          <Skeleton className="mt-1 h-5 w-12" />
+        ) : (
+          <p className="num text-lg font-semibold leading-tight tabular-nums">{value.toLocaleString("en-US")}</p>
+        )}
       </div>
     </div>
   );
@@ -103,6 +109,11 @@ export default function JobListPage() {
     customer: Customer | null;
     jobNo: string;
   } | null>(null);
+  // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
+  const [modalUsed, setModalUsed] = React.useState(false);
+  React.useEffect(() => {
+    if (callFor) setModalUsed(true);
+  }, [callFor]);
 
   // customer_detail = "C12150 ชื่อ เบอร์" → look the customer up by code
   const openCall = async (job: Job) => {
@@ -305,12 +316,14 @@ export default function JobListPage() {
         server={{ total, onChange: setTable }}
       />
 
-      <CustomerCallModal
-        open={!!callFor}
-        onClose={() => setCallFor(null)}
-        customer={callFor?.customer ?? null}
-        jobNo={callFor?.jobNo}
-      />
+      {modalUsed && (
+        <CustomerCallModal
+          open={!!callFor}
+          onClose={() => setCallFor(null)}
+          customer={callFor?.customer ?? null}
+          jobNo={callFor?.jobNo}
+        />
+      )}
     </>
   );
 }

@@ -245,6 +245,8 @@ export default function UsersPage() {
             <img
               src={r.avatar}
               alt={r.name}
+              loading="lazy"
+              decoding="async"
               className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";

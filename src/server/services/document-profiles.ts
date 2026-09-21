@@ -1,4 +1,5 @@
 import "server-only";
+import { cached, invalidate, TTL_MASTER } from "@/server/cache";
 import { asc, eq, ne, and, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { documentProfile } from "@/db/schema";
@@ -71,7 +72,10 @@ function toProfile(r: Row): DocumentProfile {
   };
 }
 
-export async function listDocumentProfiles(activeOnly = true): Promise<DocumentProfile[]> {
+export function listDocumentProfiles(activeOnly = true): Promise<DocumentProfile[]> {
+  return cached(`docprofiles:${activeOnly}`, TTL_MASTER, () => loadDocumentProfiles(activeOnly));
+}
+async function loadDocumentProfiles(activeOnly: boolean): Promise<DocumentProfile[]> {
   const rows = await db
     .select()
     .from(documentProfile)
@@ -207,6 +211,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
       summary: `${before ? "แก้ไข" : "เพิ่ม"}โปรไฟล์ผู้ออกเอกสาร ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
+    invalidate("docprofiles:");
     return toProfile(row);
   });
 }
@@ -218,4 +223,5 @@ export async function setDocumentProfileLogo(id: number, logoPath: string, byUse
     await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.id, id));
     await audit(tx, byUserId, { action: "UPDATE", module: "Admin", entity: "document_profile", key: id, summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`, changes: { logoPath: [before.logoPath, logoPath] } });
   });
+  invalidate("docprofiles:");
 }

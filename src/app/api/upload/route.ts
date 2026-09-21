@@ -4,7 +4,7 @@ import { db } from "@/db/client";
 import { job, product, saleOutHd } from "@/db/schema";
 import { handle, requireCan, requireAdmin, HttpError } from "@/server/auth";
 import { getDocumentProfile, setDocumentProfileLogo } from "@/server/services/document-profiles";
-import { systemFileName, uploadFile, removeFile, filePath, resolvePath, ALLOWED_TYPES, MAX_FILE_BYTES } from "@/server/storage";
+import { systemFileName, uploadFile, removeFile, filePath, resolvePath, optimizeImage, ALLOWED_TYPES, MAX_FILE_BYTES } from "@/server/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +31,9 @@ export const POST = handle(async (req: NextRequest) => {
   if (file.type && !ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "รองรับเฉพาะ JPG, PNG, WEBP, PDF");
   if ((kind === "product-image" || kind === "profile-logo") && file.type === "application/pdf") throw new HttpError(415, kind === "profile-logo" ? "โลโก้ต้องเป็นไฟล์ภาพ" : "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
 
-  const sys = systemFileName(file.name);
+  // photos (product image / payment slips) are resized server-side; the logo is kept as uploaded
+  const body = kind === "profile-logo" ? file : await optimizeImage(file);
+  const sys = systemFileName(body.name); // after optimizeImage: a photo-PNG may now be .jpg
   switch (kind) {
     case "profile-logo": {
       // ออกเอกสารในนาม — logo printed on quotations / labels / return notes (System Admin)
@@ -50,7 +52,7 @@ export const POST = handle(async (req: NextRequest) => {
       const [row] = await db.select({ old: product.pictrueFileName }).from(product).where(eq(product.productCode, id));
       if (!row) throw new HttpError(404, "ไม่พบรหัสอะไหล่ " + id);
       const path = filePath.productImage(id, sys);
-      await uploadFile(path, file);
+      await uploadFile(path, body);
       await db.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
       if (row.old) await removeFile(resolvePath(row.old, (f) => filePath.productImage(id, f)));
       return NextResponse.json({ ok: true, path, file: sys });
@@ -60,7 +62,7 @@ export const POST = handle(async (req: NextRequest) => {
       const [row] = await db.select({ old: saleOutHd.slipFileName }).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id));
       if (!row) throw new HttpError(404, "ไม่พบใบสั่งขาย " + id);
       const path = filePath.saleOrderSlip(id, sys);
-      await uploadFile(path, file);
+      await uploadFile(path, body);
       await db.update(saleOutHd).set({ slipFileName: path }).where(eq(saleOutHd.saleOutHdNo, id));
       if (row.old && row.old.includes("/")) await removeFile(row.old);
       return NextResponse.json({ ok: true, path, file: sys });
@@ -70,7 +72,7 @@ export const POST = handle(async (req: NextRequest) => {
       const [row] = await db.select({ old: job.jobPaymentSlipFileName }).from(job).where(eq(job.jobNo, id));
       if (!row) throw new HttpError(404, "ไม่พบหมายเลขงาน " + id);
       const path = filePath.jobSlip(id, sys);
-      await uploadFile(path, file);
+      await uploadFile(path, body);
       await db.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
       if (row.old && row.old.includes("/")) await removeFile(row.old);
       return NextResponse.json({ ok: true, path, file: sys });

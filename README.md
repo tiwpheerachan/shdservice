@@ -58,13 +58,30 @@ npm start
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage |
+| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage · `swr` (client cache ของ data hooks) · `sharp` (ย่อรูปตอนอัปโหลด) |
 | Version | ตรึงเวอร์ชันแบบ exact (ไม่มี `^`) ทุกตัว — `npm install` ได้ผลลัพธ์เดิมเสมอ |
 | Type Safety | TypeScript `strict: true` ผ่าน `next build` โดยไม่มี error |
 | Dark mode | สคริปต์ inline ใน `<head>` ตั้ง class ก่อน paint → **ไม่มีจอกระพริบ (FOUC)** |
 | Layout stability | `scrollbar-gutter: stable`, ตารางมี `overflow-x` เฉพาะตัวเอง, sidebar ใช้ CSS transition → ไม่มี layout shift |
 | Accessibility | `focus-visible` ring ทุก control, `aria-*` ครบ, ปิด Modal/Palette ด้วย `Esc`, keyboard navigation |
 | Print | มี `@media print` และคลาส `.no-print` สำหรับพิมพ์รายงาน/ใบส่งคืน |
+| Fonts | Noto Sans Thai + Inter ผ่าน `next/font/google` — self-host ตอน build ไม่มี request ไป Google Fonts ตอนใช้งาน ไม่มี render-blocking stylesheet |
+
+---
+
+## Performance (สิ่งที่ทำไว้แล้ว — อย่าทำซ้ำ)
+
+| ชั้น | กลไก | ที่ |
+|---|---|---|
+| Client cache | ทุก hook ใน `src/data/db.ts` อยู่บน **swr** key = URL เต็ม → component ที่ขอ list เดียวกันใช้ request เดียว, เปิดหน้าซ้ำได้ข้อมูลทันที · re-fetch เมื่อเก่ากว่า TTL (master 5 นาที / อื่น ๆ 30 วิ), เมื่อหน้าเรียก `refetch()`, และ**หลังทุกการเขียนผ่าน `api()`** (`onApiWrite` → `invalidateLists`) · ไม่ refresh ตอนสลับแท็บ (ตัดสินใจแล้ว) | `src/data/db.ts`, `src/lib/api.ts` |
+| Server cache | `cached(key, ttl, load)` ใน `src/server/cache.ts` — เก็บ *promise* (request พร้อมกัน 16 ตัวได้ query เดียว) ใช้กับ master list / staff / provinces / document profiles / vendor-shipper suggestions · write path เรียก `invalidate(prefix)` เสมอ → แก้แล้วเห็นทันที | `src/server/cache.ts` + services |
+| User lookup | `resolveUser` cache แถว `app_user` ต่ออีเมล **10 วิ** (จาก 1 query ต่อ API call → 1 ต่อ 10 วิ) · approve/แก้/ลบผู้ใช้ เรียก `invalidateUserCache()` จึงยังมีผลทันที | `src/server/auth.ts` |
+| ที่มีอยู่ก่อน | grants (`app_config`) 60 วิ · dashboard 30 วิ · symptom_stats / job_statuses 5 นาที | `auth.ts`, `services/jobs.ts` |
+| รูปอัปโหลด | `optimizeImage()` (sharp): หมุนตาม EXIF, ด้านยาวสูงสุด 1600px, คุณภาพ 82 · jpg/webp คงฟอร์แมต · PNG ที่ทึบทั้งรูป (ภาพถ่ายที่เซฟเป็น PNG) → เป็น .jpg · PNG โปร่งใสคง PNG · PDF/โลโก้โปรไฟล์ไม่แตะ · รูปเก่าใน bucket ไม่ได้ย่อย้อนหลัง | `src/server/storage.ts`, `api/upload` |
+| ค้นหา | ช่องค้นหาที่ยิง DB ทุกช่อง (DataTable โหมด server, customer-select, job-search) ส่งคำค้นเมื่อ **≥ 3 ตัวอักษร** (`SEARCH_MIN_CHARS` ใน `lib/utils.ts`) — GIN trigram ต้องมี 3 ตัวติดกัน ไม่งั้น Postgres ไล่ทั้งตาราง (วัดแล้ว 2 ตัว ≈ 400 ms, 3 ตัว ≈ 7 ms) · ทุก `page*()` รัน count + rows ด้วย `Promise.all` | `components/ui/data-table.tsx`, services |
+| Bundle | modal ใหญ่ (`ProductDetailModal`, `CustomerCallModal`) โหลดผ่าน `next/dynamic` ตอนเปิดครั้งแรก · รูปในตาราง `loading="lazy"` · skeleton แถวใน `DataTable` + `(app)/loading.tsx` แทน spinner | pages / `components/ui` |
+
+หมายเหตุ: cache ทั้งหมดเป็น in-memory ของ instance เดียว (Render 1 instance) — ถ้า scale หลาย instance ต้องย้าย rate-limit + cache ไป Redis ก่อน
 
 ---
 

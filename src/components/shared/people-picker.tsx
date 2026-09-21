@@ -187,6 +187,8 @@ export function PeoplePicker({
                       <img
                         src={p.avatar}
                         alt={p.name}
+                        loading="lazy"
+                        decoding="async"
                         className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-border"
                       />
                     ) : (

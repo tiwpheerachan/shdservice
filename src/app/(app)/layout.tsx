@@ -23,17 +23,15 @@ export default async function AppLayout({
   const user = await userFromCookies();
   if (!user) {
     // soft navigation / prefetch → our /login page; real navigation → SSO directly
+    // always our own /login page — never auto-forward to the external SSO
+    // (see middleware.ts: Google Web Risk flags sites that do that)
     const h = await headers();
     const next = h.get("next-url") || "";
-    if (h.get("rsc") || h.get("next-router-prefetch")) {
-      redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
-    }
-    // a cookie was sent (middleware let it through) but it no longer verifies →
-    // the session expired: show /login rather than bouncing through SSO silently
-    if ((await cookies()).get(SESSION_COOKIE)?.value) {
-      redirect(next ? `/login?expired=1&next=${encodeURIComponent(next)}` : "/login?expired=1");
-    }
-    redirect("/api/sso/login");
+    const expired = !!(await cookies()).get(SESSION_COOKIE)?.value; // cookie present but no longer verifies
+    const q = new URLSearchParams();
+    if (expired) q.set("expired", "1");
+    if (next) q.set("next", next);
+    redirect(q.size ? `/login?${q}` : "/login");
   }
   if (!user.approved) redirect("/pending");
 

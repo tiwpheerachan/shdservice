@@ -56,13 +56,39 @@ export async function findAppUserByEmail(email: string) {
   return rows[0] ?? null;
 }
 
+/* ------------------------------------------------------------------ *
+ * app_user lookup — cached 10 s per email. A screen fires 10–20 API calls
+ * on load and every one of them resolved the same row; now it is one query
+ * per user per 10 s. Admin edits (approve / role / delete) call
+ * invalidateUserCache() so they still take effect immediately; the TTL only
+ * bounds what a direct SQL edit can lag by.
+ * ------------------------------------------------------------------ */
+type AppUserRow = NonNullable<Awaited<ReturnType<typeof findAppUserByEmail>>>;
+const userCache = new Map<string, { at: number; row: AppUserRow }>();
+const USER_TTL = 10_000;
+
+export function invalidateUserCache(email?: string) {
+  if (email) userCache.delete(normEmail(email));
+  else userCache.clear();
+}
+
+async function cachedAppUser(email: string): Promise<AppUserRow | null> {
+  const key = normEmail(email);
+  const hit = userCache.get(key);
+  if (hit && Date.now() - hit.at < USER_TTL) return hit.row;
+  const row = await findAppUserByEmail(key);
+  if (row) userCache.set(key, { at: Date.now(), row }); // a missing row is never cached (first login race)
+  else userCache.delete(key);
+  return row;
+}
+
 /** Resolve a verified session cookie payload to the current user. */
 export async function resolveUser(session: SessionUser | null): Promise<CurrentUser | null> {
   if (!session) return null;
   const owner = isOwner(session.email);
-  let row: Awaited<ReturnType<typeof findAppUserByEmail>> = null;
+  let row: AppUserRow | null = null;
   try {
-    row = await findAppUserByEmail(session.email);
+    row = await cachedAppUser(session.email);
   } catch {
     row = null; // DB unreachable — fall back to the login-time cookie flags below
   }

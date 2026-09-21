@@ -29,3 +29,12 @@ export function fmtDateTime(s: string) {
 export function slugTitle(s: string) {
   return s.replace(/-/g, " ");
 }
+
+/**
+ * Minimum length before a free-text search is sent to the server. The
+ * pg_trgm indexes need 3 consecutive characters — a 1–2 character term
+ * cannot use them and falls back to scanning the whole table (≈400 ms on
+ * 43k customers, worse on 48k jobs), for results nobody can use anyway.
+ */
+export const SEARCH_MIN_CHARS = 3;
+export const SEARCH_MIN_HINT = `พิมพ์อย่างน้อย ${SEARCH_MIN_CHARS} ตัวอักษร`;

@@ -1,4 +1,5 @@
 import "server-only";
+import sharp from "sharp";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -29,6 +30,49 @@ export function resolvePath(stored: string, fallback: (file: string) => string):
 
 export const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Longest edge kept for uploaded photos (product images / payment slips). */
+export const IMAGE_MAX_EDGE = 1600;
+
+/**
+ * Shrink an uploaded photo before it goes to the bucket: apply EXIF rotation,
+ * cap the longest edge at IMAGE_MAX_EDGE, re-encode at quality 82. jpg/webp
+ * keep their format. A PNG WITHOUT transparency is a photo saved in the wrong
+ * container (lossless PNG barely shrinks it) — it comes back as JPEG with a
+ * .jpg name; a PNG with transparency (logo, graphic) stays PNG. The stored
+ * file name is generated from the returned name, so nothing legacy is renamed.
+ * Anything that is not a raster image, or that would not get smaller, is
+ * returned untouched; a decode failure falls back to the original file rather
+ * than rejecting the upload.
+ */
+export async function optimizeImage(file: File): Promise<File> {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+  try {
+    const input = Buffer.from(await file.arrayBuffer());
+    const img = sharp(input, { failOn: "none" })
+      .rotate()
+      .resize({ width: IMAGE_MAX_EDGE, height: IMAGE_MAX_EDGE, fit: "inside", withoutEnlargement: true });
+    let type = file.type;
+    let name = file.name;
+    let out: Buffer;
+    // phones/screens often export photos as PNG with a fully opaque alpha channel — stats().isOpaque sees through that
+    if (type === "image/png" && !(await sharp(input, { failOn: "none" }).stats()).isOpaque) {
+      out = await img.png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
+    } else if (type === "image/webp") {
+      out = await img.webp({ quality: 82 }).toBuffer();
+    } else {
+      out = await img.jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+      if (type === "image/png") {
+        type = "image/jpeg";
+        name = name.replace(/\.png$/i, "") + ".jpg";
+      }
+    }
+    if (out.length >= input.length && type === file.type) return file;
+    return new File([new Uint8Array(out)], name, { type, lastModified: file.lastModified });
+  } catch {
+    return file;
+  }
+}
 
 let client: SupabaseClient | null = null;
 function storage() {

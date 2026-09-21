@@ -12,7 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { type Customer } from "@/data/mock";
 import { api, postJson, errMsg, qs, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
-import { cn } from "@/lib/utils";
+import { cn, SEARCH_MIN_CHARS } from "@/lib/utils";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, type CustomerFormValues, type CustomerConflict } from "./customer-form";
 
 /**
@@ -184,7 +184,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
   // debounced server lookup (code / name / phone / tax id / email), max 10 rows
   React.useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setRows([]); return; }
+    if (term.length < SEARCH_MIN_CHARS) { setRows([]); return; }
     const my = ++seq.current;
     setLoading(true);
     const t = setTimeout(() => {
@@ -240,8 +240,8 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
             )}
           </div>
           <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
-            {q.trim().length < 2 && <p className="px-3 py-5 text-center text-xs text-muted-foreground">พิมพ์รหัส ชื่อ เบอร์โทร เลขบัตร หรืออีเมล อย่างน้อย 2 ตัวอักษร</p>}
-            {q.trim().length >= 2 && !loading && rows.length === 0 && (
+            {q.trim().length < SEARCH_MIN_CHARS && <p className="px-3 py-5 text-center text-xs text-muted-foreground">พิมพ์รหัส ชื่อ เบอร์โทร เลขบัตร หรืออีเมล อย่างน้อย {SEARCH_MIN_CHARS} ตัวอักษร</p>}
+            {q.trim().length >= SEARCH_MIN_CHARS && !loading && rows.length === 0 && (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">ไม่พบลูกค้าที่ตรงกับ "{q.trim()}"</p>
             )}
             {rows.map((c) => (

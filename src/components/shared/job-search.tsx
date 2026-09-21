@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/pop
 import { StatusBadge } from "@/components/ui/badge";
 import { type Job } from "@/data/mock";
 import { api, qs } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
 
 /**
  * Which jobs the dropdown offers — each job screen narrows the list to what it
@@ -52,7 +52,7 @@ export function JobSearch({
   // reference no / IMEI / serial / model), newest first, max 10 rows
   React.useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setRows([]); return; }
+    if (term.length < SEARCH_MIN_CHARS) { setRows([]); return; }
     const my = ++seq.current;
     setLoading(true);
     const t = setTimeout(() => {
@@ -119,12 +119,12 @@ export function JobSearch({
             )}
           </div>
           <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
-            {term.length < 2 && (
+            {term.length < SEARCH_MIN_CHARS && (
               <p className="px-3 py-5 text-center text-xs text-muted-foreground">
-                พิมพ์อย่างน้อย 2 ตัวอักษร — เลขงาน ชื่อ/รหัส/เบอร์ลูกค้า Serial, IMEI หรือรุ่น
+                {SEARCH_MIN_HINT} — เลขงาน ชื่อ/รหัส/เบอร์ลูกค้า Serial, IMEI หรือรุ่น
               </p>
             )}
-            {term.length >= 2 && !loading && rows.length === 0 && !exactOutside && (
+            {term.length >= SEARCH_MIN_CHARS && !loading && rows.length === 0 && !exactOutside && (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">ไม่พบงานที่ตรงกับ "{term}"{hint ? ` (${hint})` : ""}</p>
             )}
             {exactOutside && rows.length === 0 && (

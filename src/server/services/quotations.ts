@@ -131,19 +131,22 @@ export function quotationWhere(q: string, f: QuotationFilters) {
 
 export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise<Page<Quotation>> {
   const w = quotationWhere(p.q, f);
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(quotationHd)
-    .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
-    .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
-    .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
-    .where(w);
-  const rows = await base()
-    .where(w)
-    .orderBy(...orderBy(p.sort, SORT, [desc(quotationHd.createDate), desc(quotationHd.quotationHdId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db
+      .select({ total: count() })
+      .from(quotationHd)
+      .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
+      .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
+      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
+      .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
+      .where(w),
+    base()
+      .where(w)
+      .orderBy(...orderBy(p.sort, SORT, [desc(quotationHd.createDate), desc(quotationHd.quotationHdId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return { rows: rows.map(toQuotation), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 

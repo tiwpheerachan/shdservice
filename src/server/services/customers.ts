@@ -1,4 +1,5 @@
 import "server-only";
+import { cached, TTL_STATIC } from "@/server/cache";
 import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { db } from "@/db/client";
@@ -97,15 +98,18 @@ function customerWhere(q: string, deleted: DeletedMode) {
 /** Server-side page for the customer list (43k rows). */
 export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclude"): Promise<Page<Customer>> {
   const w = customerWhere(p.q, deleted);
-  const [{ total }] = await db.select({ total: count() }).from(customer).where(w);
-  const rows = await db
-    .select({ c: customer, f: appUser.firstName, l: appUser.lastName })
-    .from(customer)
-    .leftJoin(appUser, eq(appUser.userId, customer.createBy))
-    .where(w)
-    .orderBy(...orderBy(p.sort, SORT, [desc(customer.customerId)]))
-    .limit(p.pageSize)
-    .offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db.select({ total: count() }).from(customer).where(w),
+    db
+      .select({ c: customer, f: appUser.firstName, l: appUser.lastName })
+      .from(customer)
+      .leftJoin(appUser, eq(appUser.userId, customer.createBy))
+      .where(w)
+      .orderBy(...orderBy(p.sort, SORT, [desc(customer.customerId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
   return { rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 
@@ -262,8 +266,10 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
 }
 
 /* Address master data for cascading dropdowns */
-export async function listProvinces() {
-  return db.select({ id: mtCity.cityId, name: mtCity.nameTh }).from(mtCity).orderBy(asc(mtCity.nameTh));
+export function listProvinces() {
+  return cached("provinces", TTL_STATIC, () =>
+    db.select({ id: mtCity.cityId, name: mtCity.nameTh }).from(mtCity).orderBy(asc(mtCity.nameTh))
+  );
 }
 export async function listDistricts(cityId: number) {
   return db

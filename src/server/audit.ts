@@ -140,8 +140,11 @@ const SORT = { at: auditLog.at, user: auditLog.userName, action: auditLog.action
 
 export async function pageAudit(p: PageQuery, f: AuditFilters): Promise<Page<AuditRow>> {
   const w = auditWhere(p.q, f);
-  const [{ total }] = await db.select({ total: count() }).from(auditLog).where(w);
-  const rows = await db.select().from(auditLog).where(w).orderBy(...orderByCols(p.sort, SORT, [desc(auditLog.id)])).limit(p.pageSize).offset(offsetOf(p));
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [[{ total }], rows] = await Promise.all([
+    db.select({ total: count() }).from(auditLog).where(w),
+    db.select().from(auditLog).where(w).orderBy(...orderByCols(p.sort, SORT, [desc(auditLog.id)])).limit(p.pageSize).offset(offsetOf(p)),
+  ]);
   return { rows: rows.map(toRow), total: Number(total), page: p.page, pageSize: p.pageSize };
 }
 
