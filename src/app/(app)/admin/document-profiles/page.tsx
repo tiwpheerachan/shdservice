@@ -11,7 +11,8 @@ import { Modal } from "@/components/ui/modal";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Checkbox } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { api, postJson, errMsg, uploadFile } from "@/lib/api";
+import { useConfirm } from "@/components/ui/confirm";
+import { api, postJson, del, errMsg, uploadFile } from "@/lib/api";
 
 type Profile = {
   id: number;
@@ -66,6 +67,7 @@ const EMPTY: FormValues = {
  */
 export default function DocumentProfilesPage() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const [rows, setRows] = React.useState<Profile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [open, setOpen] = React.useState(false);
@@ -126,6 +128,29 @@ export default function DocumentProfilesPage() {
     }
   };
 
+  const remove = async (r: Profile) => {
+    const ok = await confirm({
+      tone: "danger",
+      title: `ลบโปรไฟล์ ${r.code} — ${r.nameTh}?`,
+      description: (
+        <>
+          จะหายจากหน้านี้และจากช่อง "ออกเอกสารในนาม" ทุกฟอร์ม เอกสารที่เคยออกในนามนี้ยังพิมพ์ด้วยโลโก้/ที่อยู่เดิมได้ และ prefix เลขเอกสารของโปรไฟล์นี้จะถูกจองไว้ นำกลับมาใช้กับโปรไฟล์อื่นไม่ได้
+          <br />
+          การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่หยุดใช้ชั่วคราว ให้แก้ไขแล้วปิด "เปิดใช้งาน" แทน
+        </>
+      ),
+      confirmLabel: "ลบโปรไฟล์",
+    });
+    if (!ok) return;
+    try {
+      await del(`/api/admin/document-profiles?id=${r.id}`);
+      push({ kind: "success", title: "ลบโปรไฟล์แล้ว", desc: `${r.code} · ${r.nameTh}` });
+      void load();
+    } catch (e) {
+      push({ kind: "error", title: "ลบไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
+
   const columns: Column<Profile>[] = [
     {
       key: "code",
@@ -172,7 +197,15 @@ export default function DocumentProfilesPage() {
         </div>
       ),
     },
-    { key: "action", header: "Action", width: "90px", align: "center", sortable: false, cell: (r) => <RowActions onEdit={() => openForm(r)} /> },
+    {
+      key: "action",
+      header: "Action",
+      width: "90px",
+      align: "center",
+      sortable: false,
+      // SHD (id 1) is the built-in fallback — edit only
+      cell: (r) => <RowActions onEdit={() => openForm(r)} onDelete={r.id === 1 ? undefined : () => remove(r)} />,
+    },
   ];
 
   return (

@@ -889,4 +889,7 @@ export const documentProfile = pgTable("document_profile", {
 	sortOrder: integer("sort_order").notNull().default(0),
 	createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+	// soft delete (drizzle/0009): hidden from lists/dropdowns, still printable for old documents
+	deletedAt: timestamp("deleted_at", { mode: "string" }),
+	deletedBy: integer("deleted_by"),
 });

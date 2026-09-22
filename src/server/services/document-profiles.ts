@@ -1,6 +1,6 @@
 import "server-only";
 import { cached, invalidate, TTL_MASTER } from "@/server/cache";
-import { asc, eq, ne, and, sql } from "drizzle-orm";
+import { asc, eq, ne, and, sql, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { documentProfile } from "@/db/schema";
 import { HttpError } from "@/server/auth";
@@ -37,6 +37,7 @@ export type DocumentProfile = {
   prefixSaleOrder: string;
   isDefault: boolean;
   isActive: boolean;
+  isDeleted: boolean;
   sortOrder: number;
 };
 
@@ -68,6 +69,7 @@ function toProfile(r: Row): DocumentProfile {
     prefixSaleOrder: r.prefixSaleOrder,
     isDefault: r.isDefault,
     isActive: r.isActive,
+    isDeleted: !!r.deletedAt,
     sortOrder: r.sortOrder,
   };
 }
@@ -79,7 +81,7 @@ async function loadDocumentProfiles(activeOnly: boolean): Promise<DocumentProfil
   const rows = await db
     .select()
     .from(documentProfile)
-    .where(activeOnly ? eq(documentProfile.isActive, true) : undefined)
+    .where(and(isNull(documentProfile.deletedAt), activeOnly ? eq(documentProfile.isActive, true) : undefined))
     .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id));
   return rows.map(toProfile);
 }
@@ -97,7 +99,11 @@ export async function profileForDocument(id: number | null | undefined): Promise
 }
 
 export async function defaultDocumentProfile(): Promise<DocumentProfile> {
-  const [r] = await db.select().from(documentProfile).where(and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true))).limit(1);
+  const [r] = await db
+    .select()
+    .from(documentProfile)
+    .where(and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)))
+    .limit(1);
   return r ? toProfile(r) : profileForDocument(SHD_PROFILE_ID);
 }
 
@@ -109,8 +115,39 @@ export async function defaultDocumentProfile(): Promise<DocumentProfile> {
 export async function issuingProfile(requested: number | null | undefined): Promise<DocumentProfile> {
   if (!requested || requested <= 0) return defaultDocumentProfile();
   const p = await getDocumentProfile(requested);
-  if (!p || !p.isActive) throw new HttpError(400, "โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน");
+  if (!p || !p.isActive || p.isDeleted) throw new HttpError(400, "โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน");
   return p;
+}
+
+/**
+ * Soft delete: the row stays so documents issued under it keep printing and its
+ * prefixes stay reserved. SHD (id 1, the built-in fallback) and the current
+ * default cannot be deleted — pick another default first.
+ */
+export async function deleteDocumentProfile(id: number, byUserId: number): Promise<void> {
+  if (id === SHD_PROFILE_ID) throw new HttpError(400, "โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)");
+  await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
+    if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (before.isDefault) throw new HttpError(400, "โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ");
+    const issued = await tx.execute(
+      sql`select 1 from running_no where company_id = ${id} and running_type in ('Job','Quotation','SaleOrder') and number > 0 limit 1`
+    );
+    const hadDocuments = (issued.rows?.length ?? 0) > 0;
+    await tx
+      .update(documentProfile)
+      .set({ deletedAt: nowThai(), deletedBy: byUserId, isDefault: false, updatedAt: nowThai() })
+      .where(eq(documentProfile.id, id));
+    await audit(tx, byUserId, {
+      action: "DELETE",
+      module: "Admin",
+      entity: "document_profile",
+      key: id,
+      summary: `ลบโปรไฟล์ผู้ออกเอกสาร ${before.code} — ${before.nameTh}${hadDocuments ? " (เคยออกเอกสารแล้ว เอกสารเดิมยังพิมพ์ได้)" : ""}`,
+      changes: { deletedAt: [null, nowThai()] },
+    });
+  });
+  invalidate("docprofiles:");
 }
 
 export type DocumentProfileInput = {
@@ -182,7 +219,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     let before: Row | undefined;
     if (i.id) {
       [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).limit(1);
-      if (!before) throw new HttpError(404, "ไม่พบโปรไฟล์");
+      if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
       // prefixes are baked into every number already issued — freeze them once used
       // any running_no row for this profile with number > 0 means documents exist
       const used = await tx.execute(

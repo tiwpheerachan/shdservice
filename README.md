@@ -40,6 +40,8 @@ npm start
 | `drizzle/0004_indexes.sql` | index สำหรับ filter/รายงาน + `pg_trgm` GIN สำหรับช่องค้นหา (ILIKE) |
 | `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
 | `drizzle/0006_audit_log.sql` | ตาราง `audit_log` (append-only, trigger กัน UPDATE/DELETE) — ประวัติทุกการเขียนของแอป ดูที่ ข้อมูลระบบ → ประวัติการใช้งาน |
+| `drizzle/0008_job_filter_indexes.sql` | index สำหรับตัวกรองหน้ารายการงาน (ยี่ห้อ/รุ่น/งานย่อย/ผู้เปิด/วันรับเครื่อง/warranty/งานเด้ง/เลขพัสดุ) |
+| `drizzle/0009_document_profile_delete.sql` | `document_profile.deleted_at/deleted_by` — soft delete โปรไฟล์ผู้ออกเอกสาร (เอกสารเก่ายังพิมพ์ได้, prefix ยังถูกจอง, กู้คืนทาง SQL) |
 | `drizzle/0003_record_status.sql` | soft delete แบบเดียวทั้งระบบ: lookup `record_status` (ACTIVE/INACTIVE/DELETED) + คอลัมน์ในทุกตารางที่ลบได้ — ไม่มี hard delete, กู้คืนทาง SQL |
 | `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
 
