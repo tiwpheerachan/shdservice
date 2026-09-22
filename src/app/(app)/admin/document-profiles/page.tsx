@@ -30,9 +30,6 @@ type Profile = {
   bankAccountName: string;
   logoPath: string;
   logoUrl: string;
-  prefixJob: string;
-  prefixQuotation: string;
-  prefixSaleOrder: string;
   isDefault: boolean;
   isActive: boolean;
   sortOrder: number;
@@ -52,9 +49,6 @@ const EMPTY: FormValues = {
   bankAccountType: "บัญชีออมทรัพย์",
   bankAccountNo: "",
   bankAccountName: "",
-  prefixJob: "",
-  prefixQuotation: "",
-  prefixSaleOrder: "",
   isDefault: false,
   isActive: true,
   sortOrder: 0,
@@ -75,6 +69,10 @@ export default function DocumentProfilesPage() {
   const [form, setForm] = React.useState<FormValues>(EMPTY);
   const [saving, setSaving] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  // logo picked while creating (no id yet) — uploaded right after the first save
+  const [pendingLogo, setPendingLogo] = React.useState<File | null>(null);
+  const pendingUrl = React.useMemo(() => (pendingLogo ? URL.createObjectURL(pendingLogo) : ""), [pendingLogo]);
+  React.useEffect(() => () => { if (pendingUrl) URL.revokeObjectURL(pendingUrl); }, [pendingUrl]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -93,6 +91,7 @@ export default function DocumentProfilesPage() {
   const openForm = (p: Profile | null) => {
     setEditing(p);
     setForm(p ? { ...p } : EMPTY);
+    setPendingLogo(null);
     setOpen(true);
   };
 
@@ -100,11 +99,21 @@ export default function DocumentProfilesPage() {
     setSaving(true);
     try {
       const d = await postJson<{ row: Profile }>("/api/admin/document-profiles", { ...form, id: editing?.id });
-      push({ kind: "success", title: "บันทึกโปรไฟล์แล้ว", desc: `${d.row.code} · ${d.row.nameTh}` });
-      setEditing(d.row);
-      setForm({ ...d.row });
+      let row = d.row;
+      if (pendingLogo) {
+        // new profile: the logo chosen before saving goes up now that there is an id
+        try {
+          await uploadFile("profile-logo", String(row.id), pendingLogo);
+          setPendingLogo(null);
+          row = (await api<{ rows: Profile[] }>("/api/admin/document-profiles")).rows.find((r) => r.id === d.row.id) ?? row;
+        } catch (e) {
+          push({ kind: "error", title: "บันทึกโปรไฟล์แล้ว แต่อัปโหลดโลโก้ไม่สำเร็จ", desc: errMsg(e) });
+        }
+      }
+      push({ kind: "success", title: "บันทึกโปรไฟล์แล้ว", desc: `${row.code} · ${row.nameTh}` });
+      setEditing(row);
+      setForm({ ...row });
       await load();
-      if (!editing) return; // stay open so the logo can be uploaded right away
       setOpen(false);
     } catch (e) {
       push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
@@ -114,7 +123,13 @@ export default function DocumentProfilesPage() {
   };
 
   const onLogo = async (file: File | undefined) => {
-    if (!file || !editing) return;
+    if (!file) return;
+    if (!editing) {
+      // creating: keep the file, show a preview, upload after save
+      setPendingLogo(file);
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     try {
       await uploadFile("profile-logo", String(editing.id), file);
       push({ kind: "success", title: "อัปโหลดโลโก้แล้ว" });
@@ -174,17 +189,6 @@ export default function DocumentProfilesPage() {
         </div>
       ),
     },
-    {
-      key: "prefixes",
-      header: "เลขที่เอกสาร",
-      width: "200px",
-      sortable: false,
-      cell: (r) => (
-        <span className="num text-xs">
-          งาน {r.prefixJob}· ใบเสนอราคา {r.prefixQuotation}· ใบสั่งขาย {r.prefixSaleOrder}
-        </span>
-      ),
-    },
     { key: "taxId", header: "เลขผู้เสียภาษี", width: "150px", hideBelow: "lg", cell: (r) => <span className="num">{r.taxId || "—"}</span> },
     {
       key: "isActive",
@@ -212,7 +216,7 @@ export default function DocumentProfilesPage() {
     <>
       <PageHeader
         title="โปรไฟล์ผู้ออกเอกสาร"
-        description="บริษัท / แบรนด์ที่ใช้ออกเอกสาร (ใบเสนอราคา ใบสั่งขาย ใบรับงาน ใบส่งคืน) — โลโก้ ที่อยู่ เลขภาษี บัญชี และชุดเลขที่เอกสาร"
+        description="บริษัท / แบรนด์ที่ใช้ออกเอกสาร (ใบเสนอราคา ใบสั่งขาย ใบรับงาน ใบส่งคืน) — โลโก้ ที่อยู่ เลขภาษี บัญชี · เลขที่เอกสารเป็นชุดเดียวทั้งระบบ ไม่ขึ้นกับโปรไฟล์"
         actions={
           <Button size="sm" onClick={() => openForm(null)}>
             <Plus className="h-3.5 w-3.5" />
@@ -275,15 +279,6 @@ export default function DocumentProfilesPage() {
             <Input value={form.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
           </Field>
 
-          <Field label="Prefix เลขงานซ่อม" required hint={editing ? "เปลี่ยนไม่ได้เมื่อออกเลขแล้ว" : "A–Z 1–6 ตัว ห้ามซ้ำกับโปรไฟล์อื่น"}>
-            <Input value={form.prefixJob} onChange={(e) => set("prefixJob", e.target.value.toUpperCase())} placeholder="J" className="num" />
-          </Field>
-          <Field label="Prefix ใบเสนอราคา" required>
-            <Input value={form.prefixQuotation} onChange={(e) => set("prefixQuotation", e.target.value.toUpperCase())} placeholder="Q" className="num" />
-          </Field>
-          <Field label="Prefix ใบสั่งขาย" required>
-            <Input value={form.prefixSaleOrder} onChange={(e) => set("prefixSaleOrder", e.target.value.toUpperCase())} placeholder="SO" className="num" />
-          </Field>
           <Field label="ลำดับแสดง">
             <Input type="number" value={String(form.sortOrder)} onChange={(e) => set("sortOrder", Number(e.target.value) || 0)} className="num" />
           </Field>
@@ -299,21 +294,26 @@ export default function DocumentProfilesPage() {
             </div>
           </Field>
 
-          <Field label="โลโก้" wide hint={editing ? "PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD" : "บันทึกโปรไฟล์ก่อนจึงจะอัปโหลดโลโก้ได้"}>
+          <Field label="โลโก้" wide hint={editing ? "PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD" : pendingLogo ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก` : "เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD"}>
             <div className="flex items-center gap-3">
               <div className="grid h-14 w-40 place-items-center rounded-md border border-border bg-white">
-                {editing ? (
+                {editing || pendingUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={editing.logoUrl} alt="" className="max-h-12 max-w-[150px] object-contain" />
+                  <img src={pendingUrl || editing?.logoUrl} alt="" className="max-h-12 max-w-[150px] object-contain" />
                 ) : (
                   <Building2 className="h-6 w-6 text-muted-foreground" />
                 )}
               </div>
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void onLogo(e.target.files?.[0])} />
-              <Button variant="outline" size="sm" type="button" disabled={!editing} onClick={() => fileRef.current?.click()}>
+              <Button variant="outline" size="sm" type="button" onClick={() => fileRef.current?.click()}>
                 <Upload className="h-3.5 w-3.5" />
-                อัปโหลดโลโก้
+                {editing ? "อัปโหลดโลโก้" : pendingLogo ? "เปลี่ยนไฟล์" : "เลือกโลโก้"}
               </Button>
+              {!editing && pendingLogo && (
+                <Button variant="ghost" size="sm" type="button" onClick={() => setPendingLogo(null)}>
+                  เอาออก
+                </Button>
+              )}
             </div>
           </Field>
         </FieldGrid>

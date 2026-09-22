@@ -4,6 +4,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { QuotationForm, type QuotationFormHandle, type QuotationLoaded } from "@/components/shared/quotation-form";
+import { PrintButton } from "@/components/shared/print-button";
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -74,9 +75,7 @@ function EditQuotation() {
         onSave={save}
         saving={saving}
         extra={
-          <Button variant="outline" size="md" type="button" disabled={!no} onClick={() => no && window.open(`/print/quotation/${encodeURIComponent(no)}`, "_blank")}>
-            พิมพ์ใบเสนอราคา
-          </Button>
+          <PrintButton label="พิมพ์ใบเสนอราคา" kind="quotation" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/quotation/${encodeURIComponent(no ?? "")}`} disabled={!no} />
         }
       />
     </>

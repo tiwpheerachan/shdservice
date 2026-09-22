@@ -373,7 +373,7 @@ export function JobOpenSection({
             <span className="num">{s.jobNo || jobNo || "Generate Auto"}</span>
           </ReadOnly>
         </Field>
-        <ProfileSelect value={s.documentProfileId} onChange={(id) => set("documentProfileId", id)} locked={!!(s.jobNo || jobNo)} />
+        <ProfileSelect value={s.documentProfileId} onChange={(id) => set("documentProfileId", id)} doc={s.jobNo || jobNo ? { kind: "job", no: s.jobNo || jobNo || "" } : undefined} />
         <Field label="วันที่">
           <ReadOnly>
             <span className="num">{s.createDate || now} น.</span>

@@ -226,7 +226,7 @@ export const useJobStatuses = () =>
 export const useVendors = () => useTable<string>("vendors", undefined, "exclude", {}, TTL_MASTER);
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
 export const useJobTypeDetails = () => useTable<string>("job_type_details", undefined, "exclude", {}, TTL_MASTER);
-export type DocumentProfileLite = { id: number; code: string; nameTh: string; nameEn: string; isDefault: boolean; prefixJob: string; prefixQuotation: string; prefixSaleOrder: string; logoUrl: string };
+export type DocumentProfileLite = { id: number; code: string; nameTh: string; nameEn: string; isDefault: boolean; logoUrl: string };
 /** โปรไฟล์ผู้ออกเอกสาร (active) — dropdown "ออกเอกสารในนาม" */
 export const useDocumentProfiles = () => useTable<DocumentProfileLite>("document_profiles", undefined, "exclude", {}, TTL_MASTER);
 export const useShippers = () => useTable<string>("shippers", undefined, "exclude", {}, TTL_MASTER);

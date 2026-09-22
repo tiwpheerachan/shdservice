@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PackageCheck, ClipboardList, Wallet, Printer } from "lucide-react";
+import { PackageCheck, ClipboardList, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { JobSearch } from "@/components/shared/job-search";
 import { Section } from "@/components/shared/section";
@@ -25,6 +25,7 @@ import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/dat
 import { useShippers } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
+import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 
 function CloseForm() {
@@ -142,25 +143,16 @@ function CloseForm() {
               ระบุ หมายเลขงาน
             </label>
             <JobSearch id="close-job-no" value={jobNo} scope="closable" onPick={go} />
-            <Button
-              variant="outline"
-              size="md"
-              disabled={!job}
-              onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}/return`, "_blank")}
-            >
-              <Printer className="h-3.5 w-3.5" />
-              พิมพ์ใบส่งคืน
-            </Button>
-            <Button
-              variant="outline"
-              size="md"
-              disabled={!job}
+            <PrintButton label="พิมพ์ใบส่งคืน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}/return`} disabled={!job} />
+            <PrintButton
+              label="พิมพ์ใบปะหน้าพัสดุ"
               title="ใบปะหน้าพัสดุ A5 สำหรับส่งคืนทางขนส่ง"
-              onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}/label`, "_blank")}
-            >
-              <Printer className="h-3.5 w-3.5" />
-              พิมพ์ใบปะหน้าพัสดุ
-            </Button>
+              kind="job"
+              no={job?.no ?? ""}
+              profileId={job?.documentProfileId}
+              href={`/print/job/${encodeURIComponent(job?.no ?? "")}/label`}
+              disabled={!job}
+            />
           </div>
         }
       />

@@ -16,9 +16,9 @@ import {
   fromJob,
   toJobInput,
 } from "@/components/shared/job-form";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useJob, type JobDetail } from "@/lib/use-job";
+import { PrintButton } from "@/components/shared/print-button";
 import { patchJson, errMsg } from "@/lib/api";
 
 function EditJobForm() {
@@ -86,9 +86,7 @@ function EditJobForm() {
         saving={saving}
         onCancel={() => job && reset(fromJob(job))}
         extra={
-          <Button variant="outline" size="md" type="button" disabled={!job} onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}`, "_blank")}>
-            พิมพ์ใบรับงาน
-          </Button>
+          <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
         }
       />
     </>

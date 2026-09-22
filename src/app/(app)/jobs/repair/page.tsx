@@ -18,7 +18,6 @@ import {
   saveCommonSections,
 } from "@/components/shared/job-form";
 import { useAccess } from "@/lib/use-access";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
@@ -29,6 +28,7 @@ import { SymptomPicker } from "@/components/shared/symptom-picker";
 import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
+import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg } from "@/lib/api";
 
 type Line = {
@@ -389,9 +389,7 @@ function RepairForm() {
         saving={saving}
         onCancel={() => job && reset(fromJob(job))}
         extra={
-          <Button variant="outline" size="md" type="button" disabled={!job} onClick={() => job && window.open(`/print/job/${encodeURIComponent(job.no)}`, "_blank")}>
-            พิมพ์ใบรับงาน
-          </Button>
+          <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
         }
       />
 

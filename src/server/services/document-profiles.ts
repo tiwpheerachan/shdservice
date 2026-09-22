@@ -2,15 +2,22 @@ import "server-only";
 import { cached, invalidate, TTL_MASTER } from "@/server/cache";
 import { asc, eq, ne, and, sql, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { documentProfile } from "@/db/schema";
+import { documentProfile, job, quotationHd, saleOutHd } from "@/db/schema";
 import { HttpError } from "@/server/auth";
 import { audit, diff } from "@/server/audit";
 import { nowThai } from "@/server/mappers/format";
 
 /**
- * "ออกเอกสารในนาม" — the company/brand a quotation, sale order or job is issued
- * under (drizzle/0007). SHD is id 1 and the default; documents with a NULL
- * profile id are SHD. Prefixes feed the per-profile running numbers.
+ * "ออกเอกสารในนาม" — the company/brand whose letterhead (logo, name, address,
+ * tax id, bank account) a job, quotation or sale order is printed with
+ * (drizzle/0007, revised 0010). SHD is id 1 and the default; documents with a
+ * NULL profile id are SHD.
+ *
+ * Document NUMBERS are NOT brand-specific: J / Q / SO + year + one running
+ * series for the whole company, exactly like the legacy app. The profile can be
+ * changed on a document at any time (edit screen, or from the print button) and
+ * the change is audited. The prefix_* columns are legacy of the first design and
+ * always hold J / Q / SO.
  */
 export type DocumentProfile = {
   id: number;
@@ -32,9 +39,6 @@ export type DocumentProfile = {
   /** what an <img> can load: /api/files?path=… or the built-in mark */
   logoUrl: string;
   stampPath: string;
-  prefixJob: string;
-  prefixQuotation: string;
-  prefixSaleOrder: string;
   isDefault: boolean;
   isActive: boolean;
   isDeleted: boolean;
@@ -64,9 +68,6 @@ function toProfile(r: Row): DocumentProfile {
     logoPath: r.logoPath,
     logoUrl: r.logoPath ? `/api/files?path=${encodeURIComponent(r.logoPath)}` : BUILTIN_LOGO,
     stampPath: r.stampPath,
-    prefixJob: r.prefixJob,
-    prefixQuotation: r.prefixQuotation,
-    prefixSaleOrder: r.prefixSaleOrder,
     isDefault: r.isDefault,
     isActive: r.isActive,
     isDeleted: !!r.deletedAt,
@@ -131,7 +132,9 @@ export async function deleteDocumentProfile(id: number, byUserId: number): Promi
     if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
     if (before.isDefault) throw new HttpError(400, "โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ");
     const issued = await tx.execute(
-      sql`select 1 from running_no where company_id = ${id} and running_type in ('Job','Quotation','SaleOrder') and number > 0 limit 1`
+      sql`select 1 where exists (select 1 from job where document_profile_id = ${id})
+                    or exists (select 1 from quotation_hd where document_profile_id = ${id})
+                    or exists (select 1 from sale_out_hd where document_profile_id = ${id})`
     );
     const hadDocuments = (issued.rows?.length ?? 0) > 0;
     await tx
@@ -164,27 +167,20 @@ export type DocumentProfileInput = {
   bankAccountType?: string;
   bankAccountNo?: string;
   bankAccountName?: string;
-  prefixJob: string;
-  prefixQuotation: string;
-  prefixSaleOrder: string;
   isDefault?: boolean;
   isActive?: boolean;
   sortOrder?: number;
 };
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
-const PREFIX_RE = /^[A-Z]{1,6}$/;
+/** document-type prefixes are system-wide (see db/running-no.ts) — stored on the row only because the columns are NOT NULL */
+const SYSTEM_PREFIXES = { prefixJob: "J", prefixQuotation: "Q", prefixSaleOrder: "SO" } as const;
 
 export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: number): Promise<DocumentProfile> {
   const code = str(i.code, 20).toUpperCase();
   const nameTh = str(i.nameTh);
-  const prefixes = { prefixJob: str(i.prefixJob, 10).toUpperCase(), prefixQuotation: str(i.prefixQuotation, 10).toUpperCase(), prefixSaleOrder: str(i.prefixSaleOrder, 10).toUpperCase() };
   if (!code) throw new HttpError(400, "ต้องระบุรหัสโปรไฟล์ (เช่น SHD)");
   if (!nameTh) throw new HttpError(400, "ต้องระบุชื่อบริษัท");
-  for (const [k, v] of Object.entries(prefixes)) {
-    if (!PREFIX_RE.test(v)) throw new HttpError(400, `prefix ${k === "prefixJob" ? "งานซ่อม" : k === "prefixQuotation" ? "ใบเสนอราคา" : "ใบสั่งขาย"} ต้องเป็นอักษร A–Z 1–6 ตัว`);
-  }
-  if (new Set(Object.values(prefixes)).size < 3) throw new HttpError(400, "prefix ของงานซ่อม / ใบเสนอราคา / ใบสั่งขาย ต้องต่างกัน");
 
   const values = {
     code,
@@ -199,7 +195,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     bankAccountType: str(i.bankAccountType, 50),
     bankAccountNo: str(i.bankAccountNo, 50),
     bankAccountName: str(i.bankAccountName),
-    ...prefixes,
+    ...SYSTEM_PREFIXES,
     isDefault: !!i.isDefault,
     isActive: i.isActive !== false,
     sortOrder: Number(i.sortOrder ?? 0) || 0,
@@ -207,28 +203,19 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
   };
 
   return db.transaction(async (tx) => {
-    // uniqueness: code and each prefix must not belong to another profile (numbers are primary keys)
-    const others = await tx.select().from(documentProfile).where(i.id ? ne(documentProfile.id, i.id) : undefined);
+    // the short code is what dropdowns show — unique among LIVE profiles (a deleted one frees its code)
+    const others = await tx
+      .select()
+      .from(documentProfile)
+      .where(and(isNull(documentProfile.deletedAt), i.id ? ne(documentProfile.id, i.id) : undefined));
     for (const o of others) {
       if (o.code === code) throw new HttpError(409, `รหัสโปรไฟล์ ${code} ถูกใช้แล้ว (${o.nameTh})`);
-      if (o.prefixJob === prefixes.prefixJob) throw new HttpError(409, `prefix งานซ่อม ${prefixes.prefixJob} ถูกใช้โดย ${o.code} แล้ว`);
-      if (o.prefixQuotation === prefixes.prefixQuotation) throw new HttpError(409, `prefix ใบเสนอราคา ${prefixes.prefixQuotation} ถูกใช้โดย ${o.code} แล้ว`);
-      if (o.prefixSaleOrder === prefixes.prefixSaleOrder) throw new HttpError(409, `prefix ใบสั่งขาย ${prefixes.prefixSaleOrder} ถูกใช้โดย ${o.code} แล้ว`);
     }
 
     let before: Row | undefined;
     if (i.id) {
       [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).limit(1);
       if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
-      // prefixes are baked into every number already issued — freeze them once used
-      // any running_no row for this profile with number > 0 means documents exist
-      const used = await tx.execute(
-        sql`select 1 from running_no where company_id = ${before.id} and running_type in ('Job','Quotation','SaleOrder') and number > 0 limit 1`
-      );
-      const frozen = (used.rows?.length ?? 0) > 0;
-      if (frozen && (before.prefixJob !== prefixes.prefixJob || before.prefixQuotation !== prefixes.prefixQuotation || before.prefixSaleOrder !== prefixes.prefixSaleOrder)) {
-        throw new HttpError(409, "โปรไฟล์นี้ออกเลขเอกสารไปแล้ว เปลี่ยน prefix ไม่ได้");
-      }
       if (before.isDefault && values.isDefault === false) throw new HttpError(400, "ต้องมีโปรไฟล์เริ่มต้น 1 รายการ — ตั้งรายการอื่นเป็นเริ่มต้นก่อน");
       if (before.isDefault && values.isActive === false) throw new HttpError(400, "ปิดใช้งานโปรไฟล์เริ่มต้นไม่ได้");
     }
@@ -261,4 +248,39 @@ export async function setDocumentProfileLogo(id: number, logoPath: string, byUse
     await audit(tx, byUserId, { action: "UPDATE", module: "Admin", entity: "document_profile", key: id, summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`, changes: { logoPath: [before.logoPath, logoPath] } });
   });
   invalidate("docprofiles:");
+}
+
+/* ------------------------------------------------------------------ *
+ * Change "ออกเอกสารในนาม" of an existing document — allowed at any time; the
+ * number never changes (numbers are not brand-specific). Audited under the
+ * document's own module so it shows in the job's history.
+ * ------------------------------------------------------------------ */
+export type DocumentKind = "job" | "quotation" | "sale_order";
+const DOC = {
+  job: { table: job, key: job.jobNo, col: job.documentProfileId, module: "Job Management", entity: "job", label: "งาน" },
+  quotation: { table: quotationHd, key: quotationHd.quotationNo, col: quotationHd.documentProfileId, module: "Quotation", entity: "quotation_hd", label: "ใบเสนอราคา" },
+  sale_order: { table: saleOutHd, key: saleOutHd.saleOutHdNo, col: saleOutHd.documentProfileId, module: "Sale Order", entity: "sale_out_hd", label: "ใบสั่งขาย" },
+} as const;
+export const DOC_MODULE: Record<DocumentKind, "Job Management" | "Quotation" | "Sale Order"> = { job: "Job Management", quotation: "Quotation", sale_order: "Sale Order" };
+
+export async function setDocumentProfile(kind: DocumentKind, no: string, profileId: number, byUserId: number): Promise<DocumentProfile> {
+  const d = DOC[kind];
+  const target = await issuingProfile(profileId); // must exist, be active and not deleted
+  await db.transaction(async (tx) => {
+    const [row] = await tx.select({ cur: d.col }).from(d.table).where(eq(d.key, no)).limit(1);
+    if (!row) throw new HttpError(404, `ไม่พบ${d.label} ${no}`);
+    const cur = row.cur ?? SHD_PROFILE_ID;
+    if (cur === target.id) return;
+    const from = await getDocumentProfile(cur);
+    await tx.update(d.table).set({ documentProfileId: target.id }).where(eq(d.key, no));
+    await audit(tx, byUserId, {
+      action: "UPDATE",
+      module: d.module,
+      entity: d.entity,
+      key: no,
+      summary: `เปลี่ยนออกเอกสารในนาม ${d.label} ${no}: ${from?.code ?? cur} → ${target.code}`,
+      changes: { documentProfileId: [cur, target.id] },
+    });
+  });
+  return target;
 }

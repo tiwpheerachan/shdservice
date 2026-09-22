@@ -356,7 +356,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       });
     } else {
       const profile = await issuingProfile(i.documentProfileId ?? jobProfileId);
-      no = await nextRunningNo(tx, "Quotation", { id: profile.id, prefix: profile.prefixQuotation });
+      no = await nextRunningNo(tx, "Quotation");
       await tx.insert(quotationHd).values({
         ...values,
         documentProfileId: profile.id,

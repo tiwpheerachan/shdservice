@@ -818,7 +818,7 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
   const profile = await issuingProfile(i.documentProfileId);
 
   const jobNo = await db.transaction(async (tx) => {
-    const no = await nextRunningNo(tx, "Job", { id: profile.id, prefix: profile.prefixJob });
+    const no = await nextRunningNo(tx, "Job");
     await tx.insert(job).values({
       jobNo: no,
       documentProfileId: profile.id,

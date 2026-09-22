@@ -71,6 +71,20 @@
       "when": 1757900009000,
       "tag": "0009_document_profile_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1757900010000,
+      "tag": "0010_profile_no_prefix",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1757900011000,
+      "tag": "0011_document_profile_code_live",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { SaleOrderForm, type SaleOrderFormHandle, type SaleOrderLoaded } from "@/components/shared/sale-order-form";
+import { PrintButton } from "@/components/shared/print-button";
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -111,9 +112,7 @@ function EditSaleOrder() {
         saving={saving || approved}
         extra={
           <>
-            <Button variant="outline" size="md" type="button" disabled={!no} onClick={() => no && window.open(`/print/sale-order/${encodeURIComponent(no)}`, "_blank")}>
-              พิมพ์ใบสั่งขาย
-            </Button>
+            <PrintButton label="พิมพ์ใบสั่งขาย" kind="sale_order" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/sale-order/${encodeURIComponent(no ?? "")}`} disabled={!no} />
             {loaded && !approved && canApprove ? (
             <>
               <Button variant="outline" size="md" type="button" onClick={() => decide("reject")} disabled={saving}>

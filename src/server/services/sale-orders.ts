@@ -303,7 +303,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       });
     } else {
       const profile = await issuingProfile(i.documentProfileId);
-      no = await nextRunningNo(tx, "SaleOrder", { id: profile.id, prefix: profile.prefixSaleOrder });
+      no = await nextRunningNo(tx, "SaleOrder");
       await audit(tx, byUserId, {
         action: "CREATE",
         module: "Sale Order",

@@ -205,7 +205,7 @@ export const QuotationForm = React.forwardRef<
         actions={<Badge tone="primary">{type === "A" ? "Type A (Normal)" : "Type B (VIP)"}</Badge>}
       >
         <div className="mb-3 sm:max-w-md">
-          <ProfileSelect value={profileId} onChange={setProfileId} locked={mode === "edit" || !!initial?.no} />
+          <ProfileSelect value={profileId} onChange={setProfileId} doc={initial?.no || quotationNo ? { kind: "quotation", no: initial?.no || quotationNo || "" } : undefined} />
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           {(["A", "B"] as const).map((t) => (

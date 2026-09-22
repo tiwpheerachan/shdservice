@@ -37,17 +37,18 @@ const DEFAULTS: Record<RunningType, { prefix: string; yearly: boolean; len: numb
   Model: { prefix: "MD", yearly: false, len: 5 },
 };
 
-const PER_PROFILE: ReadonlySet<RunningType> = new Set(["Job", "Quotation", "SaleOrder"]);
+/**
+ * Job / Quotation / SaleOrder rows carry company_id = 1 in the legacy table
+ * (normalised in 0007, re-asserted in 0010). Numbers are ONE series per document
+ * type for the whole company — "ออกเอกสารในนาม" never changes the number.
+ */
+const COMPANY_ROWS: ReadonlySet<RunningType> = new Set(["Job", "Quotation", "SaleOrder"]);
 
-export async function nextRunningNo(
-  tx: Tx,
-  type: RunningType,
-  profile?: { id: number; prefix: string }
-): Promise<string> {
+export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> {
   const def = DEFAULTS[type];
   const year = def.yearly ? thaiYear() : 0;
-  const companyId = PER_PROFILE.has(type) ? (profile?.id ?? 1) : null;
-  const prefixForNew = (companyId !== null && profile?.prefix) || def.prefix;
+  const companyId = COMPANY_ROWS.has(type) ? 1 : null;
+  const prefixForNew = def.prefix;
 
   // lock the row for this type(+profile)+year (or the type's single row for non-yearly)
   const locked = await tx.execute(sql`

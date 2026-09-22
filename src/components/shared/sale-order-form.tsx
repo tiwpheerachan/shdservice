@@ -164,7 +164,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 <span className="num">{soNo ?? initial?.no ?? "Generate Auto"}</span>
               </ReadOnly>
             </Field>
-            <ProfileSelect value={profileId} onChange={setProfileId} locked={!!(soNo || initial?.no)} />
+            <ProfileSelect value={profileId} onChange={setProfileId} doc={soNo || initial?.no ? { kind: "sale_order", no: soNo || initial?.no || "" } : undefined} />
             <Field label="วันที่สร้าง">
               <ReadOnly><span className="num">{date}</span></ReadOnly>
             </Field>
