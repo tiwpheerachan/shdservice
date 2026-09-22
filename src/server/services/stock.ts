@@ -882,6 +882,7 @@ export type ProductFilters = {
   creator?: string;
   date?: string; // create_date = YYYY-MM-DD
   stock?: "in" | "low" | "out"; // มีสินค้า / ใกล้หมด / หมด
+  model?: string; // model_code — parts usable with that model (product_model)
 };
 
 const creatorUser = alias(appUser, "product_creator");
@@ -901,6 +902,7 @@ function productWhere(q: string, f: ProductFilters) {
     f.category ? eq(category.categoryName, f.category) : undefined,
     f.creator ? sql`trim(coalesce(${creatorUser.firstName},'') || ' ' || coalesce(${creatorUser.lastName},'')) ilike ${"%" + f.creator + "%"}` : undefined,
     f.date ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
+    f.model ? sql`exists (select 1 from product_model pm where pm.product_id = ${product.productId} and pm.model_code = ${f.model})` : undefined,
     f.stock === "in" ? sql`coalesce(${productNoneSerial.quantityRemain},0) > 3` : undefined,
     f.stock === "low" ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3` : undefined,
     f.stock === "out" ? sql`coalesce(${productNoneSerial.quantityRemain},0) <= 0` : undefined

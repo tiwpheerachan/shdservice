@@ -16,9 +16,9 @@ export type ReportFilter =
   | { kind: "date"; key?: string; label: string; value?: string }
   | { kind: "select"; key?: string; label: string; options: string[]; value?: string };
 
-/** values keyed by filter `key` (or label); "- - Select All - -" / "ALL" → "" */
+/** values keyed by filter `key` (or label); "ทั้งหมด" (and the old "Select All" / "ALL" labels) → "" */
 export type ReportValues = Record<string, string>;
-const ALL = new Set(["- - Select All - -", "- - Select ALL - -", "ALL"]);
+const ALL = new Set(["ทั้งหมด", "- - Select All - -", "- - Select ALL - -", "ALL"]);
 
 export function ReportView<T extends Record<string, unknown>>({
   title,
@@ -119,7 +119,8 @@ export function ReportView<T extends Record<string, unknown>>({
               {f.kind === "date" && <Input type="date" value={v} onChange={(e) => set(e.target.value)} />}
               {f.kind === "select" && (
                 <Select value={v} onChange={(e) => set(e.target.value)}>
-                  {f.options.map((o) => (
+                  {/* options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique */}
+                  {Array.from(new Set(f.options)).map((o) => (
                     <option key={o}>{o}</option>
                   ))}
                 </Select>
@@ -147,7 +148,7 @@ export function ReportView<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <DataTable columns={columns} rows={rows} loading={loading} rowKey={rowKey} searchPlaceholder="ค้นหาในรายงาน…" server={server} />
+      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} rowKey={rowKey} server={server} />
     </>
   );
 }

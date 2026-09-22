@@ -7,7 +7,7 @@ import { parseStatusMode } from "@/server/record-status";
 import type { Module } from "@/lib/modules";
 import { listSimple, isSimpleKind, listSymptoms, listModels } from "@/server/services/masters";
 import { listSystemUsers } from "@/server/services/users";
-import { listCustomers } from "@/server/services/customers";
+import { listCustomers, customerFiltersFromQuery } from "@/server/services/customers";
 import { pageProducts, listMovements, listIssuedLines, type ProductFilters } from "@/server/services/stock";
 import { listAudit } from "@/server/audit";
 import { listJobs, filtersFromQuery } from "@/server/services/jobs";
@@ -213,16 +213,27 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
   const p = parsePageQuery(sp);
   const mode = parseStatusMode(sp.get("deleted"));
   const f = p.f;
-  if (isSimpleKind(resource)) return listSimple(resource, mode) as unknown as Row[];
+  // master lists: ?q= (name contains) and ?status=Active|Inactive from the page's filter bar
+  const masterFilter = <T extends { name: string; status: string }>(rows: T[]) => {
+    const term = p.q.trim().toLowerCase();
+    return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!f.status || r.status === f.status));
+  };
+  if (isSimpleKind(resource)) return masterFilter(await listSimple(resource, mode)) as unknown as Row[];
   switch (resource) {
     case "symptoms":
-      return listSymptoms(mode) as unknown as Row[];
+      return masterFilter(await listSymptoms(mode)) as unknown as Row[];
     case "models":
-      return listModels(mode) as unknown as Row[];
+      return (await listModels(mode)).filter(
+        (m) =>
+          (!f.brand || m.brand === f.brand) &&
+          (!f.code || m.code.toLowerCase().includes(f.code.toLowerCase())) &&
+          (!f.name || m.name.toLowerCase().includes(f.name.toLowerCase())) &&
+          (!f.status || m.status === f.status)
+      ) as unknown as Row[];
     case "users":
       return listSystemUsers(mode) as unknown as Row[];
     case "customers":
-      return listCustomers({ q: p.q, deleted: mode, limit: MAX_ROWS }) as unknown as Row[];
+      return listCustomers({ q: p.q, deleted: mode, limit: MAX_ROWS, filters: customerFiltersFromQuery(f) }) as unknown as Row[];
     case "jobs":
       return listJobs({ ...filtersFromQuery(f), q: p.q, limit: MAX_ROWS }) as unknown as Row[];
     case "quotations":
@@ -241,6 +252,7 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
         category: f.category,
         creator: f.creator,
         date: f.date,
+        model: f.model,
         stock: f.stock === "in" || f.stock === "low" || f.stock === "out" ? f.stock : undefined,
       };
       return (await pageProducts({ ...p, page: 1, pageSize: MAX_ROWS }, pf)).rows as unknown as Row[];

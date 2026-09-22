@@ -19,21 +19,42 @@ import { DataTable, type Column, type ServerTableState } from "@/components/ui/d
 import { Button } from "@/components/ui/button";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
+import { Input, Select, Checkbox } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import dynamic from "next/dynamic";
 
 // call-log modal — loaded on first open, not with the list page
 const CustomerCallModal = dynamic(() => import("@/components/shared/customer-call-modal").then((m) => m.CustomerCallModal), { ssr: false });
-import { JOB_STATUS_OPTIONS, type Job, type Customer } from "@/data/mock";
-import { useJobsPage, useJobTypes, useStaff, useJobStats } from "@/data/db";
+import { JOB_STATUS_OPTIONS, WARRANTY_OPTIONS, type Job, type Customer } from "@/data/mock";
+import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useModels, useJobTypeDetails } from "@/data/db";
 import { baht, cn } from "@/lib/utils";
 import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
-type Filters = { no: string; customer: string; from: string; to: string; type: string; status: string; engineer: string; imei: string };
-const NO_FILTER: Filters = { no: "", customer: "", from: "", to: "", type: "", status: "", engineer: "", imei: "" };
+/** Filter bar — every field is AND-ed on the server (see JobFilters in services/jobs.ts). */
+type Filters = {
+  no: string; ref: string; brand: string; model: string; type: string; typeDetail: string;
+  createdBy: string; engineer: string;
+  dateBy: "create" | "reception" | "closed"; from: string; to: string;
+  customer: string; phone: string; tracking: string; imei: string; warranty: string;
+  bounce: boolean; within30: boolean; cost: "" | "yes" | "no"; status: string;
+};
+const NO_FILTER: Filters = {
+  no: "", ref: "", brand: "", model: "", type: "", typeDetail: "",
+  createdBy: "", engineer: "",
+  dateBy: "create", from: "", to: "",
+  customer: "", phone: "", tracking: "", imei: "", warranty: "",
+  bounce: false, within30: false, cost: "", status: "",
+};
+/** query-string form of the applied filters — shared by the table hook and the Excel export */
+const toParams = (f: Filters) => ({
+  no: f.no, ref: f.ref, brand: f.brand, model: f.model, type: f.type, typeDetail: f.typeDetail,
+  createdBy: f.createdBy, engineer: f.engineer,
+  dateBy: f.dateBy === "create" ? "" : f.dateBy, from: f.from, to: f.to,
+  customer: f.customer, phone: f.phone, tracking: f.tracking, imei: f.imei, warranty: f.warranty,
+  bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost, status: f.status,
+});
 
 function StatChip({
   icon: Icon,
@@ -75,6 +96,9 @@ export default function JobListPage() {
   const { push } = useToast();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/jobs/list");
   const { data: JOB_TYPES } = useJobTypes();
+  const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
+  const { data: BRANDS } = useManufacturers();
+  const { data: MODELS } = useModels();
   const { data: STAFF } = useStaff();
   const { data: statRows, loading: statsLoading } = useJobStats();
 
@@ -91,18 +115,18 @@ export default function JobListPage() {
   }, []);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  // models narrow to the chosen brand (1,171 models in total)
+  const MODEL_OPTIONS = React.useMemo(
+    () => (draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS),
+    [MODELS, draft.brand]
+  );
   const { rows: JOBS, total, loading } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
-    // table search box wins; otherwise the first filled text filter (all search the same columns)
-    q: table.q || filters.no || filters.customer || filters.imei,
+    q: table.q, // quick search box in the table (job no / customer / order no / IMEI / serial / model)
     sort: table.sort?.key,
     dir: table.sort?.dir,
-    from: filters.from,
-    to: filters.to,
-    type: filters.type,
-    status: filters.status,
-    engineer: filters.engineer,
+    ...toParams(filters),
   });
 
   const [callFor, setCallFor] = React.useState<{
@@ -230,7 +254,7 @@ export default function JobListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("jobs", { q: table.q || filters.no || filters.customer || filters.imei, from: filters.from, to: filters.to, type: filters.type, status: filters.status, engineer: filters.engineer })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("jobs", { q: table.q, ...toParams(filters) })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -262,57 +286,129 @@ export default function JobListPage() {
           setDraft(NO_FILTER);
           setFilters(NO_FILTER);
         }}
-        defaultOpen={false}
       >
         <Field label="เลขที่งาน">
           <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
         </Field>
-        <Field label="ชื่อ / รหัสลูกค้า">
-          <Input placeholder="ชื่อลูกค้า หรือ C00xxxxx" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+        <Field label="เลขคำสั่งซื้อ">
+          <Input placeholder="เลขคำสั่งซื้อ Shopee / Lazada …" className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
         </Field>
-        <Field label="วันที่เปิดงาน (ตั้งแต่)">
-          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
+        <Field label="ยี่ห้อ">
+          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value, model: "" }))}>
+            <option value="">ทั้งหมด</option>
+            {BRANDS.map((b) => (
+              <option key={b.id}>{b.name}</option>
+            ))}
+          </Select>
         </Field>
-        <Field label="วันที่เปิดงาน (ถึง)">
-          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
+        <Field label="รุ่น">
+          <Select value={draft.model} onChange={(e) => setD("model", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {MODEL_OPTIONS.map((m) => (
+              <option key={m.code} value={m.name}>{draft.brand ? m.name : `${m.brand} ${m.name}`}</option>
+            ))}
+          </Select>
         </Field>
         <Field label="ประเภทงาน">
           <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {JOB_TYPES.map((j) => (
               <option key={j.id}>{j.name}</option>
             ))}
           </Select>
         </Field>
-        <Field label="สถานะงาน">
-          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
-            <option value="">- - Select All - -</option>
-            {JOB_STATUS_OPTIONS.map((s) => (
-              <option key={s}>{s}</option>
+        <Field label="งานย่อย">
+          <Select value={draft.typeDetail} onChange={(e) => setD("typeDetail", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {JOB_TYPE_DETAILS.map((d) => (
+              <option key={d}>{d}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="เปิดงานโดย">
+          <Select value={draft.createdBy} onChange={(e) => setD("createdBy", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {STAFF.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </Select>
         </Field>
         <Field label="ผู้รับผิดชอบ">
           <Select value={draft.engineer} onChange={(e) => setD("engineer", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {STAFF.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
+              <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </Select>
+        </Field>
+        {/* which date the range applies to — empty dates = all */}
+        <Field label="ช่วงวันที่ (ตาม)">
+          <Select value={draft.dateBy} onChange={(e) => setD("dateBy", e.target.value as Filters["dateBy"])}>
+            <option value="create">วันที่เปิดงาน</option>
+            <option value="reception">วันที่รับเครื่องซ่อม</option>
+            <option value="closed">วันที่ปิดงาน-ส่งคืน</option>
+          </Select>
+        </Field>
+        <Field label="ตั้งแต่วันที่">
+          <Input type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => setD("from", e.target.value)} />
+        </Field>
+        <Field label="ถึงวันที่">
+          <Input type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => setD("to", e.target.value)} />
+        </Field>
+        <Field label="ชื่อ-สกุล / รหัสลูกค้า">
+          <Input placeholder="ชื่อลูกค้า หรือ C43600" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+        </Field>
+        <Field label="เบอร์โทร">
+          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+        </Field>
+        <Field label="เลขพัสดุจากลูกค้า">
+          <Input className="num" value={draft.tracking} onChange={(e) => setD("tracking", e.target.value)} />
         </Field>
         <Field label="IMEI / Serial No.">
           <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
         </Field>
+        <Field label="Warranty">
+          <Select value={draft.warranty} onChange={(e) => setD("warranty", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {WARRANTY_OPTIONS.map((w) => (
+              <option key={w} value={w}>{w === "IN" ? "IN — ในประกัน" : "OUT — นอกประกัน"}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="ค่าใช้จ่าย (เก็บลูกค้า)">
+          <Select value={draft.cost} onChange={(e) => setD("cost", e.target.value as Filters["cost"])}>
+            <option value="">ทั้งหมด</option>
+            <option value="yes">มีค่าใช้จ่าย</option>
+            <option value="no">ไม่มีค่าใช้จ่าย</option>
+          </Select>
+        </Field>
+        <Field label="สถานะงาน">
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {JOB_STATUS_OPTIONS.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="เฉพาะงาน" className="sm:col-span-2">
+          <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <Checkbox checked={draft.bounce} onChange={(e) => setD("bounce", e.target.checked)} />
+              งานซ่อมซ้ำ
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <Checkbox checked={draft.within30} onChange={(e) => setD("within30", e.target.checked)} />
+              ซ่อมภายใน 30 วันหลังการขาย
+            </label>
+          </div>
+        </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={JOBS}
         loading={loading}
         rowKey={(r) => r.no}
-        searchPlaceholder="ค้นหาเลขที่งาน / ลูกค้า / รุ่น…"
         server={{ total, onChange: setTable }}
       />
 

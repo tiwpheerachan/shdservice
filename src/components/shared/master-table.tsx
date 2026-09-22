@@ -5,12 +5,14 @@ import { Plus, Download } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "./page-header";
 import { RowActions } from "./row-actions";
+import { FilterBar } from "./filter-bar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import type { MasterRow } from "@/data/mock";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
@@ -31,6 +33,7 @@ export type MasterConfig = {
 
 export function MasterTable({ config }: { config: MasterConfig }) {
   const { push } = useToast();
+  const confirm = useConfirm();
   const { isAdmin } = useAccess();
   const [rows, setRows] = React.useState(config.rows);
   React.useEffect(() => setRows(config.rows), [config.rows]);
@@ -40,6 +43,16 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   );
   const [form, setForm] = React.useState({ name: "", status: "Active", group: "", detail: "" });
   const [saving, setSaving] = React.useState(false);
+
+  // filter bar (ชื่อ + สถานะ) — applied on ค้นหา; the lists are small so this is done in the browser
+  type MasterFilter = { name: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: MasterFilter = { name: "", status: "" };
+  const [draft, setDraft] = React.useState<MasterFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<MasterFilter>(NO_FILTER);
+  const visible = React.useMemo(() => {
+    const term = filter.name.trim().toLowerCase();
+    return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!filter.status || r.status === filter.status));
+  }, [rows, filter]);
 
   // group options = configured list ∪ values already in the DB
   const groupOptions = React.useMemo(() => {
@@ -109,7 +122,19 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       push({ kind: "warning", title: "ต้องมีสิทธิ์ลบข้อมูล", desc: r.name });
       return;
     }
-    if (!window.confirm(`ลบ "${r.name}"? (ซ่อนจากทุกหน้า กู้คืนได้ทาง SQL เท่านั้น)`)) return;
+    const ok = await confirm({
+      tone: "danger",
+      title: `ลบ${config.title} "${r.name}"?`,
+      description: (
+        <>
+          รายการนี้จะหายจากหน้านี้และจากตัวเลือกในทุกฟอร์ม ข้อมูลเก่าที่เคยใช้ค่านี้ยังแสดงชื่อได้ตามเดิม
+          <br />
+          การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่ต้องการหยุดใช้ชั่วคราว ให้เปลี่ยนสถานะเป็น Inactive แทน
+        </>
+      ),
+      confirmLabel: "ลบ",
+    });
+    if (!ok) return;
     try {
       await postJson("/api/admin/records", { table: config.kind, id: r.id, status: "DELETED" });
       setRows((s) => s.filter((x) => x.id !== r.id));
@@ -195,7 +220,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         description={config.description}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx(config.kind, { deleted: "exclude" })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx(config.kind, { deleted: "exclude", q: filter.name, status: filter.status })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -207,14 +232,35 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }
       />
 
-      <DataTable
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label={config.nameLabel}>
+          <Input placeholder={`พิมพ์บางส่วนของ${config.nameLabel}`} value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as MasterFilter["status"] }))}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
+      <DataTable searchable={false}
         columns={columns}
-        rows={rows}
+        rows={visible}
         rowKey={(r) => r.id}
-        searchPlaceholder={`ค้นหา ${config.nameLabel}…`}
         footerNote={
           <span className="hidden sm:inline">
-            · Active {rows.filter((r) => r.status === "Active").length} รายการ
+            · Active {visible.filter((r) => r.status === "Active").length} รายการ
           </span>
         }
       />

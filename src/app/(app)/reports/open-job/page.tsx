@@ -42,8 +42,8 @@ export default function Page() {
       filters={[
         { kind: "date", key: "from", label: "วันที่เปิดงาน (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่เปิดงาน (ถึง)", value: f.to },
-        { kind: "select", key: "type", label: "ประเภทงาน", options: ["- - Select All - -", ...JOB_TYPES.map((j) => j.name)] },
-        { kind: "select", key: "channel", label: "ช่องทางการขาย", options: ["- - Select All - -", ...CHANNELS] },
+        { kind: "select", key: "type", label: "ประเภทงาน", options: ["ทั้งหมด", ...JOB_TYPES.map((j) => j.name)] },
+        { kind: "select", key: "channel", label: "ช่องทางการขาย", options: ["ทั้งหมด", ...CHANNELS] },
       ]}
       onApply={setF}
       onExport={() => exportXlsx("jobs", { ...filters, q: table.q })}

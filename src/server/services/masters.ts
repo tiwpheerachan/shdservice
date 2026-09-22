@@ -311,11 +311,18 @@ const MODEL_SORT = {
   status: model.recordStatus,
 };
 
-export async function pageModels(p: PageQuery, mode: StatusMode = "exclude"): Promise<Page<Model>> {
+/** filter bar of the รุ่นสินค้า page — every field AND-ed; brand = manufacturer name, status = Active | Inactive */
+export type ModelFilters = { brand?: string; code?: string; name?: string; status?: string };
+
+export async function pageModels(p: PageQuery, mode: StatusMode = "exclude", f: ModelFilters = {}): Promise<Page<Model>> {
   const term = p.q.trim();
   const w = and(
     statusFilter(model.recordStatus, mode),
-    term ? or(ilike(model.modelCode, `%${term}%`), ilike(model.modelName, `%${term}%`), ilike(manufacturer.manufacturerName, `%${term}%`)) : undefined
+    term ? or(ilike(model.modelCode, `%${term}%`), ilike(model.modelName, `%${term}%`), ilike(manufacturer.manufacturerName, `%${term}%`)) : undefined,
+    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    f.code ? ilike(model.modelCode, `%${f.code.trim()}%`) : undefined,
+    f.name ? ilike(model.modelName, `%${f.name.trim()}%`) : undefined,
+    f.status === "Active" ? eq(model.recordStatus, "ACTIVE") : f.status === "Inactive" ? eq(model.recordStatus, "INACTIVE") : undefined
   );
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [[{ total }], rows] = await Promise.all([

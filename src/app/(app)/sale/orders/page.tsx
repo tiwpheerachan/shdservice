@@ -150,7 +150,6 @@ export default function SaleOrderPage() {
           setDraft(NO_FILTER);
           setFilters(NO_FILTER);
         }}
-        defaultOpen={false}
       >
         <Field label="เลขใบสั่งขาย (SO)">
           <Input className="num" placeholder="SO2600760" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
@@ -169,7 +168,7 @@ export default function SaleOrderPage() {
         </Field>
         <Field label="พนักงานขาย">
           <Select value={draft.sales} onChange={(e) => setD("sales", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {USERS.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}
@@ -179,7 +178,7 @@ export default function SaleOrderPage() {
         </Field>
         <Field label="สถานะการอนุมัติ">
           <Select value={draft.approve} onChange={(e) => setD("approve", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {Object.keys(TONE).map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -187,12 +186,11 @@ export default function SaleOrderPage() {
         </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={SALE_ORDERS}
         loading={loading}
         rowKey={(r) => r.no}
-        searchPlaceholder="ค้นหา SO / ลูกค้า / พนักงานขาย…"
         server={{ total, onChange: setTable }}
       />
     </>

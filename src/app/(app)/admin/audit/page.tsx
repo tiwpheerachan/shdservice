@@ -29,8 +29,8 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   LOGIN: { label: "เข้าสู่ระบบ", tone: "neutral" },
 };
 
-type Filters = { from: string; to: string; user: string; module: string; action: string; key: string };
-const NO_FILTER: Filters = { from: "", to: "", user: "", module: "", action: "", key: "" };
+type Filters = { from: string; to: string; user: string; module: string; action: string; key: string; q: string };
+const NO_FILTER: Filters = { from: "", to: "", user: "", module: "", action: "", key: "", q: "" };
 
 const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
 
@@ -44,10 +44,9 @@ export default function AuditPage() {
   const { rows, total, loading } = useAuditPage({
     page: table.page,
     pageSize: table.pageSize,
-    q: table.q,
     sort: table.sort?.key,
     dir: table.sort?.dir,
-    ...filters,
+    ...filters, // includes q (รายละเอียด / ชื่อผู้ใช้ free text)
   });
   const [detail, setDetail] = React.useState<AuditRow | null>(null);
 
@@ -90,7 +89,7 @@ export default function AuditPage() {
         title="ประวัติการใช้งาน (Audit Log)"
         description="ข้อมูลระบบ » ใครทำอะไร กับรายการไหน เมื่อไร — บันทึกทุกการเพิ่ม/แก้ไข/ลบ/เปลี่ยนสถานะ/อนุมัติ/จ่ายสต๊อก และการเข้าสู่ระบบ"
         actions={
-          <Button variant="outline" size="sm" onClick={() => exportXlsx("audit_log", { ...filters, q: table.q })}>
+          <Button variant="outline" size="sm" onClick={() => exportXlsx("audit_log", { ...filters })}>
             <Download className="h-3.5 w-3.5" />
             ส่งออก Excel
           </Button>
@@ -119,7 +118,7 @@ export default function AuditPage() {
         </Field>
         <Field label="โมดูล">
           <Select value={draft.module} onChange={(e) => setD("module", e.target.value)}>
-            <option value="">- - ทั้งหมด - -</option>
+            <option value="">ทั้งหมด</option>
             {MODULES.map((m) => (
               <option key={m}>{m}</option>
             ))}
@@ -127,7 +126,7 @@ export default function AuditPage() {
         </Field>
         <Field label="การกระทำ">
           <Select value={draft.action} onChange={(e) => setD("action", e.target.value)}>
-            <option value="">- - ทั้งหมด - -</option>
+            <option value="">ทั้งหมด</option>
             {Object.entries(ACTION).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.label}
@@ -138,14 +137,16 @@ export default function AuditPage() {
         <Field label="เลขที่ / รหัส">
           <Input placeholder="J2612088 / Q2600462 / P00012" className="num" value={draft.key} onChange={(e) => setD("key", e.target.value.trim())} />
         </Field>
+        <Field label="รายละเอียด / ชื่อผู้ใช้">
+          <Input placeholder="ข้อความในรายละเอียด หรือชื่อผู้ใช้" value={draft.q} onChange={(e) => setD("q", e.target.value)} />
+        </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={rows}
         rowKey={(r) => String(r.id)}
         loading={loading}
-        searchPlaceholder="ค้นหา เลขที่ / รายละเอียด / ชื่อผู้ใช้…"
         server={{ total, onChange: setTable }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />

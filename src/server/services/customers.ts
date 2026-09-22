@@ -56,16 +56,32 @@ export function toCustomer(r: Row, createdBy = ""): Customer {
  * Customer list. 43k rows in the legacy DB, so the default is the most recent
  * `limit`; `q` searches code / name / phone / email / tax id server-side.
  */
+/** filter bar of the ข้อมูลลูกค้า page — AND-ed; text fields are partial matches */
+export type CustomerFilters = {
+  code?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  taxId?: string;
+  type?: string; // Normal | Corporate | Dealer
+  province?: string; // mt_city.city_id
+  status?: string; // Active | Inactive
+};
+export const customerFiltersFromQuery = (f: Record<string, string>): CustomerFilters => ({
+  code: f.code, name: f.name, phone: f.phone, email: f.email, taxId: f.taxId, type: f.type, province: f.province, status: f.status,
+});
+
 export async function listCustomers(opts: {
   q?: string;
   deleted?: DeletedMode;
   limit?: number;
+  filters?: CustomerFilters;
 } = {}): Promise<Customer[]> {
-  const { q = "", deleted = "exclude", limit = 500 } = opts;
+  const { q = "", deleted = "exclude", limit = 500, filters = {} } = opts;
   const rows = await db
     .select()
     .from(customer)
-    .where(customerWhere(q, deleted))
+    .where(customerWhere(q, deleted, filters))
     .orderBy(desc(customer.customerId))
     .limit(Math.min(limit, 5000));
   return rows.map((r) => toCustomer(r));
@@ -80,7 +96,7 @@ const SORT = {
   address: customer.customerAddress,
 };
 
-function customerWhere(q: string, deleted: DeletedMode) {
+function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
   const search = term
@@ -92,12 +108,25 @@ function customerWhere(q: string, deleted: DeletedMode) {
         ilike(customer.customerCardId, `%${term}%`)
       )
     : undefined;
-  return and(active, search);
+  const like = (v?: string) => (v && v.trim() ? `%${v.trim()}%` : null);
+  const phone = f.phone ? f.phone.replace(/\D/g, "") : "";
+  return and(
+    active,
+    search,
+    like(f.code) ? ilike(customer.customerCode, like(f.code)!) : undefined,
+    like(f.name) ? ilike(customer.customerName, like(f.name)!) : undefined,
+    phone ? ilike(customer.phoneNumber, `%${phone}%`) : undefined,
+    like(f.email) ? ilike(customer.email, like(f.email)!) : undefined,
+    like(f.taxId) ? ilike(customer.customerCardId, like(f.taxId)!) : undefined,
+    f.type ? eq(customer.customerType, f.type) : undefined,
+    f.province && /^\d+$/.test(f.province) ? eq(customer.cityId, Number(f.province)) : undefined,
+    f.status === "Active" ? eq(customer.recordStatus, "ACTIVE") : f.status === "Inactive" ? eq(customer.recordStatus, "INACTIVE") : undefined
+  );
 }
 
 /** Server-side page for the customer list (43k rows). */
-export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclude"): Promise<Page<Customer>> {
-  const w = customerWhere(p.q, deleted);
+export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclude", f: CustomerFilters = {}): Promise<Page<Customer>> {
+  const w = customerWhere(p.q, deleted, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [[{ total }], rows] = await Promise.all([
     db.select({ total: count() }).from(customer).where(w),

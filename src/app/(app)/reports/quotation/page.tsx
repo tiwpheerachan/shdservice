@@ -50,7 +50,7 @@ export default function Page() {
         { kind: "date", key: "from", label: "วันที่สร้าง (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่สร้าง (ถึง)", value: f.to },
         { kind: "select", key: "type", label: "ประเภท", options: ["ALL", "Type A (Normal)", "Type B (VIP)"] },
-        { kind: "select", key: "status", label: "สถานะ", options: ["- - Select All - -", ...QUOTATION_STATUS_OPTIONS] },
+        { kind: "select", key: "status", label: "สถานะ", options: ["ทั้งหมด", ...QUOTATION_STATUS_OPTIONS] },
       ]}
       onApply={setF}
       onExport={() => exportXlsx("quotations", { ...filters, q: table.q })}

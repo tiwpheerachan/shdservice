@@ -5,15 +5,16 @@ import { useRouter } from "next/navigation";
 import { Plus, Download, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { type Customer } from "@/data/mock";
-import { useCustomersPage } from "@/data/db";
+import { CUSTOMER_TYPES, type Customer } from "@/data/mock";
+import { useCustomersPage, useProvinces } from "@/data/db";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, toCustomerForm, type CustomerFormValues, type CustomerConflict } from "@/components/shared/customer-form";
 import { api, postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
@@ -25,12 +26,19 @@ export default function CustomersPage() {
 
   // server-side paging / search over the customer table (43k rows)
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  // filter bar (applied on ค้นหา) — every field is AND-ed on the server; same params feed the Excel export
+  type CustomerFilter = { code: string; name: string; phone: string; email: string; taxId: string; type: string; province: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: CustomerFilter = { code: "", name: "", phone: "", email: "", taxId: "", type: "", province: "", status: "" };
+  const [draft, setDraft] = React.useState<CustomerFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<CustomerFilter>(NO_FILTER);
+  const setD = <K extends keyof CustomerFilter>(k: K, v: CustomerFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const { data: PROVINCES } = useProvinces();
   const { rows: CUSTOMERS, total, loading, refetch } = useCustomersPage({
     page: table.page,
     pageSize: table.pageSize,
-    q: table.q,
     sort: table.sort?.key,
     dir: table.sort?.dir,
+    ...filter,
   });
 
   const [open, setOpen] = React.useState(false);
@@ -159,7 +167,7 @@ export default function CustomersPage() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("customers", { q: table.q })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("customers", { ...filter })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -173,12 +181,62 @@ export default function CustomersPage() {
         }
       />
 
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label="รหัสลูกค้า">
+          <Input placeholder="C43600" className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
+        </Field>
+        <Field label="ชื่อ-สกุล">
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD("name", e.target.value)} />
+        </Field>
+        <Field label="เบอร์โทรศัพท์">
+          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+        </Field>
+        <Field label="Email">
+          <Input placeholder="name@example.com" value={draft.email} onChange={(e) => setD("email", e.target.value)} />
+        </Field>
+        <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี">
+          <Input className="num" value={draft.taxId} onChange={(e) => setD("taxId", e.target.value)} />
+        </Field>
+        <Field label="ประเภทลูกค้า">
+          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {CUSTOMER_TYPES.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="จังหวัด">
+          <Select value={draft.province} onChange={(e) => setD("province", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {PROVINCES.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value as CustomerFilter["status"])}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
       <DataTable
+        searchable={false}
         columns={columns}
         rows={CUSTOMERS}
         loading={loading}
         rowKey={(r) => r.code}
-        searchPlaceholder="ค้นหารหัส / ชื่อ / เบอร์โทร / อีเมล…"
         server={{ total, onChange: setTable }}
       />
 

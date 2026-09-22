@@ -157,7 +157,7 @@ export default function InventoryPage() {
         </Field>
         <Field label="ประเภทเอกสาร">
           <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {DOC_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
@@ -165,7 +165,7 @@ export default function InventoryPage() {
         </Field>
         <Field label="คลังสินค้า">
           <Select value={draft.warehouse} onChange={(e) => setD("warehouse", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {WAREHOUSES.map((w) => (
               <option key={w}>{w}</option>
             ))}
@@ -182,12 +182,11 @@ export default function InventoryPage() {
         </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={MOVEMENTS}
         loading={loading}
         rowKey={(r) => r.doc}
-        searchPlaceholder="ค้นหาเอกสาร / ผู้ทำรายการ…"
         server={{ total, onChange: setTable }}
       />
 

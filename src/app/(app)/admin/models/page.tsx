@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -22,12 +23,18 @@ export default function ModelsPage() {
   const { push } = useToast();
   // 1.1k models — server-side paging/search (ACTIVE + INACTIVE, DELETED hidden)
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  // filter bar (applied on ค้นหา) — same params go to the table query and the Excel export
+  type ModelFilter = { brand: string; code: string; name: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: ModelFilter = { brand: "", code: "", name: "", status: "" };
+  const [draft, setDraft] = React.useState<ModelFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<ModelFilter>(NO_FILTER);
   const { rows: MODELS, total, loading, refetch } = useModelsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q,
     sort: table.sort?.key,
     dir: table.sort?.dir,
+    ...filter,
   });
   const { data: MANUFACTURERS } = useManufacturers();
   const [open, setOpen] = React.useState(false);
@@ -140,7 +147,7 @@ export default function ModelsPage() {
         description="ทะเบียนรุ่นสินค้าและราคาตลาด ใช้อ้างอิงตอนเปิดงานและเสนอราคา"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("models", { deleted: "exclude" })}>
+            <Button variant="outline" size="sm" onClick={() => exportXlsx("models", { deleted: "exclude", ...filter })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -152,12 +159,44 @@ export default function ModelsPage() {
         }
       />
 
-      <DataTable
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label="ยี่ห้อผู้ผลิต">
+          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value }))}>
+            <option value="">ทั้งหมด</option>
+            {MANUFACTURERS.map((m) => (
+              <option key={m.id}>{m.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Model Code">
+          <Input placeholder="MD00001" className="num" value={draft.code} onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))} />
+        </Field>
+        <Field label="Model Name">
+          <Input placeholder="พิมพ์บางส่วนของชื่อรุ่น" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as ModelFilter["status"] }))}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
+      <DataTable searchable={false}
         columns={columns}
         rows={MODELS}
         loading={loading}
         rowKey={(r) => r.code}
-        searchPlaceholder="ค้นหา Model Code / Model Name / Brand…"
         server={{ total, onChange: setTable }}
       />
 

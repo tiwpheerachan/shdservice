@@ -4,6 +4,7 @@ import * as React from "react";
 import { Plus, Download, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { PeoplePicker, type Person } from "@/components/shared/people-picker";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { ROLES, type User } from "@/data/mock";
 import { useUsers, useRoles } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
@@ -44,6 +46,7 @@ const EMPTY: UserForm = {
 
 export default function UsersPage() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const [view, setView] = React.useState<"active" | "deleted">("active");
   const { data: USERS, loading, refetch } = useUsers(
     view === "deleted" ? "only" : "exclude"
@@ -55,6 +58,18 @@ export default function UsersPage() {
     [dbRoles]
   );
   const pendingCount = USERS.filter((u) => u.role === "รออนุมัติ").length;
+
+  // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
+  type UserFilter = { name: string; username: string; role: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: UserFilter = { name: "", username: "", role: "", status: "" };
+  const [draft, setDraft] = React.useState<UserFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<UserFilter>(NO_FILTER);
+  const VISIBLE = React.useMemo(() => {
+    const has = (v: string | null | undefined, t: string) => !t.trim() || (v ?? "").toLowerCase().includes(t.trim().toLowerCase());
+    return USERS.filter(
+      (u) => has(u.name, filter.name) && has(u.username, filter.username) && (!filter.role || u.role === filter.role) && (!filter.status || u.status === filter.status)
+    );
+  }, [USERS, filter]);
   // auto-refresh so users who just signed in (pending) show up without a reload
   React.useEffect(() => {
     if (view !== "active") return;
@@ -188,6 +203,21 @@ export default function UsersPage() {
 
   // Soft delete / restore via the generic records endpoint (401-resilient).
   const softSet = async (r: User, deleted: boolean) => {
+    if (deleted) {
+      const ok = await confirm({
+        tone: "danger",
+        title: `ลบผู้ใช้ ${r.name}?`,
+        description: (
+          <>
+            {r.name} ({r.role}) จะเข้าระบบไม่ได้และหายจากรายชื่อพนักงานในทุกฟอร์ม งานเก่าที่เคยทำยังแสดงชื่อได้ตามเดิม
+            <br />
+            กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่พักการใช้งาน ให้แก้ไขแล้วเลือกสถานะ Inactive แทน
+          </>
+        ),
+        confirmLabel: "ลบผู้ใช้",
+      });
+      if (!ok) return;
+    }
     setBusyId(r.id);
     try {
       const doPost = () =>
@@ -418,12 +448,46 @@ export default function UsersPage() {
         </div>
       )}
 
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label="ชื่อ-สกุล ผู้ใช้ระบบ">
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="Username">
+          <Input placeholder="username" className="num" value={draft.username} onChange={(e) => setDraft((f) => ({ ...f, username: e.target.value }))} />
+        </Field>
+        <Field label="ประเภทผู้ใช้งาน">
+          <Select value={draft.role} onChange={(e) => setDraft((f) => ({ ...f, role: e.target.value }))}>
+            <option value="">ทั้งหมด</option>
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as UserFilter["status"] }))}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
       <DataTable
+        searchable={false}
         columns={columns}
-        rows={USERS}
+        rows={VISIBLE}
         loading={loading}
         rowKey={(r) => r.id}
-        searchPlaceholder="ค้นหาชื่อ, username, อีเมล…"
+        footerNote={filter !== NO_FILTER && VISIBLE.length !== USERS.length ? <span>· กรองจาก {USERS.length} คน</span> : undefined}
       />
 
       <Modal

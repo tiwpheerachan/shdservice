@@ -55,9 +55,9 @@ export default function Page() {
       title="รายงานอะไหล่คงเหลือ"
       description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ"
       filters={[
-        { kind: "select", key: "category", label: "หมวดหมู่", options: ["- - Select All - -", ...CATEGORIES.map((c) => c.name)] },
-        { kind: "select", key: "brand", label: "ยี่ห้อ", options: ["- - Select All - -", ...MANUFACTURERS.map((m) => m.name)] },
-        { kind: "select", key: "stock", label: "สถานะสต๊อก", options: ["- - Select All - -", "มีสินค้า", "ใกล้หมด (≤3)", "หมดสต๊อก"] },
+        { kind: "select", key: "category", label: "หมวดหมู่", options: ["ทั้งหมด", ...CATEGORIES.map((c) => c.name)] },
+        { kind: "select", key: "brand", label: "ยี่ห้อ", options: ["ทั้งหมด", ...MANUFACTURERS.map((m) => m.name)] },
+        { kind: "select", key: "stock", label: "สถานะสต๊อก", options: ["ทั้งหมด", "มีสินค้า", "ใกล้หมด (≤3)", "หมดสต๊อก"] },
         { kind: "text", key: "q", label: "รหัส / ชื่ออะไหล่", placeholder: "P02534" },
       ]}
       onApply={setF}

@@ -43,7 +43,7 @@ export default function Page() {
       filters={[
         { kind: "date", key: "from", label: "วันที่ (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่ (ถึง)", value: f.to },
-        { kind: "select", key: "category", label: "หมวดหมู่", options: ["- - Select All - -", ...CATEGORIES.map((c) => c.name)] },
+        { kind: "select", key: "category", label: "หมวดหมู่", options: ["ทั้งหมด", ...CATEGORIES.map((c) => c.name)] },
         { kind: "text", key: "code", label: "รหัสอะไหล่", placeholder: "P02534" },
       ]}
       onApply={setF}

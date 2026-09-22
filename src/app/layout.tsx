@@ -3,6 +3,7 @@ import { Inter, Noto_Sans_Thai } from "next/font/google";
 import "./globals.css";
 import { ThemeScript } from "@/components/layout/theme-script";
 import { ToastProvider } from "@/components/ui/toast";
+import { ConfirmProvider } from "@/components/ui/confirm";
 
 // Self-hosted at build time (next/font): no request to fonts.googleapis.com on
 // every page load and no render-blocking external stylesheet. Exposed as CSS
@@ -50,7 +51,9 @@ export default function RootLayout({
         <ThemeScript />
       </head>
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ToastProvider>
       </body>
     </html>
   );

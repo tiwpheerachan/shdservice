@@ -48,8 +48,8 @@ export default function Page() {
       filters={[
         { kind: "date", key: "from", label: "วันที่สั่งขาย (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่สั่งขาย (ถึง)", value: f.to },
-        { kind: "select", key: "sales", label: "พนักงานขาย", options: ["- - Select All - -", ...STAFF.map((u) => u.name)] },
-        { kind: "select", key: "approve", label: "สถานะอนุมัติ", options: ["- - Select All - -", ...Object.keys(TONE)] },
+        { kind: "select", key: "sales", label: "พนักงานขาย", options: ["ทั้งหมด", ...STAFF.map((u) => u.name)] },
+        { kind: "select", key: "approve", label: "สถานะอนุมัติ", options: ["ทั้งหมด", ...Object.keys(TONE)] },
       ]}
       onApply={setF}
       onExport={() => exportXlsx("sale_orders", { ...filters, q: table.q })}

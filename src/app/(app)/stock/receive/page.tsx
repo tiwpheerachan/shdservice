@@ -4,20 +4,24 @@ import * as React from "react";
 import { PackagePlus, Save } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Section } from "@/components/shared/section";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { useProducts } from "@/data/db";
+import { useProducts, useManufacturers, useCategories } from "@/data/db";
 import { int } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 type Row = {
   sysCode: string;
+  mfgCode: string;
   name: string;
+  brand: string;
+  category: string;
   status: string;
   onhand: number;
   qty: number;
@@ -27,7 +31,23 @@ export default function ReceivePage() {
   const { push } = useToast();
   const { name: me } = useAccess();
   const { data: PRODUCTS, loading, refetch } = useProducts();
+  const { data: BRANDS } = useManufacturers();
+  const { data: CATEGORIES } = useCategories();
   const [rows, setRows] = React.useState<Row[]>([]);
+  // filter bar narrows which lines are SHOWN; quantities typed into hidden lines are kept
+  // (the save reads `rows`, not the visible subset) and counted in the footer
+  type LineFilter = { code: string; mfgCode: string; name: string; brand: string; category: string };
+  const NO_FILTER: LineFilter = { code: "", mfgCode: "", name: "", brand: "", category: "" };
+  const [draft, setDraft] = React.useState<LineFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<LineFilter>(NO_FILTER);
+  const has = (v: string, t: string) => !t.trim() || v.toLowerCase().includes(t.trim().toLowerCase());
+  const visible = React.useMemo(
+    () =>
+      rows.filter(
+        (r) => has(r.sysCode, filter.code) && has(r.mfgCode, filter.mfgCode) && has(r.name, filter.name) && (!filter.brand || r.brand === filter.brand) && (!filter.category || r.category === filter.category)
+      ),
+    [rows, filter]
+  );
   const [po, setPo] = React.useState("");
   const [date, setDate] = React.useState("");
   const [supplier, setSupplier] = React.useState("");
@@ -46,7 +66,10 @@ export default function ReceivePage() {
     setRows(
       PRODUCTS.map((p) => ({
         sysCode: p.sysCode,
+        mfgCode: p.mfgCode ?? "",
         name: p.name,
+        brand: p.brand ?? "",
+        category: p.category ?? "",
         status: p.status,
         onhand: p.onhand,
         qty: 0,
@@ -80,6 +103,8 @@ export default function ReceivePage() {
     setRows((s) => s.map((r) => (r.sysCode === code ? { ...r, qty: Math.max(0, v) } : r)));
 
   const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+  const totalLines = rows.filter((r) => r.qty > 0).length;
+  const hiddenLines = rows.filter((r) => r.qty > 0 && !visible.includes(r)).length;
 
   const columns: Column<Row>[] = [
     {
@@ -180,15 +205,49 @@ export default function ReceivePage() {
         </FieldGrid>
       </Section>
 
+      <FilterBar
+        onSearch={() => setFilter(draft)}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label="รหัสอะไหล่ (ระบบ)">
+          <Input placeholder="P00012" className="num" value={draft.code} onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))} />
+        </Field>
+        <Field label="รหัสอะไหล่ (ผู้ผลิต)">
+          <Input placeholder="เลข part" className="num" value={draft.mfgCode} onChange={(e) => setDraft((f) => ({ ...f, mfgCode: e.target.value }))} />
+        </Field>
+        <Field label="ชื่ออะไหล่">
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="ยี่ห้อ (ผู้ผลิต)">
+          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value }))}>
+            <option value="">ทั้งหมด</option>
+            {BRANDS.map((b) => (
+              <option key={b.id}>{b.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="หมวดหมู่">
+          <Select value={draft.category} onChange={(e) => setDraft((f) => ({ ...f, category: e.target.value }))}>
+            <option value="">ทั้งหมด</option>
+            {CATEGORIES.map((c) => (
+              <option key={c.id}>{c.name}</option>
+            ))}
+          </Select>
+        </Field>
+      </FilterBar>
+
       <DataTable
+        searchable={false}
         columns={columns}
-        rows={rows}
+        rows={visible}
         loading={loading}
         rowKey={(r) => r.sysCode}
-        searchPlaceholder="ค้นหารายการอะไหล่…"
         footerNote={
           <span className="font-medium text-foreground">
-            · รวมรับเข้า {int(totalQty)} ชิ้น
+            · รวมรับเข้า {int(totalQty)} ชิ้น ({totalLines} รายการ{hiddenLines ? ` — ${hiddenLines} รายการอยู่นอกตัวกรอง` : ""})
           </span>
         }
       />

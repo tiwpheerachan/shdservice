@@ -277,13 +277,32 @@ export type JobFilters = {
   unassigned?: boolean;
   /** jobs the close screen can act on: Repaired group, or closed but still waiting for a tracking no / pickup */
   closable?: boolean;
-  /** which date column from/to apply to (default create) */
-  dateBy?: "create" | "repaired" | "closed";
+  /** which date column from/to apply to (default create) — reception = วันที่รับเครื่องซ่อม */
+  dateBy?: "create" | "reception" | "repaired" | "closed";
   symptom?: string; // symptom name (engineer's or customer's)
   returnType?: string;
+  /* ---- job-list filter bar (each one is AND-ed; text ones are partial matches) ---- */
+  no?: string; // เลขที่งาน
+  ref?: string; // เลขคำสั่งซื้อ (job_reference_no)
+  brand?: string; // ยี่ห้อ — manufacturer name
+  model?: string; // รุ่น — product_model_name
+  typeDetail?: string; // งานย่อย
+  createdBy?: string; // เปิดงานโดย — app_user id
+  customer?: string; // ชื่อ-สกุลลูกค้า (matched inside customer_detail = "code name phone")
+  phone?: string; // เบอร์โทร — digits, matched inside customer_detail
+  tracking?: string; // เลขพัสดุจากลูกค้า (job_reception_tracking_no)
+  imei?: string; // IMEI หรือ Serial
+  warranty?: string; // IN | OUT
+  bounce?: boolean; // งานซ่อมซ้ำ (is_job_bounce)
+  within30?: boolean; // เปิดงานภายใน 30 วันหลังวันที่ขาย
+  cost?: "yes" | "no"; // ค่าใช้จ่ายเก็บลูกค้า: มี (job_total_cost > 0) / ไม่มี
 };
 
-const dateCol = (by?: JobFilters["dateBy"]) => (by === "repaired" ? job.jobRepairedDate : by === "closed" ? job.jobClosedDate : job.jobCreateDate);
+const dateCol = (by?: JobFilters["dateBy"]) =>
+  by === "reception" ? job.jobReceptionDate : by === "repaired" ? job.jobRepairedDate : by === "closed" ? job.jobClosedDate : job.jobCreateDate;
+/** job_reception_date is a DATE column — compare with plain dates, the others are timestamps */
+const dayStart = (by: JobFilters["dateBy"], d: string) => (by === "reception" ? d : `${d} 00:00:00`);
+const dayEnd = (by: JobFilters["dateBy"], d: string) => (by === "reception" ? d : `${d} 23:59:59`);
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
@@ -311,8 +330,8 @@ export function jobWhere(q: string, f: JobFilters) {
         : sql`trim(coalesce(${eng.firstName},'') || ' ' || coalesce(${eng.lastName},'')) = ${f.engineer}`
       : undefined,
     f.channel ? eq(job.productSaleOutChannel, f.channel) : undefined,
-    f.from ? gte(dateCol(f.dateBy), `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(dateCol(f.dateBy), `${f.to} 23:59:59`) : undefined,
+    f.from ? gte(dateCol(f.dateBy), dayStart(f.dateBy, f.from)) : undefined,
+    f.to ? lte(dateCol(f.dateBy), dayEnd(f.dateBy, f.to)) : undefined,
     f.symptom ? or(eq(symptom.symptomName, f.symptom), sql`exists (select 1 from job_symptom js join symptom s2 on s2.symptom_id = js.symptom_id where js.job_no = ${job.jobNo} and s2.symptom_name = ${f.symptom})`) : undefined,
     f.returnType ? eq(job.returnCustomerType, f.returnType) : undefined,
     f.closedFrom ? gte(job.jobClosedDate, `${f.closedFrom} 00:00:00`) : undefined,
@@ -326,7 +345,23 @@ export function jobWhere(q: string, f: JobFilters) {
       : undefined,
     f.closable
       ? or(eq(jobStatus.jobStatusGroup, "Repaired"), inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]))
-      : undefined
+      : undefined,
+    // ---- job-list filter bar ----
+    f.no ? ilike(job.jobNo, `%${f.no.trim()}%`) : undefined,
+    f.ref ? ilike(job.jobReferenceNo, `%${f.ref.trim()}%`) : undefined,
+    // brand/model are matched without adding joins to the count query
+    f.brand ? sql`${job.productBrandId} in (select manufacturer_id from manufacturer where manufacturer_name = ${f.brand})` : undefined,
+    f.model ? eq(job.productModelName, f.model) : undefined,
+    f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
+    f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
+    f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
+    f.phone && f.phone.replace(/\D/g, "") ? ilike(job.customerDetail, `%${f.phone.replace(/\D/g, "")}%`) : undefined,
+    f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
+    f.imei ? or(ilike(job.productImeiNo, `%${f.imei.trim()}%`), ilike(job.productSerial, `%${f.imei.trim()}%`)) : undefined,
+    f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
+    f.bounce ? eq(job.isJobBounce, true) : undefined,
+    f.within30 ? sql`${job.productSaleOrderDate} is not null and ${job.jobCreateDate}::date - ${job.productSaleOrderDate} between 0 and 30` : undefined,
+    f.cost === "yes" ? sql`coalesce(${job.jobTotalCost}, 0) > 0` : f.cost === "no" ? sql`coalesce(${job.jobTotalCost}, 0) = 0` : undefined
   );
 }
 
@@ -347,9 +382,23 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
     includeCancelled: f.includeCancelled === "1",
     unassigned: f.unassigned === "1",
     closable: f.closable === "1",
-    dateBy: f.dateBy === "repaired" || f.dateBy === "closed" ? f.dateBy : undefined,
+    dateBy: f.dateBy === "reception" || f.dateBy === "repaired" || f.dateBy === "closed" ? f.dateBy : undefined,
     symptom: f.symptom,
     returnType: f.returnType,
+    no: f.no,
+    ref: f.ref,
+    brand: f.brand,
+    model: f.model,
+    typeDetail: f.typeDetail,
+    createdBy: f.createdBy,
+    customer: f.customer,
+    phone: f.phone,
+    tracking: f.tracking,
+    imei: f.imei,
+    warranty: f.warranty,
+    bounce: f.bounce === "1",
+    within30: f.within30 === "1",
+    cost: f.cost === "yes" || f.cost === "no" ? f.cost : undefined,
   };
 }
 

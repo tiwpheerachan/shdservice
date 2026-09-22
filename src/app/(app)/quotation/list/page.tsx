@@ -178,14 +178,13 @@ export default function QuotationListPage() {
           setDraft(NO_FILTER);
           setFilters(NO_FILTER);
         }}
-        defaultOpen={false}
       >
         <Field label="หมายเลขใบเสนอราคา">
           <Input className="num" placeholder="Q2600462" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
         </Field>
         <Field label="ประเภท">
           <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
-            <option value="">ALL</option>
+            <option value="">ทั้งหมด</option>
             <option>Type A (Normal)</option>
             <option>Type B (VIP)</option>
           </Select>
@@ -204,7 +203,7 @@ export default function QuotationListPage() {
         </Field>
         <Field label="Warranty">
           <Select value={draft.warranty} onChange={(e) => setD("warranty", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {WARRANTY_OPTIONS.map((w) => (
               <option key={w}>{w}</option>
             ))}
@@ -212,7 +211,7 @@ export default function QuotationListPage() {
         </Field>
         <Field label="ยี่ห้อ">
           <Select value={draft.brand} onChange={(e) => setD("brand", e.target.value)}>
-            <option value="">- - Select All - -</option>
+            <option value="">ทั้งหมด</option>
             {MANUFACTURERS.map((m) => (
               <option key={m.id}>{m.name}</option>
             ))}
@@ -226,7 +225,7 @@ export default function QuotationListPage() {
         </Field>
         <Field label="สถานะใบเสนอราคา">
           <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
-            <option value="">- - Select ALL - -</option>
+            <option value="">ทั้งหมด</option>
             {QUOTATION_STATUS_OPTIONS.map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -234,12 +233,11 @@ export default function QuotationListPage() {
         </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={QUOTATIONS}
         loading={loading}
         rowKey={(r) => r.no}
-        searchPlaceholder="ค้นหาเลขที่ใบเสนอราคา / ลูกค้า / งานซ่อม…"
         footerNote={
           <span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>
         }

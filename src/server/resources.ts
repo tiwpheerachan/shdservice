@@ -6,7 +6,7 @@ import { parsePageQuery, type Page } from "@/server/paging";
 import { parseStatusMode } from "@/server/record-status";
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from "@/server/services/masters";
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from "@/server/services/users";
-import { listCustomers, pageCustomers, listProvinces } from "@/server/services/customers";
+import { listCustomers, pageCustomers, listProvinces, customerFiltersFromQuery } from "@/server/services/customers";
 import { listProducts, listMovements, listIssuedLines, pageProducts, productStats, listProductsLite, pageMovements, pageIssuedLines, issuedStats, type ProductFilters, jobsWithPendingParts, jobsWithReturnableParts } from "@/server/services/stock";
 import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
 import { listDocumentProfiles } from "@/server/services/document-profiles";
@@ -48,7 +48,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     case "symptoms":
       return listSymptoms(deleted);
     case "models":
-      return paged ? pageModels(p, deleted) : listModels(deleted);
+      return paged ? pageModels(p, deleted, { brand: p.f.brand, code: p.f.code, name: p.f.name, status: p.f.status }) : listModels(deleted);
     case "staff":
       return listStaff();
     case "provinces":
@@ -87,6 +87,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
         category: p.f.category,
         creator: p.f.creator,
         date: p.f.date,
+        model: p.f.model,
         stock: p.f.stock === "in" || p.f.stock === "low" || p.f.stock === "out" ? p.f.stock : undefined,
       };
       return paged ? pageProducts(p, pf) : listProducts({ deleted, q: p.q });
@@ -102,12 +103,15 @@ export async function readResource(req: NextRequest, resource: string): Promise<
         category: p.f.category,
         creator: p.f.creator,
         date: p.f.date,
+        model: p.f.model,
         stock: p.f.stock === "in" || p.f.stock === "low" || p.f.stock === "out" ? p.f.stock : undefined,
       };
       return [await productStats(p.q, pf)];
     }
     case "customers":
-      return paged ? pageCustomers(p, deleted) : listCustomers({ q: p.q, deleted, limit: Number(sp.get("limit") ?? 500) });
+      return paged
+        ? pageCustomers(p, deleted, customerFiltersFromQuery(p.f))
+        : listCustomers({ q: p.q, deleted, limit: Number(sp.get("limit") ?? 500), filters: customerFiltersFromQuery(p.f) });
     case "issued_lines":
       return paged
         ? pageIssuedLines(p, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })

@@ -43,8 +43,8 @@ export default function Page() {
       filters={[
         { kind: "date", key: "from", label: "วันที่ซ่อม (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่ซ่อม (ถึง)", value: f.to },
-        { kind: "select", key: "engineer", label: "ช่างผู้รับผิดชอบ", options: ["- - Select All - -", ...STAFF.map((s) => s.name)] },
-        { kind: "select", key: "symptom", label: "อาการเสีย", options: ["- - Select All - -", ...SYMPTOMS.map((s) => s.name)] },
+        { kind: "select", key: "engineer", label: "ช่างผู้รับผิดชอบ", options: ["ทั้งหมด", ...STAFF.map((s) => s.name)] },
+        { kind: "select", key: "symptom", label: "อาการเสีย", options: ["ทั้งหมด", ...SYMPTOMS.map((s) => s.name)] },
       ]}
       onApply={setF}
       onExport={() => exportXlsx("jobs", { ...filters, q: table.q })}

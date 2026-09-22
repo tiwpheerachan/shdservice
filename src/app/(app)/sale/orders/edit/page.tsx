@@ -7,11 +7,13 @@ import { SaleOrderForm, type SaleOrderFormHandle, type SaleOrderLoaded } from "@
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { api, postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 function EditSaleOrder() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const { isAdmin, can } = useAccess();
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
@@ -62,7 +64,18 @@ function EditSaleOrder() {
   const decide = async (decision: "approve" | "deny" | "reject") => {
     if (!no) return;
     const label = decision === "approve" ? "อนุมัติ" : decision === "deny" ? "ปฏิเสธ" : "ส่งกลับแก้ไข";
-    if (!window.confirm(`${label}ใบสั่งขาย ${no}?`)) return;
+    const ok = await confirm({
+      tone: decision === "approve" ? "default" : "danger",
+      title: `${label}ใบสั่งขาย ${no}?`,
+      description:
+        decision === "approve"
+          ? "ระบบจะตัดสต๊อกตามรายการในใบทันที (สร้างเอกสารจ่ายออก WHO) และแก้ไขรายการไม่ได้อีก"
+          : decision === "deny"
+            ? "ใบนี้จะถูกปฏิเสธ ไม่ตัดสต๊อก และไม่สามารถอนุมัติภายหลังได้"
+            : "ใบจะถูกส่งกลับให้ผู้สร้างแก้ไข แล้วบันทึกใหม่เพื่อขออนุมัติอีกครั้ง",
+      confirmLabel: decision === "approve" ? "อนุมัติ (ตัดสต๊อก)" : label,
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/approve`, { decision });

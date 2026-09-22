@@ -3,6 +3,8 @@
 import * as React from "react";
 import { Save, ShieldCheck, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { Field } from "@/components/ui/field";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +44,16 @@ export default function PermissionsPage() {
   const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
   const [map, setMap] = React.useState<Record<Key, Cell>>({});
   const [role, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
+  // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
+  // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
+  const [menuFilter, setMenuFilter] = React.useState("");
+  const [draft, setDraft] = React.useState({ role: ASSIGNABLE_ROLES[0], menu: "" });
+  React.useEffect(() => {
+    // roles arrive from the server after first render — align the default once
+    if (!dbRoles.length) return;
+    setRole((r) => (dbRoles.includes(r) ? r : dbRoles[0]));
+    setDraft((d) => (dbRoles.includes(d.role) ? d : { ...d, role: dbRoles[0] }));
+  }, [dbRoles]);
   const [saving, setSaving] = React.useState(false);
 
   // build the editable map from DB rows
@@ -68,8 +80,8 @@ export default function PermissionsPage() {
       return { ...s, [k]: { ...cur, [field]: !cur[field] } };
     });
 
-  // rows for the selected role — always all menus, so anything can be granted
-  const viewRows: Permission[] = MENUS.map((menu) => {
+  // rows for the selected role — every menu (so anything can be granted), narrowed by the เมนูงาน filter
+  const viewRows: Permission[] = MENUS.filter((menu) => !menuFilter || menu === menuFilter).map((menu) => {
     const c = cellOf(role, menu);
     return { id: keyOf(role, menu), role, menu, ...c };
   });
@@ -158,30 +170,49 @@ export default function PermissionsPage() {
         }
       />
 
-      <div className="surface flex flex-wrap items-center gap-3 p-3">
-        <ShieldCheck className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium">บทบาทที่กำหนดสิทธิ์</span>
-        <Select
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          className="h-8 w-full text-xs sm:w-56"
-        >
-          {ASSIGNABLE_ROLES.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </Select>
-        <Badge tone="primary">{role}</Badge>
-        <span className="num text-xs text-muted-foreground">{MENUS.length} เมนู</span>
-      </div>
+      <FilterBar
+        onSearch={() => {
+          setRole(draft.role);
+          setMenuFilter(draft.menu);
+        }}
+        onReset={() => {
+          setDraft({ role: ASSIGNABLE_ROLES[0], menu: "" });
+          setRole(ASSIGNABLE_ROLES[0]);
+          setMenuFilter("");
+        }}
+      >
+        <Field label="ประเภทผู้ใช้งาน" required>
+          <Select value={draft.role} onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}>
+            {ASSIGNABLE_ROLES.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="เมนูงาน">
+          <Select value={draft.menu} onChange={(e) => setDraft((d) => ({ ...d, menu: e.target.value }))}>
+            <option value="">ทั้งหมด</option>
+            {MENUS.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </Select>
+        </Field>
+      </FilterBar>
 
       <DataTable
+        searchable={false}
         columns={columns}
         rows={viewRows}
         loading={loading}
         rowKey={(r) => r.id}
         pageSize={25}
-        searchPlaceholder="ค้นหาเมนู…"
         dense
+        toolbar={
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            กำลังกำหนดสิทธิ์ของ <Badge tone="primary">{role}</Badge>
+            <span className="num">{viewRows.length} / {MENUS.length} เมนู</span>
+          </span>
+        }
       />
     </>
   );

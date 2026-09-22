@@ -25,14 +25,15 @@ import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { type Product } from "@/data/mock";
-import { useProductsPage, useProductStats, useManufacturers, useCategories } from "@/data/db";
+import { useProductsPage, useProductStats, useManufacturers, useCategories, useModels } from "@/data/db";
 import { baht, int, cn } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
-type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; category: string; creator: string; date: string };
-const NO_FILTER: Filters = { sysCode: "", mfgCode: "", name: "", status: "", brand: "", category: "", creator: "", date: "" };
+type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; model: string; category: string; creator: string; date: string };
+const NO_FILTER: Filters = { sysCode: "", mfgCode: "", name: "", status: "", brand: "", model: "", category: "", creator: "", date: "" };
 
 function Kpi({
   icon: Icon,
@@ -66,9 +67,11 @@ function Kpi({
 
 export default function ProductsPage() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath("/stock/products");
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: CATEGORIES } = useCategories();
+  const { data: MODELS } = useModels();
 
   const [detail, setDetail] = React.useState<{
     product: Product | null;
@@ -115,7 +118,19 @@ export default function ProductsPage() {
       push({ kind: "warning", title: "ยกเลิกรายการอะไหล่", desc: `${r.sysCode} — ต้องมีสิทธิ์ยกเลิก` });
       return;
     }
-    if (!window.confirm(`ยกเลิกรายการอะไหล่ ${r.sysCode} — ${r.name}?`)) return;
+    const ok = await confirm({
+      tone: "danger",
+      title: `ยกเลิกรายการอะไหล่ ${r.sysCode}?`,
+      description: (
+        <>
+          <span className="font-medium">{r.name}</span> จะถูกซ่อนจากรายการและตัวเลือกอะไหล่ทุกที่ ยอดคงเหลือและประวัติการเคลื่อนไหวยังอยู่ครบ
+          <br />
+          การกู้คืนต้องทำโดยผู้ดูแลระบบ
+        </>
+      ),
+      confirmLabel: "ยกเลิกรายการ",
+    });
+    if (!ok) return;
     try {
       await postJson("/api/admin/records", { table: "products", id: r.sysCode, status: "DELETED" });
       push({ kind: "success", title: "ยกเลิกรายการอะไหล่แล้ว", desc: r.sysCode });
@@ -278,39 +293,15 @@ export default function ProductsPage() {
           setDraft(NO_FILTER);
           setFilters({ ...NO_FILTER, status: "Active" });
         }}
-        defaultOpen={false}
       >
         <Field label="รหัสอะไหล่ (ระบบ)">
           <Input placeholder="P02534" className="num" value={draft.sysCode} onChange={(e) => setD("sysCode", e.target.value)} />
         </Field>
         <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-          <Input className="num" value={draft.mfgCode} onChange={(e) => setD("mfgCode", e.target.value)} />
+          <Input placeholder="เลข part" className="num" value={draft.mfgCode} onChange={(e) => setD("mfgCode", e.target.value)} />
         </Field>
         <Field label="ชื่ออะไหล่">
-          <Input placeholder="ชื่ออะไหล่…" value={draft.name} onChange={(e) => setD("name", e.target.value)} />
-        </Field>
-        <Field label="สถานะอะไหล่">
-          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
-            <option value="">- - Select All - -</option>
-            <option>Active</option>
-            <option>Inactive</option>
-          </Select>
-        </Field>
-        <Field label="ยี่ห้อ (ผู้ผลิต)">
-          <Select value={draft.brand} onChange={(e) => setD("brand", e.target.value)}>
-            <option value="">- - Select All - -</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="หมวดหมู่">
-          <Select value={draft.category} onChange={(e) => setD("category", e.target.value)}>
-            <option value="">- - Select All - -</option>
-            {CATEGORIES.map((c) => (
-              <option key={c.id}>{c.name}</option>
-            ))}
-          </Select>
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD("name", e.target.value)} />
         </Field>
         <Field label="ผู้สร้างรหัส">
           <Input placeholder="ชื่อผู้สร้าง" value={draft.creator} onChange={(e) => setD("creator", e.target.value)} />
@@ -318,14 +309,44 @@ export default function ProductsPage() {
         <Field label="วันที่สร้างรหัสอะไหล่">
           <Input type="date" value={draft.date} onChange={(e) => setD("date", e.target.value)} />
         </Field>
+        <Field label="ยี่ห้อ (ผู้ผลิต)">
+          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value, model: "" }))}>
+            <option value="">ทั้งหมด</option>
+            {MANUFACTURERS.map((m) => (
+              <option key={m.id}>{m.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="รุ่น" hint="อะไหล่ที่ใช้ได้กับรุ่นนั้น (ตามที่ผูกไว้ในข้อมูลอะไหล่)">
+          <Select value={draft.model} onChange={(e) => setD("model", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {(draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS).map((m) => (
+              <option key={m.code} value={m.code}>{draft.brand ? m.name : `${m.brand} ${m.name}`}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="สถานะอะไหล่">
+          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            <option>Active</option>
+            <option>Inactive</option>
+          </Select>
+        </Field>
+        <Field label="หมวดหมู่">
+          <Select value={draft.category} onChange={(e) => setD("category", e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            {CATEGORIES.map((c) => (
+              <option key={c.id}>{c.name}</option>
+            ))}
+          </Select>
+        </Field>
       </FilterBar>
 
-      <DataTable
+      <DataTable searchable={false}
         columns={columns}
         rows={PRODUCTS}
         loading={loading}
         rowKey={(r) => r.sysCode}
-        searchPlaceholder="ค้นหารหัส / ชื่ออะไหล่ / ยี่ห้อ…"
         server={{ total: totalRows, onChange: setTable }}
       />
 

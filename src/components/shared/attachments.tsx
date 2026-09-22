@@ -5,6 +5,7 @@ import { Paperclip, Trash2, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { api, del, errMsg } from "@/lib/api";
 
 type Row = { id: number; name: string; note: string; file?: string; pending?: File };
@@ -19,6 +20,7 @@ export type AttachmentsHandle = { uploadPending: (jobNo: string) => Promise<void
 
 export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function Attachments({ jobNo }, ref) {
   const { push } = useToast();
+  const confirm = useConfirm();
   const [rows, setRows] = React.useState<Row[]>([]);
   const [file, setFile] = React.useState<File | null>(null);
   const [note, setNote] = React.useState("");
@@ -90,9 +92,20 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
 
   const remove = async (r: Row) => {
     if (r.id < 0) {
-      setRows((s) => s.filter((x) => x.id !== r.id));
+      setRows((s) => s.filter((x) => x.id !== r.id)); // not uploaded yet — just drop it from the queue
       return;
     }
+    const ok = await confirm({
+      tone: "danger",
+      title: "ลบไฟล์แนบ?",
+      description: (
+        <>
+          <span className="font-medium">{r.name}</span> จะถูกลบออกจากงานนี้ — ไฟล์ที่ลบแล้วกู้คืนไม่ได้ ต้องอัปโหลดใหม่
+        </>
+      ),
+      confirmLabel: "ลบไฟล์",
+    });
+    if (!ok) return;
     try {
       await del(`/api/attachments/${r.id}`);
       setRows((s) => s.filter((x) => x.id !== r.id));

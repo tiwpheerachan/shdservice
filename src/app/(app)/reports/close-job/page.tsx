@@ -61,7 +61,7 @@ export default function Page() {
       filters={[
         { kind: "date", key: "from", label: "วันที่ปิดงาน (ตั้งแต่)", value: f.from },
         { kind: "date", key: "to", label: "วันที่ปิดงาน (ถึง)", value: f.to },
-        { kind: "select", key: "returnType", label: "วิธีการส่งคืน", options: ["- - Select All - -", ...RETURN_METHODS] },
+        { kind: "select", key: "returnType", label: "วิธีการส่งคืน", options: ["ทั้งหมด", ...RETURN_METHODS] },
         { kind: "text", key: "no", label: "เลขที่งาน", placeholder: "J2612164" },
       ]}
       onApply={setF}
