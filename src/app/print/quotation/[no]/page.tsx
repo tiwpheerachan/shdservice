@@ -36,7 +36,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   const co = await profileForDocument(q.documentProfileId); // ออกเอกสารในนาม
   const c = q.customerDetail;
   const j = q.job;
-  // QR → /t/<token>: the quotation is the only document the customer receives
+  // QR → /track/<token>: the quotation is the only document the customer receives
   const trackUrl = j?.no ? await trackLinkFor(j.no, appBaseUrl((await headers()).get("host"))) : "";
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);

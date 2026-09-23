@@ -3,5 +3,5 @@
 User-agent: *
 Disallow: /api/
 Disallow: /print/
-Disallow: /t
+Disallow: /track
 Allow: /login

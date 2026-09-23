@@ -18,7 +18,7 @@ export default async function Page({ params }: { params: Promise<{ token: string
         <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
           ลิงก์อาจหมดอายุหรือไม่ถูกต้อง ลองค้นด้วยเลขที่เอกสารแทน หรือติดต่อศูนย์บริการ
         </p>
-        <Link href="/t" className="mt-4 inline-flex h-9 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">
+        <Link href="/track" className="mt-4 inline-flex h-9 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">
           ค้นด้วยเลขที่เอกสาร
         </Link>
       </div>

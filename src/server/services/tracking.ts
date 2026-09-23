@@ -205,7 +205,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-/** /t/<token> */
+/** /track/<token> */
 export async function trackByToken(token: string): Promise<PublicJob | null> {
   return quiet(() => trackByTokenUnsafe(token));
 }
@@ -255,7 +255,7 @@ async function trackByNumberUnsafe(input: string, phone4: string): Promise<Publi
 export async function trackLinkFor(jobNo: string, baseUrl: string): Promise<string> {
   const [row] = await db.select({ token: job.trackToken }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
   if (!row?.token) return "";
-  return `${baseUrl.replace(/\/+$/, "")}/t/${row.token}`;
+  return `${baseUrl.replace(/\/+$/, "")}/track/${row.token}`;
 }
 
 /** issue a token for a job that has none (older rows, or a job created before 0012 ran) */

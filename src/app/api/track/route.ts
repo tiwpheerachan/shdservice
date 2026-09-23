@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Public tracking lookup — the ONLY unauthenticated data endpoint.
- *  POST { no, phone4, turnstileToken? }  (the /t/<token> page reads the DB directly)
+ *  POST { no, phone4, turnstileToken? }  (the /track/<token> page reads the DB directly)
  *
  * Rules that matter more than the code:
  *  - one message for every failure, so this cannot be used to probe which
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
   // hand back the permanent link so the browser lands on the same page as the QR
   try {
     const token = await ensureToken(found.no);
-    return NextResponse.json({ ok: true, url: `/t/${token}` }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ok: true, url: `/track/${token}` }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return fail();
   }
