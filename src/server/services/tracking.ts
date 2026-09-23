@@ -4,7 +4,7 @@ import { and, asc, eq, ne, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db/client";
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/db/schema";
 import { RS } from "@/server/record-status";
-import { fmtDate, nowThai } from "@/server/mappers/format";
+import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS } from "./jobs";
 
 /**
@@ -134,7 +134,9 @@ async function hasQuotation(jobNo: string) {
 }
 
 function expired(row: Row) {
-  if (!row.closedDate) return false;
+  // the legacy DB writes 1900-01-01 (not NULL) for "not closed yet" — isSentinelDate
+  // catches that, otherwise every open job would look closed long ago and expire
+  if (isSentinelDate(row.closedDate)) return false;
   const closed = Date.parse(String(row.closedDate).replace(" ", "T"));
   if (!Number.isFinite(closed)) return false;
   return Date.now() - closed > EXPIRE_DAYS_AFTER_CLOSE * 86_400_000;
