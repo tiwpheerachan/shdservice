@@ -367,6 +367,9 @@ export const job = pgTable("job", {
 	jobPaymentSlipFileName: varchar("job_payment_slip_file_name", { length: 100 }),
 	swapRefundDocumentNo: varchar("swap_refund_document_no", { length: 100 }),
 	isJobBounce: boolean("is_job_bounce"),
+	// public customer tracking link (drizzle/0012) — /t/<track_token>
+	trackToken: varchar("track_token", { length: 43 }),
+	trackTokenAt: timestamp("track_token_at", { mode: "string" }),
 	productSaleOutShopName: varchar("product_sale_out_shop_name", { length: 100 }),
 });
 

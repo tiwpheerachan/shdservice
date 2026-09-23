@@ -41,6 +41,7 @@ npm start
 | `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
 | `drizzle/0006_audit_log.sql` | ตาราง `audit_log` (append-only, trigger กัน UPDATE/DELETE) — ประวัติทุกการเขียนของแอป ดูที่ ข้อมูลระบบ → ประวัติการใช้งาน |
 | `drizzle/0008_job_filter_indexes.sql` | index สำหรับตัวกรองหน้ารายการงาน (ยี่ห้อ/รุ่น/งานย่อย/ผู้เปิด/วันรับเครื่อง/warranty/งานเด้ง/เลขพัสดุ) |
+| `drizzle/0012_job_track_token.sql` | `job.track_token/track_token_at` — ลิงก์ติดตามสาธารณะของลูกค้า (`/t/<token>`) + backfill ทุกงาน |
 | `drizzle/0011_document_profile_code_live.sql` | รหัสโปรไฟล์ unique เฉพาะแถวที่ยังไม่ลบ (ลบแล้วใช้รหัสเดิมซ้ำได้) |
 | `drizzle/0010_profile_no_prefix.sql` | โปรไฟล์ = หัวกระดาษเท่านั้น: ปลด unique index prefix, ตั้ง prefix ทุกโปรไฟล์เป็น J/Q/SO, ลบตัวนับต่อแบรนด์ใน `running_no` — เลขเอกสารชุดเดียวทั้งระบบ · ข้อมูลทดสอบ HJ/HQ/HSO ลบด้วย `scripts/cleanup-brand-test-docs.sql` |
 | `drizzle/0009_document_profile_delete.sql` | `document_profile.deleted_at/deleted_by` — soft delete โปรไฟล์ผู้ออกเอกสาร (เอกสารเก่ายังพิมพ์ได้, prefix ยังถูกจอง, กู้คืนทาง SQL) |
@@ -169,6 +170,26 @@ src/
 - อ่าน: `GET /api/data/<resource>` (`jobs`, `customers`, `products`, `movements`, `quotations`, `sale_orders`, master ทุกตัว, `staff`, `roles`, `modules`, `dash_groups`, …) — ใส่ `?paged=1&page=&pageSize=&q=&sort=&dir=` สำหรับตารางใหญ่
 - เขียน: `/api/jobs`, `/api/jobs/:no/{repair,outsource,swap-refund,close,calls}`, `/api/jobs/assign`, `/api/customers`, `/api/products`, `/api/stock/{receive,issue,pick-lines}`, `/api/quotations`, `/api/sale-orders/:no/approve`, `/api/masters/:kind`, `/api/admin/{users,permissions,records}`, `/api/attachments`
 - ทุก route ตรวจ session (SSO cookie) และสิทธิ์ `app_config` ก่อนเขียน — ดู `src/server/auth.ts`
+
+---
+
+## หน้าติดตามสถานะสำหรับลูกค้า (public, ไม่ต้อง login)
+
+| | |
+|---|---|
+| `/t/<token>` | หน้าสถานะของงานนั้น — token สุ่ม 32 bytes (base64url) ไม่มีเลขงานใน URL |
+| `/t` | ฟอร์มสำรอง: เลขงาน **หรือ** เลขใบเสนอราคา + เบอร์โทร 4 ตัวท้าย |
+| `POST /api/track` | endpoint เดียวที่ไม่ต้อง login — คืนเฉพาะ `{ok, url}`; ข้อมูลงานถูกเรนเดอร์ที่ `/t/<token>` |
+| `GET/POST /api/jobs/:no/track-link` | หลังบ้าน: อ่านลิงก์ / ออกลิงก์ใหม่ (สิทธิ์ Job Management) |
+
+**กติกาความปลอดภัย** (อยู่ใน `src/server/services/tracking.ts` — อ่านคอมเมนต์หัวไฟล์ก่อนแก้)
+- เปิดดูได้เฉพาะงานที่**มีใบเสนอราคาแล้ว** (`QUOTATION_REQUIRED`) · ลิงก์ตายหลังปิดงาน 90 วัน · ออกลิงก์ใหม่ = เพิกถอนอันเก่า
+- ทุกความล้มเหลว (token ผิด / หมดอายุ / เบอร์ไม่ตรง / DB ล่ม) คืน**ข้อความเดียวกัน** และหน้า 200 เสมอ — ใช้ probe ว่าเลขไหนมีจริงไม่ได้ และคนนอกไม่มีวันเห็น error
+- rate limit ถัง `track` 20/นาที/IP + ล็อกเลขนั้น 15 นาทีเมื่อผิด 5 ครั้ง + Turnstile เมื่อผิดซ้ำ (ข้ามถ้าไม่ได้ตั้ง `TURNSTILE_SECRET_KEY`)
+- เปิดเผยเฉพาะฟิลด์ใน `PublicJob`: สถานะ 5 ขั้น · รุ่น · วันที่ · เลขพัสดุขาส่งคืน — **ไม่มีราคา เบอร์ ที่อยู่ IMEI เต็ม ชื่อช่าง**
+- `middleware.ts` ยกเว้น `t(?:/|$)` เท่านั้น · `robots.txt` Disallow `/t` · ทุก response `no-store`
+
+**env ที่เกี่ยวข้อง:** `APP_BASE_URL` (จำเป็น — ใช้สร้าง URL ใน QR) · `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (ไม่บังคับ)
 
 ---
 

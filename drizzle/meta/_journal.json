@@ -85,6 +85,13 @@
       "when": 1757900011000,
       "tag": "0011_document_profile_code_live",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1757900012000,
+      "tag": "0012_job_track_token",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,9 @@ import { SESSION_COOKIE, SEEN_COOKIE } from "@/lib/session";
 // cookie is PRESENT. The real verification (signature, expiry, approval) happens
 // in the Node-runtime (app) layout and API routes, which do have the secret.
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|login|favicon.ico|robots.txt|.*\\.(?:png|jpg|jpeg|svg|ico|webp)$).*)"],
+  // `t(?:/|$)` (not a bare `t`) so only the public tracking pages are exempt —
+  // a bare "t" would also let through every path that merely STARTS with t.
+  matcher: ["/((?!api|_next/static|_next/image|login|t(?:/|$)|favicon.ico|robots.txt|.*\\.(?:png|jpg|jpeg|svg|ico|webp)$).*)"],
 };
 
 export function middleware(request: NextRequest) {

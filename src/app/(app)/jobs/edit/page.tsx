@@ -19,6 +19,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
+import { TrackLink } from "@/components/shared/track-link";
 import { patchJson, errMsg } from "@/lib/api";
 
 function EditJobForm() {
@@ -78,6 +79,7 @@ function EditJobForm() {
       <ProductSection />
       <OtherInfoSection />
       <AttachmentSection jobNo={job?.no} />
+      {job?.no && <TrackLink jobNo={job.no} />}
       <JobHistorySection job={job} />
 
       <FormActions
