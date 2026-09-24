@@ -8,6 +8,7 @@ import { Section } from "@/components/shared/section";
 import {
   CustomerSection,
   ProductSection,
+  MainSymptomField,
   CostSummary,
   AttachmentSection,
   FormActions,
@@ -17,6 +18,7 @@ import {
   saveCommonSections,
 } from "@/components/shared/job-form";
 import { Tabs } from "@/components/ui/tabs";
+import { SearchSelect } from "@/components/shared/search-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -118,10 +120,15 @@ function OutsourceForm() {
     }
   };
 
-  const staffNames = React.useMemo(() => {
-    const names = STAFF.map((s) => s.name);
-    return me && !names.includes(me) ? [me, ...names] : names;
-  }, [STAFF, me]);
+  // ส่งโดย / รับโดย store the person's NAME; names saved on the job that are no longer in the
+  // staff list (left / legacy spelling) stay selectable so they are not silently replaced
+  const staffOptions = React.useMemo(() => {
+    const opts = STAFF.map((st) => ({ value: st.name, label: st.name, sub: st.userType || undefined }));
+    for (const n of [me, d.sendBy, d.recvBy]) {
+      if (n && !opts.some((o) => o.value === n)) opts.unshift({ value: n, label: n, sub: n === me ? "ฉัน" : "ไม่อยู่ในรายชื่อปัจจุบัน" });
+    }
+    return opts;
+  }, [STAFF, me, d.sendBy, d.recvBy]);
 
   return (
     <>
@@ -169,13 +176,11 @@ function OutsourceForm() {
       />
 
       {tab === "device" ? (
-        <ProductSection title="ข้อมูลเครื่องซ่อม" />
+        <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
       ) : (
         <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
           <FieldGrid>
-            <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
-              <Textarea rows={2} readOnly value={form.symptoms.join(", ")} />
-            </Field>
+            <MainSymptomField />
             <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
               <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
             </Field>
@@ -206,11 +211,7 @@ function OutsourceForm() {
             <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
           </Field>
           <Field label="ส่งโดย" required>
-            <Select value={d.sendBy} onChange={(e) => upd({ sendBy: e.target.value })}>
-              {staffNames.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </Select>
+            <SearchSelect value={d.sendBy} onChange={(v) => upd({ sendBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้ส่ง…" />
           </Field>
           <Field label="หมายเหตุการส่ง" wide>
             <Textarea rows={2} value={d.sendDetail} onChange={(e) => upd({ sendDetail: e.target.value })} />
@@ -233,11 +234,7 @@ function OutsourceForm() {
             <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
           </Field>
           <Field label="รับโดย">
-            <Select value={d.recvBy || me} onChange={(e) => upd({ recvBy: e.target.value })}>
-              {staffNames.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </Select>
+            <SearchSelect value={d.recvBy || me} onChange={(v) => upd({ recvBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้รับ…" />
           </Field>
           <Field label="หมายเหตุการรับคืน" wide>
             <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />

@@ -426,12 +426,40 @@ export function JobOpenSection({
 
 /* ---------------- product info ---------------- */
 
+/** อาการเสียหลัก (มาตรฐาน) — searchable multi-select bound to the form's symptoms (first = main);
+ *  ordered by real usage, with the chosen model's common symptoms on top. Used by ProductSection
+ *  and the Out-Source "รายละเอียดการซ่อม" tab. */
+export function MainSymptomField() {
+  const { s, set } = useJobForm();
+  const { data: MODELS } = useModels();
+  const { data: SYMPTOMS } = useSymptoms();
+  const { data: SYMPTOM_STATS } = useSymptomStats();
+  const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
+  const symptoms = s.symptoms;
+  return (
+    <Field
+      label="อาการเสียหลัก (มาตรฐาน)"
+      required
+      wide
+      hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
+    >
+      <SymptomPicker
+        value={symptoms}
+        onChange={(names) => set("symptoms", names)}
+        options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+        suggested={MODEL_SYMPTOMS}
+        suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
+      />
+    </Field>
+  );
+}
+
 /**
  * Layouts (fields a layout hides keep their loaded values, so saving never clears them):
- *  - `full`   ปิดงาน / Out-Source / Swap-Refund — every field
+ *  - `full`   ปิดงาน / Swap-Refund — every field
  *  - `open`   เปิดงานใหม่ / แก้ไขข้อมูลงาน — no ประเภทสินค้า; searchable รุ่น, Shop Name suggestions,
  *             courier from โปรไฟล์บริษัทขนส่ง
- *  - `repair` บันทึกงานซ่อม — device fields only (no shop / reception)
+ *  - `repair` บันทึกงานซ่อม / บันทึกงานส่งซ่อมต่อ (Out-Source) — device fields only (no shop / reception)
  */
 export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "open" | "repair" }) {
   const { s, set, patch } = useJobForm();
@@ -439,10 +467,6 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   const { data: PRODUCT_TYPES } = useProductTypes();
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: MODELS } = useModels();
-  const { data: SYMPTOMS } = useSymptoms();
-  const { data: SYMPTOM_STATS } = useSymptomStats();
-  const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
-  const symptoms = s.symptoms;
 
   // models of the chosen brand first (still allows any model)
   const modelOptions = React.useMemo(() => {
@@ -585,23 +609,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
       <Textarea rows={2} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" value={s.fault} onChange={(e) => set("fault", e.target.value)} />
     </Field>
   );
-  const symptomsField = (
-    <Field
-      label="อาการเสียหลัก (มาตรฐาน)"
-      required
-      wide
-      hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
-    >
-      {/* searchable multi-select, ordered by real usage; top symptoms of the chosen model on top */}
-      <SymptomPicker
-        value={symptoms}
-        onChange={(names) => set("symptoms", names)}
-        options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
-        suggested={MODEL_SYMPTOMS}
-        suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
-      />
-    </Field>
-  );
+  const symptomsField = <MainSymptomField />;
   const symptomOtherField = (
     <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
       <Textarea rows={2} value={s.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
