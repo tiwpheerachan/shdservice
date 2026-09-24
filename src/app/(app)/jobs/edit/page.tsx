@@ -41,7 +41,8 @@ function EditJobForm() {
     else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
-  // PATCH /api/jobs/:no — updates the job row (+ job_log if the status changed)
+  // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
+  // workflow screens), so it is not sent: a stale value must never roll back a newer status.
   const save = async () => {
     if (!job) {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
@@ -49,7 +50,7 @@ function EditJobForm() {
     }
     setSaving(true);
     try {
-      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, toJobInput(s));
+      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, { ...toJobInput(s), status: undefined });
       setJob(d.job);
       push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว", desc: d.job.no });
     } catch (e) {
@@ -76,8 +77,8 @@ function EditJobForm() {
 
       <CustomerSection />
       <JobOpenSection jobNo={job?.no} status={job?.status ?? "อยู่ระหว่างดำเนินการ"} />
-      <ProductSection />
-      <OtherInfoSection />
+      <ProductSection variant="open" />
+      <OtherInfoSection directory={false} />
       <AttachmentSection jobNo={job?.no} />
       {job?.no && <TrackLink jobNo={job.no} />}
       <JobHistorySection job={job} />

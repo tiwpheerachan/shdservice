@@ -230,6 +230,8 @@ export type DocumentProfileLite = { id: number; code: string; nameTh: string; na
 /** โปรไฟล์ผู้ออกเอกสาร (active) — dropdown "ออกเอกสารในนาม" */
 export const useDocumentProfiles = () => useTable<DocumentProfileLite>("document_profiles", undefined, "exclude", {}, TTL_MASTER);
 export const useShippers = () => useTable<string>("shippers", undefined, "exclude", {}, TTL_MASTER);
+/** Shop Name suggestions (most used, trimmed) — เปิดงานใหม่ / แก้ไขงาน */
+export const useShopNames = () => useTable<string>("shop_names", undefined, "exclude", {}, TTL_MASTER);
 /** โปรไฟล์บริษัทขนส่ง (active) — dropdown ตอนปิดงาน + โลโก้/ลิงก์ติดตามในหน้าลูกค้า */
 export type ShippingProfileLite = { id: number; code: string; nameTh: string; logoUrl: string; trackUrl: string };
 export const useShippingProfiles = () => useTable<ShippingProfileLite>("shipping_profiles", undefined, "exclude", {}, TTL_MASTER);

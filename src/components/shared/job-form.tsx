@@ -12,6 +12,7 @@ import {
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
 import { ModelPicker } from "./model-picker";
+import { SearchSelect } from "./search-select";
 import { CustomerSelect } from "./customer-select";
 import { ProfileSelect } from "./profile-select";
 import { Attachments, type AttachmentsHandle } from "./attachments";
@@ -23,7 +24,6 @@ import {
   CHANNELS,
   RECEIVE_METHODS,
   WARRANTY_OPTIONS,
-  JOB_STATUS_OPTIONS,
   type Customer,
 } from "@/data/mock";
 import {
@@ -37,6 +37,8 @@ import {
   useProductTypes,
   useSymptoms,
   useStaff,
+  useShopNames,
+  useShippingProfiles,
 } from "@/data/db";
 import { PeoplePicker, type Person } from "./people-picker";
 import { baht, cn } from "@/lib/utils";
@@ -346,13 +348,12 @@ export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
+/** เปิดงานใหม่ / แก้ไขข้อมูลงาน — status is shown only; it changes through the workflow screens (บันทึกซ่อม / ปิดงาน …). */
 export function JobOpenSection({
   status,
-  editable = true,
   jobNo,
 }: {
   status?: string;
-  editable?: boolean;
   jobNo?: string;
 }) {
   const { s, set } = useJobForm();
@@ -384,20 +385,11 @@ export function JobOpenSection({
           <ReadOnly>{s.createByName || me || "—"}</ReadOnly>
         </Field>
         <Field label="สถานะงาน">
-          {editable ? (
-            <Select value={shownStatus} onChange={(e) => set("status", e.target.value)}>
-              {JOB_STATUS_OPTIONS.map((st) => (
-                <option key={st}>{st}</option>
-              ))}
-              {!JOB_STATUS_OPTIONS.includes(shownStatus) && <option>{shownStatus}</option>}
-            </Select>
-          ) : (
-            <ReadOnly>
-              <Badge tone="info" dot>
-                {shownStatus}
-              </Badge>
-            </ReadOnly>
-          )}
+          <ReadOnly>
+            <Badge tone="info" dot>
+              {shownStatus}
+            </Badge>
+          </ReadOnly>
         </Field>
         <Field label="ประเภทงานหลัก" required className="lg:col-span-2">
           <Select value={s.jobType} onChange={(e) => set("jobType", e.target.value)}>
@@ -423,7 +415,7 @@ export function JobOpenSection({
         </Field>
         <Field label="งานเด้ง" wide>
           <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
-            <Checkbox checked={s.isBounce} onChange={(e) => set("isBounce", e.target.checked)} disabled={!editable} />
+            <Checkbox checked={s.isBounce} onChange={(e) => set("isBounce", e.target.checked)} />
             สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ (is_job_bounce)
           </label>
         </Field>
@@ -435,11 +427,13 @@ export function JobOpenSection({
 /* ---------------- product info ---------------- */
 
 /**
- * `variant="repair"` (บันทึกงานซ่อม): only the device fields the engineer needs, in the order
- * SO / channel / date / warranty months · IMEI / serial / expire / warranty · brand / searchable model …
- * Fields it hides keep their loaded values, so saving never clears them.
+ * Layouts (fields a layout hides keep their loaded values, so saving never clears them):
+ *  - `full`   ปิดงาน / Out-Source / Swap-Refund — every field
+ *  - `open`   เปิดงานใหม่ / แก้ไขข้อมูลงาน — no ประเภทสินค้า; searchable รุ่น, Shop Name suggestions,
+ *             courier from โปรไฟล์บริษัทขนส่ง
+ *  - `repair` บันทึกงานซ่อม — device fields only (no shop / reception)
  */
-export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "repair" }) {
+export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "open" | "repair" }) {
   const { s, set, patch } = useJobForm();
   const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
@@ -467,6 +461,9 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   };
 
   const repair = variant === "repair";
+  const open = variant === "open";
+  const { data: SHOP_NAMES } = useShopNames();
+  const { data: SHIPPING_PROFILES } = useShippingProfiles();
 
   const soField = (
     <Field label="Sale Order No." required>
@@ -517,7 +514,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const warrantyField = (
-    <Field label="Warranty" required={!repair}>
+    <Field label="Warranty" required={variant === "full"}>
       <Select value={s.warranty} onChange={(e) => set("warranty", e.target.value)}>
         <option value="">- - Please Select - -</option>
         {WARRANTY_OPTIONS.map((w) => (
@@ -548,7 +545,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   );
   const modelField = (
     <Field label="รุ่น" required>
-      {repair ? (
+      {repair || open ? (
         <ModelPicker
           models={modelOptions}
           value={s.modelCode}
@@ -616,6 +613,106 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
 
+  const shopField = open ? (
+    <Field label="Shop Name">
+      {/* free text in the legacy data (511 spellings) — the most used names as suggestions, new ones can be typed */}
+      <Input list="shop-name-options" placeholder="- - เลือกหรือพิมพ์ - -" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
+      <datalist id="shop-name-options">
+        {SHOP_NAMES.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </Field>
+  ) : (
+    <Field label="Shop Name">
+      <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
+    </Field>
+  );
+  const receptionDateField = (
+    <Field label="วันที่รับเข้า">
+      <Input type="date" value={s.receptionDate} onChange={(e) => set("receptionDate", e.target.value)} />
+    </Field>
+  );
+  const trackingField = (
+    <Field label="เลขพัสดุจากลูกค้า">
+      <Input className="num" value={s.receptionTrackingNo} onChange={(e) => set("receptionTrackingNo", e.target.value)} />
+    </Field>
+  );
+  // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value ("F", "flash" …) stays selectable as-is
+  const legacyShipper = s.receptionShipper && !SHIPPING_PROFILES.some((p) => p.nameTh === s.receptionShipper) ? s.receptionShipper : "";
+  const shipperField = open ? (
+    <Field label="โดยบริษัทขนส่ง">
+      <Select value={s.receptionShipper} onChange={(e) => set("receptionShipper", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {SHIPPING_PROFILES.map((p) => (
+          <option key={p.id} value={p.nameTh}>{p.nameTh}</option>
+        ))}
+        {legacyShipper && <option value={legacyShipper}>{legacyShipper} (ค่าเดิม)</option>}
+      </Select>
+    </Field>
+  ) : (
+    <Field label="โดยบริษัทขนส่ง">
+      {/* ระบบเดิมเป็นข้อความอิสระ — แนะนำจากค่าที่ใช้บ่อยใน DB (Flash, ไปรษณีย์, THAIPOST, KEX, J&T …) */}
+      <Input
+        list="shipper-options"
+        value={s.receptionShipper}
+        onChange={(e) => set("receptionShipper", e.target.value)}
+        placeholder="- - เลือกหรือพิมพ์ - -"
+      />
+      <datalist id="shipper-options">
+        {SHIPPERS.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+    </Field>
+  );
+  const receptionTypeField = (
+    <Field label="รับสินค้าเข้าโดย" wide>
+      <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
+        {RECEIVE_METHODS.map((m) => (
+          <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
+            <Radio name="receive-method" checked={s.receptionType === m} onChange={() => set("receptionType", m)} />
+            {m}
+          </label>
+        ))}
+      </div>
+    </Field>
+  );
+
+  if (open)
+    return (
+      <Section title={title} icon={PackageSearch}>
+        <FieldGrid>
+          {soField}
+          {channelField}
+          {shopField}
+          {saleDateField}
+
+          {warrantyMonthField}
+          {imeiField}
+          {serialField}
+          {expireField}
+
+          {warrantyField}
+          {brandField}
+          {modelField}
+          {modelDetailField}
+
+          {receptionTypeField}
+          {receptionDateField}
+          {trackingField}
+          {shipperField}
+          <div className="hidden lg:block" aria-hidden />
+
+          {equipmentField}
+          {faultField}
+          {symptomsField}
+          {symptomOtherField}
+          {remarkField}
+        </FieldGrid>
+      </Section>
+    );
+
   if (repair)
     return (
       <Section title={title} icon={PackageSearch}>
@@ -649,9 +746,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
       <FieldGrid>
         {soField}
         {channelField}
-        <Field label="Shop Name">
-          <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
-        </Field>
+        {shopField}
         {saleDateField}
 
         {warrantyMonthField}
@@ -672,37 +767,11 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
         {modelField}
 
         {modelDetailField}
-        <Field label="วันที่รับเข้า">
-          <Input type="date" value={s.receptionDate} onChange={(e) => set("receptionDate", e.target.value)} />
-        </Field>
-        <Field label="เลขพัสดุจากลูกค้า">
-          <Input className="num" value={s.receptionTrackingNo} onChange={(e) => set("receptionTrackingNo", e.target.value)} />
-        </Field>
-        <Field label="โดยบริษัทขนส่ง">
-          {/* ระบบเดิมเป็นข้อความอิสระ — แนะนำจากค่าที่ใช้บ่อยใน DB (Flash, ไปรษณีย์, THAIPOST, KEX, J&T …) */}
-          <Input
-            list="shipper-options"
-            value={s.receptionShipper}
-            onChange={(e) => set("receptionShipper", e.target.value)}
-            placeholder="- - เลือกหรือพิมพ์ - -"
-          />
-          <datalist id="shipper-options">
-            {SHIPPERS.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
-        </Field>
+        {receptionDateField}
+        {trackingField}
+        {shipperField}
 
-        <Field label="รับสินค้าเข้าโดย" wide>
-          <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
-            {RECEIVE_METHODS.map((m) => (
-              <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
-                <Radio name="receive-method" checked={s.receptionType === m} onChange={() => set("receptionType", m)} />
-                {m}
-              </label>
-            ))}
-          </div>
-        </Field>
+        {receptionTypeField}
 
         {equipmentField}
         {faultField}
@@ -802,12 +871,20 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
 
 /* ---------------- other info ---------------- */
 
-export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
+/** `directory={false}` drops the Lark directory lookup under มอบหมายงานนี้ให้ (เปิดงานใหม่ / แก้ไขข้อมูลงาน). */
+export function OtherInfoSection({ showTech = true, directory = true }: { showTech?: boolean; directory?: boolean }) {
   const { s, set, patch } = useJobForm();
   const { data: STAFF } = useStaff();
   // "มอบหมายงานนี้ให้" = job.engineer_id → a person in app_user. The directory
   // picker is kept for lookup; the assignment itself must map to app_user.
   const [assignee, setAssignee] = React.useState<Person | null>(null);
+  const staffOptions = React.useMemo(() => {
+    const opts = STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined }));
+    // assigned to someone not in the active staff list (left / inactive) → still show the name
+    if (s.engineerId && !STAFF.some((st) => st.id === s.engineerId))
+      opts.unshift({ value: String(s.engineerId), label: s.engineerName || `#${s.engineerId}`, sub: "ไม่อยู่ในรายชื่อปัจจุบัน" });
+    return opts;
+  }, [STAFF, s.engineerId, s.engineerName]);
   const pick = (p: Person | null) => {
     setAssignee(p);
     if (!p) return;
@@ -845,24 +922,20 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
           />
         </Field>
         {showTech && (
-          <Field label="มอบหมายงานนี้ให้" hint="เลือกช่างจากรายชื่อผู้ใช้ระบบ หรือค้นหาจากไดเรกทอรีกลาง">
+          <Field label="มอบหมายงานนี้ให้" hint={directory ? "เลือกช่างจากรายชื่อผู้ใช้ระบบ หรือค้นหาจากไดเรกทอรีกลาง" : undefined}>
             <div className="space-y-2">
-              <Select
+              <SearchSelect
                 value={s.engineerId ? String(s.engineerId) : ""}
-                onChange={(e) => {
-                  const id = Number(e.target.value) || 0;
+                onChange={(v) => {
+                  const id = Number(v) || 0;
                   patch({ engineerId: id, engineerName: STAFF.find((st) => st.id === id)?.name ?? "" });
                 }}
-              >
-                <option value="">- - ยังไม่ระบุ - -</option>
-                {STAFF.map((st) => (
-                  <option key={st.id} value={st.id}>
-                    {st.name}
-                    {st.userType ? ` (${st.userType})` : ""}
-                  </option>
-                ))}
-              </Select>
-              <PeoplePicker value={assignee} onChange={pick} />
+                options={staffOptions}
+                placeholder="- - ยังไม่ระบุ - -"
+                emptyLabel="- - ยังไม่ระบุ - -"
+                searchPlaceholder="พิมพ์ชื่อช่าง หรือประเภทผู้ใช้…"
+              />
+              {directory && <PeoplePicker value={assignee} onChange={pick} />}
             </div>
           </Field>
         )}

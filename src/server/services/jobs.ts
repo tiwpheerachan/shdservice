@@ -1290,6 +1290,23 @@ async function loadShippers(limit: number): Promise<string[]> {
   return rows.map((r) => r.v?.trim() ?? "").filter(Boolean);
 }
 
+/** Shop Name (job.product_sale_out_shop_name) — free text in the legacy app (511 spellings);
+ *  the most used ones (trimmed) are offered as suggestions, typing a new one still works. */
+export function listShopNames(limit = 60): Promise<string[]> {
+  return cached(`jobs:shop_names:${limit}`, 5 * TTL_MASTER, () => loadShopNames(limit));
+}
+async function loadShopNames(limit: number): Promise<string[]> {
+  const v = sql<string>`trim(${job.productSaleOutShopName})`;
+  const rows = await db
+    .select({ v, n: count() })
+    .from(job)
+    .where(sql`length(trim(coalesce(${job.productSaleOutShopName},''))) >= 2`)
+    .groupBy(v)
+    .orderBy(desc(count()))
+    .limit(limit);
+  return rows.map((r) => r.v ?? "").filter(Boolean);
+}
+
 /* ------------------------------------------------------------------ *
  * Swap / Refund
  * ------------------------------------------------------------------ */

@@ -11,7 +11,7 @@ import { listProducts, listMovements, listIssuedLines, pageProducts, productStat
 import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from "@/server/services/reports";
 import { listDocumentProfiles } from "@/server/services/document-profiles";
 import { listShippingProfiles } from "@/server/services/shipping-profiles";
-import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers, symptomStats, modelSymptoms } from "@/server/services/jobs";
+import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutsourceVendors, recentJobNos, jobStats, listJobTypeDetails, listShippers, listShopNames, symptomStats, modelSymptoms } from "@/server/services/jobs";
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
@@ -68,6 +68,8 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return modelSymptoms(sp.get("model") ?? "");
     case "shippers":
       return listShippers();
+    case "shop_names":
+      return listShopNames();
     case "document_profiles":
       return listDocumentProfiles(true);
     case "shipping_profiles":

@@ -63,9 +63,9 @@ function NewJobForm() {
         description="ข้อมูลงานบริการ » เปิดงานใหม่ — กรอกข้อมูลลูกค้า สินค้า และอาการเสีย"
       />
       <CustomerSection />
-      <JobOpenSection status="งานใหม่" editable={false} />
-      <ProductSection />
-      <OtherInfoSection />
+      <JobOpenSection status="งานใหม่" />
+      <ProductSection variant="open" />
+      <OtherInfoSection directory={false} />
       <AttachmentSection ref={attach} />
       <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} onCancel={() => reset()} />
 
