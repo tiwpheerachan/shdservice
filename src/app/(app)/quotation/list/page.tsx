@@ -232,7 +232,7 @@ export default function QuotationListPage() {
         footerNote={
           <span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>
         }
-        server={{ total: totalRows, onChange: setTable }}
+        server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
     </>
   );

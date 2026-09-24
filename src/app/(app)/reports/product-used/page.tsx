@@ -58,7 +58,7 @@ export default function Page() {
       rows={rows}
       loading={loading}
       rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
-      server={{ total, onChange: setTable }}
+      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }

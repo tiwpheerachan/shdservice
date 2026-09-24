@@ -136,7 +136,7 @@ export default function AuditPage() {
         rows={rows}
         rowKey={(r) => String(r.id)}
         loading={loading}
-        server={{ total, onChange: setTable }}
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />
 

@@ -63,7 +63,7 @@ export default function Page() {
       rows={SALE_ORDERS}
       loading={loading}
       rowKey={(r) => r.no}
-      server={{ total: totalRows, onChange: setTable }}
+      server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }

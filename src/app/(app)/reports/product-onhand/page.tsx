@@ -72,7 +72,7 @@ export default function Page() {
       rows={rows}
       loading={loading}
       rowKey={(r) => r.sysCode}
-      server={{ total, onChange: setTable }}
+      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }

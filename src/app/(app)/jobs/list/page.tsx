@@ -29,8 +29,8 @@ import dynamic from "next/dynamic";
 
 // call-log modal — loaded on first open, not with the list page
 const CustomerCallModal = dynamic(() => import("@/components/shared/customer-call-modal").then((m) => m.CustomerCallModal), { ssr: false });
-import { JOB_STATUS_OPTIONS, WARRANTY_OPTIONS, type Job, type Customer } from "@/data/mock";
-import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useModels, useJobTypeDetails } from "@/data/db";
+import { WARRANTY_OPTIONS, type Job, type Customer } from "@/data/mock";
+import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useModels, useJobTypeDetails, useJobStatuses } from "@/data/db";
 import { baht, cn } from "@/lib/utils";
 import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
@@ -42,7 +42,8 @@ type Filters = {
   dateBy: "create" | "reception" | "closed"; from: string; to: string;
   customer: string; phone: string; tracking: string; imei: string; warranty: string;
   bounce: boolean; within30: boolean; cost: "" | "yes" | "no"; status: string;
-  /* set only by a dashboard TAT deep link (no field in the bar): exact status id + open jobs only */
+  /* status is chosen BY ID (list from job_status in the DB — the TAT link sends the id too); `status` keeps
+     the name for display only. `open` (not Finished/Cancel) is set only by a dashboard TAT link. */
   statusId: string; open: boolean;
 };
 const NO_FILTER: Filters = {
@@ -60,7 +61,7 @@ const toParams = (f: Filters) => ({
   dateBy: f.dateBy === "create" ? "" : f.dateBy, from: f.from, to: f.to,
   customer: f.customer, phone: f.phone, tracking: f.tracking, imei: f.imei, warranty: f.warranty,
   bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost,
-  // statusId wins over the name (TAT trims names; the name filter is an exact match)
+  // statusId wins over the name (exact id match — no trailing-space / spelling issues with names)
   status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "",
 });
 
@@ -155,6 +156,15 @@ export default function JobListPage() {
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
   const STAFF_OPTIONS = React.useMemo(() => STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined })), [STAFF]);
   const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
+  // every status in the DB (25, incl. ones the old hard-coded list missed), in workflow order
+  const { data: JOB_STATUSES } = useJobStatuses();
+  const STATUS_OPTIONS = React.useMemo(
+    () =>
+      [...JOB_STATUSES]
+        .sort((a, b) => a.order - b.order)
+        .map((s) => ({ value: String(s.id), label: s.name.trim(), sub: s.active ? s.group : `${s.group} · ไม่ใช้งาน` })),
+    [JOB_STATUSES]
+  );
   const { rows: JOBS, total, loading } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
@@ -316,7 +326,7 @@ export default function JobListPage() {
         onSearch={() => {
           // editing any of the TAT-defining fields leaves the TAT view: drop its hidden "open jobs only" too
           const TAT_KEYS = ["status", "statusId", "dateBy", "from", "to", "type"] as const;
-          const next = tat && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false, statusId: "" } : draft;
+          const next = tat && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false } : draft;
           if (next !== draft) {
             setTat(null);
             setDraft(next);
@@ -393,7 +403,14 @@ export default function JobListPage() {
           </Select>
         </Field>
         <Field label="สถานะงาน">
-          <SearchSelect {...all} value={draft.status} onChange={(v) => setDraft((f) => ({ ...f, status: v, statusId: "" }))} options={strOptions(JOB_STATUS_OPTIONS)} minWidth={360} />
+          <SearchSelect
+            {...all}
+            value={draft.statusId || (STATUS_OPTIONS.find((o) => o.label === draft.status.trim())?.value ?? "")}
+            onChange={(v) => setDraft((f) => ({ ...f, statusId: v, status: STATUS_OPTIONS.find((o) => o.value === v)?.label ?? "" }))}
+            options={STATUS_OPTIONS}
+            minWidth={360}
+            searchPlaceholder="พิมพ์ชื่อสถานะ…"
+          />
         </Field>
         <Field label="เฉพาะงาน" className="sm:col-span-2">
           <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
@@ -437,7 +454,7 @@ export default function JobListPage() {
         rows={JOBS}
         loading={loading}
         rowKey={(r) => r.no}
-        server={{ total, onChange: setTable }}
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
 
       {modalUsed && (

@@ -201,7 +201,7 @@ export default function ModelsPage() {
         rows={MODELS}
         loading={loading}
         rowKey={(r) => r.code}
-        server={{ total, onChange: setTable }}
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />
 
       <Modal

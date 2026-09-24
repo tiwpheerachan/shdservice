@@ -296,7 +296,7 @@ export default function AssignPage() {
             </span>
           ) : undefined
         }
-        server={{ total, onChange: setTable }}
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />
     </>
   );

@@ -187,7 +187,7 @@ export default function InventoryPage() {
         rows={MOVEMENTS}
         loading={loading}
         rowKey={(r) => r.doc}
-        server={{ total, onChange: setTable }}
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
 
       {/* document line-items modal */}

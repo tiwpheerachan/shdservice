@@ -57,7 +57,7 @@ export default function Page() {
       rows={JOBS}
       loading={loading}
       rowKey={(r) => r.no}
-      server={{ total, onChange: setTable }}
+      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }
