@@ -42,6 +42,8 @@ export type ServerTableState = {
 export type ServerTable = {
   total: number;
   onChange: (state: ServerTableState) => void;
+  /** change it (e.g. the applied filters as a string) to jump back to page 1 */
+  resetKey?: string;
 };
 
 const HIDE: Record<string, string> = {
@@ -154,6 +156,11 @@ export function DataTable<T extends Record<string, unknown>>({
   React.useEffect(() => {
     if (!server) setPage(1);
   }, [rowCount, server]);
+  // server mode: new filters → page 1 (the old page may not exist any more)
+  const resetKey = server?.resetKey;
+  React.useEffect(() => {
+    if (resetKey !== undefined) setPage(1);
+  }, [resetKey]);
 
   const toggleSort = (key: string) =>
     setSort((s) =>

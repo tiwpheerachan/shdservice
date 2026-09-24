@@ -33,19 +33,25 @@ import { baht, int, cn } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
-type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; model: string; category: string; creator: string; date: string };
-const NO_FILTER: Filters = { sysCode: "", mfgCode: "", name: "", status: "", brand: "", model: "", category: "", creator: "", date: "" };
+/** stock: "" = ทั้งหมด · in = มีของเกิน 3 ชิ้น · low = ใกล้หมด 1–3 · out = หมด (≤ 0) — same buckets as the KPI cards */
+type StockFilter = "" | "in" | "low" | "out";
+type Filters = { sysCode: string; mfgCode: string; name: string; status: string; brand: string; model: string; category: string; creator: string; date: string; stock: StockFilter };
+const NO_FILTER: Filters = { sysCode: "", mfgCode: "", name: "", status: "", brand: "", model: "", category: "", creator: "", date: "", stock: "" };
 
 function Kpi({
   icon: Icon,
   label,
   value,
   tone,
+  active,
+  onClick,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   tone: "primary" | "success" | "warning" | "danger";
+  active?: boolean;
+  onClick?: () => void;
 }) {
   const map = {
     primary: "bg-primary-soft text-primary",
@@ -53,8 +59,18 @@ function Kpi({
     warning: "bg-warning-soft text-warning",
     danger: "bg-danger-soft text-danger",
   };
+  const ring = { primary: "ring-primary", success: "ring-success", warning: "ring-warning", danger: "ring-danger" };
   return (
-    <div className="surface flex items-center gap-3 p-3.5">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={active ? "กดอีกครั้งเพื่อยกเลิกการกรอง" : "กดเพื่อกรองรายการ"}
+      className={cn(
+        "surface flex w-full items-center gap-3 p-3.5 text-left transition-colors hover:bg-accent/40",
+        active && cn("ring-2", ring[tone])
+      )}
+    >
       <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", map[tone])}>
         <Icon className="h-4 w-4" />
       </div>
@@ -62,7 +78,7 @@ function Kpi({
         <p className="truncate text-2xs text-muted-foreground">{label}</p>
         <p className="num text-lg font-semibold leading-tight">{value}</p>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -88,9 +104,17 @@ export default function ProductsPage() {
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>({ ...NO_FILTER, status: "Active" });
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  // KPI card → stock filter, applied right away and mirrored in the filter bar; same card again = clear
+  const pickStock = (v: StockFilter) => {
+    const next = filters.stock === v ? "" : v;
+    setDraft((f) => ({ ...f, stock: next }));
+    setFilters((f) => ({ ...f, stock: next }));
+  };
 
   // server-side paging + filters (product table 2.5k rows; INACTIVE shown, DELETED hidden)
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  // cards follow the applied filters; say so once anything beyond the default (Active only) narrows the list
+  const narrowed = !!table.q.trim() || JSON.stringify(filters) !== JSON.stringify({ ...NO_FILTER, status: "Active" });
   const query = React.useMemo(
     () => ({ q: table.q, ...filters }),
     [table.q, filters]
@@ -279,10 +303,10 @@ export default function ProductsPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi icon={Boxes} label="รายการอะไหล่ทั้งหมด" value={int(total)} tone="primary" />
-        <Kpi icon={PackageCheck} label="จำนวนคงเหลือรวม (ชิ้น)" value={int(qty)} tone="success" />
-        <Kpi icon={TriangleAlert} label="ใกล้หมด (≤ 3 ชิ้น)" value={int(low)} tone="warning" />
-        <Kpi icon={PackageX} label="หมดสต๊อก" value={int(outOfStock)} tone="danger" />
+        <Kpi icon={Boxes} label={narrowed ? "รายการอะไหล่ (ตามตัวกรอง)" : "รายการอะไหล่ทั้งหมด"} value={int(total)} tone="primary" active={filters.stock === ""} onClick={() => pickStock("")} />
+        <Kpi icon={PackageCheck} label="จำนวนคงเหลือรวม (ชิ้น)" value={int(qty)} tone="success" active={filters.stock === "in"} onClick={() => pickStock("in")} />
+        <Kpi icon={TriangleAlert} label="ใกล้หมด (≤ 3 ชิ้น)" value={int(low)} tone="warning" active={filters.stock === "low"} onClick={() => pickStock("low")} />
+        <Kpi icon={PackageX} label="หมดสต๊อก" value={int(outOfStock)} tone="danger" active={filters.stock === "out"} onClick={() => pickStock("out")} />
       </div>
 
       <FilterBar
@@ -339,6 +363,14 @@ export default function ProductsPage() {
         <Field label="หมวดหมู่">
           <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.category} onChange={(v) => setD("category", v)} options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))} searchPlaceholder="พิมพ์ชื่อหมวดหมู่…" />
         </Field>
+        <Field label="สต๊อกคงเหลือ">
+          <Select value={draft.stock} onChange={(e) => setD("stock", e.target.value as StockFilter)}>
+            <option value="">ทั้งหมด</option>
+            <option value="in">มีของ (เกิน 3 ชิ้น)</option>
+            <option value="low">ใกล้หมด (1–3 ชิ้น)</option>
+            <option value="out">หมดสต๊อก</option>
+          </Select>
+        </Field>
       </FilterBar>
 
       <DataTable searchable={false}
@@ -346,7 +378,7 @@ export default function ProductsPage() {
         rows={PRODUCTS}
         loading={loading}
         rowKey={(r) => r.sysCode}
-        server={{ total: totalRows, onChange: setTable }}
+        server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
 
       {modalUsed && <ProductDetailModal
