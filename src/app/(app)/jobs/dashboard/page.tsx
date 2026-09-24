@@ -62,6 +62,31 @@ function Panel({
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return ymd(d); };
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+/* TAT deep links → job list. Buckets count days from the Thai calendar day (same as the server query),
+   so each bucket is a create-date range: 1–3 = from today−3, 4–7 = today−7…today−4, …, >30 = up to today−31. */
+type TatKey = "d13" | "d47" | "d814" | "d1530" | "over30" | "total";
+const thaiDaysAgo = (n: number) => new Date(Date.now() + 7 * 3_600_000 - n * 86_400_000).toISOString().slice(0, 10);
+const TAT_RANGE: Record<TatKey, [from: number | null, to: number | null]> = {
+  d13: [3, null], d47: [7, 4], d814: [14, 8], d1530: [30, 15], over30: [null, 31], total: [null, null],
+};
+function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: string }) {
+  const [f, t] = TAT_RANGE[bucket];
+  const p = new URLSearchParams({ src: "tat", bucket, open: "1" });
+  if (status?.id) { p.set("statusId", String(status.id)); p.set("status", status.name); }
+  if (f !== null) p.set("from", thaiDaysAgo(f));
+  if (t !== null) p.set("to", thaiDaysAgo(t));
+  if (type) p.set("type", type);
+  return `/jobs/list?${p}`;
+}
+/** a clickable TAT count — zero stays a quiet dash */
+function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
+  if (!n) return <span className="text-muted-foreground/30">–</span>;
+  return (
+    <Link href={href} className={cn("rounded px-1 -mx-1 underline-offset-4 transition-colors hover:bg-accent hover:underline", className)}>
+      {int(n)}
+    </Link>
+  );
+}
 const thai = (iso: string) => { if (!iso) return ""; const [y, m, d] = iso.split("-").map(Number); return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`; };
 
 export default function DashboardPage() {
@@ -252,15 +277,19 @@ export default function DashboardPage() {
                   <td className="py-2.5 pr-4 font-medium">{r.status}</td>
                   {(["d13", "d47", "d814", "d1530"] as const).map((k) => (
                     <td key={k} className="num px-4 py-2.5 text-right tabular-nums">
-                      {r[k] || <span className="text-muted-foreground/30">–</span>}
+                      <TatNum n={r[k]} href={tatHref(k, type, { id: r.statusId, name: r.status })} />
                     </td>
                   ))}
                   <td className="num px-4 py-2.5 text-right tabular-nums">
-                    <span className={cn(r.over30 > 20 && "font-semibold text-danger")}>
-                      {r.over30 || <span className="text-muted-foreground/30">–</span>}
-                    </span>
+                    <TatNum
+                      n={r.over30}
+                      href={tatHref("over30", type, { id: r.statusId, name: r.status })}
+                      className={cn(r.over30 > 20 && "font-semibold text-danger")}
+                    />
                   </td>
-                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">{int(r.total)}</td>
+                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">
+                    <TatNum n={r.total} href={tatHref("total", type, { id: r.statusId, name: r.status })} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -272,11 +301,11 @@ export default function DashboardPage() {
                   </td>
                   {dayCols.map((c) => (
                     <td key={c.k} className="num px-4 py-2.5 text-right font-medium tabular-nums">
-                      {int(grand[c.k])}
+                      {grand[c.k] ? <TatNum n={grand[c.k]} href={tatHref(c.k, type)} /> : 0}
                     </td>
                   ))}
                   <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums text-primary">
-                    {int(grand.total)}
+                    <TatNum n={grand.total} href={tatHref("total", type)} />
                   </td>
                 </tr>
               </tfoot>

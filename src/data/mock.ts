@@ -222,6 +222,7 @@ export type DashGroup = {
 };
 
 export type TatRow = {
+  statusId?: number; // job_status_id — used to deep-link a cell into the job list
   status: string;
   d13: number;
   d47: number;

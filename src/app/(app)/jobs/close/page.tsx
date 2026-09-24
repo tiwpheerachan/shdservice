@@ -22,7 +22,7 @@ import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
-import { useShippers } from "@/data/db";
+import { useShippers, useShippingProfiles } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
@@ -31,6 +31,7 @@ import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS } = useShippers();
+  const { data: SHIPPING } = useShippingProfiles();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
   const { can } = useAccess();
@@ -45,6 +46,7 @@ function CloseForm() {
     returnType: "",
     returnDate: "",
     courier: "",
+  shipperId: 0,
     tracking: "",
     returnDetail: "",
     status: "",
@@ -87,6 +89,7 @@ function CloseForm() {
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
       courier: SHIPPERS.find((c) => job.return.detail.includes(c)) ?? (job.return.detail.includes(" · ") ? job.return.detail.split(" · ")[0] : ""),
+      shipperId: job.return.shipperId ?? 0,
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
       status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : "",
@@ -120,7 +123,7 @@ function CloseForm() {
       await saveCommonSections(job.no, form, can("Job Management", "edit"));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
         payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
-        return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail },
+        return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail, shipperId: d.shipperId || undefined },
         status: d.status,
       });
       setJob(r.job);
@@ -286,14 +289,34 @@ function CloseForm() {
           <Field label="วันที่ส่งคืน" required>
             <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
           </Field>
-          <Field label="บริษัทขนส่ง">
-            {/* free text เหมือนระบบเดิม + แนะนำจากค่าที่ใช้บ่อยใน DB */}
-            <Input
-              list="close-shipper-options"
-              value={d.courier}
-              onChange={(e) => upd({ courier: e.target.value })}
-              placeholder="- - เลือกหรือพิมพ์ - -"
-            />
+          <Field label="บริษัทขนส่ง" hint={d.shipperId ? "ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ" : undefined}>
+            {/* โปรไฟล์บริษัทขนส่ง (ข้อมูลระบบ) — เลือก "อื่น ๆ" เพื่อพิมพ์ชื่อเองแบบระบบเดิม */}
+            <Select
+              value={d.shipperId ? String(d.shipperId) : d.courier ? "other" : ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "other") return upd({ shipperId: 0, courier: "" });
+                const p = SHIPPING.find((x) => String(x.id) === v);
+                upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : "" });
+              }}
+            >
+              <option value="">- - เลือก - -</option>
+              {SHIPPING.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nameTh}
+                </option>
+              ))}
+              <option value="other">อื่น ๆ (พิมพ์เอง)</option>
+            </Select>
+            {!d.shipperId && (
+              <Input
+                className="mt-2"
+                list="close-shipper-options"
+                value={d.courier}
+                onChange={(e) => upd({ courier: e.target.value })}
+                placeholder="พิมพ์ชื่อบริษัทขนส่ง"
+              />
+            )}
             <datalist id="close-shipper-options">
               {SHIPPERS.map((c) => (
                 <option key={c} value={c} />

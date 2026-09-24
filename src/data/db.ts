@@ -230,6 +230,9 @@ export type DocumentProfileLite = { id: number; code: string; nameTh: string; na
 /** โปรไฟล์ผู้ออกเอกสาร (active) — dropdown "ออกเอกสารในนาม" */
 export const useDocumentProfiles = () => useTable<DocumentProfileLite>("document_profiles", undefined, "exclude", {}, TTL_MASTER);
 export const useShippers = () => useTable<string>("shippers", undefined, "exclude", {}, TTL_MASTER);
+/** โปรไฟล์บริษัทขนส่ง (active) — dropdown ตอนปิดงาน + โลโก้/ลิงก์ติดตามในหน้าลูกค้า */
+export type ShippingProfileLite = { id: number; code: string; nameTh: string; logoUrl: string; trackUrl: string };
+export const useShippingProfiles = () => useTable<ShippingProfileLite>("shipping_profiles", undefined, "exclude", {}, TTL_MASTER);
 /** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
 export type SymptomStat = { id: number; name: string; group: string; count: number };
 export const useSymptomStats = () => useTable<SymptomStat>("symptom_stats", undefined, "exclude", {}, TTL_MASTER);

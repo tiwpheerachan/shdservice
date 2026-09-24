@@ -517,7 +517,7 @@ export type JobDetail = {
   repairedDate: string;
   closedDate: string;
   payment: { type: string; no: string; amount: number; detail: string; slip: string };
-  return: { date: string; type: string; tracking: string; detail: string };
+  return: { date: string; type: string; tracking: string; detail: string; shipperId: number };
   swap: { detail: string; docNo: string };
   quotationNo: string;
   isBounce: boolean;
@@ -689,6 +689,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       type: j.returnCustomerType ?? "",
       tracking: j.returnCustomerTrackingNo ?? "",
       detail: j.returnCustomerDetail ?? "",
+      shipperId: j.returnShipperId ?? 0,
     },
     swap: { detail: j.swapRefundDetail ?? "", docNo: j.swapRefundDocumentNo ?? "" },
     quotationNo: j.quotationNoApproved ?? "",
@@ -1356,7 +1357,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
 export type CloseInput = {
   repairDetail?: string;
   payment?: { type?: string; amount?: number | string; date?: string; no?: string; detail?: string };
-  return?: { type?: string; date?: string; courier?: string; tracking?: string; detail?: string };
+  return?: { type?: string; date?: string; courier?: string; tracking?: string; detail?: string; shipperId?: number };
   status: string;
 };
 
@@ -1383,6 +1384,8 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
               returnCustomerType: str(ret.type).slice(0, 50),
               returnCustomerTrackingNo: str(ret.tracking).slice(0, 50),
               returnCustomerDetail: [str(ret.courier), str(ret.detail)].filter(Boolean).join(" · ").slice(0, 100),
+              // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
+              returnShipperId: Number(ret.shipperId) > 0 ? Number(ret.shipperId) : null,
               jobReturnBy: byUserId,
             }
           : {}),
@@ -1489,21 +1492,24 @@ async function computeDashboard(from: string, to: string, type = "") {
     })
     .sort((a, b) => a.ord - b.ord);
 
-  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound
+  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound.
+  // "today" is the Thai calendar day (job dates are stored as Thai wall-clock), so each bucket maps
+  // exactly onto a create-date range in the job list (dashboard cells deep-link there).
   const tat = await db.execute(sql`
-    SELECT s.job_status_name AS status, s.display_order AS ord,
+    SELECT s.job_status_id AS status_id, s.job_status_name AS status, s.display_order AS ord,
            count(*) FILTER (WHERE d <= 3)  AS d13,
            count(*) FILTER (WHERE d BETWEEN 4 AND 7)  AS d47,
            count(*) FILTER (WHERE d BETWEEN 8 AND 14) AS d814,
            count(*) FILTER (WHERE d BETWEEN 15 AND 30) AS d1530,
            count(*) FILTER (WHERE d > 30) AS over30
-      FROM (SELECT job_status_id, GREATEST(1, (current_date - job_create_date::date)) AS d
+      FROM (SELECT job_status_id, GREATEST(1, ((now() AT TIME ZONE 'Asia/Bangkok')::date - job_create_date::date)) AS d
               FROM job WHERE record_status <> 'DELETED' ${typeSql}) j
       JOIN job_status s ON s.job_status_id = j.job_status_id
      WHERE s.job_status_group NOT IN ('Finished','Cancel')
-     GROUP BY s.job_status_name, s.display_order
+     GROUP BY s.job_status_id, s.job_status_name, s.display_order
      ORDER BY s.display_order`);
   const tatRows = (tat.rows as Record<string, unknown>[]).map((r) => ({
+    statusId: Number(r.status_id),
     status: String(r.status ?? "").trim(),
     d13: Number(r.d13),
     d47: Number(r.d47),

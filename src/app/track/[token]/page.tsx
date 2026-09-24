@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleCheck, CircleDot, Circle, Ban, PackageSearch } from "lucide-react";
+import { CircleCheck, CircleDot, Circle, Ban, PackageSearch, Truck, ExternalLink } from "lucide-react";
 import { trackByToken, TRACK_STEPS } from "@/server/services/tracking";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +88,41 @@ export default async function Page({ params }: { params: Promise<{ token: string
             })}
           </ol>
 
-          {(j.dueDate || j.trackingNo || j.closedDate) && (
+          {/* return shipment — courier logo + a link into the courier's own tracking page */}
+          {j.trackingNo && (
+            <div className="mt-1 rounded-lg border border-border bg-muted/40 p-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-white ring-1 ring-border">
+                  {j.courier?.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={j.courier.logoUrl} alt={j.courier.name} className="max-h-8 max-w-[56px] object-contain" />
+                  ) : (
+                    <Truck className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted-foreground">{j.courier?.name || j.shipper || "การจัดส่งคืน"}</p>
+                  <p className="num text-sm font-semibold tracking-tight">{j.trackingNo}</p>
+                </div>
+                {j.courier?.trackUrl && (
+                  <a
+                    href={j.courier.trackUrl}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    ติดตามพัสดุ
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </div>
+              {!j.courier?.trackUrl && (
+                <p className="mt-2 text-xs text-muted-foreground">นำเลขพัสดุไปตรวจสอบที่เว็บไซต์ของบริษัทขนส่ง</p>
+              )}
+            </div>
+          )}
+
+          {(j.dueDate || j.closedDate) && (
             <dl className="mt-1 grid gap-2.5 border-t border-border pt-4 text-sm sm:grid-cols-3">
               {j.dueDate && !j.closedDate && (
                 <div>
@@ -102,16 +136,10 @@ export default async function Page({ params }: { params: Promise<{ token: string
                   <dd className="num font-medium">{j.closedDate}</dd>
                 </div>
               )}
-              {j.shipper && (
+              {j.shipper && !j.trackingNo && (
                 <div>
                   <dt className="text-2xs text-muted-foreground">การส่งคืน</dt>
                   <dd className="font-medium">{j.shipper}</dd>
-                </div>
-              )}
-              {j.trackingNo && (
-                <div>
-                  <dt className="text-2xs text-muted-foreground">เลขพัสดุ</dt>
-                  <dd className="num font-medium">{j.trackingNo}</dd>
                 </div>
               )}
             </dl>

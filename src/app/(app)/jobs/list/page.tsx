@@ -11,6 +11,7 @@ import {
   Loader2,
   CheckCircle2,
   Phone,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
@@ -39,6 +40,8 @@ type Filters = {
   dateBy: "create" | "reception" | "closed"; from: string; to: string;
   customer: string; phone: string; tracking: string; imei: string; warranty: string;
   bounce: boolean; within30: boolean; cost: "" | "yes" | "no"; status: string;
+  /* set only by a dashboard TAT deep link (no field in the bar): exact status id + open jobs only */
+  statusId: string; open: boolean;
 };
 const NO_FILTER: Filters = {
   no: "", ref: "", brand: "", model: "", type: "", typeDetail: "",
@@ -46,6 +49,7 @@ const NO_FILTER: Filters = {
   dateBy: "create", from: "", to: "",
   customer: "", phone: "", tracking: "", imei: "", warranty: "",
   bounce: false, within30: false, cost: "", status: "",
+  statusId: "", open: false,
 };
 /** query-string form of the applied filters — shared by the table hook and the Excel export */
 const toParams = (f: Filters) => ({
@@ -53,8 +57,16 @@ const toParams = (f: Filters) => ({
   createdBy: f.createdBy, engineer: f.engineer,
   dateBy: f.dateBy === "create" ? "" : f.dateBy, from: f.from, to: f.to,
   customer: f.customer, phone: f.phone, tracking: f.tracking, imei: f.imei, warranty: f.warranty,
-  bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost, status: f.status,
+  bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost,
+  // statusId wins over the name (TAT trims names; the name filter is an exact match)
+  status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "",
 });
+
+/** dashboard TAT buckets (keys match the dashboard's TatKey) */
+const TAT_BUCKET: Record<string, string> = {
+  d13: "1–3 วัน", d47: "4–7 วัน", d814: "8–14 วัน", d1530: "15–30 วัน", over30: "เกิน 30 วัน", total: "ทุกช่วงวัน",
+};
+type TatSource = { bucket: string; status: string; type: string };
 
 function StatChip({
   icon: Icon,
@@ -105,14 +117,34 @@ export default function JobListPage() {
   // FilterBar (applied on ค้นหา) + table state → one server query per change
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  // deep link from the customer page: /jobs/list?customer=C43600 → prefilled ลูกค้า filter
+  // where a dashboard TAT deep link came from (shown as a clearable chip)
+  const [tat, setTat] = React.useState<TatSource | null>(null);
+  // deep links:
+  //   customer page  /jobs/list?customer=C43600 → prefilled ลูกค้า filter
+  //   dashboard TAT  /jobs/list?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…&to=…&type=…
   React.useEffect(() => {
-    const c = new URLSearchParams(window.location.search).get("customer")?.trim();
-    if (c) {
-      setDraft((f) => ({ ...f, customer: c }));
-      setFilters((f) => ({ ...f, customer: c }));
+    const p = new URLSearchParams(window.location.search);
+    const g = (k: string) => p.get(k)?.trim() ?? "";
+    const next: Partial<Filters> = {};
+    if (g("customer")) next.customer = g("customer");
+    if (g("src") === "tat") {
+      Object.assign(next, {
+        open: g("open") === "1", statusId: /^\d+$/.test(g("statusId")) ? g("statusId") : "", status: g("status"),
+        dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type"),
+      });
+      setTat({ bucket: g("bucket"), status: g("status"), type: g("type") });
+    }
+    if (Object.keys(next).length) {
+      setDraft((f) => ({ ...f, ...next }));
+      setFilters((f) => ({ ...f, ...next }));
     }
   }, []);
+  const clearAll = () => {
+    setDraft(NO_FILTER);
+    setFilters(NO_FILTER);
+    setTat(null);
+    if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
+  };
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   // models narrow to the chosen brand (1,171 models in total)
@@ -279,13 +311,18 @@ export default function JobListPage() {
 
       <FilterBar
         onSearch={() => {
-          setFilters(draft);
+          // editing any of the TAT-defining fields leaves the TAT view: drop its hidden "open jobs only" too
+          const TAT_KEYS = ["status", "statusId", "dateBy", "from", "to", "type"] as const;
+          const next = tat && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false, statusId: "" } : draft;
+          if (next !== draft) {
+            setTat(null);
+            setDraft(next);
+            window.history.replaceState(null, "", window.location.pathname);
+          }
+          setFilters(next);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters(NO_FILTER);
-        }}
+        onReset={clearAll}
       >
         <Field label="เลขที่งาน">
           <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
@@ -383,7 +420,7 @@ export default function JobListPage() {
           </Select>
         </Field>
         <Field label="สถานะงาน">
-          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value, statusId: "" }))}>
             <option value="">ทั้งหมด</option>
             {JOB_STATUS_OPTIONS.map((s) => (
               <option key={s}>{s}</option>
@@ -403,6 +440,29 @@ export default function JobListPage() {
           </div>
         </Field>
       </FilterBar>
+
+      {tat && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary-soft py-1 pl-3 pr-1 text-primary">
+            <span>
+              จาก Dashboard TAT: <span className="font-medium">{tat.status || "ทุกสถานะ"}</span>
+              {" · "}{TAT_BUCKET[tat.bucket] ?? tat.bucket}
+              {tat.type && ` · ${tat.type}`}
+              {" · "}งานที่ยังไม่ปิด
+              <span className="num tabular-nums"> ({loading ? "…" : total.toLocaleString("en-US")} งาน)</span>
+            </span>
+            <button
+              type="button"
+              onClick={clearAll}
+              title="ล้างตัวกรองจาก Dashboard"
+              aria-label="ล้างตัวกรองจาก Dashboard"
+              className="grid h-6 w-6 place-items-center rounded-full transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        </div>
+      )}
 
       <DataTable searchable={false}
         columns={columns}

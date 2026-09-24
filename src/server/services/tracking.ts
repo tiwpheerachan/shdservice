@@ -6,6 +6,7 @@ import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/d
 import { RS } from "@/server/record-status";
 import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS } from "./jobs";
+import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
 
 /**
  * Public customer tracking (/t/<token>) — the ONLY code path that serves job
@@ -13,9 +14,8 @@ import { JS } from "./jobs";
  *
  *  - the token is 32 random bytes (base64url); job numbers are sequential and
  *    must never be a key on their own
- *  - the page opens only for jobs that already have a quotation (the agreed
- *    rule: "ติดตามได้เมื่อมีใบเสนอราคาแล้ว") — change QUOTATION_REQUIRED to open
- *    it for every job
+ *  - every job is trackable from the moment it is opened (decided 2026-09-23);
+ *    flip QUOTATION_REQUIRED to gate it behind a quotation again
  *  - a link dies 90 days after the job is closed, and staff can rotate it
  *  - the fallback form needs TWO facts (job/quotation number + last 4 digits of
  *    the customer's phone) and every failure returns the same message, so the
@@ -24,8 +24,8 @@ import { JS } from "./jobs";
  *    no address, no full IMEI/serial, no technician, no internal remarks
  */
 
-/** open the page only for jobs that have at least one quotation */
-const QUOTATION_REQUIRED = true;
+/** true = only jobs that already have a quotation can be tracked (currently: every job) */
+const QUOTATION_REQUIRED = false;
 /** a link stops working this long after the job was closed */
 const EXPIRE_DAYS_AFTER_CLOSE = 90;
 
@@ -51,6 +51,8 @@ export type PublicJob = {
   shipper: string;
   trackingNo: string;
   closedDate: string;
+  /** courier profile of the return leg — logo + link into the courier's own tracking page */
+  courier: { name: string; logoUrl: string; trackUrl: string } | null;
 };
 
 export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] = [
@@ -110,6 +112,7 @@ function base(where: SQL | undefined) {
       closedDate: job.jobClosedDate,
       shipper: job.returnCustomerType,
       trackingNo: job.returnCustomerTrackingNo,
+      shipperId: job.returnShipperId,
       recordStatus: job.recordStatus,
     })
     .from(job)
@@ -168,6 +171,14 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const step = stepOf(row.statusId ?? -1, row.group?.trim() ?? "");
   if (step && !seen.has(step)) seen.set(step, "");
 
+  // courier of the return leg (jobs closed before drizzle/0013 have none → plain tracking number)
+  const trackingNo = (row.trackingNo ?? "").trim();
+  const profile = row.shipperId ? await getShippingProfile(row.shipperId) : null;
+  const courier =
+    profile && !profile.isDeleted
+      ? { name: profile.nameTh, logoUrl: profile.logoUrl, trackUrl: trackUrlFor(profile, trackingNo) }
+      : null;
+
   const order = TRACK_STEPS.map((s) => s.key);
   const history = [...seen.entries()]
     .map(([key, at]) => ({ key, at }))
@@ -187,6 +198,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
     shipper: (row.shipper ?? "").trim(),
     trackingNo: (row.trackingNo ?? "").trim(),
     closedDate: fmtDate(row.closedDate),
+    courier,
   };
 }
 

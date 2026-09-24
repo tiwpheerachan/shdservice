@@ -78,7 +78,7 @@ export function exportXlsx(resource: string, params: Record<string, string | num
 }
 
 /** Upload one file (product image / payment slip) → stored path. */
-export async function uploadFile(kind: "product-image" | "sale-order-slip" | "job-slip" | "profile-logo", id: string, file: File) {
+export async function uploadFile(kind: "product-image" | "sale-order-slip" | "job-slip" | "profile-logo" | "shipper-logo", id: string, file: File) {
   const fd = new FormData();
   fd.append("kind", kind);
   fd.append("id", id);

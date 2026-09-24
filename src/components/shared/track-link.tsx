@@ -9,12 +9,12 @@ import { api, postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
 /**
- * "ลิงก์ติดตามสำหรับลูกค้า" — the link printed as a QR on the quotation, also
- * copyable here so staff can send it in LINE. The link only works once the job
- * has a quotation (server rule); before that we say so instead of handing out a
- * link that would show "ไม่พบข้อมูล".
+ * "ลิงก์ติดตามสำหรับลูกค้า" — usable from the moment the job is opened: staff
+ * copy it here and send it in LINE, and the same link is the QR on the
+ * quotation later. `ready` mirrors the server rule (see tracking.ts) so the box
+ * never hands out a link that would answer "ไม่พบข้อมูล".
  */
-export function TrackLink({ jobNo }: { jobNo: string }) {
+export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const { edit: canEdit } = useAccess().forPath("/jobs/edit");
@@ -73,15 +73,15 @@ export function TrackLink({ jobNo }: { jobNo: string }) {
   if (loading || !url) return null;
 
   return (
-    <div className="surface p-4">
+    <div className={compact ? "rounded-lg border border-border p-3" : "surface p-4"}>
       <div className="flex items-center gap-2">
         <Link2 className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold">ลิงก์ติดตามสำหรับลูกค้า</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {ready
-          ? "ลิงก์เดียวกับ QR บนใบเสนอราคา — ส่งให้ลูกค้าทาง LINE ได้ ลูกค้าเห็นเฉพาะสถานะงาน ไม่เห็นราคา"
-          : "ยังใช้ไม่ได้ — ลูกค้าจะติดตามได้เมื่อออกใบเสนอราคาให้งานนี้แล้ว"}
+          ? "ส่งให้ลูกค้าทาง LINE ได้เลย — เป็นลิงก์เดียวกับ QR บนใบเสนอราคา ลูกค้าเห็นเฉพาะสถานะงาน ไม่เห็นราคา"
+          : "ยังใช้ไม่ได้สำหรับงานนี้"}
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

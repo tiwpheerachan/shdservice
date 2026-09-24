@@ -369,6 +369,8 @@ export const job = pgTable("job", {
 	isJobBounce: boolean("is_job_bounce"),
 	// public customer tracking link (drizzle/0012) — /t/<track_token>
 	trackToken: varchar("track_token", { length: 43 }),
+	// courier used for the return leg (drizzle/0013); NULL on legacy jobs
+	returnShipperId: integer("return_shipper_id"),
 	trackTokenAt: timestamp("track_token_at", { mode: "string" }),
 	productSaleOutShopName: varchar("product_sale_out_shop_name", { length: 100 }),
 });
@@ -893,6 +895,23 @@ export const documentProfile = pgTable("document_profile", {
 	createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 	// soft delete (drizzle/0009): hidden from lists/dropdowns, still printable for old documents
+	deletedAt: timestamp("deleted_at", { mode: "string" }),
+	deletedBy: integer("deleted_by"),
+});
+
+/** โปรไฟล์บริษัทขนส่ง (drizzle/0013) — logo + tracking URL shown on the public tracking page */
+export const shippingProfile = pgTable("shipping_profile", {
+	id: serial("id").primaryKey(),
+	code: varchar("code", { length: 20 }).notNull(),
+	nameTh: varchar("name_th", { length: 200 }).notNull(),
+	nameEn: varchar("name_en", { length: 200 }).notNull().default(""),
+	logoPath: varchar("logo_path", { length: 200 }).notNull().default(""),
+	/** {no} is replaced with the tracking number */
+	trackUrl: varchar("track_url", { length: 300 }).notNull().default(""),
+	isActive: boolean("is_active").notNull().default(true),
+	sortOrder: integer("sort_order").notNull().default(0),
+	createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 	deletedAt: timestamp("deleted_at", { mode: "string" }),
 	deletedBy: integer("deleted_by"),
 });

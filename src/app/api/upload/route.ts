@@ -4,12 +4,13 @@ import { db } from "@/db/client";
 import { job, product, saleOutHd } from "@/db/schema";
 import { handle, requireCan, requireAdmin, HttpError } from "@/server/auth";
 import { getDocumentProfile, setDocumentProfileLogo } from "@/server/services/document-profiles";
+import { getShippingProfile, setShippingProfileLogo } from "@/server/services/shipping-profiles";
 import { systemFileName, uploadFile, removeFile, filePath, resolvePath, optimizeImage, ALLOWED_TYPES, MAX_FILE_BYTES } from "@/server/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Kind = "product-image" | "sale-order-slip" | "job-slip" | "profile-logo";
+type Kind = "product-image" | "sale-order-slip" | "job-slip" | "profile-logo" | "shipper-logo";
 
 /**
  * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
@@ -29,10 +30,10 @@ export const POST = handle(async (req: NextRequest) => {
   if (!id) throw new HttpError(400, "id required");
   if (file.size > MAX_FILE_BYTES) throw new HttpError(413, "ไฟล์ใหญ่เกิน 10MB");
   if (file.type && !ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "รองรับเฉพาะ JPG, PNG, WEBP, PDF");
-  if ((kind === "product-image" || kind === "profile-logo") && file.type === "application/pdf") throw new HttpError(415, kind === "profile-logo" ? "โลโก้ต้องเป็นไฟล์ภาพ" : "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
+  if ((kind === "product-image" || kind === "profile-logo" || kind === "shipper-logo") && file.type === "application/pdf") throw new HttpError(415, kind === "profile-logo" ? "โลโก้ต้องเป็นไฟล์ภาพ" : "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
 
   // photos (product image / payment slips) are resized server-side; the logo is kept as uploaded
-  const body = kind === "profile-logo" ? file : await optimizeImage(file);
+  const body = kind === "profile-logo" || kind === "shipper-logo" ? file : await optimizeImage(file);
   const sys = systemFileName(body.name); // after optimizeImage: a photo-PNG may now be .jpg
   switch (kind) {
     case "profile-logo": {
@@ -44,6 +45,18 @@ export const POST = handle(async (req: NextRequest) => {
       const path = filePath.profileLogo(pid, sys);
       await uploadFile(path, file);
       await setDocumentProfileLogo(pid, path, me.userId);
+      if (prof.logoPath) await removeFile(prof.logoPath);
+      return NextResponse.json({ ok: true, path, file: sys });
+    }
+    case "shipper-logo": {
+      // โลโก้บริษัทขนส่ง — printed on the public tracking page (System Admin)
+      const me = await requireAdmin(req);
+      const sid = Number(id);
+      const prof = await getShippingProfile(sid);
+      if (!prof) throw new HttpError(404, "ไม่พบโปรไฟล์ขนส่ง " + id);
+      const path = filePath.shipperLogo(sid, sys);
+      await uploadFile(path, body);
+      await setShippingProfileLogo(sid, path, me.userId);
       if (prof.logoPath) await removeFile(prof.logoPath);
       return NextResponse.json({ ok: true, path, file: sys });
     }
