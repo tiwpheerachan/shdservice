@@ -5,6 +5,7 @@ import { PackagePlus, Save } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Section } from "@/components/shared/section";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect } from "@/components/shared/search-select";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -222,20 +223,10 @@ export default function ReceivePage() {
           <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
         </Field>
         <Field label="ยี่ห้อ (ผู้ผลิต)">
-          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value }))}>
-            <option value="">ทั้งหมด</option>
-            {BRANDS.map((b) => (
-              <option key={b.id}>{b.name}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v }))} options={BRANDS.map((b) => ({ value: b.name, label: b.name }))} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
         </Field>
         <Field label="หมวดหมู่">
-          <Select value={draft.category} onChange={(e) => setDraft((f) => ({ ...f, category: e.target.value }))}>
-            <option value="">ทั้งหมด</option>
-            {CATEGORIES.map((c) => (
-              <option key={c.id}>{c.name}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.category} onChange={(v) => setDraft((f) => ({ ...f, category: v }))} options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))} searchPlaceholder="พิมพ์ชื่อหมวดหมู่…" />
         </Field>
       </FilterBar>
 

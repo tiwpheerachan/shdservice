@@ -12,7 +12,7 @@ import {
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
 import { ModelPicker } from "./model-picker";
-import { SearchSelect } from "./search-select";
+import { SearchSelect, strOptions, withCurrent } from "./search-select";
 import { CustomerSelect } from "./customer-select";
 import { ProfileSelect } from "./profile-select";
 import { Attachments, type AttachmentsHandle } from "./attachments";
@@ -392,12 +392,7 @@ export function JobOpenSection({
           </ReadOnly>
         </Field>
         <Field label="ประเภทงานหลัก" required className="lg:col-span-2">
-          <Select value={s.jobType} onChange={(e) => set("jobType", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {JOB_TYPES.map((j) => (
-              <option key={j.id}>{j.name}</option>
-            ))}
-          </Select>
+          <SearchSelect value={s.jobType} onChange={(v) => set("jobType", v)} options={withCurrent(JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), s.jobType)} />
         </Field>
         <Field label="งานย่อย" className="lg:col-span-2">
           {/* ค่าที่ใช้ในระบบเดิมทั้ง 24 ค่า (job.job_type_detail) เป็นรายการแนะนำ + พิมพ์ค่าใหม่ได้ */}
@@ -456,10 +451,10 @@ export function MainSymptomField() {
 
 /**
  * Layouts (fields a layout hides keep their loaded values, so saving never clears them):
- *  - `full`   ปิดงาน / Swap-Refund — every field
- *  - `open`   เปิดงานใหม่ / แก้ไขข้อมูลงาน — no ประเภทสินค้า; searchable รุ่น, Shop Name suggestions,
+ *  - `full`   ปิดงาน — every field
+ *  - `open`   เปิดงานใหม่ / แก้ไขข้อมูลงาน — no ประเภทสินค้า; Shop Name suggestions,
  *             courier from โปรไฟล์บริษัทขนส่ง
- *  - `repair` บันทึกงานซ่อม / บันทึกงานส่งซ่อมต่อ (Out-Source) — device fields only (no shop / reception)
+ *  - `repair` บันทึกงานซ่อม / บันทึกงานส่งซ่อมต่อ (Out-Source) / Swap-Refund — device fields only (no shop / reception)
  */
 export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "open" | "repair" }) {
   const { s, set, patch } = useJobForm();
@@ -496,12 +491,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   );
   const channelField = (
     <Field label={repair ? "Sale Channel" : "Channel"} required>
-      <Select value={s.channel} onChange={(e) => set("channel", e.target.value)}>
-        <option value="">- - Please Select - -</option>
-        {CHANNELS.map((c) => (
-          <option key={c}>{c}</option>
-        ))}
-      </Select>
+      <SearchSelect value={s.channel} onChange={(v) => set("channel", v)} options={withCurrent(strOptions(CHANNELS), s.channel)} />
     </Field>
   );
   const saleDateField = (
@@ -559,39 +549,22 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   );
   const brandField = (
     <Field label="ยี่ห้อ" required>
-      <Select value={s.brand} onChange={(e) => set("brand", e.target.value)}>
-        <option value="">- - Please Select - -</option>
-        {MANUFACTURERS.map((m) => (
-          <option key={m.id}>{m.name}</option>
-        ))}
-      </Select>
+      <SearchSelect
+        value={s.brand}
+        onChange={(v) => set("brand", v)}
+        options={withCurrent(MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })), s.brand)}
+        searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+      />
     </Field>
   );
   const modelField = (
     <Field label="รุ่น" required>
-      {repair || open ? (
-        <ModelPicker
-          models={modelOptions}
-          value={s.modelCode}
-          fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
-          onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
-        />
-      ) : (
-        <Select
-          value={s.modelCode}
-          onChange={(e) => {
-            const m = MODELS.find((x) => x.code === e.target.value);
-            patch({ modelCode: e.target.value, brand: m?.brand || s.brand });
-          }}
-        >
-          <option value="">- - Please Select - -</option>
-          {modelOptions.map((m) => (
-            <option key={m.code} value={m.code}>
-              {m.code} — {m.name}
-            </option>
-          ))}
-        </Select>
-      )}
+      <ModelPicker
+        models={modelOptions}
+        value={s.modelCode}
+        fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
+        onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
+      />
     </Field>
   );
   const modelDetailField = (
@@ -761,12 +734,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
         {expireField}
         {warrantyField}
         <Field label="ประเภทสินค้า">
-          <Select value={s.productType} onChange={(e) => set("productType", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {PRODUCT_TYPES.map((p) => (
-              <option key={p.id}>{p.name}</option>
-            ))}
-          </Select>
+          <SearchSelect value={s.productType} onChange={(v) => set("productType", v)} options={withCurrent(PRODUCT_TYPES.map((p) => ({ value: p.name, label: p.name })), s.productType)} />
         </Field>
 
         {imeiField}

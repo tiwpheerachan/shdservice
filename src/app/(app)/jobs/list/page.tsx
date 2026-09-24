@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
+import { modelNameOptions } from "@/components/shared/model-picker";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -148,10 +150,11 @@ export default function JobListPage() {
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   // models narrow to the chosen brand (1,171 models in total)
-  const MODEL_OPTIONS = React.useMemo(
-    () => (draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS),
-    [MODELS, draft.brand]
-  );
+  const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
+  const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
+  const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
+  const STAFF_OPTIONS = React.useMemo(() => STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined })), [STAFF]);
+  const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
   const { rows: JOBS, total, loading } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
@@ -331,52 +334,22 @@ export default function JobListPage() {
           <Input placeholder="เลขคำสั่งซื้อ Shopee / Lazada …" className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
         </Field>
         <Field label="ยี่ห้อ">
-          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value, model: "" }))}>
-            <option value="">ทั้งหมด</option>
-            {BRANDS.map((b) => (
-              <option key={b.id}>{b.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))} options={BRAND_OPTIONS} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
         </Field>
         <Field label="รุ่น">
-          <Select value={draft.model} onChange={(e) => setD("model", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.code} value={m.name}>{draft.brand ? m.name : `${m.brand} ${m.name}`}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.model} onChange={(v) => setD("model", v)} options={MODEL_OPTIONS} minWidth={360} searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…" />
         </Field>
         <Field label="ประเภทงาน">
-          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {JOB_TYPES.map((j) => (
-              <option key={j.id}>{j.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.type} onChange={(v) => setD("type", v)} options={JOB_TYPE_OPTIONS} />
         </Field>
         <Field label="งานย่อย">
-          <Select value={draft.typeDetail} onChange={(e) => setD("typeDetail", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {JOB_TYPE_DETAILS.map((d) => (
-              <option key={d}>{d}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.typeDetail} onChange={(v) => setD("typeDetail", v)} options={strOptions(JOB_TYPE_DETAILS)} />
         </Field>
         <Field label="เปิดงานโดย">
-          <Select value={draft.createdBy} onChange={(e) => setD("createdBy", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {STAFF.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.createdBy} onChange={(v) => setD("createdBy", v)} options={STAFF_OPTIONS} searchPlaceholder="พิมพ์ชื่อพนักงาน…" />
         </Field>
         <Field label="ผู้รับผิดชอบ">
-          <Select value={draft.engineer} onChange={(e) => setD("engineer", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {STAFF.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.engineer} onChange={(v) => setD("engineer", v)} options={STAFF_OPTIONS} searchPlaceholder="พิมพ์ชื่อช่าง…" />
         </Field>
         {/* which date the range applies to — empty dates = all */}
         <Field label="ช่วงวันที่ (ตาม)">
@@ -420,12 +393,7 @@ export default function JobListPage() {
           </Select>
         </Field>
         <Field label="สถานะงาน">
-          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value, statusId: "" }))}>
-            <option value="">ทั้งหมด</option>
-            {JOB_STATUS_OPTIONS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.status} onChange={(v) => setDraft((f) => ({ ...f, status: v, statusId: "" }))} options={strOptions(JOB_STATUS_OPTIONS)} minWidth={360} />
         </Field>
         <Field label="เฉพาะงาน" className="sm:col-span-2">
           <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-1 text-sm">

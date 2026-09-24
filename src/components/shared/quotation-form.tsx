@@ -9,7 +9,8 @@ import { ProfileSelect } from "./profile-select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
+import { Input, Textarea, NumberInput } from "@/components/ui/input";
+import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
 import { useProducts } from "@/data/db";
 import { QUOTATION_STATUS_OPTIONS, type Customer } from "@/data/mock";
@@ -415,12 +416,7 @@ export const QuotationForm = React.forwardRef<
               <Textarea rows={4} placeholder="เงื่อนไขการเสนอราคา ระยะเวลายืนราคา ฯลฯ" value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
             <Field label="สถานะใบเสนอราคา" wide>
-              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-                {QUOTATION_STATUS_OPTIONS.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-                {status && !QUOTATION_STATUS_OPTIONS.includes(status) && <option>{status}</option>}
-              </Select>
+              <SearchSelect value={status} onChange={setStatus} options={withCurrent(strOptions(QUOTATION_STATUS_OPTIONS), status)} />
             </Field>
             {initial && (
               <>

@@ -5,6 +5,7 @@ import { Plus, Download, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } f
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -462,12 +463,7 @@ export default function UsersPage() {
           <Input placeholder="username" className="num" value={draft.username} onChange={(e) => setDraft((f) => ({ ...f, username: e.target.value }))} />
         </Field>
         <Field label="ประเภทผู้ใช้งาน">
-          <Select value={draft.role} onChange={(e) => setDraft((f) => ({ ...f, role: e.target.value }))}>
-            <option value="">ทั้งหมด</option>
-            {ROLE_OPTIONS.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.role} onChange={(v) => setDraft((f) => ({ ...f, role: v }))} options={strOptions(ROLE_OPTIONS)} />
         </Field>
         <Field label="สถานะ">
           <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as UserFilter["status"] }))}>
@@ -555,11 +551,7 @@ export default function UsersPage() {
             <Input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="—" />
           </Field>
           <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
-            <Select value={form.role} onChange={(e) => set("role", e.target.value)}>
-              {ROLE_OPTIONS.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </Select>
+            <SearchSelect value={form.role} onChange={(v) => set("role", v)} options={strOptions(ROLE_OPTIONS)} />
           </Field>
           <Field label="สาขา / หน่วยงาน">
             <Input value={form.branch} onChange={(e) => set("branch", e.target.value)} />

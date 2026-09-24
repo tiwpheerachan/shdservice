@@ -9,6 +9,22 @@ import { cn } from "@/lib/utils";
 
 const MAX_ROWS = 80;
 
+/**
+ * Options for filters that match a model by NAME (job list / assign): one option per name —
+ * the same name exists under several brands — with the brand(s) as the sub text.
+ */
+export function modelNameOptions(models: Model[], brand = ""): { value: string; label: string; sub?: string }[] {
+  const byName = new Map<string, Set<string>>();
+  for (const m of brand ? models.filter((x) => x.brand === brand) : models) {
+    if (!byName.has(m.name)) byName.set(m.name, new Set());
+    if (m.brand) byName.get(m.name)!.add(m.brand);
+  }
+  return [...byName].map(([name, brands]) => {
+    const b = [...brands];
+    return { value: name, label: name, sub: b.length > 2 ? `${b.slice(0, 2).join(", ")} +${b.length - 2}` : b.join(", ") || undefined };
+  });
+}
+
 /** every typed word must appear in code / name / brand; exact code first, then code / name prefix */
 function matchModels(models: Model[], q: string): Model[] {
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);

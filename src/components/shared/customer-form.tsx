@@ -4,6 +4,7 @@ import * as React from "react";
 import { AlertTriangle } from "lucide-react";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Textarea, Select, Radio } from "@/components/ui/input";
+import { SearchSelect } from "./search-select";
 import { Button } from "@/components/ui/button";
 import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from "@/data/mock";
 import { useProvinces } from "@/data/db";
@@ -197,49 +198,34 @@ export function CustomerFields({
         <Input value={form.address2} onChange={(e) => set("address2", e.target.value)} placeholder="ซอย / ถนน" />
       </Field>
       <Field label="จังหวัด">
-        <Select
+        <SearchSelect
           value={form.cityId > 0 ? String(form.cityId) : ""}
-          onChange={(e) => setForm((f) => ({ ...f, cityId: Number(e.target.value) || -1, districtId: -1, subDistrictId: -1 }))}
-        >
-          <option value="">- - Please Select - -</option>
-          {PROVINCES.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </Select>
+          onChange={(v) => setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1 }))}
+          options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
+          searchPlaceholder="พิมพ์ชื่อจังหวัด…"
+        />
       </Field>
       <Field label="เขต / อำเภอ">
-        <Select
+        <SearchSelect
           value={form.districtId > 0 ? String(form.districtId) : ""}
-          onChange={(e) => setForm((f) => ({ ...f, districtId: Number(e.target.value) || -1, subDistrictId: -1 }))}
+          onChange={(v) => setForm((f) => ({ ...f, districtId: Number(v) || -1, subDistrictId: -1 }))}
+          options={districts.map((d) => ({ value: String(d.id), label: d.name }))}
           disabled={form.cityId <= 0}
-        >
-          <option value="">- - Please Select - -</option>
-          {districts.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </Select>
+          searchPlaceholder="พิมพ์ชื่อเขต / อำเภอ…"
+        />
       </Field>
       <Field label="แขวง / ตำบล">
-        <Select
+        <SearchSelect
           value={form.subDistrictId > 0 ? String(form.subDistrictId) : ""}
-          onChange={(e) => {
-            const id = Number(e.target.value) || -1;
+          onChange={(v) => {
+            const id = Number(v) || -1;
             const hit = subDistricts.find((s) => s.id === id);
             setForm((f) => ({ ...f, subDistrictId: id, postalCode: hit?.postal || f.postalCode }));
           }}
+          options={subDistricts.map((s) => ({ value: String(s.id), label: s.name, sub: s.postal || undefined }))}
           disabled={form.districtId <= 0}
-        >
-          <option value="">- - Please Select - -</option>
-          {subDistricts.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </Select>
+          searchPlaceholder="พิมพ์ชื่อแขวง / ตำบล หรือรหัสไปรษณีย์…"
+        />
       </Field>
       <Field label="รหัสไปรษณีย์">
         <Input value={form.postalCode} onChange={(e) => set("postalCode", e.target.value)} className="num" placeholder="10000" />

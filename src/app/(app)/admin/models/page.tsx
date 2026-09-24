@@ -4,6 +4,7 @@ import * as React from "react";
 import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ export default function ModelsPage() {
 
   // ยี่ห้อให้เลือก = ยี่ห้อ Active + ยี่ห้อเดิมของรุ่นที่กำลังแก้ (152 รุ่นสังกัดยี่ห้อ Inactive —
   // ไม่ให้ dropdown เปลี่ยนยี่ห้อโดยไม่ตั้งใจ)
+  const brandFilterOptions = React.useMemo(() => MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })), [MANUFACTURERS]);
   const brandOptions = React.useMemo(() => {
     const names = MANUFACTURERS.map((m) => m.name);
     return editing?.brand && !names.includes(editing.brand) ? [editing.brand, ...names] : names;
@@ -170,12 +172,14 @@ export default function ModelsPage() {
         }}
       >
         <Field label="ยี่ห้อผู้ผลิต">
-          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value }))}>
-            <option value="">ทั้งหมด</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            value={draft.brand}
+            onChange={(v) => setDraft((f) => ({ ...f, brand: v }))}
+            options={brandFilterOptions}
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="Model Code">
           <Input placeholder="MD00001" className="num" value={draft.code} onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))} />
@@ -227,11 +231,7 @@ export default function ModelsPage() {
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
           <Field label="ยี่ห้อ" required>
-            <Select value={form.brand} onChange={(e) => set("brand", e.target.value)}>
-              {brandOptions.map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </Select>
+            <SearchSelect value={form.brand} onChange={(v) => set("brand", v)} options={strOptions(brandOptions)} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
           </Field>
           <Field label="Market Price (บาท)" required>
             <Input

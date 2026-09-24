@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, NumberInput } from "@/components/ui/input";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
 import { useProducts, useJobNos, useSaleOrders, useStaff } from "@/data/db";
 import { STOCK_PICK_TYPES } from "@/data/mock";
@@ -244,17 +245,16 @@ export default function PickPage() {
                   </datalist>
                 </div>
               ) : (
-              <Select
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                className="flex-1"
-                disabled={kind === "other"}
-              >
-                <option value="">{kind === "other" ? "- - ไม่ต้องอ้างอิง - -" : "- - Please Select - -"}</option>
-                {refOptions.map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </Select>
+              <div className="flex-1">
+                <SearchSelect
+                  value={ref}
+                  onChange={setRef}
+                  options={strOptions(refOptions)}
+                  disabled={kind === "other"}
+                  placeholder={kind === "other" ? "- - ไม่ต้องอ้างอิง - -" : "- - Please Select - -"}
+                  searchPlaceholder="พิมพ์เลขเอกสาร…"
+                />
+              </div>
               )}
               <Button size="md" variant="outline" onClick={getData}>
                 <Search className="h-3.5 w-3.5" />
@@ -346,12 +346,7 @@ export default function PickPage() {
       <div className="surface p-4">
         <FieldGrid cols={2}>
           <Field label={isReturn ? "รับคืนจาก" : "จ่ายให้"} required>
-            <Select value={payTo} onChange={(e) => setPayTo(e.target.value)}>
-              <option value="">- - Please Select - -</option>
-              {RECIPIENTS.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </Select>
+            <SearchSelect value={payTo} onChange={setPayTo} options={strOptions(RECIPIENTS)} searchPlaceholder="พิมพ์ชื่อ…" />
           </Field>
           <Field label="หมายเหตุ" wide>
             <Input

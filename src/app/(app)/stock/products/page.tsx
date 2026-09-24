@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect } from "@/components/shared/search-select";
 import dynamic from "next/dynamic";
 import type { ProductMode } from "@/components/shared/product-detail-modal";
 
@@ -310,20 +311,23 @@ export default function ProductsPage() {
           <Input type="date" value={draft.date} onChange={(e) => setD("date", e.target.value)} />
         </Field>
         <Field label="ยี่ห้อ (ผู้ผลิต)">
-          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value, model: "" }))}>
-            <option value="">ทั้งหมด</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            placeholder="ทั้งหมด" emptyLabel="ทั้งหมด"
+            value={draft.brand}
+            onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))}
+            options={MANUFACTURERS.map((m) => ({ value: m.name, label: m.name }))}
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="รุ่น" hint="อะไหล่ที่ใช้ได้กับรุ่นนั้น (ตามที่ผูกไว้ในข้อมูลอะไหล่)">
-          <Select value={draft.model} onChange={(e) => setD("model", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {(draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS).map((m) => (
-              <option key={m.code} value={m.code}>{draft.brand ? m.name : `${m.brand} ${m.name}`}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            placeholder="ทั้งหมด" emptyLabel="ทั้งหมด"
+            value={draft.model}
+            onChange={(v) => setD("model", v)}
+            options={(draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS).map((m) => ({ value: m.code, label: m.name, sub: m.brand || undefined }))}
+            minWidth={360}
+            searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
+          />
         </Field>
         <Field label="สถานะอะไหล่">
           <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
@@ -333,12 +337,7 @@ export default function ProductsPage() {
           </Select>
         </Field>
         <Field label="หมวดหมู่">
-          <Select value={draft.category} onChange={(e) => setD("category", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {CATEGORIES.map((c) => (
-              <option key={c.id}>{c.name}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.category} onChange={(v) => setD("category", v)} options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))} searchPlaceholder="พิมพ์ชื่อหมวดหมู่…" />
         </Field>
       </FilterBar>
 

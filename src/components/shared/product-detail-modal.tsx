@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea, Checkbox, Radio } from "@/components/ui/input";
+import { SearchSelect, withCurrent } from "./search-select";
 import { useToast } from "@/components/ui/toast";
 import {
   useModels,
@@ -271,11 +272,13 @@ export function ProductDetailModal({
             </Field>
 
             <Field label="หมวดหมู่">
-              <Select value={form.category} onChange={(e) => set("category", e.target.value)} disabled={ro}>
-                {CATEGORIES.map((c) => (
-                  <option key={c.id}>{c.name}</option>
-                ))}
-              </Select>
+              <SearchSelect
+                value={form.category}
+                onChange={(v) => set("category", v)}
+                options={withCurrent(CATEGORIES.map((c) => ({ value: c.name, label: c.name })), form.category)}
+                disabled={ro}
+                searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
+              />
             </Field>
             <Field label="คุม S/N (Serial Control)">
               <div className="flex h-9 items-center gap-4">
@@ -335,11 +338,13 @@ export function ProductDetailModal({
             </Field>
 
             <Field label="ยี่ห้อ (ผู้ผลิต)" wide>
-              <Select value={form.brand} onChange={(e) => set("brand", e.target.value)} disabled={ro}>
-                {MANUFACTURERS.map((m) => (
-                  <option key={m.id}>{m.name}</option>
-                ))}
-              </Select>
+              <SearchSelect
+                value={form.brand}
+                onChange={(v) => set("brand", v)}
+                options={withCurrent(MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })), form.brand)}
+                disabled={ro}
+                searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+              />
             </Field>
           </FieldGrid>
         </div>
@@ -375,12 +380,14 @@ export function ProductDetailModal({
 
         <FieldGrid cols={2}>
           <Field label="ใช้สำหรับ สีสินค้า">
-            <Select value={form.forModelColor} onChange={(e) => set("forModelColor", e.target.value)} disabled={ro}>
-              <option value="">- - Please Select - -</option>
-              {COLORS.map((c) => (
-                <option key={c.id}>{c.name}</option>
-              ))}
-            </Select>
+            <SearchSelect
+              value={form.forModelColor}
+              onChange={(v) => set("forModelColor", v)}
+              options={withCurrent(COLORS.map((c) => ({ value: c.name, label: c.name })), form.forModelColor)}
+              disabled={ro}
+              emptyLabel="- - Please Select - -"
+              searchPlaceholder="พิมพ์ชื่อสี…"
+            />
           </Field>
           <Field label="สถานะ">
             <div className="flex h-9 items-center gap-4">

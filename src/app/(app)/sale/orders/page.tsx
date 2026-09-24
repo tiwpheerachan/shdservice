@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -167,14 +168,7 @@ export default function SaleOrderPage() {
           <Input className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
         </Field>
         <Field label="พนักงานขาย">
-          <Select value={draft.sales} onChange={(e) => setD("sales", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {USERS.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.sales} onChange={(v) => setD("sales", v)} options={USERS.map((u) => ({ value: String(u.id), label: u.name }))} searchPlaceholder="พิมพ์ชื่อพนักงานขาย…" />
         </Field>
         <Field label="สถานะการอนุมัติ">
           <Select value={draft.approve} onChange={(e) => setD("approve", e.target.value)}>

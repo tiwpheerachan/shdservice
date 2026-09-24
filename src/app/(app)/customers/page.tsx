@@ -6,6 +6,7 @@ import { Plus, Download, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect } from "@/components/shared/search-select";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -215,12 +216,14 @@ export default function CustomersPage() {
           </Select>
         </Field>
         <Field label="จังหวัด">
-          <Select value={draft.province} onChange={(e) => setD("province", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {PROVINCES.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            value={draft.province}
+            onChange={(v) => setD("province", v)}
+            options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            searchPlaceholder="พิมพ์ชื่อจังหวัด…"
+          />
         </Field>
         <Field label="สถานะ">
           <Select value={draft.status} onChange={(e) => setD("status", e.target.value as CustomerFilter["status"])}>

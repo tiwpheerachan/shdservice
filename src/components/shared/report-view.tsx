@@ -8,6 +8,7 @@ import { DataTable, type Column, type ServerTable } from "@/components/ui/data-t
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
+import { SearchSelect, strOptions } from "./search-select";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
@@ -117,14 +118,20 @@ export function ReportView<T extends Record<string, unknown>>({
             <Field key={f.label} label={f.label}>
               {f.kind === "text" && <Input placeholder={f.placeholder} value={v} onChange={(e) => set(e.target.value)} />}
               {f.kind === "date" && <Input type="date" value={v} onChange={(e) => set(e.target.value)} />}
-              {f.kind === "select" && (
-                <Select value={v} onChange={(e) => set(e.target.value)}>
-                  {/* options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique */}
-                  {Array.from(new Set(f.options)).map((o) => (
-                    <option key={o}>{o}</option>
-                  ))}
-                </Select>
-              )}
+              {f.kind === "select" && (() => {
+                // options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique
+                const opts = Array.from(new Set(f.options));
+                // same rule as the rest of the app: long lists are searchable, 2–5 fixed choices stay a plain select
+                return opts.length > 5 ? (
+                  <SearchSelect value={v} onChange={set} options={strOptions(opts)} />
+                ) : (
+                  <Select value={v} onChange={(e) => set(e.target.value)}>
+                    {opts.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </Select>
+                );
+              })()}
             </Field>
           );
         })}

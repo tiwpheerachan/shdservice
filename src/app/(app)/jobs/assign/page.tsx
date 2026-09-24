@@ -5,6 +5,8 @@ import { UserCheck, ListChecks, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { JobSearch } from "@/components/shared/job-search";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect } from "@/components/shared/search-select";
+import { modelNameOptions } from "@/components/shared/model-picker";
 import { Field } from "@/components/ui/field";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -32,7 +34,10 @@ export default function AssignPage() {
   const { data: JOB_TYPES } = useJobTypes();
   const { data: BRANDS } = useManufacturers();
   const { data: MODELS } = useModels();
-  const MODEL_OPTIONS = React.useMemo(() => (draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS), [MODELS, draft.brand]);
+  const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
+  const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
+  const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
+  const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
   const { rows: JOBS, total, loading, refetch } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
@@ -204,28 +209,13 @@ export default function AssignPage() {
           <Input className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
         </Field>
         <Field label="ยี่ห้อ">
-          <Select value={draft.brand} onChange={(e) => setDraft((f) => ({ ...f, brand: e.target.value, model: "" }))}>
-            <option value="">ทั้งหมด</option>
-            {BRANDS.map((b) => (
-              <option key={b.id}>{b.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))} options={BRAND_OPTIONS} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
         </Field>
         <Field label="รุ่น">
-          <Select value={draft.model} onChange={(e) => setD("model", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.code} value={m.name}>{draft.brand ? m.name : `${m.brand} ${m.name}`}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.model} onChange={(v) => setD("model", v)} options={MODEL_OPTIONS} minWidth={360} searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…" />
         </Field>
         <Field label="ประเภทงาน">
-          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {JOB_TYPES.map((j) => (
-              <option key={j.id}>{j.name}</option>
-            ))}
-          </Select>
+          <SearchSelect {...all} value={draft.type} onChange={(v) => setD("type", v)} options={JOB_TYPE_OPTIONS} />
         </Field>
         <Field label="ชื่อ-สกุล / รหัสลูกค้า">
           <Input placeholder="ชื่อลูกค้า หรือ C43600" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />

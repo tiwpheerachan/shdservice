@@ -4,11 +4,12 @@ import * as React from "react";
 import { Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuditPage, useAuditModules, type AuditRow } from "@/data/db";
@@ -117,22 +118,10 @@ export default function AuditPage() {
           <Input placeholder="ชื่อ หรือ user id" value={draft.user} onChange={(e) => setD("user", e.target.value)} />
         </Field>
         <Field label="โมดูล">
-          <Select value={draft.module} onChange={(e) => setD("module", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {MODULES.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.module} onChange={(v) => setD("module", v)} options={strOptions(MODULES)} />
         </Field>
         <Field label="การกระทำ">
-          <Select value={draft.action} onChange={(e) => setD("action", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {Object.entries(ACTION).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.action} onChange={(v) => setD("action", v)} options={Object.entries(ACTION).map(([k, v]) => ({ value: k, label: v.label, sub: k }))} />
         </Field>
         <Field label="เลขที่ / รหัส">
           <Input placeholder="J2612088 / Q2600462 / P00012" className="num" value={draft.key} onChange={(e) => setD("key", e.target.value.trim())} />

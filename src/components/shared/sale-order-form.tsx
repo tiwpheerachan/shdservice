@@ -8,7 +8,8 @@ import { ProductPicker } from "./product-picker";
 import { ProfileSelect } from "./profile-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea, Radio, NumberInput } from "@/components/ui/input";
+import { Input, Textarea, Radio, NumberInput } from "@/components/ui/input";
+import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
 import { PAYMENT_METHODS, type Customer } from "@/data/mock";
 import { useProducts, useStaff } from "@/data/db";
@@ -172,14 +173,14 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
               <ReadOnly>{initial?.createdBy || me || "—"}</ReadOnly>
             </Field>
             <Field label="พนักงานขาย" required>
-              <Select value={salesId ? String(salesId) : ""} onChange={(e) => setSalesId(Number(e.target.value) || 0)}>
-                <option value="">- - ยังไม่ระบุ - -</option>
-                {STAFF.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
+              <SearchSelect
+                value={salesId ? String(salesId) : ""}
+                onChange={(v) => setSalesId(Number(v) || 0)}
+                options={STAFF.map((u) => ({ value: String(u.id), label: u.name, sub: u.userType || undefined }))}
+                placeholder="- - ยังไม่ระบุ - -"
+                emptyLabel="- - ยังไม่ระบุ - -"
+                searchPlaceholder="พิมพ์ชื่อพนักงานขาย…"
+              />
             </Field>
           </FieldGrid>
         </Section>

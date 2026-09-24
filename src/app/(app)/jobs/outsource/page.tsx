@@ -18,11 +18,11 @@ import {
   saveCommonSections,
 } from "@/components/shared/job-form";
 import { Tabs } from "@/components/ui/tabs";
-import { SearchSelect } from "@/components/shared/search-select";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { useVendors, useStaff } from "@/data/db";
@@ -195,13 +195,7 @@ function OutsourceForm() {
         <FieldGrid>
           <Field label="ส่งไปยัง" required className="lg:col-span-2">
             <div className="space-y-2">
-              <Select value={d.sendTo} onChange={(e) => upd({ sendTo: e.target.value })}>
-                <option value="">- - Please Select - -</option>
-                {VENDORS.map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-                <option>{OTHER}</option>
-              </Select>
+              <SearchSelect value={d.sendTo} onChange={(v) => upd({ sendTo: v })} options={strOptions([...VENDORS, OTHER])} searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…" />
               {d.sendTo === OTHER && (
                 <Input placeholder="ระบุชื่อผู้รับซ่อมต่อ" value={d.sendToOther} onChange={(e) => upd({ sendToOther: e.target.value })} />
               )}
@@ -222,13 +216,12 @@ function OutsourceForm() {
       <Section title="รายละเอียด การรับคืนงานซ่อม" icon={PackageCheck}>
         <FieldGrid>
           <Field label="รับจาก" className="lg:col-span-2">
-            <Select value={d.recvFrom} onChange={(e) => upd({ recvFrom: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {VENDORS.map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-              {d.recvFrom && !VENDORS.includes(d.recvFrom) && <option>{d.recvFrom}</option>}
-            </Select>
+            <SearchSelect
+              value={d.recvFrom}
+              onChange={(v) => upd({ recvFrom: v })}
+              options={strOptions(d.recvFrom && !VENDORS.includes(d.recvFrom) ? [d.recvFrom, ...VENDORS] : VENDORS)}
+              searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
+            />
           </Field>
           <Field label="วันที่รับ">
             <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
@@ -240,12 +233,7 @@ function OutsourceForm() {
             <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
           </Field>
           <Field label="โปรดระบุ สถานะงานซ่อม" required wide>
-            <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {JOB_STATUS_OPTIONS.map((st) => (
-                <option key={st}>{st}</option>
-              ))}
-            </Select>
+            <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>
       </Section>

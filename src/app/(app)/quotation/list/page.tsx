@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Download, Printer } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
@@ -210,12 +211,7 @@ export default function QuotationListPage() {
           </Select>
         </Field>
         <Field label="ยี่ห้อ">
-          <Select value={draft.brand} onChange={(e) => setD("brand", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.brand} onChange={(v) => setD("brand", v)} options={MANUFACTURERS.map((m) => ({ value: m.name, label: m.name }))} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
         </Field>
         <Field label="วันที่สร้าง (ตั้งแต่)">
           <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
@@ -224,12 +220,7 @@ export default function QuotationListPage() {
           <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
         </Field>
         <Field label="สถานะใบเสนอราคา">
-          <Select value={draft.status} onChange={(e) => setD("status", e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {QUOTATION_STATUS_OPTIONS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.status} onChange={(v) => setD("status", v)} options={strOptions(QUOTATION_STATUS_OPTIONS)} />
         </Field>
       </FilterBar>
 

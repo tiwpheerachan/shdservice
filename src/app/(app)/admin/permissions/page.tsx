@@ -4,11 +4,12 @@ import * as React from "react";
 import { Save, ShieldCheck, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { Field } from "@/components/ui/field";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox, Select } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type Permission } from "@/data/mock";
 import { usePermissions, useRoles, useModules } from "@/data/db";
@@ -182,19 +183,10 @@ export default function PermissionsPage() {
         }}
       >
         <Field label="ประเภทผู้ใช้งาน" required>
-          <Select value={draft.role} onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}>
-            {ASSIGNABLE_ROLES.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </Select>
+          <SearchSelect value={draft.role} onChange={(v) => setDraft((d) => ({ ...d, role: v }))} options={strOptions(ASSIGNABLE_ROLES)} />
         </Field>
         <Field label="เมนูงาน">
-          <Select value={draft.menu} onChange={(e) => setDraft((d) => ({ ...d, menu: e.target.value }))}>
-            <option value="">ทั้งหมด</option>
-            {MENUS.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </Select>
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.menu} onChange={(v) => setDraft((d) => ({ ...d, menu: v }))} options={strOptions(MENUS)} />
         </Field>
       </FilterBar>
 

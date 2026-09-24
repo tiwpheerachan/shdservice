@@ -8,6 +8,7 @@ import { Section } from "@/components/shared/section";
 import {
   CustomerSection,
   ProductSection,
+  MainSymptomField,
   CostSummary,
   AttachmentSection,
   FormActions,
@@ -18,6 +19,7 @@ import {
 } from "@/components/shared/job-form";
 import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
@@ -40,7 +42,7 @@ function parseSwap(text: string): Record<string, string> {
 function SwapRefundForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
-  const { s: form, reset } = useJobForm();
+  const { s: form, reset, set } = useJobForm();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
   const [mode, setMode] = React.useState("swap");
@@ -159,15 +161,16 @@ function SwapRefundForm() {
       />
 
       {tab === "product" ? (
-        <ProductSection title="ข้อมูลสินค้า" />
+        <ProductSection title="ข้อมูลสินค้า" variant="repair" />
       ) : (
         <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
           <FieldGrid>
-            <Field label="อาการเสียหลัก (มาตรฐาน)" className="lg:col-span-2">
-              <Textarea rows={2} readOnly value={form.symptoms.join(", ")} />
+            <MainSymptomField />
+            <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+              <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
             </Field>
-            <Field label="ผลการตรวจสอบ" className="lg:col-span-2">
-              <Textarea rows={2} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
+            <Field label="ผลการตรวจสอบ" wide>
+              <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
             </Field>
           </FieldGrid>
         </Section>
@@ -244,12 +247,7 @@ function SwapRefundForm() {
             <Textarea rows={3} value={d.detail} onChange={(e) => upd({ detail: e.target.value })} />
           </Field>
           <Field label="โปรดระบุ สถานะงาน" required wide>
-            <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {JOB_STATUS_OPTIONS.map((st) => (
-                <option key={st}>{st}</option>
-              ))}
-            </Select>
+            <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>
       </Section>

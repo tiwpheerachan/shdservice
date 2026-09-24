@@ -20,10 +20,11 @@ import {
 import { useAccess } from "@/lib/use-access";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
+import { Input, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { REPAIR_STATUS_OPTIONS } from "@/data/mock";
 import { ProductPicker } from "@/components/shared/product-picker";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { SymptomPicker } from "@/components/shared/symptom-picker";
 import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
@@ -369,12 +370,7 @@ function RepairForm() {
             <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
           </Field>
           <Field label="สถานะงานซ่อม" required>
-            <Select value={detail.status} onChange={(e) => setDetail((d) => ({ ...d, status: e.target.value }))}>
-              <option value="">- - Please Select - -</option>
-              {REPAIR_STATUS_OPTIONS.map((st) => (
-                <option key={st}>{st}</option>
-              ))}
-            </Select>
+            <SearchSelect value={detail.status} onChange={(v) => setDetail((d) => ({ ...d, status: v }))} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>
       </Section>

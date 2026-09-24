@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import {
   useDashGroups,
   useTatRows,
@@ -169,12 +170,15 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-[190px]" aria-label="ประเภทงาน">
-            <option value="">ทุกประเภทงาน</option>
-            {JOB_TYPES.map((j) => (
-              <option key={j.id} value={j.name}>{j.name}</option>
-            ))}
-          </Select>
+          <div className="w-[190px]">
+            <SearchSelect
+              value={type}
+              onChange={setType}
+              options={JOB_TYPES.map((j) => ({ value: j.name, label: j.name }))}
+              placeholder="ทุกประเภทงาน"
+              emptyLabel="ทุกประเภทงาน"
+            />
+          </div>
           {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
           <div className="flex items-center gap-1.5">
             <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="num h-9 w-[150px]" aria-label="วันที่เริ่ม" />
