@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
+import { ModelPicker } from "./model-picker";
 import { CustomerSelect } from "./customer-select";
 import { ProfileSelect } from "./profile-select";
 import { Attachments, type AttachmentsHandle } from "./attachments";
@@ -433,7 +434,12 @@ export function JobOpenSection({
 
 /* ---------------- product info ---------------- */
 
-export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า" }: { title?: string }) {
+/**
+ * `variant="repair"` (บันทึกงานซ่อม): only the device fields the engineer needs, in the order
+ * SO / channel / date / warranty months · IMEI / serial / expire / warranty · brand / searchable model …
+ * Fields it hides keep their loaded values, so saving never clears them.
+ */
+export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "repair" }) {
   const { s, set, patch } = useJobForm();
   const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
@@ -460,59 +466,197 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     patch({ expireDate: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` });
   };
 
+  const repair = variant === "repair";
+
+  const soField = (
+    <Field label="Sale Order No." required>
+      <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
+    </Field>
+  );
+  const channelField = (
+    <Field label={repair ? "Sale Channel" : "Channel"} required>
+      <Select value={s.channel} onChange={(e) => set("channel", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {CHANNELS.map((c) => (
+          <option key={c}>{c}</option>
+        ))}
+      </Select>
+    </Field>
+  );
+  const saleDateField = (
+    <Field label="Sale Order Date" required>
+      <Input
+        type="date"
+        value={s.saleOrderDate}
+        onChange={(e) => {
+          set("saleOrderDate", e.target.value);
+          recalcExpire(e.target.value, s.warrantyMonth);
+        }}
+      />
+    </Field>
+  );
+  const warrantyMonthField = (
+    <Field label="รับประกัน (เดือน)" required>
+      <Input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={s.warrantyMonth}
+        onChange={(e) => {
+          set("warrantyMonth", e.target.value);
+          recalcExpire(s.saleOrderDate, e.target.value);
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        className="num text-right"
+      />
+    </Field>
+  );
+  const expireField = (
+    <Field label="Expire Date" required>
+      <Input type="date" value={s.expireDate} onChange={(e) => set("expireDate", e.target.value)} />
+    </Field>
+  );
+  const warrantyField = (
+    <Field label="Warranty" required={!repair}>
+      <Select value={s.warranty} onChange={(e) => set("warranty", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {WARRANTY_OPTIONS.map((w) => (
+          <option key={w}>{w}</option>
+        ))}
+      </Select>
+    </Field>
+  );
+  const imeiField = (
+    <Field label="Imei No.">
+      <Input className="num" placeholder="35xxxxxxxxxxxxx" value={s.imei} onChange={(e) => set("imei", e.target.value)} />
+    </Field>
+  );
+  const serialField = (
+    <Field label="Serial No." required={!repair}>
+      <Input className="num" placeholder="SN-XXXXXXXX" value={s.serial} onChange={(e) => set("serial", e.target.value)} />
+    </Field>
+  );
+  const brandField = (
+    <Field label="ยี่ห้อ" required>
+      <Select value={s.brand} onChange={(e) => set("brand", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {MANUFACTURERS.map((m) => (
+          <option key={m.id}>{m.name}</option>
+        ))}
+      </Select>
+    </Field>
+  );
+  const modelField = (
+    <Field label="รุ่น" required>
+      {repair ? (
+        <ModelPicker
+          models={modelOptions}
+          value={s.modelCode}
+          fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
+          onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
+        />
+      ) : (
+        <Select
+          value={s.modelCode}
+          onChange={(e) => {
+            const m = MODELS.find((x) => x.code === e.target.value);
+            patch({ modelCode: e.target.value, brand: m?.brand || s.brand });
+          }}
+        >
+          <option value="">- - Please Select - -</option>
+          {modelOptions.map((m) => (
+            <option key={m.code} value={m.code}>
+              {m.code} — {m.name}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
+  );
+  const modelDetailField = (
+    <Field label="รุ่นย่อย (ถ้ามี)">
+      <Input value={s.modelDetail} onChange={(e) => set("modelDetail", e.target.value)} />
+    </Field>
+  );
+  const equipmentField = (
+    <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
+      <Textarea rows={2} placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" value={s.equipment} onChange={(e) => set("equipment", e.target.value)} />
+    </Field>
+  );
+  const faultField = (
+    <Field label="จุดตำหนิ" className="lg:col-span-2">
+      <Textarea rows={2} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" value={s.fault} onChange={(e) => set("fault", e.target.value)} />
+    </Field>
+  );
+  const symptomsField = (
+    <Field
+      label="อาการเสียหลัก (มาตรฐาน)"
+      required
+      wide
+      hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
+    >
+      {/* searchable multi-select, ordered by real usage; top symptoms of the chosen model on top */}
+      <SymptomPicker
+        value={symptoms}
+        onChange={(names) => set("symptoms", names)}
+        options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+        suggested={MODEL_SYMPTOMS}
+        suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
+      />
+    </Field>
+  );
+  const symptomOtherField = (
+    <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+      <Textarea rows={2} value={s.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+    </Field>
+  );
+  const remarkField = (
+    <Field label="หมายเหตุ" className="lg:col-span-2">
+      <Textarea rows={2} value={s.remark} onChange={(e) => set("remark", e.target.value)} />
+    </Field>
+  );
+
+  if (repair)
+    return (
+      <Section title={title} icon={PackageSearch}>
+        <FieldGrid>
+          {soField}
+          {channelField}
+          {saleDateField}
+          {warrantyMonthField}
+
+          {imeiField}
+          {serialField}
+          {expireField}
+          {warrantyField}
+
+          {brandField}
+          {modelField}
+          {modelDetailField}
+          <div className="hidden lg:block" aria-hidden />
+
+          {equipmentField}
+          {faultField}
+          {symptomsField}
+          {symptomOtherField}
+          {remarkField}
+        </FieldGrid>
+      </Section>
+    );
+
   return (
     <Section title={title} icon={PackageSearch}>
       <FieldGrid>
-        <Field label="Sale Order No." required>
-          <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
-        </Field>
-        <Field label="Channel" required>
-          <Select value={s.channel} onChange={(e) => set("channel", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {CHANNELS.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
-        </Field>
+        {soField}
+        {channelField}
         <Field label="Shop Name">
           <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
         </Field>
-        <Field label="Sale Order Date" required>
-          <Input
-            type="date"
-            value={s.saleOrderDate}
-            onChange={(e) => {
-              set("saleOrderDate", e.target.value);
-              recalcExpire(e.target.value, s.warrantyMonth);
-            }}
-          />
-        </Field>
+        {saleDateField}
 
-        <Field label="รับประกัน (เดือน)" required>
-          <Input
-            type="number"
-            min={0}
-            inputMode="numeric"
-            value={s.warrantyMonth}
-            onChange={(e) => {
-              set("warrantyMonth", e.target.value);
-              recalcExpire(s.saleOrderDate, e.target.value);
-            }}
-            onFocus={(e) => e.currentTarget.select()}
-            className="num text-right"
-          />
-        </Field>
-        <Field label="Expire Date" required>
-          <Input type="date" value={s.expireDate} onChange={(e) => set("expireDate", e.target.value)} />
-        </Field>
-        <Field label="Warranty" required>
-          <Select value={s.warranty} onChange={(e) => set("warranty", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {WARRANTY_OPTIONS.map((w) => (
-              <option key={w}>{w}</option>
-            ))}
-          </Select>
-        </Field>
+        {warrantyMonthField}
+        {expireField}
+        {warrantyField}
         <Field label="ประเภทสินค้า">
           <Select value={s.productType} onChange={(e) => set("productType", e.target.value)}>
             <option value="">- - Please Select - -</option>
@@ -522,40 +666,12 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
           </Select>
         </Field>
 
-        <Field label="Imei No.">
-          <Input className="num" placeholder="35xxxxxxxxxxxxx" value={s.imei} onChange={(e) => set("imei", e.target.value)} />
-        </Field>
-        <Field label="Serial No." required>
-          <Input className="num" placeholder="SN-XXXXXXXX" value={s.serial} onChange={(e) => set("serial", e.target.value)} />
-        </Field>
-        <Field label="ยี่ห้อ" required>
-          <Select value={s.brand} onChange={(e) => set("brand", e.target.value)}>
-            <option value="">- - Please Select - -</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="รุ่น" required>
-          <Select
-            value={s.modelCode}
-            onChange={(e) => {
-              const m = MODELS.find((x) => x.code === e.target.value);
-              patch({ modelCode: e.target.value, brand: m?.brand || s.brand });
-            }}
-          >
-            <option value="">- - Please Select - -</option>
-            {modelOptions.map((m) => (
-              <option key={m.code} value={m.code}>
-                {m.code} — {m.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {imeiField}
+        {serialField}
+        {brandField}
+        {modelField}
 
-        <Field label="รุ่นย่อย (ถ้ามี)">
-          <Input value={s.modelDetail} onChange={(e) => set("modelDetail", e.target.value)} />
-        </Field>
+        {modelDetailField}
         <Field label="วันที่รับเข้า">
           <Input type="date" value={s.receptionDate} onChange={(e) => set("receptionDate", e.target.value)} />
         </Field>
@@ -588,35 +704,13 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
           </div>
         </Field>
 
-        <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
-          <Textarea rows={2} placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" value={s.equipment} onChange={(e) => set("equipment", e.target.value)} />
-        </Field>
-        <Field label="จุดตำหนิ" className="lg:col-span-2">
-          <Textarea rows={2} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" value={s.fault} onChange={(e) => set("fault", e.target.value)} />
-        </Field>
+        {equipmentField}
+        {faultField}
 
-        <Field
-          label="อาการเสียหลัก (มาตรฐาน)"
-          required
-          wide
-          hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
-        >
-          {/* searchable multi-select, ordered by real usage; top symptoms of the chosen model on top */}
-          <SymptomPicker
-            value={symptoms}
-            onChange={(names) => set("symptoms", names)}
-            options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
-            suggested={MODEL_SYMPTOMS}
-            suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
-          />
-        </Field>
+        {symptomsField}
 
-        <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-          <Textarea rows={2} value={s.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
-        </Field>
-        <Field label="หมายเหตุ" className="lg:col-span-2">
-          <Textarea rows={2} value={s.remark} onChange={(e) => set("remark", e.target.value)} />
-        </Field>
+        {symptomOtherField}
+        {remarkField}
       </FieldGrid>
     </Section>
   );

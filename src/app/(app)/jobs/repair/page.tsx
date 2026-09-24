@@ -200,7 +200,7 @@ function RepairForm() {
         </FieldGrid>
       </Section>
 
-      <ProductSection title="ข้อมูลเครื่องซ่อม" />
+      <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
 
       <Section
         title="การใช้อะไหล่ และการเสนอราคา"

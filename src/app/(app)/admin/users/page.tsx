@@ -289,10 +289,7 @@ export default function UsersPage() {
           )}
           <div className="min-w-0">
             <p className="truncate font-medium">{r.name}</p>
-            <p className="num truncate text-2xs text-muted-foreground">
-              {r.username}
-              {r.code ? ` · ${r.code}` : ""}
-            </p>
+            <p className="num truncate text-2xs text-muted-foreground">{r.username}</p>
           </div>
         </div>
       ),
