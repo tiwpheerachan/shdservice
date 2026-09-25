@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { HttpError } from "@/server/auth";
+import { clientIp } from "@/lib/client-ip";
 
 /**
  * Small in-memory sliding-window rate limiter — enough for a single Render
@@ -21,7 +22,7 @@ function sweep(now: number) {
 export async function rateLimitKey(req: NextRequest): Promise<string> {
   const s = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   if (s?.email) return `u:${s.email.toLowerCase()}`;
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
+  const ip = clientIp(req.headers); // CF-Connecting-IP once the origin check passed — see lib/client-ip
   return `ip:${ip}`;
 }
 

@@ -19,6 +19,16 @@ const nextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
+      // public tracking: the URL carries the link token → never send it anywhere as a
+      // Referer, never cache (a later rule wins over the global one for the same key).
+      // CSP with a per-request nonce is set by the middleware.
+      ...["/track", "/track/:path*", "/api/track/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      })),
     ];
   },
 };

@@ -7,10 +7,19 @@ import { RS } from "@/server/record-status";
 import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
+import { TRACK_STEPS, type PublicJob, type TrackStepKey } from "@/lib/track-public";
 
 /**
- * Public customer tracking (/t/<token>) — the ONLY code path that serves job
- * data without a login, so everything here is deliberately narrow:
+ * Public customer tracking — the ONLY code path that serves job data without a
+ * login, so everything here is deliberately narrow. Flow (see app/api/track/*):
+ *
+ *   /track/<linkToken> or the /track form → Turnstile → /api/track/session
+ *     → jobNoForLink / jobNoForNumber (this file) → one-time ticket
+ *   /api/track/data { ticket } → atomic consume → publicJobByNo (this file)
+ *
+ * Nothing here is reachable before the captcha, and no function returns job
+ * data for a client-chosen job number: the data path only takes the job number
+ * the server bound to a consumed ticket.
  *
  *  - the token is 32 random bytes (base64url); job numbers are sequential and
  *    must never be a key on their own
@@ -29,39 +38,8 @@ const QUOTATION_REQUIRED = false;
 /** a link stops working this long after the job was closed */
 const EXPIRE_DAYS_AFTER_CLOSE = 90;
 
-export type TrackStepKey = "received" | "diagnosing" | "waiting" | "repaired" | "returned";
-
-export type PublicJob = {
-  no: string;
-  /** "คุณ สม…" — never the full name */
-  customerMasked: string;
-  brandModel: string;
-  /** •••• + last 4 of serial/IMEI, or "" */
-  deviceRef: string;
-  receivedDate: string;
-  dueDate: string;
-  /** current step; null while the job is cancelled */
-  step: TrackStepKey | null;
-  /** UI label of the current status, already softened for customers */
-  stepLabel: string;
-  cancelled: boolean;
-  /** first time each step was reached (from job_log) */
-  history: { key: TrackStepKey; at: string }[];
-  /** filled once the job is closed and shipped back */
-  shipper: string;
-  trackingNo: string;
-  closedDate: string;
-  /** courier profile of the return leg — logo + link into the courier's own tracking page */
-  courier: { name: string; logoUrl: string; trackUrl: string } | null;
-};
-
-export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] = [
-  { key: "received", label: "รับเครื่องแล้ว", hint: "ศูนย์บริการได้รับเครื่องของคุณแล้ว" },
-  { key: "diagnosing", label: "กำลังตรวจสอบ / ซ่อม", hint: "ช่างกำลังตรวจสอบและดำเนินการซ่อม" },
-  { key: "waiting", label: "รอยืนยัน / รออะไหล่", hint: "รอคำตอบจากคุณ หรือรออะไหล่เข้า" },
-  { key: "repaired", label: "ซ่อมเสร็จ", hint: "ซ่อมเสร็จแล้ว กำลังเตรียมส่งคืน" },
-  { key: "returned", label: "ส่งคืน / รอรับเครื่อง", hint: "ส่งคืนแล้ว หรือพร้อมให้มารับที่ศูนย์" },
-];
+export type { PublicJob, TrackStepKey } from "@/lib/track-public";
+export { TRACK_STEPS } from "@/lib/track-public";
 
 /** 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere) */
 function stepOf(statusId: number, group: string): TrackStepKey | null {
@@ -217,53 +195,68 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-/** /track/<token> */
-export async function trackByToken(token: string): Promise<PublicJob | null> {
-  return quiet(() => trackByTokenUnsafe(token));
-}
-async function trackByTokenUnsafe(token: string): Promise<PublicJob | null> {
-  const t = (token ?? "").trim();
-  if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
-  const [row] = await base(eq(job.trackToken, t));
-  const ok = await visible(row);
-  if (!ok || !ok.token) return null;
-  // constant-time compare so a near-miss token cannot be distinguished by timing
-  const a = Buffer.from(ok.token);
-  const b = Buffer.from(t);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return toPublic(ok);
-}
+/* ------------------------------------------------------------------ *
+ * Resolve → job number (called only AFTER Turnstile passed)
+ * ------------------------------------------------------------------ */
 
-/** fallback form: job number OR quotation number + last 4 digits of the customer's phone */
-export async function trackByNumber(input: string, phone4: string): Promise<PublicJob | null> {
-  return quiet(() => trackByNumberUnsafe(input, phone4));
-}
-async function trackByNumberUnsafe(input: string, phone4: string): Promise<PublicJob | null> {
-  const raw = (input ?? "").trim().toUpperCase();
-  const last4 = digits(phone4);
-  if (!raw || last4.length !== 4) return null;
-
-  let jobNo = raw;
-  if (!/^[A-Z]{1,6}\d{5,}$/.test(raw)) return null;
-  // a quotation number resolves to its job
-  const [q] = await db
-    .select({ jobNo: quotationHd.referenceJobNo })
-    .from(quotationHd)
-    .where(and(eq(quotationHd.quotationNo, raw), ne(quotationHd.recordStatus, RS.DELETED)))
-    .limit(1);
-  if (q?.jobNo) jobNo = q.jobNo.trim().toUpperCase();
-
-  const [row] = await base(eq(job.jobNo, jobNo));
-  const ok = await visible(row);
-  if (!ok) return null;
-
-  // phone comes from the customer record; fall back to the digits inside customer_detail
-  const phone = digits(ok.phone ?? "") || digits(ok.customerDetail ?? "");
-  if (phone.length < 4 || phone.slice(-4) !== last4) return null;
-  return toPublic(ok);
+/** /track/<linkToken> → job number, or null (bad shape / unknown / deleted / expired — never say which) */
+export async function jobNoForLink(token: string): Promise<string | null> {
+  return quiet(async () => {
+    const t = (token ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
+    const [row] = await base(eq(job.trackToken, t));
+    const ok = await visible(row);
+    if (!ok || !ok.token) return null;
+    // constant-time compare so a near-miss token cannot be distinguished by timing
+    const a = Buffer.from(ok.token);
+    const b = Buffer.from(t);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    return ok.no;
+  });
 }
 
-/** link shown in the back office / encoded in the QR on the quotation */
+/** /track form: job number OR quotation number + last 4 digits of the customer's phone → job number, or null */
+export async function jobNoForNumber(input: string, phone4: string): Promise<string | null> {
+  return quiet(async () => {
+    const raw = (input ?? "").trim().toUpperCase();
+    const last4 = digits(phone4);
+    if (!raw || last4.length !== 4) return null;
+    if (!/^[A-Z]{1,6}\d{5,}$/.test(raw)) return null;
+
+    let jobNo = raw;
+    // a quotation number resolves to its job
+    const [q] = await db
+      .select({ jobNo: quotationHd.referenceJobNo })
+      .from(quotationHd)
+      .where(and(eq(quotationHd.quotationNo, raw), ne(quotationHd.recordStatus, RS.DELETED)))
+      .limit(1);
+    if (q?.jobNo) jobNo = q.jobNo.trim().toUpperCase();
+
+    const [row] = await base(eq(job.jobNo, jobNo));
+    const ok = await visible(row);
+    if (!ok) return null;
+
+    // phone comes from the customer record; fall back to the digits inside customer_detail
+    const phone = digits(ok.phone ?? "") || digits(ok.customerDetail ?? "");
+    if (phone.length < 4 || phone.slice(-4) !== last4) return null;
+    return ok.no;
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Serialize (called only with the job number bound to a consumed ticket)
+ * ------------------------------------------------------------------ */
+
+/** the job may have been deleted / expired since the ticket was issued — checked again here */
+export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
+  return quiet(async () => {
+    const [row] = await base(eq(job.jobNo, jobNo));
+    const ok = await visible(row);
+    return ok ? toPublic(ok) : null;
+  });
+}
+
+/** link shown in the back office (staff copy it into LINE) */
 export async function trackLinkFor(jobNo: string, baseUrl: string): Promise<string> {
   const [row] = await db.select({ token: job.trackToken }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
   if (!row?.token) return "";

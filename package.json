@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
     "files:validate": "tsx scripts/legacy-files.mts validate",
-    "files:upload": "tsx scripts/legacy-files.mts upload all"
+    "files:upload": "tsx scripts/legacy-files.mts upload all",
+    "test:track": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",
@@ -24,7 +25,6 @@
     "lucide-react": "0.469.0",
     "next": "15.5.25",
     "pg": "8.23.0",
-    "qrcode-generator": "1.5.0",
     "radix-ui": "1.6.7",
     "react": "19.1.1",
     "react-dom": "19.1.1",

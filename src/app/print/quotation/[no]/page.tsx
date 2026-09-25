@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { getQuotation } from "@/server/services/quotations";
 import { AutoPrint } from "@/components/print/auto-print";
@@ -6,9 +5,6 @@ import { money } from "@/components/print/print-frame";
 import { QUOTATION_VALIDITY } from "@/lib/company";
 import { profileForDocument } from "@/server/services/document-profiles";
 import { bahtText } from "@/lib/thai-baht";
-import { TrackQr } from "@/components/print/track-qr";
-import { trackLinkFor } from "@/server/services/tracking";
-import { appBaseUrl } from "@/lib/sso";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +32,6 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   const co = await profileForDocument(q.documentProfileId); // ออกเอกสารในนาม
   const c = q.customerDetail;
   const j = q.job;
-  // QR → /track/<token>: the quotation is the only document the customer receives
-  const trackUrl = j?.no ? await trackLinkFor(j.no, appBaseUrl((await headers()).get("host"))) : "";
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);
   const hasDiscount = (q.discountAmount ?? 0) > 0;
@@ -256,11 +250,6 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
         <tbody>
           <tr>
             <td className="w-[58%] br sig text-center">
-              {trackUrl && (
-                <div className="float-left mr-2 text-left">
-                  <TrackQr url={trackUrl} size={54} />
-                </div>
-              )}
               <p className="text-[10.5px]">กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้มาที่</p>
               <p className="mt-1">Email : {q.createdByEmail || co.email || "—"}</p>
               <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>

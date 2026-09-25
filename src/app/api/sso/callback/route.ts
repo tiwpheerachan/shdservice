@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { clientIp } from "@/lib/client-ip";
 import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from "@/lib/sso";
 import {
   signSession,
@@ -141,7 +142,7 @@ export async function GET(request: NextRequest) {
       entity: "app_user",
       key: userId || email,
       summary: `เข้าสู่ระบบ ${email} · ${role}`,
-      meta: { ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
+      meta: { ip: clientIp(request.headers), ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
     });
   } catch (e) {
     // eslint-disable-next-line no-console

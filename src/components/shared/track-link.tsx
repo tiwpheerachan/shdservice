@@ -10,8 +10,8 @@ import { useAccess } from "@/lib/use-access";
 
 /**
  * "ลิงก์ติดตามสำหรับลูกค้า" — usable from the moment the job is opened: staff
- * copy it here and send it in LINE, and the same link is the QR on the
- * quotation later. `ready` mirrors the server rule (see tracking.ts) so the box
+ * copy it here and send it in LINE (there is no QR any more). Opening it shows
+ * nothing until the customer passes Turnstile — see app/api/track/*. `ready` mirrors the server rule (see tracking.ts) so the box
  * never hands out a link that would answer "ไม่พบข้อมูล".
  */
 export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean }) {
@@ -54,7 +54,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     const ok = await confirm({
       tone: "danger",
       title: "ออกลิงก์ติดตามใหม่?",
-      description: "ลิงก์เดิม (รวมถึง QR บนใบเสนอราคาที่พิมพ์ไปแล้ว) จะใช้ไม่ได้ทันที ใช้เมื่อส่งลิงก์ผิดคนเท่านั้น",
+      description: "ลิงก์เดิมจะใช้ไม่ได้ทันที ใช้เมื่อส่งลิงก์ผิดคนเท่านั้น",
       confirmLabel: "ออกลิงก์ใหม่",
     });
     if (!ok) return;
@@ -80,7 +80,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {ready
-          ? "ส่งให้ลูกค้าทาง LINE ได้เลย — เป็นลิงก์เดียวกับ QR บนใบเสนอราคา ลูกค้าเห็นเฉพาะสถานะงาน ไม่เห็นราคา"
+          ? "ส่งให้ลูกค้าทาง LINE ได้เลย — ลูกค้ากดยืนยันตัวตน (captcha) ก่อนแล้วจึงเห็นสถานะงาน ไม่เห็นราคา"
           : "ยังใช้ไม่ได้สำหรับงานนี้"}
       </p>
 

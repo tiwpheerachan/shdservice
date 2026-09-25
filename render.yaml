@@ -3,11 +3,11 @@ services:
     name: shdservice
     runtime: node
     region: singapore
-    plan: free
+    plan: starter
     branch: main
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
     # db:migrate is idempotent (see scripts/migrate.ts) — safe to run on every deploy
-    buildCommand: npm install --include=dev && npm run db:migrate && npm run build
+    buildCommand: npm ci --include=dev && npm run db:migrate && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
@@ -40,3 +40,27 @@ services:
       # emails that are always System Admin (comma-separated) — optional bootstrap
       - key: OWNER_EMAILS
         sync: false
+      # ── public tracking (/track) — see drizzle/0014 and app/api/track/* ──
+      # public base URL (the Cloudflare subdomain) — links sent to customers + Turnstile hostname check
+      - key: APP_BASE_URL
+        sync: false
+      # Cloudflare Turnstile. The site key is baked in at BUILD time → after changing it:
+      # Manual Deploy → "Clear build cache & deploy". Missing keys = tracking closed (fail-closed).
+      - key: NEXT_PUBLIC_TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      # same value as the Cloudflare Transform Rule "X-Origin-Auth" (openssl rand -hex 32)
+      - key: ORIGIN_AUTH_SECRET
+        sync: false
+      # off | log | enforce — roll out with "log", switch to "enforce" once no legit request misses the header
+      - key: ORIGIN_AUTH_MODE
+        value: log
+      # HMAC key for IPs / links in the security log + rate-limit keys (openssl rand -hex 32)
+      - key: TRACK_LOG_SECRET
+        sync: false
+      # keep the Node heap under the 512 MB Starter instance
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=400
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
