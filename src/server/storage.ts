@@ -46,18 +46,25 @@ export const IMAGE_MAX_EDGE = 1600;
  * returned untouched; a decode failure falls back to the original file rather
  * than rejecting the upload.
  */
+/** a photo never needs more than this; a tiny file declaring 16k×16k pixels would eat ~1 GB of RAM */
+export const MAX_IMAGE_PIXELS = 40_000_000;
+export class ImageTooLargeError extends Error {}
+
 export async function optimizeImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+  const input = Buffer.from(await file.arrayBuffer());
+  // header only (no decode): reject decompression bombs before sharp allocates the pixels
+  const meta = await sharp(input, { failOn: "none", limitInputPixels: false }).metadata().catch(() => null);
+  if (meta?.width && meta.height && meta.width * meta.height > MAX_IMAGE_PIXELS) throw new ImageTooLargeError();
   try {
-    const input = Buffer.from(await file.arrayBuffer());
-    const img = sharp(input, { failOn: "none" })
+    const img = sharp(input, { failOn: "none", limitInputPixels: MAX_IMAGE_PIXELS })
       .rotate()
       .resize({ width: IMAGE_MAX_EDGE, height: IMAGE_MAX_EDGE, fit: "inside", withoutEnlargement: true });
     let type = file.type;
     let name = file.name;
     let out: Buffer;
     // phones/screens often export photos as PNG with a fully opaque alpha channel — stats().isOpaque sees through that
-    if (type === "image/png" && !(await sharp(input, { failOn: "none" }).stats()).isOpaque) {
+    if (type === "image/png" && !(await sharp(input, { failOn: "none", limitInputPixels: MAX_IMAGE_PIXELS }).stats()).isOpaque) {
       out = await img.png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
     } else if (type === "image/webp") {
       out = await img.webp({ quality: 82 }).toBuffer();

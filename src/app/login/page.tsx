@@ -15,6 +15,7 @@ const ERRORS: Record<string, string> = {
   no_email: "บัญชีนี้ไม่มีอีเมลในระบบกลาง",
   server_not_configured: "ยังไม่ได้ตั้งค่า CENTRAL_API_KEY บนเซิร์ฟเวอร์",
   verify_unreachable: "เชื่อมต่อระบบกลางไม่ได้ ลองใหม่อีกครั้ง",
+  db_unavailable: "ระบบฐานข้อมูลไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง",
 };
 
 export default async function LoginPage({

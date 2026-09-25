@@ -9,6 +9,9 @@ export const SESSION_COOKIE = "os_session";
 // Idle timeout: the timer in the topbar renews the cookie on activity (≤ every
 // 5 min), so an active user never hits this; 30 min without activity → /login.
 export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// Absolute lifetime from sign-in: renewing the idle timer never extends a session
+// past this — a stolen cookie cannot be kept alive forever through /refresh.
+export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Long-lived marker that a session once existed on this browser — lets the
 // middleware tell "session expired" (→ /login with a message) apart from a
 // first visit (→ straight to SSO). Set by /api/sso/me + /refresh (JSON responses,
@@ -23,7 +26,9 @@ export type SessionUser = {
   sid?: string; // central session id (for Single-Logout checks)
   role?: string; // OneService role (from the users table); baked in at login
   approved?: boolean; // may this user actually enter the app?
-  exp: number; // epoch ms
+  exp: number; // epoch ms — idle expiry, renewed by /refresh
+  iat: number; // epoch ms — sign-in time; never renewed (SESSION_MAX_AGE_MS)
+  sv: number; // app_user.session_version at sign-in — logout bumps it (all devices)
 };
 
 function b64url(bytes: Uint8Array) {
@@ -40,19 +45,24 @@ function unb64url(s: string) {
   return arr;
 }
 
-// Candidate signing secrets, in priority order. CENTRAL_API_KEY is preferred
-// because it is STABLE across deploys — unlike a Render `generateValue` secret,
-// which can rotate on redeploy and silently invalidate every existing session
-// (the cause of sessions dying after a deploy). We SIGN with the first candidate
-// and VERIFY against all of them, so cookies signed with any of these keep
-// working — no forced re-login when the priority changes.
+// Signing secret. Production: ONLY `SESSION_SECRET` (random, ≥ 32 chars, used for
+// nothing else). It is deliberately NOT CENTRAL_API_KEY any more — that key is also
+// sent to the central directory service, and anyone holding it could mint sessions.
+// Missing in production = fail closed (nobody can sign in) rather than fall back.
+// Keep it fixed in the Render dashboard (sync: false) — changing it signs everyone out.
+//
+// The dev fallback string is public (it is in this file): it only ever applies in
+// local development when no secret is configured at all.
+const DEV_FALLBACK_SECRET = "dev-only-insecure-secret-change-me";
+const MIN_SECRET_LENGTH = 32;
 function candidateSecrets(): string[] {
-  const list = [
-    process.env.CENTRAL_API_KEY,
-    process.env.SESSION_SECRET,
-    "dev-only-insecure-secret-change-me",
-  ].filter((s): s is string => !!s);
-  return list.length ? list : ["dev-only-insecure-secret-change-me"];
+  const own = (process.env.SESSION_SECRET ?? "").trim();
+  if (own.length >= MIN_SECRET_LENGTH) return [own];
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`SESSION_SECRET is not configured (random, at least ${MIN_SECRET_LENGTH} characters)`);
+  }
+  const dev = [own, process.env.CENTRAL_API_KEY ?? ""].map((s) => s.trim()).filter(Boolean);
+  return dev.length ? dev : [DEV_FALLBACK_SECRET];
 }
 
 function importKey(secret: string) {
@@ -94,6 +104,9 @@ export async function verifySession(
     if (!ok) return null;
     const user = JSON.parse(dec.decode(unb64url(payload))) as SessionUser;
     if (!user.exp || user.exp < Date.now()) return null;
+    // absolute lifetime + version stamp are mandatory (older cookies lack them → sign in again)
+    if (typeof user.iat !== "number" || Date.now() - user.iat > SESSION_MAX_AGE_MS) return null;
+    if (typeof user.sv !== "number") return null;
     return user;
   } catch {
     return null;

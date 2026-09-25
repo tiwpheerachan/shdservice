@@ -72,6 +72,17 @@ export function invalidateUserCache(email?: string) {
   else userCache.clear();
 }
 
+/** Sign this user out everywhere: every cookie carrying the old version stops working. */
+export async function bumpSessionVersion(email: string): Promise<void> {
+  const e = normEmail(email);
+  if (!e) return;
+  await db
+    .update(appUser)
+    .set({ sessionVersion: sql`${appUser.sessionVersion} + 1` })
+    .where(sql`lower(trim(${appUser.emailAddress})) = ${e}`);
+  invalidateUserCache(e);
+}
+
 async function cachedAppUser(email: string): Promise<AppUserRow | null> {
   const key = normEmail(email);
   const hit = userCache.get(key);
@@ -82,31 +93,27 @@ async function cachedAppUser(email: string): Promise<AppUserRow | null> {
   return row;
 }
 
-/** Resolve a verified session cookie payload to the current user. */
+/**
+ * Resolve a verified session cookie payload to the current user.
+ *
+ * Fail closed: the cookie only says WHO signed in — role, status and the session
+ * version always come from app_user. No row (email changed / row removed) → null;
+ * the SSO callback creates the row BEFORE it issues a cookie, so a legitimate
+ * session always has one. DB unreachable → 503, never "trust the cookie".
+ */
 export async function resolveUser(session: SessionUser | null): Promise<CurrentUser | null> {
   if (!session) return null;
   const owner = isOwner(session.email);
   let row: AppUserRow | null = null;
   try {
     row = await cachedAppUser(session.email);
-  } catch {
-    row = null; // DB unreachable — fall back to the login-time cookie flags below
+  } catch (e) {
+    console.error("[auth] user lookup failed:", e instanceof Error ? e.message.split("\n")[0] : e);
+    throw new HttpError(503, "ระบบฐานข้อมูลไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง");
   }
-  if (!row) {
-    // No row yet (race right after first login) or DB down: trust the cookie.
-    return {
-      userId: 0,
-      email: session.email,
-      name: session.name,
-      avatar: session.avatar ?? "",
-      userType: owner ? ADMIN_USER_TYPE : session.role && session.role !== PENDING_ROLE ? session.role : null,
-      role: owner ? ADMIN_USER_TYPE : session.role || PENDING_ROLE,
-      isActive: true,
-      isAdmin: owner || session.role === ADMIN_USER_TYPE,
-      approved: owner || !!session.approved,
-      session,
-    };
-  }
+  if (!row) return null;
+  // logout (any device) bumps session_version → every older cookie of this user is dead
+  if ((row.sessionVersion ?? 0) !== session.sv) return null;
   const userType = owner ? ADMIN_USER_TYPE : row.userType?.trim() || null;
   const isActive = row.recordStatus === "ACTIVE";
   const isAdmin = userType === ADMIN_USER_TYPE;
@@ -213,11 +220,14 @@ export function handle<T extends unknown[]>(
       if (e instanceof HttpError) {
         return NextResponse.json(e.details === undefined ? { error: e.message } : { error: e.message, details: e.details }, { status: e.status });
       }
+      // unexpected error: the details (SQL, parameters, stack) stay in the server log;
+      // the browser only gets a reference to quote when reporting it
       const msg = e instanceof Error ? e.message : String(e);
+      const ref = crypto.randomUUID().slice(0, 8);
       // eslint-disable-next-line no-console
-      console.error("[api]", msg);
+      console.error(`[api] ref=${ref}`, msg);
       const status = /DATABASE_URL/.test(msg) ? 503 : 500;
-      return NextResponse.json({ error: msg }, { status });
+      return NextResponse.json({ error: `เกิดข้อผิดพลาดในระบบ (รหัสอ้างอิง ${ref})`, ref }, { status });
     }
   };
 }

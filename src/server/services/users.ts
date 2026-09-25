@@ -44,6 +44,8 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
   userId: number;
   userType: string | null;
   isActive: boolean;
+  /** app_user.session_version — stamped into the session cookie (drizzle/0015) */
+  sessionVersion: number;
 }> {
   const email = p.email.trim().toLowerCase();
   const owner = isOwner(email);
@@ -81,6 +83,7 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
       userId: existing.userId,
       userType,
       isActive: owner ? true : existing.recordStatus === RS.ACTIVE,
+      sessionVersion: existing.sessionVersion ?? 0,
     };
   }
 
@@ -98,9 +101,9 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
       emailAddress: email,
       ...profile,
     })
-    .returning({ userId: appUser.userId });
+    .returning({ userId: appUser.userId, sessionVersion: appUser.sessionVersion });
   userChanged(email);
-  return { userId: row.userId, userType: owner ? ADMIN_USER_TYPE : null, isActive: true };
+  return { userId: row.userId, userType: owner ? ADMIN_USER_TYPE : null, isActive: true, sessionVersion: row.sessionVersion ?? 0 };
 }
 
 /* ------------------------------------------------------------------ *

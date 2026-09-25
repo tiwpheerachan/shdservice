@@ -12,7 +12,7 @@ import { lookupByEmail } from "@/lib/directory";
 import { provisionSsoUser } from "@/server/services/users";
 import { audit } from "@/server/audit";
 import { db } from "@/db/client";
-import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
+import { PENDING_ROLE, isApproved } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,8 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
  * Auto-provision the signed-in employee into `app_user` (the single user table)
  * and return their effective role/status. New users start pending (user_type
  * NULL) until an admin assigns a role; owner emails are always System Admin.
- * Best-effort: never blocks login if the DB is unavailable.
+ * null = the DB is unavailable: NO cookie is issued (a session always needs its
+ * app_user row — the server never trusts a role baked into the cookie).
  */
 async function provision(opts: {
   email: string;
@@ -33,16 +34,14 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}): Promise<{ role: string; status: string; userId: number }> {
+}): Promise<{ role: string; status: string; userId: number; sessionVersion: number } | null> {
   try {
     const r = await provisionSsoUser(opts);
-    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId };
+    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId, sessionVersion: r.sessionVersion };
   } catch (e) {
     // eslint-disable-next-line no-console
-    console.error("[sso] provision failed:", e instanceof Error ? e.message : e);
-    return isOwner(opts.email)
-      ? { role: ADMIN_ROLE, status: "Active", userId: 0 }
-      : { role: PENDING_ROLE, status: "Active", userId: 0 };
+    console.error("[sso] provision failed:", e instanceof Error ? e.message.split("\n")[0] : e);
+    return null;
   }
 }
 
@@ -124,7 +123,7 @@ export async function GET(request: NextRequest) {
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table and get the effective role/status.
-  const { role, status, userId } = await provision({
+  const provisioned = await provision({
     email,
     name,
     larkId: prof?.id ?? "",
@@ -133,6 +132,8 @@ export async function GET(request: NextRequest) {
     avatar,
     title: prof?.title ?? "",
   });
+  if (!provisioned) return fail(request, "db_unavailable");
+  const { role, status, userId, sessionVersion } = provisioned;
 
   // audit: LOGIN (best-effort — never blocks sign-in)
   try {
@@ -157,6 +158,8 @@ export async function GET(request: NextRequest) {
     role,
     approved: isApproved(role, status),
     exp: Date.now() + SESSION_TTL_MS,
+    iat: Date.now(),
+    sv: sessionVersion,
   };
 
   const res = NextResponse.redirect(new URL(nextFromState, appOrigin(request)));

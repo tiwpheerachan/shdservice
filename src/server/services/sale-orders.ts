@@ -220,6 +220,7 @@ export type SaleOrderInput = {
   lines: { code: string; qty: number; price?: number | string; name?: string; type?: "SparePart" | "Service" }[];
   paymentType?: string;
   paymentAmount?: number | string;
+  /** ignored: the slip path is written only by /api/upload (a client-sent path could point at any file) */
   slip?: string;
   remark?: string;
   fee?: number | string;
@@ -282,7 +283,6 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       remarkHd: str(i.remark).slice(0, 100),
       paymentType: str(i.paymentType) || "โอนเงิน",
       paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== "" ? num(i.paymentAmount) : net),
-      ...(str(i.slip) ? { slipFileName: str(i.slip).slice(0, 100) } : {}),
       deliveryTrackingNo: str(i.tracking).slice(0, 50),
     };
     let no = i.no;

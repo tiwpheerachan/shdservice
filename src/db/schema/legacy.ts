@@ -805,6 +805,8 @@ export const appUser = pgTable("app_user", {
 	avatar: text(),
 	lastLogin: timestamp("last_login", { mode: "string" }),
 	deleted: boolean().notNull().default(false),
+	// drizzle/0015 — part of every session cookie; logout bumps it (all devices signed out)
+	sessionVersion: integer("session_version").notNull().default(0),
 }, (table) => [
 	uniqueIndex("ix_username_and_password").using("btree", table.username.asc().nullsLast().op("text_ops"), table.password.asc().nullsLast().op("text_ops")),
 ]);

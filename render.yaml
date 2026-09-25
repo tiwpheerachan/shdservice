@@ -31,10 +31,10 @@ services:
       # Supabase secret key — server-only, used for Storage (attachments / slips)
       - key: SUPABASE_SECRET_KEY
         sync: false
-      # Session-cookie signing: the app signs with the STABLE CENTRAL_API_KEY, so
-      # SESSION_SECRET is optional. Do NOT use generateValue here — it can rotate
-      # on deploys and invalidate every active session. Leave unset, or set one
-      # fixed value in the dashboard (sync:false) if you want a dedicated secret.
+      # REQUIRED — session-cookie signing key, used for nothing else (openssl rand -hex 32,
+      # at least 32 chars). Missing in production = nobody can sign in (fail closed).
+      # Set ONE fixed value in the dashboard; never generateValue (it can rotate on deploy),
+      # and changing it signs every user out.
       - key: SESSION_SECRET
         sync: false
       # emails that are always System Admin (comma-separated) — optional bootstrap
