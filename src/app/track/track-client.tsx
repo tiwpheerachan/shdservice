@@ -14,6 +14,11 @@ import { PublicJobView } from "./public-job-view";
  * The ticket lives only in a local variable for the few milliseconds between the
  * two calls — never in state, storage or a cookie. Refresh / come back later /
  * open another job = a new Turnstile. Nothing about the job is known before it.
+ *
+ * The visible check happens BEFORE this page (Cloudflare WAF Managed Challenge on
+ * /track*); here Turnstile runs in the background (Invisible widget, or
+ * `interaction-only` so a Managed widget appears only if Cloudflare really needs a
+ * click) — its token is what the server verifies before issuing a ticket.
  */
 type TurnstileApi = {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string;
@@ -101,11 +106,28 @@ export function TrackClient(props: Props) {
       sitekey: SITE_KEY,
       action: "track",
       language: "th",
-      callback: (t: string) => onToken.current(t),
+      appearance: "interaction-only", // nothing on screen unless a human click is really needed
+      "refresh-expired": "auto", // tokens live 5 min — a slow form gets a fresh one by itself
+      retry: "auto",
+      callback: (t: string) => {
+        setError("");
+        onToken.current(t);
+      },
       "expired-callback": () => setTsToken(""),
       "error-callback": () => setError(TRACK_MSG.unavailable),
     });
   }, []);
+
+  // the widget lives only while the form / check screen is shown: drop it when the job is
+  // displayed, render a fresh one when the customer goes back to search again
+  React.useEffect(() => {
+    if (job) {
+      if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
+      widgetId.current = null;
+    } else {
+      renderWidget();
+    }
+  }, [job, renderWidget]);
 
   // the script may already be on the page (client-side navigation between /track pages)
   React.useEffect(() => {
@@ -151,7 +173,7 @@ export function TrackClient(props: Props) {
         nonce={props.nonce}
         onReady={renderWidget}
       />
-      <div ref={widgetEl} className="min-h-[65px]" />
+      <div ref={widgetEl} className="flex justify-center empty:hidden" />
     </>
   );
 
@@ -159,15 +181,22 @@ export function TrackClient(props: Props) {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
         <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-primary" />
-        <h1 className="text-base font-semibold">ยืนยันก่อนดูสถานะงานซ่อม</h1>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">เพื่อความปลอดภัยของข้อมูล กรุณายืนยันว่าคุณไม่ใช่โปรแกรมอัตโนมัติ</p>
-        <div className="mt-4 flex justify-center">{widget}</div>
-        {busy && (
-          <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลดข้อมูล…
+        <h1 className="text-base font-semibold">ติดตามสถานะงานซ่อม</h1>
+        {!error && (
+          <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {busy ? "กำลังโหลดข้อมูล…" : "กำลังตรวจสอบความปลอดภัย…"}
           </p>
         )}
-        {error && <p className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+        <div className="mt-4">{widget}</div>
+        {error && (
+          <div className="mt-3 space-y-2">
+            <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
+            <button type="button" onClick={resetCaptcha} className="text-sm font-medium text-primary hover:underline">
+              ลองอีกครั้ง
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -224,6 +253,10 @@ export function TrackClient(props: Props) {
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           ติดตามสถานะ
         </button>
+        <p className="flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
+          {tsToken ? <ShieldCheck className="h-3.5 w-3.5 text-success" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {tsToken ? "ตรวจสอบความปลอดภัยแล้ว · ป้องกันโดย Cloudflare" : "กำลังตรวจสอบความปลอดภัย…"}
+        </p>
       </form>
 
       <p className="mt-4 text-xs text-muted-foreground">
