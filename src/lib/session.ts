@@ -6,7 +6,15 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 export const SESSION_COOKIE = "os_session";
-export const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+// Idle timeout: the timer in the topbar renews the cookie on activity (≤ every
+// 5 min), so an active user never hits this; 30 min without activity → /login.
+export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// Long-lived marker that a session once existed on this browser — lets the
+// middleware tell "session expired" (→ /login with a message) apart from a
+// first visit (→ straight to SSO). Set by /api/sso/me + /refresh (JSON responses,
+// never on the callback redirect — see the single-Set-Cookie note there).
+export const SEEN_COOKIE = "os_seen";
+export const SEEN_TTL_S = 30 * 24 * 60 * 60;
 
 export type SessionUser = {
   email: string;

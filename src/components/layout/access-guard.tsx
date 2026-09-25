@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAccess } from "@/lib/use-access";
+import { ALL_LINKS } from "@/lib/nav";
 
 /**
  * Client-side authorization watchdog. The server layout only re-checks approval
@@ -13,6 +15,17 @@ import { usePathname } from "next/navigation";
  */
 export function AccessGuard() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { canPath } = useAccess();
+
+  // Page-level permission (app_config `view`): a user who types a URL they may
+  // not open is sent to the first menu they can see. The API enforces the same
+  // grants on every write regardless.
+  React.useEffect(() => {
+    if (canPath(pathname)) return;
+    const first = ALL_LINKS.find((l) => canPath(l.href));
+    router.replace(first ? first.href : "/pending");
+  }, [pathname, canPath, router]);
 
   React.useEffect(() => {
     let active = true;
@@ -21,8 +34,7 @@ export function AccessGuard() {
         const r = await fetch("/api/sso/refresh", { cache: "no-store" });
         if (!active) return;
         if (r.status === 401) {
-          window.location.href =
-            "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
+          window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
           return;
         }
         const d = await r.json().catch(() => ({}));

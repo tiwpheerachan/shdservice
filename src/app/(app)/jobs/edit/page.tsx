@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { JobSearch } from "@/components/shared/job-search";
+import { JobHistorySection } from "@/components/shared/job-history";
 import {
   CustomerSection,
   JobOpenSection,
@@ -10,20 +11,53 @@ import {
   OtherInfoSection,
   AttachmentSection,
   FormActions,
+  JobFormProvider,
+  useJobForm,
+  fromJob,
+  toJobInput,
 } from "@/components/shared/job-form";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useJob, type JobDetail } from "@/lib/use-job";
+import { PrintButton } from "@/components/shared/print-button";
+import { TrackLink } from "@/components/shared/track-link";
+import { patchJson, errMsg } from "@/lib/api";
 
-export default function EditJobPage() {
+function EditJobForm() {
   const { push } = useToast();
-  const [q, setQ] = React.useState("");
-  const [jobNo, setJobNo] = React.useState<string>("");
+  const { jobNo, job, find, setJob } = useJob();
+  const { s, reset } = useJobForm();
+  const [saving, setSaving] = React.useState(false);
 
-  const go = () => {
-    const v = q.trim() || "JOB2604460";
-    setJobNo(v);
-    push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: v });
+  // prefill the form whenever a job is loaded (from ?job= or the GO button)
+  React.useEffect(() => {
+    if (job) reset(fromJob(job));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job]);
+
+  const go = async (v: string) => {
+    if (!v) return;
+    const j = await find(v);
+    if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
+    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+  };
+
+  // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
+  // workflow screens), so it is not sent: a stale value must never roll back a newer status.
+  const save = async () => {
+    if (!job) {
+      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, { ...toJobInput(s), status: undefined });
+      setJob(d.job);
+      push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว", desc: d.job.no });
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -33,40 +67,41 @@ export default function EditJobPage() {
         description="ข้อมูลงานบริการ » แก้ไขข้อมูลงาน — ระบุหมายเลขงานเพื่อเรียกข้อมูลมาแก้ไข"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="edit-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="edit-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงาน
             </label>
-            <div className="relative">
-              <Input
-                id="edit-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="JOB2604460"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="edit-job-no" value={jobNo} scope="all" onPick={go} />
           </div>
         }
       />
 
       <CustomerSection />
-      <JobOpenSection jobNo={jobNo || undefined} status="อยู่ระหว่างดำเนินการ" />
-      <ProductSection />
-      <OtherInfoSection />
-      <AttachmentSection />
+      <JobOpenSection jobNo={job?.no} status={job?.status ?? "อยู่ระหว่างดำเนินการ"} />
+      <ProductSection variant="open" />
+      <OtherInfoSection directory={false} />
+      <AttachmentSection jobNo={job?.no} />
+      {job?.no && <TrackLink jobNo={job.no} />}
+      <JobHistorySection job={job} />
 
       <FormActions
         saveLabel="บันทึกการแก้ไข"
-        onSave={() => push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว" })}
+        onSave={save}
+        saving={saving}
+        onCancel={() => job && reset(fromJob(job))}
+        extra={
+          <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
+        }
       />
     </>
+  );
+}
+
+export default function EditJobPage() {
+  return (
+    <JobFormProvider>
+      <React.Suspense fallback={null}>
+        <EditJobForm />
+      </React.Suspense>
+    </JobFormProvider>
   );
 }

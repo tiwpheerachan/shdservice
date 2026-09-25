@@ -22,11 +22,12 @@ import { useToast } from "@/components/ui/toast";
 import { useJobs } from "@/data/db";
 import type { Customer } from "@/data/mock";
 import { baht, cn } from "@/lib/utils";
+import { api, postJson, errMsg } from "@/lib/api";
 
 type CallLog = { id: number; detail: string; date: string; by: string };
 
-const CURRENT_USER = "May - Pradit";
-const DONE = new Set(["ปิดงาน", "ซ่อมเสร็จ"]);
+// job_status_group Finished/Repaired = done
+const DONE_GROUPS = new Set(["Finished", "Repaired"]);
 
 function initials(name: string) {
   const clean = name.replace(/^(คุณ|บริษัท|ห้างหุ้นส่วนจำกัด|ร้าน)\s*/u, "").trim();
@@ -52,7 +53,7 @@ function InfoRow({
       </span>
       <div className="min-w-0">
         <p className="text-2xs text-muted-foreground">{label}</p>
-        <p className={cn("break-words text-sm text-foreground", mono && "num")}>
+        <p className={cn("wrap-break-word text-sm text-foreground", mono && "num")}>
           {value?.trim() ? value : <span className="text-muted-foreground/60">—</span>}
         </p>
       </div>
@@ -72,41 +73,47 @@ export function CustomerCallModal({
   jobNo?: string;
 }) {
   const { push } = useToast();
-  const { data: JOBS } = useJobs();
+  // job history of this customer (server-filtered by customer code)
+  const { data: JOBS } = useJobs(customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 });
   const [tab, setTab] = React.useState("history");
   const [log, setLog] = React.useState<CallLog[]>([]);
   const [text, setText] = React.useState("");
   const [copied, setCopied] = React.useState(false);
 
-  // reset call log + draft whenever a different customer is opened
+  // reset draft + load this job's call log (job_call_log) whenever opened
   React.useEffect(() => {
     setLog([]);
     setText("");
     setCopied(false);
     setTab("history");
-  }, [customer?.code, open]);
+    if (!open || !jobNo) return;
+    let active = true;
+    api<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`)
+      .then((d) => active && setLog(d.rows))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [customer?.code, open, jobNo]);
 
-  const history = React.useMemo(
-    () => (customer ? JOBS.filter((j) => j.customer === customer.name) : []),
-    [JOBS, customer]
-  );
+  const history = React.useMemo(() => (customer ? JOBS : []), [JOBS, customer]);
   const hist = {
     total: history.length,
-    done: history.filter((j) => DONE.has(j.status)).length,
+    done: history.filter((j) => DONE_GROUPS.has(j.statusGroup ?? "")).length,
     value: history.reduce((s, j) => s + j.amount, 0),
   };
 
-  const addLog = () => {
+  const addLog = async () => {
     const v = text.trim();
-    if (!v) return;
-    const now = new Date();
-    const date =
-      now.toISOString().slice(0, 10) +
-      " " +
-      now.toTimeString().slice(0, 5);
-    setLog((l) => [{ id: l.length + 1, detail: v, date, by: CURRENT_USER }, ...l]);
-    setText("");
-    push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: "ระบบสาธิต — ไม่บันทึกจริง" });
+    if (!v || !jobNo) return;
+    try {
+      const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
+      setLog(d.rows);
+      setText("");
+      push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: jobNo });
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
   const copyPhone = async () => {
@@ -140,8 +147,8 @@ export function CustomerCallModal({
       ) : (
         <div className="space-y-5">
           {/* identity header */}
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-gradient-to-br from-primary/8 to-info/8 p-3">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-sm">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-linear-to-br from-primary/8 to-info/8 p-3">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-linear-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-xs">
               {initials(customer.name) || <User className="h-5 w-5" />}
             </span>
             <div className="min-w-0 flex-1">
@@ -292,7 +299,7 @@ export function CustomerCallModal({
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addLog()}
                 placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
-                className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               />
               <Button size="sm" onClick={addLog}>
                 <Plus className="h-3.5 w-3.5" />

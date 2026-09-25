@@ -31,7 +31,7 @@ export function ThemeToggle() {
             className={cn(
               "rounded-md p-1.5 transition-colors",
               active
-                ? "bg-card text-primary shadow-sm"
+                ? "bg-card text-primary shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >

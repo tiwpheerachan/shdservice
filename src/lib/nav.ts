@@ -36,6 +36,10 @@ export const NAV: NavGroup[] = [
       { title: "ประเภทงานซ่อม", href: "/admin/job-types" },
       { title: "ประเภทเครื่องซ่อม", href: "/admin/product-types" },
       { title: "อาการเสีย มาตรฐาน", href: "/admin/symptoms" },
+      { title: "โปรไฟล์ผู้ออกเอกสาร", href: "/admin/document-profiles" },
+      { title: "โปรไฟล์บริษัทขนส่ง", href: "/admin/shipping-profiles" },
+      { title: "ประวัติการใช้งาน", href: "/admin/audit" },
+      { title: "คู่มือการใช้งาน", href: "/admin/guide" },
     ],
   },
   {

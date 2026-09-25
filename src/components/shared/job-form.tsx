@@ -10,44 +10,305 @@ import {
   Paperclip,
 } from "lucide-react";
 import { Section } from "./section";
-import { Attachments } from "./attachments";
+import { SymptomPicker } from "./symptom-picker";
+import { ModelPicker } from "./model-picker";
+import { SearchSelect, strOptions, withCurrent } from "./search-select";
+import { CustomerSelect } from "./customer-select";
+import { ProfileSelect } from "./profile-select";
+import { Attachments, type AttachmentsHandle } from "./attachments";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea, Radio, Checkbox } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   CHANNELS,
-  COURIERS,
   RECEIVE_METHODS,
   WARRANTY_OPTIONS,
-  JOB_STATUS_OPTIONS,
   type Customer,
 } from "@/data/mock";
 import {
-  useCustomers,
   useJobTypes,
+  useJobTypeDetails,
+  useShippers,
+  useSymptomStats,
+  useModelSymptoms,
   useManufacturers,
   useModels,
   useProductTypes,
   useSymptoms,
+  useStaff,
+  useShopNames,
+  useShippingProfiles,
 } from "@/data/db";
 import { PeoplePicker, type Person } from "./people-picker";
 import { baht, cn } from "@/lib/utils";
+import { patchJson } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
+import type { JobDetail } from "@/lib/use-job";
+
+/* ------------------------------------------------------------------ *
+ * Shared form state. Every section reads/writes this through context, and
+ * the page posts `toJobInput(state)` to the API. `fromJob(detail)` prefills
+ * from a loaded job (แก้ไข / บันทึกซ่อม / ปิดงาน …).
+ * ------------------------------------------------------------------ */
+export type JobFormState = {
+  customer: Customer | null;
+  jobNo: string;
+  createDate: string;
+  createByName: string;
+  status: string;
+  jobType: string;
+  jobTypeDetail: string;
+  isBounce: boolean; // งานเด้ง (job.is_job_bounce)
+  documentProfileId: number; // ออกเอกสารในนาม (0 = default)
+  so: string;
+  channel: string;
+  shopName: string;
+  saleOrderDate: string;
+  warrantyMonth: string;
+  expireDate: string;
+  warranty: string;
+  productType: string;
+  imei: string;
+  serial: string;
+  brand: string;
+  modelCode: string;
+  modelDetail: string;
+  receptionDate: string;
+  receptionTrackingNo: string;
+  receptionShipper: string;
+  receptionType: string;
+  equipment: string;
+  fault: string;
+  symptoms: string[];
+  symptomOther: string;
+  remark: string;
+  serviceCost: number;
+  toolCost: number;
+  deliveryCost: number;
+  boxCost: number;
+  partsCost: number;
+  estimateCost: string;
+  depositCost: string;
+  engineerId: number;
+  engineerName: string;
+  engineerEmail: string;
+  dueDate: string;
+};
+
+export const EMPTY_JOB_FORM: JobFormState = {
+  customer: null,
+  jobNo: "",
+  createDate: "",
+  createByName: "",
+  status: "งานใหม่",
+  jobType: "",
+  jobTypeDetail: "",
+  isBounce: false,
+  documentProfileId: 0,
+  so: "",
+  channel: "",
+  shopName: "",
+  saleOrderDate: "",
+  warrantyMonth: "12",
+  expireDate: "",
+  warranty: "",
+  productType: "",
+  imei: "",
+  serial: "",
+  brand: "",
+  modelCode: "",
+  modelDetail: "",
+  receptionDate: "",
+  receptionTrackingNo: "",
+  receptionShipper: "",
+  receptionType: RECEIVE_METHODS[0],
+  equipment: "",
+  fault: "",
+  symptoms: [],
+  symptomOther: "",
+  remark: "",
+  serviceCost: 0,
+  toolCost: 0,
+  deliveryCost: 0,
+  boxCost: 0,
+  partsCost: 0,
+  estimateCost: "",
+  depositCost: "",
+  engineerId: 0,
+  engineerName: "",
+  engineerEmail: "",
+  dueDate: "",
+};
+
+/** Prefill the form from a job loaded through /api/jobs/:no */
+export function fromJob(j: JobDetail): JobFormState {
+  return {
+    ...EMPTY_JOB_FORM,
+    customer: j.customer
+      ? {
+          code: j.customer.code,
+          name: j.customer.name,
+          address: j.customer.address,
+          phone: j.customer.phone,
+          email: j.customer.email,
+          line: j.customer.line,
+          taxId: j.customer.taxId,
+          status: "Active",
+          id: j.customer.id,
+        }
+      : null,
+    jobNo: j.no,
+    createDate: j.createDate,
+    createByName: j.createByName,
+    status: j.status,
+    jobType: j.jobType,
+    jobTypeDetail: j.jobTypeDetail,
+    isBounce: j.isBounce,
+    documentProfileId: j.documentProfileId,
+    so: j.so,
+    channel: j.channel,
+    shopName: j.shopName,
+    saleOrderDate: j.saleOrderDate,
+    warrantyMonth: String(j.warrantyMonth || ""),
+    expireDate: j.expireDate,
+    warranty: j.warranty,
+    productType: j.productType,
+    imei: j.imei,
+    serial: j.serial,
+    brand: j.brand,
+    modelCode: j.modelCode,
+    modelDetail: j.modelDetail,
+    receptionDate: j.receptionDate,
+    receptionTrackingNo: j.receptionTrackingNo,
+    receptionShipper: j.receptionShipper,
+    receptionType: j.receptionType || RECEIVE_METHODS[0],
+    equipment: j.equipment,
+    fault: j.fault,
+    symptoms: j.symptoms,
+    symptomOther: j.symptomOther,
+    remark: j.remark,
+    serviceCost: j.serviceCost,
+    toolCost: j.toolCost,
+    deliveryCost: j.deliveryCost,
+    boxCost: j.boxCost,
+    partsCost: j.partsCost,
+    estimateCost: j.estimateCost ? String(j.estimateCost) : "",
+    depositCost: j.depositCost ? String(j.depositCost) : "",
+    engineerId: j.engineerId,
+    engineerName: j.engineer,
+    dueDate: j.dueDate,
+  };
+}
+
+/** Body for POST /api/jobs and PATCH /api/jobs/:no */
+export function toJobInput(s: JobFormState) {
+  return {
+    customerCode: s.customer?.code ?? "",
+    jobType: s.jobType,
+    jobTypeDetail: s.jobTypeDetail,
+    documentProfileId: s.documentProfileId || undefined,
+    isBounce: s.isBounce,
+    status: s.status,
+    so: s.so,
+    channel: s.channel,
+    shopName: s.shopName,
+    saleOrderDate: s.saleOrderDate,
+    warrantyMonth: s.warrantyMonth,
+    expireDate: s.expireDate,
+    warranty: s.warranty,
+    productType: s.productType,
+    imei: s.imei,
+    serial: s.serial,
+    brand: s.brand,
+    modelCode: s.modelCode,
+    modelDetail: s.modelDetail,
+    receptionDate: s.receptionDate,
+    receptionTrackingNo: s.receptionTrackingNo,
+    receptionShipper: s.receptionShipper,
+    receptionType: s.receptionType,
+    equipment: s.equipment,
+    fault: s.fault,
+    symptoms: s.symptoms,
+    symptomOther: s.symptomOther,
+    remark: s.remark,
+    serviceCost: s.serviceCost,
+    toolCost: s.toolCost,
+    deliveryCost: s.deliveryCost,
+    boxCost: s.boxCost,
+    estimateCost: s.estimateCost,
+    depositCost: s.depositCost,
+    engineerId: s.engineerId || undefined,
+    engineerEmail: s.engineerEmail || undefined,
+    engineerName: s.engineerName || undefined,
+    dueDate: s.dueDate,
+  };
+}
+
+/**
+ * The job screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) also show the
+ * editable product / other-info / cost sections. Persist those through the
+ * generic PATCH first so nothing typed there is lost; the page then posts its
+ * own action. Skipped (not failed) when the user lacks "Job Management" edit.
+ */
+export async function saveCommonSections(jobNo: string, s: JobFormState, allowed: boolean) {
+  if (!allowed) return;
+  const body = toJobInput(s);
+  await patchJson(`/api/jobs/${encodeURIComponent(jobNo)}`, { ...body, status: undefined });
+}
+
+type Ctx = {
+  s: JobFormState;
+  set: <K extends keyof JobFormState>(k: K, v: JobFormState[K]) => void;
+  patch: (p: Partial<JobFormState>) => void;
+  reset: (next?: JobFormState) => void;
+};
+
+const FormCtx = React.createContext<Ctx | null>(null);
+
+export function JobFormProvider({
+  initial,
+  children,
+}: {
+  initial?: JobFormState;
+  children: React.ReactNode;
+}) {
+  const [s, setS] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
+  const value = React.useMemo<Ctx>(
+    () => ({
+      s,
+      set: (k, v) => setS((x) => ({ ...x, [k]: v })),
+      patch: (p) => setS((x) => ({ ...x, ...p })),
+      reset: (next) => setS(next ?? EMPTY_JOB_FORM),
+    }),
+    [s]
+  );
+  return <FormCtx.Provider value={value}>{children}</FormCtx.Provider>;
+}
+
+export function useJobForm(): Ctx {
+  const ctx = React.useContext(FormCtx);
+  if (!ctx) throw new Error("useJobForm must be used inside <JobFormProvider>");
+  return ctx;
+}
 
 /* ---------------- lookup bar ---------------- */
 
 export function JobLookupBar({
   label = "ระบุ หมายเลขงาน",
-  placeholder = "JOB2604460",
+  placeholder = "J2612164",
   onFind,
   note,
+  initial = "",
 }: {
   label?: string;
   placeholder?: string;
   onFind?: (v: string) => void;
   note?: string;
+  initial?: string;
 }) {
-  const [v, setV] = React.useState("");
+  const [v, setV] = React.useState(initial);
+  React.useEffect(() => setV(initial), [initial]);
   return (
     <div className="surface flex flex-wrap items-center gap-3 p-3 no-print">
       <label className="text-sm font-medium">{label} :</label>
@@ -73,132 +334,85 @@ export function JobLookupBar({
 /* ---------------- customer ---------------- */
 
 export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
-  const { data: CUSTOMERS } = useCustomers();
-  const [c, setC] = React.useState<Customer | null>(null);
-  const [q, setQ] = React.useState("");
-
-  const find = () => {
-    const hit =
-      CUSTOMERS.find(
-        (x) =>
-          x.code.toLowerCase() === q.trim().toLowerCase() ||
-          x.name.includes(q.trim()) ||
-          x.taxId === q.trim()
-      ) ??
-      CUSTOMERS[0] ??
-      null;
-    setC(hit);
-  };
-
+  const { s, set } = useJobForm();
+  const c = s.customer;
   return (
     <Section
       title="ข้อมูลลูกค้า"
       icon={UserRound}
-      description="ค้นหาด้วยรหัสลูกค้า หมายเลขบัตร หรือชื่อ-สกุล"
+      description={c ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่ เพื่อเพิ่มข้อมูลก่อนเปิดงาน"}
       actions={c && <Badge tone="success" dot>พบข้อมูลลูกค้า</Badge>}
     >
-      {!readOnly && (
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && find()}
-            placeholder="รหัส หรือ หมายเลขบัตร หรือ ชื่อสกุล ลูกค้า"
-            className="sm:max-w-md"
-          />
-          <Button variant="outline" size="md" onClick={find}>
-            <Search className="h-3.5 w-3.5" />
-            ค้นหาลูกค้า
-          </Button>
-        </div>
-      )}
-
-      <FieldGrid>
-        <Field label="รหัสลูกค้า" required>
-          <Input readOnly value={c?.code ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="เลขผู้เสียภาษี / เลขบัตรประชาชน">
-          <Input readOnly value={c?.taxId ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="ชื่อลูกค้า" required className="lg:col-span-2">
-          <Input readOnly value={c?.name ?? ""} placeholder="—" />
-        </Field>
-        <Field label="ที่อยู่ลูกค้า" wide>
-          <Textarea readOnly rows={2} value={c?.address ?? ""} placeholder="—" />
-        </Field>
-        <Field label="เบอร์โทรศัพท์" required>
-          <Input readOnly value={c?.phone ?? ""} placeholder="—" className="num" />
-        </Field>
-        <Field label="Line ID">
-          <Input readOnly value={c?.line ?? ""} placeholder="—" />
-        </Field>
-        <Field label="Email" className="lg:col-span-2">
-          <Input readOnly value={c?.email ?? ""} placeholder="—" />
-        </Field>
-      </FieldGrid>
+      <CustomerSelect value={c} onChange={(cust) => set("customer", cust)} readOnly={readOnly} />
     </Section>
   );
 }
 
-/* ---------------- job open info ---------------- */
-
+/** เปิดงานใหม่ / แก้ไขข้อมูลงาน — status is shown only; it changes through the workflow screens (บันทึกซ่อม / ปิดงาน …). */
 export function JobOpenSection({
-  status = "งานใหม่",
-  editable = true,
+  status,
   jobNo,
 }: {
   status?: string;
-  editable?: boolean;
   jobNo?: string;
 }) {
+  const { s, set } = useJobForm();
   const { data: JOB_TYPES } = useJobTypes();
+  const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
+  const { name: me } = useAccess();
+  const shownStatus = s.status || status || "งานใหม่";
+  const [now, setNow] = React.useState("");
+  React.useEffect(() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    setNow(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`);
+  }, []);
   return (
     <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
       <FieldGrid>
         <Field label="หมายเลขงาน">
           <ReadOnly>
-            <span className="num">{jobNo ?? "Generate Auto"}</span>
+            <span className="num">{s.jobNo || jobNo || "Generate Auto"}</span>
           </ReadOnly>
         </Field>
+        <ProfileSelect value={s.documentProfileId} onChange={(id) => set("documentProfileId", id)} doc={s.jobNo || jobNo ? { kind: "job", no: s.jobNo || jobNo || "" } : undefined} />
         <Field label="วันที่">
           <ReadOnly>
-            <span className="num">2026-09-04 12:14:55 น.</span>
+            <span className="num">{s.createDate || now} น.</span>
           </ReadOnly>
         </Field>
         <Field label="เปิดงานโดย">
-          <ReadOnly>May - Pradit</ReadOnly>
+          <ReadOnly>{s.createByName || me || "—"}</ReadOnly>
         </Field>
         <Field label="สถานะงาน">
-          {editable ? (
-            <Select defaultValue={status}>
-              {JOB_STATUS_OPTIONS.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
-          ) : (
-            <ReadOnly>
-              <Badge tone="info" dot>
-                {status}
-              </Badge>
-            </ReadOnly>
-          )}
+          <ReadOnly>
+            <Badge tone="info" dot>
+              {shownStatus}
+            </Badge>
+          </ReadOnly>
         </Field>
         <Field label="ประเภทงานหลัก" required className="lg:col-span-2">
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {JOB_TYPES.map((j) => (
-              <option key={j.id}>{j.name}</option>
-            ))}
-          </Select>
+          <SearchSelect value={s.jobType} onChange={(v) => set("jobType", v)} options={withCurrent(JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), s.jobType)} />
         </Field>
         <Field label="งานย่อย" className="lg:col-span-2">
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            <option>เปลี่ยนอะไหล่</option>
-            <option>ทำความสะอาด</option>
-            <option>อัปเดตเฟิร์มแวร์</option>
-            <option>ตรวจเช็คทั่วไป</option>
-          </Select>
+          {/* ค่าที่ใช้ในระบบเดิมทั้ง 24 ค่า (job.job_type_detail) เป็นรายการแนะนำ + พิมพ์ค่าใหม่ได้ */}
+          <Input
+            list="job-type-detail-options"
+            value={s.jobTypeDetail}
+            onChange={(e) => set("jobTypeDetail", e.target.value)}
+            placeholder="- - เลือกหรือพิมพ์ - -"
+          />
+          <datalist id="job-type-detail-options">
+            {JOB_TYPE_DETAILS.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="งานเด้ง" wide>
+          <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
+            <Checkbox checked={s.isBounce} onChange={(e) => set("isBounce", e.target.checked)} />
+            สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ (is_job_bounce)
+          </label>
         </Field>
       </FieldGrid>
     </Section>
@@ -207,162 +421,341 @@ export function JobOpenSection({
 
 /* ---------------- product info ---------------- */
 
-export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า" }: { title?: string }) {
+/** อาการเสียหลัก (มาตรฐาน) — searchable multi-select bound to the form's symptoms (first = main);
+ *  ordered by real usage, with the chosen model's common symptoms on top. Used by ProductSection
+ *  and the Out-Source "รายละเอียดการซ่อม" tab. */
+export function MainSymptomField() {
+  const { s, set } = useJobForm();
+  const { data: MODELS } = useModels();
+  const { data: SYMPTOMS } = useSymptoms();
+  const { data: SYMPTOM_STATS } = useSymptomStats();
+  const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
+  const symptoms = s.symptoms;
+  return (
+    <Field
+      label="อาการเสียหลัก (มาตรฐาน)"
+      required
+      wide
+      hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
+    >
+      <SymptomPicker
+        value={symptoms}
+        onChange={(names) => set("symptoms", names)}
+        options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+        suggested={MODEL_SYMPTOMS}
+        suggestedLabel={s.modelCode ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}` : "อาการที่พบบ่อย"}
+      />
+    </Field>
+  );
+}
+
+/**
+ * Layouts (fields a layout hides keep their loaded values, so saving never clears them):
+ *  - `full`   ปิดงาน — every field
+ *  - `open`   เปิดงานใหม่ / แก้ไขข้อมูลงาน — no ประเภทสินค้า; Shop Name suggestions,
+ *             courier from โปรไฟล์บริษัทขนส่ง
+ *  - `repair` บันทึกงานซ่อม / บันทึกงานส่งซ่อมต่อ (Out-Source) / Swap-Refund — device fields only (no shop / reception)
+ */
+export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "open" | "repair" }) {
+  const { s, set, patch } = useJobForm();
+  const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: MODELS } = useModels();
-  const { data: SYMPTOMS } = useSymptoms();
-  const [symptoms, setSymptoms] = React.useState<string[]>([]);
 
-  const toggle = (name: string) =>
-    setSymptoms((s) =>
-      s.includes(name) ? s.filter((x) => x !== name) : [...s, name]
+  // models of the chosen brand first (still allows any model)
+  const modelOptions = React.useMemo(() => {
+    const own = MODELS.filter((m) => !s.brand || m.brand === s.brand);
+    return own.length ? own : MODELS;
+  }, [MODELS, s.brand]);
+
+  // expire date = sale order date + warranty months
+  const recalcExpire = (saleDate: string, months: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) return;
+    const m = Number(months) || 0;
+    const d = new Date(saleDate + "T00:00:00");
+    d.setMonth(d.getMonth() + m);
+    const p = (n: number) => String(n).padStart(2, "0");
+    patch({ expireDate: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` });
+  };
+
+  const repair = variant === "repair";
+  const open = variant === "open";
+  const { data: SHOP_NAMES } = useShopNames();
+  const { data: SHIPPING_PROFILES } = useShippingProfiles();
+
+  const soField = (
+    <Field label="Sale Order No." required>
+      <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
+    </Field>
+  );
+  const channelField = (
+    <Field label={repair ? "Sale Channel" : "Channel"} required>
+      <SearchSelect value={s.channel} onChange={(v) => set("channel", v)} options={withCurrent(strOptions(CHANNELS), s.channel)} />
+    </Field>
+  );
+  const saleDateField = (
+    <Field label="Sale Order Date" required>
+      <Input
+        type="date"
+        value={s.saleOrderDate}
+        onChange={(e) => {
+          set("saleOrderDate", e.target.value);
+          recalcExpire(e.target.value, s.warrantyMonth);
+        }}
+      />
+    </Field>
+  );
+  const warrantyMonthField = (
+    <Field label="รับประกัน (เดือน)" required>
+      <Input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={s.warrantyMonth}
+        onChange={(e) => {
+          set("warrantyMonth", e.target.value);
+          recalcExpire(s.saleOrderDate, e.target.value);
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        className="num text-right"
+      />
+    </Field>
+  );
+  const expireField = (
+    <Field label="Expire Date" required>
+      <Input type="date" value={s.expireDate} onChange={(e) => set("expireDate", e.target.value)} />
+    </Field>
+  );
+  const warrantyField = (
+    <Field label="Warranty" required={variant === "full"}>
+      <Select value={s.warranty} onChange={(e) => set("warranty", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {WARRANTY_OPTIONS.map((w) => (
+          <option key={w}>{w}</option>
+        ))}
+      </Select>
+    </Field>
+  );
+  const imeiField = (
+    <Field label="Imei No.">
+      <Input className="num" placeholder="35xxxxxxxxxxxxx" value={s.imei} onChange={(e) => set("imei", e.target.value)} />
+    </Field>
+  );
+  const serialField = (
+    <Field label="Serial No." required={!repair}>
+      <Input className="num" placeholder="SN-XXXXXXXX" value={s.serial} onChange={(e) => set("serial", e.target.value)} />
+    </Field>
+  );
+  const brandField = (
+    <Field label="ยี่ห้อ" required>
+      <SearchSelect
+        value={s.brand}
+        onChange={(v) => set("brand", v)}
+        options={withCurrent(MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })), s.brand)}
+        searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+      />
+    </Field>
+  );
+  const modelField = (
+    <Field label="รุ่น" required>
+      <ModelPicker
+        models={modelOptions}
+        value={s.modelCode}
+        fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
+        onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
+      />
+    </Field>
+  );
+  const modelDetailField = (
+    <Field label="รุ่นย่อย (ถ้ามี)">
+      <Input value={s.modelDetail} onChange={(e) => set("modelDetail", e.target.value)} />
+    </Field>
+  );
+  const equipmentField = (
+    <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
+      <Textarea rows={2} placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" value={s.equipment} onChange={(e) => set("equipment", e.target.value)} />
+    </Field>
+  );
+  const faultField = (
+    <Field label="จุดตำหนิ" className="lg:col-span-2">
+      <Textarea rows={2} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" value={s.fault} onChange={(e) => set("fault", e.target.value)} />
+    </Field>
+  );
+  const symptomsField = <MainSymptomField />;
+  const symptomOtherField = (
+    <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+      <Textarea rows={2} value={s.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+    </Field>
+  );
+  const remarkField = (
+    <Field label="หมายเหตุ" className="lg:col-span-2">
+      <Textarea rows={2} value={s.remark} onChange={(e) => set("remark", e.target.value)} />
+    </Field>
+  );
+
+  const shopField = open ? (
+    <Field label="Shop Name">
+      {/* free text in the legacy data (511 spellings) — the most used names as suggestions, new ones can be typed */}
+      <Input list="shop-name-options" placeholder="- - เลือกหรือพิมพ์ - -" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
+      <datalist id="shop-name-options">
+        {SHOP_NAMES.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </Field>
+  ) : (
+    <Field label="Shop Name">
+      <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set("shopName", e.target.value)} />
+    </Field>
+  );
+  const receptionDateField = (
+    <Field label="วันที่รับเข้า">
+      <Input type="date" value={s.receptionDate} onChange={(e) => set("receptionDate", e.target.value)} />
+    </Field>
+  );
+  const trackingField = (
+    <Field label="เลขพัสดุจากลูกค้า">
+      <Input className="num" value={s.receptionTrackingNo} onChange={(e) => set("receptionTrackingNo", e.target.value)} />
+    </Field>
+  );
+  // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value ("F", "flash" …) stays selectable as-is
+  const legacyShipper = s.receptionShipper && !SHIPPING_PROFILES.some((p) => p.nameTh === s.receptionShipper) ? s.receptionShipper : "";
+  const shipperField = open ? (
+    <Field label="โดยบริษัทขนส่ง">
+      <Select value={s.receptionShipper} onChange={(e) => set("receptionShipper", e.target.value)}>
+        <option value="">- - Please Select - -</option>
+        {SHIPPING_PROFILES.map((p) => (
+          <option key={p.id} value={p.nameTh}>{p.nameTh}</option>
+        ))}
+        {legacyShipper && <option value={legacyShipper}>{legacyShipper} (ค่าเดิม)</option>}
+      </Select>
+    </Field>
+  ) : (
+    <Field label="โดยบริษัทขนส่ง">
+      {/* ระบบเดิมเป็นข้อความอิสระ — แนะนำจากค่าที่ใช้บ่อยใน DB (Flash, ไปรษณีย์, THAIPOST, KEX, J&T …) */}
+      <Input
+        list="shipper-options"
+        value={s.receptionShipper}
+        onChange={(e) => set("receptionShipper", e.target.value)}
+        placeholder="- - เลือกหรือพิมพ์ - -"
+      />
+      <datalist id="shipper-options">
+        {SHIPPERS.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+    </Field>
+  );
+  const receptionTypeField = (
+    <Field label="รับสินค้าเข้าโดย" wide>
+      <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
+        {RECEIVE_METHODS.map((m) => (
+          <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
+            <Radio name="receive-method" checked={s.receptionType === m} onChange={() => set("receptionType", m)} />
+            {m}
+          </label>
+        ))}
+      </div>
+    </Field>
+  );
+
+  if (open)
+    return (
+      <Section title={title} icon={PackageSearch}>
+        <FieldGrid>
+          {soField}
+          {channelField}
+          {shopField}
+          {saleDateField}
+
+          {warrantyMonthField}
+          {imeiField}
+          {serialField}
+          {expireField}
+
+          {warrantyField}
+          {brandField}
+          {modelField}
+          {modelDetailField}
+
+          {receptionTypeField}
+          {receptionDateField}
+          {trackingField}
+          {shipperField}
+          <div className="hidden lg:block" aria-hidden />
+
+          {equipmentField}
+          {faultField}
+          {symptomsField}
+          {symptomOtherField}
+          {remarkField}
+        </FieldGrid>
+      </Section>
+    );
+
+  if (repair)
+    return (
+      <Section title={title} icon={PackageSearch}>
+        <FieldGrid>
+          {soField}
+          {channelField}
+          {saleDateField}
+          {warrantyMonthField}
+
+          {imeiField}
+          {serialField}
+          {expireField}
+          {warrantyField}
+
+          {brandField}
+          {modelField}
+          {modelDetailField}
+          <div className="hidden lg:block" aria-hidden />
+
+          {equipmentField}
+          {faultField}
+          {symptomsField}
+          {symptomOtherField}
+          {remarkField}
+        </FieldGrid>
+      </Section>
     );
 
   return (
     <Section title={title} icon={PackageSearch}>
       <FieldGrid>
-        <Field label="Sale Order No." required>
-          <Input placeholder="SO2600727" className="num" />
-        </Field>
-        <Field label="Channel" required>
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {CHANNELS.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Shop Name">
-          <Input placeholder="ชื่อร้านค้า" />
-        </Field>
-        <Field label="Sale Order Date" required>
-          <Input type="date" />
-        </Field>
+        {soField}
+        {channelField}
+        {shopField}
+        {saleDateField}
 
-        <Field label="รับประกัน (เดือน)" required>
-          <Input
-            type="number"
-            min={0}
-            inputMode="numeric"
-            defaultValue={12}
-            onFocus={(e) => e.currentTarget.select()}
-            className="num text-right"
-          />
-        </Field>
-        <Field label="Expire Date" required>
-          <Input type="date" />
-        </Field>
-        <Field label="Warranty" required>
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {WARRANTY_OPTIONS.map((w) => (
-              <option key={w}>{w}</option>
-            ))}
-          </Select>
-        </Field>
+        {warrantyMonthField}
+        {expireField}
+        {warrantyField}
         <Field label="ประเภทสินค้า">
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {PRODUCT_TYPES.map((p) => (
-              <option key={p.id}>{p.name}</option>
-            ))}
-          </Select>
+          <SearchSelect value={s.productType} onChange={(v) => set("productType", v)} options={withCurrent(PRODUCT_TYPES.map((p) => ({ value: p.name, label: p.name })), s.productType)} />
         </Field>
 
-        <Field label="Imei No.">
-          <Input className="num" placeholder="35xxxxxxxxxxxxx" />
-        </Field>
-        <Field label="Serial No." required>
-          <Input className="num" placeholder="SN-XXXXXXXX" />
-        </Field>
-        <Field label="ยี่ห้อ" required>
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="รุ่น" required>
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {MODELS.map((m) => (
-              <option key={m.code}>{m.code}</option>
-            ))}
-          </Select>
-        </Field>
+        {imeiField}
+        {serialField}
+        {brandField}
+        {modelField}
 
-        <Field label="รุ่นย่อย (ถ้ามี)">
-          <Input />
-        </Field>
-        <Field label="วันที่รับเข้า">
-          <Input type="date" defaultValue="2026-09-04" />
-        </Field>
-        <Field label="เลขพัสดุจากลูกค้า">
-          <Input className="num" />
-        </Field>
-        <Field label="โดยบริษัทขนส่ง">
-          <Select defaultValue="">
-            <option value="">- - Please Select - -</option>
-            {COURIERS.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
-        </Field>
+        {modelDetailField}
+        {receptionDateField}
+        {trackingField}
+        {shipperField}
 
-        <Field label="รับสินค้าเข้าโดย" wide>
-          <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
-            {RECEIVE_METHODS.map((m, i) => (
-              <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
-                <Radio name="receive-method" defaultChecked={i === 0} />
-                {m}
-              </label>
-            ))}
-          </div>
-        </Field>
+        {receptionTypeField}
 
-        <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
-          <Textarea rows={2} placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" />
-        </Field>
-        <Field label="จุดตำหนิ" className="lg:col-span-2">
-          <Textarea rows={2} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" />
-        </Field>
+        {equipmentField}
+        {faultField}
 
-        <Field
-          label="อาการเสียหลัก (มาตรฐาน)"
-          required
-          wide
-          hint={`เลือกแล้ว ${symptoms.length} อาการ`}
-        >
-          <div className="flex flex-wrap gap-2 rounded-md border border-border bg-muted/40 p-2.5">
-            {SYMPTOMS.map((s) => {
-              const on = symptoms.includes(s.name);
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => toggle(s.name)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-xs transition-colors",
-                    on
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-muted-foreground hover:border-primary hover:text-primary"
-                  )}
-                >
-                  {s.name}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
+        {symptomsField}
 
-        <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-          <Textarea rows={2} />
-        </Field>
-        <Field label="หมายเหตุ" className="lg:col-span-2">
-          <Textarea rows={2} />
-        </Field>
+        {symptomOtherField}
+        {remarkField}
       </FieldGrid>
     </Section>
   );
@@ -371,10 +764,10 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
 /* ---------------- cost summary ---------------- */
 
 const COST_FIELDS = [
-  { key: "service", label: "ค่าบริการการซ่อม" },
-  { key: "tool", label: "ค่าเครื่องมือพิเศษ" },
-  { key: "ship", label: "ค่าขนส่ง" },
-  { key: "box", label: "ค่ากล่องพัสดุ" },
+  { key: "serviceCost", label: "ค่าบริการการซ่อม" },
+  { key: "toolCost", label: "ค่าเครื่องมือพิเศษ" },
+  { key: "deliveryCost", label: "ค่าขนส่ง" },
+  { key: "boxCost", label: "ค่ากล่องพัสดุ" },
 ] as const;
 
 /** One label : value : บาท row, stacked so the running total reads top-to-bottom. */
@@ -410,23 +803,17 @@ function CostRow({
   );
 }
 
-export function CostSummary({ partsTotal = 0 }: { partsTotal?: number }) {
-  const [v, setV] = React.useState<Record<string, number>>({
-    service: 0,
-    tool: 0,
-    ship: 0,
-    box: 0,
-  });
-
-  const net =
-    partsTotal + Object.values(v).reduce((a, b) => a + (Number(b) || 0), 0);
+export function CostSummary({ partsTotal }: { partsTotal?: number }) {
+  const { s, set } = useJobForm();
+  const parts = partsTotal ?? s.partsCost;
+  const net = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
 
   return (
     <Section title="สรุปค่าใช้จ่าย" icon={Coins}>
       <div className="ml-auto max-w-xl space-y-2">
         <CostRow label="รวมค่าอะไหล่">
           <div className="num flex h-9 items-center justify-end rounded-md border border-border bg-muted/60 px-3 text-right text-sm">
-            {baht(partsTotal)}
+            {baht(parts)}
           </div>
         </CostRow>
 
@@ -437,13 +824,11 @@ export function CostSummary({ partsTotal = 0 }: { partsTotal?: number }) {
               step="0.01"
               min={0}
               inputMode="decimal"
-              value={v[f.key] === 0 ? "" : v[f.key]}
+              value={s[f.key] === 0 ? "" : s[f.key]}
               placeholder="0.00"
               onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) =>
-                setV((s) => ({ ...s, [f.key]: Number(e.target.value) || 0 }))
-              }
-              className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-none transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              onChange={(e) => set(f.key, Number(e.target.value) || 0)}
+              className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             />
           </CostRow>
         ))}
@@ -462,8 +847,27 @@ export function CostSummary({ partsTotal = 0 }: { partsTotal?: number }) {
 
 /* ---------------- other info ---------------- */
 
-export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
+/** `directory={false}` drops the Lark directory lookup under มอบหมายงานนี้ให้ (เปิดงานใหม่ / แก้ไขข้อมูลงาน). */
+export function OtherInfoSection({ showTech = true, directory = true }: { showTech?: boolean; directory?: boolean }) {
+  const { s, set, patch } = useJobForm();
+  const { data: STAFF } = useStaff();
+  // "มอบหมายงานนี้ให้" = job.engineer_id → a person in app_user. The directory
+  // picker is kept for lookup; the assignment itself must map to app_user.
   const [assignee, setAssignee] = React.useState<Person | null>(null);
+  const staffOptions = React.useMemo(() => {
+    const opts = STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined }));
+    // assigned to someone not in the active staff list (left / inactive) → still show the name
+    if (s.engineerId && !STAFF.some((st) => st.id === s.engineerId))
+      opts.unshift({ value: String(s.engineerId), label: s.engineerName || `#${s.engineerId}`, sub: "ไม่อยู่ในรายชื่อปัจจุบัน" });
+    return opts;
+  }, [STAFF, s.engineerId, s.engineerName]);
+  const pick = (p: Person | null) => {
+    setAssignee(p);
+    if (!p) return;
+    const hit = STAFF.find((st) => st.name === p.name);
+    // known staff → id; otherwise the server resolves/creates app_user by email
+    patch({ engineerId: hit?.id ?? 0, engineerName: p.name, engineerEmail: hit ? "" : p.email });
+  };
   return (
     <Section title="ข้อมูลอื่นๆ" icon={ClipboardList}>
       <FieldGrid>
@@ -474,6 +878,8 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
             min={0}
             inputMode="decimal"
             placeholder="0.00"
+            value={s.estimateCost}
+            onChange={(e) => set("estimateCost", e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"
           />
@@ -485,57 +891,80 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
             min={0}
             inputMode="decimal"
             placeholder="0.00"
+            value={s.depositCost}
+            onChange={(e) => set("depositCost", e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"
           />
         </Field>
         {showTech && (
-          <Field label="มอบหมายงานนี้ให้" hint="พิมพ์ชื่อเพื่อค้นหาจากไดเรกทอรีกลาง">
-            <PeoplePicker value={assignee} onChange={setAssignee} />
+          <Field label="มอบหมายงานนี้ให้" hint={directory ? "เลือกช่างจากรายชื่อผู้ใช้ระบบ หรือค้นหาจากไดเรกทอรีกลาง" : undefined}>
+            <div className="space-y-2">
+              <SearchSelect
+                value={s.engineerId ? String(s.engineerId) : ""}
+                onChange={(v) => {
+                  const id = Number(v) || 0;
+                  patch({ engineerId: id, engineerName: STAFF.find((st) => st.id === id)?.name ?? "" });
+                }}
+                options={staffOptions}
+                placeholder="- - ยังไม่ระบุ - -"
+                emptyLabel="- - ยังไม่ระบุ - -"
+                searchPlaceholder="พิมพ์ชื่อช่าง หรือประเภทผู้ใช้…"
+              />
+              {directory && <PeoplePicker value={assignee} onChange={pick} />}
+            </div>
           </Field>
         )}
         <Field label="วันประเมินซ่อมเสร็จ">
-          <Input type="date" />
+          <Input type="date" value={s.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
         </Field>
       </FieldGrid>
     </Section>
   );
 }
 
-export function AttachmentSection() {
+export const AttachmentSection = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function AttachmentSection(
+  { jobNo },
+  ref
+) {
   return (
     <Section title="เอกสารแนบ" icon={Paperclip}>
-      <Attachments />
+      <Attachments ref={ref} jobNo={jobNo} />
     </Section>
   );
-}
+});
+export type { AttachmentsHandle };
 
 export function FormActions({
   onSave,
   saveLabel = "บันทึกข้อมูล",
   extra,
+  saving = false,
+  onCancel,
 }: {
   onSave: () => void;
   saveLabel?: string;
   extra?: React.ReactNode;
+  saving?: boolean;
+  onCancel?: () => void;
 }) {
   return (
     <div className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-background/90 px-3 py-3 backdrop-blur-md sm:-mx-4 sm:px-4 lg:-mx-6 lg:px-6 no-print">
       {extra}
-      <Button variant="outline" size="md" type="button">
+      <Button variant="outline" size="md" type="button" onClick={onCancel ?? (() => window.history.back())}>
         ยกเลิก
       </Button>
-      <Button size="md" onClick={onSave}>
+      <Button size="md" onClick={onSave} disabled={saving}>
         {saveLabel}
       </Button>
     </div>
   );
 }
 
-export function ConfirmCheckbox({ label }: { label: string }) {
+export function ConfirmCheckbox({ label, checked, onChange }: { label: string; checked?: boolean; onChange?: (v: boolean) => void }) {
   return (
     <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-      <Checkbox />
+      <Checkbox checked={checked} onChange={(e) => onChange?.(e.target.checked)} />
       {label}
     </label>
   );

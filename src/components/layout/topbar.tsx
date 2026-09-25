@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Search, LogOut, ChevronRight, Bell, PanelLeft } from "lucide-react";
+import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from "lucide-react";
 import { findBreadcrumb } from "@/lib/nav";
 import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
@@ -100,13 +100,14 @@ export function Topbar({
 
       <SessionTimer />
 
-      <button
-        className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        aria-label="การแจ้งเตือน"
+      <Link
+        href="/admin/guide"
+        title="คู่มือการใช้งาน"
+        aria-label="คู่มือการใช้งาน"
+        className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
       >
-        <Bell className="h-4 w-4" />
-        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger ring-2 ring-background" />
-      </button>
+        <CircleHelp className="h-4 w-4" />
+      </Link>
 
       <ThemeToggle />
 
@@ -128,7 +129,9 @@ export function Topbar({
           <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
           <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>
         </div>
-        <Link
+        {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
+            /api/sso/logout silently signed the user out after every page load */}
+        <a
           href="/api/sso/logout"
           title="ออกจากระบบ"
           className={cn(
@@ -137,7 +140,7 @@ export function Topbar({
           )}
         >
           <LogOut className="h-4 w-4" />
-        </Link>
+        </a>
       </div>
     </header>
   );

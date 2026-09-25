@@ -9,6 +9,7 @@ export default async function Page() {
   return (
     <MasterTable
       config={{
+        kind: "job_types",
         title: "ประเภทงานซ่อม",
         description: "ประเภทงานหลักที่ใช้ตอนเปิดงานบริการ",
         nameLabel: "ประเภทงานซ่อม",

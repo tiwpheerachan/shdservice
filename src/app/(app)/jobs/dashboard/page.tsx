@@ -3,13 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { Tabs } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import {
   useDashGroups,
   useTatRows,
   useMonthly,
   useTopSymptoms,
   useJobs,
+  useJobTypes,
 } from "@/data/db";
 import { int, cn } from "@/lib/utils";
 
@@ -57,14 +59,67 @@ function Panel({
   );
 }
 
-export default function DashboardPage() {
-  const [range, setRange] = React.useState("30d");
+/* date helpers (local calendar, YYYY-MM-DD) */
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return ymd(d); };
+const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+/* TAT deep links → job list. Buckets count days from the Thai calendar day (same as the server query),
+   so each bucket is a create-date range: 1–3 = from today−3, 4–7 = today−7…today−4, …, >30 = up to today−31. */
+type TatKey = "d13" | "d47" | "d814" | "d1530" | "over30" | "total";
+const thaiDaysAgo = (n: number) => new Date(Date.now() + 7 * 3_600_000 - n * 86_400_000).toISOString().slice(0, 10);
+const TAT_RANGE: Record<TatKey, [from: number | null, to: number | null]> = {
+  d13: [3, null], d47: [7, 4], d814: [14, 8], d1530: [30, 15], over30: [null, 31], total: [null, null],
+};
+function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: string }) {
+  const [f, t] = TAT_RANGE[bucket];
+  const p = new URLSearchParams({ src: "tat", bucket, open: "1" });
+  if (status?.id) { p.set("statusId", String(status.id)); p.set("status", status.name); }
+  if (f !== null) p.set("from", thaiDaysAgo(f));
+  if (t !== null) p.set("to", thaiDaysAgo(t));
+  if (type) p.set("type", type);
+  return `/jobs/list?${p}`;
+}
+/** a clickable TAT count — zero stays a quiet dash */
+function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
+  if (!n) return <span className="text-muted-foreground/30">–</span>;
+  return (
+    <Link href={href} className={cn("rounded px-1 -mx-1 underline-offset-4 transition-colors hover:bg-accent hover:underline", className)}>
+      {int(n)}
+    </Link>
+  );
+}
+const thai = (iso: string) => { if (!iso) return ""; const [y, m, d] = iso.split("-").map(Number); return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`; };
 
-  const { data: DASH_GROUPS } = useDashGroups();
-  const { data: TAT_ROWS } = useTatRows();
-  const { data: MONTHLY } = useMonthly();
-  const { data: TOP_SYMPTOMS } = useTopSymptoms();
-  const { data: JOBS } = useJobs();
+export default function DashboardPage() {
+  // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
+  const [from, setFrom] = React.useState(() => daysAgo(29));
+  const [to, setTo] = React.useState(() => ymd(new Date()));
+  // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
+  const [type, setType] = React.useState("");
+  const { data: JOB_TYPES } = useJobTypes();
+  const range = React.useMemo(() => ({ from, to, type }), [from, to, type]);
+  const preset = (key: "7d" | "30d" | "90d" | "month" | "all") => {
+    const today = new Date();
+    if (key === "all") { setFrom(""); setTo(""); return; }
+    if (key === "month") { setFrom(`${ymd(today).slice(0, 8)}01`); setTo(ymd(today)); return; }
+    setFrom(daysAgo(key === "7d" ? 6 : key === "30d" ? 29 : 89));
+    setTo(ymd(today));
+  };
+  const activePreset =
+    !from && !to ? "all"
+    : to === ymd(new Date()) && from === daysAgo(6) ? "7d"
+    : to === ymd(new Date()) && from === daysAgo(29) ? "30d"
+    : to === ymd(new Date()) && from === daysAgo(89) ? "90d"
+    : to === ymd(new Date()) && from === `${ymd(new Date()).slice(0, 8)}01` ? "month"
+    : "";
+
+  const { data: DASH_GROUPS } = useDashGroups(range);
+  const { data: TAT_ROWS } = useTatRows(range);
+  const { data: MONTHLY } = useMonthly(range);
+  const { data: TOP_SYMPTOMS } = useTopSymptoms(range);
+  const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
+  const granularity = MONTHLY[0]?.granularity ?? "month";
+  const rangeText = (!from && !to ? "ทั้งหมด" : `${thai(from) || "เริ่มต้น"} – ${thai(to) || "วันนี้"}`) + (type ? ` · ${type}` : "");
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));
 
@@ -111,20 +166,48 @@ export default function DashboardPage() {
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">ภาพรวมงานบริการ</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            สถานะงานซ่อมและระยะเวลาดำเนินงาน (TAT) · ณ 7 ก.ย. 2026
+            สถานะงานซ่อมและระยะเวลาดำเนินงาน (TAT) · ช่วง {rangeText}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Tabs
-            value={range}
-            onChange={setRange}
-            tabs={[
-              { key: "7d", label: "7 วัน" },
-              { key: "30d", label: "30 วัน" },
-              { key: "90d", label: "90 วัน" },
-              { key: "all", label: "ทั้งหมด" },
-            ]}
-          />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[190px]">
+            <SearchSelect
+              value={type}
+              onChange={setType}
+              options={JOB_TYPES.map((j) => ({ value: j.name, label: j.name }))}
+              placeholder="ทุกประเภทงาน"
+              emptyLabel="ทุกประเภทงาน"
+            />
+          </div>
+          {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
+          <div className="flex items-center gap-1.5">
+            <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="num h-9 w-[150px]" aria-label="วันที่เริ่ม" />
+            <span className="text-xs text-muted-foreground">–</span>
+            <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="num h-9 w-[150px]" aria-label="วันที่สิ้นสุด" />
+          </div>
+          <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/60 p-0.5 text-xs">
+            {(
+              [
+                ["7d", "7 วัน"],
+                ["30d", "30 วัน"],
+                ["90d", "90 วัน"],
+                ["month", "เดือนนี้"],
+                ["all", "ทั้งหมด"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => preset(k)}
+                className={cn(
+                  "rounded-md px-2.5 py-1.5 font-medium transition-colors",
+                  activePreset === k ? "bg-card text-primary shadow-xs" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Link
             href="/jobs/new"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -171,7 +254,7 @@ export default function DashboardPage() {
       {/* TAT matrix */}
       <Panel
         title="TAT — ระยะเวลาตั้งแต่วันเปิดงานถึงวันส่งคืน"
-        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน</span>}
+        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน · งานที่ยังไม่ปิด ณ ปัจจุบัน{type ? ` · ${type}` : ""}</span>}
         bodyClass="p-0"
       >
         <div className="table-scroll">
@@ -198,15 +281,19 @@ export default function DashboardPage() {
                   <td className="py-2.5 pr-4 font-medium">{r.status}</td>
                   {(["d13", "d47", "d814", "d1530"] as const).map((k) => (
                     <td key={k} className="num px-4 py-2.5 text-right tabular-nums">
-                      {r[k] || <span className="text-muted-foreground/30">–</span>}
+                      <TatNum n={r[k]} href={tatHref(k, type, { id: r.statusId, name: r.status })} />
                     </td>
                   ))}
                   <td className="num px-4 py-2.5 text-right tabular-nums">
-                    <span className={cn(r.over30 > 20 && "font-semibold text-danger")}>
-                      {r.over30 || <span className="text-muted-foreground/30">–</span>}
-                    </span>
+                    <TatNum
+                      n={r.over30}
+                      href={tatHref("over30", type, { id: r.statusId, name: r.status })}
+                      className={cn(r.over30 > 20 && "font-semibold text-danger")}
+                    />
                   </td>
-                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">{int(r.total)}</td>
+                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">
+                    <TatNum n={r.total} href={tatHref("total", type, { id: r.statusId, name: r.status })} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -218,11 +305,11 @@ export default function DashboardPage() {
                   </td>
                   {dayCols.map((c) => (
                     <td key={c.k} className="num px-4 py-2.5 text-right font-medium tabular-nums">
-                      {int(grand[c.k])}
+                      {grand[c.k] ? <TatNum n={grand[c.k]} href={tatHref(c.k, type)} /> : 0}
                     </td>
                   ))}
                   <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums text-primary">
-                    {int(grand.total)}
+                    <TatNum n={grand.total} href={tatHref("total", type)} />
                   </td>
                 </tr>
               </tfoot>
@@ -234,7 +321,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* monthly line chart */}
         <Panel
-          title="แนวโน้มงานเปิด / ปิด รายเดือน"
+          title={granularity === "day" ? "แนวโน้มงานเปิด / ปิด รายวัน" : "แนวโน้มงานเปิด / ปิด รายเดือน"}
           className="lg:col-span-2"
           meta={
             <div className="flex items-center gap-4">
@@ -266,7 +353,9 @@ export default function DashboardPage() {
             )}
           </svg>
           <div className="mt-2 flex justify-between px-1 text-2xs text-muted-foreground">
-            {MONTHLY.map((m) => <span key={m.m}>{m.m}</span>)}
+            {MONTHLY.filter((_, i, a) => a.length <= 14 || i % Math.ceil(a.length / 12) === 0 || i === a.length - 1).map((m) => (
+              <span key={m.m}>{m.m}</span>
+            ))}
           </div>
         </Panel>
 

@@ -1,36 +1,58 @@
 "use client";
 
 import * as React from "react";
-import { Search, UserCheck, ListChecks, Wrench } from "lucide-react";
+import { UserCheck, ListChecks, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { JobSearch } from "@/components/shared/job-search";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect } from "@/components/shared/search-select";
+import { modelNameOptions } from "@/components/shared/model-picker";
+import { Field } from "@/components/ui/field";
+import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
-import { Input, Checkbox } from "@/components/ui/input";
+import { Checkbox, Input, Select } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { type Job } from "@/data/mock";
-import { useJobs } from "@/data/db";
+import { useJobsPage, useJobTypes, useManufacturers, useModels } from "@/data/db";
 import { cn } from "@/lib/utils";
-
-const CURRENT_TECH = "May - Pradit";
+import { api, postJson, errMsg, qs } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 export default function AssignPage() {
   const { push } = useToast();
-  const { data: JOBS, loading } = useJobs();
+  // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
+  const { name: CURRENT_TECH, userId } = useAccess();
+  // open jobs without an engineer / still "งานใหม่" — server-side paging
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  // filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
+  type AssignFilter = { no: string; ref: string; brand: string; model: string; type: string; customer: string; phone: string; imei: string; dateBy: "create" | "reception"; from: string; to: string };
+  const NO_FILTER: AssignFilter = { no: "", ref: "", brand: "", model: "", type: "", customer: "", phone: "", imei: "", dateBy: "create", from: "", to: "" };
+  const [draft, setDraft] = React.useState<AssignFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<AssignFilter>(NO_FILTER);
+  const setD = <K extends keyof AssignFilter>(k: K, v: AssignFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const { data: JOB_TYPES } = useJobTypes();
+  const { data: BRANDS } = useManufacturers();
+  const { data: MODELS } = useModels();
+  const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
+  const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
+  const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
+  const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
+  const { rows: JOBS, total, loading, refetch } = useJobsPage({
+    page: table.page,
+    pageSize: table.pageSize,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+    unassigned: 1,
+    ...filter,
+    dateBy: filter.dateBy === "create" ? "" : filter.dateBy,
+  });
+  const [saving, setSaving] = React.useState(false);
 
-  const [q, setQ] = React.useState("");
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [removed, setRemoved] = React.useState<Set<string>>(new Set());
 
-  const pool = React.useMemo(
-    () =>
-      JOBS.filter(
-        (j) =>
-          (j.owner === "- ยังไม่ระบุ -" || j.status === "งานใหม่") &&
-          !removed.has(j.no)
-      ),
-    [JOBS, removed]
-  );
+  const pool = React.useMemo(() => JOBS.filter((j) => !removed.has(j.no)), [JOBS, removed]);
 
   const allSelected = pool.length > 0 && pool.every((j) => picked.has(j.no));
 
@@ -45,28 +67,49 @@ export default function AssignPage() {
   const toggleAll = () =>
     setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
 
-  const go = () => {
-    const v = q.trim();
+  // type a job no → verify on the server that it is still waiting, then tick it
+  const go = async (v: string) => {
     if (!v) return;
-    const hit = pool.find((j) => j.no.toLowerCase() === v.toLowerCase());
-    if (hit) {
-      setPicked((s) => new Set(s).add(hit.no));
-      push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
-    } else {
-      push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+    const local = pool.find((j) => j.no === v);
+    if (local) {
+      setPicked((s) => new Set(s).add(local.no));
+      push({ kind: "success", title: "เลือกงานแล้ว", desc: local.no });
+      return;
     }
-    setQ("");
+    try {
+      const d = await api<{ rows: Job[] }>(`/api/data/jobs${qs({ paged: 1, pageSize: 1, q: v, unassigned: 1 })}`);
+      const hit = d.rows.find((j) => j.no === v);
+      if (hit) {
+        setPicked((s) => new Set(s).add(hit.no));
+        push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
+      } else {
+        push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+      }
+    } catch (e) {
+      push({ kind: "error", title: "ค้นหาไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
-  const confirm = () => {
+  // POST /api/jobs/assign → engineer_id + status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  const confirm = async () => {
     const list = [...picked];
-    setRemoved((r) => new Set([...r, ...list]));
-    setPicked(new Set());
-    push({
-      kind: "success",
-      title: `ยืนยันรับงานแล้ว ${list.length} รายการ`,
-      desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ' (ระบบสาธิต)",
-    });
+    if (!list.length) return;
+    setSaving(true);
+    try {
+      const d = await postJson<{ assigned: number }>("/api/jobs/assign", { jobNos: list, engineerId: userId });
+      setRemoved((r) => new Set([...r, ...list]));
+      setPicked(new Set());
+      push({
+        kind: "success",
+        title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
+        desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ'",
+      });
+      refetch();
+    } catch (e) {
+      push({ kind: "error", title: "รับงานไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns: Column<Job>[] = [
@@ -110,7 +153,7 @@ export default function AssignPage() {
       width: "130px",
       hideBelow: "lg",
       sortable: false,
-      cell: (r) => <span className="num text-xs">{r.openDate.slice(0, 10)}</span>,
+      cell: (r) => <span className="num text-xs">{r.receptionDate || r.openDate.slice(0, 10)}</span>,
     },
     {
       key: "customer",
@@ -141,32 +184,64 @@ export default function AssignPage() {
         description="เลือกงานที่ต้องการรับผิดชอบ (เลือกทีละงาน หรือทั้งหมด) แล้วกดยืนยันรับงาน"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="assign-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="assign-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงานซ่อม
             </label>
-            <div className="relative">
-              <Input
-                id="assign-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="JOB2604460"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" variant="outline" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="assign-job-no" scope="unassigned" onPick={go} />
           </div>
         }
       />
 
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label="เลขที่งาน">
+          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
+        </Field>
+        <Field label="เลขคำสั่งซื้อ">
+          <Input className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
+        </Field>
+        <Field label="ยี่ห้อ">
+          <SearchSelect {...all} value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))} options={BRAND_OPTIONS} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
+        </Field>
+        <Field label="รุ่น">
+          <SearchSelect {...all} value={draft.model} onChange={(v) => setD("model", v)} options={MODEL_OPTIONS} minWidth={360} searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…" />
+        </Field>
+        <Field label="ประเภทงาน">
+          <SearchSelect {...all} value={draft.type} onChange={(v) => setD("type", v)} options={JOB_TYPE_OPTIONS} />
+        </Field>
+        <Field label="ชื่อ-สกุล / รหัสลูกค้า">
+          <Input placeholder="ชื่อลูกค้า หรือ C43600" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+        </Field>
+        <Field label="เบอร์โทร">
+          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+        </Field>
+        <Field label="IMEI / Serial No.">
+          <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
+        </Field>
+        <Field label="ช่วงวันที่ (ตาม)">
+          <Select value={draft.dateBy} onChange={(e) => setD("dateBy", e.target.value as AssignFilter["dateBy"])}>
+            <option value="create">วันที่เปิดงาน</option>
+            <option value="reception">วันที่รับเครื่องซ่อม</option>
+          </Select>
+        </Field>
+        <Field label="ตั้งแต่วันที่">
+          <Input type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => setD("from", e.target.value)} />
+        </Field>
+        <Field label="ถึงวันที่">
+          <Input type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => setD("to", e.target.value)} />
+        </Field>
+      </FilterBar>
+
       {/* smart selection toolbar — sticks under the topbar like a navbar */}
-      <div className="surface sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-sm">
+      <div className="surface sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-medium">
             <ListChecks className="h-4 w-4 text-primary" />
@@ -174,7 +249,7 @@ export default function AssignPage() {
             <span className="num rounded-md bg-primary/10 px-2 py-0.5 text-primary">
               {picked.size}
             </span>
-            / {pool.length} งาน
+            / {total.toLocaleString("en-US")} งาน
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Wrench className="h-3.5 w-3.5" />
@@ -198,7 +273,7 @@ export default function AssignPage() {
           >
             ล้างการเลือก
           </Button>
-          <Button size="sm" disabled={picked.size === 0} onClick={confirm}>
+          <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
             <UserCheck className="h-3.5 w-3.5" />
             ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
           </Button>
@@ -211,7 +286,7 @@ export default function AssignPage() {
         loading={loading}
         rowKey={(r) => r.no}
         rowClassName={(r) => (picked.has(r.no) ? "bg-primary/5" : "")}
-        searchPlaceholder="ค้นหางานที่รอรับมอบหมาย…"
+        searchable={false}
         emptyText="ไม่มีงานรอรับมอบหมาย"
         emptyHint="งานทั้งหมดมีผู้รับผิดชอบแล้ว"
         footerNote={
@@ -221,6 +296,7 @@ export default function AssignPage() {
             </span>
           ) : undefined
         }
+        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />
     </>
   );

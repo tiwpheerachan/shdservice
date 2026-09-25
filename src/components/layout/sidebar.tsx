@@ -4,9 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
-import { NAV, type NavGroup } from "@/lib/nav";
+import { NAV as ALL_NAV, type NavGroup } from "@/lib/nav";
 import { Logo } from "@/components/shared/logo";
 import { cn } from "@/lib/utils";
+import { useAccess } from "@/lib/use-access";
 
 type Flyout = { id: string; top: number; left: number };
 
@@ -22,6 +23,15 @@ export function Sidebar({
   onToggleCollapse: () => void;
 }) {
   const pathname = usePathname();
+  // hide menus the user has no `view` grant for (app_config); admin sees all
+  const { canPath } = useAccess();
+  const NAV = React.useMemo(
+    () =>
+      ALL_NAV.map((g) => ({ ...g, items: g.items.filter((i) => canPath(i.href)) }))
+        .filter((g) => g.items.length > 0)
+        .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : g.items[0].href })),
+    [canPath]
+  );
   const activeGroup = NAV.find((g) =>
     g.items.some((i) => i.href === pathname)
   )?.id;
@@ -74,7 +84,7 @@ export function Sidebar({
     <>
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-sm lg:hidden no-print"
+          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-xs lg:hidden no-print"
           onClick={onCloseMobile}
         />
       )}
@@ -82,7 +92,7 @@ export function Sidebar({
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground",
-          "border-r border-sidebar-border shadow-sm transition-[width,transform] duration-200 ease-out no-print",
+          "border-r border-sidebar-border shadow-xs transition-[width,transform] duration-200 ease-out no-print",
           collapsed ? "lg:w-[72px]" : "lg:w-[268px]",
           "w-[268px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
@@ -97,7 +107,7 @@ export function Sidebar({
         >
           {collapsed ? (
             <div
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-sm ring-1 ring-inset ring-white/15"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-xs ring-1 ring-inset ring-white/15"
               style={{ background: "linear-gradient(135deg,#43a6f8,#55d5a1)" }}
             >
               <Check className="h-5 w-5" strokeWidth={3} />
@@ -147,7 +157,7 @@ export function Sidebar({
                       groupActive || flyout?.id === g.id
                         ? "bg-primary/12 text-primary"
                         : "text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                      groupActive && "bg-primary text-primary-foreground shadow-sm hover:bg-primary"
+                      groupActive && "bg-primary text-primary-foreground shadow-xs hover:bg-primary"
                     )}
                   >
                     <Icon className="h-[19px] w-[19px]" />
@@ -217,7 +227,7 @@ export function Sidebar({
                                 )}
                               >
                                 {active && (
-                                  <span className="absolute -left-[13px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
+                                  <span className="absolute left-[-13px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
                                 )}
                                 {i.title}
                               </Link>
@@ -257,7 +267,7 @@ export function Sidebar({
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           style={{ top: flyout.top, left: flyout.left }}
-          className="fixed z-[60] hidden w-60 origin-left animate-scale-in rounded-xl border border-border bg-card p-1.5 shadow-pop lg:block no-print"
+          className="fixed z-60 hidden w-60 origin-left animate-scale-in rounded-xl border border-border bg-card p-1.5 shadow-pop lg:block no-print"
         >
           <div className="flex items-center gap-2 px-2.5 py-1.5">
             <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/12 text-primary">

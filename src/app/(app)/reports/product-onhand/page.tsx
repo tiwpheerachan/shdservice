@@ -1,11 +1,13 @@
 "use client";
 
-import { ReportView } from "@/components/shared/report-view";
+import { ReportView, type ReportValues } from "@/components/shared/report-view";
+import type { ServerTableState } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { type Product } from "@/data/mock";
-import { useProducts, useCategories, useManufacturers } from "@/data/db";
+import { useProductsPage, useProductStats, useCategories, useManufacturers } from "@/data/db";
 import type { Column } from "@/components/ui/data-table";
 import { baht, int, cn } from "@/lib/utils";
+import { exportXlsx } from "@/lib/api";
 import * as React from "react";
 
 type Row = Product & { value: number };
@@ -33,29 +35,33 @@ const columns: Column<Row>[] = [
 ];
 
 export default function Page() {
-  const { data: PRODUCTS, loading } = useProducts();
   const { data: CATEGORIES } = useCategories();
   const { data: MANUFACTURERS } = useManufacturers();
-
-  const rows: Row[] = React.useMemo(
-    () => PRODUCTS.map((p) => ({ ...p, value: p.onhand * p.price })),
-    [PRODUCTS]
-  );
-
-  const totalValue = rows.reduce((s, r) => s + r.value, 0);
-  const totalQty = rows.reduce((s, r) => s + r.onhand, 0);
-  const low = rows.filter((r) => r.onhand > 0 && r.onhand <= 3).length;
-  const out = rows.filter((r) => r.onhand === 0).length;
+  const [f, setF] = React.useState<ReportValues>({ category: "", brand: "", stock: "", q: "" });
+  const stockKey = f.stock === "มีสินค้า" ? "in" : f.stock === "ใกล้หมด (≤3)" ? "low" : f.stock === "หมดสต๊อก" ? "out" : "";
+  // ACTIVE products only; filters + KPIs on the server, table paged
+  const filters = { category: f.category, brand: f.brand, stock: stockKey, status: "Active" };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
+  const { data: sum } = useProductStats({ ...filters, q: f.q });
+  const { rows, total, loading } = useProductsPage({ ...pageArgs, q: table.q || f.q, ...filters });
+  const S = sum[0];
+  const totalValue = S?.value ?? 0;
+  const totalQty = S?.qty ?? 0;
+  const low = S?.low ?? 0;
+  const out = S?.out ?? 0;
   return (
     <ReportView
       title="รายงานอะไหล่คงเหลือ"
       description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ"
       filters={[
-        { kind: "select", label: "หมวดหมู่", options: ["- - Select All - -", ...CATEGORIES.map((c) => c.name)] },
-        { kind: "select", label: "ยี่ห้อ", options: ["- - Select All - -", ...MANUFACTURERS.map((m) => m.name)] },
-        { kind: "select", label: "สถานะสต๊อก", options: ["- - Select All - -", "มีสินค้า", "ใกล้หมด (≤3)", "หมดสต๊อก"] },
-        { kind: "text", label: "รหัส / ชื่ออะไหล่", placeholder: "P02534" },
+        { kind: "select", key: "category", label: "หมวดหมู่", options: ["ทั้งหมด", ...CATEGORIES.map((c) => c.name)] },
+        { kind: "select", key: "brand", label: "ยี่ห้อ", options: ["ทั้งหมด", ...MANUFACTURERS.map((m) => m.name)] },
+        { kind: "select", key: "stock", label: "สถานะสต๊อก", options: ["ทั้งหมด", "มีสินค้า", "ใกล้หมด (≤3)", "หมดสต๊อก"] },
+        { kind: "text", key: "q", label: "รหัส / ชื่ออะไหล่", placeholder: "P02534" },
       ]}
+      onApply={setF}
+      onExport={() => exportXlsx("products", { ...filters, q: table.q || f.q, deleted: "active" })}
       kpis={[
         { label: "จำนวนคงเหลือรวม", value: `${int(totalQty)} ชิ้น`, tone: "primary" },
         { label: "มูลค่าสต๊อกรวม", value: baht(totalValue), tone: "success" },
@@ -66,6 +72,7 @@ export default function Page() {
       rows={rows}
       loading={loading}
       rowKey={(r) => r.sysCode}
+      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }

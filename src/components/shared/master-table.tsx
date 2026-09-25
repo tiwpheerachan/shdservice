@@ -5,15 +5,23 @@ import { Plus, Download } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "./page-header";
 import { RowActions } from "./row-actions";
+import { FilterBar } from "./filter-bar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import type { MasterRow } from "@/data/mock";
+import { postJson, errMsg, exportXlsx } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
+
+/** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
+export type MasterKind = "categories" | "manufacturers" | "colors" | "job_types" | "product_types" | "symptoms";
 
 export type MasterConfig = {
+  kind: MasterKind;
   title: string;
   description: string;
   nameLabel: string;
@@ -25,37 +33,115 @@ export type MasterConfig = {
 
 export function MasterTable({ config }: { config: MasterConfig }) {
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { isAdmin } = useAccess();
   const [rows, setRows] = React.useState(config.rows);
+  React.useEffect(() => setRows(config.rows), [config.rows]);
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<(MasterRow & { group?: string }) | null>(
     null
   );
+  const [form, setForm] = React.useState({ name: "", status: "Active", group: "", detail: "" });
+  const [saving, setSaving] = React.useState(false);
+
+  // filter bar (ชื่อ + สถานะ) — applied on ค้นหา; the lists are small so this is done in the browser
+  type MasterFilter = { name: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: MasterFilter = { name: "", status: "" };
+  const [draft, setDraft] = React.useState<MasterFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<MasterFilter>(NO_FILTER);
+  const visible = React.useMemo(() => {
+    const term = filter.name.trim().toLowerCase();
+    return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!filter.status || r.status === filter.status));
+  }, [rows, filter]);
+
+  // group options = configured list ∪ values already in the DB
+  const groupOptions = React.useMemo(() => {
+    const set = new Set<string>(["", ...(config.extraOptions ?? [])]);
+    for (const r of rows) if (r.group) set.add(r.group);
+    return Array.from(set);
+  }, [rows, config.extraOptions]);
 
   const openNew = () => {
     setEditing(null);
+    setForm({ name: "", status: "Active", group: "", detail: "" });
     setOpen(true);
   };
   const openEdit = (r: MasterRow & { group?: string }) => {
     setEditing(r);
+    setForm({ name: r.name, status: r.status, group: r.group ?? "", detail: r.detail ?? "" });
     setOpen(true);
   };
 
-  const save = () => {
-    setOpen(false);
-    push({
-      kind: "success",
-      title: editing ? "บันทึกการแก้ไขแล้ว" : "เพิ่มข้อมูลใหม่แล้ว",
-      desc: `${config.title} — ระบบสาธิต ข้อมูลไม่ถูกบันทึกจริง`,
-    });
+  const upsertRow = (row: MasterRow & { group?: string }) =>
+    setRows((s) => (s.some((x) => x.id === row.id) ? s.map((x) => (x.id === row.id ? row : x)) : [...s, row]));
+
+  const save = async () => {
+    if (!form.name.trim()) {
+      push({ kind: "error", title: "กรอกไม่ครบ", desc: `ต้องระบุ${config.nameLabel}` });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = await postJson<{ row: MasterRow & { group?: string } }>(`/api/masters/${config.kind}`, {
+        id: editing?.id,
+        name: form.name.trim(),
+        detail: form.detail,
+        group: form.group,
+        status: form.status,
+      });
+      upsertRow(d.row);
+      setOpen(false);
+      push({
+        kind: "success",
+        title: editing ? "บันทึกการแก้ไขแล้ว" : "เพิ่มข้อมูลใหม่แล้ว",
+        desc: `${config.title} — ${d.row.name}`,
+      });
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const toggleStatus = (id: string) => {
-    setRows((s) =>
-      s.map((r) =>
-        r.id === id ? { ...r, status: r.status === "Active" ? "Inactive" : "Active" } : r
-      )
-    );
-    push({ kind: "info", title: "เปลี่ยนสถานะเรียบร้อย" });
+  // สถานะ = is_active ในตารางเดิม (Inactive = ซ่อนจาก dropdown ทุกหน้า)
+  const toggleStatus = async (id: string) => {
+    const r = rows.find((x) => x.id === id);
+    if (!r) return;
+    const next = r.status === "Active" ? "Inactive" : "Active";
+    try {
+      await postJson("/api/admin/records", { table: config.kind, id, status: next === "Inactive" ? "INACTIVE" : "ACTIVE" });
+      setRows((s) => s.map((x) => (x.id === id ? { ...x, status: next } : x)));
+      push({ kind: "info", title: "เปลี่ยนสถานะเรียบร้อย", desc: `${r.name} → ${next}` });
+    } catch (e) {
+      push({ kind: "error", title: "เปลี่ยนสถานะไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
+
+  const remove = async (r: MasterRow) => {
+    if (!isAdmin) {
+      push({ kind: "warning", title: "ต้องมีสิทธิ์ลบข้อมูล", desc: r.name });
+      return;
+    }
+    const ok = await confirm({
+      tone: "danger",
+      title: `ลบ${config.title} "${r.name}"?`,
+      description: (
+        <>
+          รายการนี้จะหายจากหน้านี้และจากตัวเลือกในทุกฟอร์ม ข้อมูลเก่าที่เคยใช้ค่านี้ยังแสดงชื่อได้ตามเดิม
+          <br />
+          การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่ต้องการหยุดใช้ชั่วคราว ให้เปลี่ยนสถานะเป็น Inactive แทน
+        </>
+      ),
+      confirmLabel: "ลบ",
+    });
+    if (!ok) return;
+    try {
+      await postJson("/api/admin/records", { table: config.kind, id: r.id, status: "DELETED" });
+      setRows((s) => s.filter((x) => x.id !== r.id));
+      push({ kind: "success", title: "ลบข้อมูลแล้ว", desc: r.name });
+    } catch (e) {
+      push({ kind: "error", title: "ลบไม่สำเร็จ", desc: errMsg(e) });
+    }
   };
 
   const columns: Column<MasterRow & { group?: string }>[] = [
@@ -122,12 +208,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       align: "center",
       sortable: false,
       cell: (r) => (
-        <RowActions
-          onEdit={() => openEdit(r)}
-          onDelete={() =>
-            push({ kind: "warning", title: "ต้องมีสิทธิ์ลบข้อมูล", desc: r.name })
-          }
-        />
+        <RowActions onEdit={() => openEdit(r)} onDelete={() => remove(r)} />
       ),
     },
   ];
@@ -139,7 +220,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         description={config.description}
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => exportXlsx(config.kind, { deleted: "exclude", q: filter.name, status: filter.status })}>
               <Download className="h-3.5 w-3.5" />
               ส่งออก Excel
             </Button>
@@ -151,14 +232,35 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }
       />
 
-      <DataTable
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
+        }}
+        onReset={() => {
+          setDraft(NO_FILTER);
+          setFilter(NO_FILTER);
+        }}
+      >
+        <Field label={config.nameLabel}>
+          <Input placeholder={`พิมพ์บางส่วนของ${config.nameLabel}`} value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as MasterFilter["status"] }))}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
+      <DataTable searchable={false}
         columns={columns}
-        rows={rows}
+        rows={visible}
         rowKey={(r) => r.id}
-        searchPlaceholder={`ค้นหา ${config.nameLabel}…`}
         footerNote={
           <span className="hidden sm:inline">
-            · Active {rows.filter((r) => r.status === "Active").length} รายการ
+            · Active {visible.filter((r) => r.status === "Active").length} รายการ
           </span>
         }
       />
@@ -173,7 +275,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
               ยกเลิก
             </Button>
-            <Button size="sm" onClick={save}>
+            <Button size="sm" onClick={save} disabled={saving}>
               บันทึกข้อมูล
             </Button>
           </>
@@ -181,26 +283,41 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       >
         <FieldGrid cols={2}>
           <Field label={config.nameLabel} required>
-            <Input defaultValue={editing?.name ?? ""} placeholder={config.nameLabel} />
+            <Input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder={config.nameLabel}
+            />
           </Field>
           <Field label="สถานะ" required>
-            <Select defaultValue={editing?.status ?? "Active"}>
+            <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
               <option>Active</option>
               <option>Inactive</option>
             </Select>
           </Field>
           {config.extraLabel && (
             <Field label={config.extraLabel}>
-              <Select defaultValue={editing?.group ?? ""}>
-                {(config.extraOptions ?? []).map((o) => (
-                  <option key={o}>{o}</option>
+              {/* พิมพ์กลุ่มใหม่ได้ + เลือกจากค่าที่มีอยู่แล้วใน DB (datalist) */}
+              <Input
+                list={`${config.kind}-group-options`}
+                value={form.group}
+                onChange={(e) => setForm((f) => ({ ...f, group: e.target.value }))}
+                placeholder="- - ไม่ระบุ - -"
+              />
+              <datalist id={`${config.kind}-group-options`}>
+                {groupOptions.filter(Boolean).map((o) => (
+                  <option key={o} value={o} />
                 ))}
-              </Select>
+              </datalist>
             </Field>
           )}
           {config.detailLabel && (
             <Field label={config.detailLabel} wide>
-              <Textarea defaultValue={editing?.detail ?? ""} rows={3} />
+              <Textarea
+                value={form.detail}
+                onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
+                rows={3}
+              />
             </Field>
           )}
         </FieldGrid>
