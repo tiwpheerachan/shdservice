@@ -9,21 +9,25 @@ import { PublicJobView } from "./public-job-view";
 /**
  * Browser side of the tracking flow:
  *
- *   Turnstile → POST /api/track/session → { ticket } → POST /api/track/data → PublicJob
+ *   gate (Cloudflare checkbox) → POST /api/track/session → { ticket } → POST /api/track/data → PublicJob
  *
- * The ticket lives only in a local variable for the few milliseconds between the
- * two calls — never in state, storage or a cookie. Refresh / come back later /
- * open another job = a new Turnstile. Nothing about the job is known before it.
+ * 1. GATE — the page shows only a Turnstile checkbox (widget mode: Managed). Nothing
+ *    else, not even the form, until it passes.
+ * 2. link: the token goes straight to /api/track/session → ticket → data.
+ *    form: the form appears; the gate token is used for the first search if it is
+ *    still fresh. After that (or after 4 minutes — tokens live 5) a second,
+ *    background widget (`interaction-only` + `execute`) fetches a new one on submit;
+ *    it shows a checkbox only if Cloudflare asks for a click.
  *
- * The visible check happens BEFORE this page (Cloudflare WAF Managed Challenge on
- * /track*); here Turnstile runs in the background (Invisible widget, or
- * `interaction-only` so a Managed widget appears only if Cloudflare really needs a
- * click) — its token is what the server verifies before issuing a ticket.
+ * Every Turnstile token is single-use (Siteverify burns it). The ticket lives only in
+ * a local variable between the two calls — never in state, storage or a cookie.
+ * Refresh / come back later = the gate again.
  */
 type TurnstileApi = {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string;
   reset: (id?: string) => void;
   remove: (id?: string) => void;
+  execute: (idOrEl: string | HTMLElement) => void;
 };
 declare global {
   interface Window {
@@ -32,8 +36,11 @@ declare global {
 }
 
 const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+/** reuse a gate token only while it is comfortably inside its 5-minute life */
+const TOKEN_FRESH_MS = 4 * 60_000;
 
 type Props = { mode: "link"; linkToken: string; nonce?: string } | { mode: "form"; nonce?: string };
+type Phase = "gate" | "ready" | "done";
 
 async function post(path: string, body: Record<string, string>) {
   const r = await fetch(path, {
@@ -47,103 +54,171 @@ async function post(path: string, body: Record<string, string>) {
   return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; ticket?: string; job?: PublicJob };
 }
 
+/** one Turnstile widget bound to a container while it is mounted */
+function useTurnstile(
+  el: React.RefObject<HTMLDivElement | null>,
+  active: boolean,
+  ready: boolean,
+  opts: () => Record<string, unknown>
+) {
+  const id = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!active || !ready || !SITE_KEY || !window.turnstile || !el.current || id.current) return;
+    id.current = window.turnstile.render(el.current, { sitekey: SITE_KEY, action: "track", language: "th", ...opts() });
+    return () => {
+      if (id.current && window.turnstile) window.turnstile.remove(id.current);
+      id.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ready]);
+  return id;
+}
+
 export function TrackClient(props: Props) {
-  const widgetEl = React.useRef<HTMLDivElement>(null);
-  const widgetId = React.useRef<string | null>(null);
-  const [tsToken, setTsToken] = React.useState("");
+  const [tsReady, setTsReady] = React.useState(false);
+  const [phase, setPhase] = React.useState<Phase>("gate");
   const [busy, setBusy] = React.useState(false);
+  const [verifying, setVerifying] = React.useState(false);
   const [error, setError] = React.useState("");
   const [job, setJob] = React.useState<PublicJob | null>(null);
   const [no, setNo] = React.useState("");
   const [phone4, setPhone4] = React.useState("");
 
-  const resetCaptcha = React.useCallback(() => {
-    setTsToken("");
-    if (widgetId.current && window.turnstile) window.turnstile.reset(widgetId.current);
+  const gateEl = React.useRef<HTMLDivElement>(null);
+  const formEl = React.useRef<HTMLDivElement>(null);
+  /** the gate's token, kept for the first search only (form mode) */
+  const gateToken = React.useRef<{ t: string; at: number } | null>(null);
+  /** form fields waiting for a background token */
+  const pending = React.useRef<Record<string, string> | null>(null);
+
+  // the script may already be loaded (client-side navigation between /track pages)
+  React.useEffect(() => {
+    if (window.turnstile) setTsReady(true);
   }, []);
 
-  // session → ticket → data, back to the captcha on any failure
+  // session → ticket → data
   const run = React.useCallback(
     async (turnstileToken: string, fields: Record<string, string>) => {
       setBusy(true);
       setError("");
       try {
         const s = await post("/api/track/session", { ...fields, turnstileToken });
-        if (!s.ok || !s.ticket) {
-          setError(s.error ?? TRACK_MSG.sessionFail);
-          resetCaptcha();
-          return;
-        }
+        if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
         // the ticket exists only inside `s` for this one call — it is single-use, spent either way
         const d = await post("/api/track/data", { ticket: s.ticket });
-        if (d.ok && d.job) {
-          setJob(d.job);
-          return;
-        }
-        setError(d.error ?? TRACK_MSG.ticketFail);
-        resetCaptcha();
-      } catch {
-        setError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-        resetCaptcha();
+        if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
+        setJob(d.job);
+        setPhase("done");
+      } catch (e) {
+        setError(e instanceof Error && e.message ? e.message : "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        // link: back to the checkbox; form: stay — the next search fetches a fresh token
+        if (props.mode === "link") setPhase("gate");
       } finally {
         setBusy(false);
       }
     },
-    [resetCaptcha]
+    [props.mode]
   );
 
-  // link mode starts the moment the captcha passes; form mode waits for the button
   const linkToken = props.mode === "link" ? props.linkToken : "";
-  const onToken = React.useRef<(t: string) => void>(() => {});
-  onToken.current = (t: string) => {
-    setTsToken(t);
-    if (props.mode === "link") void run(t, { linkToken });
+  const onGatePass = React.useRef<(t: string) => void>(() => {});
+  onGatePass.current = (t: string) => {
+    setError("");
+    if (props.mode === "link") {
+      setPhase("ready");
+      void run(t, { linkToken });
+    } else {
+      gateToken.current = { t, at: Date.now() };
+      setPhase("ready");
+    }
+  };
+  const onFormToken = React.useRef<(t: string) => void>(() => {});
+  onFormToken.current = (t: string) => {
+    setVerifying(false);
+    const f = pending.current;
+    pending.current = null;
+    if (f) void run(t, f);
   };
 
-  const renderWidget = React.useCallback(() => {
-    if (!SITE_KEY || !window.turnstile || !widgetEl.current || widgetId.current) return;
-    widgetId.current = window.turnstile.render(widgetEl.current, {
-      sitekey: SITE_KEY,
-      action: "track",
-      language: "th",
-      appearance: "interaction-only", // nothing on screen unless a human click is really needed
-      "refresh-expired": "auto", // tokens live 5 min — a slow form gets a fresh one by itself
-      retry: "auto",
-      callback: (t: string) => {
-        setError("");
-        onToken.current(t);
-      },
-      "expired-callback": () => setTsToken(""),
-      "error-callback": () => setError(TRACK_MSG.unavailable),
-    });
-  }, []);
+  // 1. the gate: a visible checkbox (Managed mode) — nothing else on the page until it passes
+  useTurnstile(gateEl, phase === "gate", tsReady, () => ({
+    appearance: "always",
+    callback: (t: string) => onGatePass.current(t),
+    "error-callback": () => setError(TRACK_MSG.unavailable),
+  }));
 
-  // the widget lives only while the form / check screen is shown: drop it when the job is
-  // displayed, render a fresh one when the customer goes back to search again
-  React.useEffect(() => {
-    if (job) {
-      if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
-      widgetId.current = null;
-    } else {
-      renderWidget();
+  // 2. form mode, after the gate: a background widget that runs only when asked (execute)
+  const formWidget = useTurnstile(formEl, props.mode === "form" && phase === "ready", tsReady, () => ({
+    appearance: "interaction-only",
+    execution: "execute",
+    callback: (t: string) => onFormToken.current(t),
+    "error-callback": () => {
+      setVerifying(false);
+      pending.current = null;
+      setError(TRACK_MSG.unavailable);
+    },
+  }));
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const fields = { no: no.trim(), phone4: phone4.trim() };
+    const g = gateToken.current;
+    gateToken.current = null; // single use
+    if (g && Date.now() - g.at < TOKEN_FRESH_MS) {
+      void run(g.t, fields);
+      return;
     }
-  }, [job, renderWidget]);
-
-  // the script may already be on the page (client-side navigation between /track pages)
-  React.useEffect(() => {
-    renderWidget();
-    return () => {
-      if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
-      widgetId.current = null;
-    };
-  }, [renderWidget]);
+    // gate token used / older than 4 min → a fresh one in the background
+    if (!window.turnstile || !formWidget.current) {
+      setError(TRACK_MSG.unavailable);
+      return;
+    }
+    setError("");
+    setVerifying(true);
+    pending.current = fields;
+    window.turnstile.reset(formWidget.current);
+    window.turnstile.execute(formWidget.current);
+  };
 
   if (!SITE_KEY) {
-    // no site key in this build → fail closed, never show data without a captcha
+    // no site key in this build → fail closed, never show anything without the check
     return <Notice text={TRACK_MSG.unavailable} />;
   }
 
-  if (job) {
+  const script = (
+    <Script
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+      strategy="afterInteractive"
+      nonce={props.nonce}
+      onReady={() => setTsReady(true)}
+    />
+  );
+
+  /* ---------- 1. gate ---------- */
+  if (phase === "gate") {
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center">
+        {script}
+        <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-primary" />
+        <h1 className="text-base font-semibold">ยืนยันก่อนใช้งาน</h1>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          เพื่อปกป้องข้อมูลงานซ่อมของคุณ กรุณายืนยันว่าคุณไม่ใช่โปรแกรมอัตโนมัติ
+        </p>
+        <div className="mt-5 flex min-h-[65px] justify-center">
+          <div ref={gateEl} />
+          {!tsReady && (
+            <p className="inline-flex items-center gap-2 self-center text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลด…
+            </p>
+          )}
+        </div>
+        {error && <p className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      </div>
+    );
+  }
+
+  /* ---------- 3. result ---------- */
+  if (phase === "done" && job) {
     return (
       <div className="space-y-4">
         <PublicJobView j={job} />
@@ -154,7 +229,7 @@ export function TrackClient(props: Props) {
               setJob(null);
               setNo("");
               setPhone4("");
-              resetCaptcha();
+              setPhase("ready");
             }}
             className="text-sm font-medium text-primary hover:underline"
           >
@@ -165,54 +240,25 @@ export function TrackClient(props: Props) {
     );
   }
 
-  const widget = (
-    <>
-      <Script
-        src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
-        strategy="afterInteractive"
-        nonce={props.nonce}
-        onReady={renderWidget}
-      />
-      <div ref={widgetEl} className="flex justify-center empty:hidden" />
-    </>
-  );
-
+  /* ---------- 2. link: loading the job ---------- */
   if (props.mode === "link") {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
-        <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-primary" />
-        <h1 className="text-base font-semibold">ติดตามสถานะงานซ่อม</h1>
-        {!error && (
-          <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {busy ? "กำลังโหลดข้อมูล…" : "กำลังตรวจสอบความปลอดภัย…"}
-          </p>
-        )}
-        <div className="mt-4">{widget}</div>
-        {error && (
-          <div className="mt-3 space-y-2">
-            <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
-            <button type="button" onClick={resetCaptcha} className="text-sm font-medium text-primary hover:underline">
-              ลองอีกครั้ง
-            </button>
-          </div>
-        )}
+        <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลดข้อมูล…
+        </p>
       </div>
     );
   }
 
+  /* ---------- 2. form ---------- */
   return (
     <div className="surface mx-auto max-w-md p-6">
+      {script}
       <h1 className="text-lg font-semibold tracking-tight">ติดตามสถานะงานซ่อม</h1>
       <p className="mt-1 text-sm text-muted-foreground">กรอกเลขที่เอกสารและเบอร์โทรศัพท์ที่ให้ไว้กับศูนย์บริการ</p>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (tsToken) void run(tsToken, { no: no.trim(), phone4: phone4.trim() });
-        }}
-        className="mt-5 space-y-4"
-      >
+      <form onSubmit={submit} className="mt-5 space-y-4">
         <div>
           <label htmlFor="no" className="mb-1 block text-xs font-medium">
             เลขที่งานซ่อม หรือ เลขที่ใบเสนอราคา
@@ -241,21 +287,21 @@ export function TrackClient(props: Props) {
           />
         </div>
 
-        {widget}
+        {/* background re-check: empty unless Cloudflare asks for a click */}
+        <div ref={formEl} className="flex justify-center empty:hidden" />
 
         {error && <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
 
         <button
           type="submit"
-          disabled={busy || !tsToken || !no.trim() || phone4.length !== 4}
+          disabled={busy || verifying || !no.trim() || phone4.length !== 4}
           className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          ติดตามสถานะ
+          {busy || verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {verifying ? "กำลังตรวจสอบความปลอดภัย…" : "ติดตามสถานะ"}
         </button>
         <p className="flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
-          {tsToken ? <ShieldCheck className="h-3.5 w-3.5 text-success" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {tsToken ? "ตรวจสอบความปลอดภัยแล้ว · ป้องกันโดย Cloudflare" : "กำลังตรวจสอบความปลอดภัย…"}
+          <ShieldCheck className="h-3.5 w-3.5 text-success" /> ยืนยันแล้ว · ป้องกันโดย Cloudflare
         </p>
       </form>
 
