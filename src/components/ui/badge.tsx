@@ -31,6 +31,8 @@ export function Badge({
   className?: string;
   children: React.ReactNode;
 }) {
+  // no value (e.g. a job without a job type) → a quiet dash, not an empty pill that looks like a loading bar
+  if (isEmpty(children)) return <span className="text-muted-foreground">—</span>;
   return (
     <span data-slot="badge" className={cn(badgeVariants({ tone }), className)}>
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
@@ -38,6 +40,9 @@ export function Badge({
     </span>
   );
 }
+
+const isEmpty = (c: React.ReactNode): boolean =>
+  c === null || c === undefined || c === false || (typeof c === "string" && c.trim() === "") || (Array.isArray(c) && c.every(isEmpty));
 
 const JOB_TONE: Record<string, Tone> = {
   "งานใหม่": "info",
