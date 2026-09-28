@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown, Search, Star, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
 import { cn } from "@/lib/utils";
 import { int } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
 
 export type SymptomOption = { id: number; name: string; count?: number };
 
@@ -37,6 +38,8 @@ export function SymptomPicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [q, setQ] = React.useState("");
   const selected = new Set(value);
 
@@ -126,6 +129,10 @@ export function SymptomPicker({
             type="button"
             disabled={disabled}
             role="combobox"
+            aria-haspopup="listbox"
+            aria-controls={listId}
+            {...field}
+          aria-label={field.id ? undefined : placeholder}
             aria-expanded={open}
             className={cn(
               "flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground",
@@ -164,7 +171,7 @@ export function SymptomPicker({
               />
               {multiple && <span className="num shrink-0 text-2xs text-muted-foreground">{value.length} เลือกแล้ว</span>}
             </div>
-            <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
+            <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
               {sugOptions.length === 0 && restOptions.length === 0 && (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">ไม่พบอาการเสีย "{q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน</p>
               )}

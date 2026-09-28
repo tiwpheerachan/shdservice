@@ -184,6 +184,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
                 className="h-8 pl-8 text-xs"
                 aria-describedby={tooShort ? "dt-search-hint" : undefined}
               />

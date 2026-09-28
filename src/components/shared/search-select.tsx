@@ -5,6 +5,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
 import { cn } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
 
 export type SearchOption = { value: string; label: string; sub?: string };
 
@@ -45,6 +46,8 @@ export function SearchSelect({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(id); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [q, setQ] = React.useState("");
   const selected = options.find((o) => o.value === value);
 
@@ -70,9 +73,12 @@ export function SearchSelect({
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
       <PopoverTrigger asChild>
         <button
-          id={id}
           type="button"
           role="combobox"
+          aria-haspopup="listbox"
+          aria-controls={listId}
+          {...field}
+          aria-label={field.id ? undefined : placeholder}
           aria-expanded={open}
           disabled={disabled}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
@@ -110,7 +116,7 @@ export function SearchSelect({
               </button>
             )}
           </div>
-          <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
+          <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
             {emptyLabel && !q.trim() && (
               <CommandPrimitive.Item value="__empty__" onSelect={() => pick("")} className={cn(itemCls, "text-muted-foreground")}>
                 <Check className={cn("h-3.5 w-3.5 shrink-0", value ? "opacity-0" : "opacity-100")} />

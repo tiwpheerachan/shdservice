@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { type Job } from "@/data/mock";
 import { api, qs } from "@/lib/api";
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
 
 /**
  * Which jobs the dropdown offers — each job screen narrows the list to what it
@@ -42,6 +43,8 @@ export function JobSearch({
   className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(id); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [q, setQ] = React.useState("");
   const [rows, setRows] = React.useState<Job[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -86,9 +89,12 @@ export function JobSearch({
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
       <PopoverTrigger asChild>
         <button
-          id={id}
           type="button"
           role="combobox"
+          aria-haspopup="listbox"
+          aria-controls={listId}
+          {...field}
+          aria-label={field.id ? undefined : "ค้นหางาน"}
           aria-expanded={open}
           className={cn(
             "flex h-9 w-56 items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20",
@@ -118,7 +124,7 @@ export function JobSearch({
               </button>
             )}
           </div>
-          <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
+          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5">
             {term.length < SEARCH_MIN_CHARS && (
               <p className="px-3 py-5 text-center text-xs text-muted-foreground">
                 {SEARCH_MIN_HINT} — เลขงาน ชื่อ/รหัส/เบอร์ลูกค้า Serial, IMEI หรือรุ่น

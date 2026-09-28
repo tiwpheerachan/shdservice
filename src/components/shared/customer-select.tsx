@@ -6,7 +6,7 @@ import { ExternalLink, Loader2, Plus, RefreshCw, Search, UserRound, UserRoundPlu
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid } from "@/components/ui/field";
+import { Field, FieldGrid, useFieldControl } from "@/components/ui/field";
 import { Input, Textarea, Radio } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Customer } from "@/data/mock";
@@ -176,6 +176,8 @@ export function CustomerSelect({
 /* ---------- search-as-you-type (cmdk) ---------- */
 function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNew?: (prefill: string) => void }) {
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [q, setQ] = React.useState("");
   const [rows, setRows] = React.useState<Customer[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -214,6 +216,10 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
         <button
           type="button"
           role="combobox"
+          aria-haspopup="listbox"
+          aria-controls={listId}
+          {...field}
+          aria-label={field.id ? undefined : "ค้นหาลูกค้า"}
           aria-expanded={open}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 sm:max-w-xl"
         >
@@ -239,7 +245,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               </button>
             )}
           </div>
-          <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
+          <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
             {q.trim().length < SEARCH_MIN_CHARS && <p className="px-3 py-5 text-center text-xs text-muted-foreground">พิมพ์รหัส ชื่อ เบอร์โทร เลขบัตร หรืออีเมล อย่างน้อย {SEARCH_MIN_CHARS} ตัวอักษร</p>}
             {q.trim().length >= SEARCH_MIN_CHARS && !loading && rows.length === 0 && (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">ไม่พบลูกค้าที่ตรงกับ "{q.trim()}"</p>

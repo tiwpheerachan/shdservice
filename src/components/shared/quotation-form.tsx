@@ -437,6 +437,7 @@ export const QuotationForm = React.forwardRef<
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ค่าบริการ</dt>
                 <NumberInput
+                  aria-label="ค่าบริการ"
                   step="0.01"
                   value={service}
                   onChange={(n) => setService(n)}
@@ -448,6 +449,7 @@ export const QuotationForm = React.forwardRef<
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ส่วนลด (%)</dt>
                 <NumberInput
+                  aria-label="ส่วนลด (%)"
                   step="0.01"
                   placeholder="0"
                   value={discount}
@@ -460,6 +462,7 @@ export const QuotationForm = React.forwardRef<
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
                 <NumberInput
+                  aria-label="ภาษีมูลค่าเพิ่ม (%)"
                   step="0.01"
                   placeholder="0"
                   value={vatRate}

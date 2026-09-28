@@ -135,6 +135,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="คำอธิบายเพิ่มเติม"
+          aria-label="คำอธิบายไฟล์แนบ"
           className="sm:w-64"
         />
         <Button variant="outline" size="md" onClick={add} disabled={!file || busy}>

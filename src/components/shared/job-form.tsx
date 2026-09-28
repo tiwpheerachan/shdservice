@@ -309,11 +309,13 @@ export function JobLookupBar({
 }) {
   const [v, setV] = React.useState(initial);
   React.useEffect(() => setV(initial), [initial]);
+  const inputId = React.useId();
   return (
     <div className="surface flex flex-wrap items-center gap-3 p-3 no-print">
-      <label className="text-sm font-medium">{label} :</label>
+      <label htmlFor={inputId} className="text-sm font-medium">{label} :</label>
       <div className="relative min-w-0 flex-1 sm:max-w-xs">
         <Input
+          id={inputId}
           value={v}
           onChange={(e) => setV(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onFind?.(v)}
@@ -773,23 +775,28 @@ const COST_FIELDS = [
 /** One label : value : บาท row, stacked so the running total reads top-to-bottom. */
 function CostRow({
   label,
+  htmlFor,
   children,
   strong,
 }: {
   label: string;
+  /** id of the input in this row, so the label names it */
+  htmlFor?: string;
   children: React.ReactNode;
   strong?: boolean;
 }) {
+  const Tag = htmlFor ? "label" : "span";
   return (
     <div className="flex items-center justify-end gap-3">
-      <span
+      <Tag
+        htmlFor={htmlFor}
         className={cn(
           "w-40 shrink-0 text-right text-sm sm:w-48",
           strong ? "font-semibold text-foreground" : "text-muted-foreground"
         )}
       >
         {label} :
-      </span>
+      </Tag>
       <div className="w-36 shrink-0 sm:w-44">{children}</div>
       <span
         className={cn(
@@ -818,8 +825,9 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
         </CostRow>
 
         {COST_FIELDS.map((f) => (
-          <CostRow key={f.key} label={f.label}>
+          <CostRow key={f.key} label={f.label} htmlFor={`cost-${f.key}`}>
             <input
+              id={`cost-${f.key}`}
               type="number"
               step="0.01"
               min={0}

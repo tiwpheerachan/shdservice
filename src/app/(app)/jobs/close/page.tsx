@@ -315,6 +315,7 @@ function CloseForm() {
                 value={d.courier}
                 onChange={(e) => upd({ courier: e.target.value })}
                 placeholder="พิมพ์ชื่อบริษัทขนส่ง"
+                aria-label="ชื่อบริษัทขนส่ง (พิมพ์เอง)"
               />
             )}
             <datalist id="close-shipper-options">

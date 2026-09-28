@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Search, User, Loader2, X, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
 
 export type Person = {
   id: string;
@@ -32,6 +33,8 @@ export function PeoplePicker({
 }) {
   const [q, setQ] = React.useState("");
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [items, setItems] = React.useState<Person[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -131,6 +134,12 @@ export function PeoplePicker({
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
+          {...field}
+          role="combobox"
+          aria-label={field.id ? undefined : placeholder}
+          aria-autocomplete="list"
+          aria-expanded={open && q.trim().length >= 2}
+          aria-controls={listId}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -167,7 +176,7 @@ export function PeoplePicker({
           ) : items.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">ไม่พบพนักงานที่ตรงกับ “{q}”</p>
           ) : (
-            <ul className="max-h-64 overflow-y-auto py-1">
+            <ul id={listId} className="max-h-64 overflow-y-auto py-1">
               {stale && (
                 <li className="px-2.5 py-1 text-2xs text-warning">รายชื่ออาจไม่ครบ — รอบซิงก์ล่าสุดจาก Lark ไม่สมบูรณ์</li>
               )}

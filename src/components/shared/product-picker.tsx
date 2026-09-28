@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/pop
 import { Badge } from "@/components/ui/badge";
 import { type Product } from "@/data/mock";
 import { baht, cn } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
 
 /** The fields the picker needs — `useProducts()` (lite rows) already carries them. */
 export type PickableProduct = Pick<Product, "sysCode" | "mfgCode" | "name" | "onhand" | "price" | "brand" | "category">;
@@ -71,6 +72,8 @@ export function ProductPicker<T extends PickableProduct>({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const field = useFieldControl(id); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [q, setQ] = React.useState("");
   const term = q.trim();
 
@@ -99,9 +102,12 @@ export function ProductPicker<T extends PickableProduct>({
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
       <PopoverTrigger asChild>
         <button
-          id={id}
           type="button"
           role="combobox"
+          aria-haspopup="listbox"
+          aria-controls={listId}
+          {...field}
+          aria-label={field.id ? undefined : placeholder}
           aria-expanded={open}
           className={cn(
             "flex w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20",
@@ -151,7 +157,7 @@ export function ProductPicker<T extends PickableProduct>({
               </button>
             )}
           </div>
-          <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
+          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5">
             {extraRows.length > 0 && (
               <CommandPrimitive.Group heading="บริการ" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
                 {extraRows.map((e) => (

@@ -149,6 +149,7 @@ export default function ReceivePage() {
       sortable: false,
       cell: (r) => (
         <NumberInput
+          aria-label={`จำนวนรับเข้า ${r.sysCode}`}
           min={0}
           placeholder="0"
           value={r.qty}
