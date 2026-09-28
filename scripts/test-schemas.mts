@@ -91,6 +91,16 @@ test("outsource: sending needs to + date; receiving back needs neither", () => {
   assert.deepEqual(errorsOf(outsourceActionSchema, { status: "x", receive: { from: "ร้าน A", date: "2026-09-28" } }), {});
   assert.ok(errorsOf(outsourceActionSchema, { status: "x" })["send.to"], "neither send nor receive");
 });
+
+test("outsource: ส่งโดย / รับโดย are optional user ids — never names, 0 or negatives", () => {
+  const send = { to: "ร้าน A", date: "2026-09-28" };
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: "x", send: { ...send, by: 12 } }), {});
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: "x", send }), {}, "left out → server uses the person saving");
+  assert.ok(errorsOf(outsourceActionSchema, { status: "x", send: { ...send, by: "สมชาย" } })["send.by"]);
+  assert.ok(errorsOf(outsourceActionSchema, { status: "x", send: { ...send, by: 0 } })["send.by"]);
+  assert.ok(errorsOf(outsourceActionSchema, { status: "x", receive: { date: "2026-09-28", by: -1 } })["receive.by"]);
+  assert.ok(errorsOf(outsourceActionSchema, { status: "x", receive: { date: "2026-09-28", by: 1.5 } })["receive.by"]);
+});
 test("swap needs New Serial; refund needs amount > 0 and a method", () => {
   assert.ok(errorsOf(swapRefundActionSchema, { status: "x", newSerial: "" }).newSerial);
   assert.deepEqual(errorsOf(swapRefundActionSchema, { status: "x", newSerial: "SN2" }), {});

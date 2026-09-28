@@ -140,6 +140,9 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
 const req = (msg: string) => z.string({ error: msg }).trim().min(1, msg);
 const reqDate = (msg: string) => z.string({ error: msg }).regex(ISO_DATE, msg);
 
+/** ส่งโดย / รับโดย: an app_user id (left out → the server uses the person saving) */
+const staffId = (msg: string) => z.number({ error: msg }).int(msg).positive(msg).optional();
+
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair */
 export const repairActionSchema = z.looseObject({ status: req("โปรดระบุสถานะงานซ่อม") });
 
@@ -147,8 +150,8 @@ export const repairActionSchema = z.looseObject({ status: req("โปรดร�
 export const outsourceActionSchema = z
   .looseObject({
     status: z.string().optional(),
-    send: z.looseObject({ to: req("ต้องระบุ ส่งไปยัง"), date: reqDate("ต้องระบุวันที่ส่ง") }).optional(),
-    receive: z.looseObject({}).optional(),
+    send: z.looseObject({ to: req("ต้องระบุ ส่งไปยัง"), date: reqDate("ต้องระบุวันที่ส่ง"), by: staffId("ต้องเลือกผู้ส่ง") }).optional(),
+    receive: z.looseObject({ by: staffId("ต้องเลือกผู้รับ") }).optional(),
   })
   .superRefine((v, ctx) => {
     if (!isFilled(v.status)) ctx.addIssue({ code: "custom", path: ["status"], message: "โปรดระบุสถานะงานซ่อม" });

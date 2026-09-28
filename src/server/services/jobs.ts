@@ -563,8 +563,11 @@ export type JobDetail = {
     sendDetail: string;
     sendDate: string;
     sendBy: string;
+    /** app_user id of ส่งโดย / รับโดย (0 = none) — the page's dropdowns use these */
+    sendById: number;
     receiveDate: string;
     receiveBy: string;
+    receiveById: number;
     receiveDetail: string;
     status: string;
   }[];
@@ -736,8 +739,10 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       sendDetail: x.f.sendDetail ?? "",
       sendDate: fmtDate(x.f.sendDate),
       sendBy: fullName(x.sf, x.sl),
+      sendById: Math.max(0, x.f.sendBy ?? 0),
       receiveDate: fmtDate(x.f.receiveDate),
       receiveBy: fullName(x.rf, x.rl),
+      receiveById: Math.max(0, x.f.receiveBy ?? 0),
       receiveDetail: x.f.receiveDetail ?? "",
       status: x.f.sendStatus ?? "",
     })),
@@ -1258,10 +1263,27 @@ export type OutsourceInput = {
   engineerSymptom?: string;
   symptomOther?: string;
   repairDetail?: string;
-  send?: { to: string; date?: string; detail?: string };
-  receive?: { from?: string; date?: string; detail?: string };
+  /** `by` = app_user id of ส่งโดย / รับโดย; left out → the user saving */
+  send?: { to: string; date?: string; detail?: string; by?: number };
+  receive?: { from?: string; date?: string; detail?: string; by?: number };
   status?: string;
 };
+
+/**
+ * ส่งโดย / รับโดย: an active staff member, or the person already on the row (who may have left
+ * since — keeping them is never an error). Anything else is a 400 under that field.
+ */
+async function staffOrKeep(id: number | undefined, current: number | null | undefined, field: string, fallback: number): Promise<number> {
+  if (id === undefined) return fallback;
+  if (id === current) return id;
+  const [u] = await db
+    .select({ id: appUser.userId })
+    .from(appUser)
+    .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
+    .limit(1);
+  if (!u) throw new HttpError(400, "ข้อมูลไม่ถูกต้อง 1 ช่อง", { fields: { [field]: "ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน" } });
+  return id;
+}
 
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
@@ -1271,6 +1293,14 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     ? await db.select({ id: symptom.symptomId }).from(symptom).where(eq(symptom.symptomName, i.engineerSymptom)).limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
+  const [openRow] = await db
+    .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
+    .from(jobSendForwardDt)
+    .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, "ส่งเครื่องซ่อมแล้ว")))
+    .orderBy(desc(jobSendForwardDt.id))
+    .limit(1);
+  const sendBy = await staffOrKeep(i.send?.by, openRow?.sendBy, "send.by", byUserId);
+  const receiveBy = await staffOrKeep(i.receive?.by, openRow?.receiveBy, "receive.by", byUserId);
 
   await db.transaction(async (tx) => {
     const fields = {
@@ -1285,7 +1315,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       entity: "job",
       key: jobNo,
       summary: i.send ? `ส่งซ่อมต่อ → ${str(i.send.to)}` : i.receive ? `รับคืนจาก Out-Source (${str(i.receive.from)})` : "บันทึกงานส่งซ่อมต่อ",
-      changes: diff(null, { ...fields, ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date) } : {}), ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date) } : {}) }),
+      changes: diff(null, { ...fields, ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}), ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}) }),
     });
 
     let target = newStatus;
@@ -1301,7 +1331,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
         .update(jobSendForwardDt)
         .set({
           receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
-          receiveBy: byUserId,
+          receiveBy,
           receiveDetail: str(i.receive.detail).slice(0, 100),
           sendStatus: "รับเครื่องซ่อมแล้ว",
         })
@@ -1311,7 +1341,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       if (open[0]) {
         await tx
           .update(jobSendForwardDt)
-          .set({ sendToName: str(i.send.to).slice(0, 50), sendDetail: str(i.send.detail).slice(0, 100), sendDate: dateOrSentinel(i.send.date ?? nowThai()) })
+          .set({ sendToName: str(i.send.to).slice(0, 50), sendDetail: str(i.send.detail).slice(0, 100), sendDate: dateOrSentinel(i.send.date ?? nowThai()), sendBy })
           .where(eq(jobSendForwardDt.id, open[0].id));
       } else {
         await tx.insert(jobSendForwardDt).values({
@@ -1319,7 +1349,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           sendToName: str(i.send.to).slice(0, 50),
           sendDetail: str(i.send.detail).slice(0, 100),
           sendDate: dateOrSentinel(i.send.date ?? nowThai()),
-          sendBy: byUserId,
+          sendBy,
           receiveDate: SENTINEL_TS,
           receiveBy: -1,
           receiveDetail: "",

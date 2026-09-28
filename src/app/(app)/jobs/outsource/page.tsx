@@ -40,7 +40,7 @@ function OutsourceForm() {
   const { push } = useToast();
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
-  const { name: me, can } = useAccess();
+  const { userId: meId, can } = useAccess();
   const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors();
@@ -51,7 +51,7 @@ function OutsourceForm() {
     sendTo: "",
     sendToOther: "",
     sendDate: "",
-    sendBy: "",
+    sendBy: "", // app_user id (SearchSelect values are strings)
     sendDetail: "",
     recvFrom: "",
     recvDate: "",
@@ -60,7 +60,14 @@ function OutsourceForm() {
     status: "",
   });
   // editing a field clears its error (keys = the payload paths the rules report)
-  const ERR_KEY: Partial<Record<keyof typeof d, string>> = { sendTo: "send.to", sendToOther: "send.to", sendDate: "send.date", status: "status" };
+  const ERR_KEY: Partial<Record<keyof typeof d, string>> = {
+    sendTo: "send.to",
+    sendToOther: "send.to",
+    sendDate: "send.date",
+    sendBy: "send.by",
+    recvBy: "receive.by",
+    status: "status",
+  };
   const upd = (p: Partial<typeof d>) => {
     setD((x) => ({ ...x, ...p }));
     (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
@@ -78,11 +85,11 @@ function OutsourceForm() {
       sendTo: last?.sendTo && VENDORS.includes(last.sendTo) ? last.sendTo : last?.sendTo ? OTHER : "",
       sendToOther: last?.sendTo && !VENDORS.includes(last.sendTo) ? last.sendTo : "",
       sendDate: last?.sendDate || today,
-      sendBy: last?.sendBy || me,
+      sendBy: String(last?.sendById || meId),
       sendDetail: last?.sendDetail ?? "",
       recvFrom: last?.status === "ส่งเครื่องซ่อมแล้ว" ? last.sendTo : "",
       recvDate: last?.receiveDate ?? "",
-      recvBy: last?.receiveBy || "",
+      recvBy: last?.receiveById ? String(last.receiveById) : "",
       recvDetail: last?.receiveDetail ?? "",
       // the job's current status, so saving without a change keeps it (the field is required)
       status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
@@ -110,8 +117,8 @@ function OutsourceForm() {
     const body = {
       symptomOther: form.symptomOther,
       repairDetail: d.repairDetail,
-      send: !receiving ? { to: sendTo, date: d.sendDate, detail: d.sendDetail } : undefined,
-      receive: receiving ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail } : undefined,
+      send: !receiving ? { to: sendTo, date: d.sendDate, detail: d.sendDetail, by: Number(d.sendBy) || undefined } : undefined,
+      receive: receiving ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail, by: Number(d.recvBy || meId) || undefined } : undefined,
       status: d.status || undefined,
     };
     const canEdit = can("Job Management", "edit");
@@ -129,15 +136,21 @@ function OutsourceForm() {
     }
   };
 
-  // ส่งโดย / รับโดย store the person's NAME; names saved on the job that are no longer in the
-  // staff list (left / legacy spelling) stay selectable so they are not silently replaced
+  // ส่งโดย / รับโดย store the person's app_user id; someone already saved on this job who is no
+  // longer in the staff list (left) stays selectable so they are not silently replaced
   const staffOptions = React.useMemo(() => {
-    const opts = STAFF.map((st) => ({ value: st.name, label: st.name, sub: st.userType || undefined }));
-    for (const n of [me, d.sendBy, d.recvBy]) {
-      if (n && !opts.some((o) => o.value === n)) opts.unshift({ value: n, label: n, sub: n === me ? "ฉัน" : "ไม่อยู่ในรายชื่อปัจจุบัน" });
+    const opts = STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.id === meId ? "ฉัน" : st.userType || undefined }));
+    const last = job?.outsource[job.outsource.length - 1];
+    const saved = [
+      { id: last?.sendById, name: last?.sendBy },
+      { id: last?.receiveById, name: last?.receiveBy },
+    ];
+    for (const p of saved) {
+      if (p.id && !opts.some((o) => o.value === String(p.id)))
+        opts.unshift({ value: String(p.id), label: p.name || `#${p.id}`, sub: "ไม่อยู่ในรายชื่อปัจจุบัน" });
     }
     return opts;
-  }, [STAFF, me, d.sendBy, d.recvBy]);
+  }, [STAFF, meId, job]);
 
   return (
     <>
@@ -214,7 +227,7 @@ function OutsourceForm() {
             <Field label="วันที่ส่ง" required error={act.errors["send.date"]}>
               <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
             </Field>
-            <Field label="ส่งโดย" required>
+            <Field label="ส่งโดย" required error={act.errors["send.by"]}>
               <SearchSelect value={d.sendBy} onChange={(v) => upd({ sendBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้ส่ง…" />
             </Field>
             <Field label="หมายเหตุการส่ง" wide>
@@ -236,8 +249,8 @@ function OutsourceForm() {
             <Field label="วันที่รับ">
               <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
             </Field>
-            <Field label="รับโดย">
-              <SearchSelect value={d.recvBy || me} onChange={(v) => upd({ recvBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้รับ…" />
+            <Field label="รับโดย" error={act.errors["receive.by"]}>
+              <SearchSelect value={d.recvBy || String(meId)} onChange={(v) => upd({ recvBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้รับ…" />
             </Field>
             <Field label="หมายเหตุการรับคืน" wide>
               <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
