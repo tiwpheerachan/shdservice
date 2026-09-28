@@ -44,13 +44,14 @@ function EditQuotation() {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขใบเสนอราคาก่อน" });
       return;
     }
+    if (!form.current?.validate()) return;
     setSaving(true);
     try {
       const d = await postJson<{ quotation: QuotationLoaded }>("/api/quotations", { ...p, no });
       setLoaded(d.quotation);
       push({ kind: "success", title: "บันทึกการแก้ไขใบเสนอราคาแล้ว", desc: d.quotation.no });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

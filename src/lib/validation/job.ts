@@ -146,23 +146,25 @@ export const repairActionSchema = z.looseObject({ status: req("โปรดร�
 /** บันทึกงานส่งซ่อมต่อ → POST /api/jobs/:no/outsource (sending: to + date; receiving back: the receive block) */
 export const outsourceActionSchema = z
   .looseObject({
-    status: req("โปรดระบุสถานะงานซ่อม"),
+    status: z.string().optional(),
     send: z.looseObject({ to: req("ต้องระบุ ส่งไปยัง"), date: reqDate("ต้องระบุวันที่ส่ง") }).optional(),
     receive: z.looseObject({}).optional(),
   })
   .superRefine((v, ctx) => {
+    if (!isFilled(v.status)) ctx.addIssue({ code: "custom", path: ["status"], message: "โปรดระบุสถานะงานซ่อม" });
     if (!v.send && !v.receive) ctx.addIssue({ code: "custom", path: ["send", "to"], message: "ต้องระบุ ส่งไปยัง" });
   });
 
 /** บันทึกงาน Swap / Refund → POST /api/jobs/:no/swap-refund (refund = the body carries refund fields) */
 export const swapRefundActionSchema = z
   .looseObject({
-    status: req("โปรดระบุสถานะงาน"),
+    status: z.string().optional(),
     newSerial: z.string().optional(),
     refundAmount: z.union([z.number(), z.string()]).optional(),
     refundMethod: z.string().optional(),
   })
   .superRefine((v, ctx) => {
+    if (!isFilled(v.status)) ctx.addIssue({ code: "custom", path: ["status"], message: "โปรดระบุสถานะงาน" });
     const refund = v.refundAmount !== undefined || v.refundMethod !== undefined;
     if (refund) {
       if (!(Number(v.refundAmount) > 0)) ctx.addIssue({ code: "custom", path: ["refundAmount"], message: "ต้องระบุยอดเงินคืน (มากกว่า 0)" });

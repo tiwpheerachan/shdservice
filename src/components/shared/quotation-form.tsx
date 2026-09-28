@@ -17,6 +17,8 @@ import { QUOTATION_STATUS_OPTIONS, type Customer } from "@/data/mock";
 import { baht } from "@/lib/utils";
 import { api, errMsg, qs } from "@/lib/api";
 import type { JobDetail } from "@/lib/use-job";
+import { useFormErrors } from "@/lib/use-form-errors";
+import { quotationSchema } from "@/lib/validation/quotation";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; itemType: "SparePart" | "Service" | "Delivery" };
 
@@ -60,7 +62,14 @@ export type QuotationPayload = {
   status: string;
 };
 
-export type QuotationFormHandle = { payload: () => QuotationPayload; customer: () => Customer | null };
+export type QuotationFormHandle = {
+  payload: () => QuotationPayload;
+  customer: () => Customer | null;
+  /** check before saving (lib/validation/quotation) — shows the errors; true = OK */
+  validate: () => boolean;
+  /** API field errors → under the fields; false for any other error */
+  fromApi: (err: unknown) => boolean;
+};
 
 /** non-stock line the quotation may carry (legacy SVD0001 = delivery charge, kept out of spare_part_amount) */
 const DELIVERY_EXTRA: ExtraItem[] = [{ code: "SVD0001", name: "ค่าขนส่ง" }];
@@ -76,6 +85,7 @@ export const QuotationForm = React.forwardRef<
   }
 >(function QuotationForm({ mode, quotationNo, initial, jobNo }, ref) {
   const { push } = useToast();
+  const fe = useFormErrors();
   const { data: PRODUCTS } = useProducts();
   const [type, setType] = React.useState<"A" | "B">("A");
   const [profileId, setProfileId] = React.useState(0); // ออกเอกสารในนาม — from the job when raised from one
@@ -176,18 +186,20 @@ export const QuotationForm = React.forwardRef<
   const net = beforeVat + vat;
 
 
-  React.useImperativeHandle(ref, () => ({
-    customer: () => customer,
-    payload: () => ({
+  // a value that changes — typed or filled in from the job — takes its error away
+  const { clear } = fe;
+  React.useEffect(() => clear("customerCode"), [customer, clear]);
+  React.useEffect(() => clear("jobNo"), [jobRef, clear]);
+
+  const payload = (): QuotationPayload => ({
       no: quotationNo || initial?.no || undefined,
       documentProfileId: profileId || undefined,
       type: type === "A" ? "Type A (Normal)" : "Type B (VIP)",
       customerCode: customer?.code ?? "",
       contactName: contact,
       jobNo: jobRef,
-      lines: lines
-        .filter((l) => l.code || l.name)
-        .map((l) => ({ code: l.code, detail: l.name, qty: l.qty, unitPrice: l.price, itemType: l.itemType, unit: "หน่วย", discount: 0, discountPercent: 0 })),
+      // every row, in screen order (line errors point at the row); the API drops empty rows
+      lines: lines.map((l) => ({ code: l.code, detail: l.name, qty: l.qty, unitPrice: l.price, itemType: l.itemType, unit: "หน่วย", discount: 0, discountPercent: 0 })),
       serviceAmount: service,
       discountType: discount > 0 ? "ส่วนลดรวม" : "ไม่มีส่วนลด",
       discountValue: discount,
@@ -195,7 +207,13 @@ export const QuotationForm = React.forwardRef<
       vatRate,
       remark,
       status,
-    }),
+  });
+  React.useImperativeHandle(ref, () => ({
+    customer: () => customer,
+    payload,
+    // an old quotation saved without a job may stay without one ("never worse")
+    validate: () => !fe.report(fe.run(quotationSchema(mode === "new" || !!initial?.jobRef?.trim()), payload())),
+    fromApi: fe.fromApi,
   }));
 
   return (
@@ -234,7 +252,9 @@ export const QuotationForm = React.forwardRef<
       </Section>
 
       <Section title="ข้อมูลลูกค้า" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
-        <CustomerSelect value={customer} onChange={setCustomer} />
+        <Field error={fe.errors.customerCode}>
+          <CustomerSelect value={customer} onChange={setCustomer} />
+        </Field>
         <FieldGrid className="mt-4">
           <Field label="แฟกซ์">
             <Input className="num" value={fax} onChange={(e) => setFax(e.target.value)} />
@@ -255,7 +275,7 @@ export const QuotationForm = React.forwardRef<
           <Field label="วันที่">
             <ReadOnly><span className="num">{date} น.</span></ReadOnly>
           </Field>
-          <Field label="อ้างถึง หมายเลขงานซ่อม" required>
+          <Field label="อ้างถึง หมายเลขงานซ่อม" required={mode === "new" || !!initial?.jobRef?.trim()} error={fe.errors.jobNo}>
             <Input
               className="num"
               placeholder="J2612164"
@@ -376,18 +396,28 @@ export const QuotationForm = React.forwardRef<
                     </td>
                     <td className="px-3 py-2">
                       <NumberInput
+                        aria-label={`จำนวน แถว ${i + 1}`}
+                        aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
                         min={0}
                         placeholder="0"
                         value={l.qty}
-                        onChange={(n) => upd(l.id, { qty: n })}
+                        onChange={(n) => {
+                          upd(l.id, { qty: n });
+                          fe.clear(`lines.${i}.qty`);
+                        }}
                         className="h-8 text-xs"
                       />
                     </td>
                     <td className="px-3 py-2">
                       <NumberInput
+                        aria-label={`ราคา/หน่วย แถว ${i + 1}`}
+                        aria-invalid={!!fe.errors[`lines.${i}.unitPrice`] || undefined}
                         step="0.01"
                         value={l.price}
-                        onChange={(n) => upd(l.id, { price: n })}
+                        onChange={(n) => {
+                          upd(l.id, { price: n });
+                          fe.clear(`lines.${i}.unitPrice`);
+                        }}
                         className="h-8 text-xs"
                       />
                     </td>
@@ -438,9 +468,13 @@ export const QuotationForm = React.forwardRef<
                 <dt className="text-muted-foreground">ค่าบริการ</dt>
                 <NumberInput
                   aria-label="ค่าบริการ"
+                  aria-invalid={!!fe.errors.serviceAmount || undefined}
                   step="0.01"
                   value={service}
-                  onChange={(n) => setService(n)}
+                  onChange={(n) => {
+                    setService(n);
+                    fe.clear("serviceAmount");
+                  }}
                   className="h-8 w-32 text-xs"
                 />
               </div>
@@ -450,10 +484,14 @@ export const QuotationForm = React.forwardRef<
                 <dt className="text-muted-foreground">ส่วนลด (%)</dt>
                 <NumberInput
                   aria-label="ส่วนลด (%)"
+                  aria-invalid={!!fe.errors.discountValue || undefined}
                   step="0.01"
                   placeholder="0"
                   value={discount}
-                  onChange={(n) => setDiscount(n)}
+                  onChange={(n) => {
+                    setDiscount(n);
+                    fe.clear("discountValue");
+                  }}
                   className="h-8 w-32 text-xs"
                 />
               </div>
@@ -463,10 +501,14 @@ export const QuotationForm = React.forwardRef<
                 <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
                 <NumberInput
                   aria-label="ภาษีมูลค่าเพิ่ม (%)"
+                  aria-invalid={!!fe.errors.vatRate || undefined}
                   step="0.01"
                   placeholder="0"
                   value={vatRate}
-                  onChange={(n) => setVatRate(n)}
+                  onChange={(n) => {
+                    setVatRate(n);
+                    fe.clear("vatRate");
+                  }}
                   className="h-8 w-32 text-xs"
                 />
               </div>

@@ -18,18 +18,14 @@ function NewQuotation() {
   // POST /api/quotations → quotation_hd (running Q) + quotation_dt
   const save = async () => {
     const p = form.current?.payload();
-    if (!p) return;
-    if (!p.customerCode) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุลูกค้า" });
-      return;
-    }
+    if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
     setSaving(true);
     try {
       const d = await postJson<{ quotation: { no: string } }>("/api/quotations", p);
       push({ kind: "success", title: "สร้างใบเสนอราคาแล้ว", desc: d.quotation.no });
       router.push(`/quotation/edit?no=${encodeURIComponent(d.quotation.no)}`);
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

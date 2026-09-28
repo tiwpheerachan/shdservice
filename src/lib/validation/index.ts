@@ -29,4 +29,10 @@ export function validate<S extends z.ZodType>(
   return r.success ? { ok: true, data: r.data } : { ok: false, errors: toFieldErrors(r.error) };
 }
 
-export const summary = (errors: FieldErrors) => `กรอกข้อมูลไม่ครบ ${Object.keys(errors).length} ช่อง`;
+/** "กรอกข้อมูลไม่ครบ N ช่อง" (missing) / "ข้อมูลไม่ถูกต้อง N ช่อง" (wrong values) / both */
+export function summary(errors: FieldErrors): string {
+  const msgs = Object.values(errors);
+  const missing = msgs.filter((m) => /^ต้อง(ระบุ|เลือก|ค้นหา)/.test(m)).length;
+  const what = missing === msgs.length ? "กรอกข้อมูลไม่ครบ" : missing === 0 ? "ข้อมูลไม่ถูกต้อง" : "กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง";
+  return `${what} ${msgs.length} ช่อง`;
+}

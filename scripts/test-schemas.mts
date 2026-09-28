@@ -15,6 +15,7 @@ import {
   closeActionSchema,
 } from "../src/lib/validation/job.ts";
 import { customerSchema, conflictErrors } from "../src/lib/validation/customer.ts";
+import { quotationSchema } from "../src/lib/validation/quotation.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -114,6 +115,30 @@ test("email must be a real address when given", () => {
 test("a 409 clash becomes a message under the clashing field", () => {
   const e = conflictErrors([{ field: "phone", code: "C00001", name: "สมชาย" }]);
   assert.match(e.phone, /C00001/);
+});
+
+console.log("\nQuotation");
+const q = { customerCode: "C00001", jobNo: "J2612164", lines: [{ qty: 1, unitPrice: 100 }], serviceAmount: 0, discountValue: 0, vatRate: 7 };
+test("a complete quotation passes; no lines at all is allowed", () => {
+  assert.deepEqual(errorsOf(quotationSchema(), q), {});
+  assert.deepEqual(errorsOf(quotationSchema(), { ...q, lines: [] }), {});
+});
+test("customer + job no required for a new one; an old one without a job may stay without", () => {
+  assert.deepEqual(Object.keys(errorsOf(quotationSchema(), { ...q, customerCode: "", jobNo: "" })).sort(), ["customerCode", "jobNo"]);
+  assert.deepEqual(errorsOf(quotationSchema(false), { ...q, jobNo: "" }), {});
+  assert.ok(errorsOf(quotationSchema(false), { ...q, jobNo: "abc" }).jobNo, "a given job no must still look like one");
+});
+test("numbers: qty > 0 per row, no negatives, discount and VAT ≤ 100", () => {
+  const e = errorsOf(quotationSchema(), { ...q, lines: [{ qty: 1, unitPrice: 5 }, { qty: 0, unitPrice: -1 }], serviceAmount: -5, discountValue: 120, vatRate: -7 });
+  assert.deepEqual(Object.keys(e).sort(), ["discountValue", "lines.1.qty", "lines.1.unitPrice", "serviceAmount", "vatRate"]);
+});
+
+console.log("\nAPI called with missing keys");
+test("an empty body still reports every rule (no early stop)", () => {
+  assert.deepEqual(Object.keys(errorsOf(quotationSchema(), {})).sort(), ["customerCode", "jobNo"]);
+  assert.deepEqual(Object.keys(errorsOf(customerSchema(), {})).sort(), ["name", "phone"]);
+  assert.deepEqual(Object.keys(errorsOf(outsourceActionSchema, {})).sort(), ["send.to", "status"]);
+  assert.deepEqual(Object.keys(errorsOf(swapRefundActionSchema, {})).sort(), ["newSerial", "status"]);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

@@ -12,11 +12,13 @@ import { isFilled } from "./job";
 export function customerSchema(phoneRequired = true) {
   return z
     .looseObject({
-      name: z.string({ error: "ต้องระบุชื่อลูกค้า" }).trim().min(1, "ต้องระบุชื่อลูกค้า"),
+      name: z.string().optional(),
       phone: z.string().optional(),
       email: z.union([z.literal(""), z.email("รูปแบบอีเมลไม่ถูกต้อง")]).optional(),
     })
+    // required checks here, not on the fields: a missing key must not stop the other rules
     .superRefine((v, ctx) => {
+      if (!isFilled(v.name)) ctx.addIssue({ code: "custom", path: ["name"], message: "ต้องระบุชื่อลูกค้า" });
       if (phoneRequired && !isFilled(v.phone)) ctx.addIssue({ code: "custom", path: ["phone"], message: "ต้องระบุเบอร์โทรศัพท์" });
     });
 }
