@@ -101,7 +101,7 @@ export function Sidebar({
         {/* brand */}
         <div
           className={cn(
-            "flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border",
+            "flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-sidebar-border",
             collapsed ? "justify-center px-0" : "px-3"
           )}
         >

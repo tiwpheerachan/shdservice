@@ -112,6 +112,10 @@
   :root {
     --radius: 0.625rem;
 
+    /* heights of the sticky bars — the topbar and the scroll-padding below read them */
+    --topbar-h: 3.5rem;
+    --actions-h: 4rem;
+
     --background: 210 25% 97%;
     --foreground: 222 47% 12%;
     --card: 0 0% 100%;
@@ -215,6 +219,15 @@
   /* stable scrollbars — no layout shift when content changes */
   html {
     scrollbar-gutter: stable;
+  }
+
+  /* whatever the browser scrolls into view (Tab, a click, find-in-page, #anchor, scrollIntoView)
+     stops clear of the sticky topbar, and of the sticky save bar on pages that have one */
+  html {
+    scroll-padding-top: calc(var(--topbar-h) + 0.75rem);
+  }
+  html:has([data-sticky-actions]) {
+    scroll-padding-bottom: calc(var(--actions-h) + 0.75rem);
   }
 
   ::-webkit-scrollbar {

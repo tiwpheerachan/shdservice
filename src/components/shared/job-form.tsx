@@ -1046,7 +1046,7 @@ export function FormActions({
   onCancel?: () => void;
 }) {
   return (
-    <div className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-background/90 px-3 py-3 backdrop-blur-md sm:-mx-4 sm:px-4 lg:-mx-6 lg:px-6 no-print">
+    <div data-sticky-actions className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-background/90 px-3 py-3 backdrop-blur-md sm:-mx-4 sm:px-4 lg:-mx-6 lg:px-6 no-print">
       {extra}
       <Button variant="outline" size="md" type="button" onClick={onCancel ?? (() => window.history.back())}>
         ยกเลิก

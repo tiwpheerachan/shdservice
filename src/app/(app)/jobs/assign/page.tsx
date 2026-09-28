@@ -243,7 +243,7 @@ export default function AssignPage() {
       </FilterBar>
 
       {/* smart selection toolbar — sticks under the topbar like a navbar */}
-      <div className="surface sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-xs">
+      <div className="surface sticky top-(--topbar-h) z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-medium">
             <ListChecks className="h-4 w-4 text-primary" />

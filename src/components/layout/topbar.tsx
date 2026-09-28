@@ -33,7 +33,7 @@ export function Topbar({
     : "··";
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
+    <header className="sticky top-0 z-30 flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
       <button
         onClick={onOpenMobile}
         className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
