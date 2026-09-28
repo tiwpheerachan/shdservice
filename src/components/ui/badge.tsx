@@ -24,18 +24,24 @@ export const badgeVariants = cva(
 export function Badge({
   tone,
   dot,
+  wrap,
   className,
   children,
 }: VariantProps<typeof badgeVariants> & {
   dot?: boolean;
+  /** for table columns: long text takes 2 lines instead of forcing the column wide */
+  wrap?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
   // no value (e.g. a job without a job type) → a quiet dash, not an empty pill that looks like a loading bar
   if (isEmpty(children)) return <span className="text-muted-foreground">—</span>;
   return (
-    <span data-slot="badge" className={cn(badgeVariants({ tone }), className)}>
-      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+    <span
+      data-slot="badge"
+      className={cn(badgeVariants({ tone }), wrap && "items-start whitespace-normal rounded-lg [&>[data-dot]]:mt-[5px]", className)}
+    >
+      {dot && <span data-dot className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
       {children}
     </span>
   );
@@ -62,9 +68,10 @@ const JOB_TONE: Record<string, Tone> = {
   Cancel: "danger",
 };
 
-export function StatusBadge({ status }: { status: string }) {
+/** `wrap` (table columns): a long status ("อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่") takes 2 lines */
+export function StatusBadge({ status, wrap }: { status: string; wrap?: boolean }) {
   return (
-    <Badge tone={JOB_TONE[status] ?? "neutral"} dot>
+    <Badge tone={JOB_TONE[status] ?? "neutral"} dot wrap={wrap}>
       {status}
     </Badge>
   );

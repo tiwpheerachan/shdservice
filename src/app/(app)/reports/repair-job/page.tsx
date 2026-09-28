@@ -10,15 +10,16 @@ import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
 import { exportXlsx } from "@/lib/api";
+import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
 
 const columns: Column<Job>[] = [
   { key: "no", header: "เลขที่งาน", width: "130px", cell: (r) => <span className="num font-medium">{r.no}</span> },
-  { key: "customer", header: "ลูกค้า", cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span> },
-  { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+  { key: "customer", header: "ลูกค้า", minWidth: COL_MIN_WIDTH.customer, cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span> },
+  brandModelColumn(),
   { key: "imei", header: "Serial / IMEI", hideBelow: "xl", cell: (r) => <span className="num text-xs">{r.imei || r.serial}</span> },
   { key: "owner", header: "ช่างผู้รับผิดชอบ", hideBelow: "lg" },
   { key: "amount", header: "ค่าอะไหล่+บริการ", align: "right", width: "140px", value: (r) => r.amount, cell: (r) => baht(r.amount) },
-  { key: "status", header: "สถานะงาน", width: "150px", cell: (r) => <StatusBadge status={r.status} /> },
+  { key: "status", header: "สถานะงาน", minWidth: COL_MIN_WIDTH.status, cell: (r) => <StatusBadge status={r.status} wrap /> },
 ];
 
 export default function Page() {

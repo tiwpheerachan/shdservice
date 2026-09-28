@@ -18,6 +18,7 @@ import { useJobsPage, useJobTypes, useManufacturers, useModels } from "@/data/db
 import { api, postJson, errMsg, qs } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { isFilterActive } from "@/lib/utils";
+import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
 
 export default function AssignPage() {
   const { push } = useToast();
@@ -158,6 +159,7 @@ export default function AssignPage() {
     {
       key: "customer",
       header: "ลูกค้า",
+      minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
     },
     {
@@ -167,13 +169,13 @@ export default function AssignPage() {
       hideBelow: "xl",
       cell: (r) => <span className="num text-xs">{r.so}</span>,
     },
-    { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+    brandModelColumn(),
     { key: "jobType", header: "ประเภทงาน", hideBelow: "xl" },
     {
       key: "status",
       header: "สถานะงาน",
-      width: "150px",
-      cell: (r) => <StatusBadge status={r.status} />,
+      minWidth: COL_MIN_WIDTH.status,
+      cell: (r) => <StatusBadge status={r.status} wrap />,
     },
   ];
 

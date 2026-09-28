@@ -10,6 +10,7 @@ import type { Column } from "@/components/ui/data-table";
 import { baht, int } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
 import { exportXlsx } from "@/lib/api";
+import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
 
 // TAT = วันที่ปิดงาน − วันที่เปิดงาน
 const tatDays = (r: Job) => {
@@ -20,8 +21,8 @@ const tatDays = (r: Job) => {
 const columns: Column<Job>[] = [
   { key: "no", header: "เลขที่งาน", width: "130px", cell: (r) => <span className="num font-medium">{r.no}</span> },
   { key: "openDate", header: "วันที่เปิดงาน", width: "140px", cell: (r) => <span className="num text-xs">{r.openDate}</span> },
-  { key: "customer", header: "ลูกค้า", cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span> },
-  { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+  { key: "customer", header: "ลูกค้า", minWidth: COL_MIN_WIDTH.customer, cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span> },
+  brandModelColumn(),
   {
     key: "tat",
     header: "TAT (วัน)",
@@ -40,7 +41,7 @@ const columns: Column<Job>[] = [
     cell: (r) => (r.returnType ? <Badge tone="info">{r.returnType}</Badge> : <span className="text-muted-foreground">—</span>),
   },
   { key: "paymentAmount", header: "ยอดรับชำระ", align: "right", width: "120px", value: (r) => r.paymentAmount ?? 0, cell: (r) => baht(r.paymentAmount ?? 0) },
-  { key: "status", header: "สถานะงาน", width: "140px", cell: (r) => <StatusBadge status={r.status} /> },
+  { key: "status", header: "สถานะงาน", minWidth: COL_MIN_WIDTH.status, cell: (r) => <StatusBadge status={r.status} wrap /> },
 ];
 
 export default function Page() {

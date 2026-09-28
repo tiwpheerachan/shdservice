@@ -25,6 +25,10 @@ export type Column<T> = {
   cell?: (row: T, index: number) => React.ReactNode;
   align?: "left" | "center" | "right";
   width?: string;
+  /** the column never gets narrower than this (e.g. text that should not wrap to 4 lines) */
+  minWidth?: string;
+  /** a long header ("หมายเลขใบเสนอราคา") may take 2 lines — the column then sizes to its values */
+  headerWrap?: boolean;
   className?: string;
   sortable?: boolean;
   hideBelow?: "sm" | "md" | "lg" | "xl";
@@ -222,9 +226,10 @@ export function DataTable<T extends Record<string, unknown>>({
                   <th
                     key={c.key}
                     scope="col"
-                    style={c.width ? { width: c.width } : undefined}
+                    style={c.width || c.minWidth ? { width: c.width, minWidth: c.minWidth } : undefined}
                     className={cn(
-                      "whitespace-nowrap px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground",
+                      "px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground",
+                      c.headerWrap ? "leading-tight" : "whitespace-nowrap",
                       c.align === "right"
                         ? "text-right"
                         : c.align === "center"
@@ -240,6 +245,7 @@ export function DataTable<T extends Record<string, unknown>>({
                         className={cn(
                           "inline-flex items-center gap-1 rounded transition-colors hover:text-foreground",
                           c.align === "right" && "flex-row-reverse",
+                          c.headerWrap && (c.align === "right" ? "text-right" : "text-left"),
                           active && "text-primary"
                         )}
                       >

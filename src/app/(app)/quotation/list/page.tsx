@@ -18,6 +18,7 @@ import { useQuotationsPage, useManufacturers } from "@/data/db";
 import { baht, isFilterActive } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
 import { exportXlsx } from "@/lib/api";
+import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from "@/components/shared/table-columns";
 
 // quotation_status names (DB) → badge tone
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
@@ -61,6 +62,7 @@ export default function QuotationListPage() {
     {
       key: "no",
       header: "หมายเลขใบเสนอราคา",
+      headerWrap: true,
       width: "150px",
       cell: (r) => (
         <Link href={`/quotation/edit?no=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
@@ -72,7 +74,7 @@ export default function QuotationListPage() {
       key: "date",
       header: "วันที่",
       width: "110px",
-      cell: (r) => <span className="num text-xs">{r.date}</span>,
+      cell: (r) => <DateTimeCell value={r.date} />,
     },
     {
       key: "type",
@@ -86,21 +88,24 @@ export default function QuotationListPage() {
     {
       key: "customer",
       header: "ลูกค้า",
+      minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
     },
     {
       key: "jobRef",
       header: "อ้างถึงงานซ่อม",
+      headerWrap: true,
       width: "130px",
       cell: (r) => <span className="num text-xs">{r.jobRef}</span>,
     },
     {
       key: "imei",
       header: "IMEI No.",
+      headerWrap: true,
       hideBelow: "xl",
       cell: (r) => <span className="num text-xs">{r.imei}</span>,
     },
-    { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+    brandModelColumn(),
     {
       key: "amount",
       header: "จำนวนเงิน",
@@ -112,9 +117,10 @@ export default function QuotationListPage() {
     {
       key: "approveDate",
       header: "วันที่ตอบรับ",
+      headerWrap: true,
       hideBelow: "xl",
       width: "130px",
-      cell: (r) => <span className="num text-xs">{r.approveDate || "—"}</span>,
+      cell: (r) => <DateTimeCell value={r.approveDate} />,
     },
     {
       key: "status",

@@ -35,6 +35,7 @@ import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useM
 import { baht, cn, isFilterActive } from "@/lib/utils";
 import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
 
 /** Filter bar — every field is AND-ed on the server (see JobFilters in services/jobs.ts). */
 type Filters = {
@@ -245,6 +246,7 @@ export default function JobListPage() {
     {
       key: "customer",
       header: "ลูกค้า",
+      minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => (
         <span className="flex items-center gap-2">
           <button
@@ -267,12 +269,12 @@ export default function JobListPage() {
       hideBelow: "lg",
       cell: (r) => <span className="num text-xs">{r.so}</span>,
     },
-    { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+    brandModelColumn(),
     {
       key: "jobType",
       header: "ประเภทงาน",
       hideBelow: "xl",
-      cell: (r) => <Badge tone="primary">{r.jobType}</Badge>,
+      cell: (r) => <Badge tone="primary" wrap>{r.jobType}</Badge>,
     },
     { key: "owner", header: "ผู้รับผิดชอบ", hideBelow: "lg" },
     {
@@ -287,10 +289,10 @@ export default function JobListPage() {
     {
       key: "status",
       header: "สถานะงาน",
-      width: "150px",
+      minWidth: COL_MIN_WIDTH.status,
       cell: (r) => (
         <span className="flex flex-wrap items-center gap-1">
-          <StatusBadge status={r.status} />
+          <StatusBadge status={r.status} wrap />
           {r.isBounce && (
             <Badge tone="warning" className="px-1.5">
               งานเด้ง
