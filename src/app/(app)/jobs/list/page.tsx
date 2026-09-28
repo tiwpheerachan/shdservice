@@ -45,6 +45,8 @@ type Filters = {
   /* status is chosen BY ID (list from job_status in the DB — the TAT link sends the id too); `status` keeps
      the name for display only. `open` (not Finished/Cancel) is set only by a dashboard TAT link. */
   statusId: string; open: boolean;
+  /** open + past the customer due date — set only by the notification bell's link */
+  overdue: boolean;
 };
 const NO_FILTER: Filters = {
   no: "", ref: "", brand: "", model: "", type: "", typeDetail: "",
@@ -52,7 +54,7 @@ const NO_FILTER: Filters = {
   dateBy: "create", from: "", to: "",
   customer: "", phone: "", tracking: "", imei: "", warranty: "",
   bounce: false, within30: false, cost: "", status: "",
-  statusId: "", open: false,
+  statusId: "", open: false, overdue: false,
 };
 /** query-string form of the applied filters — shared by the table hook and the Excel export */
 const toParams = (f: Filters) => ({
@@ -63,6 +65,7 @@ const toParams = (f: Filters) => ({
   bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost,
   // statusId wins over the name (exact id match — no trailing-space / spelling issues with names)
   status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "",
+  overdue: f.overdue ? 1 : "",
 });
 
 /** dashboard TAT buckets (keys match the dashboard's TatKey) */
@@ -125,6 +128,7 @@ export default function JobListPage() {
   // deep links:
   //   customer page  /jobs/list?customer=C43600 → prefilled ลูกค้า filter
   //   dashboard TAT  /jobs/list?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…&to=…&type=…
+  //   bell           /jobs/list?src=overdue[&engineer=<user id>] → open jobs past their due date
   React.useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const g = (k: string) => p.get(k)?.trim() ?? "";
@@ -136,6 +140,10 @@ export default function JobListPage() {
         dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type"),
       });
       setTat({ bucket: g("bucket"), status: g("status"), type: g("type") });
+    }
+    if (g("src") === "overdue") {
+      next.overdue = true;
+      if (/^\d+$/.test(g("engineer"))) next.engineer = g("engineer");
     }
     if (Object.keys(next).length) {
       setDraft((f) => ({ ...f, ...next }));
@@ -426,6 +434,26 @@ export default function JobListPage() {
         </Field>
       </FilterBar>
 
+      {filters.overdue && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex items-center gap-2 rounded-full border border-danger/30 bg-danger-soft py-1 pl-3 pr-1 text-danger">
+            <span>
+              จากการแจ้งเตือน: <span className="font-medium">งานเกินกำหนดส่ง</span>
+              {filters.engineer && ` · ช่าง ${STAFF.find((s) => String(s.id) === filters.engineer)?.name ?? `#${filters.engineer}`}`}
+              <span className="num tabular-nums"> ({loading ? "…" : total.toLocaleString("en-US")} งาน)</span>
+            </span>
+            <button
+              type="button"
+              onClick={clearAll}
+              title="ล้างตัวกรองงานเกินกำหนดส่ง"
+              aria-label="ล้างตัวกรองงานเกินกำหนดส่ง"
+              className="grid h-6 w-6 place-items-center rounded-full transition-colors hover:bg-danger hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        </div>
+      )}
       {tat && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary-soft py-1 pl-3 pr-1 text-primary">

@@ -7,6 +7,7 @@ import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from "lucid
 import { findBreadcrumb } from "@/lib/nav";
 import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
+import { OverdueBell } from "./overdue-bell";
 import { cn } from "@/lib/utils";
 
 type Me = { name: string; email: string; avatar?: string };
@@ -108,6 +109,8 @@ export function Topbar({
       >
         <CircleHelp className="h-4 w-4" />
       </Link>
+
+      <OverdueBell />
 
       <ThemeToggle />
 

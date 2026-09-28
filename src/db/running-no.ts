@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { runningNo } from "./schema";
 import type { Tx } from "./client";
 import { thaiYear } from "@/server/mappers/format";
@@ -51,54 +51,56 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   const prefixForNew = def.prefix;
 
   // lock the row for this type(+profile)+year (or the type's single row for non-yearly)
-  const locked = await tx.execute(sql`
-    SELECT running_id, prefix, pyear, number, length_year, length_number
-      FROM running_no
-     WHERE running_type = ${type} AND pyear = ${year}
-       AND (${companyId}::int IS NULL OR company_id = ${companyId})
-     ORDER BY running_id DESC
-     LIMIT 1
-     FOR UPDATE`);
-  let row = locked.rows[0] as
-    | { running_id: number; prefix: string; pyear: number; number: number; length_year: number; length_number: number }
-    | undefined;
+  const sameSeries = and(eq(runningNo.runningType, type), companyId === null ? undefined : eq(runningNo.companyId, companyId));
+  const cols = {
+    runningId: runningNo.runningId,
+    prefix: runningNo.prefix,
+    pyear: runningNo.pyear,
+    number: runningNo.number,
+    lengthYear: runningNo.lengthYear,
+    lengthNumber: runningNo.lengthNumber,
+  };
+  let [row]: { runningId: number; prefix: string; pyear: number; number: number; lengthYear: number; lengthNumber: number }[] = await tx
+    .select(cols)
+    .from(runningNo)
+    .where(and(sameSeries, eq(runningNo.pyear, year)))
+    .orderBy(desc(runningNo.runningId))
+    .limit(1)
+    .for("update");
 
   if (!row && def.yearly) {
     // new year: the legacy app either updated the single row (Job/SaleOrder) or
     // inserted a new one (Quotation/Inventory). Inserting a fresh row is correct
     // for both — old-year rows are then just history.
-    const prev = await tx.execute(sql`
-      SELECT prefix, length_year, length_number, company_id, branch_id
-        FROM running_no WHERE running_type = ${type}
-         AND (${companyId}::int IS NULL OR company_id = ${companyId})
-       ORDER BY pyear DESC, running_id DESC LIMIT 1`);
-    const p = prev.rows[0] as
-      | { prefix: string; length_year: number; length_number: number; company_id: number; branch_id: number }
-      | undefined;
+    const [p] = await tx
+      .select({
+        prefix: runningNo.prefix,
+        lengthYear: runningNo.lengthYear,
+        lengthNumber: runningNo.lengthNumber,
+        companyId: runningNo.companyId,
+        branchId: runningNo.branchId,
+      })
+      .from(runningNo)
+      .where(sameSeries)
+      .orderBy(desc(runningNo.pyear), desc(runningNo.runningId))
+      .limit(1);
     const [ins] = await tx
       .insert(runningNo)
       .values({
         runningType: type,
-        companyId: companyId ?? p?.company_id ?? 0,
-        branchId: p?.branch_id ?? 0,
+        companyId: companyId ?? p?.companyId ?? 0,
+        branchId: p?.branchId ?? 0,
         prefix: p?.prefix ?? prefixForNew,
         pyear: year,
         pmonth: 0,
         pday: 0,
         number: 0,
-        lengthYear: p?.length_year ?? 2,
+        lengthYear: p?.lengthYear ?? 2,
         lengthMonth: 0,
-        lengthNumber: p?.length_number ?? def.len,
+        lengthNumber: p?.lengthNumber ?? def.len,
       })
-      .returning({ id: runningNo.runningId });
-    row = {
-      running_id: ins.id,
-      prefix: p?.prefix ?? prefixForNew,
-      pyear: year,
-      number: 0,
-      length_year: p?.length_year ?? 2,
-      length_number: p?.length_number ?? def.len,
-    };
+      .returning(cols);
+    row = ins;
   } else if (!row) {
     const [ins] = await tx
       .insert(runningNo)
@@ -115,16 +117,16 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
         lengthMonth: 0,
         lengthNumber: def.len,
       })
-      .returning({ id: runningNo.runningId });
-    row = { running_id: ins.id, prefix: prefixForNew, pyear: 0, number: 0, length_year: 0, length_number: def.len };
+      .returning(cols);
+    row = ins;
   }
 
   const next = Number(row.number) + 1;
   await tx
     .update(runningNo)
     .set({ number: next })
-    .where(and(eq(runningNo.runningId, row.running_id)));
+    .where(eq(runningNo.runningId, row.runningId));
 
-  const yy = Number(row.length_year) === 2 ? String(row.pyear).slice(-2) : Number(row.length_year) === 4 ? String(row.pyear) : "";
-  return `${row.prefix}${yy}${String(next).padStart(Number(row.length_number), "0")}`;
+  const yy = Number(row.lengthYear) === 2 ? String(row.pyear).slice(-2) : Number(row.lengthYear) === 4 ? String(row.pyear) : "";
+  return `${row.prefix}${yy}${String(next).padStart(Number(row.lengthNumber), "0")}`;
 }

@@ -1,6 +1,6 @@
 import "server-only";
 import { cached, invalidate, TTL_MASTER } from "@/server/cache";
-import { asc, eq, ne, and, sql, isNull } from "drizzle-orm";
+import { asc, eq, ne, and, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { documentProfile, job, quotationHd, saleOutHd } from "@/db/schema";
 import { HttpError } from "@/server/auth";
@@ -131,12 +131,11 @@ export async function deleteDocumentProfile(id: number, byUserId: number): Promi
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
     if (before.isDefault) throw new HttpError(400, "โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ");
-    const issued = await tx.execute(
-      sql`select 1 where exists (select 1 from job where document_profile_id = ${id})
-                    or exists (select 1 from quotation_hd where document_profile_id = ${id})
-                    or exists (select 1 from sale_out_hd where document_profile_id = ${id})`
-    );
-    const hadDocuments = (issued.rows?.length ?? 0) > 0;
+    // any document ever issued under this profile? (stops at the first hit)
+    const hadDocuments =
+      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, id)).limit(1)).length > 0 ||
+      (await tx.select({ id: quotationHd.documentProfileId }).from(quotationHd).where(eq(quotationHd.documentProfileId, id)).limit(1)).length > 0 ||
+      (await tx.select({ id: saleOutHd.documentProfileId }).from(saleOutHd).where(eq(saleOutHd.documentProfileId, id)).limit(1)).length > 0;
     await tx
       .update(documentProfile)
       .set({ deletedAt: nowThai(), deletedBy: byUserId, isDefault: false, updatedAt: nowThai() })

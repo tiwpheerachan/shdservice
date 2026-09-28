@@ -1,11 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sql } from "drizzle-orm";
+import { and, count, eq, isNull, or, sql } from "drizzle-orm";
+import { pgSchema, varchar } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
+import { appUser } from "@/db/schema";
 import { ownerEmails } from "@/lib/access";
 import { userFromRequest } from "@/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/*
+ * Postgres' own catalog + drizzle's migration journal — declared HERE, not in src/db/schema,
+ * so drizzle-kit never treats them as tables of the app.
+ */
+const infoColumns = pgSchema("information_schema").table("columns", {
+  tableName: varchar("table_name"),
+  columnName: varchar("column_name"),
+});
+const migrations = pgSchema("drizzle").table("__drizzle_migrations", { hash: varchar("hash") });
 
 /**
  * Deployment health check — no secrets, no personal data. Tells whether the
@@ -17,7 +29,7 @@ export async function GET(request: NextRequest) {
   const me = await userFromRequest(request).catch(() => null);
   if (!me?.isAdmin) {
     try {
-      await db.execute(sql`select 1`);
+      await db.select({ id: appUser.userId }).from(appUser).limit(1);
       return NextResponse.json({ ok: true });
     } catch {
       return NextResponse.json({ ok: false }, { status: 503 });
@@ -32,16 +44,20 @@ export async function GET(request: NextRequest) {
   };
   try {
     const t0 = Date.now();
-    const users = await db.execute(sql`select count(*)::int as n, count(*) filter (where user_type is null or trim(user_type) = '')::int as pending from app_user`);
-    const cols = await db.execute(sql`select count(*)::int as n from information_schema.columns where table_name = 'app_user' and column_name = 'lark_id'`);
-    const mig = await db.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => ({ rows: [{ n: 0 }] }));
-    const row = users.rows[0] as { n: number; pending: number };
+    const [users] = await db
+      .select({ n: count(), pending: sql<number>`count(*) filter (where ${or(isNull(appUser.userType), eq(sql`trim(${appUser.userType})`, ""))})`.mapWith(Number) })
+      .from(appUser);
+    const [cols] = await db
+      .select({ n: count() })
+      .from(infoColumns)
+      .where(and(eq(infoColumns.tableName, "app_user"), eq(infoColumns.columnName, "lark_id")));
+    const [mig] = await db.select({ n: count() }).from(migrations).catch(() => [{ n: 0 }]);
     out.db = "ok";
     out.dbLatencyMs = Date.now() - t0;
-    out.appUsers = row.n;
-    out.pendingUsers = row.pending;
-    out.appColumnsPresent = (cols.rows[0] as { n: number }).n > 0;
-    out.migrationsRecorded = (mig.rows[0] as { n: number }).n;
+    out.appUsers = users.n;
+    out.pendingUsers = users.pending;
+    out.appColumnsPresent = cols.n > 0;
+    out.migrationsRecorded = mig.n;
   } catch (e) {
     out.db = "error";
     out.dbError = (e instanceof Error ? e.message : String(e)).slice(0, 300);
