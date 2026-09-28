@@ -1,13 +1,87 @@
 "use client";
 
-import { CircleCheck, CircleDot, Circle, Ban, Truck, ExternalLink } from "lucide-react";
-import { TRACK_STEPS, type PublicJob } from "@/lib/track-public";
+import * as React from "react";
+import { CircleCheck, CircleDot, Circle, Ban, Truck, ExternalLink, FileText, Loader2 } from "lucide-react";
+import { TRACK_MSG, TRACK_STEPS, type PublicDoc, type PublicJob } from "@/lib/track-public";
 import { cn } from "@/lib/utils";
 
+/**
+ * Asks the server for a one-time document URL (POST /api/track/doc) — the caller adds its own
+ * authorisation (customer session header, or the link token). No url = refused / expired.
+ */
+export type DocOpener = (d: PublicDoc) => Promise<{ url?: string; error?: string }>;
+
 /** Renders a PublicJob (already masked / whitelisted by the server). */
-export function PublicJobView({ j }: { j: PublicJob }) {
+export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocOpener }) {
   const reached = new Map(j.history.map((h) => [h.key, h.at]));
   const currentIndex = j.step ? TRACK_STEPS.findIndex((s) => s.key === j.step) : -1;
+  const docs = onOpenDoc ? j.docs : [];
+  const [busy, setBusy] = React.useState("");
+  const [docError, setDocError] = React.useState("");
+  /** pop-up blocked: a plain link the customer taps (the ticket lives 60 s) */
+  const [fallback, setFallback] = React.useState<{ label: string; url: string } | null>(null);
+
+  const openDoc = async (d: PublicDoc) => {
+    if (!onOpenDoc || busy) return;
+    setBusy(`${d.kind}:${d.ref}`);
+    setDocError("");
+    setFallback(null);
+    // open the tab inside the click (pop-up blockers allow that), point it at the ticket once issued
+    const w = window.open("", "_blank");
+    if (w) w.opener = null;
+    try {
+      const r = await onOpenDoc(d);
+      if (!r.url) {
+        w?.close();
+        setDocError(r.error || TRACK_MSG.docFail);
+      } else if (w && !w.closed) {
+        w.location.replace(r.url);
+      } else {
+        setFallback({ label: d.label, url: r.url });
+      }
+    } catch {
+      w?.close();
+      setDocError(TRACK_MSG.docFail);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const docButtons = (list: PublicDoc[]) =>
+    list.length > 0 && (
+      <div className="mt-2 flex flex-wrap gap-2">
+        {list.map((d) => {
+          const key = `${d.kind}:${d.ref}`;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => void openDoc(d)}
+              disabled={!!busy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              {busy === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 text-primary" />}
+              {d.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+  const docNote = docs.length > 0 && (
+    <div className="mt-1 space-y-1.5 text-xs">
+      {docError && <p className="text-danger">{docError}</p>}
+      {fallback && (
+        <p>
+          <a href={fallback.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">
+            แตะเพื่อเปิด {fallback.label}
+          </a>{" "}
+          <span className="text-muted-foreground">(ใช้ได้ภายใน 1 นาที)</span>
+        </p>
+      )}
+      <p className="text-muted-foreground">เอกสารจะเปิดในแท็บใหม่ · เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์หากต้องการเก็บไฟล์</p>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
@@ -32,9 +106,11 @@ export function PublicJobView({ j }: { j: PublicJob }) {
       {j.cancelled ? (
         <div className="surface flex items-start gap-3 p-5">
           <Ban className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold">รายการนี้ถูกยกเลิก</p>
             <p className="mt-0.5 text-sm text-muted-foreground">กรุณาติดต่อศูนย์บริการเพื่อสอบถามรายละเอียด</p>
+            {docButtons(docs)}
+            {docNote}
           </div>
         </div>
       ) : (
@@ -65,11 +141,13 @@ export function PublicJobView({ j }: { j: PublicJob }) {
                     <p className={cn("text-sm font-medium", now && "text-primary")}>{s.label}</p>
                     <p className="text-xs text-muted-foreground">{s.hint}</p>
                     {at && <p className="num mt-0.5 text-2xs text-muted-foreground">{at}</p>}
+                    {docButtons(docs.filter((d) => d.step === s.key))}
                   </div>
                 </li>
               );
             })}
           </ol>
+          {docNote && <div className="-mt-2 mb-3">{docNote}</div>}
 
           {/* return shipment — courier logo + a link into the courier's own tracking page */}
           {j.trackingNo && (

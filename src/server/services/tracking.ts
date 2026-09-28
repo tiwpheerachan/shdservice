@@ -1,13 +1,13 @@
 import "server-only";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db/client";
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/db/schema";
 import { RS } from "@/server/record-status";
 import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
-import { TRACK_STEPS, type PublicJob, type PublicJobSummary, type TrackStepKey } from "@/lib/track-public";
+import { TRACK_STEPS, type PublicDoc, type PublicJob, type PublicJobSummary, type TrackDocKind, type TrackStepKey } from "@/lib/track-public";
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
@@ -113,6 +113,61 @@ function base(where: SQL | undefined) {
 
 type Row = Awaited<ReturnType<typeof base>>[number];
 
+/* ------------------------------------------------------------------ *
+ * Documents (the sheet itself: app/track/doc/[ticket], one-time ticket from /api/track/doc)
+ * ------------------------------------------------------------------ */
+
+/** quotations the customer has been sent: sent / accepted / declined / lapsed — never a draft (1) or a cancelled one (5) */
+const CUSTOMER_QUOTATION_STATUSES = [2, 3, 4, 6, 8, 9];
+
+/**
+ * The documents of one job, in timeline order:
+ *   ใบรับงานซ่อม (every job) · ใบเสนอราคา (each sent quotation) · ใบส่งคืนสินค้า (once the job is closed)
+ */
+async function docsFor(row: { no: string; group: string | null; closedDate: string | null; receivedDate: string | null; createDate: string | null }): Promise<PublicDoc[]> {
+  const docs: PublicDoc[] = [
+    { kind: "job", ref: row.no, label: "ใบรับงานซ่อม", date: fmtDate(row.receivedDate ?? row.createDate), step: "received" },
+  ];
+  const qs = await db
+    .select({ no: quotationHd.quotationNo, at: quotationHd.createDate })
+    .from(quotationHd)
+    .where(
+      and(
+        eq(quotationHd.referenceJobNo, row.no),
+        ne(quotationHd.recordStatus, RS.DELETED),
+        inArray(quotationHd.quotationStatusId, CUSTOMER_QUOTATION_STATUSES)
+      )
+    )
+    .orderBy(asc(quotationHd.createDate))
+    .limit(10);
+  for (const q of qs) {
+    const no = (q.no ?? "").trim();
+    if (no) docs.push({ kind: "quotation", ref: no, label: `ใบเสนอราคา ${no}`, date: fmtDate(q.at), step: "waiting" });
+  }
+  if (row.group?.trim() === "Finished" && !isSentinelDate(row.closedDate)) {
+    docs.push({ kind: "return", ref: row.no, label: "ใบส่งคืนสินค้า", date: fmtDate(row.closedDate), step: "returned" });
+  }
+  return docs;
+}
+
+const DOC_KINDS: readonly TrackDocKind[] = ["job", "quotation", "return"];
+
+/**
+ * Is this document of this job still one the customer may open? Checked when the ticket is
+ * issued AND again when it is used (a quotation cancelled / a job deleted in between → no).
+ * The job number must come from an authorisation the server issued (session / link / ticket).
+ */
+export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promise<PublicDoc | null> {
+  return quiet(async () => {
+    if (typeof kind !== "string" || !DOC_KINDS.includes(kind as TrackDocKind)) return null;
+    if (typeof ref !== "string" || !/^[A-Za-z0-9-]{1,50}$/.test(ref)) return null;
+    const [row] = await base(eq(job.jobNo, jobNo));
+    if (!row || row.recordStatus === RS.DELETED) return null;
+    const docs = await docsFor(row);
+    return docs.find((d) => d.kind === kind && d.ref === ref) ?? null;
+  });
+}
+
 
 /** does this job have a quotation the customer could be holding? */
 async function hasQuotation(jobNo: string) {
@@ -169,6 +224,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
     trackingNo: (row.trackingNo ?? "").trim(),
     closedDate: fmtDate(row.closedDate),
     courier,
+    docs: await docsFor(row),
   };
 }
 
@@ -214,8 +270,10 @@ export async function jobNoForLink(token: string): Promise<string | null> {
 
 /** first customer open of the current link starts its 15-minute window (later opens change nothing) */
 export async function markLinkOpened(jobNo: string): Promise<void> {
-  await db.execute(sql`UPDATE job SET track_opened_at = now(), track_link_expires_at = now() + make_interval(mins => ${LINK_OPEN_MINUTES})
-    WHERE job_no = ${jobNo} AND track_opened_at IS NULL`);
+  await db
+    .update(job)
+    .set({ trackOpenedAt: sql`now()`, trackLinkExpiresAt: sql`now() + make_interval(mins => ${LINK_OPEN_MINUTES})` })
+    .where(and(eq(job.jobNo, jobNo), isNull(job.trackOpenedAt)));
 }
 
 const isoUtc = (col: SQL) => sql<string | null>`to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
@@ -235,15 +293,23 @@ export async function extendLink(token: string): Promise<string | null> {
   return quiet(async () => {
     const t = (token ?? "").trim();
     if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null;
-    const r = await db.execute<{ expires_at: string }>(sql`
-      UPDATE job
-         SET track_link_expires_at = LEAST(
-               GREATEST(coalesce(track_link_expires_at, now()), now() + make_interval(mins => ${LINK_EXTEND_MINUTES})),
-               track_opened_at + make_interval(mins => ${LINK_MAX_MINUTES}))
-       WHERE track_token = ${t} AND record_status <> 'DELETED'
-         AND track_opened_at IS NOT NULL AND track_link_expires_at > now()
-      RETURNING to_char(track_link_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at`);
-    if (r.rows[0]) return r.rows[0].expires_at;
+    const [r] = await db
+      .update(job)
+      .set({
+        trackLinkExpiresAt: sql`LEAST(
+          GREATEST(coalesce(${job.trackLinkExpiresAt}, now()), now() + make_interval(mins => ${LINK_EXTEND_MINUTES})),
+          ${job.trackOpenedAt} + make_interval(mins => ${LINK_MAX_MINUTES}))`,
+      })
+      .where(
+        and(
+          eq(job.trackToken, t),
+          ne(job.recordStatus, RS.DELETED),
+          isNotNull(job.trackOpenedAt),
+          gt(job.trackLinkExpiresAt, sql`now()`)
+        )
+      )
+      .returning({ at: isoUtc(sql`${job.trackLinkExpiresAt}`) });
+    if (r?.at) return r.at;
     // not extendable but maybe still live (unopened staff preview): report its expiry as is
     const [row] = await db
       .select({ at: isoUtc(linkExpiresAt), live: linkLive, recordStatus: job.recordStatus })
@@ -329,7 +395,7 @@ export async function listJobsForCustomers(customerIds: number[]): Promise<{ act
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
     .where(
       and(
-        sql`${job.customerId} = ANY(${`{${ids.join(",")}}`}::integer[])`,
+        inArray(job.customerId, ids),
         ne(job.recordStatus, RS.DELETED),
         // in progress, or closed / cancelled within the history window (1900-01-01 = "not closed" in the legacy DB)
         sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN ('Finished','Cancel')
@@ -368,9 +434,25 @@ export async function publicJobForCustomers(jobNo: string, customerIds: number[]
     if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
     const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
     if (!ids.length) return null;
-    const [row] = await base(and(eq(job.jobNo, no), sql`${job.customerId} = ANY(${`{${ids.join(",")}}`}::integer[])`));
+    const [row] = await base(and(eq(job.jobNo, no), inArray(job.customerId, ids)));
     if (!row || row.recordStatus === RS.DELETED) return null;
     return toPublic(row);
+  });
+}
+
+/** the job number, only when that job belongs to these customers and is not deleted */
+export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): Promise<string | null> {
+  return quiet(async () => {
+    const no = (typeof jobNo === "string" ? jobNo : "").trim().toUpperCase();
+    if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
+    const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
+    if (!ids.length) return null;
+    const [row] = await db
+      .select({ no: job.jobNo })
+      .from(job)
+      .where(and(eq(job.jobNo, no), ne(job.recordStatus, RS.DELETED), inArray(job.customerId, ids)))
+      .limit(1);
+    return row?.no ?? null;
   });
 }
 

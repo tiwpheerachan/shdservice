@@ -1,8 +1,10 @@
 import "server-only";
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { hmac, sha256, normalizeUa, logEvent } from "./track-guard";
+import { customer, trackOtp, trackSession } from "@/db/schema";
+import { RS } from "@/server/record-status";
+import { hmac, sha256, normalizeUa, logEvent, hit, dbNow, dbNowPlus } from "./track-guard";
 import { sendSms } from "./sms";
 
 /**
@@ -27,8 +29,6 @@ export const SESSION_EXTEND_MIN = 5;
 export const SESSION_MAX_MIN = 60;
 
 const OPAQUE = /^[A-Za-z0-9_-]{43}$/;
-/** Postgres array literal for a bound parameter: [3, 7] → "{3,7}" */
-const intArray = (ids: number[]) => `{${ids.map((n) => Math.trunc(Number(n))).filter(Number.isFinite).join(",")}}`;
 
 /* ------------------------------------------------------------------ *
  * phone numbers
@@ -50,12 +50,17 @@ const phoneKey = (phone10: string) => hmac(`phone:${phone10}`);
 /** every customer row holding this number (legacy rows may keep two numbers in one field) */
 async function customerIdsForPhone(phone10: string): Promise<number[]> {
   const core = phone10.slice(1); // 9 digits without the leading 0 — matches 0…, 66…, and "a / b" fields
-  const r = await db.execute<{ id: number }>(sql`
-    SELECT customer_id AS id FROM customer
-     WHERE record_status <> 'DELETED'
-       AND regexp_replace(coalesce(phone_number, ''), '\\D', '', 'g') LIKE ${"%" + core + "%"}
-     LIMIT 50`);
-  return r.rows.map((x) => Number(x.id));
+  const rows = await db
+    .select({ id: customer.customerId })
+    .from(customer)
+    .where(
+      and(
+        ne(customer.recordStatus, RS.DELETED),
+        sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g') LIKE ${"%" + core + "%"}`
+      )
+    )
+    .limit(50);
+  return rows.map((x) => Number(x.id));
 }
 
 /* ------------------------------------------------------------------ *
@@ -78,15 +83,10 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   const key = phoneKey(phone);
 
   // resend cooldown (1 per minute) + 3 per hour per number, counted for EVERY number
-  const cool = await db.execute<{ hits: number }>(sql`
-    INSERT INTO track_rate (bucket, key, window_start, hits)
-    VALUES ('otp_phone_min', ${key}, to_timestamp(floor(extract(epoch FROM now()) / ${OTP_RESEND_SEC}) * ${OTP_RESEND_SEC}), 1)
-    ON CONFLICT (bucket, key, window_start) DO UPDATE SET hits = track_rate.hits + 1 RETURNING hits`);
-  const hour = await db.execute<{ hits: number }>(sql`
-    INSERT INTO track_rate (bucket, key, window_start, hits)
-    VALUES ('otp_phone_hour', ${key}, to_timestamp(floor(extract(epoch FROM now()) / 3600) * 3600), 1)
-    ON CONFLICT (bucket, key, window_start) DO UPDATE SET hits = track_rate.hits + 1 RETURNING hits`);
-  if (Number(cool.rows[0]?.hits) > 1 || Number(hour.rows[0]?.hits) > OTP_PER_PHONE_HOUR) {
+  // both counters always count (no short-circuit), exactly like the two separate upserts before
+  const coolOk = await hit("otp_phone_min", key, 1, OTP_RESEND_SEC);
+  const hourOk = await hit("otp_phone_hour", key, OTP_PER_PHONE_HOUR, 3600);
+  if (!coolOk || !hourOk) {
     logEvent("otp_rate_limited", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
     return { ok: false, reason: "rate" };
   }
@@ -96,11 +96,15 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   if (ids.length) {
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     // a new code replaces any unused one for this number
-    await db.execute(sql`UPDATE track_otp SET consumed_at = now() WHERE phone_hash = ${key} AND consumed_at IS NULL`);
-    await db.execute(sql`
-      INSERT INTO track_otp (request_hash, phone_hash, customer_ids, code_hash, issued_ip, expires_at)
-      VALUES (${sha256(requestId)}, ${key}, ${intArray(ids)}::integer[],
-              ${codeHash(requestId, code)}, ${ip}::inet, now() + make_interval(secs => ${OTP_TTL_SEC}))`);
+    await db.update(trackOtp).set({ consumedAt: dbNow }).where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
+    await db.insert(trackOtp).values({
+      requestHash: sha256(requestId),
+      phoneHash: key,
+      customerIds: ids,
+      codeHash: codeHash(requestId, code),
+      issuedIp: ip,
+      expiresAt: dbNowPlus(OTP_TTL_SEC),
+    });
     logEvent("otp_sent", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
     // after the response is decided: the SMS round-trip must not reveal "this is a customer" by timing
     void sendSms(phone, `รหัส OTP ของคุณคือ ${code} (ใช้ได้ 5 นาที) สำหรับติดตามสถานะงานซ่อม SHD — ห้ามบอกรหัสนี้กับผู้อื่น`).then((sent) => {
@@ -121,31 +125,45 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
   if (typeof requestId !== "string" || !OPAQUE.test(requestId)) return null;
   if (typeof code !== "string" || !/^\d{6}$/.test(code)) return null;
   const rh = sha256(requestId);
-  const tried = await db.execute<{ code_hash: Buffer }>(sql`
-    UPDATE track_otp SET attempts = attempts + 1
-     WHERE request_hash = ${rh} AND consumed_at IS NULL AND expires_at > now() AND attempts < ${OTP_MAX_ATTEMPTS}
-    RETURNING code_hash`);
-  const stored = tried.rows[0]?.code_hash;
+  const [tried] = await db
+    .update(trackOtp)
+    .set({ attempts: sql`${trackOtp.attempts} + 1` })
+    .where(
+      and(
+        eq(trackOtp.requestHash, rh),
+        isNull(trackOtp.consumedAt),
+        gt(trackOtp.expiresAt, dbNow),
+        lt(trackOtp.attempts, OTP_MAX_ATTEMPTS)
+      )
+    )
+    .returning({ codeHash: trackOtp.codeHash });
+  const stored = tried?.codeHash;
   if (!stored) return null;
   const given = codeHash(requestId, code);
   if (stored.length !== given.length || !timingSafeEqual(stored, given)) return null;
 
-  const won = await db.execute<{ customer_ids: number[]; phone_hash: string }>(sql`
-    UPDATE track_otp SET consumed_at = now()
-     WHERE request_hash = ${rh} AND consumed_at IS NULL
-    RETURNING customer_ids, phone_hash`);
-  const row = won.rows[0];
+  const [row] = await db
+    .update(trackOtp)
+    .set({ consumedAt: dbNow })
+    .where(and(eq(trackOtp.requestHash, rh), isNull(trackOtp.consumedAt)))
+    .returning({ customerIds: trackOtp.customerIds, phoneHash: trackOtp.phoneHash });
   if (!row) return null;
 
-  await db.execute(sql`DELETE FROM track_session WHERE max_expires_at < now()`); // housekeeping
+  await db.delete(trackSession).where(lt(trackSession.maxExpiresAt, dbNow)); // housekeeping
   const token = randomBytes(32).toString("base64url");
-  const s = await db.execute<{ expires_at: string }>(sql`
-    INSERT INTO track_session (token_hash, customer_ids, phone_hash, issued_ip, ua_hash, expires_at, max_expires_at)
-    VALUES (${sha256(token)}, ${intArray(row.customer_ids)}::integer[], ${row.phone_hash},
-            ${ip}::inet, ${sha256(normalizeUa(ua))},
-            now() + make_interval(mins => ${SESSION_START_MIN}), now() + make_interval(mins => ${SESSION_MAX_MIN}))
-    RETURNING to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at`);
-  return { token, expiresAt: s.rows[0].expires_at };
+  const [s] = await db
+    .insert(trackSession)
+    .values({
+      tokenHash: sha256(token),
+      customerIds: row.customerIds,
+      phoneHash: row.phoneHash,
+      issuedIp: ip,
+      uaHash: sha256(normalizeUa(ua)),
+      expiresAt: dbNowPlus(SESSION_START_MIN * 60),
+      maxExpiresAt: dbNowPlus(SESSION_MAX_MIN * 60),
+    })
+    .returning({ expiresAt: trackSession.expiresAt });
+  return { token, expiresAt: s.expiresAt.toISOString() };
 }
 
 /* ------------------------------------------------------------------ *
@@ -160,22 +178,27 @@ export type CustomerSession = { customerIds: number[]; expiresAt: string; maxExp
  */
 export async function touchSession(token: unknown, ip: string, ua: string, active: boolean): Promise<CustomerSession | null> {
   if (typeof token !== "string" || !OPAQUE.test(token)) return null;
-  const r = await db.execute<{ customer_ids: number[]; expires_at: string; max_expires_at: string }>(sql`
-    UPDATE track_session
-       SET expires_at = CASE WHEN ${active}
-             THEN LEAST(GREATEST(expires_at, now() + make_interval(mins => ${SESSION_EXTEND_MIN})), max_expires_at)
-             ELSE expires_at END
-     WHERE token_hash = ${sha256(token)} AND expires_at > now()
-       AND issued_ip = ${ip}::inet AND ua_hash = ${sha256(normalizeUa(ua))}
-    RETURNING customer_ids,
-      to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at,
-      to_char(max_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS max_expires_at`);
-  const row = r.rows[0];
+  const [row] = await db
+    .update(trackSession)
+    .set({
+      expiresAt: active
+        ? sql`LEAST(GREATEST(${trackSession.expiresAt}, ${dbNowPlus(SESSION_EXTEND_MIN * 60)}), ${trackSession.maxExpiresAt})`
+        : sql`${trackSession.expiresAt}`,
+    })
+    .where(
+      and(
+        eq(trackSession.tokenHash, sha256(token)),
+        gt(trackSession.expiresAt, dbNow),
+        eq(trackSession.issuedIp, ip),
+        eq(trackSession.uaHash, sha256(normalizeUa(ua)))
+      )
+    )
+    .returning({ customerIds: trackSession.customerIds, expiresAt: trackSession.expiresAt, maxExpiresAt: trackSession.maxExpiresAt });
   if (!row) return null;
-  return { customerIds: row.customer_ids.map(Number), expiresAt: row.expires_at, maxExpiresAt: row.max_expires_at };
+  return { customerIds: row.customerIds.map(Number), expiresAt: row.expiresAt.toISOString(), maxExpiresAt: row.maxExpiresAt.toISOString() };
 }
 
 export async function endSession(token: unknown): Promise<void> {
   if (typeof token !== "string" || !OPAQUE.test(token)) return;
-  await db.execute(sql`DELETE FROM track_session WHERE token_hash = ${sha256(token)}`);
+  await db.delete(trackSession).where(eq(trackSession.tokenHash, sha256(token)));
 }

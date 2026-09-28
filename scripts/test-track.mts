@@ -55,7 +55,7 @@ const { db } = await import("@/db/client");
 const guard = await import("@/server/track-guard");
 const { clientIp } = await import("@/lib/client-ip");
 const { originAuthOk } = await import("@/lib/origin-auth");
-const { jobNoForLink, publicJobByNo, rotateToken, linkStatus } = await import("@/server/services/tracking");
+const { jobNoForLink, publicJobByNo, rotateToken, linkStatus, findDoc } = await import("@/server/services/tracking");
 const S = await import("@/lib/session");
 const { POST: sessionPOST } = await import("@/app/api/track/session/route");
 const { POST: dataPOST } = await import("@/app/api/track/data/route");
@@ -65,6 +65,7 @@ const { GET: meGET, DELETE: meDELETE } = await import("@/app/api/track/me/route"
 const { POST: keepalivePOST } = await import("@/app/api/track/me/keepalive/route");
 const { GET: meJobGET } = await import("@/app/api/track/me/jobs/[no]/route");
 const { POST: linkKeepalivePOST } = await import("@/app/api/track/link/keepalive/route");
+const { POST: docPOST } = await import("@/app/api/track/doc/route");
 
 // capture "[sms:log] to 08…: … 123456 …" instead of sending an SMS
 const smsLog: { to: string; text: string }[] = [];
@@ -149,7 +150,7 @@ try {
 
 const PUBLIC_KEYS = [
   "no", "customerMasked", "brandModel", "deviceRef", "receivedDate", "dueDate", "step", "stepLabel",
-  "cancelled", "history", "shipper", "trackingNo", "closedDate", "courier",
+  "cancelled", "history", "shipper", "trackingNo", "closedDate", "courier", "docs",
 ].sort();
 
 console.log("\nOrigin protection / trusted IP");
@@ -176,6 +177,24 @@ for (const [token, expect] of [
     assert.equal(await guard.verifyTurnstile(token, "203.0.113.1"), expect);
   });
 }
+await test("Cloudflare's real test secrets are recognised (dev only)", async () => {
+  for (const s of ["1x0000000000000000000000000000000AA", "2x0000000000000000000000000000000AA", "3x0000000000000000000000000000000AA"]) {
+    assert.ok(guard.TEST_SECRET.test(s), s);
+  }
+  assert.ok(!guard.TEST_SECRET.test("unit-test-secret"));
+  // a test secret in production is refused outright (never trusted, never sent)
+  const s = process.env.TURNSTILE_SECRET_KEY;
+  const envAny = process.env as Record<string, string | undefined>;
+  const nodeEnv = envAny.NODE_ENV;
+  envAny.TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
+  envAny.NODE_ENV = "production";
+  try {
+    assert.equal(await guard.verifyTurnstile("XXXX.DUMMY.TOKEN.XXXX", "203.0.113.1"), "unavailable");
+  } finally {
+    envAny.TURNSTILE_SECRET_KEY = s;
+    envAny.NODE_ENV = nodeEnv;
+  }
+});
 await test("no secret configured → unavailable (no ticket)", async () => {
   const s = process.env.TURNSTILE_SECRET_KEY;
   process.env.TURNSTILE_SECRET_KEY = "";
@@ -549,6 +568,108 @@ await test("own job detail → masked PublicJob; someone else's job → 404", as
      WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') NOT LIKE ${"%" + PHONE.slice(1) + "%"} LIMIT 1`)).rows[0].no;
   assert.equal((await get(other)).status, 404);
 });
+console.log("\nDocuments (/api/track/doc → /track/doc/<ticket>)");
+async function docReq(body: Record<string, unknown>, ip: string, opts: { session?: string; ua?: string } = {}) {
+  usedIps.push(ip);
+  const r = await docPOST(new NextRequest("https://svc.example.test/api/track/doc", {
+    method: "POST",
+    headers: otpHeaders(ip, opts.ua ?? UA, opts.session),
+    body: JSON.stringify(body),
+  }));
+  return { status: r.status, cache: r.headers.get("cache-control"), json: (await r.json()) as { ok: boolean; url?: string; error?: string; reason?: string } };
+}
+const ticketOf = (url?: string) => url?.match(/^\/track\/doc\/([A-Za-z0-9_-]{43})$/)?.[1] ?? "";
+const ownJob = [...((await me(otpSession, otpIp)).json.active ?? []), ...((await me(otpSession, otpIp)).json.history ?? [])][0].no;
+let docTicket = "";
+await test("which documents: sent quotations only (no draft / cancelled), return note only once closed", async () => {
+  const q = (await db.execute<{ job: string; no: string; st: number }>(sql`
+    SELECT DISTINCT ON (quotation_status_id) reference_job_no job, quotation_no no, quotation_status_id st FROM quotation_hd
+     WHERE record_status <> 'DELETED' AND quotation_status_id IN (3, 5) AND coalesce(reference_job_no, '') <> ''
+     ORDER BY quotation_status_id, create_date DESC`)).rows;
+  const sent = q.find((r) => r.st === 3);
+  const cancelled = q.find((r) => r.st === 5);
+  assert.ok(sent && cancelled, "need an accepted and a cancelled quotation");
+  assert.equal((await findDoc(sent.job, "quotation", sent.no))?.step, "waiting");
+  assert.equal(await findDoc(cancelled.job, "quotation", cancelled.no), null);
+  assert.equal(await findDoc(JOB_A.job_no, "quotation", sent.no), null, "another job's quotation");
+  assert.equal(await findDoc(JOB_A.job_no, "return", JOB_A.job_no), null, "open job has no return note");
+  const closed = (await db.execute<{ no: string }>(sql`
+    SELECT j.job_no no FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
+     WHERE j.record_status <> 'DELETED' AND s.job_status_group = 'Finished' AND j.job_closed_date > '1901-01-01' LIMIT 1`)).rows[0];
+  assert.equal((await findDoc(closed.no, "return", closed.no))?.step, "returned");
+  assert.equal((await findDoc(JOB_A.job_no, "job", JOB_A.job_no))?.step, "received");
+  for (const [k, r] of [["invoice", JOB_A.job_no], ["job", "../x"], ["job", ""], [null, JOB_A.job_no]] as const) {
+    assert.equal(await findDoc(JOB_A.job_no, k, r), null, `${k}/${r}`);
+  }
+});
+await test("OTP: own job → one-time URL with no job / quotation number in it", async () => {
+  const r = await docReq({ jobNo: ownJob, kind: "job", ref: ownJob }, otpIp, { session: otpSession });
+  assert.equal(r.status, 200);
+  assert.equal(r.cache, "no-store");
+  docTicket = ticketOf(r.json.url);
+  assert.ok(docTicket, `url shape: ${r.json.url}`);
+  assert.equal(r.json.url!.includes(ownJob), false);
+});
+await test("DB stores sha256(ticket) only; TTL = 60 seconds", async () => {
+  const rows = (await db.execute<{ raw: number; ttl: number }>(sql`
+    SELECT (SELECT count(*)::int FROM track_doc_ticket WHERE encode(token_hash, 'escape') LIKE ${"%" + docTicket + "%"}) raw,
+           extract(epoch FROM expires_at - created_at)::int ttl
+      FROM track_doc_ticket WHERE token_hash = ${guard.sha256(docTicket)}`)).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rows[0].raw), 0);
+  assert.ok(Math.abs(Number(rows[0].ttl) - 60) <= 1);
+});
+await test("ticket: other IP / other browser → refused (not burnt); owner once; replay → refused", async () => {
+  assert.equal(await guard.consumeDocTicket(docTicket, nextIp(), UA), null);
+  assert.equal(await guard.consumeDocTicket(docTicket, otpIp, "curl/8"), null);
+  assert.deepEqual(await guard.consumeDocTicket(docTicket, otpIp, UA), { jobNo: ownJob, kind: "job", ref: ownJob });
+  assert.equal(await guard.consumeDocTicket(docTicket, otpIp, UA), null);
+  assert.equal(await guard.consumeDocTicket("x".repeat(43), otpIp, UA), null);
+  assert.equal(await guard.consumeDocTicket("../../etc", otpIp, UA), null);
+});
+await test("ticket: expired → refused; 10 concurrent uses → exactly one", async () => {
+  const a = (await docReq({ jobNo: ownJob, kind: "job", ref: ownJob }, otpIp, { session: otpSession })).json.url;
+  await db.execute(sql`UPDATE track_doc_ticket SET expires_at = now() - interval '1 second' WHERE token_hash = ${guard.sha256(ticketOf(a))}`);
+  assert.equal(await guard.consumeDocTicket(ticketOf(a), otpIp, UA), null);
+  const b = ticketOf((await docReq({ jobNo: ownJob, kind: "job", ref: ownJob }, otpIp, { session: otpSession })).json.url);
+  const all = await Promise.all(Array.from({ length: 10 }, () => guard.consumeDocTicket(b, otpIp, UA)));
+  assert.equal(all.filter(Boolean).length, 1);
+});
+await test("OTP: someone else's job / another job's quotation / unknown kind → the same 404", async () => {
+  const other = (await db.execute<{ no: string; q: string }>(sql`
+    SELECT j.job_no no, q.quotation_no q FROM job j JOIN customer c ON c.customer_id = j.customer_id
+      JOIN quotation_hd q ON q.reference_job_no = j.job_no AND q.quotation_status_id = 3 AND q.record_status <> 'DELETED'
+     WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\D', '', 'g') NOT LIKE ${"%" + PHONE.slice(1) + "%"} LIMIT 1`)).rows[0];
+  const a = await docReq({ jobNo: other.no, kind: "job", ref: other.no }, otpIp, { session: otpSession });
+  const b = await docReq({ jobNo: ownJob, kind: "quotation", ref: other.q }, otpIp, { session: otpSession });
+  const c = await docReq({ jobNo: ownJob, kind: "invoice", ref: ownJob }, otpIp, { session: otpSession });
+  for (const x of [a, b, c]) {
+    assert.equal(x.status, 404);
+    assert.deepEqual(x.json, a.json, "same body — never says which");
+  }
+});
+await test("OTP: session from another IP / browser → 401, no ticket", async () => {
+  assert.equal((await docReq({ jobNo: ownJob, kind: "job", ref: ownJob }, nextIp(), { session: otpSession })).status, 401);
+  assert.equal((await docReq({ jobNo: ownJob, kind: "job", ref: ownJob }, otpIp, { session: otpSession, ua: "curl/8" })).status, 401);
+});
+await test("link: the link decides the job — a jobNo in the body is ignored", async () => {
+  const ok = await docReq({ linkToken: JOB_A.track_token, kind: "job", ref: JOB_A.job_no }, nextIp());
+  assert.equal(ok.status, 200);
+  assert.ok(ticketOf(ok.json.url));
+  const other = await docReq({ linkToken: JOB_A.track_token, jobNo: JOB_B.job_no, kind: "job", ref: JOB_B.job_no }, nextIp());
+  assert.equal(other.status, 404);
+});
+await test("link: unknown / expired link, or no authorisation at all → 410, no ticket", async () => {
+  assert.equal((await docReq({ linkToken: "B".repeat(43), kind: "job", ref: JOB_A.job_no }, nextIp())).status, 410);
+  assert.equal((await docReq({ kind: "job", ref: JOB_A.job_no, jobNo: JOB_A.job_no }, nextIp())).status, 410);
+});
+await test("documents: 10 / minute / IP", async () => {
+  const ip = nextIp();
+  const codes: number[] = [];
+  for (let i = 0; i < 11; i++) codes.push((await docReq({ linkToken: "D".repeat(43), kind: "job", ref: "X" }, ip)).status);
+  assert.equal(codes.filter((c) => c === 429).length, 1);
+  assert.equal(codes.at(-1), 429);
+});
 await test("session from another IP / browser → 401", async () => {
   assert.equal((await me(otpSession, nextIp())).status, 401);
   assert.equal((await me(otpSession, otpIp, "curl/8")).status, 401);
@@ -593,7 +714,7 @@ await test("no raw link token / ticket / Turnstile token / origin secret in trac
      WHERE e.ip_hash IN ${[...new Set(usedIps)].map((ip) => guard.hmac(`ip:${ip}`))}`);
   assert.ok(r.rows.length > 0, "events were logged");
   const all = r.rows.map((x) => x.row).join("\n");
-  for (const secret of [JOB_A.track_token, ticketA, ORIGIN_SECRET, "unit-test-secret", "203.0.113."]) {
+  for (const secret of [JOB_A.track_token, ticketA, docTicket, ORIGIN_SECRET, "unit-test-secret", "203.0.113."]) {
     assert.equal(all.includes(secret), false, `log contains ${secret.slice(0, 12)}…`);
   }
 });
@@ -620,6 +741,8 @@ await db.execute(sql`DELETE FROM track_rate WHERE key IN ${ipHashes} OR key = ${
   OR key = ${guard.hmac(`link:${JOB_A.track_token}`)} OR key = ${guard.hmac(`link:${JOB_B.track_token}`)}`);
 await db.execute(sql`DELETE FROM track_block WHERE key IN ${ipHashes.map((h) => `ticket:${h}`)}`);
 await db.execute(sql`DELETE FROM track_ticket WHERE host(issued_ip) LIKE '203.0.113.%'`);
+await db.execute(sql`DELETE FROM track_doc_ticket WHERE host(issued_ip) LIKE '203.0.113.%'`);
+await db.execute(sql`DELETE FROM track_rate WHERE key = ${guard.hmac("link:")}`);
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

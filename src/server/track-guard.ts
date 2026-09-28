@@ -1,7 +1,8 @@
 import "server-only";
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@/db/client";
+import { trackBlock, trackDocTicket, trackEvent, trackRate, trackTicket } from "@/db/schema";
 
 /**
  * Security plumbing for the public tracking flow (drizzle/0014):
@@ -17,6 +18,10 @@ import { db } from "@/db/client";
  */
 
 export const TICKET_TTL_SEC = 180;
+
+/** the database clock — every expiry is compared in Postgres, never against the app server's clock */
+export const dbNow = sql`now()`;
+export const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${seconds})`;
 
 /* ------------------------------------------------------------------ *
  * hashing
@@ -49,31 +54,37 @@ export const normalizeUa = (ua: string | null | undefined) => (ua ?? "").trim().
  * current `windowSec` window (atomic upsert — concurrent requests all count).
  */
 export async function hit(bucket: string, key: string, limit: number, windowSec: number): Promise<boolean> {
-  const r = await db.execute<{ hits: number }>(sql`
-    INSERT INTO track_rate (bucket, key, window_start, hits)
-    VALUES (${bucket}, ${key}, to_timestamp(floor(extract(epoch FROM now()) / ${windowSec}) * ${windowSec}), 1)
-    ON CONFLICT (bucket, key, window_start) DO UPDATE SET hits = track_rate.hits + 1
-    RETURNING hits`);
-  return Number(r.rows[0]?.hits ?? 0) <= limit;
+  const [r] = await db
+    .insert(trackRate)
+    .values({ bucket, key, hits: 1, windowStart: sql`to_timestamp(floor(extract(epoch FROM now()) / ${windowSec}) * ${windowSec})` })
+    .onConflictDoUpdate({ target: [trackRate.bucket, trackRate.key, trackRate.windowStart], set: { hits: sql`${trackRate.hits} + 1` } })
+    .returning({ hits: trackRate.hits });
+  return Number(r?.hits ?? 0) <= limit;
 }
 
 export async function isBlocked(key: string): Promise<boolean> {
-  const r = await db.execute(sql`SELECT 1 FROM track_block WHERE key = ${key} AND blocked_until > now() LIMIT 1`);
-  return r.rows.length > 0;
+  const rows = await db
+    .select({ key: trackBlock.key })
+    .from(trackBlock)
+    .where(and(eq(trackBlock.key, key), gt(trackBlock.blockedUntil, dbNow)))
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function block(key: string, minutes: number): Promise<void> {
-  await db.execute(sql`
-    INSERT INTO track_block (key, blocked_until) VALUES (${key}, now() + make_interval(mins => ${minutes}))
-    ON CONFLICT (key) DO UPDATE SET blocked_until = EXCLUDED.blocked_until`);
+  const until = dbNowPlus(minutes * 60);
+  await db.insert(trackBlock).values({ key, blockedUntil: until }).onConflictDoUpdate({ target: trackBlock.key, set: { blockedUntil: until } });
 }
 
 /* ------------------------------------------------------------------ *
  * Turnstile (fail closed)
  * ------------------------------------------------------------------ */
 
-/** Cloudflare's documented test secrets (always pass / fail) — accepted outside production only */
-const TEST_SECRET = /^[123]x0{33}AA$/;
+/**
+ * Cloudflare's documented test secrets — 1x…AA always passes, 2x…AA always fails, 3x…AA "token
+ * already spent" (e.g. 1x0000000000000000000000000000000AA: 31 zeros). Accepted outside production only.
+ */
+export const TEST_SECRET = /^[123]x0{20,40}AA$/;
 
 function expectedHostname(): string {
   const explicit = (process.env.TURNSTILE_EXPECTED_HOSTNAME ?? "").trim();
@@ -125,12 +136,15 @@ const TICKET_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 /** issue a 3-minute, single-use ticket bound to one job + IP + User-Agent */
 export async function issueTicket(jobNo: string, ip: string, ua: string): Promise<string> {
   // expired rows go on every issue (indexed on expires_at — cheap at this volume)
-  await db.execute(sql`DELETE FROM track_ticket WHERE expires_at < now()`);
+  await db.delete(trackTicket).where(lt(trackTicket.expiresAt, dbNow));
   const raw = randomBytes(32).toString("base64url"); // 256 bits
-  await db.execute(sql`
-    INSERT INTO track_ticket (token_hash, job_no, issued_ip, ua_hash, expires_at)
-    VALUES (${sha256(raw)}, ${jobNo}, ${ip}::inet, ${sha256(normalizeUa(ua))},
-            now() + make_interval(secs => ${TICKET_TTL_SEC}))`);
+  await db.insert(trackTicket).values({
+    tokenHash: sha256(raw),
+    jobNo,
+    issuedIp: ip,
+    uaHash: sha256(normalizeUa(ua)),
+    expiresAt: dbNowPlus(TICKET_TTL_SEC),
+  });
   return raw;
 }
 
@@ -141,14 +155,60 @@ export async function issueTicket(jobNo: string, ip: string, ua: string): Promis
  */
 export async function consumeTicket(raw: unknown, ip: string, ua: string): Promise<string | null> {
   if (typeof raw !== "string" || !TICKET_SHAPE.test(raw)) return null;
-  const r = await db.execute<{ job_no: string }>(sql`
-    DELETE FROM track_ticket
-     WHERE token_hash = ${sha256(raw)}
-       AND expires_at > now()
-       AND issued_ip = ${ip}::inet
-       AND ua_hash = ${sha256(normalizeUa(ua))}
-    RETURNING job_no`);
-  return r.rows[0]?.job_no ?? null;
+  const [r] = await db
+    .delete(trackTicket)
+    .where(
+      and(
+        eq(trackTicket.tokenHash, sha256(raw)),
+        gt(trackTicket.expiresAt, dbNow),
+        eq(trackTicket.issuedIp, ip),
+        eq(trackTicket.uaHash, sha256(normalizeUa(ua)))
+      )
+    )
+    .returning({ jobNo: trackTicket.jobNo });
+  return r?.jobNo ?? null;
+}
+
+/* ------------------------------------------------------------------ *
+ * one-time document tickets (drizzle/0019)
+ * ------------------------------------------------------------------ */
+
+/** a document ticket is used right away (the page opens it in a new tab) */
+export const DOC_TICKET_TTL_SEC = 60;
+
+export type DocTicket = { jobNo: string; kind: string; ref: string };
+
+/** issue a 60-second, single-use ticket for ONE document of one job, bound to IP + User-Agent */
+export async function issueDocTicket(d: DocTicket, ip: string, ua: string): Promise<string> {
+  await db.delete(trackDocTicket).where(lt(trackDocTicket.expiresAt, dbNow));
+  const raw = randomBytes(32).toString("base64url"); // 256 bits
+  await db.insert(trackDocTicket).values({
+    tokenHash: sha256(raw),
+    jobNo: d.jobNo,
+    kind: d.kind,
+    ref: d.ref,
+    issuedIp: ip,
+    uaHash: sha256(normalizeUa(ua)),
+    expiresAt: dbNowPlus(DOC_TICKET_TTL_SEC),
+  });
+  return raw;
+}
+
+/** consume a document ticket (one atomic DELETE) — null = invalid / used / expired / other IP / other UA */
+export async function consumeDocTicket(raw: unknown, ip: string, ua: string): Promise<DocTicket | null> {
+  if (typeof raw !== "string" || !TICKET_SHAPE.test(raw)) return null;
+  const [r] = await db
+    .delete(trackDocTicket)
+    .where(
+      and(
+        eq(trackDocTicket.tokenHash, sha256(raw)),
+        gt(trackDocTicket.expiresAt, dbNow),
+        eq(trackDocTicket.issuedIp, ip),
+        eq(trackDocTicket.uaHash, sha256(normalizeUa(ua)))
+      )
+    )
+    .returning({ jobNo: trackDocTicket.jobNo, kind: trackDocTicket.kind, ref: trackDocTicket.ref });
+  return r ?? null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -175,7 +235,11 @@ export type TrackEvent =
   | "otp_unknown_phone"
   | "otp_verified"
   | "otp_invalid"
-  | "customer_session_invalid";
+  | "customer_session_invalid"
+  | "doc_ticket_issued"
+  | "doc_opened"
+  | "doc_ticket_invalid"
+  | "doc_rate_limited";
 
 /**
  * Never pass a raw token / ticket / Turnstile token / secret here — only the
@@ -186,9 +250,9 @@ export function logEvent(
   f: { ipHash?: string; linkHash?: string; jobNo?: string; result?: string; requestId?: string } = {}
 ): void {
   void db
-    .execute(sql`
-      INSERT INTO track_event (event, result, ip_hash, link_hash, job_no, request_id)
-      VALUES (${event}, ${f.result ?? ""}, ${f.ipHash ?? null}, ${f.linkHash ?? null}, ${f.jobNo ?? null}, ${f.requestId ?? null})`)
+    .insert(trackEvent)
+    .values({ event, result: f.result ?? "", ipHash: f.ipHash ?? null, linkHash: f.linkHash ?? null, jobNo: f.jobNo ?? null, requestId: f.requestId ?? null })
+    .then(() => undefined)
     .catch((e) => console.error("[track_event]", e instanceof Error ? e.message : e));
   // ~1 in 200 writes also trims old rows (counters > 2 h, blocks ended, events > 30 days)
   if (Math.random() < 0.005) void housekeeping();
@@ -196,9 +260,9 @@ export function logEvent(
 
 async function housekeeping() {
   try {
-    await db.execute(sql`DELETE FROM track_rate WHERE window_start < now() - interval '2 hours'`);
-    await db.execute(sql`DELETE FROM track_block WHERE blocked_until < now()`);
-    await db.execute(sql`DELETE FROM track_event WHERE at < now() - interval '30 days'`);
+    await db.delete(trackRate).where(lt(trackRate.windowStart, sql`now() - interval '2 hours'`));
+    await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
+    await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));
   } catch (e) {
     console.error("[track_housekeeping]", e instanceof Error ? e.message : e);
   }

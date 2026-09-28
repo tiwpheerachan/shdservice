@@ -50,7 +50,7 @@ async function post(path: string, body: Record<string, string>) {
     credentials: "same-origin",
     referrerPolicy: "no-referrer",
   });
-  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob; expiresAt?: string };
+  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob; expiresAt?: string; url?: string };
 }
 
 /** one Turnstile widget bound to a container while it is mounted */
@@ -315,6 +315,16 @@ function LinkResult({
     }
   }, [now, expiresAt, linkToken, onExpired, onExpiresAt]);
 
+  // documents: the link itself authorises them (the server ignores any job no from here)
+  const openDoc = React.useCallback(
+    async (d: { kind: string; ref: string }) => {
+      const r = await post("/api/track/doc", { linkToken, kind: d.kind, ref: d.ref });
+      if (r.reason === "link") onExpired();
+      return { url: r.ok ? r.url : undefined, error: r.error };
+    },
+    [linkToken, onExpired]
+  );
+
   return (
     <div className="space-y-3">
       {expiresAt > 0 && (
@@ -323,7 +333,7 @@ function LinkResult({
           <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
         </p>
       )}
-      <PublicJobView j={job} />
+      <PublicJobView j={job} onOpenDoc={openDoc} />
     </div>
   );
 }

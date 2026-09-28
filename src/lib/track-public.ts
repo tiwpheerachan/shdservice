@@ -6,6 +6,10 @@
  *
  * Never here: prices / costs, phone, address, email, internal notes, technician,
  * customer id, full serial / IMEI, any token.
+ *
+ * Documents (`docs`) are only a list of WHAT exists. The sheet itself (full name, address,
+ * prices) is served one at a time by app/track/doc/[ticket] against a one-time ticket from
+ * POST /api/track/doc — see drizzle/0019.
  */
 
 export type TrackStepKey = "received" | "diagnosing" | "waiting" | "repaired" | "returned";
@@ -33,6 +37,21 @@ export type PublicJob = {
   closedDate: string;
   /** courier profile of the return leg — logo + link into the courier's own tracking page */
   courier: { name: string; logoUrl: string; trackUrl: string } | null;
+  /** documents the customer can open, each shown under its step */
+  docs: PublicDoc[];
+};
+
+export type TrackDocKind = "job" | "quotation" | "return";
+
+/** a document of this job — what it is, never its content */
+export type PublicDoc = {
+  kind: TrackDocKind;
+  /** job no (ใบรับงานซ่อม / ใบส่งคืนสินค้า) or the quotation no */
+  ref: string;
+  label: string;
+  date: string;
+  /** the timeline step it belongs to */
+  step: TrackStepKey;
 };
 
 /** one row of the customer's job list (phone + OTP) — the full job needs its own request */
@@ -70,4 +89,6 @@ export const TRACK_MSG = {
   otpFail: "รหัสไม่ถูกต้องหรือหมดอายุ กรุณาลองใหม่ หรือกดขอรหัสใหม่",
   otpUnavailable: "บริการส่งรหัส OTP ยังไม่เปิดใช้งาน กรุณาติดต่อศูนย์บริการ",
   sessionExpired: "หมดเวลา กรุณายืนยันเบอร์โทรด้วย OTP อีกครั้ง",
+  docFail: "เปิดเอกสารไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
+  docExpired: "ลิงก์เอกสารนี้ใช้ได้ครั้งเดียวและหมดอายุแล้ว กรุณากดเปิดเอกสารใหม่จากหน้าติดตามสถานะ",
 } as const;

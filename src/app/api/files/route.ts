@@ -12,11 +12,12 @@ export const dynamic = "force-dynamic";
  * never an arbitrary object in the bucket:
  *   jobs/{no}/attachments|slip/…   sale-orders/{no}/slip/…   products/{code}/…
  *   profiles/{id}/…                shippers/{id}/…
- * Courier logos (shippers/) are public: the customer tracking page shows them to
- * visitors who are not signed in. Everything else needs a signed-in staff user.
+ * Courier logos (shippers/) and letterhead logos (profiles/, document profiles — nothing
+ * else is stored there) are public: the customer tracking page and the customer's documents
+ * (/track/doc) show them to visitors who are not signed in. Everything else needs a signed-in staff user.
  */
-const STAFF_PATH = /^(?:jobs\/[^/]+\/(?:attachments|slip)|sale-orders\/[^/]+\/slip|products\/[^/]+|profiles\/\d+)\/[^/]+$/;
-const PUBLIC_PATH = /^shippers\/\d+\/[^/]+$/;
+const STAFF_PATH = /^(?:jobs\/[^/]+\/(?:attachments|slip)|sale-orders\/[^/]+\/slip|products\/[^/]+)\/[^/]+$/;
+const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
 const URL_TTL_S = 300;
 
 export const GET = handle(async (req: NextRequest) => {
