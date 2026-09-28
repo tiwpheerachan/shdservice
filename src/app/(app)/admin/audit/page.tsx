@@ -14,6 +14,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuditPage, useAuditModules, type AuditRow } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
+import { isFilterActive } from "@/lib/utils";
 
 // action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
@@ -84,6 +85,12 @@ export default function AuditPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilters(NO_FILTER);
+    push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
+  };
+
   return (
     <>
       <PageHeader
@@ -102,11 +109,7 @@ export default function AuditPage() {
           setFilters(draft);
           setTable((t) => ({ ...t, page: 1 }));
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters(NO_FILTER);
-          push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
-        }}
+        onReset={resetFilters}
       >
         <Field label="วันที่ (ตั้งแต่)">
           <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
@@ -131,7 +134,10 @@ export default function AuditPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filters, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={rows}
         rowKey={(r) => String(r.id)}

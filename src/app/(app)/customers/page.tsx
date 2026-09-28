@@ -21,6 +21,7 @@ import { api, postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { customerSchema } from "@/lib/validation/customer";
+import { isFilterActive } from "@/lib/utils";
 
 export default function CustomersPage() {
   const { push } = useToast();
@@ -159,6 +160,11 @@ export default function CustomersPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -185,10 +191,7 @@ export default function CustomersPage() {
           setFilter(draft);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="รหัสลูกค้า">
           <Input placeholder="C43600" className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
@@ -233,6 +236,8 @@ export default function CustomersPage() {
       </FilterBar>
 
       <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
         searchable={false}
         columns={columns}
         rows={CUSTOMERS}

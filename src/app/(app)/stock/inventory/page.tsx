@@ -13,7 +13,7 @@ import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
 import { useMovementsPage } from "@/data/db";
-import { int } from "@/lib/utils";
+import { int, isFilterActive } from "@/lib/utils";
 import { api, errMsg, exportXlsx } from "@/lib/api";
 
 type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
@@ -121,6 +121,12 @@ export default function InventoryPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilters(NO_FILTER);
+    push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
+  };
+
   return (
     <>
       <PageHeader
@@ -143,11 +149,7 @@ export default function InventoryPage() {
           setFilters(draft);
           push({ kind: "info", title: "ค้นหาข้อมูลแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters(NO_FILTER);
-          push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
-        }}
+        onReset={resetFilters}
       >
         <Field label="วันที่สร้างเอกสาร (ตั้งแต่)">
           <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
@@ -182,7 +184,10 @@ export default function InventoryPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filters, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={MOVEMENTS}
         loading={loading}

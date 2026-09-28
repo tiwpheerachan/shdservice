@@ -15,7 +15,7 @@ import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type SaleOrder } from "@/data/mock";
 import { useSaleOrdersPage, useStaff } from "@/data/db";
-import { baht } from "@/lib/utils";
+import { baht, isFilterActive } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
 import { exportXlsx } from "@/lib/api";
 
@@ -119,6 +119,11 @@ export default function SaleOrderPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilters(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -147,10 +152,7 @@ export default function SaleOrderPage() {
           setFilters(draft);
           push({ kind: "info", title: "กรองข้อมูลแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="เลขใบสั่งขาย (SO)">
           <Input className="num" placeholder="SO2600760" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
@@ -180,7 +182,10 @@ export default function SaleOrderPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filters, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={SALE_ORDERS}
         loading={loading}

@@ -9,10 +9,13 @@ import {
   ChevronRight,
   Search,
   Inbox,
+  SearchX,
+  RotateCcw,
 } from "lucide-react";
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
 import { Input, Select } from "./input";
 import { Skeleton } from "./skeleton";
+import { Button } from "./button";
 
 export type Column<T> = {
   key: string;
@@ -69,6 +72,8 @@ export function DataTable<T extends Record<string, unknown>>({
   loading = false,
   rowClassName,
   server,
+  narrowed = false,
+  onClearFilters,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -85,6 +90,11 @@ export function DataTable<T extends Record<string, unknown>>({
   loading?: boolean;
   rowClassName?: (row: T, i: number) => string;
   server?: ServerTable;
+  /** the page's filter bar narrows the rows (see isFilterActive) — an empty result then says
+   *  "nothing matches" instead of `emptyText`, which describes a truly empty list */
+  narrowed?: boolean;
+  /** resets the page's filters (the same as its filter bar's ล้างค่า) — shown as a button on "nothing matches" */
+  onClearFilters?: () => void;
 }) {
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState<{ key: string; dir: "asc" | "desc" } | null>(
@@ -267,14 +277,33 @@ export function DataTable<T extends Record<string, unknown>>({
             ) : view.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-14 text-center">
-                  <Inbox className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" />
-                  <p className="text-sm font-medium text-muted-foreground">
-                    {emptyText}
-                  </p>
-                  {emptyHint && (
-                    <p className="mt-1 text-xs text-muted-foreground/80">
-                      {emptyHint}
-                    </p>
+                  {narrowed || q.trim() ? (
+                    <>
+                      <SearchX className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
+                      <p className="text-sm font-medium text-muted-foreground">ไม่พบรายการที่ตรงกับเงื่อนไขค้นหา</p>
+                      <p className="mt-1 text-xs text-muted-foreground/80">ลองเปลี่ยนหรือล้างตัวกรอง</p>
+                      {(onClearFilters || q.trim()) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          className="mt-3"
+                          onClick={() => {
+                            setQ("");
+                            onClearFilters?.();
+                          }}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          ล้างตัวกรอง
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Inbox className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
+                      <p className="text-sm font-medium text-muted-foreground">{emptyText}</p>
+                      {emptyHint && <p className="mt-1 text-xs text-muted-foreground/80">{emptyHint}</p>}
+                    </>
                   )}
                 </td>
               </tr>

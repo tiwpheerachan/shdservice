@@ -15,7 +15,7 @@ import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Model } from "@/data/mock";
 import { useModelsPage, useManufacturers } from "@/data/db";
-import { baht } from "@/lib/utils";
+import { baht, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { modelSchema } from "@/lib/validation/admin";
@@ -144,6 +144,11 @@ export default function ModelsPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -168,10 +173,7 @@ export default function ModelsPage() {
           setFilter(draft);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="ยี่ห้อผู้ผลิต">
           <SearchSelect
@@ -198,7 +200,10 @@ export default function ModelsPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={MODELS}
         loading={loading}

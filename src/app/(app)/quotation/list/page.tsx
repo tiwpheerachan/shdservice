@@ -15,7 +15,7 @@ import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from "@/data/mock";
 import { useQuotationsPage, useManufacturers } from "@/data/db";
-import { baht } from "@/lib/utils";
+import { baht, isFilterActive } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
 import { exportXlsx } from "@/lib/api";
 
@@ -143,6 +143,11 @@ export default function QuotationListPage() {
 
   const total = QUOTATIONS.reduce((s, q) => s + q.amount, 0);
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilters(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -175,10 +180,7 @@ export default function QuotationListPage() {
           setFilters(draft);
           push({ kind: "info", title: "กรองข้อมูลแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="หมายเลขใบเสนอราคา">
           <Input className="num" placeholder="Q2600462" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
@@ -224,7 +226,10 @@ export default function QuotationListPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filters, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={QUOTATIONS}
         loading={loading}

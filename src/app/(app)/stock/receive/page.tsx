@@ -13,7 +13,7 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useProducts, useManufacturers, useCategories } from "@/data/db";
-import { int } from "@/lib/utils";
+import { int, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
@@ -160,6 +160,11 @@ export default function ReceivePage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -209,10 +214,7 @@ export default function ReceivePage() {
 
       <FilterBar
         onSearch={() => setFilter(draft)}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="รหัสอะไหล่ (ระบบ)">
           <Input placeholder="P00012" className="num" value={draft.code} onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))} />
@@ -232,6 +234,8 @@ export default function ReceivePage() {
       </FilterBar>
 
       <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
         searchable={false}
         columns={columns}
         rows={visible}

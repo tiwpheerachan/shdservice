@@ -32,3 +32,13 @@ export function slugTitle(s: string) {
  */
 export const SEARCH_MIN_CHARS = 3;
 export const SEARCH_MIN_HINT = `พิมพ์อย่างน้อย ${SEARCH_MIN_CHARS} ตัวอักษร`;
+
+/**
+ * Does a filter-bar state narrow the list, compared with the page's default filters?
+ * ("" / undefined / null count as the same "not set")
+ */
+export function isFilterActive<F extends object>(current: F, defaults: F): boolean {
+  const a = current as Record<string, unknown>;
+  const b = defaults as Record<string, unknown>;
+  return Object.keys({ ...b, ...a }).some((k) => String(a[k] ?? "") !== String(b[k] ?? ""));
+}

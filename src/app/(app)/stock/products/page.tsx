@@ -29,7 +29,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { type Product } from "@/data/mock";
 import { useProductsPage, useProductStats, useManufacturers, useCategories, useModels } from "@/data/db";
-import { baht, int, cn } from "@/lib/utils";
+import { baht, int, cn, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
@@ -114,7 +114,7 @@ export default function ProductsPage() {
   // server-side paging + filters (product table 2.5k rows; INACTIVE shown, DELETED hidden)
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   // cards follow the applied filters; say so once anything beyond the default (Active only) narrows the list
-  const narrowed = !!table.q.trim() || JSON.stringify(filters) !== JSON.stringify({ ...NO_FILTER, status: "Active" });
+  const narrowed = !!table.q.trim() || isFilterActive(filters, { ...NO_FILTER, status: "Active" });
   const query = React.useMemo(
     () => ({ q: table.q, ...filters }),
     [table.q, filters]
@@ -281,6 +281,11 @@ export default function ProductsPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilters({ ...NO_FILTER, status: "Active" });
+  };
+
   return (
     <>
       <PageHeader
@@ -314,10 +319,7 @@ export default function ProductsPage() {
           setFilters(draft);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilters({ ...NO_FILTER, status: "Active" });
-        }}
+        onReset={resetFilters}
       >
         <Field label="รหัสอะไหล่ (ระบบ)">
           <Input placeholder="P02534" className="num" value={draft.sysCode} onChange={(e) => setD("sysCode", e.target.value)} />
@@ -373,7 +375,10 @@ export default function ProductsPage() {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={narrowed}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
         rows={PRODUCTS}
         loading={loading}

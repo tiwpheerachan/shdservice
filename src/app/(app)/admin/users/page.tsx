@@ -20,6 +20,7 @@ import { useUsers, useRoles } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { userSchema } from "@/lib/validation/admin";
+import { isFilterActive } from "@/lib/utils";
 
 type UserForm = {
   id: string;
@@ -394,6 +395,11 @@ export default function UsersPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -454,10 +460,7 @@ export default function UsersPage() {
           setFilter(draft);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="ชื่อ-สกุล ผู้ใช้ระบบ">
           <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
@@ -478,6 +481,8 @@ export default function UsersPage() {
       </FilterBar>
 
       <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
         searchable={false}
         columns={columns}
         rows={VISIBLE}

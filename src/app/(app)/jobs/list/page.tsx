@@ -32,7 +32,7 @@ import dynamic from "next/dynamic";
 const CustomerCallModal = dynamic(() => import("@/components/shared/customer-call-modal").then((m) => m.CustomerCallModal), { ssr: false });
 import { WARRANTY_OPTIONS, type Job, type Customer } from "@/data/mock";
 import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useModels, useJobTypeDetails, useJobStatuses } from "@/data/db";
-import { baht, cn } from "@/lib/utils";
+import { baht, cn, isFilterActive } from "@/lib/utils";
 import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 
@@ -495,7 +495,10 @@ export default function JobListPage() {
         </div>
       )}
 
-      <DataTable searchable={false}
+      <DataTable
+        narrowed={isFilterActive(filters, NO_FILTER)}
+        onClearFilters={clearAll}
+        searchable={false}
         columns={columns}
         rows={JOBS}
         loading={loading}

@@ -17,6 +17,7 @@ import { type Job } from "@/data/mock";
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from "@/data/db";
 import { api, postJson, errMsg, qs } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { isFilterActive } from "@/lib/utils";
 
 export default function AssignPage() {
   const { push } = useToast();
@@ -176,6 +177,11 @@ export default function AssignPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -196,10 +202,7 @@ export default function AssignPage() {
           setFilter(draft);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
+        onReset={resetFilters}
       >
         <Field label="เลขที่งาน">
           <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
@@ -282,6 +285,8 @@ export default function AssignPage() {
       </div>
 
       <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
         columns={columns}
         rows={pool}
         loading={loading}
