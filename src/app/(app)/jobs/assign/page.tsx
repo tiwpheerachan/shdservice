@@ -255,7 +255,8 @@ export default function AssignPage() {
             เจ้าหน้าที่ช่าง: <span className="font-medium text-foreground">{CURRENT_TECH}</span>
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        {/* wraps on phones: three buttons + the long confirm label are wider than 390px */}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -274,7 +275,8 @@ export default function AssignPage() {
           </Button>
           <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
             <UserCheck className="h-3.5 w-3.5" />
-            ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
+            <span className="sm:hidden">ยืนยันรับงาน</span>
+            <span className="hidden sm:inline">ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;</span>
           </Button>
         </div>
       </div>
