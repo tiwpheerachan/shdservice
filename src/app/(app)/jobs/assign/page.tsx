@@ -15,7 +15,6 @@ import { StatusBadge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { type Job } from "@/data/mock";
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from "@/data/db";
-import { cn } from "@/lib/utils";
 import { api, postJson, errMsg, qs } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 

@@ -214,6 +214,8 @@ export function TrackClient(props: Props) {
         <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
           {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือตรวจสอบด้วยเบอร์มือถือ (รับรหัส OTP ทาง SMS)
         </p>
+        {/* a full page load on purpose: fresh CSP nonce and a clean gate — nothing of the expired link stays in memory */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a
           href="/track"
           className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"

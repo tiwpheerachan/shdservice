@@ -237,7 +237,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
     return await fn();
   } catch (e) {
-    // eslint-disable-next-line no-console
+     
     console.error("[track]", e instanceof Error ? e.message : e);
     return null;
   }

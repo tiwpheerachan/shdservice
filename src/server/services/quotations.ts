@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, gte, ilike, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from "@/db/schema";
 import type { Quotation } from "@/data/mock";

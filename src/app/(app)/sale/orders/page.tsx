@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Plus, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
+import { SearchSelect } from "@/components/shared/search-select";
 import { RowActions } from "@/components/shared/row-actions";
 import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";

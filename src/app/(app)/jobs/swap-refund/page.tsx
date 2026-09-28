@@ -21,13 +21,13 @@ import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg } from "@/lib/api";
+import { today as thaiToday } from "@/lib/dates";
 
 // parse the "key: value" lines this app writes into job.swap_refund_detail
 function parseSwap(text: string): Record<string, string> {
@@ -66,7 +66,7 @@ function SwapRefundForm() {
     if (!job) return;
     reset(fromJob(job));
     const sw = parseSwap(job.swap.detail);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = thaiToday(); // Thai calendar, not UTC
     const refund = !!sw["ยอดเงินคืน"] || job.payment.amount < 0;
     setMode(refund ? "refund" : "swap");
     upd({

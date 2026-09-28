@@ -2,27 +2,28 @@
 // time zone holding Thai wall-clock time and uses sentinels (1900-01-01, -1, 0)
 // for "empty". The UI expects plain strings ("YYYY-MM-DD", "YYYY-MM-DD HH:mm").
 
+import { isoDate, isoDateTime } from "@/lib/dates";
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** Is this legacy value a "no value" sentinel? */
 export function isSentinelDate(v: string | Date | null | undefined): boolean {
   if (!v) return true;
-  const s = typeof v === "string" ? v : v.toISOString();
-  return s.startsWith("1900-01-01") || s.startsWith("0001-01-01");
+  if (v instanceof Date) return v.getUTCFullYear() < 1901; // a real instant (timestamptz)
+  return v.startsWith("1900-01-01") || v.startsWith("0001-01-01");
 }
 
 /** `timestamp` (string from pg, Thai local) → "YYYY-MM-DD" or "". */
 export function fmtDate(v: string | Date | null | undefined): string {
   if (isSentinelDate(v)) return "";
-  const s = typeof v === "string" ? v : v!.toISOString();
-  return s.slice(0, 10);
+  // a Date is a real instant (timestamptz) → its Thai calendar date, never the UTC one
+  return typeof v === "string" ? v.slice(0, 10) : isoDate(v!);
 }
 
 /** → "YYYY-MM-DD HH:mm" or "". */
 export function fmtDateTime(v: string | Date | null | undefined): string {
   if (isSentinelDate(v)) return "";
-  const s = typeof v === "string" ? v : v!.toISOString();
-  return s.slice(0, 16).replace("T", " ");
+  return typeof v === "string" ? v.slice(0, 16).replace("T", " ") : isoDateTime(v!);
 }
 
 /** Current Thai wall-clock time as a pg-compatible `timestamp` string. */

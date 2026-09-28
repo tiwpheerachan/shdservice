@@ -9,7 +9,7 @@ import { ProfileSelect } from "./profile-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Textarea, Radio, NumberInput } from "@/components/ui/input";
-import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
+import { SearchSelect } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
 import { PAYMENT_METHODS, type Customer } from "@/data/mock";
 import { useProducts, useStaff } from "@/data/db";

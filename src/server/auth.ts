@@ -224,7 +224,7 @@ export function handle<T extends unknown[]>(
       // the browser only gets a reference to quote when reporting it
       const msg = e instanceof Error ? e.message : String(e);
       const ref = crypto.randomUUID().slice(0, 8);
-      // eslint-disable-next-line no-console
+       
       console.error(`[api] ref=${ref}`, msg);
       const status = /DATABASE_URL/.test(msg) ? 503 : 500;
       return NextResponse.json({ error: `เกิดข้อผิดพลาดในระบบ (รหัสอ้างอิง ${ref})`, ref }, { status });

@@ -13,6 +13,7 @@ import { listAudit } from "@/server/audit";
 import { listJobs, filtersFromQuery } from "@/server/services/jobs";
 import { listQuotations } from "@/server/services/quotations";
 import { listSaleOrders } from "@/server/services/sale-orders";
+import { today } from "@/lib/dates";
 
 /**
  * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
@@ -299,6 +300,6 @@ export async function exportXlsx(req: NextRequest, resource: string): Promise<{ 
     else if (c.num) ws.getColumn(c.key).numFmt = "#,##0";
   }
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = today(); // Thai calendar date in the file name
   return { buffer, filename: `${resource}-${stamp}.xlsx` };
 }

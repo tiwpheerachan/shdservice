@@ -17,7 +17,7 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
   try {
     return await fn();
   } catch (e) {
-    // eslint-disable-next-line no-console
+     
     console.error("DB fetch failed:", e instanceof Error ? e.message : e);
     return [];
   }

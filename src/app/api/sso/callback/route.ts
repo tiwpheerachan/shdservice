@@ -39,7 +39,7 @@ async function provision(opts: {
     const r = await provisionSsoUser(opts);
     return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId, sessionVersion: r.sessionVersion };
   } catch (e) {
-    // eslint-disable-next-line no-console
+     
     console.error("[sso] provision failed:", e instanceof Error ? e.message.split("\n")[0] : e);
     return null;
   }
@@ -87,14 +87,14 @@ export async function GET(request: NextRequest) {
     if (!res.ok) {
       // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
       const body = await res.text().catch(() => "");
-      // eslint-disable-next-line no-console
+       
       console.error(`[sso] verify failed ${res.status} for client ${SSO.clientId}: ${body.slice(0, 300)}`);
       // a code that was already exchanged (page reload) while a session exists → just continue
       return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
     }
     identity = await res.json();
     if (process.env.SSO_DEBUG === "1") {
-      // eslint-disable-next-line no-console
+       
       console.log("[sso] identity keys:", Object.keys(identity));
     }
   } catch {
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
 
   const email = str(u.email);
   if (!email) {
-    // eslint-disable-next-line no-console
+     
     console.error("[sso] no email in verify response; top-level keys:", Object.keys(identity), "user keys:", Object.keys(u ?? {}));
     return fail(request, "no_email");
   }
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
       meta: { ip: clientIp(request.headers), ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
     });
   } catch (e) {
-    // eslint-disable-next-line no-console
+     
     console.error("[sso] audit login failed:", e instanceof Error ? e.message : e);
   }
 

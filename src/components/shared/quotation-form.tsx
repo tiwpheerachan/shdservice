@@ -126,7 +126,7 @@ export const QuotationForm = React.forwardRef<
         push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: errMsg(e) });
       }
     },
-    [push]
+    [push, mode]
   );
 
   // prefill from an existing quotation

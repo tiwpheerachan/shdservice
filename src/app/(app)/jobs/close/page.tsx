@@ -17,7 +17,6 @@ import {
 import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -27,6 +26,7 @@ import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
+import { today as thaiToday } from "@/lib/dates";
 
 function CloseForm() {
   const { push } = useToast();
@@ -79,7 +79,7 @@ function CloseForm() {
     if (!job) return;
     reset(fromJob(job));
     setSlip(job.payment.slip);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = thaiToday(); // Thai calendar, not UTC
     upd({
       payType: job.payment.type || JOB_PAYMENT_METHODS[0],
       payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : "",

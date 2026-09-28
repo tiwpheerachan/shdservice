@@ -26,9 +26,9 @@ export const POST = handle(async (req: NextRequest) => {
     await setRecordStatus("users", Number(id), rs, me.userId);
     return NextResponse.json({ ok: true, status: rs });
   }
-  const module = RECORD_MODULES[table];
-  if (module === undefined) throw new HttpError(400, `table not allowed: ${table}`);
-  const user = module === null ? await requireAdmin(req) : await requireCan(req, module, rs === RS.DELETED ? "del" : "edit");
+  const permModule = RECORD_MODULES[table];
+  if (permModule === undefined) throw new HttpError(400, `table not allowed: ${table}`);
+  const user = permModule === null ? await requireAdmin(req) : await requireCan(req, permModule, rs === RS.DELETED ? "del" : "edit");
   await setRecordStatus(table, id, rs, user.userId);
   return NextResponse.json({ ok: true, status: rs });
 });

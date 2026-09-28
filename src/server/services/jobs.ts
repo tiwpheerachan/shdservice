@@ -5,7 +5,6 @@ import { alias, unionAll } from "drizzle-orm/pg-core";
 import { db, type Tx } from "@/db/client";
 import {
   appUser,
-  customer,
   documentAttach,
   job,
   jobLog,
@@ -16,7 +15,6 @@ import {
   jobType,
   manufacturer,
   model,
-  product,
   productType,
   symptom,
 } from "@/db/schema";
@@ -41,6 +39,7 @@ import { getCustomerByCode, getCustomerById } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
 import { RS, statusStamp } from "@/server/record-status";
+import { addDays } from "@/lib/dates";
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -1499,13 +1498,6 @@ export async function dashboard(range: DashRange = {}) {
   dashCache.set(key, { at: Date.now(), value });
   if (dashCache.size > 50) dashCache.delete(dashCache.keys().next().value!);
   return value;
-}
-
-/** "2026-09-30" + 1 → "2026-10-01" (calendar dates, no time zone involved) */
-function addDays(ymd: string, n: number): string {
-  const d = new Date(`${ymd}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
 }
 
 /** every day ("YYYY-MM-DD") or month ("YYYY-MM") from lo to hi, inclusive */

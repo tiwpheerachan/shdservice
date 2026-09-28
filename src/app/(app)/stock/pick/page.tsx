@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PackageMinus, Save, Search } from "lucide-react";
+import { Save, Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

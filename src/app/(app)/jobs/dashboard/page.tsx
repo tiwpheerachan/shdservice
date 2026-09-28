@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
+import { SearchSelect } from "@/components/shared/search-select";
 import {
   useDashGroups,
   useTatRows,
@@ -14,6 +14,7 @@ import {
   useJobTypes,
 } from "@/data/db";
 import { int, cn } from "@/lib/utils";
+import { daysAgo, today } from "@/lib/dates";
 
 /* one restrained accent per status group — carried as a small dot + thin bar, never a fill */
 const TONE: Record<string, string> = {
@@ -59,14 +60,10 @@ function Panel({
   );
 }
 
-/* date helpers (local calendar, YYYY-MM-DD) */
-const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return ymd(d); };
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 /* TAT deep links → job list. Buckets count days from the Thai calendar day (same as the server query),
    so each bucket is a create-date range: 1–3 = from today−3, 4–7 = today−7…today−4, …, >30 = up to today−31. */
 type TatKey = "d13" | "d47" | "d814" | "d1530" | "over30" | "total";
-const thaiDaysAgo = (n: number) => new Date(Date.now() + 7 * 3_600_000 - n * 86_400_000).toISOString().slice(0, 10);
 const TAT_RANGE: Record<TatKey, [from: number | null, to: number | null]> = {
   d13: [3, null], d47: [7, 4], d814: [14, 8], d1530: [30, 15], over30: [null, 31], total: [null, null],
 };
@@ -74,8 +71,8 @@ function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: str
   const [f, t] = TAT_RANGE[bucket];
   const p = new URLSearchParams({ src: "tat", bucket, open: "1" });
   if (status?.id) { p.set("statusId", String(status.id)); p.set("status", status.name); }
-  if (f !== null) p.set("from", thaiDaysAgo(f));
-  if (t !== null) p.set("to", thaiDaysAgo(t));
+  if (f !== null) p.set("from", daysAgo(f));
+  if (t !== null) p.set("to", daysAgo(t));
   if (type) p.set("type", type);
   return `/jobs/list?${p}`;
 }
@@ -93,24 +90,26 @@ const thai = (iso: string) => { if (!iso) return ""; const [y, m, d] = iso.split
 export default function DashboardPage() {
   // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
   const [from, setFrom] = React.useState(() => daysAgo(29));
-  const [to, setTo] = React.useState(() => ymd(new Date()));
+  const [to, setTo] = React.useState(() => today());
   // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
   const [type, setType] = React.useState("");
   const { data: JOB_TYPES } = useJobTypes();
   const range = React.useMemo(() => ({ from, to, type }), [from, to, type]);
+  // presets use the Thai calendar (lib/dates), like the server's date filters
   const preset = (key: "7d" | "30d" | "90d" | "month" | "all") => {
-    const today = new Date();
+    const now = today();
     if (key === "all") { setFrom(""); setTo(""); return; }
-    if (key === "month") { setFrom(`${ymd(today).slice(0, 8)}01`); setTo(ymd(today)); return; }
+    if (key === "month") { setFrom(`${now.slice(0, 8)}01`); setTo(now); return; }
     setFrom(daysAgo(key === "7d" ? 6 : key === "30d" ? 29 : 89));
-    setTo(ymd(today));
+    setTo(now);
   };
+  const now = today();
   const activePreset =
     !from && !to ? "all"
-    : to === ymd(new Date()) && from === daysAgo(6) ? "7d"
-    : to === ymd(new Date()) && from === daysAgo(29) ? "30d"
-    : to === ymd(new Date()) && from === daysAgo(89) ? "90d"
-    : to === ymd(new Date()) && from === `${ymd(new Date()).slice(0, 8)}01` ? "month"
+    : to === now && from === daysAgo(6) ? "7d"
+    : to === now && from === daysAgo(29) ? "30d"
+    : to === now && from === daysAgo(89) ? "90d"
+    : to === now && from === `${now.slice(0, 8)}01` ? "month"
     : "";
 
   const { data: DASH_GROUPS } = useDashGroups(range);

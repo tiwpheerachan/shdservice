@@ -20,7 +20,6 @@ import {
 import { Tabs } from "@/components/ui/tabs";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -29,6 +28,7 @@ import { useVendors, useStaff } from "@/data/db";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { useAccess } from "@/lib/use-access";
 import { postJson, errMsg } from "@/lib/api";
+import { today as thaiToday } from "@/lib/dates";
 
 // ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
 const OTHER = "อื่นๆ (ระบุ)";
@@ -63,7 +63,7 @@ function OutsourceForm() {
     if (!job) return;
     reset(fromJob(job));
     const last = job.outsource[job.outsource.length - 1];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = thaiToday(); // Thai calendar, not UTC
     upd({
       repairDetail: job.repairDetail,
       sendTo: last?.sendTo && VENDORS.includes(last.sendTo) ? last.sendTo : last?.sendTo ? OTHER : "",

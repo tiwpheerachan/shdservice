@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Select, Textarea, Checkbox, Radio } from "@/components/ui/input";
+import { Input, Textarea, Checkbox, Radio } from "@/components/ui/input";
 import { SearchSelect, withCurrent } from "./search-select";
 import { useToast } from "@/components/ui/toast";
 import {
