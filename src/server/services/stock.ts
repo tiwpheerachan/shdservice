@@ -170,8 +170,8 @@ export type ProductInput = {
 };
 
 export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
+  assertValid(productSchema, i);
   const name = str(i.name).slice(0, 500);
-  if (!name) throw new HttpError(400, "ต้องระบุชื่ออะไหล่");
   const [cat] = i.category
     ? await db.select({ id: category.categoryId }).from(category).where(eq(category.categoryName, str(i.category))).limit(1)
     : [];
@@ -870,6 +870,8 @@ export async function listIssuedLines(opts: { from?: string; to?: string; catego
  * ------------------------------------------------------------------ */
 import { count as countFn } from "drizzle-orm";
 import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { assertValid } from "@/server/validate";
+import { productSchema } from "@/lib/validation/admin";
 
 export type ProductFilters = {
   mode?: DeletedMode;

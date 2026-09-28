@@ -17,6 +17,8 @@ import { type Model } from "@/data/mock";
 import { useModelsPage, useManufacturers } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
+import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
+import { modelSchema } from "@/lib/validation/admin";
 
 type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
 
@@ -44,10 +46,13 @@ export default function ModelsPage() {
   const [form, setForm] = React.useState<ModelForm>({ code: "", name: "", brand: "", price: "", status: "Active" });
   const [saving, setSaving] = React.useState(false);
   const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
 
   const openForm = (m: Model | null, readOnly = false) => {
     setViewOnly(readOnly);
     setEditing(m);
+    fe.setErrors({});
     setForm({
       code: m?.code ?? "",
       name: m?.name ?? "",
@@ -68,10 +73,7 @@ export default function ModelsPage() {
 
   // model_code มาจาก running_no "Model" (MD00001) — สร้างอัตโนมัติตอนเพิ่ม
   const save = async () => {
-    if (!form.name.trim() || !form.brand) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุ Model Name และยี่ห้อ" });
-      return;
-    }
+    if (fe.report(fe.run(modelSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const d = await postJson<{ row: Model }>("/api/masters/models", {
@@ -85,7 +87,7 @@ export default function ModelsPage() {
       push({ kind: "success", title: "บันทึกรุ่นสินค้าแล้ว", desc: `${d.row.code} · ${d.row.name}` });
       refetch();
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -224,16 +226,16 @@ export default function ModelsPage() {
       >
         <fieldset disabled={viewOnly} className="contents">
         <FieldGrid cols={2}>
-          <Field label="Model Code" required>
+          <Field label="Model Code">
             <Input value={form.code || "Generate Auto"} readOnly />
           </Field>
-          <Field label="Model Name" required>
+          <Field label="Model Name" required error={fe.errors.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
-          <Field label="ยี่ห้อ" required>
+          <Field label="ยี่ห้อ" required error={fe.errors.brand}>
             <SearchSelect value={form.brand} onChange={(v) => set("brand", v)} options={strOptions(brandOptions)} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
           </Field>
-          <Field label="Market Price (บาท)" required>
+          <Field label="Market Price (บาท)" required error={fe.errors.price}>
             <Input
               type="number"
               step="0.01"

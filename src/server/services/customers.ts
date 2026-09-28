@@ -11,8 +11,8 @@ import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
-import { summary, validate } from "@/lib/validation";
 import { customerSchema, conflictErrors } from "@/lib/validation/customer";
+import { assertValid } from "@/server/validate";
 
 export type DeletedMode = StatusMode;
 
@@ -242,8 +242,7 @@ export async function findCustomerConflicts(
 export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
   const prev = i.code ? await getCustomerByCode(i.code) : null;
   // same rules as the form (lib/validation/customer): phone required unless an old customer never had one
-  const v = validate(customerSchema(!prev || !!str(prev.phone)), i);
-  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
+  assertValid(customerSchema(!prev || !!str(prev.phone)), i);
   const name = str(i.name).slice(0, 200);
   const phone = str(i.phone).slice(0, 50);
 

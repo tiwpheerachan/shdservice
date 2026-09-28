@@ -13,8 +13,8 @@ import { getCustomerByCode, addressNames } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { issueForSaleOrder } from "./stock";
 import { RS, statusFilter, type StatusMode } from "@/server/record-status";
-import { summary, validate } from "@/lib/validation";
 import { saleOrderSchema } from "@/lib/validation/sale-order";
+import { assertValid } from "@/server/validate";
 
 /** approve_status ids */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
@@ -232,8 +232,7 @@ export type SaleOrderInput = {
 
 export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promise<SaleOrderDetail> {
   // same rules as the form (lib/validation/sale-order)
-  const v = validate(saleOrderSchema, i);
-  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
+  assertValid(saleOrderSchema, i);
   const cust = await getCustomerByCode(str(i.customerCode));
   if (!cust) throw new HttpError(400, "ต้องเลือกลูกค้า", { fields: { customerCode: "ไม่พบลูกค้ารายนี้" } });
   const codes = i.lines.map((l) => str(l.code)).filter(Boolean);

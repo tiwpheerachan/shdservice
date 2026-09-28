@@ -18,6 +18,8 @@ import { useConfirm } from "@/components/ui/confirm";
 import { ROLES, type User } from "@/data/mock";
 import { useUsers, useRoles } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
+import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
+import { userSchema } from "@/lib/validation/admin";
 
 type UserForm = {
   id: string;
@@ -82,11 +84,14 @@ export default function UsersPage() {
   const [form, setForm] = React.useState<UserForm>(EMPTY);
   const [saving, setSaving] = React.useState(false);
 
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const openAdd = () => {
     setForm(EMPTY);
+    fe.setErrors({});
     setEditing(false);
     setOpen(true);
   };
@@ -106,6 +111,7 @@ export default function UsersPage() {
 
   const openEdit = (r: User) => {
     setForm(toForm(r));
+    fe.setErrors({});
     setEditing(true);
     setOpen(true);
   };
@@ -156,10 +162,7 @@ export default function UsersPage() {
   };
 
   const save = async () => {
-    if (!form.name.trim() || !form.role.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องมีชื่อและประเภทผู้ใช้งาน" });
-      return;
-    }
+    if (fe.report(fe.run(userSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const data = await postUser(form);
@@ -534,10 +537,10 @@ export default function UsersPage() {
         )}
 
         <FieldGrid cols={2}>
-          <Field label="ชื่อ-สกุล" required>
+          <Field label="ชื่อ-สกุล" required error={fe.errors.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
-          <Field label="อีเมล">
+          <Field label="อีเมล" error={fe.errors.email}>
             <Input
               type="email"
               value={form.email}
@@ -550,7 +553,7 @@ export default function UsersPage() {
           <Field label="รหัสพนักงาน / Lark ID">
             <Input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="—" />
           </Field>
-          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
+          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required error={fe.errors.role} hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
             <SearchSelect value={form.role} onChange={(v) => set("role", v)} options={strOptions(ROLE_OPTIONS)} />
           </Field>
           <Field label="สาขา / หน่วยงาน">

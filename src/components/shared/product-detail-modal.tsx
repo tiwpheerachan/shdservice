@@ -18,6 +18,8 @@ import {
 import type { Product } from "@/data/mock";
 import { int } from "@/lib/utils";
 import { api, postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
+import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
+import { productSchema } from "@/lib/validation/admin";
 
 export type ProductMode = "view" | "edit" | "add";
 
@@ -112,9 +114,12 @@ export function ProductDetailModal({
     }
   };
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
 
   React.useEffect(() => {
     if (!open) return;
+    fe.setErrors({}); // a freshly opened dialog starts clean
     if (mode === "add" || !code) {
       setDetail(null);
       setStockCard([]);
@@ -153,10 +158,7 @@ export function ProductDetailModal({
   }, [open, code, mode]);
 
   const save = async () => {
-    if (!form.name.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุชื่ออะไหล่" });
-      return;
-    }
+    if (fe.report(fe.run(productSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const d = await postJson<{ row: Product }>("/api/products", { ...form, sysCode: code || undefined });
@@ -164,7 +166,7 @@ export function ProductDetailModal({
       onSave?.(d.row);
       onClose();
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -253,7 +255,7 @@ export function ProductDetailModal({
               <Input value={form.mfgCode} onChange={(e) => set("mfgCode", e.target.value)} readOnly={ro} className="num" />
             </Field>
 
-            <Field label="ชื่ออะไหล่ (TH)" wide>
+            <Field label="ชื่ออะไหล่ (TH)" required wide error={fe.errors.name}>
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} readOnly={ro} />
             </Field>
             <Field label="ชื่ออะไหล่ (EN)" wide>
@@ -291,7 +293,7 @@ export function ProductDetailModal({
               </div>
             </Field>
 
-            <Field label="ราคาทุน (Capital) — บาท">
+            <Field label="ราคาทุน (Capital) — บาท" error={fe.errors.capitalPrice}>
               <Input
                 type="number"
                 step="0.01"
@@ -305,7 +307,7 @@ export function ProductDetailModal({
                 className="num text-right"
               />
             </Field>
-            <Field label="ราคาขายส่ง (Wholesale) — บาท">
+            <Field label="ราคาขายส่ง (Wholesale) — บาท" error={fe.errors.wholesalePrice}>
               <Input
                 type="number"
                 step="0.01"
@@ -319,7 +321,7 @@ export function ProductDetailModal({
                 className="num text-right"
               />
             </Field>
-            <Field label="ราคาขายปลีก (Retail) — บาท">
+            <Field label="ราคาขายปลีก (Retail) — บาท" error={fe.errors.price}>
               <Input
                 type="number"
                 step="0.01"

@@ -41,7 +41,6 @@ import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
 import { RS, statusStamp } from "@/server/record-status";
 import { addDays } from "@/lib/dates";
-import { summary, validate } from "@/lib/validation";
 import {
   jobSchema,
   filledRequired,
@@ -51,6 +50,7 @@ import {
   closeActionSchema,
   type JobRequiredKey,
 } from "@/lib/validation/job";
+import { assertValid } from "@/server/validate";
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -846,10 +846,6 @@ async function writeSymptoms(tx: Tx, jobNo: string, ids: number[]) {
 /** 400 with every failing field ({ fields: { so: "ต้องระบุ …" } }) — the form shows each under its box */
 function assertJob(i: JobInput, mustKeep?: readonly JobRequiredKey[]) {
   assertValid(jobSchema(mustKeep), i);
-}
-function assertValid(schema: Parameters<typeof validate>[0], data: unknown) {
-  const v = validate(schema, data);
-  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
 }
 
 /**

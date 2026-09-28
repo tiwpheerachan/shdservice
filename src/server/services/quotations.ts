@@ -13,8 +13,8 @@ import { getCustomerByCode } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { getJob } from "./jobs";
 import { RS, statusFilter, statusStamp, type StatusMode } from "@/server/record-status";
-import { summary, validate } from "@/lib/validation";
 import { quotationSchema } from "@/lib/validation/quotation";
+import { assertValid } from "@/server/validate";
 
 /** quotation_status ids (from the dump) */
 export const QS = { WAIT: 1, SENT: 2, AGREED: 3, DECLINED: 4, CANCELLED: 5, AGREED_WAIT_PAY: 6, EXPIRED: 8, AGREED_WAIT_PARTS: 9 } as const;
@@ -293,8 +293,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const [before] = i.no
     ? await db.select({ jobNo: quotationHd.referenceJobNo }).from(quotationHd).where(eq(quotationHd.quotationNo, i.no)).limit(1)
     : [];
-  const v = validate(quotationSchema(!i.no || !!str(before?.jobNo)), i);
-  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
+  assertValid(quotationSchema(!i.no || !!str(before?.jobNo)), i);
   if (str(i.jobNo)) {
     const [found] = await db.select({ no: job.jobNo }).from(job).where(eq(job.jobNo, str(i.jobNo).toUpperCase())).limit(1);
     if (!found) throw new HttpError(400, "ไม่พบหมายเลขงาน", { fields: { jobNo: `ไม่พบหมายเลขงาน ${str(i.jobNo).toUpperCase()}` } });

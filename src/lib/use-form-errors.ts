@@ -78,3 +78,16 @@ export function focusFirstInvalid() {
     el.focus({ preventScroll: true });
   });
 }
+
+/**
+ * For forms that keep their values in one object: a field whose value changed (typed, picked or
+ * filled in by code) loses its error — `useClearOnChange(fe.clear, form)`.
+ */
+export function useClearOnChange(clear: (key: string) => void, values: object) {
+  const prev = React.useRef(values as Record<string, unknown>);
+  React.useEffect(() => {
+    const now = values as Record<string, unknown>;
+    for (const k of Object.keys(now)) if (!Object.is(prev.current[k], now[k])) clear(k);
+    prev.current = now;
+  });
+}

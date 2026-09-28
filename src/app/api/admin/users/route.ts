@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireAdmin, readJson, HttpError } from "@/server/auth";
+import { handle, requireAdmin, readJson } from "@/server/auth";
 import { lookupByEmail } from "@/lib/directory";
 import { listSystemUsers, upsertUser } from "@/server/services/users";
 import { parseStatusMode } from "@/server/record-status";
+import { assertValid } from "@/server/validate";
+import { userSchema } from "@/lib/validation/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,10 +26,10 @@ export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await readJson(req);
 
+  assertValid(userSchema, body); // same rules as the user form (lib/validation/admin)
   const name = str(body.name);
   const role = str(body.role);
   const email = str(body.email).toLowerCase();
-  if (!name || !role) throw new HttpError(400, "name and role are required");
 
   // Enrich avatar/title (and fill blanks) from the directory when we have an email.
   const prof = email ? await lookupByEmail(email) : null;

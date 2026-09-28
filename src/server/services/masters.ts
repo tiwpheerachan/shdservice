@@ -20,6 +20,8 @@ import { audit, diff } from "@/server/audit";
 import { count, desc, ilike, or } from "drizzle-orm";
 import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode, type RecordStatus } from "@/server/record-status";
+import { assertValid } from "@/server/validate";
+import { masterSchema, modelSchema } from "@/lib/validation/admin";
 
 export type DeletedMode = StatusMode;
 
@@ -119,8 +121,8 @@ export async function saveSimple(
   byUserId = 0
 ): Promise<MasterRow> {
   const d = SIMPLE[kind];
+  assertValid(masterSchema(), input);
   const name = str(input.name).slice(0, d.nameLen);
-  if (!name) throw new HttpError(400, "ต้องระบุชื่อ");
   const rs = fromUiStatus(input.status);
   const values: Record<string, unknown> = { [d.keys.name]: name, [d.keys.active]: rs === "ACTIVE", recordStatus: rs, statusChangedAt: nowThai(), statusChangedBy: byUserId };
   if (d.keys.detail) values[d.keys.detail] = str(input.detail).slice(0, 100);
@@ -190,7 +192,7 @@ export async function saveSymptom(
   byUserId = 0
 ): Promise<Symptom> {
   const name = str(input.name).slice(0, 50);
-  if (!name) throw new HttpError(400, "ต้องระบุชื่ออาการเสีย");
+  assertValid(masterSchema("ชื่ออาการเสีย"), input);
   const values = {
     symptomName: name,
     symptomDescription: str(input.detail).slice(0, 100),
@@ -260,7 +262,7 @@ export async function saveModel(
   byUserId = 0
 ): Promise<Model> {
   const name = str(input.name).slice(0, 50);
-  if (!name) throw new HttpError(400, "ต้องระบุ Model Name");
+  assertValid(modelSchema, input);
   const brand = await db
     .select({ id: manufacturer.manufacturerId })
     .from(manufacturer)

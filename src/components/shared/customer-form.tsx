@@ -157,7 +157,7 @@ export function CustomerFields({
   const { PROVINCES, districts, subDistricts } = useAddressLists(form.cityId, form.districtId);
   return (
     <FieldGrid cols={2}>
-      <Field label="รหัสลูกค้า" required>
+      <Field label="รหัสลูกค้า">
         <Input value={editing?.code || "Generate Auto"} readOnly />
       </Field>
       <Field label="ประเภทลูกค้า">

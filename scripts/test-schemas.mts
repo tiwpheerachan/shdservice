@@ -17,6 +17,7 @@ import {
 import { customerSchema, conflictErrors } from "../src/lib/validation/customer.ts";
 import { quotationSchema } from "../src/lib/validation/quotation.ts";
 import { saleOrderSchema } from "../src/lib/validation/sale-order.ts";
+import { masterSchema, modelSchema, userSchema, productSchema } from "../src/lib/validation/admin.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -144,6 +145,25 @@ test("customer, salesperson and a product line are required", () => {
 test("qty > 0 per row; price and paid amount not negative", () => {
   const e = errorsOf(saleOrderSchema, { ...so, lines: [{ code: "P1", qty: 0, price: -1 }], paymentAmount: -5 });
   assert.deepEqual(Object.keys(e).sort(), ["lines.0.price", "lines.0.qty", "paymentAmount"]);
+});
+
+console.log("\nBack office");
+test("master list row: the name, in the list's own words", () => {
+  assert.equal(errorsOf(masterSchema("ชื่อหมวดหมู่"), { name: " " }).name, "ต้องระบุชื่อหมวดหมู่");
+  assert.deepEqual(errorsOf(masterSchema(), { name: "สายไฟ" }), {});
+});
+test("model: name, brand, price present (0 allowed) and not negative", () => {
+  assert.deepEqual(Object.keys(errorsOf(modelSchema, { name: "", brand: "", price: "" })).sort(), ["brand", "name", "price"]);
+  assert.deepEqual(errorsOf(modelSchema, { name: "X10", brand: "Dreame", price: "0" }), {});
+  assert.ok(errorsOf(modelSchema, { name: "X10", brand: "Dreame", price: "-1" }).price);
+});
+test("user: name + role; email real when given", () => {
+  assert.deepEqual(Object.keys(errorsOf(userSchema, { name: "", role: "" })).sort(), ["name", "role"]);
+  assert.ok(errorsOf(userSchema, { name: "a", role: "Engineer", email: "x@" }).email);
+});
+test("spare part: Thai name; prices not negative", () => {
+  assert.ok(errorsOf(productSchema, { name: "" }).name);
+  assert.deepEqual(Object.keys(errorsOf(productSchema, { name: "แบต", capitalPrice: "-1", wholesalePrice: "", price: "-5" })).sort(), ["capitalPrice", "price"]);
 });
 
 console.log("\nSummary title");

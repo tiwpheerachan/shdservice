@@ -16,6 +16,8 @@ import { useConfirm } from "@/components/ui/confirm";
 import type { MasterRow } from "@/data/mock";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
+import { masterSchema } from "@/lib/validation/admin";
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
 export type MasterKind = "categories" | "manufacturers" | "colors" | "job_types" | "product_types" | "symptoms";
@@ -61,14 +63,18 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     return Array.from(set);
   }, [rows, config.extraOptions]);
 
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
   const openNew = () => {
     setEditing(null);
     setForm({ name: "", status: "Active", group: "", detail: "" });
+    fe.setErrors({});
     setOpen(true);
   };
   const openEdit = (r: MasterRow & { group?: string }) => {
     setEditing(r);
     setForm({ name: r.name, status: r.status, group: r.group ?? "", detail: r.detail ?? "" });
+    fe.setErrors({});
     setOpen(true);
   };
 
@@ -76,10 +82,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     setRows((s) => (s.some((x) => x.id === row.id) ? s.map((x) => (x.id === row.id ? row : x)) : [...s, row]));
 
   const save = async () => {
-    if (!form.name.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: `ต้องระบุ${config.nameLabel}` });
-      return;
-    }
+    if (fe.report(fe.run(masterSchema(config.nameLabel), form))) return; // the API checks the same
     setSaving(true);
     try {
       const d = await postJson<{ row: MasterRow & { group?: string } }>(`/api/masters/${config.kind}`, {
@@ -97,7 +100,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         desc: `${config.title} — ${d.row.name}`,
       });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -282,7 +285,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }
       >
         <FieldGrid cols={2}>
-          <Field label={config.nameLabel} required>
+          <Field label={config.nameLabel} required error={fe.errors.name}>
             <Input
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
