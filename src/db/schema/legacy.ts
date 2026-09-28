@@ -367,11 +367,13 @@ export const job = pgTable("job", {
 	jobPaymentSlipFileName: varchar("job_payment_slip_file_name", { length: 100 }),
 	swapRefundDocumentNo: varchar("swap_refund_document_no", { length: 100 }),
 	isJobBounce: boolean("is_job_bounce"),
-	// public customer tracking link (drizzle/0012) — /t/<track_token>
+	// public customer tracking link (drizzle/0012) — /track/<track_token>; lifetime: drizzle/0016
 	trackToken: varchar("track_token", { length: 43 }),
 	// courier used for the return leg (drizzle/0013); NULL on legacy jobs
 	returnShipperId: integer("return_shipper_id"),
 	trackTokenAt: timestamp("track_token_at", { mode: "string" }),
+	// first customer open of the current link (drizzle/0016) — link lives 15 min from here
+	trackOpenedAt: timestamp("track_opened_at", { mode: "string", withTimezone: true }),
 	productSaleOutShopName: varchar("product_sale_out_shop_name", { length: 100 }),
 });
 

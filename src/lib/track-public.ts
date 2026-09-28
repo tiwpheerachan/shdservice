@@ -43,10 +43,14 @@ export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] =
   { key: "returned", label: "ส่งคืน / รอรับเครื่อง", hint: "ส่งคืนแล้ว หรือพร้อมให้มารับที่ศูนย์" },
 ];
 
+/** link lifetime shown to customers and staff (enforced in services/tracking.ts) */
+export const LINK_RULE_TEXT = "ลิงก์ใช้ได้ 1 วันนับจากที่ได้รับ และ 15 นาทีหลังเปิดดูครั้งแรก";
+
 /** client-facing messages — one per outcome, never the reason (spec §V, §AM) */
 export const TRACK_MSG = {
   sessionFail: "ไม่สามารถยืนยันได้ กรุณาลองใหม่อีกครั้ง",
   ticketFail: "หมดเวลา กรุณายืนยันอีกครั้ง",
   rateLimited: "มีคำขอมากเกินไป กรุณาลองใหม่ภายหลัง",
   unavailable: "ระบบยืนยันตัวตนไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลังหรือติดต่อศูนย์บริการ",
+  linkExpired: "ลิงก์นี้หมดอายุหรือใช้งานไม่ได้แล้ว",
 } as const;

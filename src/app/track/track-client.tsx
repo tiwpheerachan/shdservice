@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import Script from "next/script";
-import { Loader2, Search, ShieldCheck } from "lucide-react";
-import { TRACK_MSG, type PublicJob } from "@/lib/track-public";
+import { Clock, Loader2, Search, ShieldCheck } from "lucide-react";
+import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from "@/lib/track-public";
 import { PublicJobView } from "./public-job-view";
 
 /**
@@ -40,7 +40,7 @@ const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 const TOKEN_FRESH_MS = 4 * 60_000;
 
 type Props = { mode: "link"; linkToken: string; nonce?: string } | { mode: "form"; nonce?: string };
-type Phase = "gate" | "ready" | "done";
+type Phase = "gate" | "ready" | "done" | "expired";
 
 async function post(path: string, body: Record<string, string>) {
   const r = await fetch(path, {
@@ -51,7 +51,7 @@ async function post(path: string, body: Record<string, string>) {
     credentials: "same-origin",
     referrerPolicy: "no-referrer",
   });
-  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; ticket?: string; job?: PublicJob };
+  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob };
 }
 
 /** one Turnstile widget bound to a container while it is mounted */
@@ -103,6 +103,11 @@ export function TrackClient(props: Props) {
       setError("");
       try {
         const s = await post("/api/track/session", { ...fields, turnstileToken });
+        // the link itself is expired / used up → hint + the lookup form, not the captcha again
+        if (s.reason === "link") {
+          setPhase("expired");
+          return;
+        }
         if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
         // the ticket exists only inside `s` for this one call — it is single-use, spent either way
         const d = await post("/api/track/data", { ticket: s.ticket });
@@ -213,6 +218,25 @@ export function TrackClient(props: Props) {
           )}
         </div>
         {error && <p className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      </div>
+    );
+  }
+
+  /* ---------- link expired / used up ---------- */
+  if (phase === "expired") {
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center">
+        <Clock className="mx-auto mb-3 h-9 w-9 text-warning" />
+        <h1 className="text-base font-semibold">{TRACK_MSG.linkExpired}</h1>
+        <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+          {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือค้นหาด้วยเลขที่เอกสารและเบอร์โทร 4 ตัวท้าย
+        </p>
+        <a
+          href="/track"
+          className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Search className="h-4 w-4" /> ค้นหาด้วยเลขที่เอกสาร
+        </a>
       </div>
     );
   }

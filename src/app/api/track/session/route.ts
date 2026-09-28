@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { hit, isBlocked, block, hmac, verifyTurnstile, issueTicket, logEvent } from "@/server/track-guard";
 import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
-import { jobNoForLink, jobNoForNumber } from "@/server/services/tracking";
+import { jobNoForLink, jobNoForNumber, markLinkOpened } from "@/server/services/tracking";
+import { userFromRequest } from "@/server/auth";
 import { TRACK_MSG } from "@/lib/track-public";
 
 export const runtime = "nodejs";
@@ -66,7 +67,16 @@ export async function POST(req: NextRequest) {
       if (formKey && !(await hit("form_miss", formKey, FORM_MISS_LIMIT, FORM_MISS_WINDOW))) {
         await block(formKey, 15);
       }
-      return fail();
+      // link: tell the page it is the LINK (expired / used up / unknown — never which), so it
+      // can show the "ask for a new link" hint instead of the captcha again. Tokens are
+      // 256-bit random, so confirming that a guessed one is not valid reveals nothing.
+      return byLink ? trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410) : fail();
+    }
+    // the customer's first open starts the link's 15-minute window — a signed-in staff
+    // member checking "ดูหน้าที่ลูกค้าเห็น" must not burn the customer's link
+    if (byLink) {
+      const staff = await userFromRequest(req).catch(() => null);
+      if (!staff?.approved) await markLinkOpened(jobNo);
     }
 
     // 5. one job, one use, 3 minutes, this IP, this browser

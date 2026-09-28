@@ -37,6 +37,20 @@ import { TRACK_STEPS, type PublicJob, type TrackStepKey } from "@/lib/track-publ
 const QUOTATION_REQUIRED = false;
 /** a link stops working this long after the job was closed */
 const EXPIRE_DAYS_AFTER_CLOSE = 90;
+/** a link nobody has opened yet lives this long from issue (drizzle/0016) */
+export const LINK_UNOPENED_HOURS = 24;
+/** after the first customer open, the link lives this much longer */
+export const LINK_OPEN_MINUTES = 15;
+
+/*
+ * Link lifetime, evaluated in Postgres so the clocks never disagree:
+ * job.track_token_at is Thai wall-clock (`timestamp`), track_opened_at a real instant.
+ */
+const linkIssuedAt = sql`(${job.trackTokenAt} AT TIME ZONE 'Asia/Bangkok')`;
+const linkExpiresAt = sql<string>`CASE WHEN ${job.trackOpenedAt} IS NOT NULL
+    THEN ${job.trackOpenedAt} + make_interval(mins => ${LINK_OPEN_MINUTES})
+    ELSE ${linkIssuedAt} + make_interval(hours => ${LINK_UNOPENED_HOURS}) END`;
+const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpiresAt} > now())`;
 
 export type { PublicJob, TrackStepKey } from "@/lib/track-public";
 export { TRACK_STEPS } from "@/lib/track-public";
@@ -204,15 +218,53 @@ export async function jobNoForLink(token: string): Promise<string | null> {
   return quiet(async () => {
     const t = (token ?? "").trim();
     if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
-    const [row] = await base(eq(job.trackToken, t));
-    const ok = await visible(row);
-    if (!ok || !ok.token) return null;
+    const [row] = await db
+      .select({ no: job.jobNo, token: job.trackToken, recordStatus: job.recordStatus, live: linkLive })
+      .from(job)
+      .where(eq(job.trackToken, t))
+      .limit(1);
+    // the link's own lifetime replaces the 90-days-after-close rule: 1 day unopened, 15 min after opening
+    if (!row || !row.token || row.recordStatus === RS.DELETED || !row.live) return null;
+    if (QUOTATION_REQUIRED && !(await hasQuotation(row.no))) return null;
     // constant-time compare so a near-miss token cannot be distinguished by timing
-    const a = Buffer.from(ok.token);
+    const a = Buffer.from(row.token);
     const b = Buffer.from(t);
     if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    return ok.no;
+    return row.no;
   });
+}
+
+/** first customer open of the current link starts its 15-minute window (later opens change nothing) */
+export async function markLinkOpened(jobNo: string): Promise<void> {
+  await db.execute(sql`UPDATE job SET track_opened_at = now() WHERE job_no = ${jobNo} AND track_opened_at IS NULL`);
+}
+
+export type LinkStatus = {
+  state: "unopened" | "opened" | "expired";
+  issuedAt: string | null; // ISO
+  openedAt: string | null; // ISO
+  expiresAt: string | null; // ISO
+};
+
+/** back-office view of the current link (the hint next to it) */
+export async function linkStatus(jobNo: string): Promise<LinkStatus> {
+  const [r] = await db
+    .select({
+      issuedAt: sql<string | null>`to_char(${linkIssuedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      openedAt: sql<string | null>`to_char(${job.trackOpenedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      expiresAt: sql<string | null>`to_char((${linkExpiresAt}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      live: linkLive,
+    })
+    .from(job)
+    .where(eq(job.jobNo, jobNo))
+    .limit(1);
+  if (!r) return { state: "expired", issuedAt: null, openedAt: null, expiresAt: null };
+  return {
+    state: !r.live ? "expired" : r.openedAt ? "opened" : "unopened",
+    issuedAt: r.issuedAt,
+    openedAt: r.openedAt,
+    expiresAt: r.expiresAt,
+  };
 }
 
 /** /track form: job number OR quotation number + last 4 digits of the customer's phone → job number, or null */
@@ -251,8 +303,10 @@ export async function jobNoForNumber(input: string, phone4: string): Promise<str
 export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
   return quiet(async () => {
     const [row] = await base(eq(job.jobNo, jobNo));
-    const ok = await visible(row);
-    return ok ? toPublic(ok) : null;
+    // the ticket was issued under the rules of its path (link lifetime / 90-day form rule);
+    // here only a job deleted in the meantime is refused
+    if (!row || row.recordStatus === RS.DELETED) return null;
+    return toPublic(row);
   });
 }
 
@@ -268,14 +322,16 @@ export async function ensureToken(jobNo: string): Promise<string> {
   const [row] = await db.select({ token: job.trackToken }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
   if (row?.token) return row.token;
   const token = newToken();
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai() }).where(eq(job.jobNo, jobNo));
+  // a new link: fresh 1-day window, not opened yet
+  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null }).where(eq(job.jobNo, jobNo));
   return token;
 }
 
-/** staff action: old link stops working immediately */
+/** staff action: old link stops working immediately; the new one gets a fresh 1-day window */
 export async function rotateToken(jobNo: string): Promise<string> {
   const token = newToken();
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai() }).where(eq(job.jobNo, jobNo));
+  // a new link: fresh 1-day window, not opened yet
+  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null }).where(eq(job.jobNo, jobNo));
   return token;
 }
 

@@ -20,6 +20,7 @@ Object.assign(process.env, {
   TURNSTILE_SECRET_KEY: "unit-test-secret",
   APP_BASE_URL: "https://svc.example.test",
   TRACK_LOG_SECRET: "unit-test-log-secret",
+  SESSION_SECRET: "unit-test-session-secret-0123456789abcdef", // ≥ 32 chars
 });
 
 // Siteverify mock: the Turnstile token decides the answer
@@ -53,7 +54,8 @@ const { db } = await import("@/db/client");
 const guard = await import("@/server/track-guard");
 const { clientIp } = await import("@/lib/client-ip");
 const { originAuthOk } = await import("@/lib/origin-auth");
-const { jobNoForLink, publicJobByNo } = await import("@/server/services/tracking");
+const { jobNoForLink, publicJobByNo, rotateToken, linkStatus } = await import("@/server/services/tracking");
+const S = await import("@/lib/session");
 const { POST: sessionPOST } = await import("@/app/api/track/session/route");
 const { POST: dataPOST } = await import("@/app/api/track/data/route");
 
@@ -63,9 +65,10 @@ const nextIp = () => `203.0.113.${ipSeq++}`;
 const usedIps: string[] = [];
 const UA = "Mozilla/5.0 (test-track) Chrome/140";
 
-function req(path: string, body: unknown, ip: string, opts: { ua?: string; origin?: string | null } = {}) {
+function req(path: string, body: unknown, ip: string, opts: { ua?: string; origin?: string | null; cookie?: string } = {}) {
   usedIps.push(ip);
   const headers: Record<string, string> = { "content-type": "application/json", "cf-connecting-ip": ip, "user-agent": opts.ua ?? UA };
+  if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.origin !== null) headers["x-origin-auth"] = opts.origin ?? ORIGIN_SECRET;
   return new NextRequest(`https://svc.example.test${path}`, { method: "POST", headers, body: JSON.stringify(body) });
 }
@@ -91,13 +94,19 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
-// a real, trackable job (read only)
-const pick = await db.execute<{ job_no: string; track_token: string }>(sql`
-  SELECT j.job_no, j.track_token FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
-   WHERE j.track_token IS NOT NULL AND j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
+// two real open jobs. Links live 1 day unopened / 15 min after opening (drizzle/0016), so the
+// run gives them FRESH links and puts the original token / timestamps back in `finally`.
+type Orig = { job_no: string; track_token: string | null; track_token_at: string | null; track_opened_at: string | null };
+const pick = await db.execute<Orig>(sql`
+  SELECT j.job_no, j.track_token, j.track_token_at::text, j.track_opened_at::text FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
+   WHERE j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
    ORDER BY j.job_create_date DESC LIMIT 2`);
-assert.ok(pick.rows.length === 2, "need two open jobs with a track_token in the DB");
-const [JOB_A, JOB_B] = pick.rows;
+assert.ok(pick.rows.length === 2, "need two open jobs in the DB");
+const originals = pick.rows;
+const JOB_A = { job_no: originals[0].job_no, track_token: await rotateToken(originals[0].job_no) };
+const JOB_B = { job_no: originals[1].job_no, track_token: await rotateToken(originals[1].job_no) };
+const tempEmail = `track-test-${Date.now()}@example.invalid`;
+try {
 
 const PUBLIC_KEYS = [
   "no", "customerMasked", "brandModel", "deviceRef", "receivedDate", "dueDate", "step", "stepLabel",
@@ -152,11 +161,69 @@ await test("unknown / malformed link → null", async () => {
   assert.equal(await jobNoForLink("A".repeat(43)), null);
   assert.equal(await jobNoForLink("short"), null);
 });
-await test("invalid link: same response as any other session failure", async () => {
-  const bad = await session({ linkToken: "B".repeat(43), turnstileToken: "good" }, nextIp());
+await test("unknown link → 'link' hint (410), same body as an expired one — never says which", async () => {
+  const unknown = await session({ linkToken: "B".repeat(43), turnstileToken: "good" }, nextIp());
+  await db.execute(sql`UPDATE job SET track_opened_at = now() - interval '16 minutes' WHERE job_no = ${JOB_B.job_no}`);
+  const expired = await session({ linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp());
+  await db.execute(sql`UPDATE job SET track_opened_at = NULL WHERE job_no = ${JOB_B.job_no}`);
+  assert.equal(unknown.status, 410);
+  assert.deepEqual(unknown.json, expired.json);
+  assert.equal((unknown.json as { reason?: string }).reason, "link");
+});
+await test("captcha failure is NOT reported as a link problem", async () => {
   const cap = await session({ linkToken: JOB_A.track_token, turnstileToken: "bad" }, nextIp());
-  assert.equal(bad.status, cap.status);
-  assert.deepEqual(bad.json, cap.json);
+  assert.equal(cap.status, 403);
+  assert.equal((cap.json as { reason?: string }).reason, undefined);
+});
+
+console.log("\nLink lifetime (1 day unopened · 15 min after first open)");
+const setLink = (issuedAgo: string, openedAgo: string | null) =>
+  db.execute(sql`UPDATE job SET track_token_at = (now() AT TIME ZONE 'Asia/Bangkok') - ${issuedAgo}::interval,
+    track_opened_at = ${openedAgo === null ? null : sql`now() - ${openedAgo}::interval`} WHERE job_no = ${JOB_B.job_no}`);
+const openB = async () => (await session({ linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp())).status;
+await test("fresh unopened link opens, and the first open is recorded", async () => {
+  await setLink("1 minute", null);
+  assert.equal(await openB(), 200);
+  const st = await linkStatus(JOB_B.job_no);
+  assert.equal(st.state, "opened");
+  assert.ok(st.openedAt && st.expiresAt && Date.parse(st.expiresAt) - Date.parse(st.openedAt) === 15 * 60_000);
+});
+await test("opened 14 minutes ago → still works (refresh inside the window)", async () => {
+  await setLink("2 hours", "14 minutes");
+  assert.equal(await openB(), 200);
+});
+await test("opened 16 minutes ago → expired", async () => {
+  await setLink("2 hours", "16 minutes");
+  assert.equal(await openB(), 410);
+  assert.equal((await linkStatus(JOB_B.job_no)).state, "expired");
+});
+await test("never opened, issued 23 h ago → still works", async () => {
+  await setLink("23 hours", null);
+  assert.equal(await openB(), 200);
+});
+await test("never opened, issued 25 h ago → expired", async () => {
+  await setLink("25 hours", null);
+  assert.equal(await openB(), 410);
+  assert.equal((await linkStatus(JOB_B.job_no)).state, "expired");
+});
+await test("a signed-in staff preview does not start the customer's 15 minutes", async () => {
+  await setLink("1 minute", null);
+  const role = (await db.execute<{ t: string }>(sql`SELECT DISTINCT trim(user_type) t FROM app_config WHERE user_type IS NOT NULL LIMIT 1`)).rows[0].t;
+  await db.execute(sql`INSERT INTO app_user (username, password, first_name, last_name, user_type, is_active, record_status, email_address)
+    VALUES (${tempEmail.slice(0, 40)}, '', 'Track', 'Test', ${role}, true, 'ACTIVE', ${tempEmail})`);
+  const now = Date.now();
+  const cookie = `${S.SESSION_COOKIE}=${await S.signSession({ email: tempEmail, name: "t", role, approved: true, exp: now + 6e5, iat: now, sv: 0 })}`;
+  const r = await sessionPOST(req("/api/track/session", { linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp(), { cookie }));
+  assert.equal(r.status, 200);
+  assert.equal((await linkStatus(JOB_B.job_no)).state, "unopened");
+});
+await test("issuing a new link resets the window and kills the old one", async () => {
+  await setLink("1 minute", "5 minutes");
+  const old = JOB_B.track_token;
+  JOB_B.track_token = await rotateToken(JOB_B.job_no);
+  assert.equal((await linkStatus(JOB_B.job_no)).state, "unopened");
+  assert.equal(await jobNoForLink(old), null);
+  assert.equal(await jobNoForLink(JOB_B.track_token), JOB_B.job_no);
 });
 
 console.log("\nTickets");
@@ -298,14 +365,22 @@ await test("no raw link token / ticket / Turnstile token / origin secret in trac
   }
 });
 
+} finally {
+// ---- restore the two jobs' links exactly as they were ----
+for (const o of originals) {
+  await db.execute(sql`UPDATE job SET track_token = ${o.track_token}, track_token_at = ${o.track_token_at}::timestamp,
+    track_opened_at = ${o.track_opened_at}::timestamptz WHERE job_no = ${o.job_no}`);
+}
+await db.execute(sql`DELETE FROM app_user WHERE email_address = ${tempEmail}`);
 // ---- cleanup: only what this run created ----
 const ipHashes = [...new Set(usedIps)].map((ip) => guard.hmac(`ip:${ip}`));
 await db.execute(sql`DELETE FROM track_event WHERE ip_hash IN ${ipHashes}`);
 await db.execute(sql`DELETE FROM track_rate WHERE key IN ${ipHashes} OR key = ${guard.hmac(`link:${"C".repeat(43)}`)}
   OR key = ${guard.hmac(`link:${"B".repeat(43)}`)} OR key = ${guard.hmac(`link:${"D".repeat(43)}`)}
-  OR key = ${guard.hmac(`link:${JOB_A.track_token}`)}`);
+  OR key = ${guard.hmac(`link:${JOB_A.track_token}`)} OR key = ${guard.hmac(`link:${JOB_B.track_token}`)}`);
 await db.execute(sql`DELETE FROM track_block WHERE key IN ${ipHashes.map((h) => `ticket:${h}`)}`);
 await db.execute(sql`DELETE FROM track_ticket WHERE host(issued_ip) LIKE '203.0.113.%'`);
+}
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
