@@ -14,7 +14,8 @@ const FRESH_MS = 60_000;
 /**
  * Topbar bell: open jobs past their customer due date, each with who is responsible
  * (GET /api/alerts/overdue — an Engineer sees their own jobs, everyone else all of them).
- * A quiet background poll: a failed / forbidden answer just hides the badge.
+ * A quiet background poll (every 5 min, only while the tab is visible): a failed / forbidden
+ * answer just hides the badge.
  */
 export function OverdueBell() {
   const [data, setData] = React.useState<OverdueAlerts | null>(null);
@@ -32,10 +33,21 @@ export function OverdueBell() {
     }
   }, []);
 
+  // poll only while this tab is on screen; coming back to a stale tab refreshes once
   React.useEffect(() => {
+    const visible = () => document.visibilityState === "visible";
     void load();
-    const t = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => {
+      if (visible()) void load();
+    }, POLL_MS);
+    const onVisible = () => {
+      if (visible() && Date.now() - loadedAt.current > POLL_MS) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [load]);
 
   const total = data?.total ?? 0;

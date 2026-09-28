@@ -309,15 +309,26 @@ const dayEnd = (by: JobFilters["dateBy"], d: string) => (by === "reception" ? d 
 const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
 
 /**
- * Overdue = not closed / cancelled yet, and customer_due_date (a real date — 1900-01-01 means
- * "none" in the legacy DB) is before today. Needs job_status joined. Shared by the job list
- * filter and the notification bell (services/alerts.ts), so both always count the same jobs.
+ * Open job = its status is not in a closed group (Finished / Cancel).
+ *
+ * Written as `job_status_id = ANY(ARRAY(subquery))` on purpose: Postgres runs the subquery once,
+ * then reads only the open jobs through ix_job_status — the cost follows the open work (~2k jobs),
+ * not the history (48k and growing). Filtering on job_status_group through the join instead made
+ * it scan every job (~105 ms vs ~6 ms on 2026-09-28). The status list stays live (no app cache).
+ * Works with or without job_status joined.
  */
-export const overdueWhere = and(
-  notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"]),
-  gt(job.customerDueDate, "1901-01-01"),
-  lt(sql`${job.customerDueDate}::date`, thaiToday)
-);
+export const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
+  .select({ id: jobStatus.jobStatusId })
+  .from(jobStatus)
+  .where(notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"]))}))`;
+
+/**
+ * Overdue = still open, and customer_due_date (a real date — 1900-01-01 means "none" in the
+ * legacy DB) is before today. Compared as a timestamp (no cast on the column) so an index on it
+ * stays usable. Shared by the job list filter and the notification bell (services/alerts.ts),
+ * so both always count the same jobs.
+ */
+export const overdueWhere = and(isOpenJob, gt(job.customerDueDate, "1901-01-01"), lt(job.customerDueDate, sql`${thaiToday}::timestamp`));
 /** whole days past the due date (1 = due yesterday) */
 export const daysOverdue = sql<number>`(${thaiToday} - ${job.customerDueDate}::date)`.mapWith(Number);
 
@@ -339,7 +350,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
     f.statusId !== undefined ? eq(job.jobStatusId, f.statusId) : undefined,
     f.statusGroup ? eq(jobStatus.jobStatusGroup, f.statusGroup) : undefined,
-    f.open ? sql`${jobStatus.jobStatusGroup} not in ('Finished','Cancel')` : undefined,
+    f.open ? isOpenJob : undefined,
     f.overdue ? overdueWhere : undefined,
     f.type ? eq(jobType.jobTypeName, f.type) : undefined,
     f.engineer
@@ -357,7 +368,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.customerCode ? sql`${job.customerDetail} like ${f.customerCode + " %"}` : undefined,
     f.unassigned
       ? and(
-          sql`${jobStatus.jobStatusGroup} not in ('Finished','Cancel')`,
+          isOpenJob,
           or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`)
         )
       : undefined,
@@ -456,8 +467,7 @@ export async function recentJobNos(limit = 50): Promise<string[]> {
   const rows = await db
     .select({ no: job.jobNo })
     .from(job)
-    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .where(sql`${jobStatus.jobStatusGroup} not in ('Finished','Cancel')`)
+    .where(isOpenJob)
     .orderBy(desc(job.jobCreateDate))
     .limit(limit);
   return rows.map((r) => r.no);
@@ -1570,7 +1580,7 @@ async function computeDashboard(from: string, to: string, type = "") {
     })
     .from(job)
     .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .where(and(ne(job.recordStatus, RS.DELETED), ofType, notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"])))
+    .where(and(ne(job.recordStatus, RS.DELETED), ofType, isOpenJob))
     .groupBy(jobStatus.jobStatusId, jobStatus.jobStatusName, jobStatus.displayOrder)
     .orderBy(asc(jobStatus.displayOrder));
   const tatRows = tat.map((r) => ({

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Plus,
   Download,
@@ -129,32 +130,49 @@ export default function JobListPage() {
   //   customer page  /jobs/list?customer=C43600 → prefilled ลูกค้า filter
   //   dashboard TAT  /jobs/list?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…&to=…&type=…
   //   bell           /jobs/list?src=overdue[&engineer=<user id>] → open jobs past their due date
+  // Read on EVERY change of the URL, not only on mount: a link to this page from this page
+  // (the bell in the topbar, back / forward) changes the query string without remounting.
+  const search = useSearchParams().toString();
+  /** set while we rewrite the URL ourselves (clearing a deep link) — that change is not a new deep link */
+  const ownUrlChange = React.useRef(false);
+  const dropDeepLink = () => {
+    if (!window.location.search) return;
+    ownUrlChange.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+  };
   React.useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
+    if (ownUrlChange.current) {
+      ownUrlChange.current = false;
+      return;
+    }
+    const p = new URLSearchParams(search);
     const g = (k: string) => p.get(k)?.trim() ?? "";
     const next: Partial<Filters> = {};
+    let tatSrc: TatSource | null = null;
     if (g("customer")) next.customer = g("customer");
     if (g("src") === "tat") {
       Object.assign(next, {
         open: g("open") === "1", statusId: /^\d+$/.test(g("statusId")) ? g("statusId") : "", status: g("status"),
         dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type"),
       });
-      setTat({ bucket: g("bucket"), status: g("status"), type: g("type") });
+      tatSrc = { bucket: g("bucket"), status: g("status"), type: g("type") };
     }
     if (g("src") === "overdue") {
       next.overdue = true;
       if (/^\d+$/.test(g("engineer"))) next.engineer = g("engineer");
     }
-    if (Object.keys(next).length) {
-      setDraft((f) => ({ ...f, ...next }));
-      setFilters((f) => ({ ...f, ...next }));
-    }
-  }, []);
+    // a deep link (or navigating back to the plain list) starts from a clean filter set,
+    // so e.g. one engineer from the bell never lingers when the next link has none
+    const fresh = { ...NO_FILTER, ...next };
+    setDraft(fresh);
+    setFilters(fresh);
+    setTat(tatSrc);
+  }, [search]);
   const clearAll = () => {
     setDraft(NO_FILTER);
     setFilters(NO_FILTER);
     setTat(null);
-    if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
+    dropDeepLink();
   };
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
@@ -338,7 +356,7 @@ export default function JobListPage() {
           if (next !== draft) {
             setTat(null);
             setDraft(next);
-            window.history.replaceState(null, "", window.location.pathname);
+            dropDeepLink();
           }
           setFilters(next);
           push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });

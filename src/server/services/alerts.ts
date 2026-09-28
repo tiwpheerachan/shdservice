@@ -16,7 +16,8 @@ import { daysOverdue, overdueWhere } from "./jobs";
  *  - an Engineer sees the jobs assigned to them; every other role sees all of them
  *  - responsible = the assigned engineer; none yet → "ยังไม่มอบหมายช่าง" + who opened the job
  *  - same condition as the job list's `overdue=1` filter (jobs.ts overdueWhere), so
- *    "ดูทั้งหมด" lands on exactly these jobs
+ *    "ดูทั้งหมด" lands on exactly these jobs; it reads only open jobs through ix_job_status
+ *    (~6 ms per query), so the cost does not grow with the job history
  */
 export type OverdueItem = {
   no: string;
@@ -62,14 +63,12 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
     db
       .select({ total: count(), unassigned: sql<number>`count(*) filter (where not ${assigned})`.mapWith(Number) })
       .from(job)
-      .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
       .where(where),
     engineerId !== null
       ? Promise.resolve([])
       : db
           .select({ engineerId: job.engineerId, name: nameOf(eng), count: count() })
           .from(job)
-          .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
           .leftJoin(eng, eq(eng.userId, job.engineerId))
           .where(and(where, assigned))
           .groupBy(job.engineerId, eng.firstName, eng.lastName)
