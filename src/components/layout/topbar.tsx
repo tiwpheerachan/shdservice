@@ -9,8 +9,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
 import { OverdueBell } from "./overdue-bell";
 import { cn } from "@/lib/utils";
-
-type Me = { name: string; email: string; avatar?: string };
+import { useMe } from "@/lib/use-me";
 
 export function Topbar({
   onOpenMobile,
@@ -26,20 +25,8 @@ export function Topbar({
   const pathname = usePathname();
   const crumb = findBreadcrumb(pathname);
 
-  const [me, setMe] = React.useState<Me | null>(null);
+  const { user: me } = useMe();
   const [avatarError, setAvatarError] = React.useState(false);
-  React.useEffect(() => {
-    let active = true;
-    fetch("/api/sso/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (active && d?.user) setMe(d.user);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const initials = me?.name
     ? me.name.replace(/^(คุณ|นาย|นาง|นางสาว)\s*/u, "").slice(0, 2).toUpperCase()

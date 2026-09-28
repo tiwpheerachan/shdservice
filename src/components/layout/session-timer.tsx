@@ -3,30 +3,20 @@
 import * as React from "react";
 import { Timer, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMe } from "@/lib/use-me";
 
 const WARN_SECONDS = 5 * 60;
 const AUTO_REFRESH_EVERY_MS = 5 * 60 * 1000; // activity-based renewal, at most every 5 min (TTL is 30 min)
 
 /**
- * Idle-timeout countdown (30 min): reads the cookie's expiry from /api/sso/me,
+ * Idle-timeout countdown (30 min): reads the cookie's expiry from /api/sso/me (useMe — shared with the topbar),
  * renews it through /api/sso/refresh (on the button, and automatically on user
  * activity at most every 5 minutes), and sends the user to /login when it runs out.
  */
 export function SessionTimer() {
-  const [exp, setExp] = React.useState<number | null>(null);
+  const { exp, refresh: reloadMe } = useMe();
   const [now, setNow] = React.useState(() => Date.now());
   const lastRefresh = React.useRef(0);
-
-  const load = React.useCallback(async () => {
-    try {
-      const r = await fetch("/api/sso/me", { cache: "no-store" });
-      if (!r.ok) return;
-      const d = (await r.json()) as { exp?: number };
-      if (typeof d.exp === "number") setExp(d.exp);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const refresh = React.useCallback(async () => {
     lastRefresh.current = Date.now();
@@ -36,17 +26,16 @@ export function SessionTimer() {
         window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
         return;
       }
-      await load();
+      await reloadMe();
     } catch {
       /* ignore */
     }
-  }, [load]);
+  }, [reloadMe]);
 
   React.useEffect(() => {
-    void load();
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [load]);
+  }, []);
 
   // renew on activity, throttled
   React.useEffect(() => {
