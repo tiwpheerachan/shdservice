@@ -17,15 +17,7 @@ export default function NewSaleOrderPage() {
   // POST /api/sale-orders → sale_out_hd (running SO) + sale_out_dt; approve status 1 or 2
   const save = async () => {
     const p = form.current?.payload();
-    if (!p) return;
-    if (!p.customerCode) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุลูกค้า" });
-      return;
-    }
-    if (!p.lines.length) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องมีรายการสินค้าอย่างน้อย 1 รายการ" });
-      return;
-    }
+    if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
     setSaving(true);
     try {
       const d = await postJson<{ order: { no: string } }>("/api/sale-orders", p);
@@ -33,7 +25,7 @@ export default function NewSaleOrderPage() {
       push({ kind: "success", title: "สร้างใบสั่งขายแล้ว", desc: d.order.no });
       router.push(`/sale/orders/edit?no=${encodeURIComponent(d.order.no)}`);
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

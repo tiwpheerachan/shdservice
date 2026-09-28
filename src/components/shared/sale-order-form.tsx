@@ -16,6 +16,8 @@ import { useProducts, useStaff } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { useFormErrors } from "@/lib/use-form-errors";
+import { saleOrderSchema } from "@/lib/validation/sale-order";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
 
@@ -51,6 +53,10 @@ export type SaleOrderPayload = {
 
 export type SaleOrderFormHandle = {
   payload: () => SaleOrderPayload;
+  /** check before saving (lib/validation/sale-order) — shows the errors; true = OK */
+  validate: () => boolean;
+  /** API field errors → under the fields; false for any other error */
+  fromApi: (err: unknown) => boolean;
   /** upload a slip chosen before the SO existed (new page calls this after create) */
   uploadPendingSlip: (soNo: string) => Promise<void>;
 };
@@ -58,7 +64,8 @@ export type SaleOrderFormHandle = {
 export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
   function SaleOrderForm({ soNo, initial }, ref) {
     const { push } = useToast();
-    const { name: me } = useAccess();
+    const { name: me, userId } = useAccess();
+    const fe = useFormErrors();
     const { data: PRODUCTS } = useProducts();
     const { data: STAFF } = useStaff();
     const [lines, setLines] = React.useState<Line[]>([]);
@@ -128,6 +135,17 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
 
 
+    // a new order is sold by the signed-in user unless another salesperson is picked (the field is required)
+    React.useEffect(() => {
+      if (!initial && !salesId && userId && STAFF.some((s) => s.id === userId)) setSalesId(userId);
+    }, [initial, salesId, userId, STAFF]);
+    // a value that changes takes its error away
+    const { clear } = fe;
+    React.useEffect(() => clear("customerCode"), [customer, clear]);
+    React.useEffect(() => clear("salesId"), [salesId, clear]);
+    React.useEffect(() => clear("lines"), [lines.length, clear]);
+    React.useEffect(() => clear("paymentAmount"), [payAmount, clear]);
+
     React.useImperativeHandle(ref, () => ({
       uploadPendingSlip: async (no: string) => {
         if (!pendingSlip) return;
@@ -138,7 +156,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
         }
       },
-      payload: () => ({
+      validate: () => !fe.report(fe.run(saleOrderSchema, payloadOf())),
+      fromApi: fe.fromApi,
+      payload: () => payloadOf(),
+    }));
+    const payloadOf = (): SaleOrderPayload => ({
         no: soNo || initial?.no || undefined,
         documentProfileId: profileId || undefined,
         customerCode: customer?.code ?? "",
@@ -149,13 +171,14 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         slip: slip.includes("/") ? slip : "",
         remark,
         submit,
-      }),
-    }));
+      });
 
     return (
       <>
         <Section title="Customer Info" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
-          <CustomerSelect value={customer} onChange={setCustomer} />
+          <Field error={fe.errors.customerCode}>
+            <CustomerSelect value={customer} onChange={setCustomer} />
+          </Field>
         </Section>
 
         <Section title="Sale Order Info" icon={FileText}>
@@ -172,7 +195,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             <Field label="สร้างโดย">
               <ReadOnly>{initial?.createdBy || me || "—"}</ReadOnly>
             </Field>
-            <Field label="พนักงานขาย" required>
+            <Field label="พนักงานขาย" required error={fe.errors.salesId}>
               <SearchSelect
                 value={salesId ? String(salesId) : ""}
                 onChange={(v) => setSalesId(Number(v) || 0)}
@@ -191,7 +214,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           bodyClassName="p-0"
         >
           <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
-            <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1">
+            <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1" error={fe.errors.lines}>
               <ProductPicker id="so-product" products={PRODUCTS} value={code} clearable onPick={(p) => setCode(p?.code ?? "")} placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…" />
             </Field>
             <Field label="จำนวน" className="sm:w-28">
@@ -241,6 +264,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                       </td>
                       <td className="px-3 py-2">
                         <NumberInput
+                          aria-label={`จำนวน ${l.code}`}
+                          aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
                           min={1}
                           value={l.qty}
                           onChange={(n) => setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))}
@@ -249,9 +274,14 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                       </td>
                       <td className="px-3 py-2">
                         <NumberInput
+                          aria-label={`ราคา ${l.code}`}
+                          aria-invalid={!!fe.errors[`lines.${i}.price`] || undefined}
                           step="0.01"
                           value={l.price}
-                          onChange={(n) => setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)))}
+                          onChange={(n) => {
+                            setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));
+                            fe.clear(`lines.${i}.price`);
+                          }}
                           className="ml-auto h-8 w-24 text-right text-xs"
                         />
                       </td>
@@ -296,7 +326,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 ))}
               </div>
             </Field>
-            <Field label="จำนวนเงินที่ชำระ (บาท)">
+            <Field label="จำนวนเงินที่ชำระ (บาท)" error={fe.errors.paymentAmount}>
               <Input
                 type="number"
                 step="0.01"

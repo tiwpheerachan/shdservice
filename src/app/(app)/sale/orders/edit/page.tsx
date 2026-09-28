@@ -49,13 +49,14 @@ function EditSaleOrder() {
       push({ kind: "warning", title: "กรุณาระบุเลขใบสั่งขายก่อน" });
       return;
     }
+    if (!form.current?.validate()) return;
     setSaving(true);
     try {
       const d = await postJson<{ order: SaleOrderLoaded }>("/api/sale-orders", { ...p, no });
       setLoaded(d.order);
       push({ kind: "success", title: "บันทึกการแก้ไขใบสั่งขายแล้ว", desc: d.order.no });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

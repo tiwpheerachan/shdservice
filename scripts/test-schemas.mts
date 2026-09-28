@@ -3,7 +3,7 @@
  * Pure: no DB, no network.
  */
 import assert from "node:assert/strict";
-import { validate } from "../src/lib/validation/index.ts";
+import { validate, summary } from "../src/lib/validation/index.ts";
 import {
   jobSchema,
   filledRequired,
@@ -16,6 +16,7 @@ import {
 } from "../src/lib/validation/job.ts";
 import { customerSchema, conflictErrors } from "../src/lib/validation/customer.ts";
 import { quotationSchema } from "../src/lib/validation/quotation.ts";
+import { saleOrderSchema } from "../src/lib/validation/sale-order.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -133,12 +134,32 @@ test("numbers: qty > 0 per row, no negatives, discount and VAT ≤ 100", () => {
   assert.deepEqual(Object.keys(e).sort(), ["discountValue", "lines.1.qty", "lines.1.unitPrice", "serviceAmount", "vatRate"]);
 });
 
+console.log("\nSale order");
+const so = { customerCode: "C00001", salesId: 7, lines: [{ code: "P00001", qty: 1, price: 100 }], paymentAmount: "", fee: 0 };
+test("a complete order passes", () => assert.deepEqual(errorsOf(saleOrderSchema, so), {}));
+test("customer, salesperson and a product line are required", () => {
+  assert.deepEqual(Object.keys(errorsOf(saleOrderSchema, { customerCode: "", salesId: 0, lines: [] })).sort(), ["customerCode", "lines", "salesId"]);
+  assert.ok(errorsOf(saleOrderSchema, { ...so, lines: [{ code: "", qty: 1 }] }).lines, "a line without a product does not count");
+});
+test("qty > 0 per row; price and paid amount not negative", () => {
+  const e = errorsOf(saleOrderSchema, { ...so, lines: [{ code: "P1", qty: 0, price: -1 }], paymentAmount: -5 });
+  assert.deepEqual(Object.keys(e).sort(), ["lines.0.price", "lines.0.qty", "paymentAmount"]);
+});
+
+console.log("\nSummary title");
+test("toast title says missing / wrong / both", () => {
+  assert.equal(summary({ a: "ต้องเลือกลูกค้า", b: "ต้องมีรายการสินค้าอย่างน้อย 1 รายการ", c: "โปรดระบุสถานะงาน" }), "กรอกข้อมูลไม่ครบ 3 ช่อง");
+  assert.equal(summary({ a: "จำนวนต้องมากกว่า 0" }), "ข้อมูลไม่ถูกต้อง 1 ช่อง");
+  assert.equal(summary({ a: "ต้องเลือกลูกค้า", b: "จำนวนต้องมากกว่า 0" }), "กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง 2 ช่อง");
+});
+
 console.log("\nAPI called with missing keys");
 test("an empty body still reports every rule (no early stop)", () => {
   assert.deepEqual(Object.keys(errorsOf(quotationSchema(), {})).sort(), ["customerCode", "jobNo"]);
   assert.deepEqual(Object.keys(errorsOf(customerSchema(), {})).sort(), ["name", "phone"]);
   assert.deepEqual(Object.keys(errorsOf(outsourceActionSchema, {})).sort(), ["send.to", "status"]);
   assert.deepEqual(Object.keys(errorsOf(swapRefundActionSchema, {})).sort(), ["newSerial", "status"]);
+  assert.deepEqual(Object.keys(errorsOf(saleOrderSchema, {})).sort(), ["customerCode", "lines", "salesId"]);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
