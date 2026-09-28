@@ -14,6 +14,7 @@ import {
   swapRefundActionSchema,
   closeActionSchema,
 } from "../src/lib/validation/job.ts";
+import { customerSchema, conflictErrors } from "../src/lib/validation/customer.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -98,6 +99,21 @@ test("close: status, payment method, return method and return date", () => {
   const e = errorsOf(closeActionSchema, { status: "", payment: { type: "" }, return: { type: "", date: "" } });
   assert.deepEqual(Object.keys(e).sort(), ["payment.type", "return.date", "return.type", "status"]);
   assert.deepEqual(errorsOf(closeActionSchema, { status: "ปิดงาน (Complete)", payment: { type: "เงินสด" }, return: { type: "ลูกค้ามารับเอง", date: "2026-09-28" } }), {});
+});
+
+console.log("\nCustomer");
+test("name and phone required for a new customer", () => {
+  assert.deepEqual(Object.keys(errorsOf(customerSchema(), { name: " ", phone: "" })).sort(), ["name", "phone"]);
+  assert.deepEqual(errorsOf(customerSchema(), { name: "สมชาย", phone: "0812345678", email: "" }), {});
+});
+test("an old customer without a phone may stay without one", () => assert.deepEqual(errorsOf(customerSchema(false), { name: "สมชาย", phone: "" }), {}));
+test("email must be a real address when given", () => {
+  assert.ok(errorsOf(customerSchema(), { name: "a", phone: "1", email: "abc" }).email);
+  assert.deepEqual(errorsOf(customerSchema(), { name: "a", phone: "1", email: "a@b.co" }), {});
+});
+test("a 409 clash becomes a message under the clashing field", () => {
+  const e = conflictErrors([{ field: "phone", code: "C00001", name: "สมชาย" }]);
+  assert.match(e.phone, /C00001/);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

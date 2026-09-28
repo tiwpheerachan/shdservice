@@ -37,10 +37,10 @@ export function useFormErrors() {
 
   /** toast + focus the first invalid field; false when there is nothing to report */
   const report = React.useCallback(
-    (e: FieldErrors) => {
+    (e: FieldErrors, title?: string) => {
       const msgs = Object.values(e);
       if (!msgs.length) return false;
-      push({ kind: "error", title: summary(e), desc: msgs.slice(0, 3).join(" · ") + (msgs.length > 3 ? " …" : "") });
+      push({ kind: "error", title: title ?? summary(e), desc: msgs.slice(0, 3).join(" · ") + (msgs.length > 3 ? " …" : "") });
       focusFirstInvalid();
       return true;
     },
@@ -53,7 +53,7 @@ export function useFormErrors() {
       const fields = apiFieldErrors(err);
       if (!fields) return false;
       setErrors(fields);
-      report(fields);
+      report(fields, (err as ApiError).message); // the API's own summary ("กรอกข้อมูลไม่ครบ …" / "…มีลูกค้าอยู่แล้ว")
       return true;
     },
     [report]
@@ -62,8 +62,9 @@ export function useFormErrors() {
   return { errors, setErrors, run, clear, report, fromApi };
 }
 
+/** field errors in an API answer: 400 (rules) or 409 (value already used elsewhere) */
 export function apiFieldErrors(err: unknown): FieldErrors | null {
-  if (!(err instanceof ApiError) || err.status !== 400) return null;
+  if (!(err instanceof ApiError) || (err.status !== 400 && err.status !== 409)) return null;
   const f = (err.details as { fields?: unknown } | undefined)?.fields;
   return f && typeof f === "object" && Object.keys(f).length ? (f as FieldErrors) : null;
 }

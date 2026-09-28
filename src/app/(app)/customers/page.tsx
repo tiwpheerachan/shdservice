@@ -19,6 +19,8 @@ import { useCustomersPage, useProvinces } from "@/data/db";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, toCustomerForm, type CustomerFormValues, type CustomerConflict } from "@/components/shared/customer-form";
 import { api, postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { useFormErrors } from "@/lib/use-form-errors";
+import { customerSchema } from "@/lib/validation/customer";
 
 export default function CustomersPage() {
   const { push } = useToast();
@@ -48,11 +50,13 @@ export default function CustomersPage() {
   const [form, setForm] = React.useState<CustomerFormValues>(EMPTY_CUSTOMER);
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
+  const fe = useFormErrors();
 
   const openForm = (c: Customer | null, readOnly = false) => {
     setViewOnly(readOnly);
     setEditing(c);
     setConflicts(null);
+    fe.setErrors({});
     setForm(c ? toCustomerForm(c) : EMPTY_CUSTOMER);
     setOpen(true);
   };
@@ -73,14 +77,8 @@ export default function CustomersPage() {
   }, []);
 
   const save = async () => {
-    if (!form.name.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุชื่อลูกค้า" });
-      return;
-    }
-    if (!form.phone.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุเบอร์โทรศัพท์" });
-      return;
-    }
+    // an existing customer without a phone (old data) may stay without one
+    if (fe.report(fe.run(customerSchema(!editing || !!editing.phone?.trim()), form))) return;
     setSaving(true);
     setConflicts(null);
     try {
@@ -92,7 +90,7 @@ export default function CustomersPage() {
       // 409 = phone / email / tax id already belongs to another customer (server refuses)
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
       if (details?.conflicts?.length) setConflicts(details.conflicts);
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -273,6 +271,8 @@ export default function CustomersPage() {
           form={form}
           setForm={setForm}
           editing={editing}
+          errors={fe.errors}
+          clearError={fe.clear}
           extra={
             viewOnly && editing ? (
               <>

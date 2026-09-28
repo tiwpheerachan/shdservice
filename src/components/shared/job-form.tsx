@@ -275,7 +275,7 @@ type Ctx = {
    */
   validate: () => FieldErrors;
   /** toast + focus the first bad field (also for errors a page adds of its own) */
-  report: (e: FieldErrors) => boolean;
+  report: (e: FieldErrors, title?: string) => boolean;
   /** API 400 with field errors → under the fields */
   fromApi: (err: unknown) => boolean;
   /** required fields the loaded job was saved without (old data) — null for a new job */

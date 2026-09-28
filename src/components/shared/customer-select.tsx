@@ -14,6 +14,8 @@ import { api, postJson, errMsg, qs, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { cn, SEARCH_MIN_CHARS } from "@/lib/utils";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, type CustomerFormValues, type CustomerConflict } from "./customer-form";
+import { useFormErrors } from "@/lib/use-form-errors";
+import { customerSchema } from "@/lib/validation/customer";
 
 /**
  * Customer block used by job / quotation / sale-order forms.
@@ -45,6 +47,7 @@ export function CustomerSelect({
   const [form, setForm] = React.useState<CustomerFormValues>(EMPTY_CUSTOMER);
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
+  const fe = useFormErrors();
 
   const pickByCode = async (code: string) => {
     try {
@@ -62,12 +65,12 @@ export function CustomerSelect({
     const digits = prefill.replace(/\D/g, "");
     setForm({ ...EMPTY_CUSTOMER, phone: digits.length >= 6 ? digits : "", name: digits.length >= 6 ? "" : prefill.trim() });
     setConflicts(null);
+    fe.setErrors({});
     setMode("new");
   };
 
   const saveNew = async () => {
-    if (!form.name.trim()) return push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุชื่อลูกค้า" });
-    if (!form.phone.trim()) return push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุเบอร์โทรศัพท์" });
+    if (fe.report(fe.run(customerSchema(), form))) return; // same rules as the API
     setSaving(true);
     setConflicts(null);
     try {
@@ -78,7 +81,7 @@ export function CustomerSelect({
     } catch (e) {
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
       if (details?.conflicts?.length) setConflicts(details.conflicts);
-      push({ kind: "error", title: "สร้างลูกค้าไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "สร้างลูกค้าไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -156,7 +159,7 @@ export function CustomerSelect({
           <p className="flex items-center gap-2 text-sm font-medium">
             <UserRoundPlus className="h-4 w-4 text-primary" /> เพิ่มลูกค้าใหม่ — รหัสลูกค้าจะถูกสร้างอัตโนมัติ · เบอร์โทร / อีเมล / เลขบัตร ต้องไม่ซ้ำกับลูกค้าเดิม
           </p>
-          <CustomerFields form={form} setForm={setForm} editing={null} showStatus={false} />
+          <CustomerFields form={form} setForm={setForm} editing={null} showStatus={false} errors={fe.errors} clearError={fe.clear} />
           {conflicts && <ConflictNotice conflicts={conflicts} onPick={(code) => void pickByCode(code)} />}
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setMode("existing")}>

@@ -11,6 +11,8 @@ import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
+import { summary, validate } from "@/lib/validation";
+import { customerSchema, conflictErrors } from "@/lib/validation/customer";
 
 export type DeletedMode = StatusMode;
 
@@ -238,14 +240,15 @@ export async function findCustomerConflicts(
 
 /** Create/update a customer. New codes come from running "Customer" (C00001). */
 export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
+  const prev = i.code ? await getCustomerByCode(i.code) : null;
+  // same rules as the form (lib/validation/customer): phone required unless an old customer never had one
+  const v = validate(customerSchema(!prev || !!str(prev.phone)), i);
+  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
   const name = str(i.name).slice(0, 200);
-  if (!name) throw new HttpError(400, "ต้องระบุชื่อลูกค้า");
   const phone = str(i.phone).slice(0, 50);
-  if (!phone && !i.code) throw new HttpError(400, "ต้องระบุเบอร์โทรศัพท์");
 
   // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
   // the fields that actually change are checked (legacy data already holds duplicates)
-  const prev = i.code ? await getCustomerByCode(i.code) : null;
   const check = {
     phone: !prev || digits(prev.phone) !== digits(phone) ? phone : undefined,
     email: !prev || normEmail(prev.email) !== normEmail(i.email) ? str(i.email) : undefined,
@@ -255,7 +258,10 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   if (conflicts.length) {
     const label = { phone: "เบอร์โทรศัพท์", email: "อีเมล", taxId: "เลขบัตร/ผู้เสียภาษี" };
     const first = conflicts[0];
-    throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, { conflicts });
+    throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, {
+      conflicts,
+      fields: conflictErrors(conflicts),
+    });
   }
 
   return db.transaction(async (tx) => {

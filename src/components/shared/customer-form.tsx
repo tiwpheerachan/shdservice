@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from "@/data/mock";
 import { useProvinces } from "@/data/db";
 import { api, qs } from "@/lib/api";
+import type { FieldErrors } from "@/lib/validation";
 
 /**
  * Customer form shared by the ข้อมูลลูกค้า page (modal) and CustomerSelect
@@ -137,14 +138,22 @@ export function CustomerFields({
   editing,
   showStatus = true,
   extra,
+  errors = {},
+  clearError,
 }: {
   form: CustomerFormValues;
   setForm: React.Dispatch<React.SetStateAction<CustomerFormValues>>;
   editing: Customer | null;
   showStatus?: boolean;
   extra?: React.ReactNode;
+  /** from useFormErrors — shown under each field */
+  errors?: FieldErrors;
+  clearError?: (key: string) => void;
 }) {
-  const set = <K extends keyof CustomerFormValues>(k: K, v: CustomerFormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const set = <K extends keyof CustomerFormValues>(k: K, v: CustomerFormValues[K]) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    clearError?.(k);
+  };
   const { PROVINCES, districts, subDistricts } = useAddressLists(form.cityId, form.districtId);
   return (
     <FieldGrid cols={2}>
@@ -169,11 +178,11 @@ export function CustomerFields({
         </div>
       </Field>
 
-      <Field label="ชื่อลูกค้า" required wide>
+      <Field label="ชื่อลูกค้า" required wide error={errors.name}>
         <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
       </Field>
 
-      <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี" wide>
+      <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี" wide error={errors.taxId}>
         <Input value={form.taxId} onChange={(e) => set("taxId", e.target.value)} className="num" />
       </Field>
 
@@ -230,11 +239,11 @@ export function CustomerFields({
       <Field label="รหัสไปรษณีย์">
         <Input value={form.postalCode} onChange={(e) => set("postalCode", e.target.value)} className="num" placeholder="10000" />
       </Field>
-      <Field label="เบอร์โทรศัพท์" required>
+      <Field label="เบอร์โทรศัพท์" required={!editing || !!editing.phone?.trim()} error={errors.phone}>
         <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} className="num" />
       </Field>
 
-      <Field label="Email">
+      <Field label="Email" error={errors.email}>
         <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
       </Field>
       <Field label="Line ID">
