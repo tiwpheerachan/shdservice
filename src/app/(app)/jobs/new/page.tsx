@@ -25,7 +25,7 @@ import type { JobDetail } from "@/lib/use-job";
 function NewJobForm() {
   const { push } = useToast();
   const router = useRouter();
-  const { s, reset } = useJobForm();
+  const { s, reset, validate, report, fromApi } = useJobForm();
   const attach = React.useRef<AttachmentsHandle>(null);
   const [saving, setSaving] = React.useState(false);
   // after saving we stop here first so the tracking link can be copied and sent
@@ -34,14 +34,8 @@ function NewJobForm() {
 
   // POST /api/jobs → job (running J), job_log(1), job_symptom, customer link
   const save = async () => {
-    if (!s.customer) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องค้นหาและเลือกลูกค้าก่อน" });
-      return;
-    }
-    if (!s.jobType) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องเลือกประเภทงานหลัก" });
-      return;
-    }
+    // every required field at once, under each field (the API checks the same rules)
+    if (report(validate())) return;
     setSaving(true);
     try {
       const d = await postJson<{ job: JobDetail }>("/api/jobs", toJobInput(s));
@@ -50,7 +44,7 @@ function NewJobForm() {
       reset();
       setOpened(d.job.no);
     } catch (e) {
-      push({ kind: "error", title: "เปิดงานไม่สำเร็จ", desc: errMsg(e) });
+      if (!fromApi(e)) push({ kind: "error", title: "เปิดงานไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

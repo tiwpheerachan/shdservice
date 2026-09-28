@@ -29,6 +29,7 @@ import {
   fmtDate,
   fmtDateTime,
   int,
+  isSentinelDate,
   money,
   nowThai,
   num,
@@ -40,6 +41,16 @@ import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
 import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
 import { RS, statusStamp } from "@/server/record-status";
 import { addDays } from "@/lib/dates";
+import { summary, validate } from "@/lib/validation";
+import {
+  jobSchema,
+  filledRequired,
+  repairActionSchema,
+  outsourceActionSchema,
+  swapRefundActionSchema,
+  closeActionSchema,
+  type JobRequiredKey,
+} from "@/lib/validation/job";
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -832,7 +843,58 @@ async function writeSymptoms(tx: Tx, jobNo: string, ids: number[]) {
   if (ids.length) await tx.insert(jobSymptom).values(ids.map((symptomId) => ({ jobNo, symptomId })));
 }
 
+/** 400 with every failing field ({ fields: { so: "ต้องระบุ …" } }) — the form shows each under its box */
+function assertJob(i: JobInput, mustKeep?: readonly JobRequiredKey[]) {
+  assertValid(jobSchema(mustKeep), i);
+}
+function assertValid(schema: Parameters<typeof validate>[0], data: unknown) {
+  const v = validate(schema, data);
+  if (!v.ok) throw new HttpError(400, summary(v.errors), { fields: v.errors });
+}
+
+/**
+ * Which required fields this job has right now — an edit must keep these filled ("never worse";
+ * fields the legacy data left empty may stay empty). 1900-01-01 and the "0" / "-" placeholders count as empty.
+ */
+async function requiredFilledNow(jobNo: string): Promise<JobRequiredKey[] | null> {
+  const [r] = await db
+    .select({
+      customerId: job.customerId,
+      jobTypeId: job.jobTypeId,
+      so: job.jobReferenceNo,
+      channel: job.productSaleOutChannel,
+      saleOrderDate: job.productSaleOrderDate,
+      warrantyMonth: job.productWarrantyMonth,
+      expireDate: job.productExpireDate,
+      serial: job.productSerial,
+      brandId: job.productBrandId,
+      modelId: job.productModelId,
+      symptomId: job.productSymptomId,
+    })
+    .from(job)
+    .where(eq(job.jobNo, jobNo))
+    .limit(1);
+  if (!r) return null;
+  const txt = (v: string | null) => v ?? ""; // "0" / "-" placeholders: isRequiredFilled decides
+  const id = (v: number | null) => ((v ?? 0) > 0 ? "x" : "");
+  const day = (v: string | null) => (v && !isSentinelDate(v) ? v : "");
+  return filledRequired({
+    customerCode: id(r.customerId),
+    jobType: id(r.jobTypeId),
+    so: txt(r.so),
+    channel: txt(r.channel),
+    saleOrderDate: day(r.saleOrderDate),
+    warrantyMonth: r.warrantyMonth ?? "",
+    expireDate: day(r.expireDate),
+    serial: txt(r.serial),
+    brand: id(r.brandId),
+    modelCode: id(r.modelId),
+    symptoms: id(r.symptomId) ? ["x"] : [],
+  });
+}
+
 export async function createJob(i: JobInput, byUserId: number): Promise<JobDetail> {
+  assertJob(i); // a new job: every required field
   const cust = await getCustomerByCode(str(i.customerCode));
   if (!cust) throw new HttpError(400, "ต้องเลือกลูกค้าก่อนเปิดงาน");
   const lk = await lookups(i);
@@ -933,6 +995,7 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
 export async function updateJob(jobNo: string, i: JobInput, byUserId: number): Promise<JobDetail> {
   const [cur] = await db.select({ status: job.jobStatusId, custId: job.customerId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  assertJob(i, (await requiredFilledNow(jobNo)) ?? undefined); // never worse than it is now
   const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
   const lk = await lookups(i);
   const c = costFields(i);
@@ -1053,6 +1116,7 @@ export type RepairInput = {
  * (requested from stock; booking += qty until the store issues it).
  */
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
+  assertValid(repairActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId, eng: job.engineerId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   const [es] = i.engineerSymptom
@@ -1204,6 +1268,7 @@ export type OutsourceInput = {
 };
 
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
+  assertValid(outsourceActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   const [es] = i.engineerSymptom
@@ -1349,6 +1414,7 @@ export type SwapRefundInput = {
 };
 
 export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId: number): Promise<JobDetail> {
+  assertValid(swapRefundActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
@@ -1403,6 +1469,7 @@ export type CloseInput = {
 };
 
 export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): Promise<JobDetail> {
+  assertValid(closeActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   const newStatus = await statusIdByName(i.status);

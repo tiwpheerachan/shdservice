@@ -16,6 +16,7 @@ import {
   useJobForm,
   fromJob,
   saveCommonSections,
+  useWorkflowErrors,
 } from "@/components/shared/job-form";
 import { Tabs } from "@/components/ui/tabs";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
@@ -29,6 +30,7 @@ import { useJob, type JobDetail } from "@/lib/use-job";
 import { useAccess } from "@/lib/use-access";
 import { postJson, errMsg } from "@/lib/api";
 import { today as thaiToday } from "@/lib/dates";
+import { outsourceActionSchema } from "@/lib/validation/job";
 
 // ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
 const OTHER = "อื่นๆ (ระบุ)";
@@ -40,6 +42,7 @@ function OutsourceForm() {
   const { name: me, can } = useAccess();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
+  const act = useWorkflowErrors();
   const [tab, setTab] = React.useState("device");
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
@@ -55,7 +58,12 @@ function OutsourceForm() {
     recvDetail: "",
     status: "",
   });
-  const upd = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
+  // editing a field clears its error (keys = the payload paths the rules report)
+  const ERR_KEY: Partial<Record<keyof typeof d, string>> = { sendTo: "send.to", sendToOther: "send.to", sendDate: "send.date", status: "status" };
+  const upd = (p: Partial<typeof d>) => {
+    setD((x) => ({ ...x, ...p }));
+    (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
+  };
 
 
   // prefill from the job + its latest job_send_forward_dt row
@@ -75,7 +83,8 @@ function OutsourceForm() {
       recvDate: last?.receiveDate ?? "",
       recvBy: last?.receiveBy || "",
       recvDetail: last?.receiveDetail ?? "",
-      status: "",
+      // the job's current status, so saving without a change keeps it (the field is required)
+      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job, VENDORS.length]);
@@ -97,24 +106,23 @@ function OutsourceForm() {
     }
     const sendTo = d.sendTo === OTHER ? d.sendToOther.trim() : d.sendTo;
     const receiving = !!open && (d.recvDate || d.recvDetail);
-    if (!receiving && !sendTo) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุ ส่งไปยัง" });
-      return;
-    }
+    const body = {
+      symptomOther: form.symptomOther,
+      repairDetail: d.repairDetail,
+      send: !receiving ? { to: sendTo, date: d.sendDate, detail: d.sendDetail } : undefined,
+      receive: receiving ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail } : undefined,
+      status: d.status || undefined,
+    };
+    const canEdit = can("Job Management", "edit");
+    if (!act.check(outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, can("Job Management", "edit"));
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, {
-        symptomOther: form.symptomOther,
-        repairDetail: d.repairDetail,
-        send: !receiving ? { to: sendTo, date: d.sendDate, detail: d.sendDetail } : undefined,
-        receive: receiving ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail } : undefined,
-        status: d.status || undefined,
-      });
+      await saveCommonSections(job.no, form, canEdit);
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, body);
       setJob(r.job);
       push({ kind: "success", title: "บันทึกข้อมูลส่งซ่อมต่อแล้ว", desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -193,7 +201,7 @@ function OutsourceForm() {
 
       <Section title="รายละเอียด การส่งงานซ่อม" icon={Truck}>
         <FieldGrid>
-          <Field label="ส่งไปยัง" required className="lg:col-span-2">
+          <Field label="ส่งไปยัง" required error={act.errors["send.to"]} className="lg:col-span-2">
             <div className="space-y-2">
               <SearchSelect value={d.sendTo} onChange={(v) => upd({ sendTo: v })} options={strOptions([...VENDORS, OTHER])} searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…" />
               {d.sendTo === OTHER && (
@@ -201,7 +209,7 @@ function OutsourceForm() {
               )}
             </div>
           </Field>
-          <Field label="วันที่ส่ง" required>
+          <Field label="วันที่ส่ง" required error={act.errors["send.date"]}>
             <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
           </Field>
           <Field label="ส่งโดย" required>
@@ -232,7 +240,7 @@ function OutsourceForm() {
           <Field label="หมายเหตุการรับคืน" wide>
             <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
           </Field>
-          <Field label="โปรดระบุ สถานะงานซ่อม" required wide>
+          <Field label="โปรดระบุ สถานะงานซ่อม" required wide error={act.errors.status}>
             <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>

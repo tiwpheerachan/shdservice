@@ -247,6 +247,17 @@
   }
 }
 
+/* A field that failed validation (Field sets aria-invalid on its control) — red in every form.
+   Unlayered on purpose: it must beat the border / ring utilities on the controls. */
+:is(input, select, textarea, [role="combobox"])[aria-invalid="true"] {
+  border-color: hsl(var(--danger));
+}
+:is(input, select, textarea, [role="combobox"])[aria-invalid="true"]:focus,
+:is(input, select, textarea, [role="combobox"])[aria-invalid="true"]:focus-visible {
+  border-color: hsl(var(--danger));
+  box-shadow: 0 0 0 2px hsl(var(--danger) / 0.2);
+}
+
 @media print {
   .no-print {
     display: none !important;

@@ -8,6 +8,7 @@ import {
   PackageSearch,
   Coins,
   Paperclip,
+  TriangleAlert,
 } from "lucide-react";
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
@@ -45,6 +46,10 @@ import { baht, cn } from "@/lib/utils";
 import { patchJson } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import type { JobDetail } from "@/lib/use-job";
+import { useFormErrors, apiFieldErrors } from "@/lib/use-form-errors";
+import type { z } from "zod";
+import { jobSchema, filledRequired, missingRequired, JOB_FIELD_LABEL, type JobRequiredKey } from "@/lib/validation/job";
+import type { FieldErrors } from "@/lib/validation";
 
 /* ------------------------------------------------------------------ *
  * Shared form state. Every section reads/writes this through context, and
@@ -262,7 +267,23 @@ type Ctx = {
   set: <K extends keyof JobFormState>(k: K, v: JobFormState[K]) => void;
   patch: (p: Partial<JobFormState>) => void;
   reset: (next?: JobFormState) => void;
+  /** field errors by JobInput key (shown under the fields) */
+  errors: FieldErrors;
+  /**
+   * Check the form before saving (src/lib/validation/job.ts): a new job needs every required field;
+   * a loaded job must keep the ones it already had. Shows the errors; returns them ({} = OK).
+   */
+  validate: () => FieldErrors;
+  /** toast + focus the first bad field (also for errors a page adds of its own) */
+  report: (e: FieldErrors) => boolean;
+  /** API 400 with field errors → under the fields */
+  fromApi: (err: unknown) => boolean;
+  /** required fields the loaded job was saved without (old data) — null for a new job */
+  incomplete: JobRequiredKey[] | null;
 };
+
+/** JobFormState key → the JobInput key its error is reported under */
+const errorKey = (k: keyof JobFormState): string => (k === "customer" ? "customerCode" : k);
 
 const FormCtx = React.createContext<Ctx | null>(null);
 
@@ -274,16 +295,65 @@ export function JobFormProvider({
   children: React.ReactNode;
 }) {
   const [s, setS] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
+  const { errors, setErrors, run, clear, report, fromApi } = useFormErrors();
+  // required fields the job had when it was loaded ("never worse"); null = new job (all required)
+  const baselineOf = (f: JobFormState) => (f.jobNo ? filledRequired(toJobInput(f)) : null);
+  const [baseline, setBaseline] = React.useState<JobRequiredKey[] | null>(() => baselineOf(initial ?? EMPTY_JOB_FORM));
   const value = React.useMemo<Ctx>(
     () => ({
       s,
-      set: (k, v) => setS((x) => ({ ...x, [k]: v })),
-      patch: (p) => setS((x) => ({ ...x, ...p })),
-      reset: (next) => setS(next ?? EMPTY_JOB_FORM),
+      set: (k, v) => {
+        setS((x) => ({ ...x, [k]: v }));
+        clear(errorKey(k));
+      },
+      patch: (p) => {
+        setS((x) => ({ ...x, ...p }));
+        Object.keys(p).forEach((k) => clear(errorKey(k as keyof JobFormState)));
+      },
+      reset: (next) => {
+        const f = next ?? EMPTY_JOB_FORM;
+        setS(f);
+        setBaseline(baselineOf(f));
+        setErrors({});
+      },
+      errors,
+      validate: () => run(jobSchema(baseline ?? undefined), toJobInput(s)),
+      report,
+      fromApi,
+      incomplete: baseline ? missingRequired(toJobInput(s)).filter((k) => !baseline.includes(k)) : null,
     }),
-    [s]
+    [s, errors, baseline, run, clear, report, fromApi, setErrors]
   );
   return <FormCtx.Provider value={value}>{children}</FormCtx.Provider>;
+}
+
+/**
+ * Workflow screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน): check the shared job sections
+ * (when this user may edit them) and the screen's own action payload together, so every missing
+ * field shows at once. Action errors are keyed by payload path ("status", "send.to", "return.date").
+ */
+export function useWorkflowErrors() {
+  const form = useJobForm();
+  const action = useFormErrors();
+  const { validate, report } = form;
+  const { run } = action;
+  /** true = OK to save */
+  const check = React.useCallback(
+    <S extends z.ZodType>(schema: S, body: unknown, jobEditable: boolean) =>
+      !report({ ...(jobEditable ? validate() : {}), ...run(schema, body) }),
+    [validate, report, run]
+  );
+  const fromApi = React.useCallback(
+    (err: unknown) => {
+      const f = apiFieldErrors(err);
+      if (!f) return false;
+      action.setErrors(f);
+      form.fromApi(err);
+      return true;
+    },
+    [action, form]
+  );
+  return { errors: action.errors, clear: action.clear, check, fromApi };
 }
 
 export function useJobForm(): Ctx {
@@ -336,7 +406,7 @@ export function JobLookupBar({
 /* ---------------- customer ---------------- */
 
 export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
-  const { s, set } = useJobForm();
+  const { s, set, errors } = useJobForm();
   const c = s.customer;
   return (
     <Section
@@ -345,7 +415,9 @@ export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
       description={c ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่ เพื่อเพิ่มข้อมูลก่อนเปิดงาน"}
       actions={c && <Badge tone="success" dot>พบข้อมูลลูกค้า</Badge>}
     >
-      <CustomerSelect value={c} onChange={(cust) => set("customer", cust)} readOnly={readOnly} />
+      <Field error={errors.customerCode}>
+        <CustomerSelect value={c} onChange={(cust) => set("customer", cust)} readOnly={readOnly} />
+      </Field>
     </Section>
   );
 }
@@ -358,7 +430,7 @@ export function JobOpenSection({
   status?: string;
   jobNo?: string;
 }) {
-  const { s, set } = useJobForm();
+  const { s, set, errors } = useJobForm();
   const { data: JOB_TYPES } = useJobTypes();
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { name: me } = useAccess();
@@ -393,7 +465,7 @@ export function JobOpenSection({
             </Badge>
           </ReadOnly>
         </Field>
-        <Field label="ประเภทงานหลัก" required className="lg:col-span-2">
+        <Field label="ประเภทงานหลัก" required error={errors.jobType} className="lg:col-span-2">
           <SearchSelect value={s.jobType} onChange={(v) => set("jobType", v)} options={withCurrent(JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), s.jobType)} />
         </Field>
         <Field label="งานย่อย" className="lg:col-span-2">
@@ -427,7 +499,7 @@ export function JobOpenSection({
  *  ordered by real usage, with the chosen model's common symptoms on top. Used by ProductSection
  *  and the Out-Source "รายละเอียดการซ่อม" tab. */
 export function MainSymptomField() {
-  const { s, set } = useJobForm();
+  const { s, set, errors } = useJobForm();
   const { data: MODELS } = useModels();
   const { data: SYMPTOMS } = useSymptoms();
   const { data: SYMPTOM_STATS } = useSymptomStats();
@@ -438,6 +510,7 @@ export function MainSymptomField() {
       label="อาการเสียหลัก (มาตรฐาน)"
       required
       wide
+      error={errors.symptoms}
       hint={symptoms.length ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก` : "ค้นหาแล้วติ๊กได้หลายอาการ · ตัวแรกที่เลือกเป็นอาการหลัก"}
     >
       <SymptomPicker
@@ -459,7 +532,7 @@ export function MainSymptomField() {
  *  - `repair` บันทึกงานซ่อม / บันทึกงานส่งซ่อมต่อ (Out-Source) / Swap-Refund — device fields only (no shop / reception)
  */
 export function ProductSection({ title = "ข้อมูลเกี่ยวกับสินค้า", variant = "full" }: { title?: string; variant?: "full" | "open" | "repair" }) {
-  const { s, set, patch } = useJobForm();
+  const { s, set, patch, errors, incomplete } = useJobForm();
   const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const { data: MANUFACTURERS } = useManufacturers();
@@ -482,22 +555,31 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   };
 
   const repair = variant === "repair";
+  // an old job saved before these fields were required: it can still be saved, but say what is missing
+  const incompleteNotice = incomplete && incomplete.length > 0 && (
+    <p role="status" className="mb-3 flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>
+        ข้อมูลงานนี้ยังไม่ครบ {incomplete.length} ช่อง: {incomplete.map((k) => JOB_FIELD_LABEL[k]).join(", ")} — บันทึกได้ตามปกติ แต่ควรเติมให้ครบ
+      </span>
+    </p>
+  );
   const open = variant === "open";
   const { data: SHOP_NAMES } = useShopNames();
   const { data: SHIPPING_PROFILES } = useShippingProfiles();
 
   const soField = (
-    <Field label="Sale Order No." required>
+    <Field label="Sale Order No." required error={errors.so}>
       <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set("so", e.target.value)} />
     </Field>
   );
   const channelField = (
-    <Field label={repair ? "Sale Channel" : "Channel"} required>
+    <Field label={repair ? "Sale Channel" : "Channel"} required error={errors.channel}>
       <SearchSelect value={s.channel} onChange={(v) => set("channel", v)} options={withCurrent(strOptions(CHANNELS), s.channel)} />
     </Field>
   );
   const saleDateField = (
-    <Field label="Sale Order Date" required>
+    <Field label="Sale Order Date" required error={errors.saleOrderDate}>
       <Input
         type="date"
         value={s.saleOrderDate}
@@ -509,7 +591,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const warrantyMonthField = (
-    <Field label="รับประกัน (เดือน)" required>
+    <Field label="รับประกัน (เดือน)" required error={errors.warrantyMonth}>
       <Input
         type="number"
         min={0}
@@ -525,12 +607,12 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const expireField = (
-    <Field label="Expire Date" required>
+    <Field label="Expire Date" required error={errors.expireDate}>
       <Input type="date" value={s.expireDate} onChange={(e) => set("expireDate", e.target.value)} />
     </Field>
   );
   const warrantyField = (
-    <Field label="Warranty" required={variant === "full"}>
+    <Field label="Warranty">
       <Select value={s.warranty} onChange={(e) => set("warranty", e.target.value)}>
         <option value="">- - Please Select - -</option>
         {WARRANTY_OPTIONS.map((w) => (
@@ -545,12 +627,12 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const serialField = (
-    <Field label="Serial No." required={!repair}>
+    <Field label="Serial No." required error={errors.serial}>
       <Input className="num" placeholder="SN-XXXXXXXX" value={s.serial} onChange={(e) => set("serial", e.target.value)} />
     </Field>
   );
   const brandField = (
-    <Field label="ยี่ห้อ" required>
+    <Field label="ยี่ห้อ" required error={errors.brand}>
       <SearchSelect
         value={s.brand}
         onChange={(v) => set("brand", v)}
@@ -560,7 +642,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const modelField = (
-    <Field label="รุ่น" required>
+    <Field label="รุ่น" required error={errors.modelCode}>
       <ModelPicker
         models={modelOptions}
         value={s.modelCode}
@@ -665,6 +747,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   if (open)
     return (
       <Section title={title} icon={PackageSearch}>
+        {incompleteNotice}
         <FieldGrid>
           {soField}
           {channelField}
@@ -699,6 +782,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
   if (repair)
     return (
       <Section title={title} icon={PackageSearch}>
+        {incompleteNotice}
         <FieldGrid>
           {soField}
           {channelField}
@@ -726,6 +810,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
 
   return (
     <Section title={title} icon={PackageSearch}>
+      {incompleteNotice}
       <FieldGrid>
         {soField}
         {channelField}

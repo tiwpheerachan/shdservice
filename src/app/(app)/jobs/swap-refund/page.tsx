@@ -16,6 +16,7 @@ import {
   useJobForm,
   fromJob,
   saveCommonSections,
+  useWorkflowErrors,
 } from "@/components/shared/job-form";
 import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
@@ -28,6 +29,7 @@ import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg } from "@/lib/api";
 import { today as thaiToday } from "@/lib/dates";
+import { swapRefundActionSchema } from "@/lib/validation/job";
 
 // parse the "key: value" lines this app writes into job.swap_refund_detail
 function parseSwap(text: string): Record<string, string> {
@@ -43,6 +45,7 @@ function SwapRefundForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
+  const act = useWorkflowErrors();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
   const [mode, setMode] = React.useState("swap");
@@ -60,7 +63,10 @@ function SwapRefundForm() {
     detail: "",
     status: "",
   });
-  const upd = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
+  const upd = (p: Partial<typeof d>) => {
+    setD((x) => ({ ...x, ...p }));
+    Object.keys(p).forEach((k) => act.clear(k)); // payload keys = state keys here
+  };
 
   React.useEffect(() => {
     if (!job) return;
@@ -80,7 +86,8 @@ function SwapRefundForm() {
       refundRef: sw["เลขที่บัญชี/อ้างอิง"] ?? "",
       refundDate: sw["วันที่คืนเงิน"] || today,
       detail: sw["รายละเอียด"] ?? (job.swap.detail && Object.keys(sw).length === 0 ? job.swap.detail : ""),
-      status: "",
+      // the job's current status, so saving without a change keeps it (the field is required)
+      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
@@ -98,18 +105,20 @@ function SwapRefundForm() {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
       return;
     }
+    const body =
+      mode === "swap"
+        ? { inspection: d.inspection, newSerial: d.newSerial, newModel: d.newModel, swapDate: d.swapDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined }
+        : { inspection: d.inspection, refundAmount: d.refundAmount, refundMethod: d.refundMethod, refundRef: d.refundRef, refundDate: d.refundDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined };
+    const canEdit = can("Job Management", "edit");
+    if (!act.check(swapRefundActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, can("Job Management", "edit"));
-      const body =
-        mode === "swap"
-          ? { inspection: d.inspection, newSerial: d.newSerial, newModel: d.newModel, swapDate: d.swapDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined }
-          : { inspection: d.inspection, refundAmount: d.refundAmount, refundMethod: d.refundMethod, refundRef: d.refundRef, refundDate: d.refundDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined };
+      await saveCommonSections(job.no, form, canEdit);
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, body);
       setJob(r.job);
       push({ kind: "success", title: mode === "swap" ? "บันทึกการเปลี่ยนเครื่องแล้ว" : "บันทึกการคืนเงินแล้ว", desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -200,7 +209,7 @@ function SwapRefundForm() {
         <FieldGrid>
           {mode === "swap" ? (
             <>
-              <Field label="New Serial No." required>
+              <Field label="New Serial No." required error={act.errors.newSerial}>
                 <Input className="num" value={d.newSerial} onChange={(e) => upd({ newSerial: e.target.value })} />
               </Field>
               <Field label="รุ่นที่เปลี่ยนให้">
@@ -215,7 +224,7 @@ function SwapRefundForm() {
             </>
           ) : (
             <>
-              <Field label="ยอดเงินคืน (บาท)" required>
+              <Field label="ยอดเงินคืน (บาท)" required error={act.errors.refundAmount}>
                 <Input
                   type="number"
                   step="0.01"
@@ -228,7 +237,7 @@ function SwapRefundForm() {
                   className="num text-right"
                 />
               </Field>
-              <Field label="วิธีการคืนเงิน" required>
+              <Field label="วิธีการคืนเงิน" required error={act.errors.refundMethod}>
                 <Select value={d.refundMethod} onChange={(e) => upd({ refundMethod: e.target.value })}>
                   <option>โอนเงินเข้าบัญชี</option>
                   <option>เงินสด</option>
@@ -246,7 +255,7 @@ function SwapRefundForm() {
           <Field label="รายละเอียด" wide>
             <Textarea rows={3} value={d.detail} onChange={(e) => upd({ detail: e.target.value })} />
           </Field>
-          <Field label="โปรดระบุ สถานะงาน" required wide>
+          <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
             <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>

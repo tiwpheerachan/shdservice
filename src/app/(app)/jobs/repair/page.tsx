@@ -16,6 +16,7 @@ import {
   useJobForm,
   fromJob,
   saveCommonSections,
+  useWorkflowErrors,
 } from "@/components/shared/job-form";
 import { useAccess } from "@/lib/use-access";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ import { baht } from "@/lib/utils";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg } from "@/lib/api";
+import { repairActionSchema } from "@/lib/validation/job";
 
 type Line = {
   id: number;
@@ -55,6 +57,7 @@ function RepairForm() {
   const { data: SYMPTOM_STATS } = useSymptomStats();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const act = useWorkflowErrors();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
   const [lines, setLines] = React.useState<Line[]>([]);
@@ -107,29 +110,32 @@ function RepairForm() {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
       return;
     }
+    const body = {
+      ...detail,
+      status: detail.status || undefined,
+      serviceCost: form.serviceCost,
+      toolCost: form.toolCost,
+      deliveryCost: form.deliveryCost,
+      boxCost: form.boxCost,
+      parts: lines.map((l) => ({
+        logId: l.logId,
+        code: l.code,
+        unitPrice: l.price,
+        a: { pick: l.aPick, quote: l.aQuote, qty: l.aQty },
+        b: { pick: l.bPick, quote: l.bQuote, qty: l.bQty },
+      })),
+    };
+    const canEdit = can("Job Management", "edit");
+    if (!act.check(repairActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
       // product / other-info sections shown on this screen are saved too
-      await saveCommonSections(job.no, form, can("Job Management", "edit"));
-      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
-        ...detail,
-        status: detail.status || undefined,
-        serviceCost: form.serviceCost,
-        toolCost: form.toolCost,
-        deliveryCost: form.deliveryCost,
-        boxCost: form.boxCost,
-        parts: lines.map((l) => ({
-          logId: l.logId,
-          code: l.code,
-          unitPrice: l.price,
-          a: { pick: l.aPick, quote: l.aQuote, qty: l.aQty },
-          b: { pick: l.bPick, quote: l.bQuote, qty: l.bQty },
-        })),
-      });
+      await saveCommonSections(job.no, form, canEdit);
+      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, body);
       setJob(d.job);
       push({ kind: "success", title: "บันทึกงานซ่อมเรียบร้อย", desc: `${d.job.no} · ${d.job.status}` });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -369,8 +375,8 @@ function RepairForm() {
           <Field label="New Serial No.">
             <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
           </Field>
-          <Field label="สถานะงานซ่อม" required>
-            <SearchSelect value={detail.status} onChange={(v) => setDetail((d) => ({ ...d, status: v }))} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+          <Field label="สถานะงานซ่อม" required error={act.errors.status}>
+            <SearchSelect value={detail.status} onChange={(v) => { setDetail((d) => ({ ...d, status: v })); act.clear("status"); }} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
           </Field>
         </FieldGrid>
       </Section>

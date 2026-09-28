@@ -13,6 +13,7 @@ import {
   useJobForm,
   fromJob,
   saveCommonSections,
+  useWorkflowErrors,
 } from "@/components/shared/job-form";
 import { useAccess } from "@/lib/use-access";
 import { Tabs } from "@/components/ui/tabs";
@@ -27,6 +28,7 @@ import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { today as thaiToday } from "@/lib/dates";
+import { closeActionSchema } from "@/lib/validation/job";
 
 function CloseForm() {
   const { push } = useToast();
@@ -34,6 +36,7 @@ function CloseForm() {
   const { data: SHIPPING } = useShippingProfiles();
   const { jobNo, job, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
+  const act = useWorkflowErrors();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
   const [saving, setSaving] = React.useState(false);
@@ -51,7 +54,12 @@ function CloseForm() {
     returnDetail: "",
     status: "",
   });
-  const upd = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
+  // editing a field clears its error (keys = the payload paths the rules report)
+  const ERR_KEY: Partial<Record<keyof typeof d, string>> = { status: "status", payType: "payment.type", returnType: "return.type", returnDate: "return.date" };
+  const upd = (p: Partial<typeof d>) => {
+    setD((x) => ({ ...x, ...p }));
+    (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
+  };
   const [slip, setSlip] = React.useState("");
   // สลิปชำระเงิน → bucket oneservice/jobs/{no}/slip/… (path เก็บใน job.job_payment_slip_file_name)
   const onPickSlip = async (f: File | undefined) => {
@@ -110,26 +118,21 @@ function CloseForm() {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
       return;
     }
-    if (!d.status) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "โปรดระบุสถานะงาน" });
-      return;
-    }
-    if (!d.returnType) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องระบุวิธีการส่งคืนสินค้า" });
-      return;
-    }
+    const body = {
+      payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
+      return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail, shipperId: d.shipperId || undefined },
+      status: d.status,
+    };
+    const canEdit = can("Job Management", "edit");
+    if (!act.check(closeActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, can("Job Management", "edit"));
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
-        payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
-        return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail, shipperId: d.shipperId || undefined },
-        status: d.status,
-      });
+      await saveCommonSections(job.no, form, canEdit);
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, body);
       setJob(r.job);
       push({ kind: "success", title: "ปิดงานและบันทึกการส่งคืนเรียบร้อย", desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -230,7 +233,7 @@ function CloseForm() {
               </ul>
             </div>
             <FieldGrid cols={2}>
-              <Field label="วิธีการชำระเงิน" required>
+              <Field label="วิธีการชำระเงิน" required error={act.errors["payment.type"]}>
                 <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
                   {JOB_PAYMENT_METHODS.map((p) => (
                     <option key={p}>{p}</option>
@@ -277,7 +280,7 @@ function CloseForm() {
 
       <Section title="ข้อมูลการปิดงาน - ส่งคืนสินค้า" icon={PackageCheck}>
         <FieldGrid>
-          <Field label="วิธีการส่งคืนสินค้า" required>
+          <Field label="วิธีการส่งคืนสินค้า" required error={act.errors["return.type"]}>
             <Select value={d.returnType} onChange={(e) => upd({ returnType: e.target.value })}>
               <option value="">- - Please Select - -</option>
               {RETURN_METHODS.map((m) => (
@@ -286,7 +289,7 @@ function CloseForm() {
               {d.returnType && !RETURN_METHODS.includes(d.returnType) && <option>{d.returnType}</option>}
             </Select>
           </Field>
-          <Field label="วันที่ส่งคืน" required>
+          <Field label="วันที่ส่งคืน" required error={act.errors["return.date"]}>
             <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
           </Field>
           <Field label="บริษัทขนส่ง" hint={d.shipperId ? "ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ" : undefined}>
@@ -330,7 +333,7 @@ function CloseForm() {
           <Field label="รายละเอียดการส่งคืน" wide>
             <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
           </Field>
-          <Field label="โปรดระบุ สถานะงาน" required wide>
+          <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
             <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
               <option value="">- - Please Select - -</option>
               {CLOSE_STATUS_OPTIONS.map((st) => (

@@ -25,7 +25,7 @@ import { patchJson, errMsg } from "@/lib/api";
 function EditJobForm() {
   const { push } = useToast();
   const { jobNo, job, find, setJob } = useJob();
-  const { s, reset } = useJobForm();
+  const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
 
   // prefill the form whenever a job is loaded (from ?job= or the GO button)
@@ -48,13 +48,14 @@ function EditJobForm() {
       push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
       return;
     }
+    if (report(validate())) return; // a required field that had a value must keep one
     setSaving(true);
     try {
       const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, { ...toJobInput(s), status: undefined });
       setJob(d.job);
       push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว", desc: d.job.no });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
