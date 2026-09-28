@@ -26,6 +26,7 @@ import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg } from "@/lib/api";
 import { today as thaiToday } from "@/lib/dates";
@@ -43,7 +44,7 @@ function parseSwap(text: string): Record<string, string> {
 
 function SwapRefundForm() {
   const { push } = useToast();
-  const { jobNo, job, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
@@ -96,7 +97,7 @@ function SwapRefundForm() {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
   // POST /api/jobs/:no/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
@@ -139,132 +140,134 @@ function SwapRefundForm() {
         }
       />
 
-      <CustomerSection readOnly />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="swap-job-no">
+        <CustomerSection readOnly />
 
-      <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
-        <FieldGrid>
-          <Field label="หมายเลขงาน">
-            <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
-          </Field>
-          <Field label="วันที่เปิดงาน">
-            <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
-          </Field>
-          <Field label="เปิดงานโดย">
-            <ReadOnly>{job?.createByName || "—"}</ReadOnly>
-          </Field>
-          <Field label="สถานะงาน (ปัจจุบัน)">
-            <ReadOnly>
-              <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
-            </ReadOnly>
-          </Field>
-        </FieldGrid>
-      </Section>
-
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { key: "product", label: "ข้อมูลสินค้า" },
-          { key: "detail", label: "รายละเอียดการซ่อม" },
-        ]}
-      />
-
-      {tab === "product" ? (
-        <ProductSection title="ข้อมูลสินค้า" variant="repair" />
-      ) : (
-        <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+        <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
           <FieldGrid>
-            <MainSymptomField />
-            <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-              <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+            <Field label="หมายเลขงาน">
+              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
             </Field>
-            <Field label="ผลการตรวจสอบ" wide>
-              <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
+            <Field label="วันที่เปิดงาน">
+              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+            </Field>
+            <Field label="เปิดงานโดย">
+              <ReadOnly>{job?.createByName || "—"}</ReadOnly>
+            </Field>
+            <Field label="สถานะงาน (ปัจจุบัน)">
+              <ReadOnly>
+                <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
+              </ReadOnly>
             </Field>
           </FieldGrid>
         </Section>
-      )}
 
-      <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
-        <div className="mb-4 flex gap-2">
-          {[
-            { k: "swap", l: "Swap — เปลี่ยนเครื่องใหม่" },
-            { k: "refund", l: "Refund — คืนเงิน" },
-          ].map((o) => (
-            <button
-              key={o.k}
-              onClick={() => setMode(o.k)}
-              className={
-                "flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors " +
-                (mode === o.k
-                  ? "border-primary bg-primary-soft text-primary"
-                  : "border-border bg-card text-muted-foreground hover:border-input")
-              }
-            >
-              {o.l}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: "product", label: "ข้อมูลสินค้า" },
+            { key: "detail", label: "รายละเอียดการซ่อม" },
+          ]}
+        />
 
-        <FieldGrid>
-          {mode === "swap" ? (
-            <>
-              <Field label="New Serial No." required error={act.errors.newSerial}>
-                <Input className="num" value={d.newSerial} onChange={(e) => upd({ newSerial: e.target.value })} />
+        {tab === "product" ? (
+          <ProductSection title="ข้อมูลสินค้า" variant="repair" />
+        ) : (
+          <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+            <FieldGrid>
+              <MainSymptomField />
+              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
               </Field>
-              <Field label="รุ่นที่เปลี่ยนให้">
-                <Input value={d.newModel} onChange={(e) => upd({ newModel: e.target.value })} />
+              <Field label="ผลการตรวจสอบ" wide>
+                <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
               </Field>
-              <Field label="วันที่เปลี่ยนเครื่อง">
-                <Input type="date" value={d.swapDate} onChange={(e) => upd({ swapDate: e.target.value })} />
-              </Field>
-              <Field label="เลขที่เอกสารเบิกสินค้า">
-                <Input className="num" value={d.docNo} onChange={(e) => upd({ docNo: e.target.value })} />
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="ยอดเงินคืน (บาท)" required error={act.errors.refundAmount}>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={d.refundAmount}
-                  onChange={(e) => upd({ refundAmount: e.target.value })}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="num text-right"
-                />
-              </Field>
-              <Field label="วิธีการคืนเงิน" required error={act.errors.refundMethod}>
-                <Select value={d.refundMethod} onChange={(e) => upd({ refundMethod: e.target.value })}>
-                  <option>โอนเงินเข้าบัญชี</option>
-                  <option>เงินสด</option>
-                  <option>คืนผ่านช่องทางการขาย</option>
-                </Select>
-              </Field>
-              <Field label="เลขที่บัญชี / อ้างอิง">
-                <Input className="num" value={d.refundRef} onChange={(e) => upd({ refundRef: e.target.value })} />
-              </Field>
-              <Field label="วันที่คืนเงิน">
-                <Input type="date" value={d.refundDate} onChange={(e) => upd({ refundDate: e.target.value })} />
-              </Field>
-            </>
-          )}
-          <Field label="รายละเอียด" wide>
-            <Textarea rows={3} value={d.detail} onChange={(e) => upd({ detail: e.target.value })} />
-          </Field>
-          <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
-            <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
-          </Field>
-        </FieldGrid>
-      </Section>
+            </FieldGrid>
+          </Section>
+        )}
 
-      <CostSummary />
-      <AttachmentSection jobNo={job?.no} />
+        <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
+          <div className="mb-4 flex gap-2">
+            {[
+              { k: "swap", l: "Swap — เปลี่ยนเครื่องใหม่" },
+              { k: "refund", l: "Refund — คืนเงิน" },
+            ].map((o) => (
+              <button
+                key={o.k}
+                onClick={() => setMode(o.k)}
+                className={
+                  "flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors " +
+                  (mode === o.k
+                    ? "border-primary bg-primary-soft text-primary"
+                    : "border-border bg-card text-muted-foreground hover:border-input")
+                }
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
 
-      <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+          <FieldGrid>
+            {mode === "swap" ? (
+              <>
+                <Field label="New Serial No." required error={act.errors.newSerial}>
+                  <Input className="num" value={d.newSerial} onChange={(e) => upd({ newSerial: e.target.value })} />
+                </Field>
+                <Field label="รุ่นที่เปลี่ยนให้">
+                  <Input value={d.newModel} onChange={(e) => upd({ newModel: e.target.value })} />
+                </Field>
+                <Field label="วันที่เปลี่ยนเครื่อง">
+                  <Input type="date" value={d.swapDate} onChange={(e) => upd({ swapDate: e.target.value })} />
+                </Field>
+                <Field label="เลขที่เอกสารเบิกสินค้า">
+                  <Input className="num" value={d.docNo} onChange={(e) => upd({ docNo: e.target.value })} />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="ยอดเงินคืน (บาท)" required error={act.errors.refundAmount}>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={d.refundAmount}
+                    onChange={(e) => upd({ refundAmount: e.target.value })}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="num text-right"
+                  />
+                </Field>
+                <Field label="วิธีการคืนเงิน" required error={act.errors.refundMethod}>
+                  <Select value={d.refundMethod} onChange={(e) => upd({ refundMethod: e.target.value })}>
+                    <option>โอนเงินเข้าบัญชี</option>
+                    <option>เงินสด</option>
+                    <option>คืนผ่านช่องทางการขาย</option>
+                  </Select>
+                </Field>
+                <Field label="เลขที่บัญชี / อ้างอิง">
+                  <Input className="num" value={d.refundRef} onChange={(e) => upd({ refundRef: e.target.value })} />
+                </Field>
+                <Field label="วันที่คืนเงิน">
+                  <Input type="date" value={d.refundDate} onChange={(e) => upd({ refundDate: e.target.value })} />
+                </Field>
+              </>
+            )}
+            <Field label="รายละเอียด" wide>
+              <Textarea rows={3} value={d.detail} onChange={(e) => upd({ detail: e.target.value })} />
+            </Field>
+            <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
+              <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+            </Field>
+          </FieldGrid>
+        </Section>
+
+        <CostSummary />
+        <AttachmentSection jobNo={job?.no} />
+
+        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+      </RecordGate>
     </>
   );
 }

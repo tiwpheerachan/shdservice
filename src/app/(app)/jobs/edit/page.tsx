@@ -17,6 +17,7 @@ import {
   toJobInput,
 } from "@/components/shared/job-form";
 import { useToast } from "@/components/ui/toast";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { TrackLink } from "@/components/shared/track-link";
@@ -24,7 +25,7 @@ import { patchJson, errMsg } from "@/lib/api";
 
 function EditJobForm() {
   const { push } = useToast();
-  const { jobNo, job, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
 
@@ -38,7 +39,7 @@ function EditJobForm() {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
   // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
@@ -76,23 +77,25 @@ function EditJobForm() {
         }
       />
 
-      <CustomerSection />
-      <JobOpenSection jobNo={job?.no} status={job?.status ?? "อยู่ระหว่างดำเนินการ"} />
-      <ProductSection variant="open" />
-      <OtherInfoSection directory={false} />
-      <AttachmentSection jobNo={job?.no} />
-      {job?.no && <TrackLink jobNo={job.no} />}
-      <JobHistorySection job={job} />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="edit-job-no">
+        <CustomerSection />
+        <JobOpenSection jobNo={job?.no} status={job?.status ?? "อยู่ระหว่างดำเนินการ"} />
+        <ProductSection variant="open" />
+        <OtherInfoSection directory={false} />
+        <AttachmentSection jobNo={job?.no} />
+        {job?.no && <TrackLink jobNo={job.no} />}
+        <JobHistorySection job={job} />
 
-      <FormActions
-        saveLabel="บันทึกการแก้ไข"
-        onSave={save}
-        saving={saving}
-        onCancel={() => job && reset(fromJob(job))}
-        extra={
-          <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
-        }
-      />
+        <FormActions
+          saveLabel="บันทึกการแก้ไข"
+          onSave={save}
+          saving={saving}
+          onCancel={() => job && reset(fromJob(job))}
+          extra={
+            <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
+          }
+        />
+      </RecordGate>
     </>
   );
 }

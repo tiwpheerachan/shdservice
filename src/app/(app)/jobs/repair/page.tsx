@@ -29,6 +29,7 @@ import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { SymptomPicker } from "@/components/shared/symptom-picker";
 import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg } from "@/lib/api";
@@ -55,7 +56,7 @@ function RepairForm() {
   const { data: PRODUCTS } = useProducts();
   const { data: SYMPTOMS } = useSymptoms();
   const { data: SYMPTOM_STATS } = useSymptomStats();
-  const { jobNo, job, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
@@ -101,7 +102,7 @@ function RepairForm() {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
   // POST /api/jobs/:no/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
@@ -183,218 +184,219 @@ function RepairForm() {
         }
       />
 
-      <CustomerSection readOnly />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="repair-job-no">
+        <CustomerSection readOnly />
 
-      <Section title="ข้อมูลการเปิดงานซ่อม" icon={Wrench}>
-        <FieldGrid>
-          <Field label="หมายเลขงานซ่อม">
-            <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
-          </Field>
-          <Field label="วันที่เปิดงานซ่อม">
-            <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
-          </Field>
-          <Field label="เปิดงานซ่อมโดย">
-            <ReadOnly>{job?.createByName || "—"}</ReadOnly>
-          </Field>
-          <Field label="ประเภทงานซ่อม">
-            <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
-          </Field>
-          <Field label="สถานะงานซ่อม (ปัจจุบัน)" wide>
-            <ReadOnly>
-              <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
-            </ReadOnly>
-          </Field>
-        </FieldGrid>
-      </Section>
+        <Section title="ข้อมูลการเปิดงานซ่อม" icon={Wrench}>
+          <FieldGrid>
+            <Field label="หมายเลขงานซ่อม">
+              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
+            </Field>
+            <Field label="วันที่เปิดงานซ่อม">
+              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+            </Field>
+            <Field label="เปิดงานซ่อมโดย">
+              <ReadOnly>{job?.createByName || "—"}</ReadOnly>
+            </Field>
+            <Field label="ประเภทงานซ่อม">
+              <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
+            </Field>
+            <Field label="สถานะงานซ่อม (ปัจจุบัน)" wide>
+              <ReadOnly>
+                <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
+              </ReadOnly>
+            </Field>
+          </FieldGrid>
+        </Section>
 
-      <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+        <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
 
-      <Section
-        title="การใช้อะไหล่ และการเสนอราคา"
-        icon={Stethoscope}
-        description="เสนอราคาแบบ A (Normal) และแบบ B (VIP)"
-        bodyClassName="p-0"
-      >
-        <div className="flex items-center gap-2 border-b border-border p-3">
-          <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <ProductPicker
-            products={PRODUCTS}
-            onPick={(p) => p && addPart(p.code)}
-            placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
-            className="sm:max-w-xl"
-          />
-        </div>
-        <div className="table-scroll rounded-none">
-          <table className="w-full min-w-[1080px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                <th rowSpan={2} className="w-10 px-2 py-2 text-left">#</th>
-                <th rowSpan={2} className="w-24 px-2 py-2 text-left">รหัสอะไหล่</th>
-                <th rowSpan={2} className="px-2 py-2 text-left">รายละเอียด</th>
-                <th rowSpan={2} className="w-24 px-2 py-2 text-right">ราคา/หน่วย</th>
-                <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
-                  เสนอราคาแบบ A (Normal)
-                </th>
-                <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
-                  เสนอราคาแบบ B (VIP)
-                </th>
-                <th rowSpan={2} className="w-24 px-2 py-2 text-left">สถานะ</th>
-                <th rowSpan={2} className="w-16 px-2 py-2 text-center">Action</th>
-              </tr>
-              <tr className="border-b border-border bg-muted/60 text-2xs text-muted-foreground">
-                <th className="w-14 border-l border-border px-2 py-1.5 text-center">เบิก</th>
-                <th className="w-14 px-2 py-1.5 text-center">เสนอ</th>
-                <th className="w-16 px-2 py-1.5 text-center">Qty</th>
-                <th className="w-24 px-2 py-1.5 text-right">เป็นเงิน</th>
-                <th className="w-14 border-l border-border px-2 py-1.5 text-center">เบิก</th>
-                <th className="w-14 px-2 py-1.5 text-center">เสนอ</th>
-                <th className="w-16 px-2 py-1.5 text-center">Qty</th>
-                <th className="w-24 px-2 py-1.5 text-right">เป็นเงิน</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.length === 0 ? (
-                <tr>
-                  <td colSpan={14} className="px-3 py-10 text-center text-xs text-muted-foreground">
-                    ยังไม่มีรายการอะไหล่ — ค้นหาในช่องด้านบนเพื่อเพิ่ม
-                  </td>
+        <Section
+          title="การใช้อะไหล่ และการเสนอราคา"
+          icon={Stethoscope}
+          description="เสนอราคาแบบ A (Normal) และแบบ B (VIP)"
+          bodyClassName="p-0"
+        >
+          <div className="flex items-center gap-2 border-b border-border p-3">
+            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <ProductPicker
+              products={PRODUCTS}
+              onPick={(p) => p && addPart(p.code)}
+              placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
+              className="sm:max-w-xl"
+            />
+          </div>
+          <div className="table-scroll rounded-none">
+            <table className="w-full min-w-[1080px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
+                  <th rowSpan={2} className="w-10 px-2 py-2 text-left">#</th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">รหัสอะไหล่</th>
+                  <th rowSpan={2} className="px-2 py-2 text-left">รายละเอียด</th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-right">ราคา/หน่วย</th>
+                  <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
+                    เสนอราคาแบบ A (Normal)
+                  </th>
+                  <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
+                    เสนอราคาแบบ B (VIP)
+                  </th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">สถานะ</th>
+                  <th rowSpan={2} className="w-16 px-2 py-2 text-center">Action</th>
                 </tr>
-              ) : (
-                lines.map((l, i) => (
-                  <tr key={l.id} className="border-b border-border/70 hover:bg-accent/50">
-                    <td className="num px-2 py-2 text-muted-foreground">{i + 1}</td>
-                    <td className="num px-2 py-2 font-medium">{l.code}</td>
-                    <td className="px-2 py-2">
-                      <span className="line-clamp-2 max-w-[280px]">{l.name}</span>
-                    </td>
-                    <td className="num px-2 py-2 text-right">{baht(l.price)}</td>
-
-                    <td className="border-l border-border px-2 py-2 text-center">
-                      <Checkbox checked={l.aPick} disabled={l.locked} onChange={() => upd(l.id, { aPick: !l.aPick })} />
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <Checkbox checked={l.aQuote} disabled={l.locked} onChange={() => upd(l.id, { aQuote: !l.aQuote })} />
-                    </td>
-                    <td className="px-2 py-2">
-                      <NumberInput
-                        min={0}
-                        placeholder="0"
-                        value={l.aQty}
-                        disabled={l.locked}
-                        onChange={(n) => upd(l.id, { aQty: n })}
-                        className="h-7 w-14 px-1.5 text-xs"
-                      />
-                    </td>
-                    <td className="num px-2 py-2 text-right">
-                      {baht(l.aQuote ? l.price * l.aQty : 0)}
-                    </td>
-
-                    <td className="border-l border-border px-2 py-2 text-center">
-                      <Checkbox checked={l.bPick} disabled={l.locked} onChange={() => upd(l.id, { bPick: !l.bPick })} />
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <Checkbox checked={l.bQuote} disabled={l.locked} onChange={() => upd(l.id, { bQuote: !l.bQuote })} />
-                    </td>
-                    <td className="px-2 py-2">
-                      <NumberInput
-                        min={0}
-                        placeholder="0"
-                        value={l.bQty}
-                        disabled={l.locked}
-                        onChange={(n) => upd(l.id, { bQty: n })}
-                        className="h-7 w-14 px-1.5 text-xs"
-                      />
-                    </td>
-                    <td className="num px-2 py-2 text-right">
-                      {baht(l.bQuote ? l.price * l.bQty : 0)}
-                    </td>
-
-                    <td className="px-2 py-2">
-                      <Badge tone={/พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status) ? "success" : /รออะไหล่/.test(l.status) ? "danger" : "warning"} dot>
-                        {l.status}
-                      </Badge>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      {!l.locked && (
-                        <button
-                          onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                          aria-label="ลบ"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                <tr className="border-b border-border bg-muted/60 text-2xs text-muted-foreground">
+                  <th className="w-14 border-l border-border px-2 py-1.5 text-center">เบิก</th>
+                  <th className="w-14 px-2 py-1.5 text-center">เสนอ</th>
+                  <th className="w-16 px-2 py-1.5 text-center">Qty</th>
+                  <th className="w-24 px-2 py-1.5 text-right">เป็นเงิน</th>
+                  <th className="w-14 border-l border-border px-2 py-1.5 text-center">เบิก</th>
+                  <th className="w-14 px-2 py-1.5 text-center">เสนอ</th>
+                  <th className="w-16 px-2 py-1.5 text-center">Qty</th>
+                  <th className="w-24 px-2 py-1.5 text-right">เป็นเงิน</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.length === 0 ? (
+                  <tr>
+                    <td colSpan={14} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                      ยังไม่มีรายการอะไหล่ — ค้นหาในช่องด้านบนเพื่อเพิ่ม
                     </td>
                   </tr>
-                ))
+                ) : (
+                  lines.map((l, i) => (
+                    <tr key={l.id} className="border-b border-border/70 hover:bg-accent/50">
+                      <td className="num px-2 py-2 text-muted-foreground">{i + 1}</td>
+                      <td className="num px-2 py-2 font-medium">{l.code}</td>
+                      <td className="px-2 py-2">
+                        <span className="line-clamp-2 max-w-[280px]">{l.name}</span>
+                      </td>
+                      <td className="num px-2 py-2 text-right">{baht(l.price)}</td>
+
+                      <td className="border-l border-border px-2 py-2 text-center">
+                        <Checkbox checked={l.aPick} disabled={l.locked} onChange={() => upd(l.id, { aPick: !l.aPick })} />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <Checkbox checked={l.aQuote} disabled={l.locked} onChange={() => upd(l.id, { aQuote: !l.aQuote })} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <NumberInput
+                          min={0}
+                          placeholder="0"
+                          value={l.aQty}
+                          disabled={l.locked}
+                          onChange={(n) => upd(l.id, { aQty: n })}
+                          className="h-7 w-14 px-1.5 text-xs"
+                        />
+                      </td>
+                      <td className="num px-2 py-2 text-right">
+                        {baht(l.aQuote ? l.price * l.aQty : 0)}
+                      </td>
+
+                      <td className="border-l border-border px-2 py-2 text-center">
+                        <Checkbox checked={l.bPick} disabled={l.locked} onChange={() => upd(l.id, { bPick: !l.bPick })} />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <Checkbox checked={l.bQuote} disabled={l.locked} onChange={() => upd(l.id, { bQuote: !l.bQuote })} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <NumberInput
+                          min={0}
+                          placeholder="0"
+                          value={l.bQty}
+                          disabled={l.locked}
+                          onChange={(n) => upd(l.id, { bQty: n })}
+                          className="h-7 w-14 px-1.5 text-xs"
+                        />
+                      </td>
+                      <td className="num px-2 py-2 text-right">
+                        {baht(l.bQuote ? l.price * l.bQty : 0)}
+                      </td>
+
+                      <td className="px-2 py-2">
+                        <Badge tone={/พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status) ? "success" : /รออะไหล่/.test(l.status) ? "danger" : "warning"} dot>
+                          {l.status}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        {!l.locked && (
+                          <button
+                            onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                            aria-label="ลบ"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {lines.length > 0 && (
+                <tfoot>
+                  <tr className="bg-muted/50 font-semibold">
+                    <td colSpan={7} className="px-2 py-2 text-right text-xs">
+                      รวมแบบ A
+                    </td>
+                    <td className="num px-2 py-2 text-right text-primary">{baht(totalA)}</td>
+                    <td colSpan={3} className="px-2 py-2 text-right text-xs">
+                      รวมแบบ B
+                    </td>
+                    <td className="num px-2 py-2 text-right text-primary">{baht(totalB)}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
               )}
-            </tbody>
-            {lines.length > 0 && (
-              <tfoot>
-                <tr className="bg-muted/50 font-semibold">
-                  <td colSpan={7} className="px-2 py-2 text-right text-xs">
-                    รวมแบบ A
-                  </td>
-                  <td className="num px-2 py-2 text-right text-primary">{baht(totalA)}</td>
-                  <td colSpan={3} className="px-2 py-2 text-right text-xs">
-                    รวมแบบ B
-                  </td>
-                  <td className="num px-2 py-2 text-right text-primary">{baht(totalB)}</td>
-                  <td colSpan={2} />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </Section>
+            </table>
+          </div>
+        </Section>
 
-      <Section title="รายละเอียดการซ่อม" icon={Wrench}>
-        <FieldGrid>
-          <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ (engineer_symptom_id)">
-            <SymptomPicker
-              multiple={false}
-              value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
-              onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? "" }))}
-              options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
-              suggested={MODEL_SYMPTOMS}
-              suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
-              placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
-            />
-          </Field>
-          <Field label="วิธีการซ่อม" className="lg:col-span-2">
-            <Textarea
-              rows={3}
-              placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ"
-              value={detail.repairDetail}
-              onChange={(e) => setDetail((d) => ({ ...d, repairDetail: e.target.value }))}
-            />
-          </Field>
-          <Field label="หมายเหตุ" className="lg:col-span-2">
-            <Textarea rows={3} value={detail.engineerRemark} onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))} />
-          </Field>
-          <Field label="New Serial No.">
-            <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
-          </Field>
-          <Field label="สถานะงานซ่อม" required error={act.errors.status}>
-            <SearchSelect value={detail.status} onChange={(v) => { setDetail((d) => ({ ...d, status: v })); act.clear("status"); }} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
-          </Field>
-        </FieldGrid>
-      </Section>
+        <Section title="รายละเอียดการซ่อม" icon={Wrench}>
+          <FieldGrid>
+            <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ (engineer_symptom_id)">
+              <SymptomPicker
+                multiple={false}
+                value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
+                onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? "" }))}
+                options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+                suggested={MODEL_SYMPTOMS}
+                suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
+                placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
+              />
+            </Field>
+            <Field label="วิธีการซ่อม" className="lg:col-span-2">
+              <Textarea
+                rows={3}
+                placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ"
+                value={detail.repairDetail}
+                onChange={(e) => setDetail((d) => ({ ...d, repairDetail: e.target.value }))}
+              />
+            </Field>
+            <Field label="หมายเหตุ" className="lg:col-span-2">
+              <Textarea rows={3} value={detail.engineerRemark} onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))} />
+            </Field>
+            <Field label="New Serial No.">
+              <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
+            </Field>
+            <Field label="สถานะงานซ่อม" required error={act.errors.status}>
+              <SearchSelect value={detail.status} onChange={(v) => { setDetail((d) => ({ ...d, status: v })); act.clear("status"); }} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+            </Field>
+          </FieldGrid>
+        </Section>
 
-      <CostSummary partsTotal={totalA} />
-      <OtherInfoSection />
-      <AttachmentSection jobNo={job?.no} />
+        <CostSummary partsTotal={totalA} />
+        <OtherInfoSection />
+        <AttachmentSection jobNo={job?.no} />
 
-      <FormActions
-        saveLabel="บันทึกงานซ่อม"
-        onSave={save}
-        saving={saving}
-        onCancel={() => job && reset(fromJob(job))}
-        extra={
-          <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
-        }
-      />
-
+        <FormActions
+          saveLabel="บันทึกงานซ่อม"
+          onSave={save}
+          saving={saving}
+          onCancel={() => job && reset(fromJob(job))}
+          extra={
+            <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
+          }
+        />
+      </RecordGate>
     </>
   );
 }

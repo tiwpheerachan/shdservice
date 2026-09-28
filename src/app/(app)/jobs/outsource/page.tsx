@@ -26,6 +26,7 @@ import { Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { useVendors, useStaff } from "@/data/db";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { useAccess } from "@/lib/use-access";
 import { postJson, errMsg } from "@/lib/api";
@@ -40,7 +41,7 @@ function OutsourceForm() {
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
   const { name: me, can } = useAccess();
-  const { jobNo, job, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors();
   const [tab, setTab] = React.useState("device");
@@ -93,7 +94,7 @@ function OutsourceForm() {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
   const open = job?.outsource.find((o) => o.status === "ส่งเครื่องซ่อมแล้ว");
@@ -153,103 +154,105 @@ function OutsourceForm() {
         }
       />
 
-      <CustomerSection readOnly />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="outsource-job-no">
+        <CustomerSection readOnly />
 
-      <Section title="ข้อมูลการเปิดงานซ่อม" icon={ClipboardList}>
-        <FieldGrid>
-          <Field label="หมายเลขงานซ่อม">
-            <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
-          </Field>
-          <Field label="วันที่เปิดงานซ่อม">
-            <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
-          </Field>
-          <Field label="เปิดงานซ่อมโดย">
-            <ReadOnly>{job?.createByName || "—"}</ReadOnly>
-          </Field>
-          <Field label="สถานะงานซ่อม (ปัจจุบัน)">
-            <ReadOnly>
-              <Badge tone="info" dot>{job?.status ?? "—"}</Badge>
-            </ReadOnly>
-          </Field>
-        </FieldGrid>
-      </Section>
-
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { key: "device", label: "ข้อมูลเครื่องซ่อม" },
-          { key: "detail", label: "รายละเอียดการซ่อม" },
-        ]}
-      />
-
-      {tab === "device" ? (
-        <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
-      ) : (
-        <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+        <Section title="ข้อมูลการเปิดงานซ่อม" icon={ClipboardList}>
           <FieldGrid>
-            <MainSymptomField />
-            <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-              <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+            <Field label="หมายเลขงานซ่อม">
+              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
             </Field>
-            <Field label="วิธีการซ่อมเบื้องต้น" wide>
-              <Textarea rows={3} value={d.repairDetail} onChange={(e) => upd({ repairDetail: e.target.value })} />
+            <Field label="วันที่เปิดงานซ่อม">
+              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+            </Field>
+            <Field label="เปิดงานซ่อมโดย">
+              <ReadOnly>{job?.createByName || "—"}</ReadOnly>
+            </Field>
+            <Field label="สถานะงานซ่อม (ปัจจุบัน)">
+              <ReadOnly>
+                <Badge tone="info" dot>{job?.status ?? "—"}</Badge>
+              </ReadOnly>
             </Field>
           </FieldGrid>
         </Section>
-      )}
 
-      <Section title="รายละเอียด การส่งงานซ่อม" icon={Truck}>
-        <FieldGrid>
-          <Field label="ส่งไปยัง" required error={act.errors["send.to"]} className="lg:col-span-2">
-            <div className="space-y-2">
-              <SearchSelect value={d.sendTo} onChange={(v) => upd({ sendTo: v })} options={strOptions([...VENDORS, OTHER])} searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…" />
-              {d.sendTo === OTHER && (
-                <Input placeholder="ระบุชื่อผู้รับซ่อมต่อ" value={d.sendToOther} onChange={(e) => upd({ sendToOther: e.target.value })} />
-              )}
-            </div>
-          </Field>
-          <Field label="วันที่ส่ง" required error={act.errors["send.date"]}>
-            <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
-          </Field>
-          <Field label="ส่งโดย" required>
-            <SearchSelect value={d.sendBy} onChange={(v) => upd({ sendBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้ส่ง…" />
-          </Field>
-          <Field label="หมายเหตุการส่ง" wide>
-            <Textarea rows={2} value={d.sendDetail} onChange={(e) => upd({ sendDetail: e.target.value })} />
-          </Field>
-        </FieldGrid>
-      </Section>
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: "device", label: "ข้อมูลเครื่องซ่อม" },
+            { key: "detail", label: "รายละเอียดการซ่อม" },
+          ]}
+        />
 
-      <Section title="รายละเอียด การรับคืนงานซ่อม" icon={PackageCheck}>
-        <FieldGrid>
-          <Field label="รับจาก" className="lg:col-span-2">
-            <SearchSelect
-              value={d.recvFrom}
-              onChange={(v) => upd({ recvFrom: v })}
-              options={strOptions(d.recvFrom && !VENDORS.includes(d.recvFrom) ? [d.recvFrom, ...VENDORS] : VENDORS)}
-              searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
-            />
-          </Field>
-          <Field label="วันที่รับ">
-            <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
-          </Field>
-          <Field label="รับโดย">
-            <SearchSelect value={d.recvBy || me} onChange={(v) => upd({ recvBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้รับ…" />
-          </Field>
-          <Field label="หมายเหตุการรับคืน" wide>
-            <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
-          </Field>
-          <Field label="โปรดระบุ สถานะงานซ่อม" required wide error={act.errors.status}>
-            <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
-          </Field>
-        </FieldGrid>
-      </Section>
+        {tab === "device" ? (
+          <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+        ) : (
+          <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+            <FieldGrid>
+              <MainSymptomField />
+              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+              </Field>
+              <Field label="วิธีการซ่อมเบื้องต้น" wide>
+                <Textarea rows={3} value={d.repairDetail} onChange={(e) => upd({ repairDetail: e.target.value })} />
+              </Field>
+            </FieldGrid>
+          </Section>
+        )}
 
-      <CostSummary />
-      <AttachmentSection jobNo={job?.no} />
+        <Section title="รายละเอียด การส่งงานซ่อม" icon={Truck}>
+          <FieldGrid>
+            <Field label="ส่งไปยัง" required error={act.errors["send.to"]} className="lg:col-span-2">
+              <div className="space-y-2">
+                <SearchSelect value={d.sendTo} onChange={(v) => upd({ sendTo: v })} options={strOptions([...VENDORS, OTHER])} searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…" />
+                {d.sendTo === OTHER && (
+                  <Input placeholder="ระบุชื่อผู้รับซ่อมต่อ" value={d.sendToOther} onChange={(e) => upd({ sendToOther: e.target.value })} />
+                )}
+              </div>
+            </Field>
+            <Field label="วันที่ส่ง" required error={act.errors["send.date"]}>
+              <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
+            </Field>
+            <Field label="ส่งโดย" required>
+              <SearchSelect value={d.sendBy} onChange={(v) => upd({ sendBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้ส่ง…" />
+            </Field>
+            <Field label="หมายเหตุการส่ง" wide>
+              <Textarea rows={2} value={d.sendDetail} onChange={(e) => upd({ sendDetail: e.target.value })} />
+            </Field>
+          </FieldGrid>
+        </Section>
 
-      <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+        <Section title="รายละเอียด การรับคืนงานซ่อม" icon={PackageCheck}>
+          <FieldGrid>
+            <Field label="รับจาก" className="lg:col-span-2">
+              <SearchSelect
+                value={d.recvFrom}
+                onChange={(v) => upd({ recvFrom: v })}
+                options={strOptions(d.recvFrom && !VENDORS.includes(d.recvFrom) ? [d.recvFrom, ...VENDORS] : VENDORS)}
+                searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
+              />
+            </Field>
+            <Field label="วันที่รับ">
+              <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
+            </Field>
+            <Field label="รับโดย">
+              <SearchSelect value={d.recvBy || me} onChange={(v) => upd({ recvBy: v })} options={staffOptions} searchPlaceholder="พิมพ์ชื่อผู้รับ…" />
+            </Field>
+            <Field label="หมายเหตุการรับคืน" wide>
+              <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
+            </Field>
+            <Field label="โปรดระบุ สถานะงานซ่อม" required wide error={act.errors.status}>
+              <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+            </Field>
+          </FieldGrid>
+        </Section>
+
+        <CostSummary />
+        <AttachmentSection jobNo={job?.no} />
+
+        <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+      </RecordGate>
     </>
   );
 }

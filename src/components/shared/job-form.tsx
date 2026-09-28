@@ -370,7 +370,10 @@ export function JobLookupBar({
   onFind,
   note,
   initial = "",
+  id,
 }: {
+  /** id for the input (so <RecordGate> can focus it) */
+  id?: string;
   label?: string;
   placeholder?: string;
   onFind?: (v: string) => void;
@@ -379,7 +382,8 @@ export function JobLookupBar({
 }) {
   const [v, setV] = React.useState(initial);
   React.useEffect(() => setV(initial), [initial]);
-  const inputId = React.useId();
+  const autoId = React.useId();
+  const inputId = id ?? autoId;
   return (
     <div className="surface flex flex-wrap items-center gap-3 p-3 no-print">
       <label htmlFor={inputId} className="text-sm font-medium">{label} :</label>

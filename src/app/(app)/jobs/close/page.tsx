@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/toast";
 import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
 import { useShippers, useShippingProfiles } from "@/data/db";
 import { baht } from "@/lib/utils";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
@@ -34,7 +35,7 @@ function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS } = useShippers();
   const { data: SHIPPING } = useShippingProfiles();
-  const { jobNo, job, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob();
   const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
@@ -109,7 +110,7 @@ function CloseForm() {
     if (!v) return;
     const j = await find(v);
     if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
+    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
   };
 
   // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
@@ -163,188 +164,190 @@ function CloseForm() {
         }
       />
 
-      <CustomerSection readOnly />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="close-job-no">
+        <CustomerSection readOnly />
 
-      <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
-        <FieldGrid>
-          <Field label="หมายเลขงาน">
-            <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
-          </Field>
-          <Field label="วันที่เปิดงาน">
-            <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
-          </Field>
-          <Field label="ประเภทงาน">
-            <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
-          </Field>
-          <Field label="สถานะงาน (ปัจจุบัน)">
-            <ReadOnly>
-              <Badge tone="success" dot>{job?.status ?? "—"}</Badge>
-            </ReadOnly>
-          </Field>
-        </FieldGrid>
-      </Section>
-
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { key: "product", label: "ข้อมูลสินค้า" },
-          { key: "work", label: "รายละเอียดการดำเนินงาน" },
-          { key: "payment", label: "รายละเอียดการรับชำระเงิน" },
-        ]}
-      />
-
-      {tab === "product" && <ProductSection title="ข้อมูลสินค้า" />}
-
-      {tab === "work" && (
-        <Section title="รายละเอียดการดำเนินงาน" icon={ClipboardList}>
+        <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
           <FieldGrid>
-            <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
-              <Textarea rows={2} readOnly value={form.symptoms.join(", ")} />
+            <Field label="หมายเลขงาน">
+              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
             </Field>
-            <Field label="วิธีการซ่อมที่ดำเนินการ" className="lg:col-span-2">
-              <Textarea rows={2} readOnly value={job?.repairDetail ?? ""} />
+            <Field label="วันที่เปิดงาน">
+              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
             </Field>
-            <Field label="ช่างผู้รับผิดชอบ">
-              <ReadOnly>{job?.engineer || "—"}</ReadOnly>
+            <Field label="ประเภทงาน">
+              <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
             </Field>
-            <Field label="วันที่ซ่อมเสร็จ">
-              <ReadOnly><span className="num">{job?.repairedDate || "—"}</span></ReadOnly>
+            <Field label="สถานะงาน (ปัจจุบัน)">
+              <ReadOnly>
+                <Badge tone="success" dot>{job?.status ?? "—"}</Badge>
+              </ReadOnly>
             </Field>
           </FieldGrid>
         </Section>
-      )}
 
-      {tab === "payment" && (
-        <Section title="รายละเอียดการรับชำระเงิน" icon={Wallet}>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-border bg-muted/30 p-4">
-              <ul className="space-y-2 text-sm">
-                {SUMMARY.map((s) => (
-                  <li key={s.label} className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">{s.label}</span>
-                    <span className="num">{baht(s.v)}</span>
-                  </li>
-                ))}
-                <li className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">
-                  <span>รวมเป็นเงินสุทธิ</span>
-                  <span className="num text-primary">{baht(net)} ฿</span>
-                </li>
-              </ul>
-            </div>
-            <FieldGrid cols={2}>
-              <Field label="วิธีการชำระเงิน" required error={act.errors["payment.type"]}>
-                <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
-                  {JOB_PAYMENT_METHODS.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                  {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
-                </Select>
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: "product", label: "ข้อมูลสินค้า" },
+            { key: "work", label: "รายละเอียดการดำเนินงาน" },
+            { key: "payment", label: "รายละเอียดการรับชำระเงิน" },
+          ]}
+        />
+
+        {tab === "product" && <ProductSection title="ข้อมูลสินค้า" />}
+
+        {tab === "work" && (
+          <Section title="รายละเอียดการดำเนินงาน" icon={ClipboardList}>
+            <FieldGrid>
+              <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
+                <Textarea rows={2} readOnly value={form.symptoms.join(", ")} />
               </Field>
-              <Field label="จำนวนเงินที่ชำระ (บาท)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={d.payAmount}
-                  onChange={(e) => upd({ payAmount: e.target.value })}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="num text-right"
-                />
+              <Field label="วิธีการซ่อมที่ดำเนินการ" className="lg:col-span-2">
+                <Textarea rows={2} readOnly value={job?.repairDetail ?? ""} />
               </Field>
-              <Field label="วันที่ชำระเงิน">
-                <Input type="date" value={d.payDate} onChange={(e) => upd({ payDate: e.target.value })} />
+              <Field label="ช่างผู้รับผิดชอบ">
+                <ReadOnly>{job?.engineer || "—"}</ReadOnly>
               </Field>
-              <Field label="เลขที่ใบเสร็จ">
-                <Input className="num" value={d.payNo} onChange={(e) => upd({ payNo: e.target.value })} />
-              </Field>
-              <Field label="สลิปหลักฐานการชำระ" wide>
-                <div className="flex items-center gap-2">
-                  <Input type="file" className="h-9 py-1.5 text-xs" accept=".jpg,.jpeg,.png,.webp,.pdf" disabled={!job} onChange={(e) => onPickSlip(e.target.files?.[0])} />
-                  {slip && (
-                    <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
-                      ดูสลิป
-                    </a>
-                  )}
-                </div>
-              </Field>
-              <Field label="หมายเหตุ" wide>
-                <Textarea rows={2} value={d.payDetail} onChange={(e) => upd({ payDetail: e.target.value })} />
+              <Field label="วันที่ซ่อมเสร็จ">
+                <ReadOnly><span className="num">{job?.repairedDate || "—"}</span></ReadOnly>
               </Field>
             </FieldGrid>
-          </div>
+          </Section>
+        )}
+
+        {tab === "payment" && (
+          <Section title="รายละเอียดการรับชำระเงิน" icon={Wallet}>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <ul className="space-y-2 text-sm">
+                  {SUMMARY.map((s) => (
+                    <li key={s.label} className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">{s.label}</span>
+                      <span className="num">{baht(s.v)}</span>
+                    </li>
+                  ))}
+                  <li className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">
+                    <span>รวมเป็นเงินสุทธิ</span>
+                    <span className="num text-primary">{baht(net)} ฿</span>
+                  </li>
+                </ul>
+              </div>
+              <FieldGrid cols={2}>
+                <Field label="วิธีการชำระเงิน" required error={act.errors["payment.type"]}>
+                  <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
+                    {JOB_PAYMENT_METHODS.map((p) => (
+                      <option key={p}>{p}</option>
+                    ))}
+                    {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
+                  </Select>
+                </Field>
+                <Field label="จำนวนเงินที่ชำระ (บาท)">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={d.payAmount}
+                    onChange={(e) => upd({ payAmount: e.target.value })}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="num text-right"
+                  />
+                </Field>
+                <Field label="วันที่ชำระเงิน">
+                  <Input type="date" value={d.payDate} onChange={(e) => upd({ payDate: e.target.value })} />
+                </Field>
+                <Field label="เลขที่ใบเสร็จ">
+                  <Input className="num" value={d.payNo} onChange={(e) => upd({ payNo: e.target.value })} />
+                </Field>
+                <Field label="สลิปหลักฐานการชำระ" wide>
+                  <div className="flex items-center gap-2">
+                    <Input type="file" className="h-9 py-1.5 text-xs" accept=".jpg,.jpeg,.png,.webp,.pdf" disabled={!job} onChange={(e) => onPickSlip(e.target.files?.[0])} />
+                    {slip && (
+                      <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
+                        ดูสลิป
+                      </a>
+                    )}
+                  </div>
+                </Field>
+                <Field label="หมายเหตุ" wide>
+                  <Textarea rows={2} value={d.payDetail} onChange={(e) => upd({ payDetail: e.target.value })} />
+                </Field>
+              </FieldGrid>
+            </div>
+          </Section>
+        )}
+
+        <Section title="ข้อมูลการปิดงาน - ส่งคืนสินค้า" icon={PackageCheck}>
+          <FieldGrid>
+            <Field label="วิธีการส่งคืนสินค้า" required error={act.errors["return.type"]}>
+              <Select value={d.returnType} onChange={(e) => upd({ returnType: e.target.value })}>
+                <option value="">- - Please Select - -</option>
+                {RETURN_METHODS.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+                {d.returnType && !RETURN_METHODS.includes(d.returnType) && <option>{d.returnType}</option>}
+              </Select>
+            </Field>
+            <Field label="วันที่ส่งคืน" required error={act.errors["return.date"]}>
+              <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
+            </Field>
+            <Field label="บริษัทขนส่ง" hint={d.shipperId ? "ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ" : undefined}>
+              {/* โปรไฟล์บริษัทขนส่ง (ข้อมูลระบบ) — เลือก "อื่น ๆ" เพื่อพิมพ์ชื่อเองแบบระบบเดิม */}
+              <Select
+                value={d.shipperId ? String(d.shipperId) : d.courier ? "other" : ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "other") return upd({ shipperId: 0, courier: "" });
+                  const p = SHIPPING.find((x) => String(x.id) === v);
+                  upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : "" });
+                }}
+              >
+                <option value="">- - เลือก - -</option>
+                {SHIPPING.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nameTh}
+                  </option>
+                ))}
+                <option value="other">อื่น ๆ (พิมพ์เอง)</option>
+              </Select>
+              {!d.shipperId && (
+                <Input
+                  className="mt-2"
+                  list="close-shipper-options"
+                  value={d.courier}
+                  onChange={(e) => upd({ courier: e.target.value })}
+                  placeholder="พิมพ์ชื่อบริษัทขนส่ง"
+                  aria-label="ชื่อบริษัทขนส่ง (พิมพ์เอง)"
+                />
+              )}
+              <datalist id="close-shipper-options">
+                {SHIPPERS.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="หมายเลขพัสดุ">
+              <Input className="num" value={d.tracking} onChange={(e) => upd({ tracking: e.target.value })} />
+            </Field>
+            <Field label="รายละเอียดการส่งคืน" wide>
+              <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
+            </Field>
+            <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
+              <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
+                <option value="">- - Please Select - -</option>
+                {CLOSE_STATUS_OPTIONS.map((st) => (
+                  <option key={st}>{st}</option>
+                ))}
+              </Select>
+            </Field>
+          </FieldGrid>
         </Section>
-      )}
 
-      <Section title="ข้อมูลการปิดงาน - ส่งคืนสินค้า" icon={PackageCheck}>
-        <FieldGrid>
-          <Field label="วิธีการส่งคืนสินค้า" required error={act.errors["return.type"]}>
-            <Select value={d.returnType} onChange={(e) => upd({ returnType: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {RETURN_METHODS.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-              {d.returnType && !RETURN_METHODS.includes(d.returnType) && <option>{d.returnType}</option>}
-            </Select>
-          </Field>
-          <Field label="วันที่ส่งคืน" required error={act.errors["return.date"]}>
-            <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
-          </Field>
-          <Field label="บริษัทขนส่ง" hint={d.shipperId ? "ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ" : undefined}>
-            {/* โปรไฟล์บริษัทขนส่ง (ข้อมูลระบบ) — เลือก "อื่น ๆ" เพื่อพิมพ์ชื่อเองแบบระบบเดิม */}
-            <Select
-              value={d.shipperId ? String(d.shipperId) : d.courier ? "other" : ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "other") return upd({ shipperId: 0, courier: "" });
-                const p = SHIPPING.find((x) => String(x.id) === v);
-                upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : "" });
-              }}
-            >
-              <option value="">- - เลือก - -</option>
-              {SHIPPING.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nameTh}
-                </option>
-              ))}
-              <option value="other">อื่น ๆ (พิมพ์เอง)</option>
-            </Select>
-            {!d.shipperId && (
-              <Input
-                className="mt-2"
-                list="close-shipper-options"
-                value={d.courier}
-                onChange={(e) => upd({ courier: e.target.value })}
-                placeholder="พิมพ์ชื่อบริษัทขนส่ง"
-                aria-label="ชื่อบริษัทขนส่ง (พิมพ์เอง)"
-              />
-            )}
-            <datalist id="close-shipper-options">
-              {SHIPPERS.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-          </Field>
-          <Field label="หมายเลขพัสดุ">
-            <Input className="num" value={d.tracking} onChange={(e) => upd({ tracking: e.target.value })} />
-          </Field>
-          <Field label="รายละเอียดการส่งคืน" wide>
-            <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
-          </Field>
-          <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
-            <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
-              <option value="">- - Please Select - -</option>
-              {CLOSE_STATUS_OPTIONS.map((st) => (
-                <option key={st}>{st}</option>
-              ))}
-            </Select>
-          </Field>
-        </FieldGrid>
-      </Section>
-
-      <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+      </RecordGate>
     </>
   );
 }

@@ -7,10 +7,16 @@ import { SaleOrderForm, type SaleOrderFormHandle, type SaleOrderLoaded } from "@
 import { PrintButton } from "@/components/shared/print-button";
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
+import { RecordGate } from "@/components/shared/record-gate";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { api, postJson, errMsg } from "@/lib/api";
+import { useRecord } from "@/lib/use-record";
 import { useAccess } from "@/lib/use-access";
+
+const fetchSaleOrder = (no: string) =>
+  api<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}`).then((d) => d.order);
+
 
 function EditSaleOrder() {
   const { push } = useToast();
@@ -19,24 +25,17 @@ function EditSaleOrder() {
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<SaleOrderFormHandle>(null);
-  const [no, setNo] = React.useState("");
-  const [loaded, setLoaded] = React.useState<SaleOrderLoaded | null>(null);
+  const { data: loaded, setData: setLoaded, loading, error, load: fetchRecord } = useRecord(fetchSaleOrder, !!initialNo);
+  const no = loaded?.no ?? "";
   const [saving, setSaving] = React.useState(false);
 
   const load = React.useCallback(
     async (v: string) => {
-      const q = v.trim().toUpperCase();
-      if (!q) return;
-      try {
-        const d = await api<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(q)}`);
-        setLoaded(d.order);
-        setNo(d.order.no);
-        push({ kind: "success", title: "เรียกข้อมูลใบสั่งขายสำเร็จ", desc: d.order.no });
-      } catch (e) {
-        push({ kind: "error", title: "ไม่พบใบสั่งขาย", desc: errMsg(e) });
-      }
+      const d = await fetchRecord(v);
+      if (d) push({ kind: "success", title: "เรียกข้อมูลใบสั่งขายสำเร็จ", desc: d.no });
+      else if (d === null && v.trim()) push({ kind: "error", title: "ไม่พบใบสั่งขาย", desc: v.trim().toUpperCase() });
     },
-    [push]
+    [fetchRecord, push]
   );
 
   React.useEffect(() => {
@@ -100,36 +99,39 @@ function EditSaleOrder() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Edit"
       />
       <JobLookupBar
+        id="so-no"
         label="ระบุ เลขใบสั่งขาย (SO)"
         placeholder="SO2600760"
         initial={initialNo}
         onFind={(v) => load(v)}
         note={loaded ? `สถานะ: ${loaded.approve}` : undefined}
       />
-      <SaleOrderForm ref={form} soNo={no || undefined} initial={loaded} />
-      <FormActions
-        saveLabel="บันทึกการแก้ไข"
-        onSave={save}
-        saving={saving || approved}
-        extra={
-          <>
-            <PrintButton label="พิมพ์ใบสั่งขาย" kind="sale_order" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/sale-order/${encodeURIComponent(no ?? "")}`} disabled={!no} />
-            {loaded && !approved && canApprove ? (
+      <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบสั่งขาย" searchId="so-no">
+        <SaleOrderForm ref={form} soNo={no || undefined} initial={loaded} />
+        <FormActions
+          saveLabel="บันทึกการแก้ไข"
+          onSave={save}
+          saving={saving || approved}
+          extra={
             <>
-              <Button variant="outline" size="md" type="button" onClick={() => decide("reject")} disabled={saving}>
-                ส่งกลับแก้ไข
-              </Button>
-              <Button variant="outline" size="md" type="button" onClick={() => decide("deny")} disabled={saving}>
-                ปฏิเสธ
-              </Button>
-              <Button size="md" type="button" onClick={() => decide("approve")} disabled={saving}>
-                อนุมัติ (ตัดสต๊อก)
-              </Button>
+              <PrintButton label="พิมพ์ใบสั่งขาย" kind="sale_order" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/sale-order/${encodeURIComponent(no ?? "")}`} disabled={!no} />
+              {loaded && !approved && canApprove ? (
+              <>
+                <Button variant="outline" size="md" type="button" onClick={() => decide("reject")} disabled={saving}>
+                  ส่งกลับแก้ไข
+                </Button>
+                <Button variant="outline" size="md" type="button" onClick={() => decide("deny")} disabled={saving}>
+                  ปฏิเสธ
+                </Button>
+                <Button size="md" type="button" onClick={() => decide("approve")} disabled={saving}>
+                  อนุมัติ (ตัดสต๊อก)
+                </Button>
+              </>
+              ) : null}
             </>
-            ) : null}
-          </>
-        }
-      />
+          }
+        />
+      </RecordGate>
     </>
   );
 }
