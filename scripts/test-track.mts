@@ -68,11 +68,11 @@ const { POST: linkKeepalivePOST } = await import("@/app/api/track/link/keepalive
 
 // capture "[sms:log] to 08…: … 123456 …" instead of sending an SMS
 const smsLog: { to: string; text: string }[] = [];
-const realInfo = console.info;
-console.info = (...a: unknown[]) => {
+const realLog = console.log;
+console.log = (...a: unknown[]) => {
   const m = String(a[0] ?? "").match(/^\[sms:log\] to (\d+): (.*)$/s);
   if (m) smsLog.push({ to: m[1], text: m[2] });
-  else realInfo(...a);
+  else realLog(...a);
 };
 const lastOtp = () => smsLog.at(-1)?.text.match(/\b(\d{6})\b/)?.[1] ?? "";
 const otpHeaders = (ip: string, ua = UA, session?: string) => {
@@ -599,7 +599,7 @@ await test("no raw link token / ticket / Turnstile token / origin secret in trac
 });
 
 } finally {
-console.info = realInfo;
+console.log = realLog;
 // ---- OTP rows of this run (by the two test numbers) ----
 if (phoneHashes.length) {
   await db.execute(sql`DELETE FROM track_otp WHERE phone_hash IN ${phoneHashes}`);

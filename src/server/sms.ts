@@ -30,8 +30,9 @@ export async function sendSms(phone10: string, message: string): Promise<boolean
   if (!provider) return false;
 
   if (provider === "log") {
-    // development only (smsProvider() refuses this in production)
-    console.info(`[sms:log] to ${phone10}: ${message}`);
+    // development only (smsProvider() refuses this in production). The OTP is printed HERE and
+    // nowhere else — not in the API response, not on the page, not in track_event.
+    console.log(`[sms:log] to ${phone10}: ${message}`);
     return true;
   }
 
