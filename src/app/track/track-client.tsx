@@ -2,26 +2,23 @@
 
 import * as React from "react";
 import Script from "next/script";
-import { Clock, Loader2, Search, ShieldCheck } from "lucide-react";
+import { Clock, Loader2, Search, ShieldCheck, Timer } from "lucide-react";
 import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from "@/lib/track-public";
 import { PublicJobView } from "./public-job-view";
+import { TrackOtp } from "./track-otp";
 
 /**
- * Browser side of the tracking flow:
+ * Browser side of customer tracking. Both entry points start behind the same gate:
  *
- *   gate (Cloudflare checkbox) → POST /api/track/session → { ticket } → POST /api/track/data → PublicJob
+ *   gate (Cloudflare checkbox, widget mode Managed) — nothing else on the page until it passes
  *
- * 1. GATE — the page shows only a Turnstile checkbox (widget mode: Managed). Nothing
- *    else, not even the form, until it passes.
- * 2. link: the token goes straight to /api/track/session → ticket → data.
- *    form: the form appears; the gate token is used for the first search if it is
- *    still fresh. After that (or after 4 minutes — tokens live 5) a second,
- *    background widget (`interaction-only` + `execute`) fetches a new one on submit;
- *    it shows a checkbox only if Cloudflare asks for a click.
+ *   link  /track/<token>: token → POST /api/track/session → { ticket } → POST /api/track/data → PublicJob
+ *   form  /track:         phone → SMS OTP → the customer's jobs (TrackOtp, /api/track/otp/*, /api/track/me*)
  *
- * Every Turnstile token is single-use (Siteverify burns it). The ticket lives only in
- * a local variable between the two calls — never in state, storage or a cookie.
- * Refresh / come back later = the gate again.
+ * Every Turnstile token is single-use (Siteverify burns it). The gate's token pays for the
+ * first captcha-protected call if it is still fresh; later ones come from a background,
+ * execute-only widget (`interaction-only`: a checkbox only if Cloudflare asks for a click).
+ * Tickets and the customer session live only in memory — refresh / come back = the gate again.
  */
 type TurnstileApi = {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string;
@@ -39,7 +36,9 @@ const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 /** reuse a gate token only while it is comfortably inside its 5-minute life */
 const TOKEN_FRESH_MS = 4 * 60_000;
 
-type Props = { mode: "link"; linkToken: string; nonce?: string } | { mode: "form"; nonce?: string };
+type Props =
+  | { mode: "link"; linkToken: string; nonce?: string }
+  | { mode: "form"; nonce?: string; otpAvailable: boolean; devOtpLog: boolean };
 type Phase = "gate" | "ready" | "done" | "expired";
 
 async function post(path: string, body: Record<string, string>) {
@@ -51,7 +50,7 @@ async function post(path: string, body: Record<string, string>) {
     credentials: "same-origin",
     referrerPolicy: "no-referrer",
   });
-  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob };
+  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob; expiresAt?: string };
 }
 
 /** one Turnstile widget bound to a container while it is mounted */
@@ -77,75 +76,56 @@ function useTurnstile(
 export function TrackClient(props: Props) {
   const [tsReady, setTsReady] = React.useState(false);
   const [phase, setPhase] = React.useState<Phase>("gate");
-  const [busy, setBusy] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
   const [error, setError] = React.useState("");
   const [job, setJob] = React.useState<PublicJob | null>(null);
-  const [no, setNo] = React.useState("");
-  const [phone4, setPhone4] = React.useState("");
+  const [linkExpiresAt, setLinkExpiresAt] = React.useState(0);
 
   const gateEl = React.useRef<HTMLDivElement>(null);
-  const formEl = React.useRef<HTMLDivElement>(null);
-  /** the gate's token, kept for the first search only (form mode) */
+  const bgEl = React.useRef<HTMLDivElement>(null);
+  /** the gate's token, kept for the first protected call only */
   const gateToken = React.useRef<{ t: string; at: number } | null>(null);
-  /** form fields waiting for a background token */
-  const pending = React.useRef<Record<string, string> | null>(null);
+  /** a caller waiting for a background token */
+  const waiter = React.useRef<((t: string | null) => void) | null>(null);
 
   // the script may already be loaded (client-side navigation between /track pages)
   React.useEffect(() => {
     if (window.turnstile) setTsReady(true);
   }, []);
 
-  // session → ticket → data
-  const run = React.useCallback(
-    async (turnstileToken: string, fields: Record<string, string>) => {
-      setBusy(true);
-      setError("");
-      try {
-        const s = await post("/api/track/session", { ...fields, turnstileToken });
-        // the link itself is expired / used up → hint + the lookup form, not the captcha again
-        if (s.reason === "link") {
-          setPhase("expired");
-          return;
-        }
-        if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
-        // the ticket exists only inside `s` for this one call — it is single-use, spent either way
-        const d = await post("/api/track/data", { ticket: s.ticket });
-        if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
-        setJob(d.job);
-        setPhase("done");
-      } catch (e) {
-        setError(e instanceof Error && e.message ? e.message : "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-        // link: back to the checkbox; form: stay — the next search fetches a fresh token
-        if (props.mode === "link") setPhase("gate");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [props.mode]
-  );
-
+  /* ---------- link mode: session → ticket → data ---------- */
   const linkToken = props.mode === "link" ? props.linkToken : "";
+  const runLink = React.useCallback(async (turnstileToken: string) => {
+    setError("");
+    try {
+      const s = await post("/api/track/session", { linkToken, turnstileToken });
+      // the link itself is expired / used up → hint + the lookup page, not the captcha again
+      if (s.reason === "link") {
+        setPhase("expired");
+        return;
+      }
+      if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
+      if (s.expiresAt) setLinkExpiresAt(Date.parse(s.expiresAt));
+      // the ticket exists only inside `s` for this one call — it is single-use, spent either way
+      const d = await post("/api/track/data", { ticket: s.ticket });
+      if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
+      setJob(d.job);
+      setPhase("done");
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+      setPhase("gate");
+    }
+  }, [linkToken]);
+
   const onGatePass = React.useRef<(t: string) => void>(() => {});
   onGatePass.current = (t: string) => {
     setError("");
-    if (props.mode === "link") {
-      setPhase("ready");
-      void run(t, { linkToken });
-    } else {
-      gateToken.current = { t, at: Date.now() };
-      setPhase("ready");
-    }
-  };
-  const onFormToken = React.useRef<(t: string) => void>(() => {});
-  onFormToken.current = (t: string) => {
-    setVerifying(false);
-    const f = pending.current;
-    pending.current = null;
-    if (f) void run(t, f);
+    setPhase("ready");
+    if (props.mode === "link") void runLink(t);
+    else gateToken.current = { t, at: Date.now() };
   };
 
-  // 1. the gate: a visible checkbox (Managed mode) — nothing else on the page until it passes
+  // 1. the gate: a visible checkbox — nothing else on the page until it passes
   useTurnstile(gateEl, phase === "gate", tsReady, () => ({
     appearance: "always",
     callback: (t: string) => onGatePass.current(t),
@@ -153,41 +133,44 @@ export function TrackClient(props: Props) {
   }));
 
   // 2. form mode, after the gate: a background widget that runs only when asked (execute)
-  const formWidget = useTurnstile(formEl, props.mode === "form" && phase === "ready", tsReady, () => ({
+  const bgWidget = useTurnstile(bgEl, props.mode === "form" && phase === "ready", tsReady, () => ({
     appearance: "interaction-only",
     execution: "execute",
-    callback: (t: string) => onFormToken.current(t),
+    callback: (t: string) => {
+      setVerifying(false);
+      waiter.current?.(t);
+      waiter.current = null;
+    },
     "error-callback": () => {
       setVerifying(false);
-      pending.current = null;
-      setError(TRACK_MSG.unavailable);
+      waiter.current?.(null);
+      waiter.current = null;
     },
   }));
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const fields = { no: no.trim(), phone4: phone4.trim() };
-    const g = gateToken.current;
-    gateToken.current = null; // single use
-    if (g && Date.now() - g.at < TOKEN_FRESH_MS) {
-      void run(g.t, fields);
-      return;
-    }
-    // gate token used / older than 4 min → a fresh one in the background
-    if (!window.turnstile || !formWidget.current) {
-      setError(TRACK_MSG.unavailable);
-      return;
-    }
-    setError("");
-    setVerifying(true);
-    pending.current = fields;
-    window.turnstile.reset(formWidget.current);
-    window.turnstile.execute(formWidget.current);
-  };
+  /** a fresh single-use token: the gate's while < 4 min old, otherwise a background check */
+  const getToken = React.useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        const g = gateToken.current;
+        gateToken.current = null;
+        if (g && Date.now() - g.at < TOKEN_FRESH_MS) return resolve(g.t);
+        if (!window.turnstile || !bgWidget.current) return resolve(null);
+        waiter.current?.(null);
+        waiter.current = resolve;
+        setVerifying(true);
+        window.turnstile.reset(bgWidget.current);
+        window.turnstile.execute(bgWidget.current);
+      }),
+    [bgWidget]
+  );
 
   if (!SITE_KEY) {
     // no site key in this build → fail closed, never show anything without the check
     return <Notice text={TRACK_MSG.unavailable} />;
+  }
+  if (props.mode === "form" && !props.otpAvailable) {
+    return <Notice text={TRACK_MSG.otpUnavailable} />;
   }
 
   const script = (
@@ -229,43 +212,33 @@ export function TrackClient(props: Props) {
         <Clock className="mx-auto mb-3 h-9 w-9 text-warning" />
         <h1 className="text-base font-semibold">{TRACK_MSG.linkExpired}</h1>
         <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-          {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือค้นหาด้วยเลขที่เอกสารและเบอร์โทร 4 ตัวท้าย
+          {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือตรวจสอบด้วยเบอร์มือถือ (รับรหัส OTP ทาง SMS)
         </p>
         <a
           href="/track"
           className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          <Search className="h-4 w-4" /> ค้นหาด้วยเลขที่เอกสาร
+          <Search className="h-4 w-4" /> ตรวจสอบด้วยเบอร์มือถือ
         </a>
       </div>
     );
   }
 
-  /* ---------- 3. result ---------- */
-  if (phase === "done" && job) {
-    return (
-      <div className="space-y-4">
-        <PublicJobView j={job} />
-        {props.mode === "form" && (
-          <button
-            type="button"
-            onClick={() => {
-              setJob(null);
-              setNo("");
-              setPhone4("");
-              setPhase("ready");
-            }}
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            ค้นหารายการอื่น
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  /* ---------- 2. link: loading the job ---------- */
+  /* ---------- link: result / loading ---------- */
   if (props.mode === "link") {
+    if (phase === "done" && job)
+      return (
+        <LinkResult
+          job={job}
+          linkToken={linkToken}
+          expiresAt={linkExpiresAt}
+          onExpiresAt={setLinkExpiresAt}
+          onExpired={() => {
+            setJob(null);
+            setPhase("expired");
+          }}
+        />
+      );
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
         <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -275,63 +248,82 @@ export function TrackClient(props: Props) {
     );
   }
 
-  /* ---------- 2. form ---------- */
+  /* ---------- form: phone + OTP ---------- */
   return (
-    <div className="surface mx-auto max-w-md p-6">
+    <div className="space-y-3">
       {script}
-      <h1 className="text-lg font-semibold tracking-tight">ติดตามสถานะงานซ่อม</h1>
-      <p className="mt-1 text-sm text-muted-foreground">กรอกเลขที่เอกสารและเบอร์โทรศัพท์ที่ให้ไว้กับศูนย์บริการ</p>
+      <TrackOtp getToken={getToken} verifying={verifying} devOtpLog={props.devOtpLog} />
+      {/* background re-check: empty unless Cloudflare asks for a click */}
+      <div ref={bgEl} className="flex justify-center empty:hidden" />
+    </div>
+  );
+}
 
-      <form onSubmit={submit} className="mt-5 space-y-4">
-        <div>
-          <label htmlFor="no" className="mb-1 block text-xs font-medium">
-            เลขที่งานซ่อม หรือ เลขที่ใบเสนอราคา
-          </label>
-          <input
-            id="no"
-            value={no}
-            onChange={(e) => setNo(e.target.value)}
-            placeholder="J2612165 หรือ Q2600468"
-            autoComplete="off"
-            className="num h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </div>
-        <div>
-          <label htmlFor="p4" className="mb-1 block text-xs font-medium">
-            เบอร์โทรศัพท์ 4 ตัวท้าย
-          </label>
-          <input
-            id="p4"
-            value={phone4}
-            onChange={(e) => setPhone4(e.target.value.replace(/\D/g, "").slice(0, 4))}
-            placeholder="1234"
-            inputMode="numeric"
-            autoComplete="off"
-            className="num h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </div>
+/**
+ * The job shown from a link, with the link's countdown. While the customer is using the page
+ * (input in the last minute) and < 5.5 min are left, the keepalive keeps ≥ 5 min on the clock
+ * (server cap: 60 min from the first open). At zero the data is taken off the screen.
+ */
+const ACTIVE_WINDOW_MS = 60_000;
+const KEEPALIVE_WHEN_LEFT_MS = 5.5 * 60_000;
+const mmss = (ms: number) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return s >= 3600 ? `${Math.floor(s / 3600)} ชม. ${Math.floor((s % 3600) / 60)} นาที` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
 
-        {/* background re-check: empty unless Cloudflare asks for a click */}
-        <div ref={formEl} className="flex justify-center empty:hidden" />
+function LinkResult({
+  job,
+  linkToken,
+  expiresAt,
+  onExpiresAt,
+  onExpired,
+}: {
+  job: PublicJob;
+  linkToken: string;
+  expiresAt: number;
+  onExpiresAt: (ms: number) => void;
+  onExpired: () => void;
+}) {
+  const [now, setNow] = React.useState(() => Date.now());
+  const lastInput = React.useRef(Date.now());
+  const lastKeepalive = React.useRef(0);
 
-        {error && <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+  React.useEffect(() => {
+    const mark = () => (lastInput.current = Date.now());
+    const evts = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
+    evts.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      evts.forEach((e) => window.removeEventListener(e, mark));
+      clearInterval(tick);
+    };
+  }, []);
 
-        <button
-          type="submit"
-          disabled={busy || verifying || !no.trim() || phone4.length !== 4}
-          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
-          {busy || verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          {verifying ? "กำลังตรวจสอบความปลอดภัย…" : "ติดตามสถานะ"}
-        </button>
-        <p className="flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-success" /> ยืนยันแล้ว · ป้องกันโดย Cloudflare
+  React.useEffect(() => {
+    if (!expiresAt) return;
+    if (now >= expiresAt) {
+      onExpired();
+      return;
+    }
+    const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
+    if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {
+      lastKeepalive.current = now;
+      void post("/api/track/link/keepalive", { linkToken }).then((d) => {
+        if (d.reason === "link") onExpired();
+        else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
+      });
+    }
+  }, [now, expiresAt, linkToken, onExpired, onExpiresAt]);
+
+  return (
+    <div className="space-y-3">
+      {expiresAt > 0 && (
+        <p className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted-foreground">
+          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
+          <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
         </p>
-      </form>
-
-      <p className="mt-4 text-xs text-muted-foreground">
-        เลขที่เอกสารอยู่บนใบรับงาน / ใบเสนอราคาที่ได้รับจากศูนย์บริการ · หากหาไม่พบ กรุณาติดต่อศูนย์บริการตามเบอร์ด้านล่าง
-      </p>
+      )}
+      <PublicJobView j={job} />
     </div>
   );
 }

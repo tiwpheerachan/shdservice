@@ -59,6 +59,19 @@ services:
       # HMAC key for IPs / links in the security log + rate-limit keys (openssl rand -hex 32)
       - key: TRACK_LOG_SECRET
         sync: false
+      # ── /track phone + SMS OTP (src/server/sms.ts) ──
+      # ThaiBulkSMS API v2 (Setting → API Key). Without both keys the /track page says the
+      # OTP service is not open yet — the dev "log" provider is refused in production.
+      - key: THAIBULKSMS_API_KEY
+        sync: false
+      - key: THAIBULKSMS_API_SECRET
+        sync: false
+      # approved sender name (empty = the account default); optional
+      - key: THAIBULKSMS_SENDER
+        sync: false
+      # standard | corporate (empty = the dashboard setting); optional
+      - key: THAIBULKSMS_FORCE
+        sync: false
       # keep the Node heap under the 512 MB Starter instance
       - key: NODE_OPTIONS
         value: --max-old-space-size=400

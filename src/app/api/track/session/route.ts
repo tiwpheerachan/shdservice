@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { hit, isBlocked, block, hmac, verifyTurnstile, issueTicket, logEvent } from "@/server/track-guard";
+import { hit, hmac, verifyTurnstile, issueTicket, logEvent } from "@/server/track-guard";
 import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
-import { jobNoForLink, jobNoForNumber, markLinkOpened } from "@/server/services/tracking";
+import { jobNoForLink, markLinkOpened, linkExpiry } from "@/server/services/tracking";
 import { userFromRequest } from "@/server/auth";
 import { TRACK_MSG } from "@/lib/track-public";
 
@@ -9,18 +9,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/track/session — Turnstile → resolve the job → one-time ticket.
- *
- *   { linkToken, turnstileToken }            opened from the link staff sent
- *   { no, phone4, turnstileToken }           the /track form (job / quotation no. + last 4 of phone)
+ * POST /api/track/session { linkToken, turnstileToken } — the staff-sent link
+ * (/track/<token>): Turnstile → resolve the job → one-time ticket.
+ * (The /track page itself uses phone + OTP: /api/track/otp/*.)
  *
  * Order matters: rate limits BEFORE Siteverify (a flood must not become a flood
  * of Cloudflare calls), and the database is touched for the job only AFTER the
- * captcha passed. Every failure reads the same to the caller.
+ * captcha passed.
  */
-const FORM_MISS_LIMIT = 5; // misses per job number …
-const FORM_MISS_WINDOW = 15 * 60; // … per 15 minutes → locked for 15 minutes
-
 export async function POST(req: NextRequest) {
   const c = trackCtx(req);
   const fail = () => trackJson({ ok: false, error: TRACK_MSG.sessionFail }, 403);
@@ -29,10 +25,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await readSmallJson(req);
     const linkToken = str(body.linkToken, 128).trim();
-    const formNo = str(body.no, 32).trim().toUpperCase();
-    const phone4 = str(body.phone4, 16).replace(/\D/g, "");
     const turnstileToken = str(body.turnstileToken, 4096);
-    const byLink = !!linkToken;
+    if (!linkToken) return fail();
 
     // 1. per-IP limits
     if (!(await hit("session_ip_min", c.ipKey, 10, 60)) || !(await hit("session_ip_hour", c.ipKey, 30, 3600))) {
@@ -40,15 +34,10 @@ export async function POST(req: NextRequest) {
       return limited();
     }
 
-    // 2. per-link limit (HMAC of the token, never the token) / per-number lockout for the form
-    const linkHash = byLink ? hmac(`link:${linkToken}`) : undefined;
-    const formKey = !byLink && formNo ? `form:${hmac(`no:${formNo}`)}` : undefined;
-    if (linkHash && !(await hit("session_link_hour", linkHash, 20, 3600))) {
+    // 2. per-link limit (HMAC of the token, never the token)
+    const linkHash = hmac(`link:${linkToken}`);
+    if (!(await hit("session_link_hour", linkHash, 20, 3600))) {
       logEvent("session_rate_limited", { ipHash: c.ipKey, linkHash, result: "link", requestId: c.requestId });
-      return limited();
-    }
-    if (formKey && (await isBlocked(formKey))) {
-      logEvent("form_locked", { ipHash: c.ipKey, requestId: c.requestId });
       return limited();
     }
 
@@ -60,29 +49,25 @@ export async function POST(req: NextRequest) {
     }
     logEvent("turnstile_pass", { ipHash: c.ipKey, linkHash, requestId: c.requestId });
 
-    // 4. only now: which job? (unknown / deleted / expired / wrong phone all look the same)
-    const jobNo = byLink ? await jobNoForLink(linkToken) : await jobNoForNumber(formNo, phone4);
+    // 4. only now: which job? (unknown / deleted / expired all look the same)
+    const jobNo = await jobNoForLink(linkToken);
     if (!jobNo) {
-      logEvent("link_invalid", { ipHash: c.ipKey, linkHash, result: byLink ? "link" : "form", requestId: c.requestId });
-      if (formKey && !(await hit("form_miss", formKey, FORM_MISS_LIMIT, FORM_MISS_WINDOW))) {
-        await block(formKey, 15);
-      }
-      // link: tell the page it is the LINK (expired / used up / unknown — never which), so it
-      // can show the "ask for a new link" hint instead of the captcha again. Tokens are
-      // 256-bit random, so confirming that a guessed one is not valid reveals nothing.
-      return byLink ? trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410) : fail();
+      logEvent("link_invalid", { ipHash: c.ipKey, linkHash, result: "link", requestId: c.requestId });
+      // tell the page it is the LINK (expired / used up / unknown — never which), so it can
+      // show the "ask for a new link" hint instead of the captcha again. Tokens are 256-bit
+      // random, so confirming that a guessed one is not valid reveals nothing.
+      return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410);
     }
     // the customer's first open starts the link's 15-minute window — a signed-in staff
     // member checking "ดูหน้าที่ลูกค้าเห็น" must not burn the customer's link
-    if (byLink) {
-      const staff = await userFromRequest(req).catch(() => null);
-      if (!staff?.approved) await markLinkOpened(jobNo);
-    }
+    const staff = await userFromRequest(req).catch(() => null);
+    if (!staff?.approved) await markLinkOpened(jobNo);
 
     // 5. one job, one use, 3 minutes, this IP, this browser
     const ticket = await issueTicket(jobNo, c.ip, c.ua);
     logEvent("ticket_issued", { ipHash: c.ipKey, linkHash, jobNo, requestId: c.requestId });
-    return trackJson({ ok: true, ticket });
+    // the page shows a countdown to this (and extends it while in use: /api/track/link/keepalive)
+    return trackJson({ ok: true, ticket, expiresAt: await linkExpiry(jobNo) });
   } catch (e) {
     console.error("[track/session]", e instanceof Error ? e.message : e);
     return fail();

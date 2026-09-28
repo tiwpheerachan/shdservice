@@ -168,7 +168,14 @@ export type TrackEvent =
   | "ticket_consumed"
   | "ticket_invalid"
   | "ticket_block_triggered"
-  | "data_rate_limited";
+  | "data_rate_limited"
+  | "otp_rate_limited"
+  | "otp_sent"
+  | "otp_send_failed"
+  | "otp_unknown_phone"
+  | "otp_verified"
+  | "otp_invalid"
+  | "customer_session_invalid";
 
 /**
  * Never pass a raw token / ticket / Turnstile token / secret here — only the

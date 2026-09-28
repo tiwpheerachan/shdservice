@@ -3,14 +3,14 @@ import { clientIp } from "@/lib/client-ip";
 import { TRACK_MSG } from "@/lib/track-public";
 import { hit, hmac, logEvent } from "@/server/track-guard";
 import { TrackClient } from "./track-client";
+import { smsAvailable, smsProvider } from "@/server/sms";
 
 export const dynamic = "force-dynamic";
 
 /**
- * /track — lookup for a customer without the link: job number OR quotation
- * number + the last 4 digits of their phone. Same flow as the link: Turnstile
- * every time → /api/track/session → one-time ticket → /api/track/data. It never
- * hands out the permanent link.
+ * /track — the customer's own lookup: Cloudflare gate → mobile number → SMS OTP → their jobs
+ * (in progress + 2 years of history). No SMS provider configured in production = the page
+ * says the service is not open yet (the dev "log" provider never runs in production).
  */
 export default async function TrackFormPage() {
   const h = await headers();
@@ -26,5 +26,12 @@ export default async function TrackFormPage() {
   if (!allowed) {
     return <div className="surface mx-auto max-w-md p-6 text-center text-sm text-muted-foreground">{TRACK_MSG.rateLimited}</div>;
   }
-  return <TrackClient mode="form" nonce={h.get("x-nonce") ?? undefined} />;
+  return (
+    <TrackClient
+      mode="form"
+      nonce={h.get("x-nonce") ?? undefined}
+      otpAvailable={smsAvailable()}
+      devOtpLog={smsProvider() === "log"}
+    />
+  );
 }

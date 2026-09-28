@@ -35,3 +35,6 @@ export async function readSmallJson(req: NextRequest): Promise<Record<string, un
 }
 
 export const str = (v: unknown, max = 256) => (typeof v === "string" ? v.slice(0, max) : "");
+
+/** the customer session token (phone + OTP) travels in a header, never a cookie */
+export const TRACK_SESSION_HEADER = "x-track-session";

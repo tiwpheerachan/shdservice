@@ -21,6 +21,7 @@ Object.assign(process.env, {
   APP_BASE_URL: "https://svc.example.test",
   TRACK_LOG_SECRET: "unit-test-log-secret",
   SESSION_SECRET: "unit-test-session-secret-0123456789abcdef", // ≥ 32 chars
+  SMS_PROVIDER: "log", // OTP goes to the log — captured below, like a developer reading it
 });
 
 // Siteverify mock: the Turnstile token decides the answer
@@ -58,6 +59,42 @@ const { jobNoForLink, publicJobByNo, rotateToken, linkStatus } = await import("@
 const S = await import("@/lib/session");
 const { POST: sessionPOST } = await import("@/app/api/track/session/route");
 const { POST: dataPOST } = await import("@/app/api/track/data/route");
+const { POST: otpRequestPOST } = await import("@/app/api/track/otp/request/route");
+const { POST: otpVerifyPOST } = await import("@/app/api/track/otp/verify/route");
+const { GET: meGET, DELETE: meDELETE } = await import("@/app/api/track/me/route");
+const { POST: keepalivePOST } = await import("@/app/api/track/me/keepalive/route");
+const { GET: meJobGET } = await import("@/app/api/track/me/jobs/[no]/route");
+const { POST: linkKeepalivePOST } = await import("@/app/api/track/link/keepalive/route");
+
+// capture "[sms:log] to 08…: … 123456 …" instead of sending an SMS
+const smsLog: { to: string; text: string }[] = [];
+const realInfo = console.info;
+console.info = (...a: unknown[]) => {
+  const m = String(a[0] ?? "").match(/^\[sms:log\] to (\d+): (.*)$/s);
+  if (m) smsLog.push({ to: m[1], text: m[2] });
+  else realInfo(...a);
+};
+const lastOtp = () => smsLog.at(-1)?.text.match(/\b(\d{6})\b/)?.[1] ?? "";
+const otpHeaders = (ip: string, ua = UA, session?: string) => {
+  const h: Record<string, string> = { "content-type": "application/json", "cf-connecting-ip": ip, "user-agent": ua, "x-origin-auth": ORIGIN_SECRET };
+  if (session) h["x-track-session"] = session;
+  return h;
+};
+async function otpReq(phone: string, ip: string, turnstileToken = "good") {
+  usedIps.push(ip);
+  const r = await otpRequestPOST(new NextRequest("https://svc.example.test/api/track/otp/request", { method: "POST", headers: otpHeaders(ip), body: JSON.stringify({ phone, turnstileToken }) }));
+  return { status: r.status, json: (await r.json()) as { ok: boolean; requestId?: string; masked?: string; error?: string } };
+}
+async function otpVerify(requestId: string, code: string, ip: string, ua = UA) {
+  usedIps.push(ip);
+  const r = await otpVerifyPOST(new NextRequest("https://svc.example.test/api/track/otp/verify", { method: "POST", headers: otpHeaders(ip, ua), body: JSON.stringify({ requestId, code }) }));
+  return { status: r.status, json: (await r.json()) as { ok: boolean; session?: string; expiresAt?: string; error?: string } };
+}
+async function me(session: string, ip: string, ua = UA) {
+  usedIps.push(ip);
+  const r = await meGET(new NextRequest("https://svc.example.test/api/track/me", { headers: otpHeaders(ip, ua, session) }));
+  return { status: r.status, json: (await r.json()) as { ok: boolean; active?: { no: string }[]; history?: { no: string }[]; expiresAt?: string } };
+}
 
 // ---- helpers ----
 let ipSeq = 10;
@@ -96,9 +133,9 @@ async function test(name: string, fn: () => Promise<void>) {
 
 // two real open jobs. Links live 1 day unopened / 15 min after opening (drizzle/0016), so the
 // run gives them FRESH links and puts the original token / timestamps back in `finally`.
-type Orig = { job_no: string; track_token: string | null; track_token_at: string | null; track_opened_at: string | null };
+type Orig = { job_no: string; track_token: string | null; track_token_at: string | null; track_opened_at: string | null; track_link_expires_at: string | null };
 const pick = await db.execute<Orig>(sql`
-  SELECT j.job_no, j.track_token, j.track_token_at::text, j.track_opened_at::text FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
+  SELECT j.job_no, j.track_token, j.track_token_at::text, j.track_opened_at::text, j.track_link_expires_at::text FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
    WHERE j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
    ORDER BY j.job_create_date DESC LIMIT 2`);
 assert.ok(pick.rows.length === 2, "need two open jobs in the DB");
@@ -106,6 +143,8 @@ const originals = pick.rows;
 const JOB_A = { job_no: originals[0].job_no, track_token: await rotateToken(originals[0].job_no) };
 const JOB_B = { job_no: originals[1].job_no, track_token: await rotateToken(originals[1].job_no) };
 const tempEmail = `track-test-${Date.now()}@example.invalid`;
+/** HMACs of the two test phone numbers — declared here so `finally` can clean up after them */
+let phoneHashes: string[] = [];
 try {
 
 const PUBLIC_KEYS = [
@@ -179,7 +218,19 @@ await test("captcha failure is NOT reported as a link problem", async () => {
 console.log("\nLink lifetime (1 day unopened · 15 min after first open)");
 const setLink = (issuedAgo: string, openedAgo: string | null) =>
   db.execute(sql`UPDATE job SET track_token_at = (now() AT TIME ZONE 'Asia/Bangkok') - ${issuedAgo}::interval,
-    track_opened_at = ${openedAgo === null ? null : sql`now() - ${openedAgo}::interval`} WHERE job_no = ${JOB_B.job_no}`);
+    track_opened_at = ${openedAgo === null ? null : sql`now() - ${openedAgo}::interval`},
+    track_link_expires_at = ${openedAgo === null ? null : sql`now() - ${openedAgo}::interval + interval '15 minutes'`}
+    WHERE job_no = ${JOB_B.job_no}`);
+const keepLink = async (token: string, ip = nextIp()) => {
+  usedIps.push(ip);
+  const r = await linkKeepalivePOST(new NextRequest("https://svc.example.test/api/track/link/keepalive", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": ip, "user-agent": UA, "x-origin-auth": ORIGIN_SECRET },
+    body: JSON.stringify({ linkToken: token }),
+  }));
+  return { status: r.status, json: (await r.json()) as { ok: boolean; expiresAt?: string } };
+};
+const leftMs = (iso?: string) => (iso ? Date.parse(iso) - Date.now() : NaN);
 const openB = async () => (await session({ linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp())).status;
 await test("fresh unopened link opens, and the first open is recorded", async () => {
   await setLink("1 minute", null);
@@ -215,6 +266,33 @@ await test("a signed-in staff preview does not start the customer's 15 minutes",
   const cookie = `${S.SESSION_COOKIE}=${await S.signSession({ email: tempEmail, name: "t", role, approved: true, exp: now + 6e5, iat: now, sv: 0 })}`;
   const r = await sessionPOST(req("/api/track/session", { linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp(), { cookie }));
   assert.equal(r.status, 200);
+  assert.equal((await linkStatus(JOB_B.job_no)).state, "unopened");
+});
+await test("first open → the page gets a ~15 min countdown", async () => {
+  await setLink("1 minute", null);
+  const r = await session({ linkToken: JOB_B.track_token, turnstileToken: "good" }, nextIp());
+  const left = leftMs((r.json as { expiresAt?: string }).expiresAt);
+  assert.ok(left > 14 * 60_000 && left <= 15 * 60_000 + 5000, `got ${Math.round(left / 1000)} s`);
+});
+await test("in use: keepalive keeps ≥ 5 min on an opened link", async () => {
+  await setLink("1 hour", "12 minutes"); // 3 min left
+  const k = await keepLink(JOB_B.track_token);
+  assert.equal(k.status, 200);
+  const left = leftMs(k.json.expiresAt);
+  assert.ok(left > 4.5 * 60_000 && left <= 5 * 60_000 + 5000, `got ${Math.round(left / 1000)} s`);
+});
+await test("keepalive never goes past 60 min from the first open", async () => {
+  await setLink("2 hours", "58 minutes");
+  await db.execute(sql`UPDATE job SET track_link_expires_at = now() + interval '1 minute' WHERE job_no = ${JOB_B.job_no}`);
+  const k = await keepLink(JOB_B.track_token);
+  const left = leftMs(k.json.expiresAt);
+  assert.ok(left <= 2 * 60_000 + 5000, `capped at open + 60 min (got ${Math.round(left / 1000)} s)`);
+});
+await test("keepalive does not revive an expired link, nor open an unopened one", async () => {
+  await setLink("2 hours", "16 minutes");
+  assert.equal((await keepLink(JOB_B.track_token)).status, 410);
+  await setLink("1 minute", null);
+  assert.equal((await keepLink(JOB_B.track_token)).status, 200);
   assert.equal((await linkStatus(JOB_B.job_no)).state, "unopened");
 });
 await test("issuing a new link resets the window and kills the old one", async () => {
@@ -352,6 +430,161 @@ await test("no price / phone / address / email / note / full serial / token", as
   assert.equal(s.includes(JOB_A.track_token.toLowerCase()), false);
 });
 
+console.log("\nPhone + OTP (/track)");
+// a real customer with jobs (read only); a number that no customer has
+const cust = (await db.execute<{ phone: string }>(sql`
+  SELECT right(regexp_replace(c.phone_number, '\\D', '', 'g'), 10) AS phone FROM customer c
+   WHERE c.record_status <> 'DELETED' AND regexp_replace(c.phone_number, '\\D', '', 'g') ~ '^0[689][0-9]{8}$'
+     AND EXISTS (SELECT 1 FROM job j WHERE j.customer_id = c.customer_id AND j.record_status <> 'DELETED')
+   ORDER BY c.customer_id DESC LIMIT 1`)).rows[0];
+assert.ok(cust, "need a customer with a mobile number and a job");
+const PHONE = cust.phone;
+let NOBODY = "";
+for (let i = 0; i < 20 && !NOBODY; i++) {
+  const cand = "09" + String(Math.floor(Math.random() * 1e8)).padStart(8, "0");
+  const hitRow = await db.execute(sql`SELECT 1 FROM customer WHERE regexp_replace(coalesce(phone_number,''), '\\D', '', 'g') LIKE ${"%" + cand.slice(1) + "%"} LIMIT 1`);
+  if (!hitRow.rows.length) NOBODY = cand;
+}
+const { normalizePhone } = await import("@/server/track-otp");
+phoneHashes = [PHONE, NOBODY].map((p) => guard.hmac(`phone:${p}`));
+const clearPhoneLimits = () => db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
+let otpSession = "";
+const otpIp = nextIp();
+
+await test("phone formats normalize (0x / +66 / spaces / dashes); landlines and junk rejected", async () => {
+  assert.equal(normalizePhone("081-234-5678"), "0812345678");
+  assert.equal(normalizePhone("+66 81 234 5678"), "0812345678");
+  assert.equal(normalizePhone("812345678"), "0812345678");
+  assert.equal(normalizePhone("021234567"), null);
+  assert.equal(normalizePhone("hello"), null);
+});
+await test("invalid number → 400, no SMS", async () => {
+  const before = smsLog.length;
+  const r = await otpReq("12345", nextIp());
+  assert.equal(r.status, 400);
+  assert.equal(smsLog.length, before);
+});
+await test("captcha failure → no OTP, no SMS", async () => {
+  const before = smsLog.length;
+  const r = await otpReq(PHONE, nextIp(), "bad");
+  assert.equal(r.status, 403);
+  assert.equal(smsLog.length, before);
+});
+await test("unknown number → same answer as a customer's, but NO SMS and no OTP row (no SMS pumping)", async () => {
+  const before = smsLog.length;
+  const r = await otpReq(NOBODY, nextIp());
+  assert.equal(r.status, 200);
+  assert.ok(r.json.ok && r.json.requestId && r.json.masked);
+  assert.equal(smsLog.length, before);
+  const rows = await db.execute(sql`SELECT 1 FROM track_otp WHERE phone_hash = ${guard.hmac(`phone:${NOBODY}`)}`);
+  assert.equal(rows.rows.length, 0);
+});
+let reqId = "";
+await test("customer number → SMS with a 6-digit code; DB keeps only hashes", async () => {
+  await clearPhoneLimits();
+  const r = await otpReq(PHONE, otpIp);
+  assert.equal(r.status, 200);
+  reqId = r.json.requestId!;
+  await new Promise((res) => setTimeout(res, 100)); // the send is fire-and-forget
+  assert.equal(smsLog.at(-1)?.to, PHONE);
+  assert.match(lastOtp(), /^\d{6}$/);
+  assert.equal(r.json.masked, `${PHONE.slice(0, 2)}x-xxx-${PHONE.slice(-4)}`);
+  const row = (await db.execute<{ j: string }>(sql`SELECT row_to_json(o)::text j FROM track_otp o WHERE request_hash = ${guard.sha256(reqId)}`)).rows[0];
+  assert.ok(row);
+  assert.ok(!row.j.includes(lastOtp()) && !row.j.includes(PHONE) && !row.j.includes(reqId));
+});
+await test("resend within a minute → 429 (cooldown)", async () => {
+  assert.equal((await otpReq(PHONE, nextIp())).status, 429);
+});
+await test("5 wrong codes burn the OTP — the right one then fails too", async () => {
+  const right = lastOtp();
+  const wrong = right === "000000" ? "111111" : "000000";
+  for (let i = 0; i < 5; i++) assert.equal((await otpVerify(reqId, wrong, otpIp)).status, 401);
+  assert.equal((await otpVerify(reqId, right, otpIp)).status, 401);
+});
+await test("right code → session; replaying the same code → refused", async () => {
+  await clearPhoneLimits();
+  const r = await otpReq(PHONE, otpIp);
+  reqId = r.json.requestId!;
+  await new Promise((res) => setTimeout(res, 100));
+  const code = lastOtp();
+  const v = await otpVerify(reqId, code, otpIp);
+  assert.equal(v.status, 200);
+  otpSession = v.json.session!;
+  assert.match(otpSession, /^[A-Za-z0-9_-]{43}$/);
+  const left = Date.parse(v.json.expiresAt!) - Date.now();
+  assert.ok(left > 14 * 60_000 && left <= 15 * 60_000 + 5000, "starts at 15 minutes");
+  assert.equal((await otpVerify(reqId, code, otpIp)).status, 401);
+});
+await test("concurrent right answers → exactly one session", async () => {
+  await clearPhoneLimits();
+  const r = await otpReq(PHONE, otpIp);
+  await new Promise((res) => setTimeout(res, 100));
+  const code = lastOtp();
+  const all = await Promise.all(Array.from({ length: 5 }, () => otpVerify(r.json.requestId!, code, otpIp)));
+  assert.equal(all.filter((x) => x.status === 200).length, 1);
+  for (const x of all) if (x.json.session) await db.execute(sql`DELETE FROM track_session WHERE token_hash = ${guard.sha256(x.json.session)}`);
+});
+await test("job list holds only this customer's jobs (active + ≤ 2 years of history)", async () => {
+  const r = await me(otpSession, otpIp);
+  assert.equal(r.status, 200);
+  const nos = [...(r.json.active ?? []), ...(r.json.history ?? [])].map((j) => j.no);
+  assert.ok(nos.length > 0);
+  const owners = await db.execute<{ n: number }>(sql`
+    SELECT count(*)::int n FROM job j WHERE j.job_no IN ${nos}
+      AND NOT EXISTS (SELECT 1 FROM customer c WHERE c.customer_id = j.customer_id
+        AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') LIKE ${"%" + PHONE.slice(1) + "%"})`);
+  assert.equal(Number(owners.rows[0].n), 0, "a listed job belongs to someone else");
+});
+await test("own job detail → masked PublicJob; someone else's job → 404", async () => {
+  const list = await me(otpSession, otpIp);
+  const own = [...(list.json.active ?? []), ...(list.json.history ?? [])][0].no;
+  const get = async (no: string) => meJobGET(new NextRequest(`https://svc.example.test/api/track/me/jobs/${no}`, { headers: otpHeaders(otpIp, UA, otpSession) }), { params: Promise.resolve({ no }) });
+  const mine = await get(own);
+  assert.equal(mine.status, 200);
+  const j = ((await mine.json()) as { job: Record<string, unknown> }).job;
+  assert.deepEqual(Object.keys(j).sort(), PUBLIC_KEYS);
+  const other = (await db.execute<{ no: string }>(sql`
+    SELECT j.job_no no FROM job j JOIN customer c ON c.customer_id = j.customer_id
+     WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') NOT LIKE ${"%" + PHONE.slice(1) + "%"} LIMIT 1`)).rows[0].no;
+  assert.equal((await get(other)).status, 404);
+});
+await test("session from another IP / browser → 401", async () => {
+  assert.equal((await me(otpSession, nextIp())).status, 401);
+  assert.equal((await me(otpSession, otpIp, "curl/8")).status, 401);
+});
+await test("activity keeps ≥ 5 min on the clock, never past 60 min from sign-in", async () => {
+  const th = guard.sha256(otpSession);
+  await db.execute(sql`UPDATE track_session SET expires_at = now() + interval '1 minute' WHERE token_hash = ${th}`);
+  const k1 = await keepalivePOST(new NextRequest("https://svc.example.test/api/track/me/keepalive", { method: "POST", headers: otpHeaders(otpIp, UA, otpSession) }));
+  const left1 = Date.parse(((await k1.json()) as { expiresAt: string }).expiresAt) - Date.now();
+  assert.ok(left1 > 4.5 * 60_000 && left1 <= 5 * 60_000 + 5000, `extended to ~5 min (got ${Math.round(left1 / 1000)} s)`);
+  await db.execute(sql`UPDATE track_session SET expires_at = now() + interval '30 seconds', max_expires_at = now() + interval '2 minutes' WHERE token_hash = ${th}`);
+  const k2 = await keepalivePOST(new NextRequest("https://svc.example.test/api/track/me/keepalive", { method: "POST", headers: otpHeaders(otpIp, UA, otpSession) }));
+  const left2 = Date.parse(((await k2.json()) as { expiresAt: string }).expiresAt) - Date.now();
+  assert.ok(left2 <= 2 * 60_000 + 5000, "capped at the 60-minute limit");
+});
+await test("expired session → 401", async () => {
+  await db.execute(sql`UPDATE track_session SET expires_at = now() - interval '1 second' WHERE token_hash = ${guard.sha256(otpSession)}`);
+  assert.equal((await me(otpSession, otpIp)).status, 401);
+});
+await test("sign out kills the session", async () => {
+  await db.execute(sql`UPDATE track_session SET expires_at = now() + interval '10 minutes', max_expires_at = now() + interval '10 minutes' WHERE token_hash = ${guard.sha256(otpSession)}`);
+  assert.equal((await me(otpSession, otpIp)).status, 200);
+  await meDELETE(new NextRequest("https://svc.example.test/api/track/me", { method: "DELETE", headers: otpHeaders(otpIp, UA, otpSession) }));
+  assert.equal((await me(otpSession, otpIp)).status, 401);
+});
+await test("3 OTPs per number per hour", async () => {
+  await clearPhoneLimits();
+  // the minute cooldown is separate — clear it between sends, the hour counter stays
+  const codes: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    codes.push((await otpReq(PHONE, nextIp())).status);
+    await db.execute(sql`DELETE FROM track_rate WHERE bucket = 'otp_phone_min' AND key IN ${phoneHashes}`);
+  }
+  assert.deepEqual(codes, [200, 200, 200, 429]);
+});
+
 console.log("\nLogs");
 await test("no raw link token / ticket / Turnstile token / origin secret in track_event", async () => {
   await new Promise((r) => setTimeout(r, 500)); // logEvent is fire-and-forget
@@ -366,10 +599,17 @@ await test("no raw link token / ticket / Turnstile token / origin secret in trac
 });
 
 } finally {
+console.info = realInfo;
+// ---- OTP rows of this run (by the two test numbers) ----
+if (phoneHashes.length) {
+  await db.execute(sql`DELETE FROM track_otp WHERE phone_hash IN ${phoneHashes}`);
+  await db.execute(sql`DELETE FROM track_session WHERE phone_hash IN ${phoneHashes}`);
+  await db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
+}
 // ---- restore the two jobs' links exactly as they were ----
 for (const o of originals) {
   await db.execute(sql`UPDATE job SET track_token = ${o.track_token}, track_token_at = ${o.track_token_at}::timestamp,
-    track_opened_at = ${o.track_opened_at}::timestamptz WHERE job_no = ${o.job_no}`);
+    track_opened_at = ${o.track_opened_at}::timestamptz, track_link_expires_at = ${o.track_link_expires_at}::timestamptz WHERE job_no = ${o.job_no}`);
 }
 await db.execute(sql`DELETE FROM app_user WHERE email_address = ${tempEmail}`);
 // ---- cleanup: only what this run created ----

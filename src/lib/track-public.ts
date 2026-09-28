@@ -35,6 +35,18 @@ export type PublicJob = {
   courier: { name: string; logoUrl: string; trackUrl: string } | null;
 };
 
+/** one row of the customer's job list (phone + OTP) — the full job needs its own request */
+export type PublicJobSummary = {
+  no: string;
+  brandModel: string;
+  deviceRef: string;
+  receivedDate: string;
+  closedDate: string;
+  step: TrackStepKey | null;
+  stepLabel: string;
+  cancelled: boolean;
+};
+
 export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] = [
   { key: "received", label: "รับเครื่องแล้ว", hint: "ศูนย์บริการได้รับเครื่องของคุณแล้ว" },
   { key: "diagnosing", label: "กำลังตรวจสอบ / ซ่อม", hint: "ช่างกำลังตรวจสอบและดำเนินการซ่อม" },
@@ -44,7 +56,7 @@ export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] =
 ];
 
 /** link lifetime shown to customers and staff (enforced in services/tracking.ts) */
-export const LINK_RULE_TEXT = "ลิงก์ใช้ได้ 1 วันนับจากที่ได้รับ และ 15 นาทีหลังเปิดดูครั้งแรก";
+export const LINK_RULE_TEXT = "ลิงก์ใช้ได้ 1 วันนับจากที่ได้รับ และ 15 นาทีหลังเปิดดูครั้งแรก (ต่อเวลาอัตโนมัติขณะใช้งาน สูงสุด 60 นาที)";
 
 /** client-facing messages — one per outcome, never the reason (spec §V, §AM) */
 export const TRACK_MSG = {
@@ -53,4 +65,9 @@ export const TRACK_MSG = {
   rateLimited: "มีคำขอมากเกินไป กรุณาลองใหม่ภายหลัง",
   unavailable: "ระบบยืนยันตัวตนไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลังหรือติดต่อศูนย์บริการ",
   linkExpired: "ลิงก์นี้หมดอายุหรือใช้งานไม่ได้แล้ว",
+  phoneInvalid: "กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678",
+  otpRate: "ขอรหัสถี่เกินไป กรุณารอสักครู่แล้วลองใหม่",
+  otpFail: "รหัสไม่ถูกต้องหรือหมดอายุ กรุณาลองใหม่ หรือกดขอรหัสใหม่",
+  otpUnavailable: "บริการส่งรหัส OTP ยังไม่เปิดใช้งาน กรุณาติดต่อศูนย์บริการ",
+  sessionExpired: "หมดเวลา กรุณายืนยันเบอร์โทรด้วย OTP อีกครั้ง",
 } as const;

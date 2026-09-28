@@ -7,40 +7,37 @@ import { RS } from "@/server/record-status";
 import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
-import { TRACK_STEPS, type PublicJob, type TrackStepKey } from "@/lib/track-public";
+import { TRACK_STEPS, type PublicJob, type PublicJobSummary, type TrackStepKey } from "@/lib/track-public";
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
- * login, so everything here is deliberately narrow. Flow (see app/api/track/*):
+ * login, so everything here is deliberately narrow. Two ways in (see app/api/track/*):
  *
- *   /track/<linkToken> or the /track form → Turnstile → /api/track/session
- *     → jobNoForLink / jobNoForNumber (this file) → one-time ticket
- *   /api/track/data { ticket } → atomic consume → publicJobByNo (this file)
+ *   /track/<linkToken> (staff-sent link) → Turnstile → /api/track/session
+ *     → jobNoForLink (this file) → one-time ticket → /api/track/data → publicJobByNo
+ *   /track (the customer's own lookup) → Turnstile → mobile number → SMS OTP
+ *     (server/track-otp.ts) → customer session → listJobsForCustomers / publicJobForCustomers
  *
- * Nothing here is reachable before the captcha, and no function returns job
- * data for a client-chosen job number: the data path only takes the job number
- * the server bound to a consumed ticket.
+ * Nothing here is reachable before the captcha, and no function returns job data for a
+ * client-chosen job number without an authorisation the server issued: a consumed ticket
+ * (bound to one job) or a customer session (bound to that customer's ids).
  *
- *  - the token is 32 random bytes (base64url); job numbers are sequential and
- *    must never be a key on their own
- *  - every job is trackable from the moment it is opened (decided 2026-09-23);
- *    flip QUOTATION_REQUIRED to gate it behind a quotation again
- *  - a link dies 90 days after the job is closed, and staff can rotate it
- *  - the fallback form needs TWO facts (job/quotation number + last 4 digits of
- *    the customer's phone) and every failure returns the same message, so the
- *    endpoint cannot be used to tell which numbers exist
- *  - only the fields in `PublicJob` ever leave this module: no price, no phone,
- *    no address, no full IMEI/serial, no technician, no internal remarks
+ *  - link tokens are 32 random bytes (base64url); job numbers are sequential and never a key
+ *  - a link lives 1 day unopened, 15 minutes after the first customer open (drizzle/0016)
+ *  - only the fields in `PublicJob` ever leave this module: no price, no phone, no
+ *    address, no full IMEI/serial, no technician, no internal remarks
  */
 
 /** true = only jobs that already have a quotation can be tracked (currently: every job) */
 const QUOTATION_REQUIRED = false;
-/** a link stops working this long after the job was closed */
-const EXPIRE_DAYS_AFTER_CLOSE = 90;
 /** a link nobody has opened yet lives this long from issue (drizzle/0016) */
 export const LINK_UNOPENED_HOURS = 24;
 /** after the first customer open, the link lives this much longer */
 export const LINK_OPEN_MINUTES = 15;
+/** while the customer is using the page, the keepalive keeps at least this much on the clock … */
+export const LINK_EXTEND_MINUTES = 5;
+/** … but never past this long from the first open (same rule as the phone + OTP session) */
+export const LINK_MAX_MINUTES = 60;
 
 /*
  * Link lifetime, evaluated in Postgres so the clocks never disagree:
@@ -48,7 +45,7 @@ export const LINK_OPEN_MINUTES = 15;
  */
 const linkIssuedAt = sql`(${job.trackTokenAt} AT TIME ZONE 'Asia/Bangkok')`;
 const linkExpiresAt = sql<string>`CASE WHEN ${job.trackOpenedAt} IS NOT NULL
-    THEN ${job.trackOpenedAt} + make_interval(mins => ${LINK_OPEN_MINUTES})
+    THEN coalesce(${job.trackLinkExpiresAt}, ${job.trackOpenedAt} + make_interval(mins => ${LINK_OPEN_MINUTES}))
     ELSE ${linkIssuedAt} + make_interval(hours => ${LINK_UNOPENED_HOURS}) END`;
 const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpiresAt} > now())`;
 
@@ -74,7 +71,6 @@ const maskRef = (v: string) => {
   const s = (v ?? "").trim();
   return s.length > 4 ? `••••${s.slice(-4)}` : s ? "••••" : "";
 };
-const digits = (v: string) => (v ?? "").replace(/\D/g, "");
 
 export function newToken() {
   return randomBytes(32).toString("base64url");
@@ -126,24 +122,6 @@ async function hasQuotation(jobNo: string) {
     .where(and(eq(quotationHd.referenceJobNo, jobNo), ne(quotationHd.recordStatus, RS.DELETED)))
     .limit(1);
   return !!row;
-}
-
-function expired(row: Row) {
-  // the legacy DB writes 1900-01-01 (not NULL) for "not closed yet" — isSentinelDate
-  // catches that, otherwise every open job would look closed long ago and expire
-  if (isSentinelDate(row.closedDate)) return false;
-  const closed = Date.parse(String(row.closedDate).replace(" ", "T"));
-  if (!Number.isFinite(closed)) return false;
-  return Date.now() - closed > EXPIRE_DAYS_AFTER_CLOSE * 86_400_000;
-}
-
-/** every rejection looks the same to the caller — never say which part failed */
-async function visible(row: Row | undefined): Promise<Row | null> {
-  if (!row) return null;
-  if (row.recordStatus === RS.DELETED) return null;
-  if (expired(row)) return null;
-  if (QUOTATION_REQUIRED && !(await hasQuotation(row.no))) return null;
-  return row;
 }
 
 async function toPublic(row: Row): Promise<PublicJob> {
@@ -236,7 +214,44 @@ export async function jobNoForLink(token: string): Promise<string | null> {
 
 /** first customer open of the current link starts its 15-minute window (later opens change nothing) */
 export async function markLinkOpened(jobNo: string): Promise<void> {
-  await db.execute(sql`UPDATE job SET track_opened_at = now() WHERE job_no = ${jobNo} AND track_opened_at IS NULL`);
+  await db.execute(sql`UPDATE job SET track_opened_at = now(), track_link_expires_at = now() + make_interval(mins => ${LINK_OPEN_MINUTES})
+    WHERE job_no = ${jobNo} AND track_opened_at IS NULL`);
+}
+
+const isoUtc = (col: SQL) => sql<string | null>`to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
+
+/** when the current link of this job stops working (ISO) — shown as the page's countdown */
+export async function linkExpiry(jobNo: string): Promise<string | null> {
+  const [r] = await db.select({ at: isoUtc(linkExpiresAt) }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
+  return r?.at ?? null;
+}
+
+/**
+ * The customer is using the page: keep ≥ 5 minutes on an OPENED, still-live link, never past
+ * 60 minutes from the first open. An unopened link (e.g. a staff preview) is left alone.
+ * null = the link is not live (expired / rotated / unknown) — the page should close.
+ */
+export async function extendLink(token: string): Promise<string | null> {
+  return quiet(async () => {
+    const t = (token ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null;
+    const r = await db.execute<{ expires_at: string }>(sql`
+      UPDATE job
+         SET track_link_expires_at = LEAST(
+               GREATEST(coalesce(track_link_expires_at, now()), now() + make_interval(mins => ${LINK_EXTEND_MINUTES})),
+               track_opened_at + make_interval(mins => ${LINK_MAX_MINUTES}))
+       WHERE track_token = ${t} AND record_status <> 'DELETED'
+         AND track_opened_at IS NOT NULL AND track_link_expires_at > now()
+      RETURNING to_char(track_link_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at`);
+    if (r.rows[0]) return r.rows[0].expires_at;
+    // not extendable but maybe still live (unopened staff preview): report its expiry as is
+    const [row] = await db
+      .select({ at: isoUtc(linkExpiresAt), live: linkLive, recordStatus: job.recordStatus })
+      .from(job)
+      .where(eq(job.trackToken, t))
+      .limit(1);
+    return row && row.live && row.recordStatus !== RS.DELETED ? row.at : null;
+  });
 }
 
 export type LinkStatus = {
@@ -267,34 +282,6 @@ export async function linkStatus(jobNo: string): Promise<LinkStatus> {
   };
 }
 
-/** /track form: job number OR quotation number + last 4 digits of the customer's phone → job number, or null */
-export async function jobNoForNumber(input: string, phone4: string): Promise<string | null> {
-  return quiet(async () => {
-    const raw = (input ?? "").trim().toUpperCase();
-    const last4 = digits(phone4);
-    if (!raw || last4.length !== 4) return null;
-    if (!/^[A-Z]{1,6}\d{5,}$/.test(raw)) return null;
-
-    let jobNo = raw;
-    // a quotation number resolves to its job
-    const [q] = await db
-      .select({ jobNo: quotationHd.referenceJobNo })
-      .from(quotationHd)
-      .where(and(eq(quotationHd.quotationNo, raw), ne(quotationHd.recordStatus, RS.DELETED)))
-      .limit(1);
-    if (q?.jobNo) jobNo = q.jobNo.trim().toUpperCase();
-
-    const [row] = await base(eq(job.jobNo, jobNo));
-    const ok = await visible(row);
-    if (!ok) return null;
-
-    // phone comes from the customer record; fall back to the digits inside customer_detail
-    const phone = digits(ok.phone ?? "") || digits(ok.customerDetail ?? "");
-    if (phone.length < 4 || phone.slice(-4) !== last4) return null;
-    return ok.no;
-  });
-}
-
 /* ------------------------------------------------------------------ *
  * Serialize (called only with the job number bound to a consumed ticket)
  * ------------------------------------------------------------------ */
@@ -305,6 +292,83 @@ export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
     const [row] = await base(eq(job.jobNo, jobNo));
     // the ticket was issued under the rules of its path (link lifetime / 90-day form rule);
     // here only a job deleted in the meantime is refused
+    if (!row || row.recordStatus === RS.DELETED) return null;
+    return toPublic(row);
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Customer session (phone + OTP, see server/track-otp.ts)
+ * ------------------------------------------------------------------ */
+
+/** how far back "ประวัติ" goes (finished + cancelled jobs) */
+export const HISTORY_YEARS = 2;
+
+/**
+ * Every job of these customers: still in progress, plus finished / cancelled ones from the
+ * last 2 years. Summary fields only — the full (masked) job needs publicJobForCustomers.
+ */
+export async function listJobsForCustomers(customerIds: number[]): Promise<{ active: PublicJobSummary[]; history: PublicJobSummary[] }> {
+  const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
+  if (!ids.length) return { active: [], history: [] };
+  const rows = await db
+    .select({
+      no: job.jobNo,
+      statusId: job.jobStatusId,
+      group: jobStatus.jobStatusGroup,
+      brand: manufacturer.manufacturerName,
+      model: job.productModelName,
+      serial: job.productSerial,
+      imei: job.productImeiNo,
+      receivedDate: job.jobReceptionDate,
+      createDate: job.jobCreateDate,
+      closedDate: job.jobClosedDate,
+    })
+    .from(job)
+    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
+    .where(
+      and(
+        sql`${job.customerId} = ANY(${`{${ids.join(",")}}`}::integer[])`,
+        ne(job.recordStatus, RS.DELETED),
+        // in progress, or closed / cancelled within the history window (1900-01-01 = "not closed" in the legacy DB)
+        sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN ('Finished','Cancel')
+          OR CASE WHEN ${job.jobClosedDate} > '1901-01-01' THEN ${job.jobClosedDate} ELSE ${job.jobCreateDate} END
+             >= (now() AT TIME ZONE 'Asia/Bangkok') - make_interval(years => ${HISTORY_YEARS}))`
+      )
+    )
+    .orderBy(sql`${job.jobCreateDate} DESC`)
+    .limit(200);
+
+  const active: PublicJobSummary[] = [];
+  const history: PublicJobSummary[] = [];
+  for (const r of rows) {
+    const group = r.group?.trim() ?? "";
+    const step = stepOf(r.statusId ?? -1, group);
+    const done = group === "Finished" || group === "Cancel";
+    const item: PublicJobSummary = {
+      no: r.no,
+      brandModel: [r.brand, r.model].filter(Boolean).join(" ").trim(),
+      deviceRef: maskRef(r.serial || r.imei || ""),
+      receivedDate: fmtDate(r.receivedDate ?? r.createDate),
+      closedDate: isSentinelDate(r.closedDate) ? "" : fmtDate(r.closedDate),
+      step,
+      stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : "ยกเลิกรายการ",
+      cancelled: step === null,
+    };
+    (done ? history : active).push(item);
+  }
+  return { active, history };
+}
+
+/** one job's (masked) detail — only when it belongs to these customers and is not deleted */
+export async function publicJobForCustomers(jobNo: string, customerIds: number[]): Promise<PublicJob | null> {
+  return quiet(async () => {
+    const no = (jobNo ?? "").trim().toUpperCase();
+    if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
+    const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
+    if (!ids.length) return null;
+    const [row] = await base(and(eq(job.jobNo, no), sql`${job.customerId} = ANY(${`{${ids.join(",")}}`}::integer[])`));
     if (!row || row.recordStatus === RS.DELETED) return null;
     return toPublic(row);
   });
@@ -323,7 +387,7 @@ export async function ensureToken(jobNo: string): Promise<string> {
   if (row?.token) return row.token;
   const token = newToken();
   // a new link: fresh 1-day window, not opened yet
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null }).where(eq(job.jobNo, jobNo));
+  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null, trackLinkExpiresAt: null }).where(eq(job.jobNo, jobNo));
   return token;
 }
 
@@ -331,7 +395,7 @@ export async function ensureToken(jobNo: string): Promise<string> {
 export async function rotateToken(jobNo: string): Promise<string> {
   const token = newToken();
   // a new link: fresh 1-day window, not opened yet
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null }).where(eq(job.jobNo, jobNo));
+  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null, trackLinkExpiresAt: null }).where(eq(job.jobNo, jobNo));
   return token;
 }
 
@@ -341,4 +405,3 @@ export async function trackingReady(jobNo: string): Promise<boolean> {
   return hasQuotation(jobNo);
 }
 
-export { EXPIRE_DAYS_AFTER_CLOSE };

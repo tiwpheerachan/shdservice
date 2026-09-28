@@ -374,6 +374,8 @@ export const job = pgTable("job", {
 	trackTokenAt: timestamp("track_token_at", { mode: "string" }),
 	// first customer open of the current link (drizzle/0016) — link lives 15 min from here
 	trackOpenedAt: timestamp("track_opened_at", { mode: "string", withTimezone: true }),
+	// current expiry of an opened link (drizzle/0018) — the keepalive moves it, capped at open + 60 min
+	trackLinkExpiresAt: timestamp("track_link_expires_at", { mode: "string", withTimezone: true }),
 	productSaleOutShopName: varchar("product_sale_out_shop_name", { length: 100 }),
 });
 
