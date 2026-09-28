@@ -210,10 +210,18 @@ export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder
 
 /** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT is a live snapshot (date-independent, but follows `type`) */
 export type DashRange = { from?: string; to?: string; type?: string };
-export const useDashGroups = (range: DashRange = {}) => useTable<DashGroup>("dash_groups", { column: "ord" }, "exclude", range);
-export const useTatRows = (range: DashRange = {}) => useTable<TatRow>("tat_rows", undefined, "exclude", range);
-export const useMonthly = (range: DashRange = {}) => useTable<MonthlyRow & { granularity?: "day" | "month" }>("monthly", undefined, "exclude", range);
-export const useTopSymptoms = (range: DashRange = {}) => useTable<TopSymptom>("top_symptoms", undefined, "exclude", range);
+export type Dashboard = {
+  groups: DashGroup[];
+  tat: TatRow[];
+  monthly: MonthlyRow[];
+  granularity: "day" | "month";
+  topSymptoms: TopSymptom[];
+};
+/** the whole dashboard in ONE request — the server computes it once per range (30 s cache) */
+export function useDashboard(range: DashRange = {}) {
+  const { data, loading, error, refetch } = useTable<Dashboard>("dashboard", undefined, "exclude", range);
+  return { data: data[0] ?? null, loading, error, refetch };
+}
 
 /* ---- lookups added for the real backend ---- */
 export type Staff = { id: number; name: string; userType: string };

@@ -6,10 +6,7 @@ import { ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { SearchSelect } from "@/components/shared/search-select";
 import {
-  useDashGroups,
-  useTatRows,
-  useMonthly,
-  useTopSymptoms,
+  useDashboard,
   useJobs,
   useJobTypes,
 } from "@/data/db";
@@ -112,12 +109,14 @@ export default function DashboardPage() {
     : to === now && from === `${now.slice(0, 8)}01` ? "month"
     : "";
 
-  const { data: DASH_GROUPS } = useDashGroups(range);
-  const { data: TAT_ROWS } = useTatRows(range);
-  const { data: MONTHLY } = useMonthly(range);
-  const { data: TOP_SYMPTOMS } = useTopSymptoms(range);
+  // one request for every panel (was four in parallel, each computing the whole dashboard)
+  const { data: DASH } = useDashboard(range);
+  const DASH_GROUPS = DASH?.groups ?? [];
+  const TAT_ROWS = DASH?.tat ?? [];
+  const MONTHLY = DASH?.monthly ?? [];
+  const TOP_SYMPTOMS = DASH?.topSymptoms ?? [];
   const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
-  const granularity = MONTHLY[0]?.granularity ?? "month";
+  const granularity = DASH?.granularity ?? "month";
   const rangeText = (!from && !to ? "ทั้งหมด" : `${thai(from) || "เริ่มต้น"} – ${thai(to) || "วันนี้"}`) + (type ? ` · ${type}` : "");
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));

@@ -1,4 +1,5 @@
 import "server-only";
+import { cached } from "@/server/cache";
 import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from "@/db/schema";
@@ -21,12 +22,11 @@ const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PA
 const TYPE_LABEL: Record<string, Quotation["type"]> = { Normal: "Type A (Normal)", VIP: "Type B (VIP)" };
 const TYPE_VALUE: Record<string, string> = { "Type A (Normal)": "Normal", "Type B (VIP)": "VIP" };
 
-let statusCache: { id: number; name: string }[] | null = null;
-export async function quotationStatuses() {
-  if (statusCache) return statusCache;
-  const rows = await db.select().from(quotationStatus).orderBy(asc(quotationStatus.quotationStatusId));
-  statusCache = rows.map((r) => ({ id: r.quotationStatusId, name: r.quotationStatusName.trim() }));
-  return statusCache;
+export function quotationStatuses() {
+  return cached("quotationstatus:all", 300_000, async () => {
+    const rows = await db.select().from(quotationStatus).orderBy(asc(quotationStatus.quotationStatusId));
+    return rows.map((r) => ({ id: r.quotationStatusId, name: r.quotationStatusName.trim() }));
+  });
 }
 async function statusIdByName(name: string) {
   const hit = (await quotationStatuses()).find((s) => s.name === name.trim());

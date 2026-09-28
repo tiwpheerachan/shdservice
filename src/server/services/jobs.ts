@@ -81,21 +81,17 @@ const opener = alias(appUser, "opener");
 /* ------------------------------------------------------------------ *
  * Status helpers (cached name ↔ id)
  * ------------------------------------------------------------------ */
-let statusCache: { at: number; rows: { id: number; name: string; group: string; order: number; active: boolean }[] } | null = null;
-export async function jobStatuses() {
-  if (statusCache && Date.now() - statusCache.at < 300_000) return statusCache.rows;
-  const rows = await db.select().from(jobStatus).orderBy(asc(jobStatus.displayOrder), asc(jobStatus.jobStatusId));
-  statusCache = {
-    at: Date.now(),
-    rows: rows.map((r) => ({
+export function jobStatuses() {
+  return cached("jobstatus:all", 300_000, async () => {
+    const rows = await db.select().from(jobStatus).orderBy(asc(jobStatus.displayOrder), asc(jobStatus.jobStatusId));
+    return rows.map((r) => ({
       id: r.jobStatusId,
       name: r.jobStatusName?.trim() ?? "",
       group: r.jobStatusGroup?.trim() ?? "",
       order: r.displayOrder ?? 0,
       active: r.isActive !== false,
-    })),
-  };
-  return statusCache.rows;
+    }));
+  });
 }
 
 export async function statusIdByName(name: string): Promise<number> {
@@ -1485,19 +1481,13 @@ export async function removeAttachment(id: number, byUserId = 0) {
 /** `type` = job type NAME (same convention as the job list filter) */
 export type DashRange = { from?: string; to?: string; type?: string };
 
-// 30 s memo per date range (the dashboard is opened constantly; the queries scan job by date)
-const dashCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof computeDashboard>> }>();
-export async function dashboard(range: DashRange = {}) {
+// 30 s memo per date range (the dashboard is opened constantly). cached() gives parallel callers the
+// same in-flight computation, so the page's panels never compute it more than once.
+export function dashboard(range: DashRange = {}) {
   const from = /^\d{4}-\d{2}-\d{2}$/.test(range.from ?? "") ? range.from! : "";
   const to = /^\d{4}-\d{2}-\d{2}$/.test(range.to ?? "") ? range.to! : "";
   const type = (range.type ?? "").trim();
-  const key = `${from}|${to}|${type}`;
-  const hit = dashCache.get(key);
-  if (hit && Date.now() - hit.at < 30_000) return hit.value;
-  const value = await computeDashboard(from, to, type);
-  dashCache.set(key, { at: Date.now(), value });
-  if (dashCache.size > 50) dashCache.delete(dashCache.keys().next().value!);
-  return value;
+  return cached(`dashboard:${from}|${to}|${type}`, 30_000, () => computeDashboard(from, to, type));
 }
 
 /** every day ("YYYY-MM-DD") or month ("YYYY-MM") from lo to hi, inclusive */
@@ -1634,29 +1624,27 @@ async function computeDashboard(from: string, to: string, type = "") {
 /* ------------------------------------------------------------------ *
  * Symptom picker data — usage counts (job.product_symptom_id ∪ job_symptom)
  * ------------------------------------------------------------------ */
-let symptomStatsCache: { at: number; value: { id: number; name: string; group: string; count: number }[] } | null = null;
-/** Active symptoms ordered by how often they were used, most common first (5 min memo). */
-export async function symptomStats() {
-  if (symptomStatsCache && Date.now() - symptomStatsCache.at < 300_000) return symptomStatsCache.value;
-  // every use of a symptom: the job's main symptom + its extra ones (not counting the main one twice)
-  const used = unionAll(
-    db.select({ sid: job.productSymptomId }).from(job).where(and(ne(job.recordStatus, RS.DELETED), gt(job.productSymptomId, 0))),
-    db
-      .select({ sid: jobSymptom.symptomId })
-      .from(jobSymptom)
-      .innerJoin(job, eq(job.jobNo, jobSymptom.jobNo))
-      .where(and(ne(job.recordStatus, RS.DELETED), ne(jobSymptom.symptomId, job.productSymptomId)))
-  ).as("u");
-  const rows = await db
-    .select({ id: symptom.symptomId, name: symptom.symptomName, grp: symptom.symptomGroupName, n: count(used.sid) })
-    .from(symptom)
-    .leftJoin(used, eq(used.sid, symptom.symptomId))
-    .where(eq(symptom.recordStatus, RS.ACTIVE))
-    .groupBy(symptom.symptomId, symptom.symptomName, symptom.symptomGroupName)
-    .orderBy(desc(count(used.sid)), asc(symptom.symptomName));
-  const value = rows.map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), group: x.grp ?? "", count: Number(x.n) }));
-  symptomStatsCache = { at: Date.now(), value };
-  return value;
+/** Active symptoms ordered by how often they were used, most common first (5 min memo; a symptom edit drops it). */
+export function symptomStats() {
+  return cached("master:symptoms:stats", 300_000, async () => {
+    // every use of a symptom: the job's main symptom + its extra ones (not counting the main one twice)
+    const used = unionAll(
+      db.select({ sid: job.productSymptomId }).from(job).where(and(ne(job.recordStatus, RS.DELETED), gt(job.productSymptomId, 0))),
+      db
+        .select({ sid: jobSymptom.symptomId })
+        .from(jobSymptom)
+        .innerJoin(job, eq(job.jobNo, jobSymptom.jobNo))
+        .where(and(ne(job.recordStatus, RS.DELETED), ne(jobSymptom.symptomId, job.productSymptomId)))
+    ).as("u");
+    const rows = await db
+      .select({ id: symptom.symptomId, name: symptom.symptomName, grp: symptom.symptomGroupName, n: count(used.sid) })
+      .from(symptom)
+      .leftJoin(used, eq(used.sid, symptom.symptomId))
+      .where(eq(symptom.recordStatus, RS.ACTIVE))
+      .groupBy(symptom.symptomId, symptom.symptomName, symptom.symptomGroupName)
+      .orderBy(desc(count(used.sid)), asc(symptom.symptomName));
+    return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), group: x.grp ?? "", count: Number(x.n) }));
+  });
 }
 
 /** Top symptoms seen on jobs of one product model (by model_code) — "อาการที่พบบ่อยของรุ่นนี้". */
