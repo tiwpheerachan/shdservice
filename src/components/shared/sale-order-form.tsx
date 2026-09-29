@@ -306,7 +306,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
           <FieldGrid>
-            <Field label="วิธีการชำระเงิน" required className="lg:col-span-2">
+            <Field label="วิธีการชำระเงิน" required className="lg:col-span-2" group="radiogroup">
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
                 {PAYMENT_METHODS.map((p) => (
                   <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -347,7 +347,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             <Field label="หมายเหตุ" wide>
               <Textarea rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
-            <Field label="Action" required wide>
+            <Field label="Action" required wide group="radiogroup">
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
                 {[
                   { k: false, l: "กำลังดำเนินการจัดทำ (In Progress)" },

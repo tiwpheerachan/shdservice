@@ -494,7 +494,7 @@ export function JobOpenSection({
             ))}
           </datalist>
         </Field>
-        <Field label="งานเด้ง" wide>
+        <Field label="งานเด้ง" wide group="group">
           <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
             <Checkbox checked={s.isBounce} onChange={(e) => set("isBounce", e.target.checked)} />
             สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ (is_job_bounce)
@@ -744,7 +744,7 @@ export function ProductSection({ title = "ข้อมูลเกี่ยว�
     </Field>
   );
   const receptionTypeField = (
-    <Field label="รับสินค้าเข้าโดย" wide>
+    <Field label="รับสินค้าเข้าโดย" wide group="radiogroup">
       <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
         {RECEIVE_METHODS.map((m) => (
           <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">

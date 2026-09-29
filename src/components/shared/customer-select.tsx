@@ -46,6 +46,7 @@ export function CustomerSelect({
   const canAdd = allowNew && can("Customer", "add");
   const canEdit = can("Customer", "edit");
   const [mode, setMode] = React.useState<Mode>("existing");
+  const modeLabelId = React.useId(); // "ประเภทลูกค้า" names the radio group
   const [form, setForm] = React.useState<CustomerFormValues>(EMPTY_CUSTOMER);
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
@@ -142,8 +143,8 @@ export function CustomerSelect({
   /* ---------- nothing selected: choose เดิม / ใหม่ ---------- */
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
-        <span className="text-xs font-medium text-muted-foreground">ประเภทลูกค้า</span>
+      <div role="radiogroup" aria-labelledby={modeLabelId} className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
+        <span id={modeLabelId} className="text-xs font-medium text-muted-foreground">ประเภทลูกค้า</span>
         <label className="flex cursor-pointer items-center gap-2 text-sm">
           <Radio name="customer-mode" checked={mode === "existing"} onChange={() => setMode("existing")} />
           ลูกค้าเดิม <span className="text-xs text-muted-foreground">— เคยมีข้อมูลในระบบ</span>

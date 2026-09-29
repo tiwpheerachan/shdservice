@@ -276,7 +276,7 @@ export default function DocumentProfilesPage() {
             <Input type="number" value={String(form.sortOrder)} onChange={(e) => set("sortOrder", Number(e.target.value) || 0)} className="num" />
           </Field>
 
-          <Field label="ตัวเลือก" wide>
+          <Field label="ตัวเลือก" wide group="group">
             <div className="flex flex-wrap gap-6 pt-1 text-sm">
               <label className="flex items-center gap-2">
                 <Checkbox checked={form.isDefault} onChange={(e) => set("isDefault", e.target.checked)} /> ค่าเริ่มต้น (ใช้เมื่อไม่ได้เลือก)
@@ -287,7 +287,7 @@ export default function DocumentProfilesPage() {
             </div>
           </Field>
 
-          <Field label="โลโก้" wide hint={editing ? "PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD" : pendingLogo ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก` : "เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD"}>
+          <Field label="โลโก้" wide group="group" hint={editing ? "PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD" : pendingLogo ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก` : "เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD"}>
             <div className="flex items-center gap-3">
               <div className="grid h-14 w-40 place-items-center rounded-md border border-border bg-white">
                 {editing || pendingUrl ? (

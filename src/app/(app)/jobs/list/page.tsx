@@ -432,7 +432,7 @@ export default function JobListPage() {
             searchPlaceholder="พิมพ์ชื่อสถานะ…"
           />
         </Field>
-        <Field label="เฉพาะงาน" className="sm:col-span-2">
+        <Field label="เฉพาะงาน" className="sm:col-span-2" group="group">
           <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
             <label className="inline-flex cursor-pointer items-center gap-2">
               <Checkbox checked={draft.bounce} onChange={(e) => setD("bounce", e.target.checked)} />

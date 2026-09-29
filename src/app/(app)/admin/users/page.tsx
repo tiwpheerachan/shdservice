@@ -461,13 +461,9 @@ export default function UsersPage() {
       >
         {!editing && (
           <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
-            <label className="mb-1.5 block text-xs font-medium text-foreground">
-              ค้นหาพนักงานจากไดเรกทอรี Lark
-            </label>
-            <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
-            <p className="mt-1.5 text-2xs text-muted-foreground">
-              เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ
-            </p>
+            <Field label="ค้นหาพนักงานจากไดเรกทอรี Lark" hint="เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ">
+              <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
+            </Field>
           </div>
         )}
 

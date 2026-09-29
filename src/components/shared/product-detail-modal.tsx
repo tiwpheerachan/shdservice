@@ -289,7 +289,7 @@ export function ProductDetailModal({
                 searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
               />
             </Field>
-            <Field label="คุม S/N (Serial Control)">
+            <Field label="คุม S/N (Serial Control)" group="radiogroup">
               <div className="flex h-9 items-center gap-4">
                 <label className="flex cursor-pointer items-center gap-1.5 text-sm">
                   <Radio name={`sn-${p.sysCode}`} disabled /> True
@@ -398,7 +398,7 @@ export function ProductDetailModal({
               searchPlaceholder="พิมพ์ชื่อสี…"
             />
           </Field>
-          <Field label="สถานะ">
+          <Field label="สถานะ" group="radiogroup">
             <div className="flex h-9 items-center gap-4">
               <label className="flex cursor-pointer items-center gap-1.5 text-sm">
                 <Radio

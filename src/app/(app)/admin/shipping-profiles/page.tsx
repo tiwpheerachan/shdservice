@@ -225,13 +225,13 @@ export default function ShippingProfilesPage() {
             <Input value={form.trackUrl} onChange={(e) => set("trackUrl", e.target.value)} placeholder="https://…/track?no={no}" />
           </Field>
 
-          <Field label="ตัวเลือก" wide>
+          <Field label="ตัวเลือก" wide group="group">
             <label className="flex items-center gap-2 pt-1 text-sm">
               <Checkbox checked={form.isActive} onChange={(e) => set("isActive", e.target.checked)} /> เปิดใช้งาน (แสดงในตัวเลือกหน้าปิดงาน)
             </label>
           </Field>
 
-          <Field label="โลโก้" wide hint={editing ? "PNG/JPG พื้นขาวหรือโปร่งใส แนะนำสูงอย่างน้อย 120px" : pendingLogo ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก` : "เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก"}>
+          <Field label="โลโก้" wide group="group" hint={editing ? "PNG/JPG พื้นขาวหรือโปร่งใส แนะนำสูงอย่างน้อย 120px" : pendingLogo ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก` : "เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก"}>
             <div className="flex items-center gap-3">
               <div className="grid h-12 w-28 place-items-center rounded-md border border-border bg-white">
                 {editing?.logoUrl || pendingUrl ? (
