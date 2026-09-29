@@ -31,6 +31,9 @@ export type MasterConfig = {
   detailLabel?: string;
   extraLabel?: string;
   extraOptions?: string[];
+  /** a whole-number days field (job types: SLA) — its label, and the hint under it */
+  daysLabel?: string;
+  daysHint?: string;
   rows: (MasterRow & { group?: string })[];
 };
 
@@ -50,7 +53,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   const [editing, setEditing] = React.useState<(MasterRow & { group?: string }) | null>(
     null
   );
-  const [form, setForm] = React.useState({ name: "", status: "Active", group: "", detail: "" });
+  const [form, setForm] = React.useState({ name: "", status: "Active", group: "", detail: "", days: "" });
   const [saving, setSaving] = React.useState(false);
 
   // filter bar (ชื่อ + สถานะ) — applied on ค้นหา; the lists are small so this is done in the browser
@@ -74,13 +77,13 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   useClearOnChange(fe.clear, form);
   const openNew = () => {
     setEditing(null);
-    setForm({ name: "", status: "Active", group: "", detail: "" });
+    setForm({ name: "", status: "Active", group: "", detail: "", days: config.daysLabel ? "7" : "" });
     fe.setErrors({});
     setOpen(true);
   };
   const openEdit = (r: MasterRow & { group?: string }) => {
     setEditing(r);
-    setForm({ name: r.name, status: r.status, group: r.group ?? "", detail: r.detail ?? "" });
+    setForm({ name: r.name, status: r.status, group: r.group ?? "", detail: r.detail ?? "", days: r.days != null ? String(r.days) : "" });
     fe.setErrors({});
     setOpen(true);
   };
@@ -89,7 +92,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     setRows((s) => (s.some((x) => x.id === row.id) ? s.map((x) => (x.id === row.id ? row : x)) : [...s, row]));
 
   const save = async () => {
-    if (fe.report(fe.run(masterSchema(config.nameLabel), form))) return; // the API checks the same
+    if (fe.report(fe.run(masterSchema(config.nameLabel, { days: !!config.daysLabel }), form))) return; // the API checks the same
     setSaving(true);
     try {
       const d = await postJson<{ row: MasterRow & { group?: string } }>(`/api/masters/${config.kind}`, {
@@ -97,6 +100,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         name: form.name.trim(),
         detail: form.detail,
         group: form.group,
+        ...(config.daysLabel ? { days: form.days } : {}),
         status: form.status,
       });
       upsertRow(d.row);
@@ -177,6 +181,17 @@ export function MasterTable({ config }: { config: MasterConfig }) {
             cell: (r: MasterRow) => (
               <span className="text-muted-foreground">{r.detail || "—"}</span>
             ),
+          },
+        ]
+      : []),
+    ...(config.daysLabel
+      ? [
+          {
+            key: "days",
+            header: config.daysLabel,
+            align: "right" as const,
+            value: (r: MasterRow & { group?: string }) => r.days ?? 0,
+            cell: (r: MasterRow & { group?: string }) => <span className="num">{r.days ?? "—"}</span>,
           },
         ]
       : []),
@@ -302,6 +317,20 @@ export function MasterTable({ config }: { config: MasterConfig }) {
               <option>Inactive</option>
             </Select>
           </Field>
+          {config.daysLabel && (
+            <Field label={config.daysLabel} required error={fe.errors.days} hint={config.daysHint}>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={365}
+                step={1}
+                className="num"
+                value={form.days}
+                onChange={(e) => setForm((f) => ({ ...f, days: e.target.value }))}
+              />
+            </Field>
+          )}
           {config.extraLabel && (
             <Field label={config.extraLabel}>
               {/* พิมพ์กลุ่มใหม่ได้ + เลือกจากค่าที่มีอยู่แล้วใน DB (datalist) */}

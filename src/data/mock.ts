@@ -15,6 +15,8 @@ export type MasterRow = {
   detail: string;
   status: Status;
   extra?: string;
+  /** job types: target turnaround (SLA) in days */
+  days?: number;
 };
 
 export type User = {

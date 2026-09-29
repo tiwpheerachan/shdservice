@@ -306,6 +306,9 @@ export const job = pgTable("job", {
 	customerId: integer("customer_id"),
 	customerDetail: varchar("customer_detail", { length: 200 }),
 	customerDueDate: timestamp("customer_due_date", { mode: 'string' }),
+	// true only when a user picked / changed the due date in this app (drizzle/0020_due_date_sla.sql);
+	// false = the legacy system's automatic "opened + 1 day" → the job type's SLA applies instead
+	dueDateSetByUser: boolean("due_date_set_by_user").notNull().default(false),
 	jobCreateDate: timestamp("job_create_date", { mode: 'string' }),
 	jobCreateBy: integer("job_create_by"),
 	jobTypeId: integer("job_type_id"),
@@ -513,6 +516,8 @@ export const jobType = pgTable("job_type", {
 	jobTypeName: varchar("job_type_name", { length: 50 }),
 	jobTypeDescription: varchar("job_type_description", { length: 100 }),
 	isActive: boolean("is_active"),
+	// --- target turnaround in days, added by this app (drizzle/0020_due_date_sla.sql) ---
+	defaultDueDays: integer("default_due_days").notNull().default(7),
 }, (table) => [
 	uniqueIndex("ix_job_type_name").using("btree", table.jobTypeName.asc().nullsLast().op("text_ops")),
 ]);

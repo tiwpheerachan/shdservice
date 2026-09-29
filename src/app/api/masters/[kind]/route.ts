@@ -12,7 +12,7 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
   const body = await readJson<Record<string, unknown>>(req);
   const s = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : body[k] == null ? undefined : String(body[k]));
   if (isSimpleKind(kind)) {
-    const row = await saveSimple(kind, { id: s("id"), name: s("name") ?? "", detail: s("detail"), extra: s("extra"), status: s("status") }, me.userId);
+    const row = await saveSimple(kind, { id: s("id"), name: s("name") ?? "", detail: s("detail"), extra: s("extra"), days: s("days"), status: s("status") }, me.userId);
     return NextResponse.json({ ok: true, row });
   }
   if (kind === "symptoms") {

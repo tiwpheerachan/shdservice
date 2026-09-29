@@ -101,6 +101,8 @@ export type JobFormState = {
   engineerName: string;
   engineerEmail: string;
   dueDate: string;
+  /** the due date shown is opened + the job type's SLA (nobody picked one yet) */
+  dueDateAuto: boolean;
 };
 
 export const EMPTY_JOB_FORM: JobFormState = {
@@ -146,6 +148,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   engineerName: "",
   engineerEmail: "",
   dueDate: "",
+  dueDateAuto: false,
 };
 
 /** Prefill the form from a job loaded through /api/jobs/:no */
@@ -177,7 +180,7 @@ export function fromJob(j: JobDetail): JobFormState {
     channel: j.channel,
     shopName: j.shopName,
     saleOrderDate: j.saleOrderDate,
-    warrantyMonth: String(j.warrantyMonth || ""),
+    warrantyMonth: j.warrantyMonth == null ? "" : String(j.warrantyMonth), // 0 months is a value (the API keeps it required)
     expireDate: j.expireDate,
     warranty: j.warranty,
     productType: j.productType,
@@ -205,6 +208,7 @@ export function fromJob(j: JobDetail): JobFormState {
     engineerId: j.engineerId,
     engineerName: j.engineer,
     dueDate: j.dueDate,
+    dueDateAuto: j.dueDateAuto,
   };
 }
 
@@ -950,7 +954,7 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
 
 /** `directory={false}` drops the Lark directory lookup under มอบหมายงานนี้ให้ (เปิดงานใหม่ / แก้ไขข้อมูลงาน). */
 export function OtherInfoSection({ showTech = true, directory = true }: { showTech?: boolean; directory?: boolean }) {
-  const { s, set, patch } = useJobForm();
+  const { s, set, patch, errors } = useJobForm();
   const { data: STAFF } = useStaff();
   // "มอบหมายงานนี้ให้" = job.engineer_id → a person in app_user. The directory
   // picker is kept for lookup; the assignment itself must map to app_user.
@@ -1016,7 +1020,12 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
             </div>
           </Field>
         )}
-        <Field label="วันประเมินซ่อมเสร็จ">
+        <Field
+          label="วันประเมินซ่อมเสร็จ"
+          required
+          error={errors.dueDate}
+          hint={s.dueDateAuto ? "ตาม SLA ของประเภทงาน (ยังไม่มีผู้กำหนด) — เลือกวันเองได้" : undefined}
+        >
           <Input type="date" value={s.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
         </Field>
       </FieldGrid>

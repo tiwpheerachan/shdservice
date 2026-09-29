@@ -89,6 +89,19 @@ const FINISHED_GROUP = "Finished";
 const eng = alias(appUser, "eng");
 const opener = alias(appUser, "opener");
 
+/** the job type's target turnaround in days (job_type.default_due_days; 7 when the job has no type) */
+const slaDays = sql`coalesce((${db.select({ d: jobType.defaultDueDays }).from(jobType).where(eq(jobType.jobTypeId, job.jobTypeId))}), 7)`;
+
+/**
+ * The job's REAL due date (a date): the one a user picked in this app, else opened + its job type's
+ * SLA. The legacy system writes "opened + 1 day" on every job — not an estimate (real repairs take
+ * 3–30 days), see drizzle/0020_due_date_sla.sql. One definition for the overdue filter, the bell,
+ * the job screens and the customer's /track page.
+ */
+export const effectiveDue = sql`(case when ${job.dueDateSetByUser} and ${job.customerDueDate} > '1901-01-01' then ${job.customerDueDate}::date else ${job.jobCreateDate}::date + ${slaDays} end)`;
+/** effectiveDue as "YYYY-MM-DD" (a raw date column would come back as a JS Date) */
+export const effectiveDueText = sql<string>`to_char(${effectiveDue}, 'YYYY-MM-DD')`;
+
 /* ------------------------------------------------------------------ *
  * Status helpers (cached name ↔ id)
  * ------------------------------------------------------------------ */
@@ -186,7 +199,7 @@ const listSelect = {
   returnDate: job.jobReturnDate,
   paymentType: job.jobPaymentType,
   paymentAmount: job.jobPaymentAmount,
-  dueDate: job.customerDueDate,
+  dueDate: effectiveDueText,
   openerFirst: opener.firstName,
   openerLast: opener.lastName,
   quotationNo: job.quotationNoApproved,
@@ -194,7 +207,9 @@ const listSelect = {
   partsCost: job.sparePartTotalCost,
 };
 
-type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]["_"]["data"] | null };
+/** a select field's value: a column's data type, or an sql<T> expression's T */
+type FieldData<F> = F extends SQL<infer T> ? T : F extends { _: { data: infer D } } ? D : never;
+type ListRow = { [K in keyof typeof listSelect]: FieldData<(typeof listSelect)[K]> | null };
 
 function toJob(r: ListRow): Job {
   return {
@@ -328,15 +343,15 @@ export const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .from(jobStatus)
   .where(notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"]))}))`;
 
+
 /**
- * Overdue = still open, and customer_due_date (a real date — 1900-01-01 means "none" in the
- * legacy DB) is before today. Compared as a timestamp (no cast on the column) so an index on it
- * stays usable. Shared by the job list filter and the notification bell (services/alerts.ts),
- * so both always count the same jobs.
+ * Overdue = still open, and its real due date (effectiveDue) is before today. isOpenJob narrows to
+ * the open jobs through ix_job_status first, so the per-row due date stays cheap. Shared by the job
+ * list filter and the notification bell (services/alerts.ts), so both always count the same jobs.
  */
-export const overdueWhere = and(isOpenJob, gt(job.customerDueDate, "1901-01-01"), lt(job.customerDueDate, sql`${thaiToday}::timestamp`));
-/** whole days past the due date (1 = due yesterday) */
-export const daysOverdue = sql<number>`(${thaiToday} - ${job.customerDueDate}::date)`.mapWith(Number);
+export const overdueWhere = and(isOpenJob, sql`${effectiveDue} < ${thaiToday}`);
+/** whole days past the real due date (1 = due yesterday) */
+export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith(Number);
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
@@ -542,7 +557,10 @@ export type JobDetail = {
   deliveryCost: number;
   boxCost: number;
   totalCost: number;
+  /** the real due date (effectiveDue) */
   dueDate: string;
+  /** true = no user picked it: opened + the job type's SLA (a legacy "+1 day" date is ignored) */
+  dueDateAuto: boolean;
   engineerId: number;
   engineer: string;
   engineerSymptomId: number;
@@ -595,6 +613,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       engLast: eng.lastName,
       openerFirst: opener.firstName,
       openerLast: opener.lastName,
+      due: effectiveDueText,
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
@@ -706,7 +725,8 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     deliveryCost: num(j.deliveryCost),
     boxCost: num(j.cartonBoxCost),
     totalCost: num(j.jobTotalCost),
-    dueDate: fmtDate(j.customerDueDate),
+    dueDate: fmtDate(r.due),
+    dueDateAuto: !j.dueDateSetByUser,
     engineerId: j.engineerId ?? 0,
     engineer: fullName(r.engFirst, r.engLast),
     engineerSymptomId: j.engineerSymptomId ?? 0,
@@ -871,6 +891,7 @@ async function requiredFilledNow(jobNo: string): Promise<JobRequiredKey[] | null
       brandId: job.productBrandId,
       modelId: job.productModelId,
       symptomId: job.productSymptomId,
+      due: effectiveDueText,
     })
     .from(job)
     .where(eq(job.jobNo, jobNo))
@@ -891,6 +912,7 @@ async function requiredFilledNow(jobNo: string): Promise<JobRequiredKey[] | null
     brand: id(r.brandId),
     modelCode: id(r.modelId),
     symptoms: id(r.symptomId) ? ["x"] : [],
+    dueDate: day(r.due),
   });
 }
 
@@ -915,6 +937,7 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       customerId: cust.id,
       customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200),
       customerDueDate: dateOrSentinel(i.dueDate),
+      dueDateSetByUser: true, // required on a new job — the user picked it
       jobCreateDate: now,
       jobCreateBy: byUserId,
       jobTypeId: lk.jobTypeId,
@@ -994,7 +1017,10 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
 }
 
 export async function updateJob(jobNo: string, i: JobInput, byUserId: number): Promise<JobDetail> {
-  const [cur] = await db.select({ status: job.jobStatusId, custId: job.customerId }).from(job).where(eq(job.jobNo, jobNo));
+  const [cur] = await db
+    .select({ status: job.jobStatusId, custId: job.customerId, due: effectiveDueText })
+    .from(job)
+    .where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   assertJob(i, (await requiredFilledNow(jobNo)) ?? undefined); // never worse than it is now
   const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
@@ -1008,7 +1034,11 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
     const parts = num(existing?.sparePartTotalCost);
     const values = {
         ...(cust ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) } : {}),
-        customerDueDate: dateOrSentinel(i.dueDate),
+        // the due date is written (and becomes "picked by a user") only when it was changed: saving
+        // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
+        ...(i.dueDate !== undefined && str(i.dueDate) !== (cur.due ?? "")
+          ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
+          : {}),
         ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
         jobTypeDetail: str(i.jobTypeDetail).slice(0, 50),
         productImeiNo: str(i.imei).slice(0, 50),

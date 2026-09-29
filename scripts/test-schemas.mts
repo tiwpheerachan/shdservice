@@ -39,11 +39,12 @@ const errorsOf = (schema: Parameters<typeof validate>[0], data: unknown) => {
 const fullJob = {
   customerCode: "C00001", jobType: "งานซ่อม", so: "SO-1", channel: "SHOPEE", saleOrderDate: "2026-09-01",
   warrantyMonth: "12", expireDate: "2027-09-01", serial: "SN1", brand: "Dreame", modelCode: "MD00001", symptoms: ["แบตหมดไว"],
+  dueDate: "2026-09-08",
 };
 
 console.log("\nJob — new job (every required field)");
 test("a complete job passes", () => assert.deepEqual(errorsOf(jobSchema(), fullJob), {}));
-test("an empty job reports all 11 required fields at once, in form order", () => {
+test("an empty job reports all 12 required fields at once, in form order", () => {
   const e = errorsOf(jobSchema(), {});
   assert.deepEqual(Object.keys(e), JOB_REQUIRED_KEYS);
   assert.equal(e.so, "ต้องระบุ Sale Order No.");
@@ -62,6 +63,10 @@ test("dates must be YYYY-MM-DD", () => {
   assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, receptionDate: "" }), {});
 });
 test("costs must not be negative", () => assert.ok(errorsOf(jobSchema(), { ...fullJob, serviceCost: -5 }).serviceCost));
+test("a new job needs its due date (วันประเมินซ่อมเสร็จ) — ISSUE-013", () => {
+  assert.equal(errorsOf(jobSchema(), { ...fullJob, dueDate: "" }).dueDate, "ต้องระบุวันประเมินซ่อมเสร็จ");
+  assert.ok(errorsOf(jobSchema(), { ...fullJob, dueDate: "8/9/2026" }).dueDate, "a date, not any text");
+});
 
 console.log("\nJob — edit (never worse than before)");
 const legacy = { ...fullJob, serial: "", so: "" }; // an old swap job saved without these
@@ -161,6 +166,13 @@ console.log("\nBack office");
 test("master list row: the name, in the list's own words", () => {
   assert.equal(errorsOf(masterSchema("ชื่อหมวดหมู่"), { name: " " }).name, "ต้องระบุชื่อหมวดหมู่");
   assert.deepEqual(errorsOf(masterSchema(), { name: "สายไฟ" }), {});
+});
+test("job type SLA: whole days 1–365, required; other masters have no days field", () => {
+  const sla = masterSchema("ประเภทงานซ่อม", { days: true });
+  assert.deepEqual(errorsOf(sla, { name: "งานซ่อม", days: "8" }), {});
+  assert.equal(errorsOf(sla, { name: "งานซ่อม", days: "" }).days, "ต้องระบุ SLA (วัน)");
+  for (const bad of ["0", "366", "2.5", "abc", "-1"]) assert.ok(errorsOf(sla, { name: "งานซ่อม", days: bad }).days, bad);
+  assert.deepEqual(errorsOf(masterSchema(), { name: "สายไฟ", days: "abc" }), {});
 });
 test("model: name, brand, price present (0 allowed) and not negative", () => {
   assert.deepEqual(Object.keys(errorsOf(modelSchema, { name: "", brand: "", price: "" })).sort(), ["brand", "name", "price"]);

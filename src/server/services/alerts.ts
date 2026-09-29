@@ -7,7 +7,7 @@ import { cached } from "@/server/cache";
 import { RS } from "@/server/record-status";
 import { fmtDate } from "@/server/mappers/format";
 import type { CurrentUser } from "@/server/auth";
-import { daysOverdue, overdueWhere } from "./jobs";
+import { daysOverdue, effectiveDue, effectiveDueText, overdueWhere } from "./jobs";
 
 /**
  * Notification bell (topbar): jobs past their customer due date that are still open
@@ -83,7 +83,7 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
         customer: customer.customerName,
         customerDetail: job.customerDetail,
         status: jobStatus.jobStatusName,
-        dueDate: job.customerDueDate,
+        dueDate: effectiveDueText, // the real due date (a user's, or opened + SLA)
         daysOver: daysOverdue,
         engineerId: job.engineerId,
         engineer: nameOf(eng),
@@ -96,7 +96,7 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
       .leftJoin(eng, eq(eng.userId, job.engineerId))
       .leftJoin(opener, eq(opener.userId, job.jobCreateBy))
       .where(where)
-      .orderBy(desc(job.customerDueDate), desc(job.jobNo))
+      .orderBy(desc(effectiveDue), desc(job.jobNo))
       .limit(ITEM_LIMIT),
   ]);
 

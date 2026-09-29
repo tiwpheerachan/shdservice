@@ -14,9 +14,15 @@ const nonNegative = (field: string) =>
     .refine((v) => v === undefined || v === "" || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
 
 /** a master list row — `nameLabel` is the list's own word ("ชื่อหมวดหมู่", "ชื่ออาการเสีย" …) */
-export function masterSchema(nameLabel = "ชื่อ") {
-  return z.looseObject({ name: z.string().optional() }).superRefine((v, ctx) => {
+/** `days`: the master has a whole-number days field (job types: SLA, 1–365) */
+export function masterSchema(nameLabel = "ชื่อ", opts: { days?: boolean } = {}) {
+  return z.looseObject({ name: z.string().optional(), days: z.union([z.string(), z.number()]).optional() }).superRefine((v, ctx) => {
     if (!isFilled(v.name)) ctx.addIssue({ code: "custom", path: ["name"], message: `ต้องระบุ${nameLabel}` });
+    if (opts.days) {
+      const n = Number(v.days);
+      if (!isFilled(v.days)) ctx.addIssue({ code: "custom", path: ["days"], message: "ต้องระบุ SLA (วัน)" });
+      else if (!Number.isInteger(n) || n < 1 || n > 365) ctx.addIssue({ code: "custom", path: ["days"], message: "SLA ต้องเป็นจำนวนวันเต็ม 1–365" });
+    }
   });
 }
 

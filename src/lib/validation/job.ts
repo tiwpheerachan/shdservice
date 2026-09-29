@@ -23,6 +23,7 @@ export const JOB_REQUIRED = {
   brand: "ต้องเลือกยี่ห้อ",
   modelCode: "ต้องเลือกรุ่น",
   symptoms: "ต้องเลือกอาการเสียหลักอย่างน้อย 1 อาการ",
+  dueDate: "ต้องระบุวันประเมินซ่อมเสร็จ",
 } as const;
 export type JobRequiredKey = keyof typeof JOB_REQUIRED;
 export const JOB_REQUIRED_KEYS = Object.keys(JOB_REQUIRED) as JobRequiredKey[];
@@ -40,6 +41,7 @@ export const JOB_FIELD_LABEL: Record<JobRequiredKey, string> = {
   brand: "ยี่ห้อ",
   modelCode: "รุ่น",
   symptoms: "อาการเสียหลัก",
+  dueDate: "วันประเมินซ่อมเสร็จ",
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

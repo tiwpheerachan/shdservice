@@ -5,7 +5,7 @@ import { db } from "@/db/client";
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/db/schema";
 import { RS } from "@/server/record-status";
 import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
-import { JS } from "./jobs";
+import { JS, effectiveDueText } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
 import { TRACK_STEPS, type PublicDoc, type PublicJob, type PublicJobSummary, type TrackDocKind, type TrackStepKey } from "@/lib/track-public";
 
@@ -96,7 +96,7 @@ function base(where: SQL | undefined) {
       imei: job.productImeiNo,
       receivedDate: job.jobReceptionDate,
       createDate: job.jobCreateDate,
-      dueDate: job.customerDueDate,
+      dueDate: effectiveDueText, // "วันที่คาดว่าจะเสร็จ": a user's date, or opened + SLA — never the legacy +1 day
       closedDate: job.jobClosedDate,
       shipper: job.returnCustomerType,
       trackingNo: job.returnCustomerTrackingNo,

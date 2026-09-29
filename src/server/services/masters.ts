@@ -40,8 +40,9 @@ const SIMPLE = {
     detail: category.categoryDescription,
     extra: category.shotCode,
     active: category.recordStatus,
+    days: null,
     // drizzle insert/update keys (TS property names, not DB column names)
-    keys: { name: "categoryName", detail: "categoryDescription", extra: "shotCode", active: "isActive" },
+    keys: { name: "categoryName", detail: "categoryDescription", extra: "shotCode", active: "isActive", days: null },
     nameLen: 50,
   },
   manufacturers: {
@@ -51,7 +52,8 @@ const SIMPLE = {
     detail: manufacturer.logoName,
     extra: null,
     active: manufacturer.recordStatus,
-    keys: { name: "manufacturerName", detail: "logoName", extra: null, active: "isActive" },
+    days: null,
+    keys: { name: "manufacturerName", detail: "logoName", extra: null, active: "isActive", days: null },
     nameLen: 50,
   },
   colors: {
@@ -61,7 +63,8 @@ const SIMPLE = {
     detail: color.description,
     extra: null,
     active: color.recordStatus,
-    keys: { name: "colorName", detail: "description", extra: null, active: "isActive" },
+    days: null,
+    keys: { name: "colorName", detail: "description", extra: null, active: "isActive", days: null },
     nameLen: 50,
   },
   job_types: {
@@ -71,7 +74,8 @@ const SIMPLE = {
     detail: jobType.jobTypeDescription,
     extra: null,
     active: jobType.recordStatus,
-    keys: { name: "jobTypeName", detail: "jobTypeDescription", extra: null, active: "isActive" },
+    keys: { name: "jobTypeName", detail: "jobTypeDescription", extra: null, active: "isActive", days: "defaultDueDays" },
+    days: jobType.defaultDueDays, // SLA → the real due date of a job nobody picked one for
     nameLen: 50,
   },
   product_types: {
@@ -81,7 +85,8 @@ const SIMPLE = {
     detail: productType.productTypeDescription,
     extra: null,
     active: productType.recordStatus,
-    keys: { name: "productTypeName", detail: "productTypeDescription", extra: null, active: "isActive" },
+    days: null,
+    keys: { name: "productTypeName", detail: "productTypeDescription", extra: null, active: "isActive", days: null },
     nameLen: 50,
   },
 } as const;
@@ -101,6 +106,7 @@ async function loadSimple(kind: SimpleKind, deleted: DeletedMode): Promise<Maste
       name: d.name,
       detail: d.detail ?? sql<string>`''`,
       extra: d.extra ?? sql<string>`''`,
+      days: d.days ?? sql<number | null>`null`,
       active: d.active,
     })
     .from(d.table)
@@ -112,21 +118,23 @@ async function loadSimple(kind: SimpleKind, deleted: DeletedMode): Promise<Maste
     detail: r.detail ?? "",
     status: status(r.active),
     extra: r.extra ?? "",
+    ...(r.days != null ? { days: Number(r.days) } : {}),
   }));
 }
 
 export async function saveSimple(
   kind: SimpleKind,
-  input: { id?: string; name: string; detail?: string; extra?: string; status?: string },
+  input: { id?: string; name: string; detail?: string; extra?: string; days?: string; status?: string },
   byUserId = 0
 ): Promise<MasterRow> {
   const d = SIMPLE[kind];
-  assertValid(masterSchema(), input);
+  assertValid(masterSchema(undefined, { days: !!d.keys.days }), input);
   const name = str(input.name).slice(0, d.nameLen);
   const rs = fromUiStatus(input.status);
   const values: Record<string, unknown> = { [d.keys.name]: name, [d.keys.active]: rs === "ACTIVE", recordStatus: rs, statusChangedAt: nowThai(), statusChangedBy: byUserId };
   if (d.keys.detail) values[d.keys.detail] = str(input.detail).slice(0, 100);
   if (d.keys.extra) values[d.keys.extra] = str(input.extra).slice(0, 50);
+  if (d.keys.days) values[d.keys.days] = Number(input.days);
 
   // unique-name guard (legacy has unique indexes on most names)
   const dup = await db
