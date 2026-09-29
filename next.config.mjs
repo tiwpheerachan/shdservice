@@ -21,7 +21,7 @@ const nextConfig = {
       },
       // public tracking: the URL carries the link token → never send it anywhere as a
       // Referer, never cache (a later rule wins over the global one for the same key).
-      // CSP with a per-request nonce is set by the middleware.
+      // CSP with a per-request nonce is set by src/proxy.ts.
       ...["/track", "/track/:path*", "/api/track/:path*"].map((source) => ({
         source,
         headers: [

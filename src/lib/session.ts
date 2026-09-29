@@ -1,5 +1,5 @@
 // Signed session cookie helpers — HMAC-SHA256 via Web Crypto so they run in
-// both the Edge middleware and Node route handlers. The cookie is httpOnly and
+// the proxy (src/proxy.ts) and the route handlers. The cookie is httpOnly and
 // tamper-proof: payload.signature, verified before it is trusted.
 
 const enc = new TextEncoder();
@@ -13,7 +13,7 @@ export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 // past this — a stolen cookie cannot be kept alive forever through /refresh.
 export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Long-lived marker that a session once existed on this browser — lets the
-// middleware tell "session expired" (→ /login with a message) apart from a
+// proxy tell "session expired" (→ /login with a message) apart from a
 // first visit (→ straight to SSO). Set by /api/sso/me + /refresh (JSON responses,
 // never on the callback redirect — see the single-Set-Cookie note there).
 export const SEEN_COOKIE = "os_seen";

@@ -3,11 +3,11 @@ import { SESSION_COOKIE, SEEN_COOKIE } from "@/lib/session";
 import { originAuthMode, originAuthOk, originAuthSecret } from "@/lib/origin-auth";
 import { THEME_SCRIPT } from "@/lib/theme-script-source";
 
-// Middleware runs in the EDGE runtime, where the HMAC secret (CENTRAL_API_KEY)
-// is NOT reliably available — so it must NOT verify the cookie signature here,
-// or every navigation would be wrongly rejected. It only checks that a session
-// cookie is PRESENT. The real verification (signature, expiry, approval) happens
-// in the Node-runtime (app) layout and API routes, which do have the secret.
+// Proxy (Next 16's name for middleware; always the Node.js runtime). It only
+// checks that a session cookie is PRESENT — the real verification (signature,
+// expiry, user row, approval) happens in the (app) layout and every API route,
+// which is where it has always been; a stale cookie that gets past here is still
+// rejected there.
 //
 // It runs on EVERY path except /api/health, in three steps:
 //   1. origin guard  — the request must come through Cloudflare (X-Origin-Auth)
@@ -79,7 +79,7 @@ async function trackPage(request: NextRequest): Promise<NextResponse> {
   return res;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const blocked = guard(request);
   if (blocked) return blocked;
 

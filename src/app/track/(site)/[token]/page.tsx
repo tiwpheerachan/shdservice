@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * The token is NOT looked up here: a valid, unknown, expired or deleted token all
  * get the same page (no enumeration, nothing to learn before the captcha). The job
  * is resolved by /api/track/session after Turnstile, and its data comes from
- * /api/track/data with a one-time ticket. Security headers + CSP nonce: middleware.
+ * /api/track/data with a one-time ticket. Security headers + CSP nonce: src/proxy.ts.
  */
 export default async function Page({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

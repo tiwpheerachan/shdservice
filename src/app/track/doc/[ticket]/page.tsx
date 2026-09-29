@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * from the IP + browser it was issued to (drizzle/0019). The document is checked again here
  * (a quotation cancelled / a job deleted since the ticket was issued → refused).
  * Refresh = the ticket is spent → open the document again from the tracking page.
- * The middleware gives this path the /track headers (no-store, noindex, no-referrer, CSP).
+ * The proxy (src/proxy.ts) gives this path the /track headers (no-store, noindex, no-referrer, CSP).
  */
 const FAIL_LIMIT = 5; // invalid tickets per IP per 10 minutes → blocked 15 minutes (as /api/track/data)
 

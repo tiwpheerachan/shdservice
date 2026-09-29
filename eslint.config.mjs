@@ -1,15 +1,14 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) });
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
 /**
  * `npm run lint` — Next.js recommended rules (core-web-vitals + TypeScript) plus project rules.
  */
-const config = [
-  { ignores: [".next/**", ".next-*/**", "node_modules/**", "drizzle/**", "public/**", "next-env.d.ts"] },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+export default defineConfig([
+  globalIgnores([".next/**", ".next-*/**", "node_modules/**", "drizzle/**", "public/**", "next-env.d.ts"]),
+  ...nextVitals,
+  ...nextTs,
   {
     rules: {
       // React escapes text safely; this rule only flags quotes in Thai UI copy (80 of them)
@@ -29,6 +28,4 @@ const config = [
   },
   // the one place allowed to do date arithmetic
   { files: ["src/lib/dates.ts"], rules: { "no-restricted-syntax": "off" } },
-];
-
-export default config;
+]);

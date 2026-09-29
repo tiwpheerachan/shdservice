@@ -4,7 +4,7 @@
  * reaches Render without it came around Cloudflare (e.g. straight at
  * shdservice.onrender.com) and none of its headers can be trusted.
  *
- * Edge-safe (used by the middleware): no node:crypto.
+ * Web Crypto only, no node:crypto (used by the proxy, src/proxy.ts).
  *
  * ORIGIN_AUTH_MODE
  *   off      no check (local dev)                 — default outside production

@@ -8,7 +8,7 @@ import { originAuthMode, originAuthOk } from "./origin-auth";
  * header. X-Forwarded-For / X-Real-IP are client-controlled and only used while
  * the origin check is off (local dev) or in `log` rollout mode, where nothing
  * is trusted anyway. In `enforce` mode a request without the secret never gets
- * past the middleware (only /api/health, which does not use the IP).
+ * past the proxy (src/proxy.ts) (only /api/health, which does not use the IP).
  */
 export const UNKNOWN_IP = "0.0.0.0";
 

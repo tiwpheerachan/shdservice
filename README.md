@@ -188,7 +188,7 @@ src/
 - ทุกความล้มเหลว (token ผิด / หมดอายุ / เบอร์ไม่ตรง / DB ล่ม) คืน**ข้อความเดียวกัน** และหน้า 200 เสมอ — ใช้ probe ว่าเลขไหนมีจริงไม่ได้ และคนนอกไม่มีวันเห็น error
 - rate limit ถัง `track` 20/นาที/IP + ล็อกเลขนั้น 15 นาทีเมื่อผิด 5 ครั้ง + Turnstile เมื่อผิดซ้ำ (ข้ามถ้าไม่ได้ตั้ง `TURNSTILE_SECRET_KEY`)
 - เปิดเผยเฉพาะฟิลด์ใน `PublicJob`: สถานะ 5 ขั้น · รุ่น · วันที่ · เลขพัสดุขาส่งคืน + โลโก้/ลิงก์ของบริษัทขนส่ง (`shipping_profile.track_url` แทน `{no}` ด้วยเลขพัสดุ) — **ไม่มีราคา เบอร์ ที่อยู่ IMEI เต็ม ชื่อช่าง**
-- `middleware.ts` ยกเว้น `track(?:/|$)` เท่านั้น · `robots.txt` Disallow `/track` · ทุก response `no-store`
+- `src/proxy.ts` (เดิม middleware.ts) ยกเว้น `track(?:/|$)` เท่านั้น · `robots.txt` Disallow `/track` · ทุก response `no-store`
 
 **env ที่เกี่ยวข้อง:** `APP_BASE_URL` (จำเป็น — ใช้สร้าง URL ใน QR) · `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (ไม่บังคับ)
 
