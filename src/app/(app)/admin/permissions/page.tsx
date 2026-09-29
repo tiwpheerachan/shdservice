@@ -35,6 +35,13 @@ const FALLBACK_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;
 
+/** the editable grid from the DB rows: role::menu → the four grants */
+function buildMap(perms: Permission[]): Record<Key, Cell> {
+  const m: Record<Key, Cell> = {};
+  for (const p of perms) m[keyOf(p.role, p.menu)] = { add: !!p.add, edit: !!p.edit, del: !!p.del, view: !!p.view };
+  return m;
+}
+
 type Cell = { add: boolean; edit: boolean; del: boolean; view: boolean };
 
 export default function PermissionsPage() {
@@ -44,33 +51,26 @@ export default function PermissionsPage() {
   const { data: dbModules } = useModules();
   const ASSIGNABLE_ROLES = dbRoles.length ? dbRoles : FALLBACK_ROLES;
   const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
-  const [map, setMap] = React.useState<Record<Key, Cell>>({});
-  const [role, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
+  // the editable grant grid, rebuilt from the DB rows whenever they change (loaded / after a save)
+  // — adjusted while rendering, not in an effect pass
+  const [map, setMap] = React.useState<Record<Key, Cell>>(() => buildMap(perms));
+  const [mapFrom, setMapFrom] = React.useState(perms);
+  if (perms !== mapFrom) {
+    setMapFrom(perms);
+    setMap(buildMap(perms));
+  }
+  // the roles come from the server after the first render: a pick that is not one of them falls back
+  // to the first (derived — nothing to align)
+  const inRoles = (r: string) => !dbRoles.length || dbRoles.includes(r);
+  const [pickedRole, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
+  const role = inRoles(pickedRole) ? pickedRole : dbRoles[0];
   // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
   // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
   const [menuFilter, setMenuFilter] = React.useState("");
-  const [draft, setDraft] = React.useState({ role: ASSIGNABLE_ROLES[0], menu: "" });
-  React.useEffect(() => {
-    // roles arrive from the server after first render — align the default once
-    if (!dbRoles.length) return;
-    setRole((r) => (dbRoles.includes(r) ? r : dbRoles[0]));
-    setDraft((d) => (dbRoles.includes(d.role) ? d : { ...d, role: dbRoles[0] }));
-  }, [dbRoles]);
+  const [draftPick, setDraft] = React.useState({ role: ASSIGNABLE_ROLES[0], menu: "" });
+  const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] };
   const [saving, setSaving] = React.useState(false);
 
-  // build the editable map from DB rows
-  React.useEffect(() => {
-    const m: Record<Key, Cell> = {};
-    for (const p of perms) {
-      m[keyOf(p.role, p.menu)] = {
-        add: !!p.add,
-        edit: !!p.edit,
-        del: !!p.del,
-        view: !!p.view,
-      };
-    }
-    setMap(m);
-  }, [perms]);
 
   const cellOf = (r: string, menu: string): Cell =>
     map[keyOf(r, menu)] ?? { add: false, edit: false, del: false, view: false };

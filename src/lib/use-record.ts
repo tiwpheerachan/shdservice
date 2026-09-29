@@ -13,6 +13,8 @@ import { api, errMsg } from "@/lib/api";
  *  - `initial`: the number from the URL — loaded on mount, without a toast
  *  - `find(no)`: the search bar — loads that number (again, if it is the current one)
  *  - `onLoaded` / `onMissing`: the page's toasts for a lookup the user asked for
+ *  - `onRecord`: every record that arrives — loaded (URL or search) or saved through `setData` —
+ *    e.g. to fill the page's form from it (an event, not an effect watching the data)
  *  - `setData`: the saved record the API answered with, shown without another read
  */
 export function useRecord<T>(opts: {
@@ -22,13 +24,14 @@ export function useRecord<T>(opts: {
   initial?: string;
   onLoaded?: (record: T) => void;
   onMissing?: (no: string, message: string) => void;
+  onRecord?: (record: T) => void;
 }) {
   const norm = (v: string) => v.trim().toUpperCase();
   const [no, setNo] = React.useState(() => norm(opts.initial ?? ""));
   const quiet = React.useRef(!!no); // the URL's record opens without a "found" toast
   const key = no ? opts.url(no) : null;
 
-  const { pick, onLoaded, onMissing } = opts;
+  const { pick, onLoaded, onMissing, onRecord } = opts;
   const { data, error, isLoading, mutate } = useSWR<T>(key, async (url: string) => pick((await api(url)) as never), {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
@@ -40,6 +43,7 @@ export function useRecord<T>(opts: {
     // swr calls these from the latest render's options → `key` / `no` are the current lookup
     onSuccess: (d, k) => {
       if (k !== key) return;
+      onRecord?.(d);
       if (quiet.current) quiet.current = false;
       else onLoaded?.(d);
     },
@@ -60,7 +64,10 @@ export function useRecord<T>(opts: {
     },
     [no, mutate]
   );
-  const setData = React.useCallback((d: T) => void mutate(d, { revalidate: false }), [mutate]);
+  const setData = (d: T) => {
+    void mutate(d, { revalidate: false });
+    onRecord?.(d);
+  };
   const reload = React.useCallback(() => mutate(), [mutate]);
 
   return { no, data: data ?? null, loading: isLoading, error: error ? errMsg(error) : null, find, setData, reload };

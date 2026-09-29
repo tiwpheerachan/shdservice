@@ -44,7 +44,9 @@ function parseSwap(text: string): Record<string, string> {
 
 function SwapRefundForm() {
   const { push } = useToast();
+  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => prefill(j),
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
@@ -72,8 +74,7 @@ function SwapRefundForm() {
     Object.keys(p).forEach((k) => act.clear(k)); // payload keys = state keys here
   };
 
-  React.useEffect(() => {
-    if (!job) return;
+  function prefill(job: JobDetail) {
     reset(fromJob(job));
     const sw = parseSwap(job.swap.detail);
     const today = thaiToday(); // Thai calendar, not UTC
@@ -93,8 +94,7 @@ function SwapRefundForm() {
       // the job's current status, so saving without a change keeps it (the field is required)
       status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job]);
+  }
 
   const go = (v: string) => find(v);
 

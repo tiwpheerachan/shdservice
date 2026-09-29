@@ -25,7 +25,9 @@ import { patchJson, errMsg } from "@/lib/api";
 
 function EditJobForm() {
   const { push } = useToast();
+  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => prefill(j),
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
@@ -33,10 +35,9 @@ function EditJobForm() {
   const [saving, setSaving] = React.useState(false);
 
   // prefill the form whenever a job is loaded (from ?job= or the GO button)
-  React.useEffect(() => {
-    if (job) reset(fromJob(job));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job]);
+  function prefill(job: JobDetail) {
+    reset(fromJob(job));
+  }
 
   const go = (v: string) => find(v);
 

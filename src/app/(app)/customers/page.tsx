@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { Plus, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
@@ -15,16 +16,16 @@ import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { CUSTOMER_TYPES, type Customer } from "@/data/mock";
-import { useCustomersPage, useProvinces } from "@/data/db";
+import { useApi, useCustomersPage, useProvinces } from "@/data/db";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, toCustomerForm, type CustomerFormValues, type CustomerConflict } from "@/components/shared/customer-form";
-import { api, postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
+import { postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { customerSchema } from "@/lib/validation/customer";
 import { isFilterActive } from "@/lib/utils";
 import { ExportButton } from "@/components/shared/export-button";
 
-export default function CustomersPage() {
+function CustomersPageInner() {
   const { push } = useToast();
   const router = useRouter();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/customers");
@@ -63,20 +64,27 @@ export default function CustomersPage() {
     setOpen(true);
   };
 
-  // deep links: /customers?edit=C43601 (from job / quotation / SO forms) · /customers?new=1&phone=…&name=…
-  React.useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const edit = sp.get("edit")?.trim();
-    if (edit) {
-      api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: edit })}`)
-        .then((d) => { const hit = d.rows.find((c) => c.code === edit) ?? d.rows[0]; if (hit) openForm(hit, !canEdit); })
-        .catch(() => {});
-    } else if (sp.get("new") && canAdd) {
-      openForm(null);
-      setForm((f) => ({ ...f, phone: sp.get("phone") ?? "", name: sp.get("name") ?? "" }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // deep links — handled once each, without an effect:
+  //   ?edit=C43601 (from the job / quotation / SO forms) → that customer's form (swr answer's callback)
+  //   ?new=1&phone=…&name=… → a new customer's form with those filled in (adjusted while rendering)
+  const sp = useSearchParams();
+  const editCode = sp.get("edit")?.trim() ?? "";
+  const editLinkOpened = React.useRef(false);
+  useApi<{ rows: Customer[] }>(editCode ? `/api/customers/lookup${qs({ q: editCode })}` : null, {
+    fresh: true,
+    onSuccess: (d) => {
+      if (editLinkOpened.current) return;
+      editLinkOpened.current = true;
+      const hit = d.rows.find((c) => c.code === editCode) ?? d.rows[0];
+      if (hit) openForm(hit, !canEdit);
+    },
+  });
+  const [newLinkHandled, setNewLinkHandled] = React.useState(false);
+  if (!editCode && sp.get("new") && canAdd && !newLinkHandled) {
+    setNewLinkHandled(true);
+    openForm(null);
+    setForm((f) => ({ ...f, phone: sp.get("phone") ?? "", name: sp.get("name") ?? "" }));
+  }
 
   const save = async () => {
     // an existing customer without a phone (old data) may stay without one
@@ -293,5 +301,13 @@ export default function CustomersPage() {
         </fieldset>
       </Modal>
     </>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <CustomersPageInner />
+    </React.Suspense>
   );
 }

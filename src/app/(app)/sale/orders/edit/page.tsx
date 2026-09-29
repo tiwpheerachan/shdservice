@@ -22,11 +22,15 @@ function EditSaleOrder() {
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<SaleOrderFormHandle>(null);
+  // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
+  // once, when it mounts, so a new record always starts from a clean form
+  const [version, setVersion] = React.useState(0);
   // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
   const { data: loaded, setData: setLoaded, loading, error, find: load } = useRecord<SaleOrderLoaded>({
     url: (n) => `/api/sale-orders/${encodeURIComponent(n)}`,
     pick: (d: { order: SaleOrderLoaded }) => d.order,
     initial: initialNo,
+    onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => push({ kind: "success", title: "เรียกข้อมูลใบสั่งขายสำเร็จ", desc: d.no }),
     onMissing: (n) => push({ kind: "error", title: "ไม่พบใบสั่งขาย", desc: n }),
   });
@@ -98,7 +102,7 @@ function EditSaleOrder() {
         note={loaded ? `สถานะ: ${loaded.approve}` : undefined}
       />
       <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบสั่งขาย" searchId="so-no">
-        <SaleOrderForm ref={form} soNo={no || undefined} initial={loaded} />
+        <SaleOrderForm key={version} ref={form} soNo={no || undefined} initial={loaded} />
         <FormActions
           saveLabel="บันทึกการแก้ไข"
           onSave={save}

@@ -65,11 +65,13 @@ export default function PickPage() {
     [STAFF]
   );
 
-  React.useEffect(() => {
+  // another document type → its reference and lines start over (the change event does it)
+  const changeDocType = (t: string) => {
+    setDocType(t);
     setRef("");
     setLines([]);
     setLoaded(false);
-  }, [docType]);
+  };
 
   // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
   const getData = async () => {
@@ -213,7 +215,7 @@ export default function PickPage() {
             </ReadOnly>
           </Field>
           <Field label="ประเภทเอกสาร" required>
-            <Select value={docType} onChange={(e) => setDocType(e.target.value)}>
+            <Select value={docType} onChange={(e) => changeDocType(e.target.value)}>
               {DOC_TYPES.map((t) => (
                 <option key={t}>{t}</option>
               ))}

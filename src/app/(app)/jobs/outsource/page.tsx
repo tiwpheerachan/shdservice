@@ -41,7 +41,9 @@ function OutsourceForm() {
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
   const { userId: meId, can } = useAccess();
+  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => prefill(j),
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
@@ -78,8 +80,13 @@ function OutsourceForm() {
 
 
   // prefill from the job + its latest job_send_forward_dt row
-  React.useEffect(() => {
-    if (!job) return;
+  // the vendor list can arrive after the job: a saved "ส่งไปยัง" that turns out to be a known
+  // vendor moves from "อื่นๆ" into the list (adjusted while rendering, once — then it matches)
+  if (VENDORS.length && d.sendTo === OTHER && d.sendToOther && VENDORS.includes(d.sendToOther)) {
+    setD((x) => ({ ...x, sendTo: x.sendToOther, sendToOther: "" }));
+  }
+
+  function prefill(job: JobDetail) {
     reset(fromJob(job));
     const last = job.outsource[job.outsource.length - 1];
     const today = thaiToday(); // Thai calendar, not UTC
@@ -97,8 +104,7 @@ function OutsourceForm() {
       // the job's current status, so saving without a change keeps it (the field is required)
       status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job, VENDORS.length]);
+  }
 
   const go = (v: string) => find(v);
 

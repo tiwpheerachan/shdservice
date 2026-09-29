@@ -38,8 +38,14 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const { isAdmin } = useAccess();
+  // local copy for instant feedback after a save; a fresh list from the server replaces it
+  // (adjusted while rendering when config.rows changes — not in an effect pass)
   const [rows, setRows] = React.useState(config.rows);
-  React.useEffect(() => setRows(config.rows), [config.rows]);
+  const [rowsFrom, setRowsFrom] = React.useState(config.rows);
+  if (config.rows !== rowsFrom) {
+    setRowsFrom(config.rows);
+    setRows(config.rows);
+  }
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<(MasterRow & { group?: string }) | null>(
     null

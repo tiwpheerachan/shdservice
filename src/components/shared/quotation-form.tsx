@@ -89,21 +89,35 @@ export const QuotationForm = React.forwardRef<
   const { push } = useToast();
   const fe = useFormErrors();
   const { data: PRODUCTS } = useProducts();
-  const [type, setType] = React.useState<"A" | "B">("A");
-  const [profileId, setProfileId] = React.useState(0); // ออกเอกสารในนาม — from the job when raised from one
-  const [lines, setLines] = React.useState<Line[]>([]);
-  const [service, setService] = React.useState(0);
-  const [discount, setDiscount] = React.useState(0);
-  const [vatRate, setVatRate] = React.useState(0);
-  const [remark, setRemark] = React.useState("");
-  const [status, setStatus] = React.useState(QUOTATION_STATUS_OPTIONS[0]);
-  const [customer, setCustomer] = React.useState<Customer | null>(null);
-  const [contact, setContact] = React.useState("");
+  // an existing quotation fills the form when it mounts — the edit page remounts the form (key) for
+  // every quotation it loads or saves, so this is the one place the form takes `initial`
+  const [type, setType] = React.useState<"A" | "B">(() => (initial && (initial.type.startsWith("Type B") || initial.type === "VIP") ? "B" : "A"));
+  const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม — from the job when raised from one
+  const [lines, setLines] = React.useState<Line[]>(() =>
+    (initial?.lines ?? []).map((l, i) => ({
+      id: i + 2,
+      code: l.code,
+      name: l.detail,
+      qty: l.qty,
+      price: l.unitPrice,
+      itemType: (l.itemType as Line["itemType"]) || "SparePart",
+    }))
+  );
+  const [service, setService] = React.useState(initial?.serviceAmount ?? 0);
+  const [discount, setDiscount] = React.useState(() => {
+    const pct = initial?.discountFormula.match(/^([\d.]+)%$/);
+    return pct ? Number(pct[1]) : 0;
+  });
+  const [vatRate, setVatRate] = React.useState(initial?.vatRate ?? 0);
+  const [remark, setRemark] = React.useState(initial?.remark ?? "");
+  const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
+  const [customer, setCustomer] = React.useState<Customer | null>(initial?.customerDetail ?? null);
+  const [contact, setContact] = React.useState(initial?.contactName ?? "");
   const [fax, setFax] = React.useState("");
-  const [jobRef, setJobRef] = React.useState("");
-  const [job, setJob] = React.useState<JobDetail | null>(null);
-  const [date, setDate] = React.useState("");
-  const idRef = React.useRef(1);
+  const [jobRef, setJobRef] = React.useState(initial?.jobRef ?? "");
+  const [job, setJob] = React.useState<JobDetail | null>(initial?.job ?? null);
+  const date = initial?.date ?? "";
+  const idRef = React.useRef((initial?.lines.length ?? 0) + 1);
 
   // a new quotation's date preview: when the screen opened, Thai time (a loaded one shows its own)
   const openedAt = useMountTime();
@@ -156,33 +170,6 @@ export const QuotationForm = React.forwardRef<
     onError: (msg) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: msg }),
   });
 
-  // prefill from an existing quotation
-  React.useEffect(() => {
-    if (!initial) return;
-    setType(initial.type.startsWith("Type B") || initial.type === "VIP" ? "B" : "A");
-    setLines(
-      initial.lines.map((l) => ({
-        id: ++idRef.current,
-        code: l.code,
-        name: l.detail,
-        qty: l.qty,
-        price: l.unitPrice,
-        itemType: (l.itemType as Line["itemType"]) || "SparePart",
-      }))
-    );
-    setService(initial.serviceAmount ?? 0);
-    const pct = initial.discountFormula.match(/^([\d.]+)%$/);
-    setDiscount(pct ? Number(pct[1]) : 0);
-    setVatRate(initial.vatRate ?? 0);
-    setRemark(initial.remark);
-    setStatus(initial.status || QUOTATION_STATUS_OPTIONS[0]);
-    setCustomer(initial.customerDetail);
-    setContact(initial.contactName);
-    setJobRef(initial.jobRef);
-    setProfileId(initial.documentProfileId ?? 0);
-    setJob(initial.job);
-    setDate(initial.date);
-  }, [initial]);
 
 
   const add = () =>

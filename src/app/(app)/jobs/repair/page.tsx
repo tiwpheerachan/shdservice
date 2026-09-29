@@ -56,7 +56,9 @@ function RepairForm() {
   const { data: PRODUCTS } = useProducts();
   const { data: SYMPTOMS } = useSymptoms();
   const { data: SYMPTOM_STATS } = useSymptomStats();
+  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => prefill(j),
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
@@ -71,8 +73,7 @@ function RepairForm() {
 
 
   // prefill form, repair details and spare-part requests from the loaded job
-  React.useEffect(() => {
-    if (!job) return;
+  function prefill(job: JobDetail) {
     reset(fromJob(job));
     setDetail({
       engineerSymptom: job.engineerSymptom,
@@ -98,8 +99,7 @@ function RepairForm() {
         locked: p.statusId !== 1 || p.granted > 0,
       }))
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job]);
+  }
 
   const go = (v: string) => find(v);
 

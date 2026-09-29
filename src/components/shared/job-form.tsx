@@ -382,8 +382,13 @@ export function JobLookupBar({
   note?: string;
   initial?: string;
 }) {
+  // the box follows a new `initial` from the page (adjusted while rendering); typing edits it freely
   const [v, setV] = React.useState(initial);
-  React.useEffect(() => setV(initial), [initial]);
+  const [vFrom, setVFrom] = React.useState(initial);
+  if (initial !== vFrom) {
+    setVFrom(initial);
+    setV(initial);
+  }
   const autoId = React.useId();
   const inputId = id ?? autoId;
   return (

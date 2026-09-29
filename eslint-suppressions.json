@@ -1,40 +1,5 @@
 {
-  "src/app/(app)/admin/permissions/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 2
-    }
-  },
-  "src/app/(app)/customers/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/jobs/close/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/app/(app)/jobs/list/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/jobs/outsource/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/jobs/repair/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/jobs/swap-refund/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/stock/pick/page.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
     }
@@ -44,19 +9,9 @@
       "count": 1
     }
   },
-  "src/app/(app)/stock/receive/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/app/track/(site)/track-otp.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/components/layout/sidebar.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 2
     }
   },
   "src/components/shared/customer-select.tsx": {
@@ -64,22 +19,7 @@
       "count": 1
     }
   },
-  "src/components/shared/job-form.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/components/shared/job-search.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/shared/master-table.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/shared/quotation-form.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
     }

@@ -18,6 +18,8 @@ import { errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { saleOrderSchema } from "@/lib/validation/sale-order";
+import { useMountTime } from "@/lib/use-client";
+import { isoDateTime } from "@/lib/dates";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
 
@@ -68,18 +70,30 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const fe = useFormErrors();
     const { data: PRODUCTS } = useProducts();
     const { data: STAFF } = useStaff();
-    const [lines, setLines] = React.useState<Line[]>([]);
+    // an existing SO fills the form when it mounts — the edit page remounts the form (key) for every
+    // order it loads or saves, so this is the one place the form takes `initial`
+    const [lines, setLines] = React.useState<Line[]>(() =>
+      (initial?.lines ?? []).map((l, i) => ({ id: i + 1, code: l.code, name: l.name, qty: l.qty, price: l.price, type: l.type }))
+    );
     const [code, setCode] = React.useState("");
-    const [profileId, setProfileId] = React.useState(0); // ออกเอกสารในนาม
+    const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม
     const [qty, setQty] = React.useState(1);
-    const [customer, setCustomer] = React.useState<Customer | null>(null);
-    const [salesId, setSalesId] = React.useState<number>(0);
-    const [payment, setPayment] = React.useState(PAYMENT_METHODS[0]);
-    const [payAmount, setPayAmount] = React.useState("");
-    const [remark, setRemark] = React.useState("");
-    const [slip, setSlip] = React.useState("");
+    const [customer, setCustomer] = React.useState<Customer | null>(() => {
+      const c = initial?.customerDetail;
+      return c ? { code: c.code, name: c.name, address: c.address, phone: c.phone, email: c.email, line: c.line, taxId: c.taxId, status: "Active" } : null;
+    });
+    // พนักงานขาย: the one picked here, else the order's own salesperson, else (a new order) the
+    // signed-in user — derived, so it is right whichever of the order / the staff list arrives first
+    const [pickedSalesId, setSalesId] = React.useState<number>(0);
+    const salesId =
+      pickedSalesId ||
+      (initial ? STAFF.find((x) => x.name === initial.sales)?.id ?? 0 : userId && STAFF.some((x) => x.id === userId) ? userId : 0);
+    const [payment, setPayment] = React.useState(initial?.paymentType || PAYMENT_METHODS[0]);
+    const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : "");
+    const [remark, setRemark] = React.useState(initial?.remark ?? "");
+    const [slip, setSlip] = React.useState(initial?.slip ?? "");
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
-    const [submit, setSubmit] = React.useState(false);
+    const [submit, setSubmit] = React.useState((initial?.approveId ?? 0) >= 2);
 
     // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
     const onPickSlip = async (f: File | undefined) => {
@@ -98,31 +112,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
       }
     };
-    const [date, setDate] = React.useState("");
-    const idRef = React.useRef(0);
+    // the order's own date, or (a new order) when the screen opened — Thai time, browser only
+    const openedAt = useMountTime();
+    const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : "");
+    const idRef = React.useRef(initial?.lines.length ?? 0);
 
-    React.useEffect(() => {
-      const d = new Date();
-      const p = (n: number) => String(n).padStart(2, "0");
-      setDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`);
-    }, []);
-
-    // prefill from an existing SO
-    React.useEffect(() => {
-      if (!initial) return;
-      setLines(initial.lines.map((l) => ({ id: ++idRef.current, code: l.code, name: l.name, qty: l.qty, price: l.price, type: l.type })));
-      const c = initial.customerDetail;
-      setCustomer({ code: c.code, name: c.name, address: c.address, phone: c.phone, email: c.email, line: c.line, taxId: c.taxId, status: "Active" });
-      setPayment(initial.paymentType || PAYMENT_METHODS[0]);
-      setPayAmount(initial.paymentAmount ? String(initial.paymentAmount) : "");
-      setRemark(initial.remark ?? "");
-      setSlip(initial.slip);
-      setProfileId(initial.documentProfileId ?? 0);
-      setSubmit((initial.approveId ?? 0) >= 2);
-      setDate(initial.date);
-      const s = STAFF.find((x) => x.name === initial.sales);
-      if (s) setSalesId(s.id);
-    }, [initial, STAFF]);
 
     const add = () => {
       const p = PRODUCTS.find((x) => x.sysCode === code);
@@ -135,10 +129,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
 
 
-    // a new order is sold by the signed-in user unless another salesperson is picked (the field is required)
-    React.useEffect(() => {
-      if (!initial && !salesId && userId && STAFF.some((s) => s.id === userId)) setSalesId(userId);
-    }, [initial, salesId, userId, STAFF]);
     // a value that changes takes its error away
     const { clear } = fe;
     React.useEffect(() => clear("customerCode"), [customer, clear]);

@@ -17,11 +17,15 @@ function EditQuotation() {
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<QuotationFormHandle>(null);
+  // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
+  // once, when it mounts, so a new record always starts from a clean form
+  const [version, setVersion] = React.useState(0);
   // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
   const { data: loaded, setData: setLoaded, loading, error, find: load } = useRecord<QuotationLoaded>({
     url: (n) => `/api/quotations/${encodeURIComponent(n)}`,
     pick: (d: { quotation: QuotationLoaded }) => d.quotation,
     initial: initialNo,
+    onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => push({ kind: "success", title: "เรียกข้อมูลใบเสนอราคาสำเร็จ", desc: d.no }),
     onMissing: (n) => push({ kind: "error", title: "ไม่พบใบเสนอราคา", desc: n }),
   });
@@ -61,7 +65,7 @@ function EditQuotation() {
         onFind={(v) => load(v)}
       />
       <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบเสนอราคา" searchId="quotation-no">
-        <QuotationForm ref={form} mode="edit" quotationNo={no || undefined} initial={loaded} />
+        <QuotationForm key={version} ref={form} mode="edit" quotationNo={no || undefined} initial={loaded} />
         <FormActions
           saveLabel="บันทึกการแก้ไข"
           onSave={save}

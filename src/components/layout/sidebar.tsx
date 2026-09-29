@@ -40,9 +40,13 @@ export function Sidebar({
     activeGroup ? [activeGroup] : ["jobs"]
   );
 
-  React.useEffect(() => {
-    if (activeGroup) setOpen((s) => (s.includes(activeGroup) ? s : [...s, activeGroup]));
-  }, [activeGroup]);
+  // moving to a page of another group opens that group (adjusted while rendering; the user can
+  // still close it — only a change of page re-opens)
+  const [openedFor, setOpenedFor] = React.useState(activeGroup);
+  if (activeGroup !== openedFor) {
+    setOpenedFor(activeGroup);
+    if (activeGroup && !open.includes(activeGroup)) setOpen([...open, activeGroup]);
+  }
 
   const toggle = (id: string) =>
     setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -71,9 +75,8 @@ export function Sidebar({
     setFlyout({ id: g.id, top, left: rect.right + 10 });
   };
 
-  React.useEffect(() => {
-    if (!collapsed) setFlyout(null);
-  }, [collapsed]);
+  // the hover flyout only exists in the collapsed sidebar
+  if (!collapsed && flyout) setFlyout(null);
 
   React.useEffect(() => () => cancelClose(), []);
 

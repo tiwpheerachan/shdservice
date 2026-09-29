@@ -35,7 +35,9 @@ function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS } = useShippers();
   const { data: SHIPPING } = useShippingProfiles();
+  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => prefill(j),
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
@@ -87,8 +89,7 @@ function CloseForm() {
   ];
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
 
-  React.useEffect(() => {
-    if (!job) return;
+  function prefill(job: JobDetail) {
     reset(fromJob(job));
     setSlip(job.payment.slip);
     const today = thaiToday(); // Thai calendar, not UTC
@@ -106,8 +107,7 @@ function CloseForm() {
       returnDetail: job.return.detail,
       status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : "",
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job]);
+  }
 
   const go = (v: string) => find(v);
 

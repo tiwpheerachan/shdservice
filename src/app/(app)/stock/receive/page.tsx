@@ -17,6 +17,7 @@ import { int, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { today } from "@/lib/dates";
+import type { Product } from "@/data/mock";
 
 type Row = {
   sysCode: string;
@@ -29,13 +30,34 @@ type Row = {
   qty: number;
 };
 
+/** one receipt line per part, quantity 0 */
+function toRows(products: Product[]): Row[] {
+  return products.map((p) => ({
+    sysCode: p.sysCode,
+    mfgCode: p.mfgCode ?? "",
+    name: p.name,
+    brand: p.brand ?? "",
+    category: p.category ?? "",
+    status: p.status,
+    onhand: p.onhand,
+    qty: 0,
+  }));
+}
+
 export default function ReceivePage() {
   const { push } = useToast();
   const { name: me } = useAccess();
   const { data: PRODUCTS, loading, refetch } = useProducts();
   const { data: BRANDS } = useManufacturers();
   const { data: CATEGORIES } = useCategories();
-  const [rows, setRows] = React.useState<Row[]>([]);
+  // every active part is a candidate line (qty typed per line); a fresh product list — loaded, or
+  // re-read after a receipt is saved — starts the lines over (adjusted while rendering)
+  const [rows, setRows] = React.useState<Row[]>(() => toRows(PRODUCTS));
+  const [rowsFrom, setRowsFrom] = React.useState(PRODUCTS);
+  if (PRODUCTS !== rowsFrom) {
+    setRowsFrom(PRODUCTS);
+    setRows(toRows(PRODUCTS));
+  }
   // filter bar narrows which lines are SHOWN; quantities typed into hidden lines are kept
   // (the save reads `rows`, not the visible subset) and counted in the footer
   type LineFilter = { code: string; mfgCode: string; name: string; brand: string; category: string };
@@ -57,21 +79,6 @@ export default function ReceivePage() {
   const [saving, setSaving] = React.useState(false);
 
 
-  // every active part is a candidate line; use the table search to find one
-  React.useEffect(() => {
-    setRows(
-      PRODUCTS.map((p) => ({
-        sysCode: p.sysCode,
-        mfgCode: p.mfgCode ?? "",
-        name: p.name,
-        brand: p.brand ?? "",
-        category: p.category ?? "",
-        status: p.status,
-        onhand: p.onhand,
-        qty: 0,
-      }))
-    );
-  }, [PRODUCTS]);
 
   // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
   const save = async () => {
