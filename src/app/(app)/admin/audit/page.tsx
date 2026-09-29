@@ -10,7 +10,6 @@ import { Badge, type Tone } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
-import { useToast } from "@/components/ui/toast";
 import { useAuditPage, useAuditModules, type AuditRow } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
 import { isFilterActive } from "@/lib/utils";
@@ -37,7 +36,6 @@ const NO_FILTER: Filters = { from: "", to: "", user: "", module: "", action: "",
 const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
 
 export default function AuditPage() {
-  const { push } = useToast();
   const { data: MODULES } = useAuditModules();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
@@ -88,7 +86,6 @@ export default function AuditPage() {
   const resetFilters = () => {
     setDraft(NO_FILTER);
     setFilters(NO_FILTER);
-    push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
   };
 
   return (

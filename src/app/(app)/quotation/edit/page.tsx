@@ -34,10 +34,7 @@ function EditQuotation() {
 
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !no) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขใบเสนอราคาก่อน" });
-      return;
-    }
+    if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
     if (!form.current?.validate()) return;
     setSaving(true);
     try {

@@ -105,10 +105,7 @@ function RepairForm() {
 
   // POST /api/jobs/:no/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
   const save = async () => {
-    if (!job) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
-      return;
-    }
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body = {
       ...detail,
       status: detail.status || undefined,

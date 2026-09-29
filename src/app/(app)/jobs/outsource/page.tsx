@@ -112,10 +112,7 @@ function OutsourceForm() {
 
   // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
-    if (!job) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
-      return;
-    }
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const sendTo = d.sendTo === OTHER ? d.sendToOther.trim() : d.sendTo;
     const receiving = !!open && (d.recvDate || d.recvDetail);
     const body = {

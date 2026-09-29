@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
 import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from "@/data/mock";
 import { useQuotationsPage, useManufacturers } from "@/data/db";
 import { baht, isFilterActive } from "@/lib/utils";
@@ -37,7 +36,6 @@ type Filters = { no: string; type: string; customer: string; customerCode: strin
 const NO_FILTER: Filters = { no: "", type: "", customer: "", customerCode: "", jobNo: "", imei: "", warranty: "", brand: "", from: "", to: "", status: "" };
 
 export default function QuotationListPage() {
-  const { push } = useToast();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/quotation/list");
   const { data: MANUFACTURERS } = useManufacturers();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
@@ -182,7 +180,6 @@ export default function QuotationListPage() {
       <FilterBar
         onSearch={() => {
           setFilters(draft);
-          push({ kind: "info", title: "กรองข้อมูลแล้ว" });
         }}
         onReset={resetFilters}
       >

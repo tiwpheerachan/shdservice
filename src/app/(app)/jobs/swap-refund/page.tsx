@@ -100,10 +100,7 @@ function SwapRefundForm() {
 
   // POST /api/jobs/:no/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
   const save = async () => {
-    if (!job) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
-      return;
-    }
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body =
       mode === "swap"
         ? { inspection: d.inspection, newSerial: d.newSerial, newModel: d.newModel, swapDate: d.swapDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined }

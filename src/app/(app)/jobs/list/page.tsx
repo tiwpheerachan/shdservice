@@ -24,7 +24,6 @@ import { StatusBadge, Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select, Checkbox } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/components/ui/toast";
 import dynamic from "next/dynamic";
 
 // call-log modal — loaded on first open, not with the list page
@@ -113,7 +112,6 @@ function StatChip({
 }
 
 export default function JobListPage() {
-  const { push } = useToast();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/jobs/list");
   const { data: JOB_TYPES } = useJobTypes();
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
@@ -356,7 +354,6 @@ export default function JobListPage() {
             dropDeepLink();
           }
           setFilters(next);
-          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
         onReset={clearAll}
       >

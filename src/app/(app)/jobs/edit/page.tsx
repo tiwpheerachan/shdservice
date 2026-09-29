@@ -44,10 +44,7 @@ function EditJobForm() {
   // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
   // workflow screens), so it is not sent: a stale value must never roll back a newer status.
   const save = async () => {
-    if (!job) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
-      return;
-    }
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     if (report(validate())) return; // a required field that had a value must keep one
     setSaving(true);
     try {

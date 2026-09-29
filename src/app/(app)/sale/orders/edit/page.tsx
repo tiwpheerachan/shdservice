@@ -39,10 +39,7 @@ function EditSaleOrder() {
 
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !no) {
-      push({ kind: "warning", title: "กรุณาระบุเลขใบสั่งขายก่อน" });
-      return;
-    }
+    if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
     if (!form.current?.validate()) return;
     setSaving(true);
     try {

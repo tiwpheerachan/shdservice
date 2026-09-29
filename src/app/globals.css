@@ -226,7 +226,8 @@
   html {
     scroll-padding-top: calc(var(--topbar-h) + 0.75rem);
   }
-  html:has([data-sticky-actions]) {
+  /* a save bar that is on screen — not one inside a hidden block (RecordGate before a record loads) */
+  html:has([data-sticky-actions]:not([hidden] *)) {
     scroll-padding-bottom: calc(var(--actions-h) + 0.75rem);
   }
 
@@ -269,6 +270,13 @@
 :is(input, select, textarea, [role="combobox"])[aria-invalid="true"]:focus-visible {
   border-color: hsl(var(--danger));
   box-shadow: 0 0 0 2px hsl(var(--danger) / 0.2);
+}
+
+/* Toasts (bottom-right) sit above the sticky save bar on the pages that have one, so a toast never
+   covers "บันทึก" (sonner sets these offsets inline → !important). Same bar height as above. */
+html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-position="bottom"] {
+  --offset-bottom: calc(var(--actions-h) + 1rem) !important;
+  --mobile-offset-bottom: calc(var(--actions-h) + 1rem) !important;
 }
 
 @media print {

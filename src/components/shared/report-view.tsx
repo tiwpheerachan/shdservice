@@ -10,7 +10,6 @@ import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { SearchSelect, strOptions } from "./search-select";
 import { ExportButton } from "./export-button";
-import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 export type ReportFilter =
@@ -59,7 +58,6 @@ export function ReportView<T extends Record<string, unknown>>({
   /** download the whole report (same filters) as .xlsx */
   onExport?: () => Promise<unknown>;
 }) {
-  const { push } = useToast();
   // the defaults the filters declare change (a page passes new ones) → the form starts over from
   // them: adjusted while rendering (React's "state from props" pattern), not in an effect pass
   const defaultsKey = filters.map((f) => `${keyOf(f)}=${f.value ?? ""}`).join("|");
@@ -89,14 +87,7 @@ export function ReportView<T extends Record<string, unknown>>({
               <Printer className="h-3.5 w-3.5" />
               พิมพ์รายงาน
             </Button>
-            {onExport ? (
-              <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />
-            ) : (
-              <Button variant="outline" size="sm" onClick={() => push({ kind: "warning", title: "หน้านี้ยังไม่รองรับการส่งออก" })}>
-                <FileSpreadsheet className="h-3.5 w-3.5" />
-                Excel
-              </Button>
-            )}
+            {onExport && <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />}
             <Button
               size="sm"
               onClick={() => window.print()}
@@ -113,7 +104,6 @@ export function ReportView<T extends Record<string, unknown>>({
         title="เงื่อนไขการออกรายงาน"
         onSearch={() => {
           onApply?.(clean(values));
-          push({ kind: "info", title: "ประมวลผลรายงานแล้ว" });
         }}
         onReset={() => {
           const d = defaultsOf(filters);

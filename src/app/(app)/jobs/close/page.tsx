@@ -113,10 +113,7 @@ function CloseForm() {
 
   // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {
-    if (!job) {
-      push({ kind: "warning", title: "กรุณาระบุหมายเลขงานก่อน" });
-      return;
-    }
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body = {
       payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
       return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail, shipperId: d.shipperId || undefined },

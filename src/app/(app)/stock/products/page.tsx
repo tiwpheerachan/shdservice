@@ -137,10 +137,7 @@ export default function ProductsPage() {
 
   // ยกเลิก = product.is_active = false (+ cancel_date / cancel_by)
   const cancelProduct = async (r: Product) => {
-    if (!canDel) {
-      push({ kind: "warning", title: "ยกเลิกรายการอะไหล่", desc: `${r.sysCode} — ต้องมีสิทธิ์ยกเลิก` });
-      return;
-    }
+    if (!canDel) return; // the ยกเลิก button only shows with the permission
     const ok = await confirm({
       tone: "danger",
       title: `ยกเลิกรายการอะไหล่ ${r.sysCode}?`,
@@ -312,7 +309,6 @@ export default function ProductsPage() {
       <FilterBar
         onSearch={() => {
           setFilters(draft);
-          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
         onReset={resetFilters}
       >

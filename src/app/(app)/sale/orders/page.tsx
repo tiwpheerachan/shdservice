@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
 import { type SaleOrder } from "@/data/mock";
 import { useSaleOrdersPage, useStaff } from "@/data/db";
 import { baht, isFilterActive } from "@/lib/utils";
@@ -33,7 +32,6 @@ type Filters = { no: string; customer: string; from: string; to: string; code: s
 const NO_FILTER: Filters = { no: "", customer: "", from: "", to: "", code: "", sales: "", approve: "" };
 
 export default function SaleOrderPage() {
-  const { push } = useToast();
   const { add: canAdd, edit: canEdit } = useAccess().forPath("/sale/orders");
   const { data: USERS } = useStaff();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
@@ -148,7 +146,6 @@ export default function SaleOrderPage() {
       <FilterBar
         onSearch={() => {
           setFilters(draft);
-          push({ kind: "info", title: "กรองข้อมูลแล้ว" });
         }}
         onReset={resetFilters}
       >

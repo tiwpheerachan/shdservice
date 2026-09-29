@@ -119,7 +119,6 @@ export default function InventoryPage() {
   const resetFilters = () => {
     setDraft(NO_FILTER);
     setFilters(NO_FILTER);
-    push({ kind: "info", title: "แสดงข้อมูลทั้งหมด" });
   };
 
   return (
@@ -135,7 +134,6 @@ export default function InventoryPage() {
       <FilterBar
         onSearch={() => {
           setFilters(draft);
-          push({ kind: "info", title: "ค้นหาข้อมูลแล้ว" });
         }}
         onReset={resetFilters}
       >

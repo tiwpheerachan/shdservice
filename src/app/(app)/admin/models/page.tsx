@@ -169,7 +169,6 @@ export default function ModelsPage() {
       <FilterBar
         onSearch={() => {
           setFilter(draft);
-          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
         onReset={resetFilters}
       >

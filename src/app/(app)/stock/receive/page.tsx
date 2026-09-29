@@ -17,6 +17,7 @@ import { int, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { today } from "@/lib/dates";
+import { useClearOnChange, useFormErrors } from "@/lib/use-form-errors";
 import type { Product } from "@/data/mock";
 
 type Row = {
@@ -46,6 +47,7 @@ function toRows(products: Product[]): Row[] {
 
 export default function ReceivePage() {
   const { push } = useToast();
+  const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
   const { name: me } = useAccess();
   const { data: PRODUCTS, loading, refetch } = useProducts();
   const { data: BRANDS } = useManufacturers();
@@ -80,13 +82,15 @@ export default function ReceivePage() {
 
 
 
+  const typedQty = rows.reduce((n, r) => n + r.qty, 0);
+  useClearOnChange(fe.clear, { lines: typedQty }); // typing a quantity takes the error away
+
   // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
   const save = async () => {
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
-    if (!lines.length) {
-      push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนรับเข้า" });
-      return;
-    }
+    const e: Record<string, string> = lines.length ? {} : { lines: "ต้องระบุจำนวนรับเข้าอย่างน้อย 1 รายการ" };
+    fe.setErrors(e);
+    if (fe.report(e)) return;
     setSaving(true);
     try {
       const d = await postJson<{ no: string; total: number }>("/api/stock/receive", { date, poRef: po, supplier, remark, lines });
@@ -235,6 +239,11 @@ export default function ReceivePage() {
         </Field>
       </FilterBar>
 
+      {fe.errors.lines && (
+        <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+          {fe.errors.lines}
+        </p>
+      )}
       <DataTable
         narrowed={isFilterActive(filter, NO_FILTER)}
         onClearFilters={resetFilters}

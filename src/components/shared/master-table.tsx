@@ -125,17 +125,14 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     try {
       await postJson("/api/admin/records", { table: config.kind, id, status: next === "Inactive" ? "INACTIVE" : "ACTIVE" });
       setRows((s) => s.map((x) => (x.id === id ? { ...x, status: next } : x)));
-      push({ kind: "info", title: "เปลี่ยนสถานะเรียบร้อย", desc: `${r.name} → ${next}` });
+      push({ kind: "success", title: "เปลี่ยนสถานะเรียบร้อย", desc: `${r.name} → ${next}` });
     } catch (e) {
       push({ kind: "error", title: "เปลี่ยนสถานะไม่สำเร็จ", desc: errMsg(e) });
     }
   };
 
   const remove = async (r: MasterRow) => {
-    if (!isAdmin) {
-      push({ kind: "warning", title: "ต้องมีสิทธิ์ลบข้อมูล", desc: r.name });
-      return;
-    }
+    if (!isAdmin) return; // the delete button only shows for an admin
     const ok = await confirm({
       tone: "danger",
       title: `ลบ${config.title} "${r.name}"?`,
@@ -233,7 +230,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       align: "center",
       sortable: false,
       cell: (r) => (
-        <RowActions onEdit={() => openEdit(r)} onDelete={() => remove(r)} />
+        <RowActions onEdit={() => openEdit(r)} onDelete={isAdmin ? () => remove(r) : undefined} />
       ),
     },
   ];
@@ -257,7 +254,6 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       <FilterBar
         onSearch={() => {
           setFilter(draft);
-          push({ kind: "info", title: "กรองข้อมูลตามเงื่อนไขแล้ว" });
         }}
         onReset={() => {
           setDraft(NO_FILTER);

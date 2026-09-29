@@ -15,6 +15,7 @@ import { int, cn } from "@/lib/utils";
 import { api, postJson, errMsg, qs } from "@/lib/api";
 import { useMountTime } from "@/lib/use-client";
 import { isoDateTime } from "@/lib/dates";
+import { useClearOnChange, useFormErrors } from "@/lib/use-form-errors";
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 
@@ -36,6 +37,7 @@ type ReturnLine = { logId: number; jobNo: string; code: string; name: string; on
 
 export default function PickPage() {
   const { push } = useToast();
+  const fe = useFormErrors(); // same as every form: the error under its field, focus, one summary toast
   const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
   // งานที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (ไม่ผูกกับสถานะงาน)
   const { data: PENDING_JOB_NOS } = useJobNos(300, "pending_parts");
@@ -71,6 +73,7 @@ export default function PickPage() {
     setRef("");
     setLines([]);
     setLoaded(false);
+    fe.setErrors({}); // another document → the old one's errors no longer apply
   };
 
   // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
@@ -92,7 +95,9 @@ export default function PickPage() {
       return;
     }
     if (!ref) {
-      push({ kind: "warning", title: "กรุณาเลือกอ้างอิงเลขเอกสารก่อน" });
+      const e = { ref: "ต้องเลือกอ้างอิงเลขเอกสาร" };
+      fe.setErrors(e);
+      fe.report(e);
       return;
     }
     try {
@@ -161,17 +166,15 @@ export default function PickPage() {
     );
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
+  useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 
   // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
   const save = async () => {
-    if (totalIssue === 0) {
-      push({ kind: "warning", title: isReturn ? "ยังไม่ได้ระบุจำนวนรับคืน" : "ยังไม่ได้ระบุจำนวนจ่ายออก" });
-      return;
-    }
-    if (!payTo) {
-      push({ kind: "warning", title: isReturn ? "กรุณาระบุ รับคืนจาก" : "กรุณาระบุ จ่ายให้" });
-      return;
-    }
+    const e: Record<string, string> = {};
+    if (totalIssue === 0) e.lines = isReturn ? "ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ" : "ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ";
+    if (!payTo) e.payTo = isReturn ? "ต้องเลือก รับคืนจาก" : "ต้องเลือก จ่ายให้";
+    fe.setErrors(e);
+    if (fe.report(e)) return;
     setSaving(true);
     try {
       const d = await postJson<{ no: string; total: number }>("/api/stock/issue", {
@@ -221,7 +224,7 @@ export default function PickPage() {
               ))}
             </Select>
           </Field>
-          <Field label="อ้างอิงเลขเอกสาร" required={kind !== "other"}>
+          <Field label="อ้างอิงเลขเอกสาร" required={kind !== "other"} error={fe.errors.ref}>
             <div className="flex gap-2">
               {kind === "job" || kind === "return" ? (
                 // พิมพ์เลขงานเองได้ + รายการแนะนำ = งานที่ค้างเบิก / รับคืนได้ (ไม่จำกัดแค่ 100 งานล่าสุด)
@@ -263,6 +266,11 @@ export default function PickPage() {
 
       {/* items table */}
       <div className="surface overflow-hidden">
+        {fe.errors.lines && (
+          <p role="alert" className="border-b border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+            {fe.errors.lines}
+          </p>
+        )}
         <div className="table-scroll">
           <table className="w-full min-w-[880px] text-sm">
             <thead>
@@ -341,7 +349,7 @@ export default function PickPage() {
       {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
-          <Field label={isReturn ? "รับคืนจาก" : "จ่ายให้"} required>
+          <Field label={isReturn ? "รับคืนจาก" : "จ่ายให้"} required error={fe.errors.payTo}>
             <SearchSelect value={payTo} onChange={setPayTo} options={strOptions(RECIPIENTS)} searchPlaceholder="พิมพ์ชื่อ…" />
           </Field>
           <Field label="หมายเหตุ" wide>

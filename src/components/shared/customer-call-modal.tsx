@@ -120,7 +120,7 @@ export function CustomerCallModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      push({ kind: "warning", title: "คัดลอกไม่สำเร็จ" });
+      push({ kind: "error", title: "คัดลอกไม่สำเร็จ" });
     }
   };
 
