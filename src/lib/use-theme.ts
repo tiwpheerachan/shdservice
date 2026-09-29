@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useIsClient, useLocalStorage } from "@/lib/use-client";
 
 export type ThemeMode = "light" | "dark" | "system";
 const KEY = "shd-theme";
+const MODES: readonly ThemeMode[] = ["light", "dark", "system"];
 
 function apply(mode: ThemeMode) {
   const dark =
@@ -14,29 +16,30 @@ function apply(mode: ThemeMode) {
   document.documentElement.dataset.themeMode = mode;
 }
 
+/**
+ * Light / dark / follow the OS. The choice lives in localStorage (the inline theme script paints it
+ * before React loads); every tab follows a change made in another one.
+ */
 export function useTheme() {
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [mounted, setMounted] = useState(false);
+  const [stored, setStored] = useLocalStorage(KEY, "system");
+  const mode: ThemeMode = MODES.includes(stored as ThemeMode) ? (stored as ThemeMode) : "system";
+  const mounted = useIsClient();
 
+  // paint the page whenever the mode changes (here or in another tab)
   useEffect(() => {
-    const stored = (localStorage.getItem(KEY) as ThemeMode | null) ?? "system";
-    setMode(stored);
-    setMounted(true);
+    apply(mode);
+  }, [mode]);
+
+  // "system": follow the OS switching between light and dark
+  useEffect(() => {
+    if (mode !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      if ((localStorage.getItem(KEY) as ThemeMode | null) === "system" || !localStorage.getItem(KEY)) {
-        apply("system");
-      }
-    };
+    const onChange = () => apply("system");
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
-  }, []);
+  }, [mode]);
 
-  const set = useCallback((m: ThemeMode) => {
-    localStorage.setItem(KEY, m);
-    setMode(m);
-    apply(m);
-  }, []);
+  const set = useCallback((m: ThemeMode) => setStored(m), [setStored]);
 
   return { mode, setMode: set, mounted };
 }

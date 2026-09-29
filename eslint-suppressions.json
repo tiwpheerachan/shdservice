@@ -36,7 +36,7 @@
   },
   "src/app/(app)/stock/pick/page.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
+      "count": 1
     }
   },
   "src/app/(app)/stock/products/page.tsx": {
@@ -46,20 +46,10 @@
   },
   "src/app/(app)/stock/receive/page.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
-    }
-  },
-  "src/app/track/(site)/track-client.tsx": {
-    "react-hooks/set-state-in-effect": {
       "count": 1
     }
   },
   "src/app/track/(site)/track-otp.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/layout/app-shell.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
     }
@@ -76,7 +66,7 @@
   },
   "src/components/shared/job-form.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
+      "count": 1
     }
   },
   "src/components/shared/job-search.tsx": {
@@ -91,17 +81,12 @@
   },
   "src/components/shared/quotation-form.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
+      "count": 1
     }
   },
   "src/components/ui/data-table.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 3
-    }
-  },
-  "src/lib/use-theme.ts": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
     }
   }
 }

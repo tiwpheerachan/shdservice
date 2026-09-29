@@ -74,7 +74,9 @@ function useTurnstile(
 }
 
 export function TrackClient(props: Props) {
-  const [tsReady, setTsReady] = React.useState(false);
+  // the script may already be loaded (client-side navigation between /track pages); on a fresh page
+  // it loads after hydration, so the server and the first browser render agree (false)
+  const [tsReady, setTsReady] = React.useState(() => typeof window !== "undefined" && !!window.turnstile);
   const [phase, setPhase] = React.useState<Phase>("gate");
   const [verifying, setVerifying] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -88,10 +90,6 @@ export function TrackClient(props: Props) {
   /** a caller waiting for a background token */
   const waiter = React.useRef<((t: string | null) => void) | null>(null);
 
-  // the script may already be loaded (client-side navigation between /track pages)
-  React.useEffect(() => {
-    if (window.turnstile) setTsReady(true);
-  }, []);
 
   /* ---------- link mode: session → ticket → data ---------- */
   const linkToken = props.mode === "link" ? props.linkToken : "";

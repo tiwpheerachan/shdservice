@@ -50,6 +50,8 @@ import { useFormErrors, apiFieldErrors } from "@/lib/use-form-errors";
 import type { z } from "zod";
 import { jobSchema, filledRequired, missingRequired, JOB_FIELD_LABEL, type JobRequiredKey } from "@/lib/validation/job";
 import type { FieldErrors } from "@/lib/validation";
+import { useMountTime } from "@/lib/use-client";
+import { isoDateTime } from "@/lib/dates";
 
 /* ------------------------------------------------------------------ *
  * Shared form state. Every section reads/writes this through context, and
@@ -439,12 +441,9 @@ export function JobOpenSection({
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { name: me } = useAccess();
   const shownStatus = s.status || status || "งานใหม่";
-  const [now, setNow] = React.useState("");
-  React.useEffect(() => {
-    const d = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    setNow(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`);
-  }, []);
+  // a new job's "วันที่" preview: the moment the screen opened, Thai time (the server stamps the real one)
+  const openedAt = useMountTime();
+  const now = openedAt ? isoDateTime(openedAt, { seconds: true }) : "";
   return (
     <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
       <FieldGrid>

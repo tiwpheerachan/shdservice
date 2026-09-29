@@ -15,6 +15,7 @@ const partsFmt = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+  second: "2-digit",
   hourCycle: "h23",
 });
 const parts = (at: Date) => Object.fromEntries(partsFmt.formatToParts(at).map((x) => [x.type, x.value]));
@@ -26,10 +27,10 @@ export function isoDate(at: Date = new Date()): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-/** the Thai wall-clock "YYYY-MM-DD HH:mm" of an instant */
-export function isoDateTime(at: Date = new Date()): string {
+/** the Thai wall-clock "YYYY-MM-DD HH:mm" (or "…HH:mm:ss" with `seconds`) of an instant */
+export function isoDateTime(at: Date = new Date(), opts: { seconds?: boolean } = {}): string {
   const p = parts(at);
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
 }
 
 /** today on the Thai calendar */

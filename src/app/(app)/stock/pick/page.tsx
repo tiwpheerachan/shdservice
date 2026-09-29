@@ -13,6 +13,8 @@ import { useProducts, useJobNos, useSaleOrders, useStaff } from "@/data/db";
 import { STOCK_PICK_TYPES } from "@/data/mock";
 import { int, cn } from "@/lib/utils";
 import { api, postJson, errMsg, qs } from "@/lib/api";
+import { useMountTime } from "@/lib/use-client";
+import { isoDateTime } from "@/lib/dates";
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 
@@ -48,17 +50,9 @@ export default function PickPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [payTo, setPayTo] = React.useState("");
   const [remark, setRemark] = React.useState("");
-  const [docDate, setDocDate] = React.useState("");
-
-  // stamp document date on the client only (avoids SSR/hydration mismatch)
-  React.useEffect(() => {
-    const now = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    setDocDate(
-      `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ` +
-        `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
-    );
-  }, []);
+  // document date preview: when the screen opened, Thai time (browser only — no hydration mismatch)
+  const openedAt = useMountTime();
+  const docDate = openedAt ? isoDateTime(openedAt, { seconds: true }) : "";
 
   const kind: "job" | "sale" | "other" | "return" =
     docType === "จ่ายออกตามงานซ่อม" ? "job" : docType === "จ่ายออกตามใบสั่งขาย" ? "sale" : docType === "รับคืนจากการเบิก" ? "return" : "other";

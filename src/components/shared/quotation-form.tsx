@@ -19,6 +19,8 @@ import { api, errMsg, qs } from "@/lib/api";
 import type { JobDetail } from "@/lib/use-job";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { quotationSchema } from "@/lib/validation/quotation";
+import { useMountTime } from "@/lib/use-client";
+import { isoDateTime } from "@/lib/dates";
 
 type Line = { id: number; code: string; name: string; qty: number; price: number; itemType: "SparePart" | "Service" | "Delivery" };
 
@@ -103,11 +105,8 @@ export const QuotationForm = React.forwardRef<
   const [date, setDate] = React.useState("");
   const idRef = React.useRef(1);
 
-  React.useEffect(() => {
-    const d = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    setDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`);
-  }, []);
+  // a new quotation's date preview: when the screen opened, Thai time (a loaded one shows its own)
+  const openedAt = useMountTime();
 
   // a job → customer + device info (+ parts flagged "เสนอ" in the repair screen become lines)
   const applyJob = React.useCallback(
@@ -288,7 +287,7 @@ export const QuotationForm = React.forwardRef<
             </ReadOnly>
           </Field>
           <Field label="วันที่">
-            <ReadOnly><span className="num">{date} น.</span></ReadOnly>
+            <ReadOnly><span className="num">{date || (openedAt ? isoDateTime(openedAt) : "")} น.</span></ReadOnly>
           </Field>
           <Field label="อ้างถึง หมายเลขงานซ่อม" required={mode === "new" || !!initial?.jobRef?.trim()} error={fe.errors.jobNo}>
             <Input

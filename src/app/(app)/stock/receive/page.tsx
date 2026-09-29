@@ -16,6 +16,7 @@ import { useProducts, useManufacturers, useCategories } from "@/data/db";
 import { int, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { today } from "@/lib/dates";
 
 type Row = {
   sysCode: string;
@@ -50,17 +51,11 @@ export default function ReceivePage() {
     [rows, filter]
   );
   const [po, setPo] = React.useState("");
-  const [date, setDate] = React.useState("");
+  const [date, setDate] = React.useState(today); // Thai calendar — identical on the server and in the browser
   const [supplier, setSupplier] = React.useState("");
   const [remark, setRemark] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
-  // today's date on the client only (avoids SSR/hydration mismatch)
-  React.useEffect(() => {
-    const n = new Date();
-    const p = (x: number) => String(x).padStart(2, "0");
-    setDate(`${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`);
-  }, []);
 
   // every active part is a candidate line; use the table search to find one
   React.useEffect(() => {
