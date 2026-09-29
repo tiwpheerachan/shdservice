@@ -207,9 +207,7 @@ export default function JobListPage() {
   } | null>(null);
   // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
   const [modalUsed, setModalUsed] = React.useState(false);
-  React.useEffect(() => {
-    if (callFor) setModalUsed(true);
-  }, [callFor]);
+  if (callFor && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
 
   // customer_detail = "C12150 ชื่อ เบอร์" → look the customer up by code
   const openCall = async (job: Job) => {

@@ -58,7 +58,16 @@ export function JobSearch({
   const searchable = settled.length >= SEARCH_MIN_CHARS;
   const found = useApi<{ rows: Job[] }>(
     searchable ? `/api/data/jobs${qs({ paged: 1, pageSize: 10, q: settled, sort: "openDate", dir: "desc", ...params })}` : null,
-    { keepPrevious: true }
+    {
+      keepPrevious: true,
+      fresh: true, // every term is read (not served from cache) — the answer's arrival is the pick event
+      // a full job no picks itself as soon as the lookup confirms it (or, when it is outside this
+      // screen's scope, on Enter — the page then loads it directly and reports what it finds)
+      onSuccess: (d) => {
+        const term = q.trim().toUpperCase();
+        if (JOB_NO.test(term) && d.rows.some((r) => r.no === term)) pick(term);
+      },
+    }
   );
   const rows = React.useMemo(
     () => (typed.length >= SEARCH_MIN_CHARS && searchable && !found.error ? (found.data?.rows ?? []).slice(0, 10) : []),
@@ -71,14 +80,6 @@ export function JobSearch({
     setQ("");
     void onPick(no.trim().toUpperCase());
   };
-
-  // a full job no picks itself as soon as the lookup confirms it (or, when it is outside this
-  // screen's scope, on Enter — the page then loads it directly and reports what it finds)
-  React.useEffect(() => {
-    const term = q.trim().toUpperCase();
-    if (JOB_NO.test(term) && rows.some((r) => r.no === term)) pick(term);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
 
   const term = q.trim();
   const exactOutside = JOB_NO.test(term.toUpperCase()) && !loading && !rows.some((r) => r.no === term.toUpperCase());

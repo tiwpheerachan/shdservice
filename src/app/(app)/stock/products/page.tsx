@@ -96,9 +96,7 @@ export default function ProductsPage() {
   } | null>(null);
   // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
   const [modalUsed, setModalUsed] = React.useState(false);
-  React.useEffect(() => {
-    if (detail) setModalUsed(true);
-  }, [detail]);
+  if (detail && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
 
   // FilterBar (applied on "ค้นหา")
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);

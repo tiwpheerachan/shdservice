@@ -189,22 +189,22 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
   const typed = q.trim();
   const settled = useDebouncedValue(typed, 300);
   const searchable = settled.length >= SEARCH_MIN_CHARS;
-  const found = useApi<{ rows: Customer[] }>(searchable ? `/api/customers/lookup${qs({ q: settled, limit: 10 })}` : null, { keepPrevious: true });
+  const found = useApi<{ rows: Customer[] }>(searchable ? `/api/customers/lookup${qs({ q: settled, limit: 10 })}` : null, {
+    keepPrevious: true,
+    fresh: true, // every term is read (not served from cache) — the answer's arrival is the pick event
+    // typing a full customer code (C43601) selects it without an extra click, when its answer arrives
+    onSuccess: (d) => {
+      const term = q.trim().toUpperCase();
+      if (!/^C\d{5}$/.test(term)) return;
+      const hit = d.rows.find((r) => r.code === term);
+      if (hit) pick(hit);
+    },
+  });
   const rows = React.useMemo(
     () => (typed.length >= SEARCH_MIN_CHARS && searchable && !found.error ? (found.data?.rows ?? []).slice(0, 10) : []),
     [typed, searchable, found.data, found.error]
   );
   const loading = typed.length >= SEARCH_MIN_CHARS && (typed !== settled || found.validating);
-
-  // typing a full customer code (C43601) selects it without an extra click
-  React.useEffect(() => {
-    const term = q.trim().toUpperCase();
-    if (/^C\d{5}$/.test(term)) {
-      const hit = rows.find((r) => r.code === term);
-      if (hit) { onPick(hit); setOpen(false); setQ(""); }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
 
   const pick = (c: Customer) => { onPick(c); setOpen(false); setQ(""); };
 

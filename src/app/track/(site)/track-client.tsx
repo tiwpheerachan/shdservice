@@ -115,6 +115,13 @@ export function TrackClient(props: Props) {
     }
   }, [linkToken]);
 
+  // the link ran out (timer / keepalive / a refused document) — stable, so LinkResult's expiry timer
+  // is armed once per expiry time
+  const expireLink = React.useCallback(() => {
+    setJob(null);
+    setPhase("expired");
+  }, []);
+
   // latest-callback ref: refreshed after every commit (never written during render), read only
   // by the Turnstile callback below — which the widget keeps from its first render
   const onGatePass = React.useRef<(t: string) => void>(() => {});
@@ -237,10 +244,7 @@ export function TrackClient(props: Props) {
           linkToken={linkToken}
           expiresAt={linkExpiresAt}
           onExpiresAt={setLinkExpiresAt}
-          onExpired={() => {
-            setJob(null);
-            setPhase("expired");
-          }}
+          onExpired={expireLink}
         />
       );
     return (
@@ -304,12 +308,16 @@ function LinkResult({
     };
   }, []);
 
+  // the link runs out exactly at expiresAt — one timer, re-armed whenever a keepalive moves it
   React.useEffect(() => {
     if (!expiresAt) return;
-    if (now >= expiresAt) {
-      onExpired();
-      return;
-    }
+    const t = setTimeout(onExpired, Math.max(0, expiresAt - Date.now()));
+    return () => clearTimeout(t);
+  }, [expiresAt, onExpired]);
+
+  // in use and running low → ask the server for more time (it caps at 60 min from the first open)
+  React.useEffect(() => {
+    if (!expiresAt || now >= expiresAt) return;
     const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
     if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {
       lastKeepalive.current = now;

@@ -118,12 +118,17 @@ export function TrackOtp({
     };
   }, []);
 
+  // the session runs out exactly at expiresAt — one timer, re-armed whenever a keepalive moves it
   React.useEffect(() => {
-    if (!session.current || !expiresAt) return;
-    if (now >= expiresAt) {
-      signOut(TRACK_MSG.sessionExpired);
-      return;
-    }
+    if (!expiresAt) return;
+    const t = setTimeout(() => {
+      if (session.current) signOut(TRACK_MSG.sessionExpired);
+    }, Math.max(0, expiresAt - Date.now()));
+    return () => clearTimeout(t);
+  }, [expiresAt, signOut]);
+
+  React.useEffect(() => {
+    if (!session.current || !expiresAt || now >= expiresAt) return;
     // in use and running low → ask the server for more time (it caps at 60 min from sign-in)
     const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
     if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {

@@ -164,17 +164,15 @@ export function DataTable<T extends Record<string, unknown>>({
   const current = server ? page : Math.min(page, totalPages);
   const view = server ? rows : sorted.slice((current - 1) * pageSize, current * pageSize);
 
-  // reset to page 1 when the search / page size / (client) data set changes
-  React.useEffect(() => setPage(1), [q, pageSize]);
-  const rowCount = rows.length;
-  React.useEffect(() => {
-    if (!server) setPage(1);
-  }, [rowCount, server]);
-  // server mode: new filters → page 1 (the old page may not exist any more)
-  const resetKey = server?.resetKey;
-  React.useEffect(() => {
-    if (resetKey !== undefined) setPage(1);
-  }, [resetKey]);
+  // back to page 1 when what is listed changes — the search box and page size do it in their change
+  // events; a new client data set or (server mode) new filters from the page are adjusted while
+  // rendering (the old page may not exist any more)
+  const listKey = server ? `s:${server.resetKey ?? ""}` : `c:${rows.length}`;
+  const [listKeyFrom, setListKeyFrom] = React.useState(listKey);
+  if (listKey !== listKeyFrom) {
+    setListKeyFrom(listKey);
+    setPage(1);
+  }
 
   const toggleSort = (key: string) =>
     setSort((s) =>
@@ -196,7 +194,10 @@ export function DataTable<T extends Record<string, unknown>>({
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
                 className="h-8 pl-8 text-xs"
@@ -296,6 +297,7 @@ export function DataTable<T extends Record<string, unknown>>({
                           className="mt-3"
                           onClick={() => {
                             setQ("");
+                            setPage(1);
                             onClearFilters?.();
                           }}
                         >
@@ -360,7 +362,10 @@ export function DataTable<T extends Record<string, unknown>>({
         <div className="flex items-center gap-2">
           <Select
             value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
             className="h-8 w-28 text-xs"
             aria-label="จำนวนต่อหน้า"
           >
