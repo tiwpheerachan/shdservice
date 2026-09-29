@@ -21,6 +21,15 @@ export type ReportFilter =
 export type ReportValues = Record<string, string>;
 const ALL = new Set(["ทั้งหมด", "- - Select All - -", "- - Select ALL - -", "ALL"]);
 
+const keyOf = (f: ReportFilter) => f.key ?? f.label;
+
+/** each filter's starting value: its `value`, else a select's first option, else "" */
+function defaultsOf(filters: ReportFilter[]): ReportValues {
+  const v: ReportValues = {};
+  for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === "select" ? f.options[0] ?? "" : "");
+  return v;
+}
+
 export function ReportView<T extends Record<string, unknown>>({
   title,
   description,
@@ -50,15 +59,15 @@ export function ReportView<T extends Record<string, unknown>>({
   onExport?: () => void;
 }) {
   const { push } = useToast();
-  const keyOf = (f: ReportFilter) => f.key ?? f.label;
-  const initial = React.useMemo(() => {
-    const v: ReportValues = {};
-    for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === "select" ? f.options[0] ?? "" : "");
-    return v;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.map((f) => `${keyOf(f)}=${f.value ?? ""}`).join("|")]);
-  const [values, setValues] = React.useState<ReportValues>(initial);
-  React.useEffect(() => setValues(initial), [initial]);
+  // the defaults the filters declare change (a page passes new ones) → the form starts over from
+  // them: adjusted while rendering (React's "state from props" pattern), not in an effect pass
+  const defaultsKey = filters.map((f) => `${keyOf(f)}=${f.value ?? ""}`).join("|");
+  const [values, setValues] = React.useState<ReportValues>(() => defaultsOf(filters));
+  const [seenKey, setSeenKey] = React.useState(defaultsKey);
+  if (seenKey !== defaultsKey) {
+    setSeenKey(defaultsKey);
+    setValues(defaultsOf(filters));
+  }
   const clean = (v: ReportValues) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, ALL.has(x) ? "" : x]));
 
   const toneMap = {
@@ -106,8 +115,9 @@ export function ReportView<T extends Record<string, unknown>>({
           push({ kind: "info", title: "ประมวลผลรายงานแล้ว" });
         }}
         onReset={() => {
-          setValues(initial);
-          onApply?.(clean(initial));
+          const d = defaultsOf(filters);
+          setValues(d);
+          onApply?.(clean(d));
         }}
       >
         {filters.map((f) => {

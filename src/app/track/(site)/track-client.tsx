@@ -117,13 +117,17 @@ export function TrackClient(props: Props) {
     }
   }, [linkToken]);
 
+  // latest-callback ref: refreshed after every commit (never written during render), read only
+  // by the Turnstile callback below — which the widget keeps from its first render
   const onGatePass = React.useRef<(t: string) => void>(() => {});
-  onGatePass.current = (t: string) => {
-    setError("");
-    setPhase("ready");
-    if (props.mode === "link") void runLink(t);
-    else gateToken.current = { t, at: Date.now() };
-  };
+  React.useLayoutEffect(() => {
+    onGatePass.current = (t: string) => {
+      setError("");
+      setPhase("ready");
+      if (props.mode === "link") void runLink(t);
+      else gateToken.current = { t, at: Date.now() };
+    };
+  });
 
   // 1. the gate: a visible checkbox — nothing else on the page until it passes
   useTurnstile(gateEl, phase === "gate", tsReady, () => ({
@@ -287,10 +291,11 @@ function LinkResult({
   onExpired: () => void;
 }) {
   const [now, setNow] = React.useState(() => Date.now());
-  const lastInput = React.useRef(Date.now());
+  const lastInput = React.useRef(0); // stamped on mount below (no Date.now() during render)
   const lastKeepalive = React.useRef(0);
 
   React.useEffect(() => {
+    lastInput.current = Date.now();
     const mark = () => (lastInput.current = Date.now());
     const evts = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
     evts.forEach((e) => window.addEventListener(e, mark, { passive: true }));

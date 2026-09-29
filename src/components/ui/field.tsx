@@ -5,18 +5,23 @@ import { cn } from "@/lib/utils";
 
 /**
  * Field = label + one control (+ hint / error). The label is tied to the control automatically:
- * Field makes an id (React.useId) and the FIRST form control rendered inside it (Input, Select,
+ * Field makes an id (React.useId) and the FIRST form control mounted inside it (Input, Select,
  * Textarea, NumberInput, SearchSelect and the pickers — via useFieldControl) takes it, together
  * with aria-describedby (hint / error) and aria-invalid. So clicking the label focuses the control,
  * and screen readers announce "ประเภทงานหลัก, combobox" instead of an unnamed box.
  * A control that already has its own `id` keeps it and the label follows it.
+ *
+ * Controls register in a layout effect (never by writing during render — a render React throws
+ * away must not leave the label pointing at nothing); the owner is settled before the browser paints.
  */
 type FieldCtx = {
   id: string;
   describedBy?: string;
   invalid: boolean;
-  /** which control inside owns the label (the first one rendered) */
-  owner: React.RefObject<string | null>;
+  /** the control that owns the label: the first one registered that is still mounted */
+  owner: string | null;
+  /** a control announces itself; returns its unregister */
+  register: (token: string) => () => void;
 };
 const FieldContext = React.createContext<FieldCtx | null>(null);
 
@@ -33,15 +38,9 @@ export type FieldControlProps = {
 export function useFieldControl(ownId?: string): FieldControlProps {
   const ctx = React.useContext(FieldContext);
   const token = React.useId();
-  if (ctx && ctx.owner.current === null) ctx.owner.current = token;
-  const primary = !!ctx && ctx.owner.current === token;
-  const owner = ctx?.owner;
-  React.useEffect(() => {
-    if (!owner) return;
-    return () => {
-      if (owner.current === token) owner.current = null; // unmounted → the next control takes over
-    };
-  }, [owner, token]);
+  const register = ctx?.register;
+  React.useLayoutEffect(() => register?.(token), [register, token]);
+  const primary = !!ctx && ctx.owner === token;
   if (!primary) return ownId ? { id: ownId } : {};
   return {
     id: ownId ?? ctx.id,
@@ -77,10 +76,21 @@ export function Field({
   const id = htmlFor ?? childId ?? `${auto}-control`;
   const hintId = hint && !error ? `${auto}-hint` : undefined;
   const errorId = error ? `${auto}-error` : undefined;
-  const owner = React.useRef<string | null>(null);
+  // controls in mount order (layout effects run in tree order → the first control in the markup
+  // registers first); unmounting the owner hands the label to the next one
+  const [owner, setOwner] = React.useState<string | null>(null);
+  const registered = React.useRef<string[]>([]);
+  const register = React.useCallback((token: string) => {
+    registered.current = [...registered.current, token];
+    setOwner(registered.current[0]);
+    return () => {
+      registered.current = registered.current.filter((t) => t !== token);
+      setOwner(registered.current[0] ?? null);
+    };
+  }, []);
   const ctx = React.useMemo<FieldCtx>(
-    () => ({ id, describedBy: errorId ?? hintId, invalid: !!error, owner }),
-    [id, errorId, hintId, error]
+    () => ({ id, describedBy: errorId ?? hintId, invalid: !!error, owner, register }),
+    [id, errorId, hintId, error, owner, register]
   );
 
   return (

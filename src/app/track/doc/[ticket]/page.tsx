@@ -28,29 +28,35 @@ export default async function Page({ params }: { params: Promise<{ ticket: strin
   const ipKey = hmac(`ip:${ip}`);
   const ua = h.get("user-agent") ?? "";
 
+  // the checks only decide WHAT to show; the JSX is built after the try (a render error inside a
+  // document is not something this catch could handle anyway — it goes to the error boundary)
   let doc: Awaited<ReturnType<typeof findDoc>> = null;
+  let refusal: string | null = null;
   try {
     const blockKey = `ticket:${ipKey}`;
     if (!(await hit("page_ip_min", ipKey, 30, 60)) || (await isBlocked(blockKey))) {
       logEvent("doc_rate_limited", { ipHash: ipKey, result: "page" });
-      return <Refused text={TRACK_MSG.rateLimited} />;
-    }
-    const t = await consumeDocTicket(ticket, ip, ua);
-    if (!t) {
-      logEvent("doc_ticket_invalid", { ipHash: ipKey });
-      if (!(await hit("ticket_fail", ipKey, FAIL_LIMIT, 10 * 60))) {
-        await block(blockKey, 15);
-        logEvent("ticket_block_triggered", { ipHash: ipKey, result: "doc" });
+      refusal = TRACK_MSG.rateLimited;
+    } else {
+      const t = await consumeDocTicket(ticket, ip, ua);
+      if (!t) {
+        logEvent("doc_ticket_invalid", { ipHash: ipKey });
+        if (!(await hit("ticket_fail", ipKey, FAIL_LIMIT, 10 * 60))) {
+          await block(blockKey, 15);
+          logEvent("ticket_block_triggered", { ipHash: ipKey, result: "doc" });
+        }
+        refusal = TRACK_MSG.docExpired;
+      } else {
+        doc = await findDoc(t.jobNo, t.kind, t.ref);
+        if (!doc) refusal = TRACK_MSG.docExpired;
+        else logEvent("doc_opened", { ipHash: ipKey, jobNo: t.jobNo, result: doc.kind });
       }
-      return <Refused text={TRACK_MSG.docExpired} />;
     }
-    doc = await findDoc(t.jobNo, t.kind, t.ref);
-    if (!doc) return <Refused text={TRACK_MSG.docExpired} />;
-    logEvent("doc_opened", { ipHash: ipKey, jobNo: t.jobNo, result: doc.kind });
   } catch (e) {
     console.error("[track/doc]", e instanceof Error ? e.message.split("\n")[0] : e);
-    return <Refused text={TRACK_MSG.docFail} />;
+    refusal = TRACK_MSG.docFail;
   }
+  if (refusal || !doc) return <Refused text={refusal ?? TRACK_MSG.docExpired} />;
 
   // the same sheet the staff print — what the customer's paper copy already shows
   if (doc.kind === "quotation") return <QuotationDoc no={doc.ref} />;

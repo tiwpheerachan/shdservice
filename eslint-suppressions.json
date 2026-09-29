@@ -65,27 +65,13 @@
     }
   },
   "src/app/track/(site)/track-client.tsx": {
-    "react-hooks/purity": {
-      "count": 1
-    },
-    "react-hooks/refs": {
-      "count": 1
-    },
     "react-hooks/set-state-in-effect": {
       "count": 1
     }
   },
   "src/app/track/(site)/track-otp.tsx": {
-    "react-hooks/purity": {
-      "count": 1
-    },
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/app/track/doc/[ticket]/page.tsx": {
-    "react-hooks/error-boundaries": {
-      "count": 3
     }
   },
   "src/components/layout/app-shell.tsx": {
@@ -148,14 +134,6 @@
       "count": 3
     }
   },
-  "src/components/shared/report-view.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    },
-    "react-hooks/use-memo": {
-      "count": 1
-    }
-  },
   "src/components/shared/track-link.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -164,11 +142,6 @@
   "src/components/ui/data-table.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 3
-    }
-  },
-  "src/components/ui/field.tsx": {
-    "react-hooks/immutability": {
-      "count": 1
     }
   },
   "src/lib/use-job.ts": {
