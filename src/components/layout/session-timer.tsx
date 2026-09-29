@@ -10,9 +10,11 @@ const WARN_SECONDS = 5 * 60;
 const AUTO_REFRESH_EVERY_MS = 5 * 60 * 1000; // activity-based renewal, at most every 5 min (TTL is 30 min)
 
 /**
- * Idle-timeout countdown (30 min): reads the cookie's expiry from /api/sso/me (useMe — shared with the topbar),
- * renews it through /api/sso/refresh (on the button, and automatically on user
- * activity at most every 5 minutes), and sends the user to /login when it runs out.
+ * Idle-timeout countdown (30 min): reads the cookie's expiry from /api/sso/me (useMe — shared with
+ * the topbar and AccessGuard, re-read every minute, so it shows the server's real expiry). The ONLY
+ * thing that extends the session is this component: /api/sso/refresh on the button, and
+ * automatically on user activity at most every 5 minutes. No activity for 30 min → the session ends
+ * on the server and this sends the user to /login.
  */
 export function SessionTimer() {
   const { exp, refresh: reloadMe } = useMe();

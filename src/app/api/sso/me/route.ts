@@ -11,9 +11,12 @@ export async function GET(request: NextRequest) {
   // (signed out on another device → every cookie of that user is dead)
   const user = session ? await resolveUser(session).catch(() => null) : null;
   if (!session || !user) return NextResponse.json({ user: null }, { status: 401 });
+  // read-only: this never re-issues the cookie (the idle timer is renewed only by real activity →
+  // /api/sso/refresh). AccessGuard polls this for "still signed in / still approved".
   const res = NextResponse.json({
     user: { email: session.email, name: user.name, avatar: user.avatar },
     exp: session.exp,
+    approved: user.approved,
   });
   res.cookies.set(SEEN_COOKIE, "1", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: SEEN_TTL_S });
   return res;
