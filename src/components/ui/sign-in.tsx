@@ -18,7 +18,7 @@ export function AuthSplit({
   fit?: "cover" | "contain";
 }) {
   return (
-    <div className="flex min-h-[100dvh] w-full flex-col md:flex-row">
+    <div className="flex min-h-dvh w-full flex-col md:flex-row">
       <section className="flex flex-1 items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-md">{children}</div>
       </section>

@@ -9,9 +9,13 @@ import {
   ChevronRight,
   Search,
   Inbox,
+  SearchX,
+  RotateCcw,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
 import { Input, Select } from "./input";
+import { Skeleton } from "./skeleton";
+import { Button } from "./button";
 
 export type Column<T> = {
   key: string;
@@ -21,9 +25,32 @@ export type Column<T> = {
   cell?: (row: T, index: number) => React.ReactNode;
   align?: "left" | "center" | "right";
   width?: string;
+  /** the column never gets narrower than this (e.g. text that should not wrap to 4 lines) */
+  minWidth?: string;
+  /** a long header ("หมายเลขใบเสนอราคา") may take 2 lines — the column then sizes to its values */
+  headerWrap?: boolean;
   className?: string;
   sortable?: boolean;
   hideBelow?: "sm" | "md" | "lg" | "xl";
+};
+
+/**
+ * Server mode: when `server` is given the table stops filtering / sorting /
+ * slicing `rows` itself. `rows` is the current page from the API, `total` the
+ * full count, and every change of page / page size / search text / sort is
+ * reported through `onChange` so the caller can refetch. Visuals are identical.
+ */
+export type ServerTableState = {
+  page: number;
+  pageSize: number;
+  q: string;
+  sort: { key: string; dir: "asc" | "desc" } | null;
+};
+export type ServerTable = {
+  total: number;
+  onChange: (state: ServerTableState) => void;
+  /** change it (e.g. the applied filters as a string) to jump back to page 1 */
+  resetKey?: string;
 };
 
 const HIDE: Record<string, string> = {
@@ -48,6 +75,9 @@ export function DataTable<T extends Record<string, unknown>>({
   className,
   loading = false,
   rowClassName,
+  server,
+  narrowed = false,
+  onClearFilters,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -63,6 +93,12 @@ export function DataTable<T extends Record<string, unknown>>({
   className?: string;
   loading?: boolean;
   rowClassName?: (row: T, i: number) => string;
+  server?: ServerTable;
+  /** the page's filter bar narrows the rows (see isFilterActive) — an empty result then says
+   *  "nothing matches" instead of `emptyText`, which describes a truly empty list */
+  narrowed?: boolean;
+  /** resets the page's filters (the same as its filter bar's ล้างค่า) — shown as a button on "nothing matches" */
+  onClearFilters?: () => void;
 }) {
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState<{ key: string; dir: "asc" | "desc" } | null>(
@@ -80,16 +116,35 @@ export function DataTable<T extends Record<string, unknown>>({
     []
   );
 
+  // server mode: debounce the search box, then let the caller refetch. A term
+  // shorter than SEARCH_MIN_CHARS is never sent (the trigram indexes cannot use
+  // it) — the box shows a hint and the table keeps the unfiltered list.
+  const tooShort = !!server && q.trim().length > 0 && q.trim().length < SEARCH_MIN_CHARS;
+  const [dq, setDq] = React.useState("");
+  React.useEffect(() => {
+    if (!server) return;
+    const next = tooShort ? "" : q;
+    const id = setTimeout(() => setDq(next), 350);
+    return () => clearTimeout(id);
+  }, [q, tooShort, server]);
+  const onServerChange = server?.onChange;
+  React.useEffect(() => {
+    if (!onServerChange) return;
+    onServerChange({ page, pageSize, q: dq, sort });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, dq, sort, !!onServerChange]);
+
   const filtered = React.useMemo(() => {
+    if (server) return rows;
     if (!q.trim()) return rows;
     const needle = q.trim().toLowerCase();
     return rows.filter((r) =>
       columns.some((c) => String(getVal(r, c)).toLowerCase().includes(needle))
     );
-  }, [q, rows, columns, getVal]);
+  }, [q, rows, columns, getVal, server]);
 
   const sorted = React.useMemo(() => {
-    if (!sort) return filtered;
+    if (server || !sort) return filtered;
     const col = columns.find((c) => c.key === sort.key);
     if (!col) return filtered;
     const copy = [...filtered];
@@ -102,13 +157,22 @@ export function DataTable<T extends Record<string, unknown>>({
       return sort.dir === "asc" ? r : -r;
     });
     return copy;
-  }, [filtered, sort, columns, getVal]);
+  }, [filtered, sort, columns, getVal, server]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const current = Math.min(page, totalPages);
-  const view = sorted.slice((current - 1) * pageSize, current * pageSize);
+  const totalCount = server ? server.total : sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const current = server ? page : Math.min(page, totalPages);
+  const view = server ? rows : sorted.slice((current - 1) * pageSize, current * pageSize);
 
-  React.useEffect(() => setPage(1), [q, pageSize, rows]);
+  // back to page 1 when what is listed changes — the search box and page size do it in their change
+  // events; a new client data set or (server mode) new filters from the page are adjusted while
+  // rendering (the old page may not exist any more)
+  const listKey = server ? `s:${server.resetKey ?? ""}` : `c:${rows.length}`;
+  const [listKeyFrom, setListKeyFrom] = React.useState(listKey);
+  if (listKey !== listKeyFrom) {
+    setListKeyFrom(listKey);
+    setPage(1);
+  }
 
   const toggleSort = (key: string) =>
     setSort((s) =>
@@ -130,10 +194,20 @@ export function DataTable<T extends Record<string, unknown>>({
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
                 placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
                 className="h-8 pl-8 text-xs"
+                aria-describedby={tooShort ? "dt-search-hint" : undefined}
               />
+              {tooShort && (
+                <span id="dt-search-hint" className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 whitespace-nowrap text-2xs text-muted-foreground">
+                  {SEARCH_MIN_HINT}
+                </span>
+              )}
             </div>
           ) : (
             <div />
@@ -153,9 +227,10 @@ export function DataTable<T extends Record<string, unknown>>({
                   <th
                     key={c.key}
                     scope="col"
-                    style={c.width ? { width: c.width } : undefined}
+                    style={c.width || c.minWidth ? { width: c.width, minWidth: c.minWidth } : undefined}
                     className={cn(
-                      "whitespace-nowrap px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground",
+                      "px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground",
+                      c.headerWrap ? "leading-tight" : "whitespace-nowrap",
                       c.align === "right"
                         ? "text-right"
                         : c.align === "center"
@@ -171,6 +246,7 @@ export function DataTable<T extends Record<string, unknown>>({
                         className={cn(
                           "inline-flex items-center gap-1 rounded transition-colors hover:text-foreground",
                           c.align === "right" && "flex-row-reverse",
+                          c.headerWrap && (c.align === "right" ? "text-right" : "text-left"),
                           active && "text-primary"
                         )}
                       >
@@ -194,30 +270,47 @@ export function DataTable<T extends Record<string, unknown>>({
             </tr>
           </thead>
           <tbody>
-            {view.length === 0 ? (
+            {view.length === 0 && loading ? (
+              // first load: skeleton rows keep the table's height so nothing jumps when data lands
+              Array.from({ length: Math.min(pageSize, 8) }, (_, i) => (
+                <tr key={`sk-${i}`} className="border-b border-border/70 last:border-0" aria-busy>
+                  {columns.map((c, j) => (
+                    <td key={c.key} className={cn(cellPad, c.hideBelow && HIDE[c.hideBelow])}>
+                      <Skeleton className={cn("h-3.5", j === 0 ? "w-20" : i % 2 ? "w-3/5" : "w-4/5", c.align === "right" && "ml-auto")} />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : view.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-14 text-center">
-                  {loading ? (
+                  {narrowed || q.trim() ? (
                     <>
-                      <div
-                        className="mx-auto mb-2 h-7 w-7 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary"
-                        aria-hidden
-                      />
-                      <p className="text-sm font-medium text-muted-foreground">
-                        กำลังโหลดข้อมูล…
-                      </p>
+                      <SearchX className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
+                      <p className="text-sm font-medium text-muted-foreground">ไม่พบรายการที่ตรงกับเงื่อนไขค้นหา</p>
+                      <p className="mt-1 text-xs text-muted-foreground/80">ลองเปลี่ยนหรือล้างตัวกรอง</p>
+                      {(onClearFilters || q.trim()) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          className="mt-3"
+                          onClick={() => {
+                            setQ("");
+                            setPage(1);
+                            onClearFilters?.();
+                          }}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          ล้างตัวกรอง
+                        </Button>
+                      )}
                     </>
                   ) : (
                     <>
-                      <Inbox className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" />
-                      <p className="text-sm font-medium text-muted-foreground">
-                        {emptyText}
-                      </p>
-                      {emptyHint && (
-                        <p className="mt-1 text-xs text-muted-foreground/80">
-                          {emptyHint}
-                        </p>
-                      )}
+                      <Inbox className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
+                      <p className="text-sm font-medium text-muted-foreground">{emptyText}</p>
+                      {emptyHint && <p className="mt-1 text-xs text-muted-foreground/80">{emptyHint}</p>}
                     </>
                   )}
                 </td>
@@ -261,16 +354,19 @@ export function DataTable<T extends Record<string, unknown>>({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5 text-xs text-muted-foreground">
         <div className="flex items-center gap-2">
           <span className="num">
-            แสดง {sorted.length === 0 ? 0 : (current - 1) * pageSize + 1}–
-            {Math.min(current * pageSize, sorted.length)} จาก {sorted.length} รายการ
+            แสดง {totalCount === 0 ? 0 : (current - 1) * pageSize + 1}–
+            {Math.min(current * pageSize, totalCount)} จาก {totalCount.toLocaleString("en-US")} รายการ
           </span>
           {footerNote}
         </div>
         <div className="flex items-center gap-2">
           <Select
             value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="h-8 w-24 text-xs"
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="h-8 w-28 text-xs"
             aria-label="จำนวนต่อหน้า"
           >
             {[10, 25, 50, 100].map((n) => (
@@ -293,7 +389,7 @@ export function DataTable<T extends Record<string, unknown>>({
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={current === totalPages}
+              disabled={current >= totalPages}
               className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
               aria-label="ถัดไป"
             >

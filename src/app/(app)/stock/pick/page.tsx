@@ -1,25 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { PackageMinus, Save, Search } from "lucide-react";
+import { Save, Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Select, NumberInput } from "@/components/ui/input";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
-import { useProducts, useJobs } from "@/data/db";
-import { TECHNICIANS, STOCK_PICK_TYPES } from "@/data/mock";
+import { useProducts, useJobNos, useSaleOrders, useStaff } from "@/data/db";
+import { STOCK_PICK_TYPES } from "@/data/mock";
 import { int, cn } from "@/lib/utils";
+import { api, postJson, errMsg, qs } from "@/lib/api";
+import { useMountTime } from "@/lib/use-client";
+import { isoDateTime } from "@/lib/dates";
+import { useClearOnChange, useFormErrors } from "@/lib/use-form-errors";
 
-const DOC_TYPES = STOCK_PICK_TYPES;
-
-const RECIPIENTS = [
-  "ศูนย์ซ่อม รังสิต",
-  "ศูนย์ซ่อม บางนา",
-  "คลังกลาง",
-  ...TECHNICIANS.slice(1),
-];
+const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 
 type Line = {
   docNo: string;
@@ -29,12 +27,24 @@ type Line = {
   onhand: number;
   need: number;
   issue: number;
+  logId?: number; // job_order_spare_part_log id (จ่ายออกตามงานซ่อม)
+  dtId?: number; // sale_out_dt id (จ่ายออกตามใบสั่งขาย)
 };
+
+type PartLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; need: number; status: string };
+type SoLine = { dtId: number; code: string; name: string; onhand: number; need: number; picked: boolean };
+type ReturnLine = { logId: number; jobNo: string; code: string; name: string; onhand: number; granted: number; returned: number; returnable: number; status: string };
 
 export default function PickPage() {
   const { push } = useToast();
-  const { data: PRODUCTS } = useProducts();
-  const { data: JOBS } = useJobs();
+  const fe = useFormErrors(); // same as every form: the error under its field, focus, one summary toast
+  const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
+  // งานที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (ไม่ผูกกับสถานะงาน)
+  const { data: PENDING_JOB_NOS } = useJobNos(300, "pending_parts");
+  const { data: RETURNABLE_JOB_NOS } = useJobNos(300, "returnable");
+  const { data: SALE_ORDERS } = useSaleOrders({ approve: "อนุมัติแล้ว", limit: 100 });
+  const { data: STAFF } = useStaff();
+  const [saving, setSaving] = React.useState(false);
 
   const [docType, setDocType] = React.useState(DOC_TYPES[0]);
   const [ref, setRef] = React.useState("");
@@ -42,60 +52,149 @@ export default function PickPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [payTo, setPayTo] = React.useState("");
   const [remark, setRemark] = React.useState("");
-  const [docDate, setDocDate] = React.useState("");
+  // document date preview: when the screen opened, Thai time (browser only — no hydration mismatch)
+  const openedAt = useMountTime();
+  const docDate = openedAt ? isoDateTime(openedAt, { seconds: true }) : "";
 
-  // stamp document date on the client only (avoids SSR/hydration mismatch)
-  React.useEffect(() => {
-    const now = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    setDocDate(
-      `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ` +
-        `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
-    );
-  }, []);
+  const kind: "job" | "sale" | "other" | "return" =
+    docType === "จ่ายออกตามงานซ่อม" ? "job" : docType === "จ่ายออกตามใบสั่งขาย" ? "sale" : docType === "รับคืนจากการเบิก" ? "return" : "other";
+  // อ้างอิง: งานที่ค้างเบิก / งานที่รับคืนได้ / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
+  const refOptions =
+    kind === "job" ? PENDING_JOB_NOS : kind === "return" ? RETURNABLE_JOB_NOS : kind === "sale" ? SALE_ORDERS.map((s) => s.no) : [];
+  const isReturn = kind === "return";
+  const RECIPIENTS = React.useMemo(
+    () => ["คลังสินค้าดี", ...STAFF.map((s) => s.name)],
+    [STAFF]
+  );
 
-  const refOptions = JOBS.slice(0, 15).map((j) => j.no);
-
-  const getData = () => {
-    if (!ref) {
-      push({ kind: "warning", title: "กรุณาเลือกอ้างอิงเลขเอกสารก่อน" });
-      return;
-    }
-    const items = PRODUCTS.slice(0, 4).map((p, i) => ({
-      docNo: ref,
-      code: p.sysCode,
-      name: p.name,
-      pickStatus: p.onhand === 0 ? "รออะไหล่" : i % 3 === 0 ? "เบิกบางส่วน" : "รอเบิก",
-      onhand: p.onhand,
-      need: (i % 3) + 1,
-      issue: 0,
-    }));
-    setLines(items);
-    setLoaded(true);
-    push({ kind: "success", title: "ดึงรายการเบิกแล้ว", desc: `${ref} — ${items.length} รายการ` });
+  // another document type → its reference and lines start over (the change event does it)
+  const changeDocType = (t: string) => {
+    setDocType(t);
+    setRef("");
+    setLines([]);
+    setLoaded(false);
+    fe.setErrors({}); // another document → the old one's errors no longer apply
   };
 
-  const setIssue = (code: string, v: number) =>
+  // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
+  const getData = async () => {
+    if (kind === "other") {
+      // จ่ายออกอื่นๆ: เลือกจากรายการอะไหล่ทั้งหมด (ใส่จำนวนเฉพาะที่ต้องการจ่าย)
+      setLines(
+        PRODUCTS.filter((p) => p.onhand > 0).map((p) => ({
+          docNo: "-",
+          code: p.sysCode,
+          name: p.name,
+          pickStatus: "พร้อมจ่าย",
+          onhand: p.onhand,
+          need: p.onhand,
+          issue: 0,
+        }))
+      );
+      setLoaded(true);
+      return;
+    }
+    if (!ref) {
+      const e = { ref: "ต้องเลือกอ้างอิงเลขเอกสาร" };
+      fe.setErrors(e);
+      fe.report(e);
+      return;
+    }
+    try {
+      if (kind === "return") {
+        const d = await api<{ rows: ReturnLine[] }>(`/api/stock/pick-lines${qs({ type: "return", ref })}`);
+        setLines(
+          d.rows.map((r) => ({
+            docNo: r.jobNo,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.status,
+            onhand: r.onhand,
+            need: r.returnable,
+            issue: 0,
+            logId: r.logId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการที่รับคืนได้แล้ว", desc: `${ref} — ${d.rows.length} รายการ` });
+      } else if (kind === "job") {
+        const d = await api<{ rows: PartLine[] }>(`/api/stock/pick-lines${qs({ type: "job", ref })}`);
+        setLines(
+          d.rows.map((r) => ({
+            docNo: r.jobNo,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.status,
+            onhand: r.onhand,
+            need: r.need,
+            issue: 0,
+            logId: r.logId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการเบิกแล้ว", desc: `${ref} — ${d.rows.length} รายการ` });
+      } else {
+        const d = await api<{ rows: SoLine[] }>(`/api/stock/pick-lines${qs({ type: "sale", ref })}`);
+        const rows = d.rows.filter((r) => !r.picked);
+        setLines(
+          rows.map((r) => ({
+            docNo: ref,
+            code: r.code,
+            name: r.name,
+            pickStatus: r.onhand === 0 ? "รออะไหล่" : "รอจ่าย",
+            onhand: r.onhand,
+            need: r.need,
+            issue: 0,
+            dtId: r.dtId,
+          }))
+        );
+        setLoaded(true);
+        push({ kind: "success", title: "ดึงรายการแล้ว", desc: `${ref} — ${rows.length} รายการ` });
+      }
+    } catch (e) {
+      push({ kind: "error", title: "ดึงรายการไม่สำเร็จ", desc: errMsg(e) });
+    }
+  };
+
+  const setIssue = (key: number | string, v: number) =>
     setLines((s) =>
       s.map((l) =>
-        l.code === code
-          ? { ...l, issue: Math.max(0, Math.min(v, Math.min(l.need, l.onhand))) }
+        (l.logId ?? l.dtId ?? l.code) === key
+          ? { ...l, issue: Math.max(0, Math.min(v, isReturn ? l.need : Math.min(l.need, l.onhand))) }
           : l
       )
     );
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
+  useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 
-  const save = () => {
-    if (totalIssue === 0) {
-      push({ kind: "warning", title: "ยังไม่ได้ระบุจำนวนจ่ายออก" });
-      return;
+  // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
+  const save = async () => {
+    const e: Record<string, string> = {};
+    if (totalIssue === 0) e.lines = isReturn ? "ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ" : "ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ";
+    if (!payTo) e.payTo = isReturn ? "ต้องเลือก รับคืนจาก" : "ต้องเลือก จ่ายให้";
+    fe.setErrors(e);
+    if (fe.report(e)) return;
+    setSaving(true);
+    try {
+      const d = await postJson<{ no: string; total: number }>("/api/stock/issue", {
+        type: kind,
+        ref,
+        payTo,
+        remark,
+        lines: lines.filter((l) => l.issue > 0).map((l) => ({ logId: l.logId, dtId: l.dtId, code: l.code, qty: l.issue })),
+      });
+      push({ kind: "success", title: isReturn ? `บันทึกการรับคืนแล้ว ${d.total} ชิ้น` : `บันทึกการจ่ายออกแล้ว ${d.total} ชิ้น`, desc: d.no });
+      setLines([]);
+      setLoaded(false);
+      setRef("");
+      setRemark("");
+      refetchProducts();
+    } catch (e) {
+      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+    } finally {
+      setSaving(false);
     }
-    push({
-      kind: "success",
-      title: `บันทึกการจ่ายออกแล้ว ${totalIssue} ชิ้น`,
-      desc: "ระบบสาธิต — ไม่ตัดสต๊อกจริง",
-    });
   };
 
   return (
@@ -119,24 +218,43 @@ export default function PickPage() {
             </ReadOnly>
           </Field>
           <Field label="ประเภทเอกสาร" required>
-            <Select value={docType} onChange={(e) => setDocType(e.target.value)}>
+            <Select value={docType} onChange={(e) => changeDocType(e.target.value)}>
               {DOC_TYPES.map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </Select>
           </Field>
-          <Field label="อ้างอิงเลขเอกสาร" required>
+          <Field label="อ้างอิงเลขเอกสาร" required={kind !== "other"} error={fe.errors.ref}>
             <div className="flex gap-2">
-              <Select
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                className="flex-1"
-              >
-                <option value="">- - Please Select - -</option>
-                {refOptions.map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </Select>
+              {kind === "job" || kind === "return" ? (
+                // พิมพ์เลขงานเองได้ + รายการแนะนำ = งานที่ค้างเบิก / รับคืนได้ (ไม่จำกัดแค่ 100 งานล่าสุด)
+                <div className="relative flex-1">
+                  <Input
+                    list="pick-ref-options"
+                    value={ref}
+                    onChange={(e) => setRef(e.target.value.trim().toUpperCase())}
+                    onKeyDown={(e) => e.key === "Enter" && getData()}
+                    placeholder={kind === "job" ? "เลือกหรือพิมพ์เลขงานที่ค้างเบิก เช่น J2612088" : "เลือกหรือพิมพ์เลขงานที่จ่ายอะไหล่ไปแล้ว"}
+                    className="num"
+                  />
+                  <datalist id="pick-ref-options">
+                    {refOptions.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
+                </div>
+              ) : (
+              <div className="flex-1">
+                <SearchSelect
+                  value={ref}
+                  onChange={setRef}
+                  options={strOptions(refOptions)}
+                  disabled={kind === "other"}
+                  placeholder={kind === "other" ? "- - ไม่ต้องอ้างอิง - -" : "- - Please Select - -"}
+                  searchPlaceholder="พิมพ์เลขเอกสาร…"
+                />
+              </div>
+              )}
               <Button size="md" variant="outline" onClick={getData}>
                 <Search className="h-3.5 w-3.5" />
                 Get Data
@@ -148,6 +266,11 @@ export default function PickPage() {
 
       {/* items table */}
       <div className="surface overflow-hidden">
+        {fe.errors.lines && (
+          <p role="alert" className="border-b border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+            {fe.errors.lines}
+          </p>
+        )}
         <div className="table-scroll">
           <table className="w-full min-w-[880px] text-sm">
             <thead>
@@ -158,8 +281,8 @@ export default function PickPage() {
                 <th className="px-3 py-2.5 text-left">Item Name</th>
                 <th className="px-3 py-2.5 text-left">สถานะการเบิก</th>
                 <th className="px-3 py-2.5 text-right">คงเหลือ</th>
-                <th className="px-3 py-2.5 text-right">ต้องการ</th>
-                <th className="px-3 py-2.5 text-right">จำนวนจ่ายออก</th>
+                <th className="px-3 py-2.5 text-right">{isReturn ? "รับคืนได้" : "ต้องการ"}</th>
+                <th className="px-3 py-2.5 text-right">{isReturn ? "จำนวนรับคืน" : "จำนวนจ่ายออก"}</th>
               </tr>
             </thead>
             <tbody>
@@ -175,7 +298,7 @@ export default function PickPage() {
               ) : (
                 lines.map((l, i) => (
                   <tr
-                    key={l.code}
+                    key={l.logId ?? l.dtId ?? l.code}
                     className="border-b border-border/70 last:border-0 hover:bg-accent/50"
                   >
                     <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
@@ -185,7 +308,7 @@ export default function PickPage() {
                       <span className="line-clamp-1 max-w-[320px]">{l.name}</span>
                     </td>
                     <td className="px-3 py-2">
-                      <Badge tone={l.pickStatus === "รออะไหล่" ? "danger" : "warning"} dot>
+                      <Badge tone={l.pickStatus === "รออะไหล่" ? "danger" : isReturn ? "info" : "warning"} dot>
                         {l.pickStatus}
                       </Badge>
                     </td>
@@ -201,11 +324,11 @@ export default function PickPage() {
                     <td className="px-3 py-2">
                       <NumberInput
                         min={0}
-                        max={Math.min(l.need, l.onhand)}
+                        max={isReturn ? l.need : Math.min(l.need, l.onhand)}
                         placeholder="0"
                         value={l.issue}
-                        disabled={l.onhand === 0}
-                        onChange={(n) => setIssue(l.code, n)}
+                        disabled={!isReturn && l.onhand === 0}
+                        onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
                         className="ml-auto h-8 w-24"
                       />
                     </td>
@@ -217,7 +340,7 @@ export default function PickPage() {
         </div>
         {lines.length > 0 && (
           <div className="flex justify-end gap-3 border-t border-border px-3 py-2.5 text-sm">
-            <span className="text-muted-foreground">รวมจำนวนจ่ายออก</span>
+            <span className="text-muted-foreground">{isReturn ? "รวมจำนวนรับคืน" : "รวมจำนวนจ่ายออก"}</span>
             <span className="num font-semibold text-primary">{int(totalIssue)} ชิ้น</span>
           </div>
         )}
@@ -226,28 +349,23 @@ export default function PickPage() {
       {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
-          <Field label="จ่ายให้" required>
-            <Select value={payTo} onChange={(e) => setPayTo(e.target.value)}>
-              <option value="">- - Please Select - -</option>
-              {RECIPIENTS.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </Select>
+          <Field label={isReturn ? "รับคืนจาก" : "จ่ายให้"} required error={fe.errors.payTo}>
+            <SearchSelect value={payTo} onChange={setPayTo} options={strOptions(RECIPIENTS)} searchPlaceholder="พิมพ์ชื่อ…" />
           </Field>
           <Field label="หมายเหตุ" wide>
             <Input
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
-              placeholder="หมายเหตุการจ่ายออก…"
+              placeholder={isReturn ? "หมายเหตุการรับคืน…" : "หมายเหตุการจ่ายออก…"}
             />
           </Field>
         </FieldGrid>
       </div>
 
       <div className="flex justify-end">
-        <Button size="md" onClick={save} disabled={lines.length === 0}>
+        <Button size="md" onClick={save} disabled={lines.length === 0 || saving}>
           <Save className="h-4 w-4" />
-          บันทึกการจ่ายออก
+          {isReturn ? "บันทึกการรับคืน" : "บันทึกการจ่ายออก"}
         </Button>
       </div>
     </>

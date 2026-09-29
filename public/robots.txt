@@ -1,0 +1,7 @@
+# OneService — internal after-sales service system for SHD Technology staff.
+# Everything except /login needs a signed-in employee; the API is not for crawlers.
+User-agent: *
+Disallow: /api/
+Disallow: /print/
+Disallow: /track
+Allow: /login

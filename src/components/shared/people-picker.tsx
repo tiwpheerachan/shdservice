@@ -3,6 +3,10 @@
 import * as React from "react";
 import { Search, User, Loader2, X, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFieldControl } from "@/components/ui/field";
+import { useApi } from "@/data/db";
+import { qs } from "@/lib/api";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 export type Person = {
   id: string;
@@ -11,6 +15,8 @@ export type Person = {
   department?: string;
   title?: string;
   avatar?: string;
+  /** "active" or not — people who left Lark still show up for a while, flagged */
+  status?: string;
 };
 
 /**
@@ -30,9 +36,8 @@ export function PeoplePicker({
 }) {
   const [q, setQ] = React.useState("");
   const [open, setOpen] = React.useState(false);
-  const [items, setItems] = React.useState<Person[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const field = useFieldControl(); // tie to the surrounding <Field> label
+  const listId = React.useId();
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);
 
@@ -45,37 +50,23 @@ export function PeoplePicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // debounced search
-  React.useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      setItems([]);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const ctrl = new AbortController();
-    const t = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/directory/search?q=${encodeURIComponent(term)}`, {
-          signal: ctrl.signal,
-        });
-        const data = await r.json();
-        setItems(Array.isArray(data.items) ? data.items : []);
-        setError(data.error ?? null);
-        setActive(0);
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") setError("ค้นหาไม่สำเร็จ");
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-    return () => {
-      clearTimeout(t);
-      ctrl.abort();
-    };
-  }, [q]);
+  // debounced directory search (SSO people directory) through swr — the last answer stays on
+  // screen while the next loads, an older answer never wins
+  const typed = q.trim();
+  const settled = useDebouncedValue(typed, 250);
+  const searchable = settled.length >= 2;
+  const found = useApi<{ items?: Person[]; stale?: boolean; error?: string }>(
+    searchable ? `/api/directory/search${qs({ q: settled })}` : null,
+    { keepPrevious: true }
+  );
+  const shown = typed.length >= 2;
+  const items = React.useMemo(
+    () => (shown && Array.isArray(found.data?.items) ? found.data.items : []),
+    [shown, found.data]
+  );
+  const stale = shown && !!found.data?.stale;
+  const error = shown ? (found.error ?? found.data?.error ?? null) : null;
+  const loading = shown && (typed !== settled || found.validating);
 
   const pick = (p: Person) => {
     onChange(p);
@@ -127,9 +118,16 @@ export function PeoplePicker({
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
+          {...field}
+          role="combobox"
+          aria-label={field.id ? undefined : placeholder}
+          aria-autocomplete="list"
+          aria-expanded={open && q.trim().length >= 2}
+          aria-controls={listId}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
+            setActive(0); // a new term → the highlight starts at the top of its results
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
@@ -141,7 +139,7 @@ export function PeoplePicker({
             else if (e.key === "Escape") setOpen(false);
           }}
           placeholder={placeholder}
-          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
         />
         {loading && (
           <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -156,12 +154,17 @@ export function PeoplePicker({
             <p className="px-3 py-3 text-xs text-danger">
               {error === "CENTRAL_API_KEY is not configured on the server"
                 ? "ยังไม่ได้ตั้งค่า CENTRAL_API_KEY บนเซิร์ฟเวอร์"
-                : "ค้นหาไม่สำเร็จ — ลองใหม่อีกครั้ง"}
+                : /missing_scope/.test(error)
+                  ? "แอปยังไม่ได้รับสิทธิ์ directory:read:people จากระบบ SSO"
+                  : "ค้นหาไม่สำเร็จ — ลองใหม่อีกครั้ง"}
             </p>
           ) : items.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">ไม่พบพนักงานที่ตรงกับ “{q}”</p>
           ) : (
-            <ul className="max-h-64 overflow-y-auto py-1">
+            <ul id={listId} className="max-h-64 overflow-y-auto py-1">
+              {stale && (
+                <li className="px-2.5 py-1 text-2xs text-warning">รายชื่ออาจไม่ครบ — รอบซิงก์ล่าสุดจาก Lark ไม่สมบูรณ์</li>
+              )}
               {items.map((p, i) => (
                 <li key={p.id || i}>
                   <button
@@ -178,6 +181,8 @@ export function PeoplePicker({
                       <img
                         src={p.avatar}
                         alt={p.name}
+                        loading="lazy"
+                        decoding="async"
                         className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-border"
                       />
                     ) : (
@@ -186,7 +191,12 @@ export function PeoplePicker({
                       </span>
                     )}
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{p.name}</span>
+                      <span className="block truncate text-sm font-medium">
+                        {p.name}
+                        {p.status && p.status !== "active" && (
+                          <span className="ml-1.5 rounded-full border border-border bg-muted px-1.5 text-2xs font-normal text-muted-foreground">{p.status}</span>
+                        )}
+                      </span>
                       <span className="block truncate text-2xs text-muted-foreground">
                         {[p.title, p.department, p.email].filter(Boolean).join(" · ")}
                       </span>

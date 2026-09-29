@@ -6,22 +6,18 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { AccessGuard } from "./access-guard";
 import { cn } from "@/lib/utils";
+import { useLocalStorage } from "@/lib/use-client";
+import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [collapsed, setCollapsed] = React.useState(false);
+  // collapsed sidebar is remembered per browser (and follows a change made in another tab)
+  const [collapsedPref, setCollapsedPref] = useLocalStorage("shd-sidebar-collapsed", "0");
+  const collapsed = collapsedPref === "1";
   const [palette, setPalette] = React.useState(false);
+  useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
 
-  React.useEffect(() => {
-    const saved = localStorage.getItem("shd-sidebar-collapsed");
-    if (saved === "1") setCollapsed(true);
-  }, []);
-
-  const toggleCollapse = () =>
-    setCollapsed((c) => {
-      localStorage.setItem("shd-sidebar-collapsed", c ? "0" : "1");
-      return !c;
-    });
+  const toggleCollapse = () => setCollapsedPref(collapsed ? "0" : "1");
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -9,6 +9,7 @@ export default async function Page() {
   return (
     <MasterTable
       config={{
+        kind: "manufacturers",
         title: "ยี่ห้อสินค้า",
         description: "รายชื่อผู้ผลิต / แบรนด์สินค้าที่ให้บริการซ่อม",
         nameLabel: "ชื่อยี่ห้อ",

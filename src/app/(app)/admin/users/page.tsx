@@ -1,9 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
+import { Plus, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +14,14 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { PeoplePicker, type Person } from "@/components/shared/people-picker";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import { ROLES, type User } from "@/data/mock";
-import { useUsers } from "@/data/db";
+import { useUsers, useRoles } from "@/data/db";
+import { errMsg, exportXlsx, postJson } from "@/lib/api";
+import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
+import { userSchema } from "@/lib/validation/admin";
+import { isFilterActive } from "@/lib/utils";
+import { ExportButton } from "@/components/shared/export-button";
 
 type UserForm = {
   id: string;
@@ -43,11 +51,30 @@ const EMPTY: UserForm = {
 
 export default function UsersPage() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const [view, setView] = React.useState<"active" | "deleted">("active");
   const { data: USERS, loading, refetch } = useUsers(
     view === "deleted" ? "only" : "exclude"
   );
+  // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
+  const { data: dbRoles } = useRoles();
+  const ROLE_OPTIONS = React.useMemo(
+    () => (dbRoles.length ? [...dbRoles, "รออนุมัติ"] : ROLES),
+    [dbRoles]
+  );
   const pendingCount = USERS.filter((u) => u.role === "รออนุมัติ").length;
+
+  // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
+  type UserFilter = { name: string; username: string; role: string; status: "" | "Active" | "Inactive" };
+  const NO_FILTER: UserFilter = { name: "", username: "", role: "", status: "" };
+  const [draft, setDraft] = React.useState<UserFilter>(NO_FILTER);
+  const [filter, setFilter] = React.useState<UserFilter>(NO_FILTER);
+  const VISIBLE = React.useMemo(() => {
+    const has = (v: string | null | undefined, t: string) => !t.trim() || (v ?? "").toLowerCase().includes(t.trim().toLowerCase());
+    return USERS.filter(
+      (u) => has(u.name, filter.name) && has(u.username, filter.username) && (!filter.role || u.role === filter.role) && (!filter.status || u.status === filter.status)
+    );
+  }, [USERS, filter]);
   // auto-refresh so users who just signed in (pending) show up without a reload
   React.useEffect(() => {
     if (view !== "active") return;
@@ -59,11 +86,14 @@ export default function UsersPage() {
   const [form, setForm] = React.useState<UserForm>(EMPTY);
   const [saving, setSaving] = React.useState(false);
 
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const openAdd = () => {
     setForm(EMPTY);
+    fe.setErrors({});
     setEditing(false);
     setOpen(true);
   };
@@ -83,6 +113,7 @@ export default function UsersPage() {
 
   const openEdit = (r: User) => {
     setForm(toForm(r));
+    fe.setErrors({});
     setEditing(true);
     setOpen(true);
   };
@@ -90,7 +121,7 @@ export default function UsersPage() {
   // Approve in ONE click — assign a default real role + Active immediately.
   // (Change the role afterwards via the edit pencil if needed.)
   const approveNow = (r: User) =>
-    quickSet(r, { role: "เจ้าหน้าที่รับงาน", status: "Active" }, "อนุมัติแล้ว");
+    quickSet(r, { role: "Customer Service", status: "Active" }, "อนุมัติแล้ว");
 
   // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
   const pickPerson = (p: Person | null) => {
@@ -106,41 +137,15 @@ export default function UsersPage() {
     }));
   };
 
-  // POST a user with one automatic session-refresh + retry on 401, so a valid
-  // write is never silently lost to an expiring cookie. Returns the parsed data
-  // or throws; returns null if it had to redirect to re-login.
-  const postUser = async (body: Record<string, unknown>) => {
-    const doPost = () =>
-      fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    let res = await doPost();
-    if (res.status === 401) {
-      await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-      await new Promise((r) => setTimeout(r, 400));
-      res = await doPost();
-    }
-    if (res.status === 401) {
-      window.location.href =
-        "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-      return null;
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `error ${res.status}`);
-    return data;
-  };
+  // a 401 refreshes the session and retries once, then goes to /login (api.ts) — a valid write is
+  // never silently lost to an expiring cookie; field errors come back as ApiError details
+  const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>("/api/admin/users", body);
 
   const save = async () => {
-    if (!form.name.trim() || !form.role.trim()) {
-      push({ kind: "error", title: "กรอกไม่ครบ", desc: "ต้องมีชื่อและประเภทผู้ใช้งาน" });
-      return;
-    }
+    if (fe.report(fe.run(userSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const data = await postUser(form);
-      if (!data) return;
       push({
         kind: "success",
         title: data.created ? "เพิ่มผู้ใช้งานแล้ว" : "บันทึกการแก้ไขแล้ว",
@@ -149,11 +154,7 @@ export default function UsersPage() {
       setOpen(false);
       refetch();
     } catch (e) {
-      push({
-        kind: "error",
-        title: "บันทึกไม่สำเร็จ",
-        desc: e instanceof Error ? e.message : String(e),
-      });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -164,8 +165,7 @@ export default function UsersPage() {
   const quickSet = async (r: User, patch: Partial<UserForm>, okTitle: string) => {
     setBusyId(r.id);
     try {
-      const data = await postUser({ ...toForm(r), ...patch });
-      if (!data) return;
+      await postUser({ ...toForm(r), ...patch });
       push({ kind: "success", title: okTitle, desc: r.name });
       refetch();
     } catch (e) {
@@ -181,27 +181,24 @@ export default function UsersPage() {
 
   // Soft delete / restore via the generic records endpoint (401-resilient).
   const softSet = async (r: User, deleted: boolean) => {
+    if (deleted) {
+      const ok = await confirm({
+        tone: "danger",
+        title: `ลบผู้ใช้ ${r.name}?`,
+        description: (
+          <>
+            {r.name} ({r.role}) จะเข้าระบบไม่ได้และหายจากรายชื่อพนักงานในทุกฟอร์ม งานเก่าที่เคยทำยังแสดงชื่อได้ตามเดิม
+            <br />
+            กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่พักการใช้งาน ให้แก้ไขแล้วเลือกสถานะ Inactive แทน
+          </>
+        ),
+        confirmLabel: "ลบผู้ใช้",
+      });
+      if (!ok) return;
+    }
     setBusyId(r.id);
     try {
-      const doPost = () =>
-        fetch("/api/admin/records", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ table: "users", id: r.id, deleted }),
-        });
-      let res = await doPost();
-      if (res.status === 401) {
-        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-        await new Promise((x) => setTimeout(x, 400));
-        res = await doPost();
-      }
-      if (res.status === 401) {
-        window.location.href =
-          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || `error ${res.status}`);
+      await postJson("/api/admin/records", { table: "users", id: r.id, deleted });
       push({
         kind: "success",
         title: deleted ? "ย้ายไปรายการที่ลบแล้ว" : "กู้คืนแล้ว",
@@ -238,6 +235,8 @@ export default function UsersPage() {
             <img
               src={r.avatar}
               alt={r.name}
+              loading="lazy"
+              decoding="async"
               className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -250,10 +249,7 @@ export default function UsersPage() {
           )}
           <div className="min-w-0">
             <p className="truncate font-medium">{r.name}</p>
-            <p className="num truncate text-2xs text-muted-foreground">
-              {r.username}
-              {r.code ? ` · ${r.code}` : ""}
-            </p>
+            <p className="num truncate text-2xs text-muted-foreground">{r.username}</p>
           </div>
         </div>
       ),
@@ -354,6 +350,11 @@ export default function UsersPage() {
     },
   ];
 
+  const resetFilters = () => {
+    setDraft(NO_FILTER);
+    setFilter(NO_FILTER);
+  };
+
   return (
     <>
       <PageHeader
@@ -361,10 +362,7 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <Button variant="outline" size="sm">
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })} />
             <Button size="sm" onClick={openAdd}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มผู้ใช้งาน
@@ -381,7 +379,7 @@ export default function UsersPage() {
             className={
               "rounded-md px-3.5 py-1.5 font-medium transition-colors " +
               (view === v
-                ? "bg-card text-foreground shadow-sm"
+                ? "bg-card text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground")
             }
           >
@@ -409,12 +407,39 @@ export default function UsersPage() {
         </div>
       )}
 
+      <FilterBar
+        onSearch={() => {
+          setFilter(draft);
+        }}
+        onReset={resetFilters}
+      >
+        <Field label="ชื่อ-สกุล ผู้ใช้ระบบ">
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+        </Field>
+        <Field label="Username">
+          <Input placeholder="username" className="num" value={draft.username} onChange={(e) => setDraft((f) => ({ ...f, username: e.target.value }))} />
+        </Field>
+        <Field label="ประเภทผู้ใช้งาน">
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.role} onChange={(v) => setDraft((f) => ({ ...f, role: v }))} options={strOptions(ROLE_OPTIONS)} />
+        </Field>
+        <Field label="สถานะ">
+          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as UserFilter["status"] }))}>
+            <option value="">ทั้งหมด</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </Select>
+        </Field>
+      </FilterBar>
+
       <DataTable
+        narrowed={isFilterActive(filter, NO_FILTER)}
+        onClearFilters={resetFilters}
+        searchable={false}
         columns={columns}
-        rows={USERS}
+        rows={VISIBLE}
         loading={loading}
         rowKey={(r) => r.id}
-        searchPlaceholder="ค้นหาชื่อ, username, อีเมล…"
+        footerNote={filter !== NO_FILTER && VISIBLE.length !== USERS.length ? <span>· กรองจาก {USERS.length} คน</span> : undefined}
       />
 
       <Modal
@@ -436,13 +461,9 @@ export default function UsersPage() {
       >
         {!editing && (
           <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
-            <label className="mb-1.5 block text-xs font-medium text-foreground">
-              ค้นหาพนักงานจากไดเรกทอรี Lark
-            </label>
-            <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
-            <p className="mt-1.5 text-2xs text-muted-foreground">
-              เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ
-            </p>
+            <Field label="ค้นหาพนักงานจากไดเรกทอรี Lark" hint="เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ">
+              <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
+            </Field>
           </div>
         )}
 
@@ -468,10 +489,10 @@ export default function UsersPage() {
         )}
 
         <FieldGrid cols={2}>
-          <Field label="ชื่อ-สกุล" required>
+          <Field label="ชื่อ-สกุล" required error={fe.errors.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
           </Field>
-          <Field label="อีเมล">
+          <Field label="อีเมล" error={fe.errors.email}>
             <Input
               type="email"
               value={form.email}
@@ -484,12 +505,8 @@ export default function UsersPage() {
           <Field label="รหัสพนักงาน / Lark ID">
             <Input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="—" />
           </Field>
-          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
-            <Select value={form.role} onChange={(e) => set("role", e.target.value)}>
-              {ROLES.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </Select>
+          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required error={fe.errors.role} hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
+            <SearchSelect value={form.role} onChange={(v) => set("role", v)} options={strOptions(ROLE_OPTIONS)} />
           </Field>
           <Field label="สาขา / หน่วยงาน">
             <Input value={form.branch} onChange={(e) => set("branch", e.target.value)} />

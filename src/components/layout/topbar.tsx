@@ -3,13 +3,13 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Search, LogOut, ChevronRight, Bell, PanelLeft } from "lucide-react";
+import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from "lucide-react";
 import { findBreadcrumb } from "@/lib/nav";
 import { ThemeToggle } from "./theme-toggle";
 import { SessionTimer } from "./session-timer";
+import { OverdueBell } from "./overdue-bell";
 import { cn } from "@/lib/utils";
-
-type Me = { name: string; email: string; avatar?: string };
+import { useMe } from "@/lib/use-me";
 
 export function Topbar({
   onOpenMobile,
@@ -25,27 +25,15 @@ export function Topbar({
   const pathname = usePathname();
   const crumb = findBreadcrumb(pathname);
 
-  const [me, setMe] = React.useState<Me | null>(null);
+  const { user: me } = useMe();
   const [avatarError, setAvatarError] = React.useState(false);
-  React.useEffect(() => {
-    let active = true;
-    fetch("/api/sso/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (active && d?.user) setMe(d.user);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const initials = me?.name
     ? me.name.replace(/^(คุณ|นาย|นาง|นางสาว)\s*/u, "").slice(0, 2).toUpperCase()
     : "··";
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
+    <header className="sticky top-0 z-30 flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
       <button
         onClick={onOpenMobile}
         className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
@@ -100,13 +88,16 @@ export function Topbar({
 
       <SessionTimer />
 
-      <button
-        className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        aria-label="การแจ้งเตือน"
+      <Link
+        href="/admin/guide"
+        title="คู่มือการใช้งาน"
+        aria-label="คู่มือการใช้งาน"
+        className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
       >
-        <Bell className="h-4 w-4" />
-        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger ring-2 ring-background" />
-      </button>
+        <CircleHelp className="h-4 w-4" />
+      </Link>
+
+      <OverdueBell />
 
       <ThemeToggle />
 
@@ -128,7 +119,9 @@ export function Topbar({
           <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
           <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>
         </div>
-        <Link
+        {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
+            /api/sso/logout silently signed the user out after every page load */}
+        <a
           href="/api/sso/logout"
           title="ออกจากระบบ"
           className={cn(
@@ -137,7 +130,7 @@ export function Topbar({
           )}
         >
           <LogOut className="h-4 w-4" />
-        </Link>
+        </a>
       </div>
     </header>
   );

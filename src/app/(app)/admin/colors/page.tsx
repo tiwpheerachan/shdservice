@@ -9,6 +9,7 @@ export default async function Page() {
   return (
     <MasterTable
       config={{
+        kind: "colors",
         title: "สีสินค้า",
         description: "รหัสสีมาตรฐานสำหรับระบุสีของเครื่องที่รับซ่อม",
         nameLabel: "ชื่อสี",

@@ -3,53 +3,74 @@
 import * as React from "react";
 import { Save, ShieldCheck, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { SearchSelect, strOptions } from "@/components/shared/search-select";
+import { Field } from "@/components/ui/field";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox, Select } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type Permission } from "@/data/mock";
-import { usePermissions } from "@/data/db";
+import { usePermissions, useRoles, useModules } from "@/data/db";
+import { postJson } from "@/lib/api";
 
-// เมนูงานหลักของระบบ — ใช้สร้าง matrix สิทธิ์ให้ครบทุก role
-const MENUS = [
-  "ข้อมูลระบบ",
-  "ข้อมูลอะไหล่",
-  "ข้อมูลลูกค้า",
-  "ข้อมูลงานบริการ",
-  "ข้อมูลเสนอราคา",
-  "ข้อมูลใบสั่งขาย",
-  "รายงาน",
+// เมนูงาน (module) และบทบาท (user_type) มาจากตาราง app_config ของระบบเดิม
+// — ค่า fallback ด้านล่างใช้เฉพาะระหว่างโหลด
+const FALLBACK_MENUS = [
+  "Job Management",
+  "Job Assign",
+  "Job Repair",
+  "Job Closing",
+  "Product",
+  "Product Onhand",
+  "Product Receive Stock",
+  "Product Pick Stock",
+  "Customer",
+  "Quotation",
+  "Sale Order",
 ];
-
-// role ที่กำหนดสิทธิ์ได้ (ตัด "รออนุมัติ" ออก — เป็นสถานะรอ ไม่ใช่บทบาทใช้งาน)
-const ASSIGNABLE_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
+const FALLBACK_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
 
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;
+
+/** the editable grid from the DB rows: role::menu → the four grants */
+function buildMap(perms: Permission[]): Record<Key, Cell> {
+  const m: Record<Key, Cell> = {};
+  for (const p of perms) m[keyOf(p.role, p.menu)] = { add: !!p.add, edit: !!p.edit, del: !!p.del, view: !!p.view };
+  return m;
+}
 
 type Cell = { add: boolean; edit: boolean; del: boolean; view: boolean };
 
 export default function PermissionsPage() {
   const { push } = useToast();
   const { data: perms, loading, refetch } = usePermissions();
-  const [map, setMap] = React.useState<Record<Key, Cell>>({});
-  const [role, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
+  const { data: dbRoles } = useRoles();
+  const { data: dbModules } = useModules();
+  const ASSIGNABLE_ROLES = dbRoles.length ? dbRoles : FALLBACK_ROLES;
+  const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
+  // the editable grant grid, rebuilt from the DB rows whenever they change (loaded / after a save)
+  // — adjusted while rendering, not in an effect pass
+  const [map, setMap] = React.useState<Record<Key, Cell>>(() => buildMap(perms));
+  const [mapFrom, setMapFrom] = React.useState(perms);
+  if (perms !== mapFrom) {
+    setMapFrom(perms);
+    setMap(buildMap(perms));
+  }
+  // the roles come from the server after the first render: a pick that is not one of them falls back
+  // to the first (derived — nothing to align)
+  const inRoles = (r: string) => !dbRoles.length || dbRoles.includes(r);
+  const [pickedRole, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
+  const role = inRoles(pickedRole) ? pickedRole : dbRoles[0];
+  // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
+  // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
+  const [menuFilter, setMenuFilter] = React.useState("");
+  const [draftPick, setDraft] = React.useState({ role: ASSIGNABLE_ROLES[0], menu: "" });
+  const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] };
   const [saving, setSaving] = React.useState(false);
 
-  // build the editable map from DB rows
-  React.useEffect(() => {
-    const m: Record<Key, Cell> = {};
-    for (const p of perms) {
-      m[keyOf(p.role, p.menu)] = {
-        add: !!p.add,
-        edit: !!p.edit,
-        del: !!p.del,
-        view: !!p.view,
-      };
-    }
-    setMap(m);
-  }, [perms]);
 
   const cellOf = (r: string, menu: string): Cell =>
     map[keyOf(r, menu)] ?? { add: false, edit: false, del: false, view: false };
@@ -61,8 +82,8 @@ export default function PermissionsPage() {
       return { ...s, [k]: { ...cur, [field]: !cur[field] } };
     });
 
-  // rows for the selected role — always all menus, so anything can be granted
-  const viewRows: Permission[] = MENUS.map((menu) => {
+  // rows for the selected role — every menu (so anything can be granted), narrowed by the เมนูงาน filter
+  const viewRows: Permission[] = MENUS.filter((menu) => !menuFilter || menu === menuFilter).map((menu) => {
     const c = cellOf(role, menu);
     return { id: keyOf(role, menu), role, menu, ...c };
   });
@@ -71,25 +92,7 @@ export default function PermissionsPage() {
     setSaving(true);
     try {
       const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
-      const doPost = () =>
-        fetch("/api/admin/permissions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items }),
-        });
-      let res = await doPost();
-      if (res.status === 401) {
-        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 400));
-        res = await doPost();
-      }
-      if (res.status === 401) {
-        window.location.href =
-          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `error ${res.status}`);
+      await postJson("/api/admin/permissions", { items }); // 401 → refresh + retry → /login (api.ts)
       push({ kind: "success", title: "บันทึกสิทธิ์แล้ว", desc: `บทบาท: ${role}` });
       refetch();
     } catch (e) {
@@ -151,30 +154,40 @@ export default function PermissionsPage() {
         }
       />
 
-      <div className="surface flex flex-wrap items-center gap-3 p-3">
-        <ShieldCheck className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium">บทบาทที่กำหนดสิทธิ์</span>
-        <Select
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          className="h-8 w-full text-xs sm:w-56"
-        >
-          {ASSIGNABLE_ROLES.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </Select>
-        <Badge tone="primary">{role}</Badge>
-        <span className="num text-xs text-muted-foreground">{MENUS.length} เมนู</span>
-      </div>
+      <FilterBar
+        onSearch={() => {
+          setRole(draft.role);
+          setMenuFilter(draft.menu);
+        }}
+        onReset={() => {
+          setDraft({ role: ASSIGNABLE_ROLES[0], menu: "" });
+          setRole(ASSIGNABLE_ROLES[0]);
+          setMenuFilter("");
+        }}
+      >
+        <Field label="ประเภทผู้ใช้งาน" required>
+          <SearchSelect value={draft.role} onChange={(v) => setDraft((d) => ({ ...d, role: v }))} options={strOptions(ASSIGNABLE_ROLES)} />
+        </Field>
+        <Field label="เมนูงาน">
+          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.menu} onChange={(v) => setDraft((d) => ({ ...d, menu: v }))} options={strOptions(MENUS)} />
+        </Field>
+      </FilterBar>
 
       <DataTable
+        searchable={false}
         columns={columns}
         rows={viewRows}
         loading={loading}
         rowKey={(r) => r.id}
         pageSize={25}
-        searchPlaceholder="ค้นหาเมนู…"
         dense
+        toolbar={
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            กำลังกำหนดสิทธิ์ของ <Badge tone="primary">{role}</Badge>
+            <span className="num">{viewRows.length} / {MENUS.length} เมนู</span>
+          </span>
+        }
       />
     </>
   );
