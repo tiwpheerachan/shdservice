@@ -6,7 +6,9 @@ import { Loader2, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
 import { StatusBadge } from "@/components/ui/badge";
 import { type Job } from "@/data/mock";
-import { api, qs } from "@/lib/api";
+import { qs } from "@/lib/api";
+import { useApi } from "@/data/db";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
 import { useFieldControl } from "@/components/ui/field";
 
@@ -46,27 +48,23 @@ export function JobSearch({
   const field = useFieldControl(id); // tie to the surrounding <Field> label
   const listId = React.useId();
   const [q, setQ] = React.useState("");
-  const [rows, setRows] = React.useState<Job[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const seq = React.useRef(0);
   const { params, hint } = SCOPE[scope];
 
   // debounced server search — same matcher as the job list (job no / customer code·name·phone /
-  // reference no / IMEI / serial / model), newest first, max 10 rows
-  React.useEffect(() => {
-    const term = q.trim();
-    if (term.length < SEARCH_MIN_CHARS) { setRows([]); return; }
-    const my = ++seq.current;
-    setLoading(true);
-    const t = setTimeout(() => {
-      api<{ rows: Job[] }>(`/api/data/jobs${qs({ paged: 1, pageSize: 10, q: term, sort: "openDate", dir: "desc", ...params })}`)
-        .then((d) => { if (my === seq.current) setRows(d.rows.slice(0, 10)); })
-        .catch(() => { if (my === seq.current) setRows([]); })
-        .finally(() => { if (my === seq.current) setLoading(false); });
-    }, 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, scope]);
+  // reference no / IMEI / serial / model), newest first, max 10 rows; swr keeps the last answer on
+  // screen while the next one loads and never lets an older answer win
+  const typed = q.trim();
+  const settled = useDebouncedValue(typed, 300);
+  const searchable = settled.length >= SEARCH_MIN_CHARS;
+  const found = useApi<{ rows: Job[] }>(
+    searchable ? `/api/data/jobs${qs({ paged: 1, pageSize: 10, q: settled, sort: "openDate", dir: "desc", ...params })}` : null,
+    { keepPrevious: true }
+  );
+  const rows = React.useMemo(
+    () => (typed.length >= SEARCH_MIN_CHARS && searchable && !found.error ? (found.data?.rows ?? []).slice(0, 10) : []),
+    [typed, searchable, found.data, found.error]
+  );
+  const loading = typed.length >= SEARCH_MIN_CHARS && (typed !== settled || found.validating);
 
   const pick = (no: string) => {
     setOpen(false);

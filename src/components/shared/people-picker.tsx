@@ -4,6 +4,9 @@ import * as React from "react";
 import { Search, User, Loader2, X, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFieldControl } from "@/components/ui/field";
+import { useApi } from "@/data/db";
+import { qs } from "@/lib/api";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 export type Person = {
   id: string;
@@ -35,10 +38,6 @@ export function PeoplePicker({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(); // tie to the surrounding <Field> label
   const listId = React.useId();
-  const [items, setItems] = React.useState<Person[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [stale, setStale] = React.useState(false);
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);
 
@@ -51,38 +50,23 @@ export function PeoplePicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // debounced search
-  React.useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      setItems([]);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const ctrl = new AbortController();
-    const t = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/directory/search?q=${encodeURIComponent(term)}`, {
-          signal: ctrl.signal,
-        });
-        const data = await r.json();
-        setItems(Array.isArray(data.items) ? data.items : []);
-        setStale(!!data.stale);
-        setError(data.error ?? null);
-        setActive(0);
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") setError("ค้นหาไม่สำเร็จ");
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-    return () => {
-      clearTimeout(t);
-      ctrl.abort();
-    };
-  }, [q]);
+  // debounced directory search (SSO people directory) through swr — the last answer stays on
+  // screen while the next loads, an older answer never wins
+  const typed = q.trim();
+  const settled = useDebouncedValue(typed, 250);
+  const searchable = settled.length >= 2;
+  const found = useApi<{ items?: Person[]; stale?: boolean; error?: string }>(
+    searchable ? `/api/directory/search${qs({ q: settled })}` : null,
+    { keepPrevious: true }
+  );
+  const shown = typed.length >= 2;
+  const items = React.useMemo(
+    () => (shown && Array.isArray(found.data?.items) ? found.data.items : []),
+    [shown, found.data]
+  );
+  const stale = shown && !!found.data?.stale;
+  const error = shown ? (found.error ?? found.data?.error ?? null) : null;
+  const loading = shown && (typed !== settled || found.validating);
 
   const pick = (p: Person) => {
     onChange(p);
@@ -143,6 +127,7 @@ export function PeoplePicker({
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
+            setActive(0); // a new term → the highlight starts at the top of its results
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}

@@ -5,7 +5,8 @@ import { Link2, Copy, Check, RefreshCw, ExternalLink, Loader2, Clock, Eye, Alert
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
-import { api, postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg } from "@/lib/api";
+import { useApi } from "@/data/db";
 import { useAccess } from "@/lib/use-access";
 import { LINK_RULE_TEXT } from "@/lib/track-public";
 import { cn } from "@/lib/utils";
@@ -45,41 +46,21 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
   const { push } = useToast();
   const confirm = useConfirm();
   const { edit: canEdit } = useAccess().forPath("/jobs/edit");
-  const [url, setUrl] = React.useState("");
-  const [ready, setReady] = React.useState(false);
-  const [status, setStatus] = React.useState<LinkStatus | null>(null);
-  const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const [now, setNow] = React.useState(() => Date.now());
 
-  const load = React.useCallback(async () => {
-    const d = await api<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`);
-    setUrl(d.url);
-    setReady(d.ready ?? true);
-    setStatus(d.status);
-  }, [jobNo]);
+  // the link + its state through swr; re-read every minute (the customer may open it meanwhile)
+  const link = useApi<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, { fresh: true, refreshInterval: 60_000 });
+  const url = link.error ? "" : link.data?.url ?? "";
+  const ready = link.data?.ready ?? true;
+  const status = link.data?.status ?? null;
 
-  React.useEffect(() => {
-    let active = true;
-    setLoading(true);
-    load()
-      .catch(() => active && setUrl(""))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [load]);
-
-  // keep the countdown honest; re-read the state every minute (the customer may open it meanwhile)
+  // keep the countdown honest between reads
   React.useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 30_000);
-    const poll = setInterval(() => void load().catch(() => {}), 60_000);
-    return () => {
-      clearInterval(tick);
-      clearInterval(poll);
-    };
-  }, [load]);
+    return () => clearInterval(tick);
+  }, []);
 
   const expiresMs = status?.expiresAt ? Date.parse(status.expiresAt) - now : 0;
   const state: LinkStatus["state"] = !status || status.state === "expired" || expiresMs <= 0 ? "expired" : status.state;
@@ -109,8 +90,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     setBusy(true);
     try {
       const d = await postJson<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, {});
-      setUrl(d.url);
-      setStatus(d.status);
+      void link.mutate({ ...d, ready: d.ready ?? ready }, { revalidate: false }); // show the new link at once
       setNow(Date.now());
       push({ kind: "success", title: "ออกลิงก์ใหม่แล้ว", desc: "ใช้ได้ 1 วัน · ลิงก์เดิมใช้ไม่ได้แล้ว" });
     } catch (e) {
@@ -120,7 +100,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     }
   };
 
-  if (loading || !url) return null;
+  if (link.loading || !url) return null;
 
   const hint = !ready ? (
     <span>ยังใช้ไม่ได้สำหรับงานนี้</span>

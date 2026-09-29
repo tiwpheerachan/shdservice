@@ -16,6 +16,8 @@ import { cn, SEARCH_MIN_CHARS } from "@/lib/utils";
 import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, type CustomerFormValues, type CustomerConflict } from "./customer-form";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { customerSchema } from "@/lib/validation/customer";
+import { useApi } from "@/data/db";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 /**
  * Customer block used by job / quotation / sale-order forms.
@@ -182,24 +184,17 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
   const field = useFieldControl(); // tie to the surrounding <Field> label
   const listId = React.useId();
   const [q, setQ] = React.useState("");
-  const [rows, setRows] = React.useState<Customer[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const seq = React.useRef(0);
-
-  // debounced server lookup (code / name / phone / tax id / email), max 10 rows
-  React.useEffect(() => {
-    const term = q.trim();
-    if (term.length < SEARCH_MIN_CHARS) { setRows([]); return; }
-    const my = ++seq.current;
-    setLoading(true);
-    const t = setTimeout(() => {
-      api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: term, limit: 10 })}`)
-        .then((d) => { if (my === seq.current) setRows(d.rows.slice(0, 10)); })
-        .catch(() => { if (my === seq.current) setRows([]); })
-        .finally(() => { if (my === seq.current) setLoading(false); });
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
+  // debounced server lookup (code / name / phone / tax id / email), max 10 rows — swr keeps the
+  // last answer on screen while the next one loads and never lets an older answer win
+  const typed = q.trim();
+  const settled = useDebouncedValue(typed, 300);
+  const searchable = settled.length >= SEARCH_MIN_CHARS;
+  const found = useApi<{ rows: Customer[] }>(searchable ? `/api/customers/lookup${qs({ q: settled, limit: 10 })}` : null, { keepPrevious: true });
+  const rows = React.useMemo(
+    () => (typed.length >= SEARCH_MIN_CHARS && searchable && !found.error ? (found.data?.rows ?? []).slice(0, 10) : []),
+    [typed, searchable, found.data, found.error]
+  );
+  const loading = typed.length >= SEARCH_MIN_CHARS && (typed !== settled || found.validating);
 
   // typing a full customer code (C43601) selects it without an extra click
   React.useEffect(() => {

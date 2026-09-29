@@ -1,17 +1,7 @@
 {
-  "src/app/(app)/admin/document-profiles/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/app/(app)/admin/permissions/page.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 2
-    }
-  },
-  "src/app/(app)/admin/shipping-profiles/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
     }
   },
   "src/app/(app)/customers/page.tsx": {
@@ -40,11 +30,6 @@
     }
   },
   "src/app/(app)/jobs/swap-refund/page.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(app)/stock/inventory/page.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
     }
@@ -79,29 +64,14 @@
       "count": 1
     }
   },
-  "src/components/layout/overdue-bell.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/components/layout/sidebar.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 2
-    }
-  },
-  "src/components/shared/customer-call-modal.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/shared/customer-form.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 2
     }
   },
   "src/components/shared/customer-select.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
+      "count": 1
     }
   },
   "src/components/shared/job-form.tsx": {
@@ -111,7 +81,7 @@
   },
   "src/components/shared/job-search.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 2
+      "count": 1
     }
   },
   "src/components/shared/master-table.tsx": {
@@ -119,34 +89,14 @@
       "count": 1
     }
   },
-  "src/components/shared/people-picker.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/shared/product-detail-modal.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/components/shared/quotation-form.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 3
-    }
-  },
-  "src/components/shared/track-link.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
+      "count": 2
     }
   },
   "src/components/ui/data-table.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 3
-    }
-  },
-  "src/lib/use-job.ts": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
     }
   },
   "src/lib/use-theme.ts": {

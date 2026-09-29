@@ -12,7 +12,7 @@ import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
 import { Input, Textarea, NumberInput } from "@/components/ui/input";
 import { SearchSelect, strOptions, withCurrent } from "@/components/shared/search-select";
 import { useToast } from "@/components/ui/toast";
-import { useProducts } from "@/data/db";
+import { useApi, useProducts } from "@/data/db";
 import { QUOTATION_STATUS_OPTIONS, type Customer } from "@/data/mock";
 import { baht } from "@/lib/utils";
 import { api, errMsg, qs } from "@/lib/api";
@@ -109,35 +109,53 @@ export const QuotationForm = React.forwardRef<
     setDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`);
   }, []);
 
-  // load a job → customer + device info (+ parts flagged "เสนอ" in the repair screen become lines)
-  const loadJob = React.useCallback(
-    async (no: string, withParts: boolean) => {
-      const v = no.trim().toUpperCase();
-      if (!v) return;
-      try {
-        const d = await api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(v)}`);
-        setJob(d.job);
-        if (mode === "new") setProfileId(d.job.documentProfileId || 0);
-        setJobRef(d.job.no);
-        if (d.job.customer) {
-          const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: d.job.customer.code })}`);
-          setCustomer(c.rows[0] ?? null);
+  // a job → customer + device info (+ parts flagged "เสนอ" in the repair screen become lines)
+  const applyJob = React.useCallback(
+    async (j: JobDetail, withParts: boolean) => {
+      setJob(j);
+      if (mode === "new") setProfileId(j.documentProfileId || 0);
+      setJobRef(j.no);
+      if (withParts) {
+        const quoted = j.parts.filter((p) => p.isQuotation && p.requested > 0);
+        if (quoted.length) {
+          setLines(
+            quoted.map((p) => ({ id: ++idRef.current, code: p.code, name: p.name, qty: p.requested, price: p.unitPrice, itemType: "SparePart" as const }))
+          );
         }
-        if (withParts) {
-          const quoted = d.job.parts.filter((p) => p.isQuotation && p.requested > 0);
-          if (quoted.length) {
-            setLines(
-              quoted.map((p) => ({ id: ++idRef.current, code: p.code, name: p.name, qty: p.requested, price: p.unitPrice, itemType: "SparePart" as const }))
-            );
-          }
-          if (d.job.serviceCost) setService(d.job.serviceCost);
-        }
-      } catch (e) {
-        push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: errMsg(e) });
+        if (j.serviceCost) setService(j.serviceCost);
+      }
+      if (j.customer) {
+        const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: j.customer.code })}`);
+        setCustomer(c.rows[0] ?? null);
       }
     },
-    [push, mode]
+    [mode]
   );
+
+  // the job number typed in the form (Enter / leaving the box)
+  const loadJob = async (no: string, withParts: boolean) => {
+    const v = no.trim().toUpperCase();
+    if (!v) return;
+    try {
+      const d = await api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(v)}`);
+      await applyJob(d.job, withParts);
+    } catch (e) {
+      push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: errMsg(e) });
+    }
+  };
+
+  // /quotation/new?job=J… opens with that job, its customer and its quoted parts filled in — once,
+  // from the swr answer's callback (not an effect, not during render)
+  const urlJobApplied = React.useRef(false);
+  useApi<{ job: JobDetail }>(jobNo && !initial ? `/api/jobs/${encodeURIComponent(jobNo.trim().toUpperCase())}` : null, {
+    fresh: true,
+    onSuccess: (d) => {
+      if (urlJobApplied.current) return;
+      urlJobApplied.current = true;
+      applyJob(d.job, true).catch((e) => push({ kind: "error", title: "โหลดข้อมูลลูกค้าไม่สำเร็จ", desc: errMsg(e) }));
+    },
+    onError: (msg) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: msg }),
+  });
 
   // prefill from an existing quotation
   React.useEffect(() => {
@@ -167,9 +185,6 @@ export const QuotationForm = React.forwardRef<
     setDate(initial.date);
   }, [initial]);
 
-  React.useEffect(() => {
-    if (jobNo && !initial) void loadJob(jobNo, true);
-  }, [jobNo, initial, loadJob]);
 
   const add = () =>
     setLines((s) => [...s, { id: ++idRef.current + 100, code: "", name: "", qty: 1, price: 0, itemType: "SparePart" }]);

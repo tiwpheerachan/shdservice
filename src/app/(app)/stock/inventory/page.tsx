@@ -12,9 +12,9 @@ import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
-import { useMovementsPage } from "@/data/db";
+import { useApi, useMovementsPage } from "@/data/db";
 import { int, isFilterActive } from "@/lib/utils";
-import { api, errMsg, exportXlsx } from "@/lib/api";
+import { exportXlsx } from "@/lib/api";
 import { ExportButton } from "@/components/shared/export-button";
 
 type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
@@ -52,18 +52,12 @@ export default function InventoryPage() {
   });
 
   const [viewDoc, setViewDoc] = React.useState<Movement | null>(null);
-  const [lines, setLines] = React.useState<LineRow[]>([]);
-  React.useEffect(() => {
-    if (!viewDoc) return;
-    let active = true;
-    setLines([]);
-    api<{ rows: LineRow[] }>(`/api/stock/movements/${encodeURIComponent(viewDoc.doc)}`)
-      .then((d) => active && setLines(d.rows))
-      .catch((e) => push({ kind: "error", title: "โหลดรายการไม่สำเร็จ", desc: errMsg(e) }));
-    return () => {
-      active = false;
-    };
-  }, [viewDoc, push]);
+  // the lines of the document being viewed — read fresh each time a document is opened
+  const docLines = useApi<{ rows: LineRow[] }>(viewDoc ? `/api/stock/movements/${encodeURIComponent(viewDoc.doc)}` : null, {
+    fresh: true,
+    onError: (msg) => push({ kind: "error", title: "โหลดรายการไม่สำเร็จ", desc: msg }),
+  });
+  const lines = React.useMemo(() => docLines.data?.rows ?? [], [docLines.data]);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
 
   const columns: Column<Movement>[] = [

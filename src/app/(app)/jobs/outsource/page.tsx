@@ -41,7 +41,10 @@ function OutsourceForm() {
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
   const { userId: meId, can } = useAccess();
-  const { jobNo, job, loading, error, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob({
+    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
+    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+  });
   const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors();
   const [tab, setTab] = React.useState("device");
@@ -97,12 +100,7 @@ function OutsourceForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job, VENDORS.length]);
 
-  const go = async (v: string) => {
-    if (!v) return;
-    const j = await find(v);
-    if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
-  };
+  const go = (v: string) => find(v);
 
   const open = job?.outsource.find((o) => o.status === "ส่งเครื่องซ่อมแล้ว");
 

@@ -10,6 +10,7 @@ import { Input, Textarea, Checkbox, Radio } from "@/components/ui/input";
 import { SearchSelect, withCurrent } from "./search-select";
 import { useToast } from "@/components/ui/toast";
 import {
+  useApi,
   useModels,
   useColors,
   useCategories,
@@ -17,7 +18,7 @@ import {
 } from "@/data/db";
 import type { Product } from "@/data/mock";
 import { int } from "@/lib/utils";
-import { api, postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
+import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { productSchema } from "@/lib/validation/admin";
 
@@ -92,8 +93,13 @@ export function ProductDetailModal({
   const code = product?.sysCode ?? "";
 
   // full detail + stock card from the DB (product / product_none_serial / inventory_*)
-  const [detail, setDetail] = React.useState<Detail | null>(null);
-  const [stockCard, setStockCard] = React.useState<Card[]>([]);
+  const detailKey = open && mode !== "add" && code ? `/api/products/${encodeURIComponent(code)}` : null;
+  const loaded = useApi<{ product: Detail; card: Card[] }>(detailKey, {
+    fresh: true,
+    onError: (msg) => push({ kind: "error", title: "โหลดข้อมูลอะไหล่ไม่สำเร็จ", desc: msg }),
+  });
+  const detail = detailKey ? loaded.data?.product ?? null : null;
+  const stockCard = React.useMemo(() => (detailKey ? loaded.data?.card ?? [] : []), [detailKey, loaded.data]);
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
   const [image, setImage] = React.useState("");
@@ -117,45 +123,46 @@ export function ProductDetailModal({
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
 
-  React.useEffect(() => {
-    if (!open) return;
-    fe.setErrors({}); // a freshly opened dialog starts clean
+  // one dialog session = opened for one product (or "add"); state is adjusted while rendering:
+  //  - a new session starts clean (no leftover errors, empty form for "add")
+  //  - the edit form is filled ONCE per session, from a fresh answer (not a cached one still being
+  //    re-read) — a late answer never overwrites what the user has started typing
+  const session = `${open ? 1 : 0}|${mode}|${code}`;
+  const [seenSession, setSeenSession] = React.useState("");
+  const [filledFor, setFilledFor] = React.useState("");
+  if (open && seenSession !== session) {
+    setSeenSession(session);
+    fe.setErrors({});
     if (mode === "add" || !code) {
-      setDetail(null);
-      setStockCard([]);
       setImage("");
       setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? "", brand: MANUFACTURERS[0]?.name ?? "" });
-      return;
     }
-    let active = true;
-    api<{ product: Detail; card: Card[] }>(`/api/products/${encodeURIComponent(code)}`)
-      .then((d) => {
-        if (!active) return;
-        setDetail(d.product);
-        setStockCard(d.card);
-        setImage(d.product.image ?? "");
-        setForm({
-          mfgCode: d.product.mfgCode,
-          name: d.product.name,
-          nameEn: d.product.nameEn ?? "",
-          nameCn: d.product.nameCn ?? "",
-          description: d.product.description ?? "",
-          category: d.product.category,
-          brand: d.product.brand,
-          capitalPrice: d.product.capitalPrice ? String(d.product.capitalPrice) : "",
-          wholesalePrice: d.product.wholesalePrice ? String(d.product.wholesalePrice) : "",
-          price: d.product.price ? String(d.product.price) : "",
-          forModelColor: d.product.forModelColor ?? "",
-          status: d.product.status,
-          models: d.product.models ?? [],
-        });
-      })
-      .catch((e) => push({ kind: "error", title: "โหลดข้อมูลอะไหล่ไม่สำเร็จ", desc: errMsg(e) }));
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, code, mode]);
+  }
+  if (detailKey && loaded.data && !loaded.validating && filledFor !== session) {
+    const d = loaded.data;
+    setFilledFor(session);
+    setImage(d.product.image ?? "");
+    setForm({
+      mfgCode: d.product.mfgCode,
+      name: d.product.name,
+      nameEn: d.product.nameEn ?? "",
+      nameCn: d.product.nameCn ?? "",
+      description: d.product.description ?? "",
+      category: d.product.category,
+      brand: d.product.brand,
+      capitalPrice: d.product.capitalPrice ? String(d.product.capitalPrice) : "",
+      wholesalePrice: d.product.wholesalePrice ? String(d.product.wholesalePrice) : "",
+      price: d.product.price ? String(d.product.price) : "",
+      forModelColor: d.product.forModelColor ?? "",
+      status: d.product.status,
+      models: d.product.models ?? [],
+    });
+  }
+  if (!open && (filledFor || seenSession)) {
+    // closed → the next open (even of the same product) starts a new session
+    setFilledFor("");
+    setSeenSession("");
+  }
 
   const save = async () => {
     if (fe.report(fe.run(productSchema, form))) return; // the API checks the same

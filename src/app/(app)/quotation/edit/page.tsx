@@ -8,11 +8,8 @@ import { PrintButton } from "@/components/shared/print-button";
 import { FormActions, JobLookupBar } from "@/components/shared/job-form";
 import { RecordGate } from "@/components/shared/record-gate";
 import { useToast } from "@/components/ui/toast";
-import { api, postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg } from "@/lib/api";
 import { useRecord } from "@/lib/use-record";
-
-const fetchQuotation = (no: string) =>
-  api<{ quotation: QuotationLoaded }>(`/api/quotations/${encodeURIComponent(no)}`).then((d) => d.quotation);
 
 
 function EditQuotation() {
@@ -20,22 +17,16 @@ function EditQuotation() {
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<QuotationFormHandle>(null);
-  const { data: loaded, setData: setLoaded, loading, error, load: fetchRecord } = useRecord(fetchQuotation, !!initialNo);
+  // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
+  const { data: loaded, setData: setLoaded, loading, error, find: load } = useRecord<QuotationLoaded>({
+    url: (n) => `/api/quotations/${encodeURIComponent(n)}`,
+    pick: (d: { quotation: QuotationLoaded }) => d.quotation,
+    initial: initialNo,
+    onLoaded: (d) => push({ kind: "success", title: "เรียกข้อมูลใบเสนอราคาสำเร็จ", desc: d.no }),
+    onMissing: (n) => push({ kind: "error", title: "ไม่พบใบเสนอราคา", desc: n }),
+  });
   const no = loaded?.no ?? "";
   const [saving, setSaving] = React.useState(false);
-
-  const load = React.useCallback(
-    async (v: string) => {
-      const d = await fetchRecord(v);
-      if (d) push({ kind: "success", title: "เรียกข้อมูลใบเสนอราคาสำเร็จ", desc: d.no });
-      else if (d === null && v.trim()) push({ kind: "error", title: "ไม่พบใบเสนอราคา", desc: v.trim().toUpperCase() });
-    },
-    [fetchRecord, push]
-  );
-
-  React.useEffect(() => {
-    if (initialNo) void load(initialNo);
-  }, [initialNo, load]);
 
   const save = async () => {
     const p = form.current?.payload();

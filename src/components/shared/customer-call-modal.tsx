@@ -19,10 +19,10 @@ import { Button } from "@/components/ui/button";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
-import { useJobs } from "@/data/db";
+import { useApi, useJobs } from "@/data/db";
 import type { Customer } from "@/data/mock";
 import { baht, cn } from "@/lib/utils";
-import { api, postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg } from "@/lib/api";
 
 type CallLog = { id: number; detail: string; date: string; by: string };
 
@@ -76,25 +76,22 @@ export function CustomerCallModal({
   // job history of this customer (server-filtered by customer code)
   const { data: JOBS } = useJobs(customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 });
   const [tab, setTab] = React.useState("history");
-  const [log, setLog] = React.useState<CallLog[]>([]);
   const [text, setText] = React.useState("");
   const [copied, setCopied] = React.useState(false);
 
-  // reset draft + load this job's call log (job_call_log) whenever opened
-  React.useEffect(() => {
-    setLog([]);
+  // opened again / another job or customer → the draft starts clean (adjusted while rendering)
+  const session = `${open ? 1 : 0}|${jobNo ?? ""}|${customer?.code ?? ""}`;
+  const [seenSession, setSeenSession] = React.useState(session);
+  if (seenSession !== session) {
+    setSeenSession(session);
     setText("");
     setCopied(false);
     setTab("history");
-    if (!open || !jobNo) return;
-    let active = true;
-    api<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`)
-      .then((d) => active && setLog(d.rows))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [customer?.code, open, jobNo]);
+  }
+
+  // this job's call log (job_call_log), read fresh every time the dialog opens
+  const calls = useApi<{ rows: CallLog[] }>(open && jobNo ? `/api/jobs/${encodeURIComponent(jobNo)}/calls` : null, { fresh: true });
+  const log = React.useMemo(() => (open && jobNo ? calls.data?.rows ?? [] : []), [open, jobNo, calls.data]);
 
   const history = React.useMemo(() => (customer ? JOBS : []), [JOBS, customer]);
   const hist = {
@@ -108,7 +105,7 @@ export function CustomerCallModal({
     if (!v || !jobNo) return;
     try {
       const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
-      setLog(d.rows);
+      void calls.mutate(d, { revalidate: false }); // the server answers with the updated log
       setText("");
       push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: jobNo });
     } catch (e) {

@@ -6,6 +6,7 @@ import { Bell, CalendarClock, UserRound, UserX } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
 import { cn } from "@/lib/utils";
 import type { OverdueAlerts } from "@/server/services/alerts";
+import { useApi } from "@/data/db";
 
 /** background refresh; opening the bell re-checks when the last answer is older than a minute */
 const POLL_MS = 5 * 60_000;
@@ -18,37 +19,14 @@ const FRESH_MS = 60_000;
  * answer just hides the badge.
  */
 export function OverdueBell() {
-  const [data, setData] = React.useState<OverdueAlerts | null>(null);
+  // quiet background poll through swr: every 5 min, paused while the tab is hidden, once more
+  // when a tab comes back after that long; a failed answer keeps the last one on screen
+  const { data, mutate, ageMs } = useApi<OverdueAlerts>("/api/alerts/overdue", {
+    quiet: true,
+    refreshInterval: POLL_MS,
+    revalidateOnFocus: true,
+  });
   const [open, setOpen] = React.useState(false);
-  const loadedAt = React.useRef(0);
-
-  const load = React.useCallback(async () => {
-    try {
-      const r = await fetch("/api/alerts/overdue", { cache: "no-store" });
-      if (!r.ok) return;
-      setData((await r.json()) as OverdueAlerts);
-      loadedAt.current = Date.now();
-    } catch {
-      /* offline / server busy — keep the last answer */
-    }
-  }, []);
-
-  // poll only while this tab is on screen; coming back to a stale tab refreshes once
-  React.useEffect(() => {
-    const visible = () => document.visibilityState === "visible";
-    void load();
-    const t = setInterval(() => {
-      if (visible()) void load();
-    }, POLL_MS);
-    const onVisible = () => {
-      if (visible() && Date.now() - loadedAt.current > POLL_MS) void load();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(t);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [load]);
 
   const total = data?.total ?? 0;
   const mine = data?.scope === "mine";
@@ -60,7 +38,7 @@ export function OverdueBell() {
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (v && Date.now() - loadedAt.current > FRESH_MS) void load();
+        if (v && ageMs() > FRESH_MS) void mutate();
       }}
     >
       <PopoverTrigger asChild>

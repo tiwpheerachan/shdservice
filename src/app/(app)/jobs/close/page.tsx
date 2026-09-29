@@ -35,7 +35,10 @@ function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS } = useShippers();
   const { data: SHIPPING } = useShippingProfiles();
-  const { jobNo, job, loading, error, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob({
+    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
+    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+  });
   const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
@@ -106,12 +109,7 @@ function CloseForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
 
-  const go = async (v: string) => {
-    if (!v) return;
-    const j = await find(v);
-    if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
-  };
+  const go = (v: string) => find(v);
 
   // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {

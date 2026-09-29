@@ -10,12 +10,9 @@ import { Button } from "@/components/ui/button";
 import { RecordGate } from "@/components/shared/record-gate";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
-import { api, postJson, errMsg } from "@/lib/api";
+import { postJson, errMsg } from "@/lib/api";
 import { useRecord } from "@/lib/use-record";
 import { useAccess } from "@/lib/use-access";
-
-const fetchSaleOrder = (no: string) =>
-  api<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}`).then((d) => d.order);
 
 
 function EditSaleOrder() {
@@ -25,22 +22,16 @@ function EditSaleOrder() {
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<SaleOrderFormHandle>(null);
-  const { data: loaded, setData: setLoaded, loading, error, load: fetchRecord } = useRecord(fetchSaleOrder, !!initialNo);
+  // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
+  const { data: loaded, setData: setLoaded, loading, error, find: load } = useRecord<SaleOrderLoaded>({
+    url: (n) => `/api/sale-orders/${encodeURIComponent(n)}`,
+    pick: (d: { order: SaleOrderLoaded }) => d.order,
+    initial: initialNo,
+    onLoaded: (d) => push({ kind: "success", title: "เรียกข้อมูลใบสั่งขายสำเร็จ", desc: d.no }),
+    onMissing: (n) => push({ kind: "error", title: "ไม่พบใบสั่งขาย", desc: n }),
+  });
   const no = loaded?.no ?? "";
   const [saving, setSaving] = React.useState(false);
-
-  const load = React.useCallback(
-    async (v: string) => {
-      const d = await fetchRecord(v);
-      if (d) push({ kind: "success", title: "เรียกข้อมูลใบสั่งขายสำเร็จ", desc: d.no });
-      else if (d === null && v.trim()) push({ kind: "error", title: "ไม่พบใบสั่งขาย", desc: v.trim().toUpperCase() });
-    },
-    [fetchRecord, push]
-  );
-
-  React.useEffect(() => {
-    if (initialNo) void load(initialNo);
-  }, [initialNo, load]);
 
   const save = async () => {
     const p = form.current?.payload();

@@ -12,7 +12,8 @@ import { Field, FieldGrid } from "@/components/ui/field";
 import { Input, Checkbox } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
-import { api, postJson, del, errMsg, uploadFile } from "@/lib/api";
+import { postJson, del, errMsg, uploadFile } from "@/lib/api";
+import { useApi } from "@/data/db";
 
 /** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
 type Profile = {
@@ -32,8 +33,6 @@ const EMPTY: FormValues = { code: "", nameTh: "", nameEn: "", trackUrl: "", isAc
 export default function ShippingProfilesPage() {
   const { push } = useToast();
   const confirm = useConfirm();
-  const [rows, setRows] = React.useState<Profile[]>([]);
-  const [loading, setLoading] = React.useState(true);
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Profile | null>(null);
   const [form, setForm] = React.useState<FormValues>(EMPTY);
@@ -43,18 +42,13 @@ export default function ShippingProfilesPage() {
   const pendingUrl = React.useMemo(() => (pendingLogo ? URL.createObjectURL(pendingLogo) : ""), [pendingLogo]);
   React.useEffect(() => () => { if (pendingUrl) URL.revokeObjectURL(pendingUrl); }, [pendingUrl]);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const d = await api<{ rows: Profile[] }>("/api/admin/shipping-profiles");
-      setRows(d.rows);
-    } catch (e) {
-      push({ kind: "error", title: "โหลดข้อมูลไม่สำเร็จ", desc: errMsg(e) });
-    } finally {
-      setLoading(false);
-    }
-  }, [push]);
-  React.useEffect(() => { void load(); }, [load]);
+  // the list: read through swr (one request, cached); after a save `load()` re-reads it
+  const { data, loading, mutate } = useApi<{ rows: Profile[] }>("/api/admin/shipping-profiles", {
+    fresh: true,
+    onError: (msg) => push({ kind: "error", title: "โหลดข้อมูลไม่สำเร็จ", desc: msg }),
+  });
+  const rows = data?.rows ?? [];
+  const load = () => mutate();
 
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
@@ -96,8 +90,7 @@ export default function ShippingProfilesPage() {
     try {
       await uploadFile("shipper-logo", String(editing.id), file);
       push({ kind: "success", title: "อัปโหลดโลโก้แล้ว" });
-      await load();
-      const fresh = (await api<{ rows: Profile[] }>("/api/admin/shipping-profiles")).rows.find((r) => r.id === editing.id);
+      const fresh = (await load())?.rows.find((r) => r.id === editing.id);
       if (fresh) setEditing(fresh);
     } catch (e) {
       push({ kind: "error", title: "อัปโหลดไม่สำเร็จ", desc: errMsg(e) });

@@ -265,3 +265,57 @@ export const useJobStats = () =>
 /** Job numbers for reference dropdowns: recent open jobs (default), or `mode` = "pending_parts" / "returnable" (ตัดจ่าย / รับคืน). */
 export const useJobNos = (limit = 50, mode?: "pending_parts" | "returnable") =>
   useTable<string>("job_nos", undefined, "exclude", mode ? { limit, mode } : { limit });
+
+/* ------------------------------------------------------------------ *
+ * useApi — one read of any app API (not a /api/data list) through the same swr cache, so no
+ * screen hand-writes useEffect + fetch + loading + "is this answer still current?" again.
+ *   url = null        → nothing loaded (e.g. the dialog is closed, the search term too short)
+ *   ttl               → how long a cached answer is served without re-fetching (default 30 s)
+ *   fresh             → always re-read when the key appears (a dialog opened again, a new record)
+ *   keepPrevious      → keep the last answer on screen while the next key loads (search boxes);
+ *                       off by default so one record's data never shows under another's key
+ *   refreshInterval   → poll (paused while the tab is hidden)
+ *   quiet             → a failed read never redirects to /login (background widgets)
+ *   onError           → e.g. a toast; called once per failed read
+ *   onSuccess         → act on an answer outside render (e.g. prefill a form once)
+ * ------------------------------------------------------------------ */
+export type ApiOpts<T = unknown> = {
+  ttl?: number;
+  fresh?: boolean;
+  keepPrevious?: boolean;
+  refreshInterval?: number;
+  revalidateOnFocus?: boolean;
+  quiet?: boolean;
+  onError?: (message: string) => void;
+  onSuccess?: (data: T) => void;
+};
+
+/** background fetch: never redirects — a failure keeps the last answer on screen */
+const quietFetcher = async <T,>(url: string): Promise<T> => {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = (await r.json()) as T;
+  fetchedAt.set(url, Date.now());
+  return d;
+};
+
+export function useApi<T>(url: string | null, opts: ApiOpts<T> = {}) {
+  const { data, error, isLoading, isValidating, mutate: swrMutate } = useSWR<T>(url, opts.quiet ? quietFetcher : fetcher, {
+    ...SWR_OPTS,
+    keepPreviousData: !!opts.keepPrevious,
+    ...(opts.fresh ? { revalidateOnMount: true, revalidateIfStale: true } : {}),
+    ...(opts.refreshInterval ? { refreshInterval: opts.refreshInterval } : {}),
+    ...(opts.revalidateOnFocus ? { revalidateOnFocus: true, focusThrottleInterval: opts.refreshInterval ?? 5_000 } : {}),
+    // only pass the callbacks a caller gave: swr spreads options over its defaults, so an explicit
+    // `undefined` would replace its no-op and crash every read
+    ...(opts.onError ? { onError: (e: unknown) => opts.onError?.(errMsg(e)) } : {}),
+    ...(opts.onSuccess ? { onSuccess: (d: T) => opts.onSuccess?.(d) } : {}),
+  });
+  useStaleCheck(url ?? "", data !== undefined && !!url && !opts.fresh, opts.ttl ?? TTL_DEFAULT, swrMutate);
+  /** ms since this key was last read from the server (Infinity when never) */
+  const ageMs = React.useCallback(() => {
+    const at = url ? fetchedAt.get(url) : undefined;
+    return at ? Date.now() - at : Infinity;
+  }, [url]);
+  return { data, error: error ? errMsg(error) : null, loading: isLoading, validating: isValidating, mutate: swrMutate, ageMs };
+}

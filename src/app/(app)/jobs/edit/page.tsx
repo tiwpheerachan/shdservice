@@ -25,7 +25,10 @@ import { patchJson, errMsg } from "@/lib/api";
 
 function EditJobForm() {
   const { push } = useToast();
-  const { jobNo, job, loading, error, find, setJob } = useJob();
+  const { jobNo, job, loading, error, find, setJob } = useJob({
+    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
+    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+  });
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
 
@@ -35,12 +38,7 @@ function EditJobForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job]);
 
-  const go = async (v: string) => {
-    if (!v) return;
-    const j = await find(v);
-    if (j) push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no });
-    else if (j === null) push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: v });
-  };
+  const go = (v: string) => find(v);
 
   // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
   // workflow screens), so it is not sent: a stale value must never roll back a newer status.

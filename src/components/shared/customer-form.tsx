@@ -7,8 +7,8 @@ import { Input, Textarea, Select, Radio } from "@/components/ui/input";
 import { SearchSelect } from "./search-select";
 import { Button } from "@/components/ui/button";
 import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from "@/data/mock";
-import { useProvinces } from "@/data/db";
-import { api, qs } from "@/lib/api";
+import { TTL_MASTER, useApi, useProvinces } from "@/data/db";
+import { qs } from "@/lib/api";
 import type { FieldErrors } from "@/lib/validation";
 
 /**
@@ -78,22 +78,11 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
 /** cascading address lists (mt_city → mt_district → mt_sub_district) */
 export function useAddressLists(cityId: number, districtId: number) {
   const { data: PROVINCES } = useProvinces();
-  const [districts, setDistricts] = React.useState<Opt[]>([]);
-  const [subDistricts, setSubDistricts] = React.useState<Opt[]>([]);
-  React.useEffect(() => {
-    if (cityId > 0) {
-      api<{ rows: Opt[] }>(`/api/address${qs({ level: "district", city: cityId })}`)
-        .then((d) => setDistricts(d.rows))
-        .catch(() => setDistricts([]));
-    } else setDistricts([]);
-  }, [cityId]);
-  React.useEffect(() => {
-    if (districtId > 0) {
-      api<{ rows: Opt[] }>(`/api/address${qs({ level: "subdistrict", district: districtId })}`)
-        .then((d) => setSubDistricts(d.rows))
-        .catch(() => setSubDistricts([]));
-    } else setSubDistricts([]);
-  }, [districtId]);
+  // master data: read once, shared by every customer form (5 min cache like the other masters)
+  const { data: d } = useApi<{ rows: Opt[] }>(cityId > 0 ? `/api/address${qs({ level: "district", city: cityId })}` : null, { ttl: TTL_MASTER });
+  const { data: sd } = useApi<{ rows: Opt[] }>(districtId > 0 ? `/api/address${qs({ level: "subdistrict", district: districtId })}` : null, { ttl: TTL_MASTER });
+  const districts = React.useMemo(() => (cityId > 0 ? d?.rows ?? [] : []), [cityId, d]);
+  const subDistricts = React.useMemo(() => (districtId > 0 ? sd?.rows ?? [] : []), [districtId, sd]);
   return { PROVINCES, districts, subDistricts };
 }
 
