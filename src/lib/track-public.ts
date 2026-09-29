@@ -77,6 +77,10 @@ export const TRACK_STEPS: { key: TrackStepKey; label: string; hint: string }[] =
 /** link lifetime shown to customers and staff (enforced in services/tracking.ts) */
 export const LINK_RULE_TEXT = "ลิงก์ใช้ได้ 1 วันนับจากที่ได้รับ และ 15 นาทีหลังเปิดดูครั้งแรก (ต่อเวลาอัตโนมัติขณะใช้งาน สูงสุด 60 นาที)";
 
+/** digits in the /track OTP — must match the ThaiBulkSMS OTP app's setting (OTP Manager) */
+export const OTP_LENGTH = 4;
+export const OTP_PATTERN = new RegExp(`^\\d{${OTP_LENGTH}}$`);
+
 /** client-facing messages — one per outcome, never the reason (spec §V, §AM) */
 export const TRACK_MSG = {
   sessionFail: "ไม่สามารถยืนยันได้ กรุณาลองใหม่อีกครั้ง",

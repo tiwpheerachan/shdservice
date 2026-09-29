@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, LogOut, MessageSquareText, Phone, Search, ShieldCheck, Timer, X } from "lucide-react";
-import { TRACK_MSG, TRACK_STEPS, type PublicJob, type PublicJobSummary } from "@/lib/track-public";
+import { OTP_LENGTH, OTP_PATTERN, TRACK_MSG, TRACK_STEPS, type PublicJob, type PublicJobSummary } from "@/lib/track-public";
 import { Input, Select } from "@/components/ui/input";
 import { PublicJobView } from "./public-job-view";
 import { cn } from "@/lib/utils";
@@ -51,7 +51,6 @@ async function call<T>(path: string, init: RequestInit & { session?: string } = 
   return { status: r.status, d };
 }
 
-const OTP_LENGTH = 6;
 const EMPTY_CODE: string[] = Array(OTP_LENGTH).fill("");
 
 const mmss = (ms: number) => {
@@ -181,7 +180,7 @@ export function TrackOtp({
 
   /** called by the boxes as soon as the 6th digit is in — no confirm button */
   const verify = async (value: string) => {
-    if (busy || !/^\d{6}$/.test(value)) return;
+    if (busy || !OTP_PATTERN.test(value)) return;
     setBusy(true);
     setError("");
     try {
@@ -262,7 +261,7 @@ export function TrackOtp({
         ) : (
           <div className="mt-4 space-y-4">
             <p className="text-sm text-muted-foreground">
-              ส่งรหัส 6 หลักไปที่ <span className="num font-medium text-foreground">{masked}</span> แล้ว (ถ้าเบอร์นี้อยู่ในระบบ) · รหัสใช้ได้ 5 นาที
+              ส่งรหัส {OTP_LENGTH} หลักไปที่ <span className="num font-medium text-foreground">{masked}</span> แล้ว (ถ้าเบอร์นี้อยู่ในระบบ) · รหัสใช้ได้ 5 นาที
             </p>
             <div>
               <p className="mb-2 text-xs font-medium">รหัส OTP</p>
@@ -274,7 +273,7 @@ export function TrackOtp({
                   </>
                 ) : (
                   <>
-                    <ShieldCheck className="h-3.5 w-3.5" /> กรอกครบ 6 หลักแล้วระบบจะยืนยันให้อัตโนมัติ
+                    <ShieldCheck className="h-3.5 w-3.5" /> กรอกครบ {OTP_LENGTH} หลักแล้วระบบจะยืนยันให้อัตโนมัติ
                   </>
                 )}
               </p>
@@ -562,7 +561,7 @@ function OtpBoxes({
   };
 
   return (
-    <div className="flex justify-center gap-2" role="group" aria-label="รหัส OTP 6 หลัก">
+    <div className="flex justify-center gap-2" role="group" aria-label={`รหัส OTP ${OTP_LENGTH} หลัก`}>
       {value.map((d, i) => (
         <input
           key={i}

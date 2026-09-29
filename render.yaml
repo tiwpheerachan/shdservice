@@ -62,7 +62,7 @@ services:
         sync: false
       # ── /track phone + SMS OTP (src/server/sms.ts) ──
       # ThaiBulkSMS OTP service: key / secret of the app in OTP Manager (the app sets the code
-      # length — 6 digits — the 5-minute expiry, the sender and the SMS text). Without both keys the
+      # length — 4 digits (OTP_LENGTH in src/lib/track-public.ts) — the 5-minute expiry, the sender and the SMS text). Without both keys the
       # /track page says the OTP service is not open yet — the dev "log" provider is refused in production.
       - key: THAIBULKSMS_OTP_KEY
         sync: false

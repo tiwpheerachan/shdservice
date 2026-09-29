@@ -4,13 +4,14 @@ import { and, eq, gt, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { customer, trackOtp, trackSession } from "@/db/schema";
 import { RS } from "@/server/record-status";
+import { OTP_LENGTH, OTP_PATTERN } from "@/lib/track-public";
 import { hmac, sha256, normalizeUa, logEvent, hit, dbNow, dbNowPlus } from "./track-guard";
 import { checkOtpSms, printDevOtp, requestOtpSms, smsProvider } from "./sms";
 
 /**
  * /track by phone number + SMS OTP (drizzle/0017).
  *
- *   phone → OTP (6 digits, 5 min, 5 tries) → customer session → that customer's jobs
+ *   phone → OTP (4 digits — OTP_LENGTH, 5 min, 5 tries) → customer session → that customer's jobs
  *
  *  - the answer to "send me a code" is the same whether or not the number is a customer;
  *    a real SMS goes out ONLY to numbers in the customer table (no paid SMS to random
@@ -98,7 +99,7 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   if (ids.length) {
     const rh = sha256(requestId);
     // development `log` mode makes its own code; ThaiBulkSMS makes the real one
-    const own = smsProvider() === "log" ? String(randomInt(0, 1_000_000)).padStart(6, "0") : null;
+    const own = smsProvider() === "log" ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, "0") : null;
     // a new code replaces any unused one for this number
     await db.update(trackOtp).set({ consumedAt: dbNow }).where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
     await db.insert(trackOtp).values({
@@ -134,7 +135,7 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
  */
 export async function verifyOtp(requestId: unknown, code: unknown, ip: string, ua: string): Promise<{ token: string; expiresAt: string } | null> {
   if (typeof requestId !== "string" || !OPAQUE.test(requestId)) return null;
-  if (typeof code !== "string" || !/^\d{6}$/.test(code)) return null;
+  if (typeof code !== "string" || !OTP_PATTERN.test(code)) return null;
   const rh = sha256(requestId);
   const [tried] = await db
     .update(trackOtp)

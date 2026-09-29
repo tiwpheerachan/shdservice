@@ -53,10 +53,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 // ThaiBulkSMS OTP service mock (used once SMS_PROVIDER=thaibulksms below): records every call;
-// msisdn "0900000000" = the send fails; pin "246810" is the right code; token "tok-down" = service down
+// msisdn "0900000000" = the send fails; pin "2468" is the right code; token "tok-down" = service down
 const OTP_KEY = "1234567890123";
 const OTP_SECRET = "unit-test-otp-secret";
-const RIGHT_PIN = "246810";
+const RIGHT_PIN = "2468";
 const providerCalls: { path: string; f: Record<string, string> }[] = [];
 let tokenSeq = 0;
 function otpProviderMock(url: string, init?: RequestInit) {
@@ -100,7 +100,7 @@ console.log = (...a: unknown[]) => {
   if (m) smsLog.push({ to: m[1], text: m[2] });
   else realLog(...a);
 };
-const lastOtp = () => smsLog.at(-1)?.text.match(/\b(\d{6})\b/)?.[1] ?? "";
+const lastOtp = () => smsLog.at(-1)?.text.match(/\b(\d{4})\b/)?.[1] ?? "";
 const otpHeaders = (ip: string, ua = UA, session?: string) => {
   const h: Record<string, string> = { "content-type": "application/json", "cf-connecting-ip": ip, "user-agent": ua, "x-origin-auth": ORIGIN_SECRET };
   if (session) h["x-track-session"] = session;
@@ -524,14 +524,14 @@ await test("unknown number → same answer as a customer's, but NO SMS and no OT
   assert.equal(rows.rows.length, 0);
 });
 let reqId = "";
-await test("customer number → SMS with a 6-digit code; DB keeps only hashes", async () => {
+await test("customer number → SMS with a 4-digit code; DB keeps only hashes", async () => {
   await clearPhoneLimits();
   const r = await otpReq(PHONE, otpIp);
   assert.equal(r.status, 200);
   reqId = r.json.requestId!;
   await new Promise((res) => setTimeout(res, 100)); // the send is fire-and-forget
   assert.equal(smsLog.at(-1)?.to, PHONE);
-  assert.match(lastOtp(), /^\d{6}$/);
+  assert.match(lastOtp(), /^\d{4}$/);
   assert.equal(r.json.masked, `${PHONE.slice(0, 2)}x-xxx-${PHONE.slice(-4)}`);
   const row = (await db.execute<{ j: string }>(sql`SELECT row_to_json(o)::text j FROM track_otp o WHERE request_hash = ${guard.sha256(reqId)}`)).rows[0];
   assert.ok(row);
@@ -542,7 +542,7 @@ await test("resend within a minute → 429 (cooldown)", async () => {
 });
 await test("5 wrong codes burn the OTP — the right one then fails too", async () => {
   const right = lastOtp();
-  const wrong = right === "000000" ? "111111" : "000000";
+  const wrong = right === "0000" ? "1111" : "0000";
   for (let i = 0; i < 5; i++) assert.equal((await otpVerify(reqId, wrong, otpIp)).status, 401);
   assert.equal((await otpVerify(reqId, right, otpIp)).status, 401);
 });
@@ -616,8 +616,8 @@ try {
     const ip = nextIp();
     const r = await otpReq(PHONE, ip);
     const token = await providerToken(r.json.requestId!);
-    assert.equal((await otpVerify(r.json.requestId!, "000000", ip)).status, 401);
-    assert.deepEqual(providerCalls.at(-1), { path: "/v2/otp/verify", f: { key: OTP_KEY, secret: OTP_SECRET, token: token!, pin: "000000" } });
+    assert.equal((await otpVerify(r.json.requestId!, "0000", ip)).status, 401);
+    assert.deepEqual(providerCalls.at(-1), { path: "/v2/otp/verify", f: { key: OTP_KEY, secret: OTP_SECRET, token: token!, pin: "0000" } });
     const v = await otpVerify(r.json.requestId!, RIGHT_PIN, ip);
     assert.equal(v.status, 200);
     assert.match(v.json.session ?? "", /^[A-Za-z0-9_-]{43}$/);
@@ -631,7 +631,7 @@ try {
     const ip = nextIp();
     const r = await otpReq(PHONE, ip);
     await providerToken(r.json.requestId!);
-    for (let i = 0; i < 5; i++) assert.equal((await otpVerify(r.json.requestId!, "111111", ip)).status, 401);
+    for (let i = 0; i < 5; i++) assert.equal((await otpVerify(r.json.requestId!, "1111", ip)).status, 401);
     const calls = providerCalls.length;
     assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
     assert.equal(providerCalls.length, calls);
