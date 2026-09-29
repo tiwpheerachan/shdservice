@@ -52,6 +52,7 @@ import { jobSchema, filledRequired, missingRequired, JOB_FIELD_LABEL, type JobRe
 import type { FieldErrors } from "@/lib/validation";
 import { useMountTime } from "@/lib/use-client";
 import { isoDateTime } from "@/lib/dates";
+import { useLeave, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 /* ------------------------------------------------------------------ *
  * Shared form state. Every section reads/writes this through context, and
@@ -272,6 +273,9 @@ type Ctx = {
   s: JobFormState;
   set: <K extends keyof JobFormState>(k: K, v: JobFormState[K]) => void;
   patch: (p: Partial<JobFormState>) => void;
+  /** values that are already stored (a default pre-picked, a field saved on the spot) — not an edit */
+  adopt: (p: Partial<JobFormState>) => void;
+  /** a job loaded / saved (or an empty form) — also what "unsaved edits" is measured against */
   reset: (next?: JobFormState) => void;
   /** field errors by JobInput key (shown under the fields) */
   errors: FieldErrors;
@@ -301,6 +305,10 @@ export function JobFormProvider({
   children: React.ReactNode;
 }) {
   const [s, setS] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
+  // the form as last loaded / saved — anything else on screen is an unsaved edit
+  const [saved, setSaved] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
+  const dirty = React.useMemo(() => JSON.stringify(s) !== JSON.stringify(saved), [s, saved]);
+  useUnsavedChanges(dirty);
   const { errors, setErrors, run, clear, report, fromApi } = useFormErrors();
   // required fields the job had when it was loaded ("never worse"); null = new job (all required)
   const baselineOf = (f: JobFormState) => (f.jobNo ? filledRequired(toJobInput(f)) : null);
@@ -316,9 +324,14 @@ export function JobFormProvider({
         setS((x) => ({ ...x, ...p }));
         Object.keys(p).forEach((k) => clear(errorKey(k as keyof JobFormState)));
       },
+      adopt: (p) => {
+        setS((x) => ({ ...x, ...p }));
+        setSaved((x) => ({ ...x, ...p }));
+      },
       reset: (next) => {
         const f = next ?? EMPTY_JOB_FORM;
         setS(f);
+        setSaved(f);
         setBaseline(baselineOf(f));
         setErrors({});
       },
@@ -445,7 +458,7 @@ export function JobOpenSection({
   status?: string;
   jobNo?: string;
 }) {
-  const { s, set, errors } = useJobForm();
+  const { s, set, adopt, errors } = useJobForm();
   const { data: JOB_TYPES } = useJobTypes();
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { name: me } = useAccess();
@@ -461,7 +474,9 @@ export function JobOpenSection({
             <span className="num">{s.jobNo || jobNo || "Generate Auto"}</span>
           </ReadOnly>
         </Field>
-        <ProfileSelect value={s.documentProfileId} onChange={(id) => set("documentProfileId", id)} doc={s.jobNo || jobNo ? { kind: "job", no: s.jobNo || jobNo || "" } : undefined} />
+        <ProfileSelect
+          value={s.documentProfileId}
+          onChange={(id, how) => (how === "user" ? set("documentProfileId", id) : adopt({ documentProfileId: id }))} doc={s.jobNo || jobNo ? { kind: "job", no: s.jobNo || jobNo || "" } : undefined} />
         <Field label="วันที่">
           <ReadOnly>
             <span className="num">{s.createDate || now} น.</span>
@@ -1050,18 +1065,20 @@ export function FormActions({
   saveLabel = "บันทึกข้อมูล",
   extra,
   saving = false,
-  onCancel,
+  cancelHref,
 }: {
   onSave: () => void;
   saveLabel?: string;
   extra?: React.ReactNode;
   saving?: boolean;
-  onCancel?: () => void;
+  /** "ยกเลิก" → this list page (asks first when something is unsaved) */
+  cancelHref: string;
 }) {
+  const leave = useLeave();
   return (
     <div data-sticky-actions className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-background/90 px-3 py-3 backdrop-blur-md sm:-mx-4 sm:px-4 lg:-mx-6 lg:px-6 no-print">
       {extra}
-      <Button variant="outline" size="md" type="button" onClick={onCancel ?? (() => window.history.back())}>
+      <Button variant="outline" size="md" type="button" onClick={() => void leave(cancelHref)}>
         ยกเลิก
       </Button>
       <Button size="md" onClick={onSave} disabled={saving}>

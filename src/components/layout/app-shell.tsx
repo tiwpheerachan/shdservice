@@ -7,6 +7,7 @@ import { CommandPalette } from "./command-palette";
 import { AccessGuard } from "./access-guard";
 import { cn } from "@/lib/utils";
 import { useLocalStorage } from "@/lib/use-client";
+import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -14,6 +15,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsedPref, setCollapsedPref] = useLocalStorage("shd-sidebar-collapsed", "0");
   const collapsed = collapsedPref === "1";
   const [palette, setPalette] = React.useState(false);
+  useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
 
   const toggleCollapse = () => setCollapsedPref(collapsed ? "0" : "1");
 

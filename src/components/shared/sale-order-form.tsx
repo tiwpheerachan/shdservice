@@ -17,6 +17,7 @@ import { baht } from "@/lib/utils";
 import { errMsg, uploadFile, fileUrl } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useFormErrors } from "@/lib/use-form-errors";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { saleOrderSchema } from "@/lib/validation/sale-order";
 import { useMountTime } from "@/lib/use-client";
 import { isoDateTime } from "@/lib/dates";
@@ -107,6 +108,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       try {
         const d = await uploadFile("sale-order-slip", no, f);
         setSlip(d.path);
+        setSaved((x) => ({ ...x, slip: d.path })); // saved to the order right away — not an edit
         push({ kind: "success", title: "อัปโหลดสลิปแล้ว", desc: f.name });
       } catch (e) {
         push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
@@ -116,6 +118,12 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const openedAt = useMountTime();
     const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : "");
     const idRef = React.useRef(initial?.lines.length ?? 0);
+
+    // the form as it opened (a loaded order, or empty) — anything else is an unsaved edit; the edit
+    // page remounts the form for every order it loads or saves
+    const now = { profileId, customer: customer?.code ?? "", pickedSalesId, lines, payment, payAmount, remark, slip, submit };
+    const [saved, setSaved] = React.useState(now);
+    useUnsavedChanges(JSON.stringify(now) !== JSON.stringify(saved));
 
 
     const add = () => {
@@ -178,7 +186,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 <span className="num">{soNo ?? initial?.no ?? "Generate Auto"}</span>
               </ReadOnly>
             </Field>
-            <ProfileSelect value={profileId} onChange={setProfileId} doc={soNo || initial?.no ? { kind: "sale_order", no: soNo || initial?.no || "" } : undefined} />
+            <ProfileSelect
+              value={profileId}
+              onChange={(id, how) => {
+                setProfileId(id);
+                if (how !== "user") setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
+              }}
+              doc={soNo || initial?.no ? { kind: "sale_order", no: soNo || initial?.no || "" } : undefined} />
             <Field label="วันที่สร้าง">
               <ReadOnly><span className="num">{date}</span></ReadOnly>
             </Field>

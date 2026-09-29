@@ -1,3 +1,5 @@
+import { allowUnload } from "@/lib/use-unsaved-changes";
+
 /**
  * Full page loads — for the few moments the app must start clean instead of routing client-side
  * (in-app links use <Link> / router.push):
@@ -10,6 +12,7 @@
  */
 export function hardNavigate(path: string) {
   if (typeof window === "undefined") return;
+  allowUnload(); // the app decided — an unsaved form can't be saved without the session anyway
   window.location.assign(new URL(path, window.location.origin).href);
 }
 

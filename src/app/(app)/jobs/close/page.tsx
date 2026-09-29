@@ -25,6 +25,7 @@ import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/dat
 import { useShippers, useShippingProfiles } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { RecordGate } from "@/components/shared/record-gate";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
@@ -67,6 +68,10 @@ function CloseForm() {
     (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
   };
   const [slip, setSlip] = React.useState("");
+  // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
+  // (the slip is not: an upload is saved to the job right away)
+  const [saved, setSaved] = React.useState<typeof d | null>(null);
+  useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
   // สลิปชำระเงิน → bucket oneservice/jobs/{no}/slip/… (path เก็บใน job.job_payment_slip_file_name)
   const onPickSlip = async (f: File | undefined) => {
     if (!f || !job) return;
@@ -93,7 +98,7 @@ function CloseForm() {
     reset(fromJob(job));
     setSlip(job.payment.slip);
     const today = thaiToday(); // Thai calendar, not UTC
-    upd({
+    const next = {
       payType: job.payment.type || JOB_PAYMENT_METHODS[0],
       payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : "",
       payDate: today,
@@ -106,7 +111,9 @@ function CloseForm() {
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
       status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : "",
-    });
+    };
+    upd(next);
+    setSaved(next);
   }
 
   const go = (v: string) => find(v);
@@ -341,7 +348,7 @@ function CloseForm() {
           </FieldGrid>
         </Section>
 
-        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" />
       </RecordGate>
     </>
   );

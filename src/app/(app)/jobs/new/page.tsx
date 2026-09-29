@@ -61,7 +61,7 @@ function NewJobForm() {
       <ProductSection variant="open" />
       <OtherInfoSection directory={false} />
       <AttachmentSection ref={attach} />
-      <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} onCancel={() => reset()} />
+      <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" />
 
       <Modal
         open={!!opened}

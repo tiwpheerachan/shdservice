@@ -67,6 +67,7 @@ function EditQuotation() {
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
           saving={saving}
+          cancelHref="/quotation/list"
           extra={
             <PrintButton label="พิมพ์ใบเสนอราคา" kind="quotation" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/quotation/${encodeURIComponent(no ?? "")}`} disabled={!no} />
           }

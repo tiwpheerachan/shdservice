@@ -86,7 +86,7 @@ function EditJobForm() {
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
           saving={saving}
-          onCancel={() => job && reset(fromJob(job))}
+          cancelHref="/jobs/list"
           extra={
             <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
           }

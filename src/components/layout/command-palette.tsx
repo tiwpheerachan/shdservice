@@ -1,12 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Command as CommandPrimitive } from "cmdk";
 import { Search, CornerDownLeft } from "lucide-react";
 import { ALL_LINKS as EVERY_LINK } from "@/lib/nav";
 import { useAccess } from "@/lib/use-access";
+import { useLeave } from "@/lib/use-unsaved-changes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,13 +20,13 @@ export function CommandPalette({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const router = useRouter();
+  const leave = useLeave(); // asks first when a form on this page has unsaved edits
   const { canPath } = useAccess();
   const links = React.useMemo(() => EVERY_LINK.filter((l) => canPath(l.href)), [canPath]);
 
   const go = (href: string) => {
     onOpenChange(false);
-    router.push(href);
+    void leave(href);
   };
 
   return (

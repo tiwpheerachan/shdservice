@@ -104,6 +104,7 @@ function EditSaleOrder() {
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
           saving={saving || approved}
+          cancelHref="/sale/orders"
           extra={
             <>
               <PrintButton label="พิมพ์ใบสั่งขาย" kind="sale_order" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/sale-order/${encodeURIComponent(no ?? "")}`} disabled={!no} />

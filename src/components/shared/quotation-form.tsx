@@ -18,6 +18,7 @@ import { baht } from "@/lib/utils";
 import { api, errMsg, qs } from "@/lib/api";
 import type { JobDetail } from "@/lib/use-job";
 import { useFormErrors } from "@/lib/use-form-errors";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { quotationSchema } from "@/lib/validation/quotation";
 import { useMountTime } from "@/lib/use-client";
 import { isoDateTime } from "@/lib/dates";
@@ -119,6 +120,18 @@ export const QuotationForm = React.forwardRef<
   const date = initial?.date ?? "";
   const idRef = React.useRef((initial?.lines.length ?? 0) + 1);
 
+  // the form as it opened (a loaded quotation, or empty / filled from ?job=) — anything else is an
+  // unsaved edit; the edit page remounts the form for every quotation it loads or saves
+  const now = { type, profileId, lines, service, discount, vatRate, remark, status, customer: customer?.code ?? "", contact, fax, jobRef };
+  const [saved, setSaved] = React.useState(now);
+  const [settled, setSettled] = React.useState(true);
+  if (!settled) {
+    // ?job= has filled the form in (adjusted while rendering, once) — that is where it starts
+    setSettled(true);
+    setSaved(now);
+  }
+  useUnsavedChanges(JSON.stringify(now) !== JSON.stringify(saved));
+
   // a new quotation's date preview: when the screen opened, Thai time (a loaded one shows its own)
   const openedAt = useMountTime();
 
@@ -165,7 +178,9 @@ export const QuotationForm = React.forwardRef<
     onSuccess: (d) => {
       if (urlJobApplied.current) return;
       urlJobApplied.current = true;
-      applyJob(d.job, true).catch((e) => push({ kind: "error", title: "โหลดข้อมูลลูกค้าไม่สำเร็จ", desc: errMsg(e) }));
+      applyJob(d.job, true)
+        .catch((e) => push({ kind: "error", title: "โหลดข้อมูลลูกค้าไม่สำเร็จ", desc: errMsg(e) }))
+        .finally(() => setSettled(false));
     },
     onError: (msg) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: msg }),
   });
@@ -225,7 +240,13 @@ export const QuotationForm = React.forwardRef<
         actions={<Badge tone="primary">{type === "A" ? "Type A (Normal)" : "Type B (VIP)"}</Badge>}
       >
         <div className="mb-3 sm:max-w-md">
-          <ProfileSelect value={profileId} onChange={setProfileId} doc={initial?.no || quotationNo ? { kind: "quotation", no: initial?.no || quotationNo || "" } : undefined} />
+          <ProfileSelect
+            value={profileId}
+            onChange={(id, how) => {
+              setProfileId(id);
+              if (how !== "user") setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
+            }}
+            doc={initial?.no || quotationNo ? { kind: "quotation", no: initial?.no || quotationNo || "" } : undefined} />
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           {(["A", "B"] as const).map((t) => (

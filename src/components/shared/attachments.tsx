@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { api, del, errMsg } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type Row = { id: number; name: string; note: string; file?: string; pending?: File };
 
@@ -26,6 +27,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
   const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const idRef = React.useRef(0);
+  // files queued for a job not saved yet are an unsaved edit (they upload with the job)
+  useUnsavedChanges(rows.some((r) => r.pending));
 
   // existing files of a loaded job
   React.useEffect(() => {
@@ -60,6 +63,9 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
           push({ kind: "error", title: `แนบไฟล์ ${r.name} ไม่สำเร็จ`, desc: errMsg(e) });
         }
       }
+      // the queue belonged to that job — the next new job starts with none (a failed file was toasted
+      // and can be attached from the job's edit screen)
+      setRows((all) => all.filter((r) => !r.pending));
     },
   }));
 

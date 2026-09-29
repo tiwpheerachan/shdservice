@@ -30,6 +30,7 @@ import { SymptomPicker } from "@/components/shared/symptom-picker";
 import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
 import { baht } from "@/lib/utils";
 import { RecordGate } from "@/components/shared/record-gate";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { postJson, errMsg } from "@/lib/api";
@@ -70,20 +71,23 @@ function RepairForm() {
   const [detail, setDetail] = React.useState({ engineerSymptom: "", repairDetail: "", engineerRemark: "", newSerial: "", status: "" });
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(0);
+  // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
+  const [saved, setSaved] = React.useState<{ detail: typeof detail; lines: Line[] } | null>(null);
+  useUnsavedChanges(!!saved && JSON.stringify({ detail, lines }) !== JSON.stringify(saved));
 
 
   // prefill form, repair details and spare-part requests from the loaded job
   function prefill(job: JobDetail) {
     reset(fromJob(job));
-    setDetail({
-      engineerSymptom: job.engineerSymptom,
-      repairDetail: job.repairDetail,
-      engineerRemark: job.engineerRemark,
-      newSerial: "",
-      status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : "",
-    });
-    setLines(
-      job.parts.map((p) => ({
+    const next = {
+      detail: {
+        engineerSymptom: job.engineerSymptom,
+        repairDetail: job.repairDetail,
+        engineerRemark: job.engineerRemark,
+        newSerial: "",
+        status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : "",
+      },
+      lines: job.parts.map((p) => ({
         id: ++idRef.current,
         logId: p.logId,
         code: p.code,
@@ -97,8 +101,11 @@ function RepairForm() {
         bQty: p.requestQtyB,
         status: p.status,
         locked: p.statusId !== 1 || p.granted > 0,
-      }))
-    );
+      })),
+    };
+    setDetail(next.detail);
+    setLines(next.lines);
+    setSaved(next);
   }
 
   const go = (v: string) => find(v);
@@ -386,7 +393,7 @@ function RepairForm() {
           saveLabel="บันทึกงานซ่อม"
           onSave={save}
           saving={saving}
-          onCancel={() => job && reset(fromJob(job))}
+          cancelHref="/jobs/list"
           extra={
             <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
           }

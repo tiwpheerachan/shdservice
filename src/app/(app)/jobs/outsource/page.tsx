@@ -27,6 +27,7 @@ import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { useVendors, useStaff } from "@/data/db";
 import { RecordGate } from "@/components/shared/record-gate";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { useAccess } from "@/lib/use-access";
 import { postJson, errMsg } from "@/lib/api";
@@ -77,20 +78,25 @@ function OutsourceForm() {
     setD((x) => ({ ...x, ...p }));
     (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
   };
+  // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
+  const [saved, setSaved] = React.useState<typeof d | null>(null);
+  useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
 
 
   // prefill from the job + its latest job_send_forward_dt row
   // the vendor list can arrive after the job: a saved "ส่งไปยัง" that turns out to be a known
   // vendor moves from "อื่นๆ" into the list (adjusted while rendering, once — then it matches)
   if (VENDORS.length && d.sendTo === OTHER && d.sendToOther && VENDORS.includes(d.sendToOther)) {
-    setD((x) => ({ ...x, sendTo: x.sendToOther, sendToOther: "" }));
+    const known = (x: typeof d) => (x.sendTo === OTHER && VENDORS.includes(x.sendToOther) ? { ...x, sendTo: x.sendToOther, sendToOther: "" } : x);
+    setD(known);
+    setSaved((x) => x && known(x)); // the same value, only shown the other way — not an edit
   }
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
     const last = job.outsource[job.outsource.length - 1];
     const today = thaiToday(); // Thai calendar, not UTC
-    upd({
+    const next = {
       repairDetail: job.repairDetail,
       sendTo: last?.sendTo && VENDORS.includes(last.sendTo) ? last.sendTo : last?.sendTo ? OTHER : "",
       sendToOther: last?.sendTo && !VENDORS.includes(last.sendTo) ? last.sendTo : "",
@@ -103,7 +109,9 @@ function OutsourceForm() {
       recvDetail: last?.receiveDetail ?? "",
       // the job's current status, so saving without a change keeps it (the field is required)
       status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
-    });
+    };
+    upd(next);
+    setSaved(next);
   }
 
   const go = (v: string) => find(v);
@@ -265,7 +273,7 @@ function OutsourceForm() {
         <CostSummary />
         <AttachmentSection jobNo={job?.no} />
 
-        <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+        <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} cancelHref="/jobs/list" />
       </RecordGate>
     </>
   );

@@ -27,6 +27,7 @@ import { Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { JOB_STATUS_OPTIONS } from "@/data/mock";
 import { RecordGate } from "@/components/shared/record-gate";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { useJob, type JobDetail } from "@/lib/use-job";
 import { postJson, errMsg } from "@/lib/api";
 import { today as thaiToday } from "@/lib/dates";
@@ -73,14 +74,16 @@ function SwapRefundForm() {
     setD((x) => ({ ...x, ...p }));
     Object.keys(p).forEach((k) => act.clear(k)); // payload keys = state keys here
   };
+  // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
+  const [saved, setSaved] = React.useState<{ mode: string; d: typeof d } | null>(null);
+  useUnsavedChanges(!!saved && JSON.stringify({ mode, d }) !== JSON.stringify(saved));
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
     const sw = parseSwap(job.swap.detail);
     const today = thaiToday(); // Thai calendar, not UTC
     const refund = !!sw["ยอดเงินคืน"] || job.payment.amount < 0;
-    setMode(refund ? "refund" : "swap");
-    upd({
+    const next = {
       inspection: job.repairDetail,
       newSerial: (sw["New S/N"] ?? "").trim(),
       newModel: sw["รุ่นที่เปลี่ยนให้"] ?? "",
@@ -93,7 +96,10 @@ function SwapRefundForm() {
       detail: sw["รายละเอียด"] ?? (job.swap.detail && Object.keys(sw).length === 0 ? job.swap.detail : ""),
       // the job's current status, so saving without a change keeps it (the field is required)
       status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
-    });
+    };
+    setMode(refund ? "refund" : "swap");
+    upd(next);
+    setSaved({ mode: refund ? "refund" : "swap", d: next });
   }
 
   const go = (v: string) => find(v);
@@ -261,7 +267,7 @@ function SwapRefundForm() {
         <CostSummary />
         <AttachmentSection jobNo={job?.no} />
 
-        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} onCancel={() => job && reset(fromJob(job))} />
+        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} cancelHref="/jobs/list" />
       </RecordGate>
     </>
   );

@@ -38,7 +38,7 @@ function NewQuotation() {
         description="ข้อมูลการเสนอราคา » เสนอราคางานซ่อม"
       />
       <QuotationForm ref={form} mode="new" jobNo={sp.get("job") ?? undefined} />
-      <FormActions saveLabel="บันทึกใบเสนอราคา" onSave={save} saving={saving} />
+      <FormActions saveLabel="บันทึกใบเสนอราคา" onSave={save} saving={saving} cancelHref="/quotation/list" />
     </>
   );
 }

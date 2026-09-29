@@ -38,7 +38,7 @@ export default function NewSaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Add New Sale Order"
       />
       <SaleOrderForm ref={form} />
-      <FormActions saveLabel="บันทึกใบสั่งขาย" onSave={save} saving={saving} />
+      <FormActions saveLabel="บันทึกใบสั่งขาย" onSave={save} saving={saving} cancelHref="/sale/orders" />
     </>
   );
 }
