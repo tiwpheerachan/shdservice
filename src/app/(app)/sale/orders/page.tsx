@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Plus, Download } from "lucide-react";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { SearchSelect } from "@/components/shared/search-select";
@@ -18,6 +18,7 @@ import { useSaleOrdersPage, useStaff } from "@/data/db";
 import { baht, isFilterActive } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
 import { exportXlsx } from "@/lib/api";
+import { ExportButton } from "@/components/shared/export-button";
 
 // approve_status.approve_name_th → badge tone
 const TONE: Record<string, "warning" | "success" | "danger" | "info"> = {
@@ -112,8 +113,8 @@ export default function SaleOrderPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`)}
-          onEdit={canEdit ? () => (window.location.href = `/sale/orders/edit?no=${encodeURIComponent(r.no)}`) : undefined}
+          viewHref={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`}
+          editHref={canEdit ? `/sale/orders/edit?no=${encodeURIComponent(r.no)}` : undefined}
         />
       ),
     },
@@ -131,10 +132,7 @@ export default function SaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("sale_orders", { q: table.q || filters.no || filters.customer || filters.code, from: filters.from, to: filters.to, sales: filters.sales, approve: filters.approve })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("sale_orders", { q: table.q || filters.no || filters.customer || filters.code, from: filters.from, to: filters.to, sales: filters.sales, approve: filters.approve })} />
             {canAdd && (
               <Link href="/sale/orders/new">
                 <Button size="sm">

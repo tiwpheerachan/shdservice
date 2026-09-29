@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Plus,
-  Download,
   Printer,
   Layers,
   Sparkles,
@@ -36,6 +35,7 @@ import { baht, cn, isFilterActive } from "@/lib/utils";
 import { api, qs, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
+import { ExportButton } from "@/components/shared/export-button";
 
 /** Filter bar — every field is AND-ed on the server (see JobFilters in services/jobs.ts). */
 type Filters = {
@@ -309,8 +309,8 @@ export default function JobListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => (window.location.href = `/jobs/repair?job=${encodeURIComponent(r.no)}`)}
-          onEdit={canEdit ? () => (window.location.href = `/jobs/edit?job=${encodeURIComponent(r.no)}`) : undefined}
+          viewHref={`/jobs/repair?job=${encodeURIComponent(r.no)}`}
+          editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
         />
       ),
     },
@@ -327,10 +327,7 @@ export default function JobListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("jobs", { q: table.q, ...toParams(filters) })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("jobs", { q: table.q, ...toParams(filters) })} />
             {canAdd && (
               <Link href="/jobs/new">
                 <Button size="sm">

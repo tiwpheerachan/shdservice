@@ -4,6 +4,7 @@ import * as React from "react";
 import { Clock, RefreshCw, LogOut, Mail, BadgeCheck } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { AuthSplit } from "@/components/ui/sign-in";
+import { hardNavigate } from "@/lib/navigation";
 
 type Me = { name: string; email: string; avatar?: string };
 
@@ -30,7 +31,7 @@ export default function PendingPage() {
       const r = await fetch("/api/sso/refresh", { cache: "no-store" });
       const d = await r.json().catch(() => ({}));
       if (d?.approved && !preview) {
-        window.location.href = "/jobs/dashboard";
+        hardNavigate("/jobs/dashboard"); // approved → full reload so the new role's permissions load
         return;
       }
       const n = new Date();

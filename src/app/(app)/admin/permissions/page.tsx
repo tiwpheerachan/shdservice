@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ROLES, type Permission } from "@/data/mock";
 import { usePermissions, useRoles, useModules } from "@/data/db";
+import { postJson } from "@/lib/api";
 
 // เมนูงาน (module) และบทบาท (user_type) มาจากตาราง app_config ของระบบเดิม
 // — ค่า fallback ด้านล่างใช้เฉพาะระหว่างโหลด
@@ -91,25 +92,7 @@ export default function PermissionsPage() {
     setSaving(true);
     try {
       const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
-      const doPost = () =>
-        fetch("/api/admin/permissions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items }),
-        });
-      let res = await doPost();
-      if (res.status === 401) {
-        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 400));
-        res = await doPost();
-      }
-      if (res.status === 401) {
-        window.location.href =
-          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `error ${res.status}`);
+      await postJson("/api/admin/permissions", { items }); // 401 → refresh + retry → /login (api.ts)
       push({ kind: "success", title: "บันทึกสิทธิ์แล้ว", desc: `บทบาท: ${role}` });
       refetch();
     } catch (e) {

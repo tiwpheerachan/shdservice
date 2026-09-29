@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { SearchSelect, strOptions } from "./search-select";
+import { ExportButton } from "./export-button";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +57,7 @@ export function ReportView<T extends Record<string, unknown>>({
   /** server-side paging for the report table (rows = current page) */
   server?: ServerTable;
   /** download the whole report (same filters) as .xlsx */
-  onExport?: () => void;
+  onExport?: () => Promise<unknown>;
 }) {
   const { push } = useToast();
   // the defaults the filters declare change (a page passes new ones) → the form starts over from
@@ -88,14 +89,14 @@ export function ReportView<T extends Record<string, unknown>>({
               <Printer className="h-3.5 w-3.5" />
               พิมพ์รายงาน
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => (onExport ? onExport() : push({ kind: "warning", title: "หน้านี้ยังไม่รองรับการส่งออก" }))}
-            >
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-              Excel
-            </Button>
+            {onExport ? (
+              <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => push({ kind: "warning", title: "หน้านี้ยังไม่รองรับการส่งออก" })}>
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Excel
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={() => window.print()}

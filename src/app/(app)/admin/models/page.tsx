@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download } from "lucide-react";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
@@ -19,6 +19,7 @@ import { baht, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { modelSchema } from "@/lib/validation/admin";
+import { ExportButton } from "@/components/shared/export-button";
 
 type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
 
@@ -156,10 +157,7 @@ export default function ModelsPage() {
         description="ทะเบียนรุ่นสินค้าและราคาตลาด ใช้อ้างอิงตอนเปิดงานและเสนอราคา"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("models", { deleted: "exclude", ...filter })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("models", { deleted: "exclude", ...filter })} />
             <Button size="sm" onClick={() => openForm(null)}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มรุ่นสินค้า

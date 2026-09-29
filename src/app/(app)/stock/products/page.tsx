@@ -3,7 +3,6 @@
 import * as React from "react";
 import {
   Plus,
-  Download,
   PackageX,
   TriangleAlert,
   Boxes,
@@ -32,6 +31,7 @@ import { useProductsPage, useProductStats, useManufacturers, useCategories, useM
 import { baht, int, cn, isFilterActive } from "@/lib/utils";
 import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
+import { ExportButton } from "@/components/shared/export-button";
 
 /** stock: "" = ทั้งหมด · in = มีของเกิน 3 ชิ้น · low = ใกล้หมด 1–3 · out = หมด (≤ 0) — same buckets as the KPI cards */
 type StockFilter = "" | "in" | "low" | "out";
@@ -293,10 +293,7 @@ export default function ProductsPage() {
         description="ทะเบียนอะไหล่และอุปกรณ์เสริม พร้อมยอดคงเหลือที่พร้อมใช้งาน"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("products", { ...query, deleted: "exclude" })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("products", { ...query, deleted: "exclude" })} />
             {canAdd && (
               <Button size="sm" onClick={() => setDetail({ product: null, mode: "add" })}>
                 <Plus className="h-3.5 w-3.5" />

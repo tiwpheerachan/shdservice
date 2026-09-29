@@ -4,6 +4,7 @@ import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAccess } from "@/lib/use-access";
 import { ALL_LINKS } from "@/lib/nav";
+import { hardNavigate, toLogin } from "@/lib/navigation";
 
 /**
  * Client-side authorization watchdog. The server layout only re-checks approval
@@ -34,12 +35,12 @@ export function AccessGuard() {
         const r = await fetch("/api/sso/refresh", { cache: "no-store" });
         if (!active) return;
         if (r.status === 401) {
-          window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
+          toLogin();
           return;
         }
         const d = await r.json().catch(() => ({}));
         if (active && d && d.approved === false) {
-          window.location.href = "/pending";
+          hardNavigate("/pending"); // approval revoked → reload into the pending page
         }
       } catch {
         /* ignore transient errors */

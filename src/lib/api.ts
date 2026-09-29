@@ -1,10 +1,13 @@
 "use client";
 
+import { toLogin } from "@/lib/navigation";
+
 /**
  * Tiny fetch wrapper for the app's own API routes.
- *  - JSON in / JSON out, throws ApiError { status, message } on !ok
- *  - 401 → try to refresh the session once, then bounce to SSO login
+ *  - JSON in / JSON out, throws ApiError { status, message, details } on !ok
+ *  - 401 → try to refresh the session once, then our /login page (never straight to SSO)
  *  - 403 → surfaces the server's Thai permission message
+ * Every call to the app's API goes through here (or exportXlsx) — no hand-rolled fetch + 401 logic.
  */
 export class ApiError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
@@ -21,11 +24,6 @@ async function tryRefresh(): Promise<boolean> {
   return refreshing;
 }
 
-function toLogin() {
-  if (typeof window === "undefined") return;
-  window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname + window.location.search);
-}
-
 /**
  * Listeners run after every successful non-GET call (create/update/delete/
  * upload) — the data hooks use this to drop their cached lists so the next
@@ -37,15 +35,27 @@ export function onApiWrite(fn: () => void) {
   return () => writeListeners.delete(fn);
 }
 
-export async function api<T = unknown>(url: string, init: RequestInit = {}, retry = true): Promise<T> {
-  const res = await fetch(url, { cache: "no-store", ...init });
+/** fetch under the session rules: 401 → refresh once and retry; still 401 → /login (throws) */
+async function authedFetch(url: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(url, { cache: "no-store", ...init });
+  if (res.status === 401 && (await tryRefresh())) res = await fetch(url, { cache: "no-store", ...init });
   if (res.status === 401) {
-    if (retry && (await tryRefresh())) return api<T>(url, init, false);
     toLogin();
     throw new ApiError(401, "กรุณาเข้าสู่ระบบใหม่");
   }
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string; details?: unknown };
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string })?.error || `เกิดข้อผิดพลาด (${res.status})`, (data as { details?: unknown })?.details);
+  return res;
+}
+
+/** a non-2xx answer → ApiError with the server's message (+ details such as { fields }) */
+async function failure(res: Response): Promise<ApiError> {
+  const data = (await res.json().catch(() => ({}))) as { error?: string; details?: unknown };
+  return new ApiError(res.status, data.error || `เกิดข้อผิดพลาด (${res.status})`, data.details);
+}
+
+export async function api<T = unknown>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await authedFetch(url, init);
+  if (!res.ok) throw await failure(res);
+  const data = (await res.json().catch(() => ({}))) as T;
   if ((init.method ?? "GET").toUpperCase() !== "GET") writeListeners.forEach((fn) => fn());
   return data as T;
 }
@@ -71,10 +81,35 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 
 export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Open an .xlsx download of a list under the given filters (same params as the data hook). */
-export function exportXlsx(resource: string, params: Record<string, string | number | boolean | undefined | null> = {}) {
-  if (typeof window === "undefined") return;
-  window.location.href = `/api/export/${resource}${qs(params)}`;
+/**
+ * Download an .xlsx of a list under the given filters (same params as the data hook).
+ * Fetched first, saved after: a refusal (429 too many exports, 403, 500) throws an ApiError the
+ * button shows as a toast — the page never navigates away to a JSON error.
+ */
+export async function exportXlsx(resource: string, params: Record<string, string | number | boolean | undefined | null> = {}) {
+  const res = await authedFetch(`/api/export/${resource}${qs(params)}`, {});
+  if (!res.ok) throw await failure(res);
+  saveBlob(await res.blob(), filenameOf(res.headers.get("content-disposition")) ?? `${resource}.xlsx`);
+}
+
+/** filename from Content-Disposition (RFC 5987 filename*=UTF-8'' first, then filename="…") */
+function filenameOf(cd: string | null): string | null {
+  if (!cd) return null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) return decodeURIComponent(star[1]);
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1] : null;
+}
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000); // the browser has taken the file by then
 }
 
 /** Upload one file (product image / payment slip) → stored path. */

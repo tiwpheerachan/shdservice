@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
@@ -15,6 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAuditPage, useAuditModules, type AuditRow } from "@/data/db";
 import { exportXlsx } from "@/lib/api";
 import { isFilterActive } from "@/lib/utils";
+import { ExportButton } from "@/components/shared/export-button";
 
 // action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
@@ -97,10 +97,7 @@ export default function AuditPage() {
         title="ประวัติการใช้งาน (Audit Log)"
         description="ข้อมูลระบบ » ใครทำอะไร กับรายการไหน เมื่อไร — บันทึกทุกการเพิ่ม/แก้ไข/ลบ/เปลี่ยนสถานะ/อนุมัติ/จ่ายสต๊อก และการเข้าสู่ระบบ"
         actions={
-          <Button variant="outline" size="sm" onClick={() => exportXlsx("audit_log", { ...filters })}>
-            <Download className="h-3.5 w-3.5" />
-            ส่งออก Excel
-          </Button>
+          <ExportButton run={() => exportXlsx("audit_log", { ...filters })} />
         }
       />
 

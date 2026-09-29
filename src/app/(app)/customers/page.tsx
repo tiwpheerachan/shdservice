@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Download, MapPin } from "lucide-react";
+import { Plus, MapPin } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { FilterBar } from "@/components/shared/filter-bar";
@@ -22,6 +22,7 @@ import { useAccess } from "@/lib/use-access";
 import { useFormErrors } from "@/lib/use-form-errors";
 import { customerSchema } from "@/lib/validation/customer";
 import { isFilterActive } from "@/lib/utils";
+import { ExportButton } from "@/components/shared/export-button";
 
 export default function CustomersPage() {
   const { push } = useToast();
@@ -172,10 +173,7 @@ export default function CustomersPage() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("customers", { ...filter })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("customers", { ...filter })} />
             {canAdd && (
               <Button size="sm" onClick={() => openForm(null)}>
                 <Plus className="h-3.5 w-3.5" />

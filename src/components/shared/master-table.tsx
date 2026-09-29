@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download } from "lucide-react";
+import { Plus } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "./page-header";
 import { RowActions } from "./row-actions";
@@ -18,6 +18,7 @@ import { postJson, errMsg, exportXlsx } from "@/lib/api";
 import { useAccess } from "@/lib/use-access";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { masterSchema } from "@/lib/validation/admin";
+import { ExportButton } from "@/components/shared/export-button";
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
 export type MasterKind = "categories" | "manufacturers" | "colors" | "job_types" | "product_types" | "symptoms";
@@ -223,10 +224,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         description={config.description}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx(config.kind, { deleted: "exclude", q: filter.name, status: filter.status })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx(config.kind, { deleted: "exclude", q: filter.name, status: filter.status })} />
             <Button size="sm" onClick={openNew}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มข้อมูล

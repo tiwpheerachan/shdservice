@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Plus, Download, Printer } from "lucide-react";
+import { Plus, Printer } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { SearchSelect, strOptions } from "@/components/shared/search-select";
@@ -19,6 +19,7 @@ import { baht, isFilterActive } from "@/lib/utils";
 import { useAccess } from "@/lib/use-access";
 import { exportXlsx } from "@/lib/api";
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from "@/components/shared/table-columns";
+import { ExportButton } from "@/components/shared/export-button";
 
 // quotation_status names (DB) → badge tone
 const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
@@ -140,8 +141,8 @@ export default function QuotationListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => (window.location.href = `/quotation/edit?no=${encodeURIComponent(r.no)}`)}
-          onEdit={canEdit ? () => (window.location.href = `/quotation/edit?no=${encodeURIComponent(r.no)}`) : undefined}
+          viewHref={`/quotation/edit?no=${encodeURIComponent(r.no)}`}
+          editHref={canEdit ? `/quotation/edit?no=${encodeURIComponent(r.no)}` : undefined}
         />
       ),
     },
@@ -165,10 +166,7 @@ export default function QuotationListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("quotations", { q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei, status: filters.status, from: filters.from, to: filters.to, type: filters.type, warranty: filters.warranty, brand: filters.brand })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("quotations", { q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei, status: filters.status, from: filters.from, to: filters.to, type: filters.type, warranty: filters.warranty, brand: filters.brand })} />
             {canAdd && (
               <Link href="/quotation/new">
                 <Button size="sm">

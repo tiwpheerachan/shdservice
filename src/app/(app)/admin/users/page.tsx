@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Download, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
+import { Plus, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RowActions } from "@/components/shared/row-actions";
 import { FilterBar } from "@/components/shared/filter-bar";
@@ -17,10 +17,11 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { ROLES, type User } from "@/data/mock";
 import { useUsers, useRoles } from "@/data/db";
-import { exportXlsx } from "@/lib/api";
+import { errMsg, exportXlsx, postJson } from "@/lib/api";
 import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
 import { userSchema } from "@/lib/validation/admin";
 import { isFilterActive } from "@/lib/utils";
+import { ExportButton } from "@/components/shared/export-button";
 
 type UserForm = {
   id: string;
@@ -136,38 +137,15 @@ export default function UsersPage() {
     }));
   };
 
-  // POST a user with one automatic session-refresh + retry on 401, so a valid
-  // write is never silently lost to an expiring cookie. Returns the parsed data
-  // or throws; returns null if it had to redirect to re-login.
-  const postUser = async (body: Record<string, unknown>) => {
-    const doPost = () =>
-      fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    let res = await doPost();
-    if (res.status === 401) {
-      await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-      await new Promise((r) => setTimeout(r, 400));
-      res = await doPost();
-    }
-    if (res.status === 401) {
-      window.location.href =
-        "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-      return null;
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `error ${res.status}`);
-    return data;
-  };
+  // a 401 refreshes the session and retries once, then goes to /login (api.ts) — a valid write is
+  // never silently lost to an expiring cookie; field errors come back as ApiError details
+  const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>("/api/admin/users", body);
 
   const save = async () => {
     if (fe.report(fe.run(userSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const data = await postUser(form);
-      if (!data) return;
       push({
         kind: "success",
         title: data.created ? "เพิ่มผู้ใช้งานแล้ว" : "บันทึกการแก้ไขแล้ว",
@@ -176,11 +154,7 @@ export default function UsersPage() {
       setOpen(false);
       refetch();
     } catch (e) {
-      push({
-        kind: "error",
-        title: "บันทึกไม่สำเร็จ",
-        desc: e instanceof Error ? e.message : String(e),
-      });
+      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -191,8 +165,7 @@ export default function UsersPage() {
   const quickSet = async (r: User, patch: Partial<UserForm>, okTitle: string) => {
     setBusyId(r.id);
     try {
-      const data = await postUser({ ...toForm(r), ...patch });
-      if (!data) return;
+      await postUser({ ...toForm(r), ...patch });
       push({ kind: "success", title: okTitle, desc: r.name });
       refetch();
     } catch (e) {
@@ -225,25 +198,7 @@ export default function UsersPage() {
     }
     setBusyId(r.id);
     try {
-      const doPost = () =>
-        fetch("/api/admin/records", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ table: "users", id: r.id, deleted }),
-        });
-      let res = await doPost();
-      if (res.status === 401) {
-        await fetch("/api/sso/refresh", { cache: "no-store" }).catch(() => {});
-        await new Promise((x) => setTimeout(x, 400));
-        res = await doPost();
-      }
-      if (res.status === 401) {
-        window.location.href =
-          "/api/sso/login?next=" + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || `error ${res.status}`);
+      await postJson("/api/admin/records", { table: "users", id: r.id, deleted });
       push({
         kind: "success",
         title: deleted ? "ย้ายไปรายการที่ลบแล้ว" : "กู้คืนแล้ว",
@@ -407,10 +362,7 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })}>
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
-            </Button>
+            <ExportButton run={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })} />
             <Button size="sm" onClick={openAdd}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มผู้ใช้งาน

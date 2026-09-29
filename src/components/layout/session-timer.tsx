@@ -4,6 +4,7 @@ import * as React from "react";
 import { Timer, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMe } from "@/lib/use-me";
+import { toLogin } from "@/lib/navigation";
 
 const WARN_SECONDS = 5 * 60;
 const AUTO_REFRESH_EVERY_MS = 5 * 60 * 1000; // activity-based renewal, at most every 5 min (TTL is 30 min)
@@ -23,7 +24,7 @@ export function SessionTimer() {
     try {
       const r = await fetch("/api/sso/refresh", { cache: "no-store" });
       if (r.status === 401) {
-        window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
+        toLogin();
         return;
       }
       await reloadMe();
@@ -52,7 +53,7 @@ export function SessionTimer() {
 
   // expired → back through SSO
   React.useEffect(() => {
-    if (left === 0) window.location.href = "/login?expired=1&next=" + encodeURIComponent(window.location.pathname);
+    if (left === 0) toLogin();
   }, [left]);
 
   const p = (n: number) => String(n).padStart(2, "0");
