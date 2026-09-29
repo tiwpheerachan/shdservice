@@ -10,8 +10,9 @@ services:
     buildCommand: npm ci --include=dev && npm run db:migrate && npm run build
     startCommand: npm start
     envVars:
+      # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
-        value: "20"
+        value: "24"
       - key: NEXT_PUBLIC_SUPABASE_URL
         value: https://izypdfhjbqctbopxhrqq.supabase.co
       # publishable key is client-safe (it is sent to the browser anyway)
