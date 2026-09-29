@@ -232,6 +232,7 @@ export type TrackEvent =
   | "otp_rate_limited"
   | "otp_sent"
   | "otp_send_failed"
+  | "otp_check_failed"
   | "otp_unknown_phone"
   | "otp_verified"
   | "otp_invalid"

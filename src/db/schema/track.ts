@@ -63,7 +63,10 @@ export const trackOtp = pgTable(
     requestHash: bytea("request_hash").primaryKey(),
     phoneHash: varchar("phone_hash", { length: 64 }).notNull(),
     customerIds: integer("customer_ids").array().notNull(),
-    codeHash: bytea("code_hash").notNull(),
+    /** development `log` mode only — our own code, HMAC'd (drizzle/0021) */
+    codeHash: bytea("code_hash"),
+    /** ThaiBulkSMS OTP service: its token for this request — checked together with the code (drizzle/0021) */
+    providerToken: varchar("provider_token", { length: 128 }),
     attempts: integer("attempts").notNull().default(0),
     issuedIp: inet("issued_ip").notNull(),
     createdAt: at("created_at").notNull().defaultNow(),

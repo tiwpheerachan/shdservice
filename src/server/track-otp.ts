@@ -5,7 +5,7 @@ import { db } from "@/db/client";
 import { customer, trackOtp, trackSession } from "@/db/schema";
 import { RS } from "@/server/record-status";
 import { hmac, sha256, normalizeUa, logEvent, hit, dbNow, dbNowPlus } from "./track-guard";
-import { sendSms } from "./sms";
+import { checkOtpSms, printDevOtp, requestOtpSms, smsProvider } from "./sms";
 
 /**
  * /track by phone number + SMS OTP (drizzle/0017).
@@ -15,8 +15,10 @@ import { sendSms } from "./sms";
  *  - the answer to "send me a code" is the same whether or not the number is a customer;
  *    a real SMS goes out ONLY to numbers in the customer table (no paid SMS to random
  *    numbers — SMS pumping) and the send happens after the response is decided
- *  - nothing raw is stored: phone → HMAC, code → HMAC bound to its request id,
- *    request id / session token → sha256
+ *  - the code: ThaiBulkSMS's OTP service makes it, sends it and checks it — the row keeps its token
+ *    (useless without the SMS); our 5-try cap comes first. Development `log` mode makes its own
+ *    code and keeps only an HMAC of it bound to its request id
+ *  - nothing else raw is stored: phone → HMAC, request id / session token → sha256
  *  - session: 15 min, activity keeps ≥ 5 min left, never past 60 min from sign-in;
  *    the token lives only in page memory (leaving the page = a new OTP)
  */
@@ -94,22 +96,31 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   const requestId = randomBytes(32).toString("base64url");
   const ids = await customerIdsForPhone(phone);
   if (ids.length) {
-    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const rh = sha256(requestId);
+    // development `log` mode makes its own code; ThaiBulkSMS makes the real one
+    const own = smsProvider() === "log" ? String(randomInt(0, 1_000_000)).padStart(6, "0") : null;
     // a new code replaces any unused one for this number
     await db.update(trackOtp).set({ consumedAt: dbNow }).where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
     await db.insert(trackOtp).values({
-      requestHash: sha256(requestId),
+      requestHash: rh,
       phoneHash: key,
       customerIds: ids,
-      codeHash: codeHash(requestId, code),
+      codeHash: own ? codeHash(requestId, own) : null,
       issuedIp: ip,
       expiresAt: dbNowPlus(OTP_TTL_SEC),
     });
     logEvent("otp_sent", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
+    if (own) printDevOtp(phone, own);
     // after the response is decided: the SMS round-trip must not reveal "this is a customer" by timing
-    void sendSms(phone, `รหัส OTP ของคุณคือ ${code} (ใช้ได้ 5 นาที) สำหรับติดตามสถานะงานซ่อม SHD — ห้ามบอกรหัสนี้กับผู้อื่น`).then((sent) => {
-      if (!sent) logEvent("otp_send_failed", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
-    });
+    else
+      void requestOtpSms(phone).then(async (token) => {
+        if (!token) return logEvent("otp_send_failed", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
+        await db
+          .update(trackOtp)
+          .set({ providerToken: token })
+          .where(eq(trackOtp.requestHash, rh))
+          .catch((e) => console.error("[track_otp] token not saved", e instanceof Error ? e.message.split("\n")[0] : e));
+      });
   } else {
     logEvent("otp_unknown_phone", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
   }
@@ -136,11 +147,16 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
         lt(trackOtp.attempts, OTP_MAX_ATTEMPTS)
       )
     )
-    .returning({ codeHash: trackOtp.codeHash });
-  const stored = tried?.codeHash;
-  if (!stored) return null;
-  const given = codeHash(requestId, code);
-  if (stored.length !== given.length || !timingSafeEqual(stored, given)) return null;
+    .returning({ codeHash: trackOtp.codeHash, providerToken: trackOtp.providerToken });
+  if (!tried) return null;
+  if (tried.providerToken) {
+    const answer = await checkOtpSms(tried.providerToken, code);
+    if (answer === "error") logEvent("otp_check_failed", { ipHash: hmac(`ip:${ip}`) });
+    if (answer !== "ok") return null;
+  } else if (tried.codeHash) {
+    const given = codeHash(requestId, code);
+    if (tried.codeHash.length !== given.length || !timingSafeEqual(tried.codeHash, given)) return null;
+  } else return null; // the SMS never went out
 
   const [row] = await db
     .update(trackOtp)

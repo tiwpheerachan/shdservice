@@ -28,6 +28,7 @@ Object.assign(process.env, {
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
+  if (url.startsWith("https://otp.thaibulksms.com/")) return otpProviderMock(url, init);
   if (!url.includes("challenges.cloudflare.com")) return realFetch(input, init);
   const token = new URLSearchParams(String(init?.body ?? "")).get("response") ?? "";
   const reply = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
@@ -50,6 +51,30 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       return reply({ success: false });
   }
 }) as typeof fetch;
+
+// ThaiBulkSMS OTP service mock (used once SMS_PROVIDER=thaibulksms below): records every call;
+// msisdn "0900000000" = the send fails; pin "246810" is the right code; token "tok-down" = service down
+const OTP_KEY = "1234567890123";
+const OTP_SECRET = "unit-test-otp-secret";
+const RIGHT_PIN = "246810";
+const providerCalls: { path: string; f: Record<string, string> }[] = [];
+let tokenSeq = 0;
+function otpProviderMock(url: string, init?: RequestInit) {
+  const path = url.replace("https://otp.thaibulksms.com", "");
+  const f = Object.fromEntries(new URLSearchParams(String(init?.body ?? "")));
+  providerCalls.push({ path, f });
+  const reply = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
+  if (f.key !== OTP_KEY || f.secret !== OTP_SECRET) return reply({ code: 400, errors: [{ detail: [], message: "Application not found." }] }, 400);
+  if (path === "/v2/otp/request") {
+    if (f.msisdn === "0900000000") return reply({ code: 400, errors: [{ detail: "ERROR_MSISDN", message: "Gateway response send sms fail." }] }, 400);
+    return reply({ status: "success", token: `tok-${++tokenSeq}-${"x".repeat(24)}`, refno: "AB12C" });
+  }
+  if (path === "/v2/otp/verify") {
+    if (f.token === "tok-down") return reply({}, 503);
+    return f.pin === RIGHT_PIN ? reply({ status: "success", message: "Code is correct." }) : reply({ code: 400, errors: [{ detail: [], message: "Code is invalid." }] }, 400);
+  }
+  return reply({}, 404);
+}
 
 const { db } = await import("@/db/client");
 const guard = await import("@/server/track-guard");
@@ -544,6 +569,111 @@ await test("concurrent right answers → exactly one session", async () => {
   assert.equal(all.filter((x) => x.status === 200).length, 1);
   for (const x of all) if (x.json.session) await db.execute(sql`DELETE FROM track_session WHERE token_hash = ${guard.sha256(x.json.session)}`);
 });
+
+// ---- ThaiBulkSMS OTP service (production): it makes, sends and checks the code ----
+const setProviderMode = (on: boolean) =>
+  Object.assign(process.env, on ? { SMS_PROVIDER: "thaibulksms", THAIBULKSMS_OTP_KEY: OTP_KEY, THAIBULKSMS_OTP_SECRET: OTP_SECRET } : { SMS_PROVIDER: "log", THAIBULKSMS_OTP_KEY: "", THAIBULKSMS_OTP_SECRET: "" });
+const otpRow = async (requestId: string) =>
+  (await db.execute<{ token: string | null; has_code: boolean }>(sql`SELECT provider_token AS token, code_hash IS NOT NULL AS has_code FROM track_otp WHERE request_hash = ${guard.sha256(requestId)}`)).rows[0];
+/** the provider call runs after the answer — wait for its token to land on the row */
+async function providerToken(requestId: string) {
+  for (let i = 0; i < 40; i++) {
+    const row = await otpRow(requestId);
+    if (row?.token) return row.token;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  return null;
+}
+setProviderMode(true);
+try {
+  await test("provider: customer number → ThaiBulkSMS gets the number + app keys; the row keeps its token, no code of ours", async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    const logged = smsLog.length;
+    const calls = providerCalls.length;
+    const r = await otpReq(PHONE, ip);
+    assert.equal(r.status, 200);
+    const token = await providerToken(r.json.requestId!);
+    assert.match(token ?? "", /^tok-/);
+    const sent = providerCalls.slice(calls);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].path, "/v2/otp/request");
+    assert.deepEqual(sent[0].f, { key: OTP_KEY, secret: OTP_SECRET, msisdn: PHONE });
+    assert.equal((await otpRow(r.json.requestId!)).has_code, false);
+    assert.equal(smsLog.length, logged, "no [sms:log] in provider mode");
+  });
+  await test("provider: unknown number → same answer, ThaiBulkSMS never called", async () => {
+    await clearPhoneLimits();
+    const calls = providerCalls.length;
+    const r = await otpReq(NOBODY, nextIp());
+    assert.equal(r.status, 200);
+    assert.ok(r.json.requestId && r.json.masked);
+    await new Promise((res) => setTimeout(res, 150));
+    assert.equal(providerCalls.length, calls);
+  });
+  await test("provider: wrong code → 401 (checked by ThaiBulkSMS); right code → session; replay → refused without asking again", async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    const r = await otpReq(PHONE, ip);
+    const token = await providerToken(r.json.requestId!);
+    assert.equal((await otpVerify(r.json.requestId!, "000000", ip)).status, 401);
+    assert.deepEqual(providerCalls.at(-1), { path: "/v2/otp/verify", f: { key: OTP_KEY, secret: OTP_SECRET, token: token!, pin: "000000" } });
+    const v = await otpVerify(r.json.requestId!, RIGHT_PIN, ip);
+    assert.equal(v.status, 200);
+    assert.match(v.json.session ?? "", /^[A-Za-z0-9_-]{43}$/);
+    await db.execute(sql`DELETE FROM track_session WHERE token_hash = ${guard.sha256(v.json.session!)}`);
+    const calls = providerCalls.length;
+    assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
+    assert.equal(providerCalls.length, calls, "a used OTP never reaches ThaiBulkSMS");
+  });
+  await test("provider: our 5-try cap comes first — the 6th try (even right) never reaches ThaiBulkSMS", async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    const r = await otpReq(PHONE, ip);
+    await providerToken(r.json.requestId!);
+    for (let i = 0; i < 5; i++) assert.equal((await otpVerify(r.json.requestId!, "111111", ip)).status, 401);
+    const calls = providerCalls.length;
+    assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
+    assert.equal(providerCalls.length, calls);
+  });
+  await test("provider: service down while checking → 401, logged as otp_check_failed", async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    const r = await otpReq(PHONE, ip);
+    await providerToken(r.json.requestId!);
+    await db.execute(sql`UPDATE track_otp SET provider_token = 'tok-down' WHERE request_hash = ${guard.sha256(r.json.requestId!)}`);
+    assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
+    await new Promise((res) => setTimeout(res, 150));
+    const ev = await db.execute(sql`SELECT 1 FROM track_event WHERE event = 'otp_check_failed' AND ip_hash = ${guard.hmac(`ip:${ip}`)} AND at > now() - interval '1 minute'`);
+    assert.ok(ev.rows.length >= 1);
+  });
+  await test("provider: send refused (bad keys) → otp_send_failed, no token, every code refused", async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    process.env.THAIBULKSMS_OTP_SECRET = "wrong-secret";
+    const r = await otpReq(PHONE, ip);
+    assert.equal(r.status, 200, "the page still gets the same answer");
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal((await otpRow(r.json.requestId!)).token, null);
+    const ev = await db.execute(sql`SELECT 1 FROM track_event WHERE event = 'otp_send_failed' AND ip_hash = ${guard.hmac(`ip:${ip}`)} AND at > now() - interval '1 minute'`);
+    assert.ok(ev.rows.length >= 1);
+    process.env.THAIBULKSMS_OTP_SECRET = OTP_SECRET;
+    const calls = providerCalls.length;
+    assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
+    assert.equal(providerCalls.length, calls);
+  });
+  await test("provider: keys missing → the phone option is closed (503), nothing sent", async () => {
+    process.env.THAIBULKSMS_OTP_KEY = "";
+    const calls = providerCalls.length;
+    assert.equal((await otpReq(PHONE, nextIp())).status, 503);
+    assert.equal(providerCalls.length, calls);
+    process.env.THAIBULKSMS_OTP_KEY = OTP_KEY;
+  });
+} finally {
+  setProviderMode(false);
+  await clearPhoneLimits();
+}
+
 await test("job list holds only this customer's jobs (active + ≤ 2 years of history)", async () => {
   const r = await me(otpSession, otpIp);
   assert.equal(r.status, 200);
