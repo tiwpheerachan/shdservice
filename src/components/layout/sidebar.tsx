@@ -29,7 +29,7 @@ export function Sidebar({
     () =>
       ALL_NAV.map((g) => ({ ...g, items: g.items.filter(canLink) }))
         .filter((g) => g.items.length > 0)
-        .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : g.items[0].href })),
+        .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : (g.items[0]?.href ?? g.href) })), // items non-empty (filtered above)
     [canLink]
   );
   const activeGroup = NAV.find((g) =>

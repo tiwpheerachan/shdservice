@@ -4,7 +4,7 @@ import { db, type Tx } from "@/db/client";
 import { appUser, auditLog } from "@/db/schema";
 import { fullName } from "@/server/auth";
 import { nowThai, fmtDateTime } from "@/server/mappers/format";
-import { orderBy as orderByCols, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
+import { orderBy as orderByCols, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
 
 /**
  * Audit trail — every write the app performs records WHO did WHAT to WHICH
@@ -148,11 +148,11 @@ const SORT = { at: auditLog.at, user: auditLog.userName, action: auditLog.action
 export async function pageAudit(p: PageQuery, f: AuditFilters): Promise<Page<AuditRow>> {
   const w = auditWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db.select({ total: count() }).from(auditLog).where(w),
     db.select().from(auditLog).where(w).orderBy(...orderByCols(p.sort, SORT, [desc(auditLog.id)])).limit(p.pageSize).offset(offsetOf(p)),
   ]);
-  return { rows: rows.map(toRow), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map(toRow), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
 }
 
 export async function listAudit(f: AuditFilters & { q?: string; limit?: number }): Promise<AuditRow[]> {

@@ -40,7 +40,7 @@ export function today(): string {
 
 /** calendar arithmetic on "YYYY-MM-DD" — "2026-09-30" + 1 → "2026-10-01" (no time zone involved) */
 export function addDays(ymd: string, n: number): string {
-  const [y, m, d] = ymd.split("-").map(Number);
+  const [y = NaN, m = NaN, d = NaN] = ymd.split("-").map(Number); // missing part → NaN (Invalid Date), as before
   const t = new Date(Date.UTC(y, m - 1, d + n));
   return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
 }

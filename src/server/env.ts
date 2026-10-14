@@ -38,6 +38,7 @@ export function envProblems(): { required: string[]; optional: string[] } {
   want("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "public tracking closed");
   want("TRACK_LOG_SECRET", "tracking rate limits reset on every restart");
   want("OWNER_EMAILS", "no admin bootstrap on a fresh database");
+  if (/supabase|pooler/.test(env.DATABASE_URL ?? "") && !has("DB_SSL_CA")) optional.push("DB_SSL_CA missing — the database TLS certificate is not verified (src/db/ssl.ts)");
   if (/^[123]x0{20,40}AA$/.test((env.TURNSTILE_SECRET_KEY ?? "").trim())) optional.push("TURNSTILE_SECRET_KEY is a Cloudflare TEST key — tracking refuses it in production");
   if ((env.SMS_PROVIDER ?? "").trim() === "log") optional.push("SMS_PROVIDER=log — OTP refused in production");
   if (!has("THAIBULKSMS_OTP_KEY") || !has("THAIBULKSMS_OTP_SECRET")) optional.push("THAIBULKSMS_OTP_KEY/SECRET missing — OTP tracking closed");

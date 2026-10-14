@@ -63,7 +63,28 @@ export async function api<T = unknown>(url: string, init: RequestInit = {}): Pro
 const json = (method: string) => <T = unknown>(url: string, body: unknown) =>
   api<T>(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
-export const postJson = json("POST");
+/**
+ * Idempotency-Key of each POST not yet answered OK, by url + body: sending the same body again
+ * (a retry after a network error / timeout, a second click) reuses the key, so the server
+ * (src/server/idempotency.ts) answers with the first result instead of creating a second
+ * document. An edited form is another body → a new key; after a success the key is dropped,
+ * so the next submit — even an identical one — is a new document.
+ */
+const pendingKeys = new Map<string, string>();
+export async function postJson<T = unknown>(url: string, body: unknown): Promise<T> {
+  const payload = JSON.stringify(body ?? {});
+  const id = `${url}\n${payload}`;
+  // randomUUID exists only on https / localhost — plain-http LAN access must still be able to save
+  const key = pendingKeys.get(id) ?? (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  pendingKeys.set(id, key);
+  const data = await api<T>(url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: payload });
+  pendingKeys.delete(id);
+  return data;
+}
+
+/** 409 from optimistic locking (assertVersion): someone else saved this record after the form loaded it */
+export const isStale = (e: unknown) => e instanceof ApiError && e.status === 409 && (e.details as { stale?: boolean } | undefined)?.stale === true;
+
 export const patchJson = json("PATCH");
 export const putJson = json("PUT");
 export const del = <T = unknown>(url: string) => api<T>(url, { method: "DELETE" });
@@ -95,10 +116,9 @@ export async function exportXlsx(resource: string, params: Record<string, string
 /** filename from Content-Disposition (RFC 5987 filename*=UTF-8'' first, then filename="…") */
 function filenameOf(cd: string | null): string | null {
   if (!cd) return null;
-  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
-  if (star) return decodeURIComponent(star[1]);
-  const plain = /filename="?([^";]+)"?/i.exec(cd);
-  return plain ? plain[1] : null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1];
+  if (star) return decodeURIComponent(star);
+  return /filename="?([^";]+)"?/i.exec(cd)?.[1] ?? null;
 }
 
 function saveBlob(blob: Blob, name: string) {

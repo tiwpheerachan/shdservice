@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
-import { clientIp } from "@/lib/client-ip";
+import { clientIp, ipBucket } from "@/lib/client-ip";
 import { hmac } from "./track-guard";
 
 /** every tracking response: never cached anywhere (spec §P, §AE) */
@@ -11,12 +11,13 @@ export function trackJson(body: Record<string, unknown>, status = 200, extra: Re
   return NextResponse.json(body, { status, headers: { ...NO_STORE, ...extra } });
 }
 
-/** per-request context: trusted IP (+ its HMAC for keys / logs), UA and a request id */
+/** per-request context: trusted IP (ticket binding, Turnstile) + the HMAC of its rate bucket (IPv6 → /64,
+ *  so rotating addresses does not reset the limits; also the log ipHash), UA and a request id */
 export function trackCtx(req: NextRequest) {
   const ip = clientIp(req.headers);
   return {
     ip,
-    ipKey: hmac(`ip:${ip}`),
+    ipKey: hmac(`ip:${ipBucket(ip)}`),
     ua: req.headers.get("user-agent") ?? "",
     requestId: randomUUID(),
   };

@@ -111,6 +111,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
     const [row] = before
       ? await tx.update(shippingProfile).set(values).where(eq(shippingProfile.id, before.id)).returning()
       : await tx.insert(shippingProfile).values(values).returning();
+    if (!row) throw new HttpError(404, "ไม่พบโปรไฟล์");
     await audit(tx, byUserId, {
       action: before ? "UPDATE" : "CREATE",
       module: "Admin",

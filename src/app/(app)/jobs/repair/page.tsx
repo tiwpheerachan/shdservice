@@ -64,7 +64,7 @@ function RepairForm() {
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
-  const { s: form, reset } = useJobForm();
+  const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
@@ -134,7 +134,7 @@ function RepairForm() {
     setSaving(true);
     try {
       // product / other-info sections shown on this screen are saved too
-      await saveCommonSections(job.no, form, canEdit);
+      adopt(await saveCommonSections(job.no, form, canEdit));
       const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, body);
       setJob(d.job);
       push({ kind: "success", title: "บันทึกงานซ่อมเรียบร้อย", desc: `${d.job.no} · ${d.job.status}` });

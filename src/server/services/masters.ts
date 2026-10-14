@@ -18,7 +18,7 @@ import { fmtDateTime, money, nowThai, num, str } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
 import { count, desc, ilike, or } from "drizzle-orm";
-import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy as orderByCols, offsetOf, totalOf, type Page, type PageQuery } from "@/server/paging";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode, type RecordStatus } from "@/server/record-status";
 import { assertValid } from "@/server/validate";
 import { masterSchema, modelSchema } from "@/lib/validation/admin";
@@ -146,17 +146,22 @@ export async function saveSimple(
 
   if (input.id) {
     const [before] = await db.select().from(d.table).where(eq(d.id, Number(input.id)));
+    if (!before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`); // was: silent update of nothing + undefined answer
     await db.update(d.table).set(values).where(eq(d.id, Number(input.id)));
     await audit(db, byUserId, { action: "UPDATE", module: "Admin", entity: kind, key: input.id, summary: `แก้ไข ${kind}: ${name}`, changes: diff(before as Record<string, unknown>, values) });
     invalidate(`master:${kind}:`);
-    const rows = await listSimple(kind, "exclude");
-    return rows.find((r) => r.id === input.id)!;
+    // "all": an edit may just have set the row INACTIVE
+    const saved = (await listSimple(kind, "all")).find((r) => r.id === input.id);
+    if (!saved) throw new Error(`${kind} #${input.id} not found after update`);
+    return saved;
   }
   const [row] = await db.insert(d.table).values(values).returning({ id: d.id });
+  if (!row) throw new Error(`${kind} insert returned no row`);
   await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: kind, key: row.id, summary: `เพิ่ม ${kind}: ${name}` });
   invalidate(`master:${kind}:`);
-  const rows = await listSimple(kind, "exclude");
-  return rows.find((r) => r.id === String(row.id))!;
+  const created = (await listSimple(kind, "all")).find((r) => r.id === String(row.id));
+  if (!created) throw new Error(`${kind} #${row.id} not found after insert`);
+  return created;
 }
 
 /** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
@@ -215,6 +220,7 @@ export async function saveSymptom(
     await audit(db, byUserId, { action: "UPDATE", module: "Admin", entity: "symptom", key: id, summary: `แก้ไขอาการเสีย: ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
   } else {
     const [row] = await db.insert(symptom).values(values).returning({ id: symptom.symptomId });
+    if (!row) throw new Error("symptom insert returned no row");
     id = row.id;
     await audit(db, byUserId, { action: "CREATE", module: "Admin", entity: "symptom", key: id, summary: `เพิ่มอาการเสีย: ${name}` });
   }
@@ -335,7 +341,7 @@ export async function pageModels(p: PageQuery, mode: StatusMode = "exclude", f: 
     f.status === "Active" ? eq(model.recordStatus, "ACTIVE") : f.status === "Inactive" ? eq(model.recordStatus, "INACTIVE") : undefined
   );
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: count() })
       .from(model)
@@ -367,7 +373,7 @@ export async function pageModels(p: PageQuery, mode: StatusMode = "exclude", f: 
       updated: fmtDateTime(r.updated),
       status: status(r.active),
     })),
-    total: Number(total),
+    total: totalOf(counted),
     page: p.page,
     pageSize: p.pageSize,
   };

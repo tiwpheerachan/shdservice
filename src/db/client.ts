@@ -2,6 +2,7 @@ import "server-only";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
+import { dbSsl } from "./ssl";
 import { logError } from "@/lib/log";
 
 /**
@@ -28,8 +29,8 @@ function createPool() {
   const pool = new Pool({
     connectionString: url,
     max: Number(process.env.DB_POOL_MAX ?? 5),
-    // Supabase pooler needs TLS; local docker does not.
-    ssl: /supabase\.co|supabase\.com|pooler/.test(url) ? { rejectUnauthorized: false } : undefined,
+    // Supabase pooler needs TLS (verified when DB_SSL_CA is set); local docker does not.
+    ssl: dbSsl(url),
     // fail fast instead of queueing forever when the pool/pooler is saturated,
     // and stop a runaway query before it holds a connection for minutes
     connectionTimeoutMillis: 10_000,

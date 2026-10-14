@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import type { z } from "zod";
-import { ApiError } from "@/lib/api";
+import { ApiError, isStale } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import { summary, validate, type FieldErrors } from "@/lib/validation";
 
@@ -47,16 +47,26 @@ export function useFormErrors() {
     [push]
   );
 
-  /** an API answer with field errors → shown under the fields; false for any other error */
+  /** an API answer with field errors → shown under the fields; a stale-version 409 → toast with
+   *  "โหลดใหม่" (saving again would overwrite the other user's edit); false for any other error */
   const fromApi = React.useCallback(
     (err: unknown) => {
+      if (isStale(err)) {
+        push({
+          kind: "error",
+          title: (err as ApiError).message,
+          desc: "ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง",
+          action: { label: "โหลดใหม่", onClick: () => window.location.reload() },
+        });
+        return true;
+      }
       const fields = apiFieldErrors(err);
       if (!fields) return false;
       setErrors(fields);
       report(fields, (err as ApiError).message); // the API's own summary ("กรอกข้อมูลไม่ครบ …" / "…มีลูกค้าอยู่แล้ว")
       return true;
     },
-    [report]
+    [report, push]
   );
 
   return { errors, setErrors, run, clear, report, fromApi };

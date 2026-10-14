@@ -9,6 +9,7 @@
  * mocked; nothing leaves the machine except queries to the local DB.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { sql } from "drizzle-orm";
 import { TEST_DATABASE_URL, assertLocal } from "../tests/db-url.mts";
@@ -87,7 +88,7 @@ await seed(pool);
 const guard = await import("@/server/track-guard");
 const { clientIp } = await import("@/lib/client-ip");
 const { originAuthOk } = await import("@/lib/origin-auth");
-const { jobNoForLink, publicJobByNo, rotateToken, linkStatus, findDoc } = await import("@/server/services/tracking");
+const { jobNoForLink, publicJobByNo, rotateToken, ensureToken, linkStatus, findDoc } = await import("@/server/services/tracking");
 const S = await import("@/lib/session");
 const { POST: sessionPOST } = await import("@/app/api/track/session/route");
 const { POST: dataPOST } = await import("@/app/api/track/data/route");
@@ -350,6 +351,40 @@ await test("issuing a new link resets the window and kills the old one", async (
   assert.equal((await linkStatus(JOB_B.job_no)).state, "unopened");
   assert.equal(await jobNoForLink(old), null);
   assert.equal(await jobNoForLink(JOB_B.track_token), JOB_B.job_no);
+});
+
+console.log("\nLink token at rest (drizzle/0025)");
+const sha256hex = (t: string) => createHash("sha256").update(t).digest("hex");
+const linkRow = async (jobNo: string) =>
+  (await db.execute<{ raw: string | null; hash: string | null; row: string }>(sql`
+    SELECT track_token AS raw, track_token_hash AS hash, row_to_json(j)::text AS row FROM job j WHERE job_no = ${jobNo}`)).rows[0];
+await test("a generated link: the DB holds only its sha256, never the token; lookup works by hash", async () => {
+  const r = await linkRow(JOB_B.job_no);
+  assert.equal(r.raw, null);
+  assert.equal(r.hash, sha256hex(JOB_B.track_token));
+  assert.equal(r.row.includes(JOB_B.track_token), false, "raw token stored somewhere in the job row");
+  assert.equal(await jobNoForLink(JOB_B.track_token), JOB_B.job_no);
+  assert.equal(await jobNoForLink(r.hash!.slice(0, 43)), null); // what a DB reader sees is no link
+});
+await test("first link of a job is returned once; later calls cannot show it again", async () => {
+  const token = await ensureToken("TJ00003"); // seeded without a link
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  const r = await linkRow("TJ00003");
+  assert.equal(r.raw, null);
+  assert.equal(r.hash, sha256hex(token));
+  assert.equal(await ensureToken("TJ00003"), "");
+  assert.equal(await jobNoForLink(token), "TJ00003");
+});
+await test("deploy overlap: a raw token the OLD code writes is hashed by the trigger and keeps working", async () => {
+  const old = "oldCodeToken_" + "x".repeat(30); // 43 chars
+  await db.execute(sql`UPDATE job SET track_token = ${old}, track_token_at = now() AT TIME ZONE 'Asia/Bangkok',
+    track_opened_at = NULL, track_link_expires_at = NULL WHERE job_no = 'TJ00003'`);
+  assert.equal((await linkRow("TJ00003")).hash, sha256hex(old));
+  assert.equal(await jobNoForLink(old), "TJ00003");
+  const fresh = await rotateToken("TJ00003"); // new code: raw column emptied, old link dead
+  assert.equal((await linkRow("TJ00003")).raw, null);
+  assert.equal(await jobNoForLink(old), null);
+  assert.equal(await jobNoForLink(fresh), "TJ00003");
 });
 
 console.log("\nTickets");

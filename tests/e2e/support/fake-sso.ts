@@ -83,7 +83,7 @@ const server = createServer(async (request, response) => {
       if (badClient(params)) return json(response, 400, { error: "invalid_client_or_redirect_uri" });
       const email = params.get("email")?.trim() ?? "";
       const code = randomUUID();
-      codes.set(code, { email, name: params.get("name")?.trim() || email.split("@")[0], expires: Date.now() + CODE_TTL_MS });
+      codes.set(code, { email, name: params.get("name")?.trim() || (email.split("@")[0] ?? email), expires: Date.now() + CODE_TTL_MS });
       const back = new URL(REDIRECT_URI);
       back.searchParams.set("code", code);
       back.searchParams.set("state", params.get("state")!);

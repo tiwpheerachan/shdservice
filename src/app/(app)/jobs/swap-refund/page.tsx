@@ -52,7 +52,7 @@ function SwapRefundForm() {
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
-  const { s: form, reset, set } = useJobForm();
+  const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
@@ -116,7 +116,7 @@ function SwapRefundForm() {
     if (!act.check(swapRefundActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, canEdit);
+      adopt(await saveCommonSections(job.no, form, canEdit));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, body);
       setJob(r.job);
       push({ kind: "success", title: mode === "swap" ? "บันทึกการเปลี่ยนเครื่องแล้ว" : "บันทึกการคืนเงินแล้ว", desc: `${r.job.no} · ${r.job.status}` });

@@ -97,7 +97,7 @@ export function Field({
   const registered = React.useRef<{ token: string; labelable: boolean }[]>([]);
   const register = React.useCallback((token: string, labelable: boolean) => {
     registered.current = [...registered.current, { token, labelable }];
-    setOwner(registered.current[0]);
+    setOwner(registered.current[0] ?? null); // never empty here: just appended
     return () => {
       registered.current = registered.current.filter((r) => r.token !== token);
       setOwner(registered.current[0] ?? null);

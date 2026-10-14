@@ -24,6 +24,21 @@ export function normalizeIp(v: string | null | undefined): string | null {
   return null;
 }
 
+/**
+ * The address a RATE LIMIT counts against: IPv4 as itself, IPv6 by its /64 (one
+ * household / VM allocation — a client rotates through it for free). Rate keys only:
+ * logs and ticket binding keep the full clientIp(). (OneLink lib/redirect/rate-limit.ts bucketOf)
+ * Expects normalizeIp() output: lower-case, IPv4-mapped already unwrapped.
+ */
+export function ipBucket(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = ip.includes("::") && tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right] : left;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
 export function clientIp(headers: Headers): string {
   const mode = originAuthMode();
   if (mode !== "off" && originAuthOk(headers)) {

@@ -1,5 +1,5 @@
 import "server-only";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db/client";
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/db/schema";
@@ -9,6 +9,7 @@ import { JS, effectiveDueText } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
 import { TRACK_STEPS, type PublicDoc, type PublicJob, type PublicJobSummary, type TrackDocKind, type TrackStepKey } from "@/lib/track-public";
 import { logError } from "@/lib/log";
+import { sha256 } from "@/server/track-guard";
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
@@ -24,6 +25,8 @@ import { logError } from "@/lib/log";
  * (bound to one job) or a customer session (bound to that customer's ids).
  *
  *  - link tokens are 32 random bytes (base64url); job numbers are sequential and never a key
+ *  - only sha256(token) is stored (drizzle/0025): a DB leak yields no working link, and a
+ *    link can be shown only once — to the staff member who just generated it
  *  - a link lives 1 day unopened, 15 minutes after the first customer open (drizzle/0016)
  *  - only the fields in `PublicJob` ever leave this module: no price, no phone, no
  *    address, no full IMEI/serial, no technician, no internal remarks
@@ -77,6 +80,9 @@ export function newToken() {
   return randomBytes(32).toString("base64url");
 }
 
+/** what the DB holds for a link (drizzle/0025) — same digest as the migration's backfill */
+export const tokenHash = (token: string) => sha256(token).toString("hex");
+
 /* ------------------------------------------------------------------ *
  * Lookup
  * ------------------------------------------------------------------ */
@@ -85,7 +91,6 @@ function base(where: SQL | undefined) {
   return db
     .select({
       no: job.jobNo,
-      token: job.trackToken,
       statusId: job.jobStatusId,
       group: jobStatus.jobStatusGroup,
       customerDetail: job.customerDetail,
@@ -253,18 +258,15 @@ export async function jobNoForLink(token: string): Promise<string | null> {
   return quiet(async () => {
     const t = (token ?? "").trim();
     if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
+    // looked up by its hash: a near-miss token has an unrelated hash, so timing reveals nothing about it
     const [row] = await db
-      .select({ no: job.jobNo, token: job.trackToken, recordStatus: job.recordStatus, live: linkLive })
+      .select({ no: job.jobNo, recordStatus: job.recordStatus, live: linkLive })
       .from(job)
-      .where(eq(job.trackToken, t))
+      .where(eq(job.trackTokenHash, tokenHash(t)))
       .limit(1);
     // the link's own lifetime replaces the 90-days-after-close rule: 1 day unopened, 15 min after opening
-    if (!row || !row.token || row.recordStatus === RS.DELETED || !row.live) return null;
+    if (!row || row.recordStatus === RS.DELETED || !row.live) return null;
     if (QUOTATION_REQUIRED && !(await hasQuotation(row.no))) return null;
-    // constant-time compare so a near-miss token cannot be distinguished by timing
-    const a = Buffer.from(row.token);
-    const b = Buffer.from(t);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
     return row.no;
   });
 }
@@ -303,7 +305,7 @@ export async function extendLink(token: string): Promise<string | null> {
       })
       .where(
         and(
-          eq(job.trackToken, t),
+          eq(job.trackTokenHash, tokenHash(t)),
           ne(job.recordStatus, RS.DELETED),
           isNotNull(job.trackOpenedAt),
           gt(job.trackLinkExpiresAt, sql`now()`)
@@ -315,7 +317,7 @@ export async function extendLink(token: string): Promise<string | null> {
     const [row] = await db
       .select({ at: isoUtc(linkExpiresAt), live: linkLive, recordStatus: job.recordStatus })
       .from(job)
-      .where(eq(job.trackToken, t))
+      .where(eq(job.trackTokenHash, tokenHash(t)))
       .limit(1);
     return row && row.live && row.recordStatus !== RS.DELETED ? row.at : null;
   });
@@ -457,28 +459,38 @@ export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): 
   });
 }
 
-/** link shown in the back office (staff copy it into LINE) */
-export async function trackLinkFor(jobNo: string, baseUrl: string): Promise<string> {
-  const [row] = await db.select({ token: job.trackToken }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
-  if (!row?.token) return "";
-  return `${baseUrl.replace(/\/+$/, "")}/track/${row.token}`;
+/** the customer link for a token the caller just generated (staff copy it into LINE) */
+export function trackLinkFor(token: string, baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/track/${token}`;
 }
 
-/** issue a token for a job that has none (older rows, or a job created before 0012 ran) */
+/** a new link: only its hash is stored, fresh 1-day window, not opened yet */
+const issue = (token: string) => ({
+  trackTokenHash: tokenHash(token),
+  trackToken: null, // legacy raw column (drizzle/0012): never written again, dropped by the 0025 follow-up
+  trackTokenAt: nowThai(),
+  trackOpenedAt: null,
+  trackLinkExpiresAt: null,
+});
+
+/**
+ * Issue a link for a job that has none (jobs are created without one) and return its token.
+ * "" when the job already has a link — its token is not stored, so it cannot be shown again.
+ */
 export async function ensureToken(jobNo: string): Promise<string> {
-  const [row] = await db.select({ token: job.trackToken }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
-  if (row?.token) return row.token;
   const token = newToken();
-  // a new link: fresh 1-day window, not opened yet
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null, trackLinkExpiresAt: null }).where(eq(job.jobNo, jobNo));
-  return token;
+  const r = await db
+    .update(job)
+    .set(issue(token))
+    .where(and(eq(job.jobNo, jobNo), isNull(job.trackTokenHash)))
+    .returning({ no: job.jobNo });
+  return r.length ? token : "";
 }
 
 /** staff action: old link stops working immediately; the new one gets a fresh 1-day window */
 export async function rotateToken(jobNo: string): Promise<string> {
   const token = newToken();
-  // a new link: fresh 1-day window, not opened yet
-  await db.update(job).set({ trackToken: token, trackTokenAt: nowThai(), trackOpenedAt: null, trackLinkExpiresAt: null }).where(eq(job.jobNo, jobNo));
+  await db.update(job).set(issue(token)).where(eq(job.jobNo, jobNo));
   return token;
 }
 

@@ -1,9 +1,9 @@
 /**
  * npm run test:domain (scripts/test-domain.mts) — domain rules that must hold under real data:
  * the permission matrix (app_config → can / canViewAny / requireView / GET /api/data/:resource),
- * stock never going negative, the sale-order approve / pick / edit state machine, and the two
+ * stock never going negative, the sale-order approve / pick / edit state machine, the two
  * row-lock regressions (lockStock: opposite-order movements deadlocked; lockJob: duplicate
- * job_log rows when two saves raced).
+ * job_log rows when two saves raced), Idempotency-Key on creates and row_version on edits.
  *
  * Runs ONLY against the throwaway local test database (npm run db:test:up && npm run db:test:prepare).
  * Seeds its own fixtures (ids 9xxx, codes TD*, roles "TD *") and resets them at every start, so it
@@ -28,11 +28,14 @@ const { HttpError, userFromRequest, can, canViewAny, requireView, JOB_MODULES } 
 const { signSession, SESSION_COOKIE } = await import("@/lib/session");
 const { nextRunningNo } = await import("@/db/running-no");
 const { issueOther, issueForJob, receiveStock } = await import("@/server/services/stock");
-const { closeJob, saveRepair } = await import("@/server/services/jobs");
+const { closeJob, saveRepair, updateJob } = await import("@/server/services/jobs");
 const { GET: dataGET } = await import("@/app/api/data/[resource]/route");
 const { POST: soPOST } = await import("@/app/api/sale-orders/route");
 const { POST: soApprovePOST } = await import("@/app/api/sale-orders/[no]/approve/route");
 const { POST: stockIssuePOST } = await import("@/app/api/stock/issue/route");
+const { POST: stockReceivePOST } = await import("@/app/api/stock/receive/route");
+const { POST: customerPOST } = await import("@/app/api/customers/route");
+const { saveQuotation } = await import("@/server/services/quotations");
 
 // ---- fixtures ----
 const U = {
@@ -42,6 +45,7 @@ const U = {
   picker: { id: 9104, email: "td-picker@example.invalid", type: "TD Picker", status: "ACTIVE" },
   pending: { id: 9105, email: "td-pending@example.invalid", type: null, status: "ACTIVE" },
   inactive: { id: 9106, email: "td-inactive@example.invalid", type: "TD Customer Viewer", status: "INACTIVE" },
+  seller: { id: 9107, email: "td-seller@example.invalid", type: "TD Seller", status: "ACTIVE" },
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
 const SV = 3; // every fixture user's session_version — a cookie must carry exactly this
@@ -50,6 +54,8 @@ const CUSTOMER = "TDC001";
 const JOB_CLOSE = "TDJ0001"; // closeJob race
 const JOB_PARTS = "TDJ0002"; // issueForJob over stock
 const JOB_REPAIR = "TDJ0003"; // saveRepair race
+const JOB_EDIT = "TDJ0004"; // row_version
+const JOB_QUOTE = "TDJ00005"; // a quotation's job (the form wants letters + ≥ 5 digits)
 
 async function seed() {
   const users = Object.values(U);
@@ -59,7 +65,8 @@ async function seed() {
       ('TD Job Clerk', 'Job Management', false, true, false, true),
       ('TD Job Clerk', 'Customer', true, true, true, false),          -- every right but view: view is its own grant
       ('TD Customer Viewer', 'Customer', false, false, false, true),
-      ('TD Picker', 'Product Pick Stock', true, false, false, true);
+      ('TD Picker', 'Product Pick Stock', true, false, false, true),
+      ('TD Seller', 'Sale Order', true, true, false, true);
 
     DELETE FROM app_user WHERE user_id BETWEEN 9100 AND 9199 OR email_address LIKE 'td-%@example.invalid';
     INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
@@ -87,7 +94,10 @@ async function seed() {
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date) VALUES
       ('${JOB_CLOSE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_PARTS}', 11, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
-      ('${JOB_REPAIR}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01');
+      ('${JOB_REPAIR}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
+      ('${JOB_EDIT}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
+      ('${JOB_QUOTE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01');
+    DELETE FROM idempotency_key WHERE user_id BETWEEN 9100 AND 9199;
     -- 15 requested (booked) while only 10 are on hand
     UPDATE product_none_serial SET quantity_booking = 15 WHERE product_id = 9203;
     INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
@@ -133,8 +143,8 @@ async function cookieFor(u: TestUser, sv = SV) {
   const now = Date.now();
   return `${SESSION_COOKIE}=${await signSession({ email: u.email, name: u.email, exp: now + 10 * 60_000, iat: now, sv })}`;
 }
-async function request(path: string, u: TestUser | null, init: { method?: string; body?: unknown; sv?: number } = {}) {
-  const headers: Record<string, string> = { "user-agent": "test-domain" };
+async function request(path: string, u: TestUser | null, init: { method?: string; body?: unknown; sv?: number; headers?: Record<string, string> } = {}) {
+  const headers: Record<string, string> = { "user-agent": "test-domain", ...init.headers };
   if (u) headers.cookie = await cookieFor(u, init.sv);
   if (init.body !== undefined) headers["content-type"] = "application/json";
   return new NextRequest(`https://svc.example.test${path}`, {
@@ -285,7 +295,7 @@ let soDtId = 0;
 await test("create (submit → waiting) via POST /api/sale-orders", async () => {
   await setStock(P.a.code, 10);
   const r = await json(await soPOST(await request("/api/sale-orders", U.admin, { method: "POST", body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.a.code, qty: 2 }] } })));
-  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.status, 201, JSON.stringify(r.body));
   const order = r.body.order as { no: string; approveId: number; lines: { id: number }[] };
   assert.equal(order.approveId, 2);
   soNo = order.no;
@@ -361,6 +371,121 @@ await test("5 concurrent saveRepair to the same status → all succeed, exactly 
   const failed = results.flatMap((r) => (r.status === "rejected" ? [String(r.reason)] : []));
   assert.equal(failed.length, 0, failed[0]);
   assert.deepEqual(await logRows(JOB_REPAIR), [5]);
+});
+
+console.log("\nIdempotency-Key on creates (src/server/idempotency.ts)");
+const soCount = async (remark: string) =>
+  (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM sale_out_hd WHERE customer_code = ${CUSTOMER} AND remark_hd = ${remark}`)).rows[0].n;
+const createSO = async (u: TestUser, remark: string, key?: string) =>
+  soPOST(
+    await request("/api/sale-orders", u, {
+      method: "POST",
+      headers: key ? { "idempotency-key": key } : {},
+      body: { customerCode: CUSTOMER, salesId: u.id, submit: false, remark, lines: [{ code: P.b.code, qty: 1 }] },
+    })
+  );
+await test("same key twice (same user, same route) → one sale order, the second answer is the first one replayed", async () => {
+  const key = `td-${crypto.randomUUID()}`;
+  const a = await createSO(U.admin, "TD-idem-1", key);
+  const b = await createSO(U.admin, "TD-idem-1", key);
+  assert.equal(a.status, 201);
+  assert.equal(b.status, 201);
+  assert.equal(b.headers.get("idempotent-replayed"), "true");
+  assert.deepEqual(await b.json(), await a.json());
+  assert.equal(await soCount("TD-idem-1"), 1);
+});
+await test("5 concurrent requests with one key → exactly one sale order (the others replay or 409)", async () => {
+  const key = `td-${crypto.randomUUID()}`;
+  const rs = await Promise.all(Array.from({ length: 5 }, () => createSO(U.admin, "TD-idem-race", key)));
+  assert.ok(rs.every((r) => r.status === 201 || r.status === 409), rs.map((r) => r.status).join(","));
+  assert.equal(await soCount("TD-idem-race"), 1);
+});
+await test("another user with the same key → a separate sale order", async () => {
+  const key = `td-${crypto.randomUUID()}`;
+  const a = await json(await createSO(U.admin, "TD-idem-2", key));
+  const b = await json(await createSO(U.seller, "TD-idem-2", key));
+  assert.equal(b.status, 201, JSON.stringify(b.body));
+  assert.notEqual((a.body.order as { no: string }).no, (b.body.order as { no: string }).no);
+  assert.equal(await soCount("TD-idem-2"), 2);
+});
+await test("a refused create releases its key: fix the input, same key → created once", async () => {
+  const key = `td-${crypto.randomUUID()}`;
+  const bad = await soPOST(await request("/api/sale-orders", U.admin, { method: "POST", headers: { "idempotency-key": key }, body: { customerCode: "TD-NOPE", salesId: U.admin.id, remark: "TD-idem-3", lines: [{ code: P.b.code, qty: 1 }] } }));
+  assert.equal(bad.status, 400);
+  assert.equal((await createSO(U.admin, "TD-idem-3", key)).status, 201);
+  assert.equal((await createSO(U.admin, "TD-idem-3", key)).status, 201);
+  assert.equal(await soCount("TD-idem-3"), 1);
+});
+await test("no header → old behaviour: the same body twice creates two sale orders", async () => {
+  assert.equal((await createSO(U.admin, "TD-idem-none")).status, 201);
+  assert.equal((await createSO(U.admin, "TD-idem-none")).status, 201);
+  assert.equal(await soCount("TD-idem-none"), 2);
+});
+await test("stock receive with one key twice → stock goes in once (WHI created once)", async () => {
+  await setStock(P.b.code, 10);
+  const key = `td-${crypto.randomUUID()}`;
+  const recv = async () =>
+    json(await stockReceivePOST(await request("/api/stock/receive", U.admin, { method: "POST", headers: { "idempotency-key": key }, body: { supplier: "TD-idem", lines: [{ code: P.b.code, qty: 3 }] } })));
+  const a = await recv();
+  const b = await recv();
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  assert.equal(b.body.no, a.body.no);
+  assert.equal((await qty(P.b.code)).remain, 13);
+});
+
+console.log("\nrow_version on edits (optimistic locking)");
+const version = async (table: "job" | "customer" | "sale_out_hd", where: ReturnType<typeof sql>) =>
+  (await db.execute<{ v: number }>(sql`SELECT row_version AS v FROM ${sql.raw(table)} WHERE ${where}`)).rows[0].v;
+await test("trigger: any write to the row bumps row_version (legacy SQL too); tracking-link columns do not", async () => {
+  const v0 = await version("job", sql`job_no = ${JOB_EDIT}`);
+  await db.execute(sql`UPDATE job SET track_opened_at = now(), track_link_expires_at = now() WHERE job_no = ${JOB_EDIT}`);
+  assert.equal(await version("job", sql`job_no = ${JOB_EDIT}`), v0, "tracking columns only");
+  await db.execute(sql`UPDATE job SET job_remark = 'TD legacy write' WHERE job_no = ${JOB_EDIT}`);
+  assert.equal(await version("job", sql`job_no = ${JOB_EDIT}`), v0 + 1);
+});
+const jobEdit = { customerCode: CUSTOMER, jobType: "", dueDate: "2026-12-31", warrantyMonth: 0, channel: "Online" }; // what an edit of this fixture must keep
+await test("job: save with the loaded version → OK (+1); a second save with that old version → 409, data unchanged", async () => {
+  const v = await version("job", sql`job_no = ${JOB_EDIT}`);
+  const saved = await updateJob(JOB_EDIT, { ...jobEdit, remark: "TD first", version: v }, U.admin.id);
+  assert.equal(saved.version, v + 1);
+  assert.equal(await statusOf(updateJob(JOB_EDIT, { ...jobEdit, remark: "TD stale", version: v }, U.admin.id)), 409);
+  const [j] = (await db.execute<{ r: string }>(sql`SELECT job_remark AS r FROM job WHERE job_no = ${JOB_EDIT}`)).rows;
+  assert.equal(j.r, "TD first");
+  // no version (older client / script) → last write wins as before
+  await updateJob(JOB_EDIT, { ...jobEdit, remark: "TD unversioned" }, U.admin.id);
+});
+await test("sale order: stale version → 409 with { stale }, lines unchanged; current version / no version → 200", async () => {
+  const r = await json(await createSO(U.admin, "TD-ver"));
+  const order = r.body.order as { no: string; version: number };
+  const edit = async (qty: number, v?: number) =>
+    json(await soPOST(await request("/api/sale-orders", U.admin, { method: "POST", body: { no: order.no, version: v, customerCode: CUSTOMER, salesId: U.admin.id, submit: false, remark: "TD-ver", lines: [{ code: P.b.code, qty }] } })));
+  const ok = await edit(2, order.version);
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const stale = await edit(5, order.version);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.error, "มีผู้อื่นแก้ไขเอกสารนี้ไปแล้ว กรุณาโหลดใหม่");
+  assert.deepEqual(stale.body.details, { stale: true });
+  const [dt] = (await db.execute<{ q: number }>(sql`SELECT sale_out_quantity AS q FROM sale_out_dt WHERE sale_out_hd_no = ${order.no}`)).rows;
+  assert.equal(dt.q, 2);
+  assert.equal((await edit(3)).status, 200, "no version = old behaviour");
+});
+await test("quotation: stale version → 409, remark unchanged", async () => {
+  const base = { customerCode: CUSTOMER, jobNo: JOB_QUOTE, contactName: "TD", lines: [{ itemType: "SparePart" as const, code: P.a.code, detail: "TD", qty: 1, unit: "ชิ้น", unitPrice: 100, discount: 0, discountPercent: 0 }] };
+  const q = await saveQuotation({ ...base, remark: "TD q0" }, U.admin.id);
+  const saved = await saveQuotation({ ...base, no: q.no, remark: "TD q1", version: q.version }, U.admin.id);
+  assert.equal(saved.version, q.version + 1);
+  assert.equal(await statusOf(saveQuotation({ ...base, no: q.no, remark: "TD q-stale", version: q.version }, U.admin.id)), 409);
+  const [hd] = (await db.execute<{ r: string }>(sql`SELECT remark AS r FROM quotation_hd WHERE quotation_no = ${q.no}`)).rows;
+  assert.equal(hd.r, "TD q1");
+});
+await test("customer: stale version → 409, name unchanged", async () => {
+  const v = await version("customer", sql`customer_code = ${CUSTOMER}`);
+  const save = async (name: string, ver: number) =>
+    customerPOST(await request("/api/customers", U.admin, { method: "POST", body: { code: CUSTOMER, name, phone: "02-000-0000", version: ver } }));
+  assert.equal((await save("ลูกค้า ทดสอบโดเมน", v)).status, 200);
+  assert.equal((await save("TD ชื่อทับ", v)).status, 409);
+  const [c] = (await db.execute<{ n: string }>(sql`SELECT customer_name AS n FROM customer WHERE customer_code = ${CUSTOMER}`)).rows;
+  assert.equal(c.n, "ลูกค้า ทดสอบโดเมน");
 });
 
 } finally {

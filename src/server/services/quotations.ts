@@ -5,9 +5,10 @@ import { db } from "@/db/client";
 import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from "@/db/schema";
 import type { Quotation } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
+import { assertVersion } from "@/server/http-error";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
@@ -135,7 +136,7 @@ export function quotationWhere(q: string, f: QuotationFilters) {
 export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise<Page<Quotation>> {
   const w = quotationWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: count() })
       .from(quotationHd)
@@ -150,7 +151,7 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  return { rows: rows.map(toQuotation), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map(toQuotation), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
 }
 
 export async function listQuotations(f: QuotationFilters & { q?: string; limit?: number } = {}): Promise<Quotation[]> {
@@ -196,12 +197,15 @@ export type QuotationDetail = Quotation & {
   /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
   createdByPhone: string;
   createdByEmail: string;
+  /** quotation_hd.row_version (drizzle/0026) — the edit page sends it back with its save */
+  version: number;
 };
 
 export async function getQuotation(no: string): Promise<QuotationDetail | null> {
   const [r] = await base().where(eq(quotationHd.quotationNo, no)).limit(1);
   if (!r) return null;
   const [hd] = await db.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).limit(1);
+  if (!hd) return null; // deleted between the two reads
   const dts = await db.select().from(quotationDt).where(eq(quotationDt.quotationNo, no)).orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
   const [cust, jb, [creator]] = await Promise.all([
     hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
@@ -240,6 +244,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     createdByPhone: creator?.phone ?? "",
     createdByEmail: creator?.email ?? "",
+    version: hd.rowVersion,
   };
 }
 
@@ -260,6 +265,8 @@ export type QuotationInput = {
   remark?: string;
   status?: string; // name
   approveRemark?: string;
+  /** row_version the edit page loaded: another save since → 409; absent = no check */
+  version?: number;
 };
 
 /** Amount rules reverse-engineered from quotation_hd columns. */
@@ -349,6 +356,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     if (no) {
       const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for("update");
       if (!prev) throw new HttpError(404, "ไม่พบใบเสนอราคา " + no);
+      assertVersion(i.version, prev.rowVersion);
       const upd = {
         ...values,
         customerApproveDate: AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,

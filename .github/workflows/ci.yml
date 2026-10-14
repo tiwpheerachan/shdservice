@@ -61,7 +61,7 @@ jobs:
         run: npm run lint
 
       - name: Typecheck
-        run: npx tsc --noEmit --incremental false
+        run: npm run typecheck
 
       - name: Unit tests
         run: npm test

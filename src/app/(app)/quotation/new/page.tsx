@@ -4,12 +4,14 @@ import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { QuotationForm, type QuotationFormHandle } from "@/components/shared/quotation-form";
-import { FormActions } from "@/components/shared/job-form";
+import { FormActions, VIEW_ONLY } from "@/components/shared/job-form";
 import { useToast } from "@/components/ui/toast";
 import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 function NewQuotation() {
   const { push } = useToast();
+  const { can } = useAccess();
   const router = useRouter();
   const sp = useSearchParams();
   const form = React.useRef<QuotationFormHandle>(null);
@@ -38,7 +40,7 @@ function NewQuotation() {
         description="ข้อมูลการเสนอราคา » เสนอราคางานซ่อม"
       />
       <QuotationForm ref={form} mode="new" jobNo={sp.get("job") ?? undefined} />
-      <FormActions saveLabel="บันทึกใบเสนอราคา" onSave={save} saving={saving} cancelHref="/quotation/list" />
+      <FormActions saveLabel="บันทึกใบเสนอราคา" onSave={save} saving={saving} cancelHref="/quotation/list" denied={can("Quotation", "add") ? undefined : VIEW_ONLY} />
     </>
   );
 }

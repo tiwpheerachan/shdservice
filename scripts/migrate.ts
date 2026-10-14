@@ -17,6 +17,7 @@ import "dotenv/config";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { dbSsl } from "../src/db/ssl";
 
 const MIGRATIONS_FOLDER = "./drizzle";
 const JOURNAL_SCHEMA = "drizzle";
@@ -31,7 +32,7 @@ async function main() {
   const pool = new Pool({
     connectionString: url,
     max: 1,
-    ssl: /supabase\.co|supabase\.com|pooler/.test(url) ? { rejectUnauthorized: false } : undefined,
+    ssl: dbSsl(url), // same TLS rules as the app (src/db/ssl.ts)
     options: "-c TimeZone=Asia/Bangkok",
   });
   // RAISE NOTICE from a migration (e.g. 0022 "duplicate …, unique index NOT created") must reach

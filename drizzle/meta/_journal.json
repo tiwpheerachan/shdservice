@@ -176,6 +176,20 @@
       "when": 1757900024000,
       "tag": "0024_phone_digits_index",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1757900025000,
+      "tag": "0025_track_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1757900026000,
+      "tag": "0026_idempotency_row_version",
+      "breakpoints": true
     }
   ]
 }

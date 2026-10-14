@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { clientIp } from "@/lib/client-ip";
+import { clientIp, ipBucket } from "@/lib/client-ip";
 import { TRACK_MSG } from "@/lib/track-public";
 import { hit, hmac, logEvent } from "@/server/track-guard";
 import { TrackClient } from "../track-client";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function Page({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const h = await headers();
-  const ipKey = hmac(`ip:${clientIp(h)}`);
+  const ipKey = hmac(`ip:${ipBucket(clientIp(h))}`); // same key as trackCtx (IPv6 → /64)
 
   let allowed = true;
   try {

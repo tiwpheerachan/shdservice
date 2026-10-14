@@ -50,6 +50,7 @@ export default function PermissionsPage() {
   const { data: dbRoles } = useRoles();
   const { data: dbModules } = useModules();
   const ASSIGNABLE_ROLES = dbRoles.length ? dbRoles : FALLBACK_ROLES;
+  const firstRole = ASSIGNABLE_ROLES[0] ?? ROLES[0]; // FALLBACK_ROLES is never empty
   const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
   // the editable grant grid, rebuilt from the DB rows whenever they change (loaded / after a save)
   // — adjusted while rendering, not in an effect pass
@@ -62,13 +63,13 @@ export default function PermissionsPage() {
   // the roles come from the server after the first render: a pick that is not one of them falls back
   // to the first (derived — nothing to align)
   const inRoles = (r: string) => !dbRoles.length || dbRoles.includes(r);
-  const [pickedRole, setRole] = React.useState<string>(ASSIGNABLE_ROLES[0]);
-  const role = inRoles(pickedRole) ? pickedRole : dbRoles[0];
+  const [pickedRole, setRole] = React.useState<string>(firstRole);
+  const role = inRoles(pickedRole) ? pickedRole : (dbRoles[0] ?? pickedRole); // not in roles ⇒ dbRoles is non-empty
   // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
   // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
   const [menuFilter, setMenuFilter] = React.useState("");
-  const [draftPick, setDraft] = React.useState({ role: ASSIGNABLE_ROLES[0], menu: "" });
-  const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] };
+  const [draftPick, setDraft] = React.useState({ role: firstRole, menu: "" });
+  const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] ?? draftPick.role };
   const [saving, setSaving] = React.useState(false);
 
 
@@ -160,8 +161,8 @@ export default function PermissionsPage() {
           setMenuFilter(draft.menu);
         }}
         onReset={() => {
-          setDraft({ role: ASSIGNABLE_ROLES[0], menu: "" });
-          setRole(ASSIGNABLE_ROLES[0]);
+          setDraft({ role: firstRole, menu: "" });
+          setRole(firstRole);
           setMenuFilter("");
         }}
       >

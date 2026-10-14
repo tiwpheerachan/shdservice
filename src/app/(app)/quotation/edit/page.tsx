@@ -5,15 +5,17 @@ import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { QuotationForm, type QuotationFormHandle, type QuotationLoaded } from "@/components/shared/quotation-form";
 import { PrintButton } from "@/components/shared/print-button";
-import { FormActions, JobLookupBar } from "@/components/shared/job-form";
+import { FormActions, JobLookupBar, VIEW_ONLY } from "@/components/shared/job-form";
 import { RecordGate } from "@/components/shared/record-gate";
 import { useToast } from "@/components/ui/toast";
 import { postJson, errMsg } from "@/lib/api";
 import { useRecord } from "@/lib/use-record";
+import { useAccess } from "@/lib/use-access";
 
 
 function EditQuotation() {
   const { push } = useToast();
+  const { can } = useAccess();
   const sp = useSearchParams();
   const initialNo = sp.get("no") ?? "";
   const form = React.useRef<QuotationFormHandle>(null);
@@ -38,7 +40,7 @@ function EditQuotation() {
     if (!form.current?.validate()) return;
     setSaving(true);
     try {
-      const d = await postJson<{ quotation: QuotationLoaded }>("/api/quotations", { ...p, no });
+      const d = await postJson<{ quotation: QuotationLoaded }>("/api/quotations", { ...p, no, version: loaded?.version });
       setLoaded(d.quotation);
       push({ kind: "success", title: "บันทึกการแก้ไขใบเสนอราคาแล้ว", desc: d.quotation.no });
     } catch (e) {
@@ -68,6 +70,7 @@ function EditQuotation() {
           onSave={save}
           saving={saving}
           cancelHref="/quotation/list"
+          denied={can("Quotation", "edit") ? undefined : VIEW_ONLY}
           extra={
             <PrintButton label="พิมพ์ใบเสนอราคา" kind="quotation" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/quotation/${encodeURIComponent(no ?? "")}`} disabled={!no} />
           }

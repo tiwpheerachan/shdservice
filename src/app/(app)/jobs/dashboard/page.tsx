@@ -92,7 +92,7 @@ function TatNum({ n, href, className }: { n: number; href: string; className?: s
     </Link>
   );
 }
-const thai = (iso: string) => { if (!iso) return ""; const [y, m, d] = iso.split("-").map(Number); return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`; };
+const thai = (iso: string) => { if (!iso) return ""; const [y = NaN, m = NaN, d] = iso.split("-").map(Number); return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`; };
 
 export default function DashboardPage() {
   const canAdd = useAccess().can("Job Management", "add"); // เปิดงานใหม่ only for a role that may

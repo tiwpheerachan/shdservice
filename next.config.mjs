@@ -57,6 +57,13 @@ const nextConfig = {
           { key: "Cache-Control", value: "no-store" },
         ],
       })),
+      // public/ images (logos, login hero) — Next serves them with max-age=0, so every page
+      // re-validated them. Names are NOT content-hashed → not immutable: 1 day fresh, then a
+      // week of stale-while-revalidate so a replaced logo shows up within a day. Top-level only.
+      {
+        source: "/:file([^/]+\\.(?:png|jpe?g|svg|ico|webp))",
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
+      },
     ];
   },
 };

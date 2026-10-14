@@ -34,7 +34,7 @@ export default function Page() {
   const { data: JOB_TYPES } = useJobTypes();
   const S = sum[0];
   const newJobs = S?.fresh ?? 0;
-  const days = Math.max(1, Math.round((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) + 1);
+  const days = Math.max(1, Math.round((new Date(f.to ?? "").getTime() - new Date(f.from ?? "").getTime()) / 86400000) + 1);
   const topChannel = S?.topChannel ?? "—";
   return (
     <ReportView

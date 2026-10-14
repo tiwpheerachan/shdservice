@@ -4,12 +4,14 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { SaleOrderForm, type SaleOrderFormHandle } from "@/components/shared/sale-order-form";
-import { FormActions } from "@/components/shared/job-form";
+import { FormActions, VIEW_ONLY } from "@/components/shared/job-form";
 import { useToast } from "@/components/ui/toast";
 import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 export default function NewSaleOrderPage() {
   const { push } = useToast();
+  const { can } = useAccess();
   const router = useRouter();
   const form = React.useRef<SaleOrderFormHandle>(null);
   const [saving, setSaving] = React.useState(false);
@@ -38,7 +40,7 @@ export default function NewSaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Add New Sale Order"
       />
       <SaleOrderForm ref={form} />
-      <FormActions saveLabel="บันทึกใบสั่งขาย" onSave={save} saving={saving} cancelHref="/sale/orders" />
+      <FormActions saveLabel="บันทึกใบสั่งขาย" onSave={save} saving={saving} cancelHref="/sale/orders" denied={can("Sale Order", "add") ? undefined : VIEW_ONLY} />
     </>
   );
 }

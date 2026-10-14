@@ -45,6 +45,7 @@ export type QuotationLoaded = {
   approveDate?: string; // quotation_hd.customer_approve_date
   createdBy?: string;
   documentProfileId?: number; // ออกเอกสารในนาม
+  version?: number; // row_version — the edit page sends it back with its save
 };
 
 /** What the page posts to /api/quotations. */

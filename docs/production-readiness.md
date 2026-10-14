@@ -171,9 +171,11 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 
 - [x] E2E Playwright + fake SSO (ต้องทำ `SSO_ORIGIN` env ก่อน — ตอนนี้ hard-code ใน `sso.ts:5-7`, `directory.ts:12`) · L
   ✅ 2026-10-14: `SSO_ORIGIN` env (prod ต้อง https — env check) · fake SSO (`tests/e2e/support/fake-sso.ts`) · 5 spec: owner login→dashboard, unknown→/pending, role ไม่มี Customer view → เมนูซ่อน + API 403, เปิดงานได้เลข, open redirect · ทุก spec ล้มถ้ามี CSP violation · CI job `e2e` · `/track` ข้าม (production ปฏิเสธ Turnstile test key + SMS log)
-- [ ] `noUncheckedIndexedAccess` ทีละโฟลเดอร์ (เริ่ม `src/db`, `src/server`) · M
+- [x] `noUncheckedIndexedAccess` ทีละโฟลเดอร์ (เริ่ม `src/db`, `src/server`) · M
+  ✅ 2026-10-14: เปิดทั้งโปรเจกต์ แก้ 168 จุดตามความหมาย (throw ชัดเจนเมื่อ query ต้องได้แถว, `totalOf()`, รายการคงที่ type `[string, ...string[]]`) · ไม่มี @ts-ignore / as any · `!` 1 จุด (thai-baht, มี comment) · `npm run typecheck` ใน CI · masters update id ที่ไม่มี → 404
 - [ ] Prettier + `.git-blame-ignore-revs` · S
-- [ ] ADR (`adr/`) ย้ายการตัดสินใจจาก `backend-rebase-plan.md`: timestamp ไทยไม่มี TZ, soft delete `record_status`, single instance cache, track fail-closed · M
+- [x] ADR (`adr/`) ย้ายการตัดสินใจจาก `backend-rebase-plan.md`: timestamp ไทยไม่มี TZ, soft delete `record_status`, single instance cache, track fail-closed · M
+  ✅ 2026-10-14: `adr/` 0001–0006 (+ DB production safety, แบ่งงาน agent) · plan §0/§13/§31/§35 ลิงก์ไป ADR แทนข้อความเดิม · README ลิงก์
 - [x] Logout เป็น POST + cross-site check · S
   ✅ 2026-10-14: GET แต่ปฏิเสธ `Sec-Fetch-Site` cross-site/same-site (ลิงก์จากเว็บอื่น logout ไม่ได้)
 - [x] ข้อความ login error แยกตาม `verify_400/401/403/unreachable` + แก้ข้อความ `server_not_configured` · S
@@ -190,14 +192,22 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   ✅ 2026-10-14: `clampInt`, `ymd()` (วันที่ผิด = ไม่กรอง), `Object.hasOwn` · JSON customers/movements cap 5k
 - [x] cache `jobStats`, `Promise.all` ใน `computeDashboard` · S
   ✅ 2026-10-14: jobStats cache 30s · dashboard Promise.all
-- [ ] proxy matcher ไม่รันกับ `_next/static`, cache logo, ลด font (Inter ซ้ำกับ Noto) · S
-- [ ] Rate limiter: cap ขนาด map + IPv6 /64 · S
+- [x] proxy matcher ไม่รันกับ `_next/static`, cache logo, ลด font (Inter ซ้ำกับ Noto) · S
+  ✅ 2026-10-14: matcher ข้าม `_next/static`, `_next/image`, favicon/robots, รูประดับบนสุด (= public/) — ตรวจกับ build ที่ `enforce`: หน้า/`/api/*`/`/api/files/x.png`/`/track` ยัง 403 ไม่มี header, `/track` ยังได้ nonce · รูปใน public/ `max-age=86400, stale-while-revalidate=604800` (เดิม 0) · Logo โหลดเฉพาะสีที่เห็น (`loading=lazy`) · ตัด Inter: font 10 ไฟล์ 292 KB → 3 ไฟล์ 74 KB, preload 106 → 58 KB
+- [x] Rate limiter: cap ขนาด map + IPv6 /64 · S
+  ✅ 2026-10-14: เพดาน 20,000 bucket (ทิ้ง 1/10 ที่เก่าสุด) · `ipBucket()` ใน `client-ip.ts` ใช้กับ key ของ `rate-limit.ts` + `trackCtx().ipKey` + 3 หน้า `/track` (IP เต็มยังใช้ผูก ticket/Turnstile) · `npm run test:rate-limit` · ยังไม่ทำ: key `phone-ip` ใน `track-otp.ts`
 - [x] `proxyClientMaxBodySize: "11mb"` (ตอนนี้ไฟล์ ~10MB ถูกตัดเงียบ) + cap JSON 1MB · S
   ✅ 2026-10-14: `12mb` + readJson cap 1MB นับเป็น byte
-- [ ] DB TLS verify cert (`rejectUnauthorized: false`) · S
-- [ ] hash `track_token` ใน DB · rate limit `/api/files` public · M
-- [ ] Idempotency-Key สำหรับ create (เริ่ม stock receive/issue) · optimistic locking (updated_at) · M
-- [ ] aria-sort, ข้อความ error ภาษาไทยทั้งหมด, create ตอบ 201 · S
+- [x] DB TLS verify cert (`rejectUnauthorized: false`) · S · 👤 ใส่ `DB_SSL_CA` ใน Render
+  ✅ 2026-10-14: `src/db/ssl.ts` (app + `db:migrate`) — ตั้ง `DB_SSL_CA` = verify (`rejectUnauthorized: true`), ไม่ตั้ง = เหมือนเดิม · pooler ใช้ CA ของ Supabase เอง ("Supabase Root 2021 CA", `prod-ca-2021.crt`, หมดอายุ 2031-04-26) — เช็กแล้วด้วย TLS handshake อย่างเดียว (ไม่ login): verify ผ่านกับ CA นี้, CA store ปกติของ Node ไม่ผ่าน · วิธีใส่ดู `.env.example`
+- [x] hash `track_token` ใน DB · rate limit `/api/files` public · M
+  ✅ 2026-10-14: `drizzle/0025` เพิ่ม `job.track_token_hash` (sha256 hex) + backfill + trigger ระหว่าง deploy ทับกัน — โค้ดใหม่เขียน/ค้นด้วย hash อย่างเดียว ลิงก์แสดงครั้งเดียวตอนสร้าง (UI: "สร้างลิงก์ใหม่") · `/api/files` path public 120/นาที/IP · test:track +3 เคส
+  - [ ] **ต่อ (contract) หลัง deploy นี้ live แล้วเท่านั้น:** migration ใหม่ `UPDATE job SET track_token = NULL` + drop trigger/function `job_track_token_hash_sync` + drop index `ux_job_track_token` + drop column `track_token` · ลบ `trackToken` ใน schema + `trackToken: null` ใน `tracking.ts` (รายละเอียดหัวไฟล์ `drizzle/0025`)
+- [x] Idempotency-Key สำหรับ create (เริ่ม stock receive/issue) · optimistic locking (updated_at) · M
+  ✅ 2026-10-14: `drizzle/0026` · `idempotent()` (`src/server/idempotency.ts`) ครอบ POST jobs / quotations / sale-orders / customers / stock receive / issue — key เดิม + user เดิม + route เดิม = ตอบผลเดิม, ซ้อนกันระหว่างทำ = 409, ไม่มี header = เหมือนเดิม, ลบ > 24 ชม. · `postJson` ส่ง key ต่อ submit (body เดิม = key เดิม, สำเร็จแล้วออกใหม่) · ไม่มี `updated_at` ใน legacy → `row_version` + trigger bump ทุก UPDATE (รวมระบบเก่า; ไม่นับคอลัมน์ที่บันทึกทันทีที่อื่น: profile, slip, track link) · edit job / ใบเสนอราคา / SO / ลูกค้า ส่ง version → 409 "มีผู้อื่นแก้ไขเอกสารนี้ไปแล้ว กรุณาโหลดใหม่" + toast ปุ่มโหลดใหม่ · ไม่ส่ง version = เหมือนเดิม · test:domain 11 เคส
+- [x] aria-sort, ข้อความ error ภาษาไทยทั้งหมด, create ตอบ 201 · S
+  ✅ 2026-10-14: create ตอบ 201 (jobs, quotations/sale-orders/customers เมื่อสร้างใหม่, stock receive/issue) · aria-sort + ข้อความไทยทั้งหมด ยังไม่ทำ
+  ✅ 2026-10-14: aria-sort ใน `data-table.tsx` แล้ว (ที่เหลือ: error ไทย, 201)
 
 ---
 
@@ -212,7 +222,7 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [x] บัญชีถูกปิดเรียก API ได้ "รอการอนุมัติ" → "บัญชีนี้ถูกปิดการใช้งาน"
 - [x] **DF-001 (High) ปุ่ม "อนุมัติ" ให้ role Customer Service ทันที** — dialog เลือก role (ไม่มี default, ยืนยันได้เมื่อเลือกแล้ว)
 - [x] **DF-003 role ดูอย่างเดียวเปิดงานไม่ได้** — `jobLink()` ไปใบรับงาน `/print/job/<no>?auto=0` เมื่อเปิดหน้าซ่อมไม่ได้ (รายการงาน + กระดิ่งงานเกินกำหนด)
-- [x] **DF-004 ดูอย่างเดียวเห็นเมนู/ปุ่มบันทึก** — เมนู/command palette กรองตาม add/edit (`canLink`), หน้าเปิดตรง ๆ แสดง "ไม่มีสิทธิ์แก้ไข" แทนปุ่มบันทึก, 403 เป็นภาษาไทย · quotation/SO เปิดตรงยังไม่มี notice (เมนูซ่อนแล้ว)
+- [x] **DF-004 ดูอย่างเดียวเห็นเมนู/ปุ่มบันทึก** — เมนู/command palette กรองตาม add/edit (`canLink`), หน้าเปิดตรง ๆ แสดง "ไม่มีสิทธิ์แก้ไข" แทนปุ่มบันทึก, 403 เป็นภาษาไทย · quotation/SO เปิดตรงแสดง notice เดียวกันแล้ว (2026-10-14)
 - [x] **DF-006 การ์ด KPI** — ลิงก์ `?src=kpi&group=…` ตัวเลขการ์ด = ยอดในรายการ
 - [x] DF-009 toast บังปุ่มบันทึก + ไม่บอกช่องที่ผิด · DF-010/015 ตาราง users/หัวเพจล้นที่ 1280px · DF-011 หน้าไม่มีสิทธิ์เด้งไป /admin/guide เงียบ ๆ · DF-012 print 404 console error · DF-013 ป้ายพัสดุพิมพ์ "ต. อ. จ." ว่าง · DF-014 ใบเสนอราคาพิมพ์ "xxxxxxxx" แทนเลขภาษี/บัญชีที่ไม่มี
   ✅ 2026-10-14: ทั้งหมด — toast อยู่เหนือ save bar + บอกชื่อช่อง, ตาราง/หัวเพจพอดี 1280px, หน้าไม่มีสิทธิ์ = toast "ไม่มีสิทธิ์เข้าหน้า …" และไม่ render/ยิง API ก่อน redirect, theme script ผ่าน `useServerInsertedHTML` (ครั้งเดียว, hash CSP /track ยังตรง — ตรวจกับ production build), print ซ่อนช่องว่าง/xxx (รวม return note)

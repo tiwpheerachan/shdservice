@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
   const prof = await lookupByEmail(email);
 
   const name =
-    str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
+    str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split("@")[0] ?? email);
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table and get the effective role/status.

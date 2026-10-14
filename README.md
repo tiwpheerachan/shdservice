@@ -19,6 +19,8 @@ npm run dev                                          # http://localhost:3000
 
 > ต้องใช้ Node.js 24 LTS (`.nvmrc`) — Render ใช้ 24
 
+> ทำไมระบบเป็นแบบนี้ (เวลาไทยใน DB, soft delete, cache ใน memory, /track fail-closed, กันลบ DB production): [`adr/`](adr/README.md)
+
 ---
 
 ## ฐานข้อมูลสำหรับพัฒนา (local)
@@ -38,7 +40,7 @@ npm run dev                                          # http://localhost:3000
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `npm test` | test ที่ไม่ใช้ DB: validation (`test:schemas`), redirect หลัง login (`test:auth`) |
+| `npm test` | test ที่ไม่ใช้ DB: validation (`test:schemas`), redirect หลัง login (`test:auth`), rate limiter IPv6 /64 + เพดาน map (`test:rate-limit`) |
 | `npm run db:test:up` | เปิด Postgres ทิ้งได้ใน Docker (`tests/docker-compose.yml`, port 55442, tmpfs) |
 | `npm run db:test:prepare` | ทำให้เหมือน Supabase เปล่า (pgcrypto) + รัน migration ทั้งหมด |
 | `npm run test:db` | test ที่ใช้ DB: เลขเอกสารไม่ซ้ำเมื่อยิงพร้อมกัน (`test:running-no`), ความปลอดภัย /track (`test:track`), สิทธิ์ตาม role / สต็อกห้ามติดลบ / SO อนุมัติซ้ำ / deadlock / job race (`test:domain`) |

@@ -20,9 +20,9 @@ import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode 
 const DEFAULT_APPROVED_TYPE = "Customer Service";
 
 function splitName(name: string): { first: string; last: string } {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { first: "", last: "" };
-  return { first: parts[0].slice(0, 50), last: parts.slice(1).join(" ").slice(0, 50) };
+  const [head, ...rest] = name.trim().split(/\s+/).filter(Boolean);
+  if (head === undefined) return { first: "", last: "" };
+  return { first: head.slice(0, 50), last: rest.join(" ").slice(0, 50) };
 }
 
 export type SsoProfile = {
@@ -50,7 +50,7 @@ export async function provisionSsoUser(p: SsoProfile, retried = false): Promise<
   const email = p.email.trim().toLowerCase();
   const owner = isOwner(email);
   const existing = await findAppUserByEmail(email);
-  const { first, last } = splitName(p.name || email.split("@")[0]);
+  const { first, last } = splitName(p.name || (email.split("@")[0] ?? email));
   const profile = {
     larkId: p.larkId || null,
     department: p.department || null,
@@ -103,8 +103,8 @@ export async function provisionSsoUser(p: SsoProfile, retried = false): Promise<
       ...profile,
     })
     .returning({ userId: appUser.userId, sessionVersion: appUser.sessionVersion });
-  const local = email.split("@")[0].slice(0, 50);
-  let row: { userId: number; sessionVersion: number | null };
+  const local = (email.split("@")[0] ?? email).slice(0, 50);
+  let row: { userId: number; sessionVersion: number | null } | undefined;
   try {
     [row] = await insert(local);
   } catch (e) {
@@ -115,6 +115,7 @@ export async function provisionSsoUser(p: SsoProfile, retried = false): Promise<
     if (constraint === "ix_username_and_password") [row] = await insert(`${local.slice(0, 44)}.${crypto.randomUUID().slice(0, 4)}`);
     else throw e;
   }
+  if (!row) throw new Error("app_user insert returned no row");
   userChanged(email);
   return { userId: row.userId, userType: owner ? ADMIN_USER_TYPE : null, isActive: true, sessionVersion: row.sessionVersion ?? 0 };
 }
@@ -265,6 +266,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       avatar: input.avatar || null,
     })
     .returning();
+  if (!row) throw new Error("app_user insert returned no row");
   userChanged(row.emailAddress);
   await audit(db, actorId, { action: "CREATE", module: "Admin", entity: "app_user", key: row.userId, summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || "-"} · สิทธิ์ ${userType ?? PENDING_ROLE}` });
   return { user: toUser(row), created: true };

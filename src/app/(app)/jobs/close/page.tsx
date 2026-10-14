@@ -43,7 +43,7 @@ function CloseForm() {
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
-  const { s: form, reset } = useJobForm();
+  const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
   const [tab, setTab] = React.useState("product");
@@ -107,7 +107,7 @@ function CloseForm() {
       payDetail: job.payment.detail,
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
-      courier: SHIPPERS.find((c) => job.return.detail.includes(c)) ?? (job.return.detail.includes(" · ") ? job.return.detail.split(" · ")[0] : ""),
+      courier: SHIPPERS.find((c) => job.return.detail.includes(c)) ?? (job.return.detail.includes(" · ") ? (job.return.detail.split(" · ")[0] ?? "") : ""),
       shipperId: job.return.shipperId ?? 0,
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
@@ -131,7 +131,7 @@ function CloseForm() {
     if (!act.check(closeActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, canEdit);
+      adopt(await saveCommonSections(job.no, form, canEdit));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, body);
       setJob(r.job);
       push({ kind: "success", title: "ปิดงานและบันทึกการส่งคืนเรียบร้อย", desc: `${r.job.no} · ${r.job.status}` });

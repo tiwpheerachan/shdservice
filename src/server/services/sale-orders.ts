@@ -5,9 +5,10 @@ import { db } from "@/db/client";
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from "@/db/schema";
 import type { SaleOrder } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
+import { assertVersion } from "@/server/http-error";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode, addressNames } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
@@ -112,7 +113,7 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
 export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise<Page<SaleOrder>> {
   const w = saleOrderWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: count() })
       .from(saleOutHd)
@@ -125,7 +126,7 @@ export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  return { rows: rows.map(toSaleOrder), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map(toSaleOrder), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
 }
 
 export async function listSaleOrders(f: SaleOrderFilters & { q?: string; limit?: number } = {}): Promise<SaleOrder[]> {
@@ -164,12 +165,15 @@ export type SaleOrderDetail = SaleOrder & {
   createdBy: string;
   /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
   documentProfileId: number;
+  /** sale_out_hd.row_version (drizzle/0026) — the edit page sends it back with its save */
+  version: number;
 };
 
 export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> {
   const [r] = await base().where(eq(saleOutHd.saleOutHdNo, no)).limit(1);
   if (!r) return null;
   const [hd] = await db.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).limit(1);
+  if (!hd) return null; // deleted between the two reads
   const dts = await db
     .select({ d: saleOutDt, name: product.productName })
     .from(saleOutDt)
@@ -211,6 +215,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     approveRemark: hd.approveRemark ?? "",
     createdBy: fullName(r.salesFirst, r.salesLast),
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
+    version: hd.rowVersion,
   };
 }
 
@@ -229,6 +234,8 @@ export type SaleOrderInput = {
   fee?: number | string;
   tracking?: string;
   submit?: boolean; // true → รออนุมัติ, false → กำลังดำเนินการจัดทำ
+  /** row_version the edit page loaded: another save since → 409; absent = no check */
+  version?: number;
 };
 
 export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promise<SaleOrderDetail> {
@@ -294,6 +301,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       // lock: an approval running now must finish first, so the APPROVED check below sees it
       const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for("update");
       if (!prev) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
+      assertVersion(i.version, prev.rowVersion);
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, "ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้");
       const upd = { ...hdValues, approveStatusId: approveId, ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}) };
       await tx.update(saleOutHd).set(upd).where(eq(saleOutHd.saleOutHdNo, no));

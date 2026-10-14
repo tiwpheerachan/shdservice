@@ -58,14 +58,14 @@ function unb64url(s: string) {
 // local development when no secret is configured at all.
 const DEV_FALLBACK_SECRET = "dev-only-insecure-secret-change-me";
 const MIN_SECRET_LENGTH = 32;
-function candidateSecrets(): string[] {
+function candidateSecrets(): [string, ...string[]] {
   const own = (process.env.SESSION_SECRET ?? "").trim();
   if (own.length >= MIN_SECRET_LENGTH) return [own];
   if (process.env.NODE_ENV === "production") {
     throw new Error(`SESSION_SECRET is not configured (random, at least ${MIN_SECRET_LENGTH} characters)`);
   }
-  const dev = [own, process.env.CENTRAL_API_KEY ?? ""].map((s) => s.trim()).filter(Boolean);
-  return dev.length ? dev : [DEV_FALLBACK_SECRET];
+  const [first, ...rest] = [own, process.env.CENTRAL_API_KEY ?? ""].map((s) => s.trim()).filter(Boolean);
+  return first ? [first, ...rest] : [DEV_FALLBACK_SECRET];
 }
 
 function importKey(secret: string) {

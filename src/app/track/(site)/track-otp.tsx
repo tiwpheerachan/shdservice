@@ -550,7 +550,7 @@ function OtpBoxes({
   /** put `digits` in from box `at` onward; complete → submit */
   const fill = (at: number, digits: string) => {
     const next = [...value];
-    for (let k = 0; k < digits.length && at + k < OTP_LENGTH; k++) next[at + k] = digits[k];
+    for (let k = 0; k < digits.length && at + k < OTP_LENGTH; k++) next[at + k] = digits.charAt(k);
     onChange(next);
     if (next.every((d) => d !== "")) {
       refs.current[Math.min(at + digits.length, OTP_LENGTH) - 1]?.blur();
@@ -584,7 +584,7 @@ function OtpBoxes({
               return;
             }
             if (digits.length >= OTP_LENGTH) return fill(0, digits.slice(0, OTP_LENGTH)); // SMS autofill: the whole code
-            if (d && digits.length === 2) return fill(i, digits[0] === d ? digits[1] : digits[0]); // typed over an unselected digit
+            if (d && digits.length === 2) return fill(i, digits.charAt(0) === d ? digits.charAt(1) : digits.charAt(0)); // typed over an unselected digit
             fill(i, digits); // one typed digit (the old one was selected) or a partial paste
           }}
           onPaste={(e) => {

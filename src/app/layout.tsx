@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Noto_Sans_Thai } from "next/font/google";
+import { Noto_Sans_Thai } from "next/font/google";
 import "./globals.css";
 import { ThemeScript } from "@/components/layout/theme-script";
 import { ToastProvider } from "@/components/ui/toast";
@@ -8,16 +8,12 @@ import { ConfirmProvider } from "@/components/ui/confirm";
 // Self-hosted at build time (next/font): no request to fonts.googleapis.com on
 // every page load and no render-blocking external stylesheet. Exposed as CSS
 // variables that globals.css folds into --font-sans.
+// Noto Sans Thai only: it carries Latin too and comes first in --font-sans, so Inter never drew
+// a glyph — it was 7 files (48 KB preloaded) for nothing. No `weight`: it is a variable font, one
+// file per subset covers 400–700 (all four are used: font-medium/semibold/bold, <th>).
 const notoThai = Noto_Sans_Thai({
   subsets: ["thai", "latin"],
-  weight: ["400", "500", "600", "700"],
   variable: "--font-noto-thai",
-  display: "swap",
-});
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-inter",
   display: "swap",
 });
 
@@ -46,7 +42,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="th" className={`${notoThai.variable} ${inter.variable}`} suppressHydrationWarning>
+    <html lang="th" className={notoThai.variable} suppressHydrationWarning>
       <head>
         <ThemeScript />
       </head>

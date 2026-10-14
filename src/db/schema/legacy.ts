@@ -159,6 +159,8 @@ export const mtDistrict = pgTable("mt_district", {
 ]);
 
 export const customer = pgTable("customer", {
+	// optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+	rowVersion: integer("row_version").notNull().default(0),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
 	recordStatus: varchar("record_status", { length: 10 }).notNull().default("ACTIVE"),
 	statusChangedAt: timestamp("status_changed_at", { mode: "string" }),
@@ -294,6 +296,8 @@ export const inventoryDt = pgTable("inventory_dt", {
 });
 
 export const job = pgTable("job", {
+	// optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+	rowVersion: integer("row_version").notNull().default(0),
 	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
 	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
@@ -370,8 +374,11 @@ export const job = pgTable("job", {
 	jobPaymentSlipFileName: varchar("job_payment_slip_file_name", { length: 100 }),
 	swapRefundDocumentNo: varchar("swap_refund_document_no", { length: 100 }),
 	isJobBounce: boolean("is_job_bounce"),
-	// public customer tracking link (drizzle/0012) — /track/<track_token>; lifetime: drizzle/0016
+	// public customer tracking link (drizzle/0012) — /track/<token>; lifetime: drizzle/0016
+	// legacy raw token — no longer written (new code stores only the hash below); dropped by a later contract migration
 	trackToken: varchar("track_token", { length: 43 }),
+	// sha256(link token) as hex (drizzle/0025) — the only thing a link is looked up by
+	trackTokenHash: varchar("track_token_hash", { length: 64 }),
 	// courier used for the return leg (drizzle/0013); NULL on legacy jobs
 	returnShipperId: integer("return_shipper_id"),
 	trackTokenAt: timestamp("track_token_at", { mode: "string" }),
@@ -609,6 +616,8 @@ export const quotationDt = pgTable("quotation_dt", {
 ]);
 
 export const quotationHd = pgTable("quotation_hd", {
+	// optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+	rowVersion: integer("row_version").notNull().default(0),
 	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
 	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
@@ -697,6 +706,8 @@ export const saleInHd = pgTable("sale_in_hd", {
 });
 
 export const saleOutHd = pgTable("sale_out_hd", {
+	// optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+	rowVersion: integer("row_version").notNull().default(0),
 	// --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
 	documentProfileId: integer("document_profile_id"),
 	// --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---

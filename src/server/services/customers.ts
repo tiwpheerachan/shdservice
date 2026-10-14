@@ -1,12 +1,13 @@
 import "server-only";
 import { cached, TTL_STATIC } from "@/server/cache";
 import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
-import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, totalOf, type Page, type PageQuery } from "@/server/paging";
 import { db } from "@/db/client";
 import type { Tx } from "@/db/client";
 import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from "@/db/schema";
 import type { Customer } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
+import { assertVersion } from "@/server/http-error";
 import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
@@ -51,6 +52,7 @@ export function toCustomer(r: Row, createdBy = ""): Customer {
     subDistrictId: r.subDistrictId ?? -1,
     postalCode: r.postalCode ?? "",
     priceGroup: PRICE_GROUP_LABEL[r.usePriceGroup ?? "Retail"] ?? PRICE_GROUP_LABEL.Retail,
+    version: r.rowVersion,
   };
 }
 
@@ -140,7 +142,7 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
 export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclude", f: CustomerFilters = {}): Promise<Page<Customer>> {
   const w = customerWhere(p.q, deleted, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db.select({ total: count() }).from(customer).where(w),
     db
       .select({ c: customer, f: appUser.firstName, l: appUser.lastName })
@@ -151,7 +153,7 @@ export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclud
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  return { rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
 }
 
 export async function getCustomerByCode(code: string): Promise<Customer | null> {
@@ -181,6 +183,8 @@ export type CustomerInput = {
   line?: string;
   priceGroup?: string;
   status?: string;
+  /** row_version the edit form loaded: another save since → 409; absent = no check */
+  version?: number;
 };
 
 /** Build the legacy single-line address from the parts (what the old app did). */
@@ -264,9 +268,9 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? str(i.taxId) : undefined,
   };
   const conflicts = await findCustomerConflicts(check, i.code);
-  if (conflicts.length) {
+  const [first] = conflicts;
+  if (first) {
     const label = { phone: "เบอร์โทรศัพท์", email: "อีเมล", taxId: "เลขบัตร/ผู้เสียภาษี" };
-    const first = conflicts[0];
     throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, {
       conflicts,
       fields: conflictErrors(conflicts),
@@ -293,7 +297,8 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       ...statusStamp(fromUiStatus(i.status), byUserId),
     };
     if (i.code) {
-      const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code));
+      const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for("update");
+      if (before) assertVersion(i.version, before.rowVersion);
       const [row] = await tx.update(customer).set(values).where(eq(customer.customerCode, i.code)).returning();
       if (!row) throw new HttpError(404, "customer not found");
       await audit(tx, byUserId, { action: "UPDATE", module: "Customer", entity: "customer", key: i.code, summary: `แก้ไขลูกค้า ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
@@ -304,6 +309,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       .insert(customer)
       .values({ ...values, customerCode: code, createdDate: nowThai(), createBy: byUserId, faxNumber: "" })
       .returning();
+    if (!row) throw new Error("customer insert returned no row");
     await audit(tx, byUserId, { action: "CREATE", module: "Customer", entity: "customer", key: code, summary: `เพิ่มลูกค้า ${name} · ${phone}` });
     return toCustomer(row);
   });

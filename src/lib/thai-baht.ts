@@ -1,6 +1,6 @@
 /** จำนวนเงิน → คำอ่านภาษาไทย เช่น 1400 → "หนึ่งพันสี่ร้อยบาทถ้วน", 20.50 → "ยี่สิบบาทห้าสิบสตางค์" */
-const DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
-const PLACES = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"];
+const DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"] as const;
+const PLACES = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"] as const;
 
 function readGroup(n: number, hasHigher = false): string {
   // n < 1,000,000; hasHigher = a "ล้าน" group precedes this one (so a lone 1 reads เอ็ด)
@@ -14,7 +14,7 @@ function readGroup(n: number, hasHigher = false): string {
     if (pos === 0 && d === 1 && (len > 1 || hasHigher)) out += "เอ็ด";
     else if (pos === 1 && d === 2) out += "ยี่สิบ";
     else if (pos === 1 && d === 1) out += "สิบ";
-    else out += DIGITS[d] + PLACES[pos];
+    else out += DIGITS[d]! + PLACES[pos]!; // d is a digit 1–9 (0 skipped above), pos < 6 (n < 1,000,000)
   }
   return out;
 }

@@ -56,7 +56,7 @@ export const log = {
 
 /** A path safe to log: /track/<token> and /track/doc/<ticket> are bearer links — never logged. */
 export function safePath(path: string): string {
-  return path.split("?")[0].replace(/^\/track\/doc\/[^/]+/, "/track/doc/[ticket]").replace(/^\/track\/(?!doc(?:\/|$))[^/]+/, "/track/[token]");
+  return (path.split("?")[0] ?? path).replace(/^\/track\/doc\/[^/]+/, "/track/doc/[ticket]").replace(/^\/track\/(?!doc(?:\/|$))[^/]+/, "/track/[token]");
 }
 
 /** Request context for a log line: id, method and path — never the query string. */

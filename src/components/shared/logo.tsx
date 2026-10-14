@@ -21,12 +21,15 @@ export function Logo({
     // eslint-disable-next-line @next/next/no-img-element
     return <img src="/logo.png" alt="OneService" className={className} />;
   }
+  // theme = the `dark` class on <html> (manual toggle), so <picture media> cannot pick the file.
+  // loading="lazy": a display:none image is never fetched, so only the visible variant downloads
+  // (the other one loads on the first theme switch).
   return (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="OneService" className={cn("block dark:hidden", className)} />
+      <img src="/logo.png" alt="OneService" loading="lazy" className={cn("block dark:hidden", className)} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo-dark.png" alt="OneService" className={cn("hidden dark:block", className)} />
+      <img src="/logo-dark.png" alt="OneService" loading="lazy" className={cn("hidden dark:block", className)} />
     </>
   );
 }

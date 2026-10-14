@@ -17,8 +17,13 @@ import { log, safePath } from "@/lib/log";
 //   2. /track        — security headers + CSP nonce for the public tracking pages
 //   3. login gate    — the old matcher's pages need a session cookie
 export const config = {
-  // /api/health stays reachable for Render's health check (it calls the origin directly)
-  matcher: ["/((?!api/health(?:/|$)).*)"],
+  // /api/health stays reachable for Render's health check (it calls the origin directly).
+  // Static files skip the proxy too: /_next/static (hashed build output), /_next/image (off —
+  // images.unoptimized), favicon/robots and top-level images (= public/). Safe for origin auth:
+  // they are the same public bytes for everyone, carry no data and run no app code, and
+  // Cloudflare still fronts them in production. The image pattern is top-level only
+  // ([^/]+ before the extension), so /api/files/x.png and every page stay behind the guard.
+  matcher: ["/((?!api/health(?:/|$)|_next/static/|_next/image(?:/|$)|favicon\\.ico$|robots\\.txt$|[^/]+\\.(?:png|jpe?g|svg|ico|webp)$).*)"],
 };
 
 /** paths the login gate used to skip (the previous matcher) */

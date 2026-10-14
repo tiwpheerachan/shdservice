@@ -17,7 +17,7 @@
 | Role | = `app_user.user_type` (System Admin, Customer Service, Engineer, Head Engineer, Stock, Salesman, Manager, Account, Audit, Call Center) · รออนุมัติ = `user_type IS NULL` · approve ครั้งแรก default **Customer Service** |
 | Permission | `app_config` (user_type × module_name × can_insert/edit/delete/view) · **บังคับที่ API + ซ่อนเมนู/ปุ่ม** · ไม่เพิ่ม module · หน้า admin/* และ reports/* = System Admin เท่านั้น |
 | ตาราง mock 19 ตัว | drop ทั้งหมด (ย้ายคนใน `users` → `app_user` ก่อน) |
-| ชนิดคอลัมน์ legacy | ไม่แก้ (re-dump จะทับ) · parse ในแอป · `timestamp` เขียนเวลาไทย · sentinel `1900-01-01` / `-1` / `0` = ว่าง |
+| ชนิดคอลัมน์ legacy | ไม่แก้ (re-dump จะทับ) · parse ในแอป · `timestamp` เขียนเวลาไทย → [ADR 0001](../adr/0001-thai-wall-clock-timestamp.md) |
 
 ### 0.1 การแก้ UI ที่หลีกเลี่ยงไม่ได้ (ขอ confirm)
 
@@ -220,13 +220,7 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 
 ## 13. Soft delete แบบเดียวทั้งระบบ — `record_status` (เพิ่ม 2026-09-15, migration `0003`)
 
-- ตาราง lookup **`record_status`**: `ACTIVE` ใช้งาน · `INACTIVE` ปิดใช้งาน (ยังเห็นในรายการ/หน้า admin แต่ไม่ขึ้น dropdown) · `DELETED` ลบแล้ว (ซ่อนทุกหน้า **กู้คืนทาง SQL เท่านั้น** ตามที่ตกลง)
-- คอลัมน์ `record_status` (FK) + `status_changed_at` + `status_changed_by` ใน 14 ตาราง: category, manufacturer, color, job_type, product_type, symptom, model, product, customer, app_user, job, quotation_hd, sale_out_hd, document_attach
-- **ไม่มี hard delete ที่ไหนเลย** — ทุกปุ่มลบ/ยกเลิก → `DELETED`; toggle สถานะ → `ACTIVE`/`INACTIVE`
-- ยัง mirror flag เดิมของ legacy: `is_active = (ACTIVE)`, `app_user.deleted = (DELETED)`, ใบสั่งขาย `document_status=false` เมื่อ DELETED, งานที่ DELETED ตั้ง `job_status_id=0` + `job_log` ตามระบบเก่า
-- backfill (รันซ้ำได้หลัง re-dump, แตะเฉพาะแถวที่ยังเป็น ACTIVE): `is_active=false` → INACTIVE · job สถานะ 0 → DELETED · SO `document_status=false` → DELETED · `app_user.deleted` → DELETED · ไฟล์แนบ `is_active=false` → DELETED
-- API: `POST /api/admin/records {table,id,status}` — DELETED ต้องมีสิทธิ์ `del`, ACTIVE/INACTIVE ต้องมี `edit` (master/ผู้ใช้ = System Admin) · การอ่านรับ `?deleted=active|exclude|only|all`
-- กู้คืน: `update <table> set record_status='ACTIVE', is_active=true where …` (งาน: ตั้ง `job_status_id` กลับเองด้วย)
+→ ย้ายไป [ADR 0002](../adr/0002-soft-delete-record-status.md)
 
 ## 14. ประสิทธิภาพ / pagination (2026-09-15)
 
@@ -381,7 +375,7 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - **Open redirect**: `safeNext()` ใน `lib/sso.ts` — `next` ต้องเป็น path ภายใน (ขึ้นต้น `/` ไม่ใช่ `//` หรือ `/\`) ไม่งั้นใช้ dashboard · ใช้ที่ `/api/sso/login`, callback (`nextFromState`), หน้า `/login` (ลิงก์ปุ่ม) — ทดสอบ `next=https://evil`, `//evil` → dashboard, path ภายในคงเดิม
 - **`/api/directory/search`**: เดิมไม่ต้อง login (open proxy ไป SSO กลางด้วย API key ของเรา + เผยรายชื่อพนักงาน) → `requireAdmin` (System Admin ตามที่ตกลงว่าเมนูผู้ใช้เป็นของ admin) + rate limit 30/นาที
 - **`/api/health`**: คนนอกได้แค่ `{ok}` (200/503) · รายละเอียด env/จำนวนผู้ใช้/error DB เฉพาะ System Admin
-- **Rate limit** `server/rate-limit.ts` (in-memory sliding window, key = อีเมลใน session หรือ IP, 429 + `retryAfter`): export 5/นาที · `/api/data/*` 240/นาที · `/api/customers/lookup` 120/นาที · directory 30/นาที — กันสคริปต์/แท็บค้างยิงจน CPU/RAM พุ่ง (instance เดียวบน Render จึงพอ; reset ตอน deploy; ไม่ใช่ security boundary — auth ยังทำงานตามเดิม)
+- **Rate limit** `server/rate-limit.ts` (in-memory) — กันสคริปต์/แท็บค้างยิงจน CPU/RAM พุ่ง → [ADR 0003](../adr/0003-single-instance-in-memory.md)
 - ตรวจแล้วไม่ต้องแก้: upload มี auth + 10MB + whitelist + bucket private + signed URL · `.env*`/`data.sql`/โฟลเดอร์ไฟล์อยู่นอก git · ขาออกมีแค่ SSO กลาง + Supabase · ไม่มี cron/loop ฝั่ง server
 
 ## 32. ออกเอกสารในนาม — หลายบริษัท/แบรนด์ + เลขที่เอกสารแยก (2026-09-18)
@@ -405,6 +399,8 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - ข้อมูลทดสอบ `HJ2600001 / HQ2600001 / HSO2600001` จาก 18 ก.ย. → **ลบจริง** ด้วย `scripts/cleanup-brand-test-docs.sql` (ผู้ใช้รันเอง)
 
 ## 35. หน้าติดตามสถานะสำหรับลูกค้า (public tracking, 2026-09-23)
+> การป้องกันปัจจุบัน (origin auth, Turnstile, ticket, OTP) → [ADR 0004](../adr/0004-public-tracking-fail-closed.md) — ข้อความด้านล่างเป็นรุ่นแรก
+
 - **ข้อตกลง** (แก้ 2026-09-23 ระหว่างวัน): ลูกค้าติดตามได้**ตั้งแต่เปิดงาน** (`QUOTATION_REQUIRED = false`) — เจ้าหน้าที่คัดลอกลิงก์จากกล่องที่ขึ้นหลังบันทึกเปิดงานแล้วส่งทาง LINE · เดิมกำหนดว่าต้องมีใบเสนอราคาก่อน (ใบเสนอราคาเป็นเอกสารใบเดียวที่ลูกค้าได้รับจริง — ใบรับงานซ่อมเป็นเอกสารภายใน) · QR ยังพิมพ์บน**ใบเสนอราคาใบเดียว** · ไม่แสดงราคาใด ๆ บนหน้าติดตาม
 - **ทำไมไม่ใช้เลขงานเป็นกุญแจเดี่ยว**: `J26xxxxx` เรียงลำดับ ไล่เดาได้ทั้ง 48k งาน (งานวิจัย enumeration attack บนระบบ tracking เก็บข้อมูลได้หลักล้านรายการใน 6 เดือน) → ใช้ token สุ่ม 32 bytes เป็นทางหลัก และฟอร์มสำรองบังคับ 2 ปัจจัย (เลข + เบอร์ 4 ตัวท้าย)
 - `drizzle/0012` เพิ่ม `job.track_token` (unique partial index) + backfill ทุกงาน · token ออกให้ทุกงานตั้งแต่แรก แต่**เปิดสิทธิ์เข้าดู**ด้วยเงื่อนไข `QUOTATION_REQUIRED` ใน service → เปลี่ยนนโยบายภายหลังได้โดยไม่ต้อง migrate ใหม่

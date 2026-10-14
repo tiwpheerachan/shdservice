@@ -223,6 +223,8 @@ export function DataTable<T extends Record<string, unknown>>({
                   <th
                     key={c.key}
                     scope="col"
+                    // screen readers announce the sort state; the chevrons alone are visual only
+                    aria-sort={!sortable ? undefined : active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                     style={c.width || c.minWidth ? { width: c.width, minWidth: c.minWidth } : undefined}
                     className={cn(
                       "px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground",

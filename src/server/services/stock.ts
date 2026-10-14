@@ -219,6 +219,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
           cancelBy: -1,
         })
         .returning({ id: product.productId });
+      if (!row) throw new Error("product insert returned no row");
       productId = row.id;
     }
 
@@ -906,7 +907,7 @@ export async function listIssuedLines(opts: { from?: string; to?: string; catego
  * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
  * ------------------------------------------------------------------ */
 import { count as countFn } from "drizzle-orm";
-import { orderBy as orderByCols, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
+import { orderBy as orderByCols, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { assertValid } from "@/server/validate";
 import { productSchema } from "@/lib/validation/admin";
 
@@ -972,7 +973,7 @@ const PRODUCT_SORT = {
 export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Page<Product & { value: number }>> {
   const w = productWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: countFn() })
       .from(product)
@@ -992,7 +993,7 @@ export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Pag
       const pr = toProduct(r, fullName(r.creatorFirst, r.creatorLast));
       return { ...pr, value: Math.max(0, pr.onhand) * pr.price };
     }),
-    total: Number(total),
+    total: totalOf(counted),
     page: p.page,
     pageSize: p.pageSize,
   };
@@ -1014,6 +1015,7 @@ export async function productStats(q: string, f: ProductFilters) {
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
     .where(productWhere(q, f));
+  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
   return { total: Number(r.total), qty: num(r.qty), value: num(r.value), low: num(r.low), out: num(r.out) };
 }
 
@@ -1095,7 +1097,7 @@ const MOVE_SORT = {
 export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<Page<Movement>> {
   const w = movementWhere({ ...f, q: p.q || f.q });
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: countFn() })
       .from(inventoryHd)
@@ -1140,7 +1142,7 @@ export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<P
         items: r.items ?? "",
       };
     }),
-    total: Number(total),
+    total: totalOf(counted),
     page: p.page,
     pageSize: p.pageSize,
   };
@@ -1206,7 +1208,7 @@ const ISSUED_SORT = {
 export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
   const w = issuedWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     issuedCountBase().where(w),
     issuedBase()
       .where(w)
@@ -1233,7 +1235,7 @@ export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
         value: qty * num(r.price),
       };
     }),
-    total: Number(total),
+    total: totalOf(counted),
     page: p.page,
     pageSize: p.pageSize,
   };
@@ -1253,6 +1255,7 @@ export async function issuedStats(q: string, f: IssuedFilters) {
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .where(w);
+  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
   const [top] = await db
     .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${inventoryDt.itemQuantity})` })
     .from(inventoryDt)

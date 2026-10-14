@@ -37,6 +37,7 @@ export type SaleOrderLoaded = {
   remark?: string;
   slip: string;
   documentProfileId?: number; // ออกเอกสารในนาม
+  version?: number; // row_version — the edit page sends it back with its save
   customerDetail: { code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string };
   lines: { code: string; name: string; type: "SparePart" | "Service"; qty: number; price: number }[];
 };

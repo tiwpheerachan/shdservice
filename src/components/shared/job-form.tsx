@@ -105,6 +105,8 @@ export type JobFormState = {
   dueDate: string;
   /** the due date shown is opened + the job type's SLA (nobody picked one yet) */
   dueDateAuto: boolean;
+  /** job.row_version as loaded — sent back so a save over someone else's newer edit is refused (409) */
+  version: number;
 };
 
 export const EMPTY_JOB_FORM: JobFormState = {
@@ -151,6 +153,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   engineerEmail: "",
   dueDate: "",
   dueDateAuto: false,
+  version: 0,
 };
 
 /** Prefill the form from a job loaded through /api/jobs/:no */
@@ -211,6 +214,7 @@ export function fromJob(j: JobDetail): JobFormState {
     engineerName: j.engineer,
     dueDate: j.dueDate,
     dueDateAuto: j.dueDateAuto,
+    version: j.version,
   };
 }
 
@@ -255,6 +259,7 @@ export function toJobInput(s: JobFormState) {
     engineerEmail: s.engineerEmail || undefined,
     engineerName: s.engineerName || undefined,
     dueDate: s.dueDate,
+    version: s.version, // ignored by a create
   };
 }
 
@@ -264,10 +269,12 @@ export function toJobInput(s: JobFormState) {
  * generic PATCH first so nothing typed there is lost; the page then posts its
  * own action. Skipped (not failed) when the user lacks "Job Management" edit.
  */
-export async function saveCommonSections(jobNo: string, s: JobFormState, allowed: boolean) {
-  if (!allowed) return;
+export async function saveCommonSections(jobNo: string, s: JobFormState, allowed: boolean): Promise<Partial<JobFormState>> {
+  if (!allowed) return {};
   const body = toJobInput(s);
-  await patchJson(`/api/jobs/${encodeURIComponent(jobNo)}`, { ...body, status: undefined });
+  const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(jobNo)}`, { ...body, status: undefined });
+  // the page `adopt`s this: if its own action then fails, a second try must not trip over our own save
+  return { version: d.job.version };
 }
 
 type Ctx = {
@@ -366,7 +373,7 @@ export function useWorkflowErrors() {
   const fromApi = React.useCallback(
     (err: unknown) => {
       const f = apiFieldErrors(err);
-      if (!f) return false;
+      if (!f) return form.fromApi(err); // a stale-version 409 (reload toast); false otherwise
       action.setErrors(f);
       form.fromApi(err);
       return true;

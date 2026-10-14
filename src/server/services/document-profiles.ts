@@ -220,12 +220,13 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     }
     if (values.isDefault) await tx.update(documentProfile).set({ isDefault: false }).where(i.id ? ne(documentProfile.id, i.id) : undefined);
 
-    let row: Row;
+    let row: Row | undefined;
     if (before) {
       [row] = await tx.update(documentProfile).set(values).where(eq(documentProfile.id, before.id)).returning();
     } else {
       [row] = await tx.insert(documentProfile).values(values).returning();
     }
+    if (!row) throw new HttpError(404, "ไม่พบโปรไฟล์");
     await audit(tx, byUserId, {
       action: before ? "UPDATE" : "CREATE",
       module: "Admin",

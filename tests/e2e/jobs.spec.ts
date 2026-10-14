@@ -26,7 +26,7 @@ test("the owner opens a job: a job number is issued and the job is in the list",
       dueDate: today,
     },
   );
-  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  expect(res.status, JSON.stringify(res.body)).toBe(201); // creates answer 201
   const no: string = res.body.job.no;
   expect(no).toMatch(/^J\d{7}$/); // J + Thai year (2 digits) + 5-digit running number
 

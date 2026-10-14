@@ -61,10 +61,11 @@ export async function GET(request: NextRequest) {
     const [mig] = await db.select({ n: count() }).from(migrations).catch(() => [{ n: 0 }]);
     out.db = "ok";
     out.dbLatencyMs = Date.now() - t0;
-    out.appUsers = users.n;
-    out.pendingUsers = users.pending;
-    out.appColumnsPresent = cols.n > 0;
-    out.migrationsRecorded = mig.n;
+    // count() without GROUP BY always returns exactly one row
+    out.appUsers = users?.n ?? 0;
+    out.pendingUsers = users?.pending ?? 0;
+    out.appColumnsPresent = (cols?.n ?? 0) > 0;
+    out.migrationsRecorded = mig?.n ?? 0;
     // dates are Thai wall-clock `timestamp` without time zone — both clocks must say Bangkok
     const tz = await db.execute<{ tz: string; now: string }>(sql`select current_setting('TimeZone') as tz, to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as now`);
     const row = tz.rows[0];

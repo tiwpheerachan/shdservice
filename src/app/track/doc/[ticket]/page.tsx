@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { FileX } from "lucide-react";
-import { clientIp } from "@/lib/client-ip";
+import { clientIp, ipBucket } from "@/lib/client-ip";
 import { TRACK_MSG } from "@/lib/track-public";
 import { block, consumeDocTicket, hit, hmac, isBlocked, logEvent } from "@/server/track-guard";
 import { findDoc } from "@/server/services/tracking";
@@ -26,7 +26,7 @@ export default async function Page({ params }: { params: Promise<{ ticket: strin
   const { ticket } = await params;
   const h = await headers();
   const ip = clientIp(h);
-  const ipKey = hmac(`ip:${ip}`);
+  const ipKey = hmac(`ip:${ipBucket(ip)}`); // = trackCtx ipKey: the ticket: block is shared with /api/track/doc|data
   const ua = h.get("user-agent") ?? "";
 
   // the checks only decide WHAT to show; the JSX is built after the try (a render error inside a

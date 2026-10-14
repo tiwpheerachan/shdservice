@@ -6,8 +6,8 @@ import { Toaster } from "@/components/shadcn/sonner";
 import { CheckCircle2, Info, AlertTriangle, XCircle } from "lucide-react";
 
 type ToastKind = "success" | "error" | "info" | "warning";
-/** `id`: the same id replaces a toast instead of stacking a second one */
-type ToastInput = { kind: ToastKind; title: string; desc?: string; id?: string };
+/** `id`: the same id replaces a toast instead of stacking a second one; `action`: a button — the toast then stays until used or closed */
+type ToastInput = { kind: ToastKind; title: string; desc?: string; id?: string; action?: { label: string; onClick: () => void } };
 
 /**
  * App toasts — same `useToast().push({ kind, title, desc })` API as before, now
@@ -15,7 +15,7 @@ type ToastInput = { kind: ToastKind; title: string; desc?: string; id?: string }
  */
 const push = (t: ToastInput) => {
   const fn = t.kind === "error" ? toast.error : t.kind === "success" ? toast.success : t.kind === "warning" ? toast.warning : toast.info;
-  fn(t.title, { description: t.desc, id: t.id });
+  fn(t.title, { description: t.desc, id: t.id, ...(t.action && { action: t.action, duration: Infinity }) });
 };
 
 const Ctx = React.createContext<{ push: (t: ToastInput) => void }>({ push });

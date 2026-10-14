@@ -138,7 +138,7 @@ export default function UsersPage() {
       ...f,
       name: p.name || f.name,
       email: (p.email || f.email).toLowerCase(),
-      username: p.email ? p.email.split("@")[0] : f.username,
+      username: p.email ? (p.email.split("@")[0] ?? p.email) : f.username,
       code: p.id || f.code,
       branch: p.department || f.branch,
       avatar: p.avatar || f.avatar,

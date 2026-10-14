@@ -20,9 +20,10 @@ import {
 } from "@/db/schema";
 import type { Job } from "@/data/mock";
 import { HttpError, fullName, findAppUserByEmail } from "@/server/auth";
+import { assertVersion } from "@/server/http-error";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff, auditFor, type AuditRow } from "@/server/audit";
-import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import {
   dateOrNull,
   dateOrSentinel,
@@ -472,7 +473,7 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
 export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> {
   const where = jobWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
-  const [[{ total }], rows] = await Promise.all([
+  const [counted, rows] = await Promise.all([
     db
       .select({ total: count() })
       .from(job)
@@ -487,7 +488,7 @@ export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> 
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  return { rows: rows.map(toJob), total: Number(total), page: p.page, pageSize: p.pageSize };
+  return { rows: rows.map(toJob), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
 }
 
 /** Un-paged list for reports (server-filtered, capped). */
@@ -610,6 +611,8 @@ export type JobDetail = {
   logs: { statusId: number; status: string; date: string; by: string }[];
   /** audit_log entries for this job (newest first) — ประวัติการแก้ไข */
   history: AuditRow[];
+  /** job.row_version (drizzle/0026) — the edit form sends it back with its save */
+  version: number;
 };
 
 export async function getJob(jobNo: string): Promise<JobDetail | null> {
@@ -786,6 +789,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     attachments: atts.map((a) => ({ id: a.documentAttachId, name: a.originalFileName ?? "", file: a.systemFileName ?? "", remark: a.remark ?? "" })),
     logs: logs.map((l) => ({ statusId: l.statusId ?? 0, status: l.status?.trim() ?? "", date: fmtDateTime(l.date), by: fullName(l.f, l.l) })),
     history,
+    version: j.rowVersion,
   };
 }
 
@@ -835,6 +839,8 @@ export type JobInput = {
   engineerEmail?: string;
   engineerName?: string;
   dueDate?: string;
+  /** row_version the form loaded (updateJob): another save since → 409; absent = no check */
+  version?: number;
 };
 
 /**
@@ -849,12 +855,14 @@ async function resolveEngineer(i: { engineerId?: number | string; engineerEmail?
   if (!email) return 0;
   const found = await findAppUserByEmail(email);
   if (found) return found.userId;
-  const name = str(i.engineerName) || email.split("@")[0];
-  const [first, ...rest] = name.split(/\s+/);
+  const local = email.split("@")[0] ?? email;
+  const name = str(i.engineerName) || local;
+  const [first = "", ...rest] = name.split(/\s+/); // split always yields at least one element
   const [row] = await db
     .insert(appUser)
-    .values({ username: email.split("@")[0].slice(0, 50), password: "", firstName: first.slice(0, 50), lastName: rest.join(" ").slice(0, 50), userType: null, isActive: true, emailAddress: email })
+    .values({ username: local.slice(0, 50), password: "", firstName: first.slice(0, 50), lastName: rest.join(" ").slice(0, 50), userType: null, isActive: true, emailAddress: email })
     .returning({ id: appUser.userId });
+  if (!row) throw new Error("app_user insert returned no row");
   return row.id;
 }
 
@@ -1047,6 +1055,8 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
 
   await db.transaction(async (tx) => {
     const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for("update");
+    if (!existing) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+    assertVersion(i.version, existing.rowVersion);
     const parts = num(existing?.sparePartTotalCost);
     const values = {
         ...(cust ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) } : {}),
@@ -1266,6 +1276,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 
     // ---- job fields ----
     const [j] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
+    if (!j) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo); // locked by lockJob above — cannot vanish
     const service = i.serviceCost !== undefined ? num(i.serviceCost) : num(j.serviceCost);
     const tool = i.toolCost !== undefined ? num(i.toolCost) : num(j.serviceToolCost);
     const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
@@ -1622,6 +1633,7 @@ export async function addAttachment(jobNo: string, originalName: string, systemN
         isActive: true,
       })
       .returning({ id: documentAttach.documentAttachId });
+    if (!row) throw new Error("document_attach insert returned no row");
     await audit(tx, byUserId, { action: "UPLOAD", module: "Job Management", entity: "job", key: jobNo, summary: `แนบไฟล์ ${originalName}`, changes: { file: [null, systemName] } });
     return row.id;
   });
@@ -1657,7 +1669,7 @@ function periodKeys(lo: string, hi: string, daily: boolean): string[] {
     for (let d = lo; d <= hi && keys.length < 400; d = addDays(d, 1)) keys.push(d);
     return keys;
   }
-  let [y, m] = lo.slice(0, 7).split("-").map(Number);
+  let [y = NaN, m = NaN] = lo.slice(0, 7).split("-").map(Number); // missing part → NaN, as before
   const end = hi.slice(0, 7);
   for (let k = lo.slice(0, 7); k <= end && keys.length < 1200; ) {
     keys.push(k);
@@ -1704,6 +1716,7 @@ async function computeDashboard(from: string, to: string, type = "") {
               today: sql<string>`to_char(current_date, 'YYYY-MM-DD')`,
             })
             .from(job);
+    if (!bounds) throw new Error("min(job_create_date) returned no row"); // an aggregate always returns one
     const lo = daily ? from || bounds.first : `${(from || bounds.first).slice(0, 7)}-01`;
     const hi = to || bounds.today;
     const perPeriod = async (col: typeof job.jobCreateDate | typeof job.jobClosedDate) => {

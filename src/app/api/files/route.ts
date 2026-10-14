@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handle, requireUser, HttpError } from "@/server/auth";
 import { signedUrl } from "@/server/storage";
+import { rateLimit } from "@/server/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,9 @@ export const GET = handle(async (req: NextRequest) => {
   if (!path || path.length > 300 || path.includes("..") || /[\x00-\x1f\\]/.test(path)) throw new HttpError(400, "path required");
 
   const isPublic = PUBLIC_PATH.test(path);
-  if (!isPublic) {
+  // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)
+  if (isPublic) await rateLimit(req, "files-public", 120);
+  else {
     await requireUser(req);
     if (!STAFF_PATH.test(path)) throw new HttpError(404, "ไม่พบไฟล์");
   }

@@ -39,6 +39,7 @@ async function jobBase(f: JobFilters, q = "") {
 
 export async function jobReportSummary(f: JobFilters, q = "") {
   const [r] = await jobBase(f, q);
+  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
   const [top] = await db
     .select({ channel: job.productSaleOutChannel, n: count() })
     .from(job)
@@ -77,6 +78,7 @@ export async function quotationReportSummary(f: QuotationFilters, q = "") {
     .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
     .where(quotationWhere(q, f));
+  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
   return { total: Number(r.total), agreed: num(r.agreed), amount: num(r.amount), agreedAmount: num(r.agreedAmount) };
 }
 
@@ -92,6 +94,7 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = "") {
     .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
     .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
     .where(saleOrderWhere(q, f));
+  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
   const total = Number(r.total);
   const amount = num(r.amount);
   return { total, approved: num(r.approved), amount, avg: total ? amount / total : 0 };

@@ -49,7 +49,7 @@ function OutsourceForm() {
     onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
     onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
   });
-  const { s: form, reset, set } = useJobForm();
+  const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors();
   const [tab, setTab] = React.useState("device");
   const [saving, setSaving] = React.useState(false);
@@ -135,7 +135,7 @@ function OutsourceForm() {
     if (!act.check(outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      await saveCommonSections(job.no, form, canEdit);
+      adopt(await saveCommonSections(job.no, form, canEdit));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, body);
       setJob(r.job);
       push({ kind: "success", title: "บันทึกข้อมูลส่งซ่อมต่อแล้ว", desc: `${r.job.no} · ${r.job.status}` });

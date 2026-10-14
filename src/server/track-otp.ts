@@ -8,6 +8,7 @@ import { OTP_LENGTH, OTP_PATTERN } from "@/lib/track-public";
 import { hmac, sha256, normalizeUa, logEvent, hit, block, isBlocked, dbNow, dbNowPlus } from "./track-guard";
 import { checkOtpSms, printDevOtp, requestOtpSms, smsProvider } from "./sms";
 import { logError } from "@/lib/log";
+import { ipBucket } from "@/lib/client-ip";
 
 /**
  * /track by phone number + SMS OTP (drizzle/0017).
@@ -103,7 +104,7 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   // both counters always count (no short-circuit), exactly like the two separate upserts before
   const coolOk = await hit("otp_phone_min", key, 1, OTP_RESEND_SEC);
   const hourOk = await hit("otp_phone_hour", key, OTP_PER_PHONE_HOUR, 3600);
-  const ipKey = hmac(`phone-ip:${key}:${ip}`); // one hash — track_rate.key is varchar(128)
+  const ipKey = hmac(`phone-ip:${key}:${ipBucket(ip)}`); // one hash (varchar(128)) · IPv6 per /64, like the other limits
   const dayOk = await hit("otp_phone_day", ipKey, OTP_PER_PHONE_DAY, 86400);
   const dayAllOk = await hit("otp_phone_day_all", key, OTP_PER_PHONE_DAY_ALL, 86400);
   if (!coolOk || !hourOk || !dayOk || !dayAllOk || (await isBlocked(`phone:${key}`)) || (await isBlocked(`phone:${ipKey}`))) {
@@ -173,7 +174,7 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
   // a wrong code counts against number+IP (locks that IP out of the number) and the number
   // (locks it only past the higher ceiling) — both for 24 h
   const wrong = async () => {
-    const ipKey = hmac(`phone-ip:${tried.phoneHash}:${ip}`);
+    const ipKey = hmac(`phone-ip:${tried.phoneHash}:${ipBucket(ip)}`);
     const ipOk = await hit("otp_fail_phone_day", ipKey, OTP_FAILS_PER_PHONE_DAY, 86400);
     const allOk = await hit("otp_fail_phone_day_all", tried.phoneHash, OTP_FAILS_PER_PHONE_DAY_ALL, 86400);
     if (!ipOk) await block(`phone:${ipKey}`, OTP_PHONE_LOCK_MIN);
@@ -212,6 +213,7 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
       maxExpiresAt: dbNowPlus(SESSION_MAX_MIN * 60),
     })
     .returning({ expiresAt: trackSession.expiresAt });
+  if (!s) throw new Error("track_session insert returned no row");
   return { token, expiresAt: s.expiresAt.toISOString() };
 }
 

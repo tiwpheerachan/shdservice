@@ -122,6 +122,8 @@ export type Customer = {
   priceGroup?: string;
   createdDate?: string;
   createdBy?: string;
+  /** customer.row_version — the edit form sends it back with its save */
+  version?: number;
 };
 
 export type Job = {
@@ -240,7 +242,7 @@ export type TopSymptom = { name: string; count: number };
 /* ---------- Static UI config (not database data) ---------- */
 
 /* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก app_config ผ่าน useRoles) */
-export const ROLES = [
+export const ROLES: [string, ...string[]] = [
   "System Admin",
   "Customer Service",
   "Engineer",
@@ -320,7 +322,7 @@ export const CLOSE_STATUS_OPTIONS = [
 ];
 
 /* สถานะใบเสนอราคา (8) */
-export const QUOTATION_STATUS_OPTIONS = [
+export const QUOTATION_STATUS_OPTIONS: [string, ...string[]] = [
   "รอเสนอราคา",
   "เสนอราคาแล้ว",
   "ลูกค้าตกลงซ่อม",
@@ -354,7 +356,7 @@ export const CHANNELS = [
 ];
 
 export const WARRANTY_OPTIONS = ["IN", "OUT"];
-export const RECEIVE_METHODS = ["Walk-In", "Carry-In", "Onsite", "ไม่ระบุ"];
+export const RECEIVE_METHODS: [string, ...string[]] = ["Walk-In", "Carry-In", "Onsite", "ไม่ระบุ"];
 export const COURIERS = ["Kerry Express", "Flash Express", "J&T Express", "ไปรษณีย์ไทย", "DHL", "อื่นๆ"];
 
 /* วิธีการส่งคืนสินค้า (5) */
@@ -367,9 +369,9 @@ export const RETURN_METHODS = [
 ];
 
 /* วิธีชำระเงิน (3) */
-export const PAYMENT_METHODS = ["โอนเงิน", "เงินสด", "บัตรเครดิต"]; // = sale_out_hd.payment_type
+export const PAYMENT_METHODS: [string, ...string[]] = ["โอนเงิน", "เงินสด", "บัตรเครดิต"]; // = sale_out_hd.payment_type
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
-export const JOB_PAYMENT_METHODS = ["เงินโอน", "เงินสด", "บัตรเครดิต"];
+export const JOB_PAYMENT_METHODS: [string, ...string[]] = ["เงินโอน", "เงินสด", "บัตรเครดิต"];
 
 /* ค่าบริการการซ่อม (ค่าคงที่ให้เลือก) */
 export const SERVICE_FEES = [0, 98, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
@@ -410,7 +412,7 @@ export const PART_CATEGORIES = [
 /* ลูกค้า */
 export const CUSTOMER_TYPES = ["Dealer", "Corporate", "Normal"];
 /* ใช้กลุ่มราคา — DB เก็บ Retail / Wholesale / Special (map ใน services/customers.ts) */
-export const PRICE_GROUPS = [
+export const PRICE_GROUPS: [string, ...string[]] = [
   "ขายปลีก (Retail Price)",
   "ขายส่ง (Wholesale Price)",
   "ราคาพิเศษ (Special Price)",

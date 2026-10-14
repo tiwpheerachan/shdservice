@@ -125,6 +125,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
       .returning(cols);
     row = ins;
   }
+  if (!row) throw new Error(`running_no: insert … returning gave no row for ${type} ${year}`);
 
   const next = Number(row.number) + 1;
   await tx

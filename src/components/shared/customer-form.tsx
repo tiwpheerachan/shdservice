@@ -35,6 +35,8 @@ export type CustomerFormValues = {
   line: string;
   priceGroup: string;
   status: string;
+  /** customer.row_version as loaded (an edit sends it back; 409 when someone saved in between) */
+  version?: number;
 };
 
 export const EMPTY_CUSTOMER: CustomerFormValues = {
@@ -73,6 +75,7 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
   line: c.line,
   priceGroup: c.priceGroup ?? PRICE_GROUPS[0],
   status: c.status,
+  version: c.version,
 });
 
 /** cascading address lists (mt_city → mt_district → mt_sub_district) */

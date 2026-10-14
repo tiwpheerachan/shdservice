@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { SaleOrderForm, type SaleOrderFormHandle, type SaleOrderLoaded } from "@/components/shared/sale-order-form";
 import { PrintButton } from "@/components/shared/print-button";
-import { FormActions, JobLookupBar } from "@/components/shared/job-form";
+import { FormActions, JobLookupBar, VIEW_ONLY } from "@/components/shared/job-form";
 import { Button } from "@/components/ui/button";
 import { RecordGate } from "@/components/shared/record-gate";
 import { useToast } from "@/components/ui/toast";
@@ -43,7 +43,7 @@ function EditSaleOrder() {
     if (!form.current?.validate()) return;
     setSaving(true);
     try {
-      const d = await postJson<{ order: SaleOrderLoaded }>("/api/sale-orders", { ...p, no });
+      const d = await postJson<{ order: SaleOrderLoaded }>("/api/sale-orders", { ...p, no, version: loaded?.version });
       setLoaded(d.order);
       push({ kind: "success", title: "บันทึกการแก้ไขใบสั่งขายแล้ว", desc: d.order.no });
     } catch (e) {
@@ -105,6 +105,7 @@ function EditSaleOrder() {
           onSave={save}
           saving={saving || approved}
           cancelHref="/sale/orders"
+          denied={can("Sale Order", "edit") ? undefined : VIEW_ONLY}
           extra={
             <>
               <PrintButton label="พิมพ์ใบสั่งขาย" kind="sale_order" no={no ?? ""} profileId={loaded?.documentProfileId} href={`/print/sale-order/${encodeURIComponent(no ?? "")}`} disabled={!no} />
