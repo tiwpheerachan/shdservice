@@ -6,7 +6,7 @@
 #
 # Three databases, never mixed up:
 #
-#   development   this file                   127.0.0.1:55443   kept between runs
+#   development   this file                   127.0.0.1:55435   kept between runs
 #   test          tests/docker-compose.yml    127.0.0.1:55442   wiped every run
 #   production    Supabase (bnntps…)          .env              Render migrates it on deploy
 #
@@ -28,7 +28,7 @@ services:
     command: ['postgres', '-c', 'timezone=Asia/Bangkok', '-c', 'log_timezone=Asia/Bangkok']
     ports:
       # Loopback only.
-      - '127.0.0.1:${DEV_DB_PORT:-55443}:5432'
+      - '127.0.0.1:${DEV_DB_PORT:-55435}:5432'
     volumes:
       - devdata:/var/lib/postgresql/data
     healthcheck:

@@ -2,13 +2,13 @@
  * npm run db:dev:load — (re)build the LOCAL dev database from the legacy dump in
  * ../setupdata/out (the same files production was loaded from), then apply every
  * migration. Wipes the dev database each time. Never touches anything but the local
- * container (docker-compose.yml, port 55443).
+ * container (docker-compose.yml, port 55435).
  */
 import { execFileSync } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
-const DEV_DATABASE_URL = "postgresql://root:dev_pass@127.0.0.1:55443/oneservice_dev_db";
+const DEV_DATABASE_URL = "postgresql://root:dev_pass@127.0.0.1:55435/oneservice_dev_db";
 const OUT = "../setupdata/out";
 const compose = ["compose", "-f", "docker-compose.yml"]; // project name is in the file (shd-oneservice-dev)
 

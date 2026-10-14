@@ -27,10 +27,10 @@ npm run dev                                          # http://localhost:3000
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `npm run db:dev:up` | เปิด dev DB (`docker-compose.yml`, port 55443, เก็บข้อมูลข้าม restart) |
+| `npm run db:dev:up` | เปิด dev DB (`docker-compose.yml`, port 55435, เก็บข้อมูลข้าม restart) |
 | `npm run db:dev:load` | ล้างแล้วโหลดใหม่จาก dump ระบบเดิม `../setupdata/out` (~10 วินาที) + รัน migration |
 
-ต่อจาก DBeaver / psql: host `127.0.0.1` · port `55443` · database `oneservice_dev_db` · user `root` · password `dev_pass` (ค่าเดียวกับ OneLink, loopback เท่านั้น — เปลี่ยนได้ด้วย `DEV_DB_*` ใน shell)
+ต่อจาก DBeaver / psql: host `127.0.0.1` · port `55435` · database `oneservice_dev_db` · user `root` · password `dev_pass` (ค่าเดียวกับ OneLink, loopback เท่านั้น — เปลี่ยนได้ด้วย `DEV_DB_*` ใน shell)
 
 ใน dev **อัปโหลดไฟล์ไม่ได้** (ตั้งใจ — key ใน `.env` เป็น bucket production) · `npm run db:migrate` / `next dev` กับ DB production ถูกปฏิเสธ เว้นแต่ตั้ง `ALLOW_PROD_DB=1` · production migrate เองตอน deploy (Render pre-deploy)
 
