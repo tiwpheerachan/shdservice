@@ -129,23 +129,30 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [ ] **P1-OPS-8 `ops/runbook.md` + `ops/risks.md`** · M — deploy, rollback (forward-only, expand/contract), หมุน `SESSION_SECRET`, SSO/DB/SMS/Turnstile ล่ม, restore backup, ห้ามรัน `load_supabase.sh` · เช็ก backup/PITR ของ Supabase + bucket ไฟล์ไม่อยู่ใน backup
 
 ### Data / API
-- [ ] **P1-DATA-1 Job ไม่ lock แถว** · S–M — `jobs.ts` updateJob/saveRepair/saveOutsource/swap/closeJob อ่าน status นอก tx → `lockJob(tx,no)` `FOR UPDATE` ทุก tx แล้วส่ง status ให้ `setStatus`
-- [ ] **P1-DATA-2 Export ตัดแถวเงียบ + OOM** · M — customers cap 5,000 (มี 43k) · in-memory workbook บน 512MB → cap ชัด + แจ้ง "ตัดที่ N แถว" หรือ stream writer
+- [x] **P1-DATA-1 Job ไม่ lock แถว** · S–M — `jobs.ts` updateJob/saveRepair/saveOutsource/swap/closeJob อ่าน status นอก tx → `lockJob(tx,no)` `FOR UPDATE` ทุก tx แล้วส่ง status ให้ `setStatus`
+  ✅ 2026-10-14: `lockJob(tx)` FOR UPDATE ใน saveRepair/saveOutsource/closeJob + `.for("update")` ใน updateJob/saveSwapRefund/markPartsIssued + assignJobs lock เรียงตาม job_no · setStatus เทียบกับ status ที่ lock แล้ว
+- [x] **P1-DATA-2 Export ตัดแถวเงียบ + OOM** · M — customers cap 5,000 (มี 43k) · in-memory workbook บน 512MB → cap ชัด + แจ้ง "ตัดที่ N แถว" หรือ stream writer
+  ✅ 2026-10-14: cap เดียว 20,000 ทุก list (customers/movements จาก 5k) · ถึง cap = แถวเตือนท้ายไฟล์ + ชื่อไฟล์ `-partial` · ยังสร้างใน memory (stream = P2 ถ้าต้องการเกิน 20k)
 - [x] **P1-DATA-3 แปลง Postgres error** · S — `handle()` 23505 → 409 "ข้อมูลซ้ำ", 57014 → 503 · `resources.ts:151` ใช้ `HttpError(404)`
   ✅ 2026-10-14: `handle()`: 23505 → 409, 57014 → 503, 08006/57P01 → 503 · unknown resource → 404
-- [ ] **P1-DATA-5 Unique index เลขเอกสาร** · S — เช็กเลขซ้ำใน prod (`quotation_no`, `sale_out_hd_no`, `inventory_no`, `running_no(type,company,pyear)`) แล้วสร้าง unique (partial ถ้า legacy ซ้ำ) เป็นตาข่ายชั้นสุดท้าย
+- [x] **P1-DATA-5 Unique index เลขเอกสาร** · S — เช็กเลขซ้ำใน prod (`quotation_no`, `sale_out_hd_no`, `inventory_no`, `running_no(type,company,pyear)`) แล้วสร้าง unique (partial ถ้า legacy ซ้ำ) เป็นตาข่ายชั้นสุดท้าย
+  ✅ 2026-10-14: `drizzle/0022` unique index `quotation_no` / `sale_out_hd_no` / `inventory_no` — ข้ามพร้อม NOTICE ถ้ามีเลขซ้ำ (dev copy ไม่มีซ้ำ) · running_no ไม่ต้องใช้ (advisory lock แล้ว)
 - [x] **P1-DATA-4 list โหลดพลาดแสดง "ไม่พบข้อมูล"** · S — `DataTable` รับ `error` + `onRetry` แล้วส่งจาก 14 หน้า list
 
   ✅ 2026-10-14: `DataTable`/`ReportView` รับ `error` + `onRetry` · ต่อครบ 16 หน้า list/report
 ### Testing / CI
-- [ ] **P1-CI-1 test DB local + guard** · M — `tests/docker-compose.yml` (postgres:17, tmpfs), guard host localhost, seed ขั้นต่ำ, ย้าย `test-track` มาใช้ seed
-- [ ] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
+- [x] **P1-CI-1 test DB local + guard** · M — `tests/docker-compose.yml` (postgres:17, tmpfs), guard host localhost, seed ขั้นต่ำ, ย้าย `test-track` มาใช้ seed
+  ✅ 2026-10-14: `tests/docker-compose.yml` (port 55442), `tests/prepare-db.mts` (pgcrypto + migrate), `tests/db-url.mts` guard localhost, `tests/seed.mts` · `test-track` ไม่อ่าน `.env` แล้ว — 81/81 ผ่าน
+- [x] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
+  ✅ 2026-10-14: `npm test` (schemas + auth) · `npm run test:db` (running-no + track)
 - [ ] **P1-CI-3 Test สำคัญที่ต้องมี DB** · M — running-no (20 tx พร้อมกัน, ข้ามปี), api-guard (ทุก route เรียก require*), auth/permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
-- [ ] **P1-CI-4 GitHub Actions** · M — postgres service, `npm ci` → lint → tsc → migrate ×2 (idempotent) → test → build → `npm audit --audit-level=high` → gitleaks · pin action ด้วย SHA (copy OL `.github/workflows/ci.yml`) · แล้วใส่ `autoDeployTrigger: checksPass`
+- [x] **P1-CI-4 GitHub Actions** · M — postgres service, `npm ci` → lint → tsc → migrate ×2 (idempotent) → test → build → `npm audit --audit-level=high` → gitleaks · pin action ด้วย SHA (copy OL `.github/workflows/ci.yml`) · แล้วใส่ `autoDeployTrigger: checksPass`
+  ✅ 2026-10-14: `.github/workflows/ci.yml` (lint, tsc, test, migrate ×2, test:db, audit high, build, gitleaks — action pin SHA) · gitleaks ทั้ง 133 commit สะอาด · ⏳ `autoDeployTrigger: checksPass` เปิดหลัง CI เขียวครั้งแรก
 - [ ] **P1-CI-5 Branch flow** · S — ตัดสินใจ flow (`yuu`→PR→`main` หรือ `develop`→`release` แบบ OL), เขียน `CONTRIBUTING.md`, protect branch
 - [ ] **P1-CI-6 Dependabot + CODEOWNERS + gitleaks config** · S
-- [ ] **P1-CI-7 `.nvmrc` 24 + `engines`, README อัปเดต (Next 16, Node 24)** · S
+- [x] **P1-CI-7 `.nvmrc` 24 + `engines`, README อัปเดต (Next 16, Node 24)** · S
 
+  ✅ 2026-10-14: `.nvmrc` 24, `engines >=24`, README อัปเดต Next 16 / Node 24 + ส่วน Tests
 ---
 
 ## P2 — ดีถ้ามี
