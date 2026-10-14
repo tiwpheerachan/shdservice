@@ -30,7 +30,7 @@ export default function Page() {
   const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
   // KPIs over the whole range (1 query) + one page of rows
   const { data: sum } = useJobSummary(filters);
-  const { rows: JOBS, total, loading } = useJobsPage({ ...pageArgs, ...filters });
+  const { rows: JOBS, total, loading, error: loadError, refetch: retryLoad } = useJobsPage({ ...pageArgs, ...filters });
   const { data: JOB_TYPES } = useJobTypes();
   const S = sum[0];
   const newJobs = S?.fresh ?? 0;
@@ -56,7 +56,7 @@ export default function Page() {
       ]}
       columns={columns}
       rows={JOBS}
-      loading={loading}
+      loading={loading} error={loadError} onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />

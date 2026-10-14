@@ -37,7 +37,7 @@ export default function InventoryPage() {
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   // inventory_hd (20k rows) — server-side paging; filters + table search run on the server
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
-  const { rows: MOVEMENTS, total, loading } = useMovementsPage({
+  const { rows: MOVEMENTS, total, loading, error: loadError, refetch: retryLoad } = useMovementsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q,
@@ -176,7 +176,7 @@ export default function InventoryPage() {
         searchable={false}
         columns={columns}
         rows={MOVEMENTS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={retryLoad}
         rowKey={(r) => r.doc}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

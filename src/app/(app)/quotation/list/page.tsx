@@ -42,7 +42,7 @@ export default function QuotationListPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
-  const { rows: PAGE, total: totalRows, loading } = useQuotationsPage({
+  const { rows: PAGE, total: totalRows, loading, error: loadError, refetch: retryLoad } = useQuotationsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei,
@@ -233,7 +233,7 @@ export default function QuotationListPage() {
         searchable={false}
         columns={columns}
         rows={QUOTATIONS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={retryLoad}
         rowKey={(r) => r.no}
         footerNote={
           <span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>

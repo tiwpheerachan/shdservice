@@ -29,7 +29,7 @@ export default function Page() {
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
   const { data: sum } = useJobSummary(filters);
-  const { rows: JOBS, total: totalRows, loading } = useJobsPage({ ...pageArgs, ...filters });
+  const { rows: JOBS, total: totalRows, loading, error: loadError, refetch: retryLoad } = useJobsPage({ ...pageArgs, ...filters });
   const { data: SYMPTOMS } = useSymptoms();
   const { data: STAFF } = useStaff();
   const S = sum[0];
@@ -57,7 +57,7 @@ export default function Page() {
       ]}
       columns={columns}
       rows={JOBS}
-      loading={loading}
+      loading={loading} error={loadError} onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(f) }}
     />

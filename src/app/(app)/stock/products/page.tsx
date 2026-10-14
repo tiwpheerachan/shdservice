@@ -117,7 +117,7 @@ export default function ProductsPage() {
     () => ({ q: table.q, ...filters }),
     [table.q, filters]
   );
-  const { rows: PRODUCTS, total: totalRows, loading, refetch } = useProductsPage({
+  const { rows: PRODUCTS, total: totalRows, loading, refetch, error: loadError } = useProductsPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -372,7 +372,7 @@ export default function ProductsPage() {
         searchable={false}
         columns={columns}
         rows={PRODUCTS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={refetch}
         rowKey={(r) => r.sysCode}
         server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

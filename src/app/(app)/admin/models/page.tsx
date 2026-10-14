@@ -32,7 +32,7 @@ export default function ModelsPage() {
   const NO_FILTER: ModelFilter = { brand: "", code: "", name: "", status: "" };
   const [draft, setDraft] = React.useState<ModelFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<ModelFilter>(NO_FILTER);
-  const { rows: MODELS, total, loading, refetch } = useModelsPage({
+  const { rows: MODELS, total, loading, refetch, error: loadError } = useModelsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q,
@@ -203,7 +203,7 @@ export default function ModelsPage() {
         searchable={false}
         columns={columns}
         rows={MODELS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={refetch}
         rowKey={(r) => r.code}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />

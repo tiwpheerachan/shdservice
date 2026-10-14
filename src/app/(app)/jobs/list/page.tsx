@@ -190,7 +190,7 @@ export default function JobListPage() {
         .map((s) => ({ value: String(s.id), label: s.name.trim(), sub: s.active ? s.group : `${s.group} · ไม่ใช้งาน` })),
     [JOB_STATUSES]
   );
-  const { rows: JOBS, total, loading } = useJobsPage({
+  const { rows: JOBS, total, loading, error: loadError, refetch: retryLoad } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q, // quick search box in the table (job no / customer / order no / IMEI / serial / model)
@@ -495,7 +495,7 @@ export default function JobListPage() {
         searchable={false}
         columns={columns}
         rows={JOBS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={retryLoad}
         rowKey={(r) => r.no}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

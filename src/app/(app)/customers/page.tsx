@@ -39,7 +39,7 @@ function CustomersPageInner() {
   const [filter, setFilter] = React.useState<CustomerFilter>(NO_FILTER);
   const setD = <K extends keyof CustomerFilter>(k: K, v: CustomerFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const { data: PROVINCES } = useProvinces();
-  const { rows: CUSTOMERS, total, loading, refetch } = useCustomersPage({
+  const { rows: CUSTOMERS, total, loading, refetch, error: loadError } = useCustomersPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -246,7 +246,7 @@ function CustomersPageInner() {
         searchable={false}
         columns={columns}
         rows={CUSTOMERS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={refetch}
         rowKey={(r) => r.code}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />

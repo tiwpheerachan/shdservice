@@ -38,7 +38,7 @@ export default function Page() {
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
   const { data: sum } = useQuotationSummary(filters);
-  const { rows: QUOTATIONS, total: totalRows, loading } = useQuotationsPage({ ...pageArgs, ...filters });
+  const { rows: QUOTATIONS, total: totalRows, loading, error: loadError, refetch: retryLoad } = useQuotationsPage({ ...pageArgs, ...filters });
   const S = sum[0];
   const total = S?.amount ?? 0;
   const approvedTotal = S?.agreedAmount ?? 0;
@@ -62,7 +62,7 @@ export default function Page() {
       ]}
       columns={columns}
       rows={QUOTATIONS}
-      loading={loading}
+      loading={loading} error={loadError} onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(f) }}
     />

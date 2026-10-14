@@ -39,6 +39,8 @@ export function ReportView<T extends Record<string, unknown>>({
   rows,
   rowKey,
   loading = false,
+  error = null,
+  onRetry,
   onApply,
   server,
   onExport,
@@ -51,6 +53,9 @@ export function ReportView<T extends Record<string, unknown>>({
   rows: T[];
   rowKey: (r: T, i: number) => string;
   loading?: boolean;
+  /** the rows failed to load (shown in the table instead of "no data") */
+  error?: string | null;
+  onRetry?: () => void;
   /** called with the current filter values when the user presses ค้นหา / reset */
   onApply?: (values: ReportValues) => void;
   /** server-side paging for the report table (rows = current page) */
@@ -156,7 +161,7 @@ export function ReportView<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} rowKey={rowKey} server={server} />
+      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} error={error} onRetry={onRetry} rowKey={rowKey} server={server} />
     </>
   );
 }

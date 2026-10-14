@@ -41,7 +41,7 @@ export default function AuditPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 50, q: "", sort: null });
-  const { rows, total, loading } = useAuditPage({
+  const { rows, total, loading, error: loadError, refetch: retryLoad } = useAuditPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -135,7 +135,7 @@ export default function AuditPage() {
         columns={columns}
         rows={rows}
         rowKey={(r) => String(r.id)}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={retryLoad}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />

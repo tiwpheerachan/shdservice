@@ -1,17 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  ChevronDown,
-  ChevronUp,
-  ChevronsUpDown,
-  ChevronLeft,
-  ChevronRight,
-  Search,
-  Inbox,
-  SearchX,
-  RotateCcw,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsUpDown, ChevronLeft, ChevronRight, Search, Inbox, SearchX, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from "@/lib/utils";
 import { Input, Select } from "./input";
 import { Skeleton } from "./skeleton";
@@ -78,6 +68,8 @@ export function DataTable<T extends Record<string, unknown>>({
   server,
   narrowed = false,
   onClearFilters,
+  error = null,
+  onRetry,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -99,6 +91,9 @@ export function DataTable<T extends Record<string, unknown>>({
   narrowed?: boolean;
   /** resets the page's filters (the same as its filter bar's ล้างค่า) — shown as a button on "nothing matches" */
   onClearFilters?: () => void;
+  /** the rows failed to load — say so (with a retry) instead of "no data" */
+  error?: string | null;
+  onRetry?: () => void;
 }) {
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState<{ key: string; dir: "asc" | "desc" } | null>(
@@ -284,7 +279,19 @@ export function DataTable<T extends Record<string, unknown>>({
             ) : view.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-14 text-center">
-                  {narrowed || q.trim() ? (
+                  {error ? (
+                    <div role="alert">
+                      <TriangleAlert className="mx-auto mb-2 h-7 w-7 text-destructive/70" aria-hidden />
+                      <p className="text-sm font-medium text-destructive">โหลดข้อมูลไม่สำเร็จ</p>
+                      <p className="mt-1 text-xs text-muted-foreground/80">{error}</p>
+                      {onRetry && (
+                        <Button variant="outline" size="sm" type="button" className="mt-3" onClick={onRetry}>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          ลองใหม่
+                        </Button>
+                      )}
+                    </div>
+                  ) : narrowed || q.trim() ? (
                     <>
                       <SearchX className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
                       <p className="text-sm font-medium text-muted-foreground">ไม่พบรายการที่ตรงกับเงื่อนไขค้นหา</p>

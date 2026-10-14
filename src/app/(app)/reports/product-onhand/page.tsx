@@ -44,7 +44,7 @@ export default function Page() {
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   const pageArgs = { page: table.page, pageSize: table.pageSize, q: table.q, sort: table.sort?.key, dir: table.sort?.dir };
   const { data: sum } = useProductStats({ ...filters, q: f.q });
-  const { rows, total, loading } = useProductsPage({ ...pageArgs, q: table.q || f.q, ...filters });
+  const { rows, total, loading, error: loadError, refetch: retryLoad } = useProductsPage({ ...pageArgs, q: table.q || f.q, ...filters });
   const S = sum[0];
   const totalValue = S?.value ?? 0;
   const totalQty = S?.qty ?? 0;
@@ -70,7 +70,7 @@ export default function Page() {
       ]}
       columns={columns}
       rows={rows}
-      loading={loading}
+      loading={loading} error={loadError} onRetry={retryLoad}
       rowKey={(r) => r.sysCode}
       server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />

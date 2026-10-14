@@ -39,7 +39,7 @@ export default function AssignPage() {
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
   const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
-  const { rows: JOBS, total, loading, refetch } = useJobsPage({
+  const { rows: JOBS, total, loading, refetch, error: loadError } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -290,7 +290,7 @@ export default function AssignPage() {
         onClearFilters={resetFilters}
         columns={columns}
         rows={pool}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={refetch}
         rowKey={(r) => r.no}
         rowClassName={(r) => (picked.has(r.no) ? "bg-primary/5" : "")}
         searchable={false}

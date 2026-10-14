@@ -38,7 +38,7 @@ export default function SaleOrderPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
-  const { rows: SALE_ORDERS, total, loading } = useSaleOrdersPage({
+  const { rows: SALE_ORDERS, total, loading, error: loadError, refetch: retryLoad } = useSaleOrdersPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q || filters.no || filters.customer || filters.code,
@@ -183,7 +183,7 @@ export default function SaleOrderPage() {
         searchable={false}
         columns={columns}
         rows={SALE_ORDERS}
-        loading={loading}
+        loading={loading} error={loadError} onRetry={retryLoad}
         rowKey={(r) => r.no}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

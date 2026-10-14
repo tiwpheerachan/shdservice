@@ -35,12 +35,8 @@ export default async function AppLayout({
   }
   if (!user.approved) redirect("/pending");
 
-  let grants = {};
-  try {
-    grants = user.isAdmin ? {} : await grantsForUserType(user.userType);
-  } catch {
-    grants = {};
-  }
+  // a failed grants read must not look like "no access" (→ /pending): let it reach app/error.tsx
+  const grants = user.isAdmin ? {} : await grantsForUserType(user.userType);
 
   return (
     <AccessProvider
