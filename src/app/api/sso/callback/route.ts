@@ -46,6 +46,17 @@ async function provision(opts: {
   }
 }
 
+/** {email: "string(24)", user: {sub: "string(35)", …}} — the structure of a value, none of its content */
+function shapeOf(v: unknown, depth = 0): unknown {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return `array(${v.length})`;
+  if (typeof v === "object") {
+    if (depth >= 2) return `object(${Object.keys(v as object).length} keys)`;
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shapeOf(x, depth + 1)]));
+  }
+  return typeof v === "string" ? `string(${v.length})` : typeof v;
+}
+
 function fail(request: NextRequest, reason: string) {
   const to = new URL("/login", appOrigin(request));
   to.searchParams.set("error", reason);
@@ -97,10 +108,9 @@ export async function GET(request: NextRequest) {
       return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
     }
     identity = await res.json();
-    if (process.env.SSO_DEBUG === "1") {
-       
-      console.log("[sso] identity keys:", Object.keys(identity));
-    }
+    // SSO_DEBUG=shape (or 1): what /sso/verify answered — field names, types and sizes,
+    // never a value (safe in production for one sign-in; needed before keying users on `sub`)
+    if (process.env.SSO_DEBUG === "shape" || process.env.SSO_DEBUG === "1") log.info("sso verify shape", { shape: shapeOf(identity) });
   } catch {
     return fail(request, "verify_unreachable");
   }

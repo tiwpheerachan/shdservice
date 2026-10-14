@@ -98,15 +98,18 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [x] **P1-AUTH-6 owner hard-code ลบไม่ได้** · S
   `DEFAULT_OWNERS` ใน `src/lib/access.ts:13-25` ถูก force เป็น admin + ACTIVE + undelete ทุก login → prod ใช้ `OWNER_EMAILS` อย่างเดียว, ไม่ force ACTIVE ถ้า admin ปิดไว้
   ✅ 2026-10-14: production ใช้ `OWNER_EMAILS` อย่างเดียว · owner = bootstrap เฉพาะแถวที่ยังไม่มี role · admin เปลี่ยน role/ปิดได้
-- [~] **P1-AUTH-7 PII ใน log ของ SSO + shape debug** · S (redact อีเมลแล้ว ✅ · shape debug ยังไม่ทำ)
+- [x] **P1-AUTH-7 PII ใน log ของ SSO + shape debug** · S
+  ✅ 2026-10-14: redact อีเมล + `SSO_DEBUG=shape` (log `sso verify shape`: ชื่อฟิลด์/ชนิด/ความยาว ไม่มีค่า)
   `callback/route.ts:91` log body 300 ตัวอักษร (มีอีเมล) → regex redact แบบ OL · copy `sso-debug.ts` (`SSO_DEBUG=shape`)
 - [ ] **P1-AUTH-8 เช็ก session กลาง (`/sso/session`)** · M (หลัง AUTH-1)
   คนลาออก/ถูกปิดที่ SSO ยังใช้ได้ถึง 12 ชม. → ใน `/api/sso/refresh` เช็กทุก 5 นาที (copy OneBridge `lib/auth/sso.ts:76-98`, grace 30 นาทีถ้า unavailable) · ลบ `sid` ที่ไม่มีใครใช้
 
 ### Security
 - [ ] **P1-SEC-1 Origin auth ยังเป็น `log`** · S · 👤 งานของคุณ: ดู log `origin_auth_failed` แล้วสลับใน dashboard (ตอนนี้ env check log เตือนทุกครั้งที่ start) — `render.yaml:58` → ดู log `origin_auth_failed` แล้วเปลี่ยนเป็น `enforce` (ตอนนี้ยิงตรง `onrender.com` ข้าม WAF + ปลอม `X-Forwarded-For` reset rate limit ได้)
-- [ ] **P1-SEC-2 ตรวจไฟล์อัปโหลด** · M — type ว่างผ่าน, นามสกุลจากชื่อไฟล์ user, ไม่เช็ก magic bytes, `/api/attachments` ไม่มี rate limit/Content-Length/เช็ก jobNo → `assertFile()` ใน `storage.ts` (copy `SIGNATURES` จาก OL `validate.ts:302-343`), นามสกุลจาก MIME
-- [ ] **P1-SEC-3 Route เขียนข้อมูลที่ไม่มี schema** · M — `stock/issue`, `stock/receive`, `jobs/assign`, `sale-orders/[no]/approve|tracking`, `jobs/[no]/calls`, `admin/permissions` · `qty` ทศนิยม/ใหญ่ผ่าน → zod `int().positive().max()`, `.max()` ให้ text ตาม varchar
+- [x] **P1-SEC-2 ตรวจไฟล์อัปโหลด** · M — type ว่างผ่าน, นามสกุลจากชื่อไฟล์ user, ไม่เช็ก magic bytes, `/api/attachments` ไม่มี rate limit/Content-Length/เช็ก jobNo → `assertFile()` ใน `storage.ts` (copy `SIGNATURES` จาก OL `validate.ts:302-343`), นามสกุลจาก MIME
+  ✅ 2026-10-14: `fileProblem()` ใน storage.ts: ไม่ว่าง, ≤10MB, type ใน allowlist (type ว่าง = ปฏิเสธ), magic bytes ตรง type · นามสกุลจาก MIME ไม่ใช่ชื่อไฟล์ · รูป/โลโก้รับแค่ภาพ · `/api/attachments`: rate limit + Content-Length ก่อน buffer + jobNo ต้องมีจริง · test 8 เคสใน test:schemas
+- [x] **P1-SEC-3 Route เขียนข้อมูลที่ไม่มี schema** · M — `stock/issue`, `stock/receive`, `jobs/assign`, `sale-orders/[no]/approve|tracking`, `jobs/[no]/calls`, `admin/permissions` · `qty` ทศนิยม/ใหญ่ผ่าน → zod `int().positive().max()`, `.max()` ให้ text ตาม varchar
+  ✅ 2026-10-14: `src/lib/validation/stock.ts`: receive, issue, assign, SO approve (enum — เดิมพิมพ์ผิด = reject), tracking, call log · qty จำนวนเต็ม 0–100,000, ≤500 บรรทัด · admin/permissions sanitize อยู่แล้ว · test 4 กลุ่มใน test:schemas · `.max()` ให้ text ทุก schema เดิม + strictObject = ยังไม่ทำ (P2)
 - [x] **P1-SEC-4 OTP เดาได้** · S — 4 หลัก × 5 ครั้ง × 3 code/ชม. ไม่มี cap รายวัน → `otp_phone_day` 10/วัน, ล็อก phone 24 ชม. หลังผิด 15 ครั้ง, cap SMS รวมต่อชั่วโมง, ขอ OTP 6 หลัก
   ✅ 2026-10-14: cap 8 ครั้ง/วัน/เบอร์, ผิด 15 ครั้ง/วัน → ล็อกเบอร์ 24 ชม., cap SMS รวม 200/ชม. (เกินแล้วตอบเหมือนเดิมแต่ไม่ส่ง) · OTP 6 หลักยังไม่ทำ (ต้องตั้งที่ ThaiBulkSMS)
 - [x] **P1-SEC-5 CSP หน้า staff + API** · S — มีแค่ `/track` · เพิ่ม `PAGE_CSP` (OL `lib/security-headers.ts`) ให้ `/:path((?!api/|track).*)` + `API_CSP` ให้ `/api` · ทดสอบกับ production build
