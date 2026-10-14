@@ -12,6 +12,7 @@ import {
   OtherInfoSection,
   AttachmentSection,
   FormActions,
+  VIEW_ONLY,
   JobFormProvider,
   useJobForm,
   fromJob,
@@ -393,6 +394,7 @@ function RepairForm() {
           saveLabel="บันทึกงานซ่อม"
           onSave={save}
           saving={saving}
+          denied={can("Job Repair", "edit") ? undefined : VIEW_ONLY}
           cancelHref="/jobs/list"
           extra={
             <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />

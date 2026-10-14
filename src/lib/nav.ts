@@ -1,3 +1,4 @@
+import type { Action } from "@/lib/modules";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings2,
@@ -9,7 +10,8 @@ import {
   BarChart3,
 } from "lucide-react";
 
-export type NavItem = { title: string; href: string; badge?: string };
+/** `need`: the grant the page exists for beyond `view` — a view-only role does not see it in the menu */
+export type NavItem = { title: string; href: string; badge?: string; need?: Action };
 export type NavGroup = {
   id: string;
   no: number;
@@ -72,12 +74,12 @@ export const NAV: NavGroup[] = [
     items: [
       { title: "Dashboard", href: "/jobs/dashboard" },
       { title: "รายการงานทั้งหมด", href: "/jobs/list" },
-      { title: "เปิดงานใหม่", href: "/jobs/new" },
-      { title: "แก้ไขข้อมูลงาน", href: "/jobs/edit" },
+      { title: "เปิดงานใหม่", href: "/jobs/new", need: "add" },
+      { title: "แก้ไขข้อมูลงาน", href: "/jobs/edit", need: "edit" },
       { title: "จนท.รับมอบหมายงาน", href: "/jobs/assign" },
       { title: "บันทึกงานซ่อม", href: "/jobs/repair" },
       { title: "บันทึกงานส่งซ่อมต่อ", href: "/jobs/outsource" },
-      { title: "บันทึกงาน Swap/Refund", href: "/jobs/swap-refund" },
+      { title: "บันทึกงาน Swap/Refund", href: "/jobs/swap-refund", need: "edit" },
       { title: "ปิดงาน-ส่งคืนสินค้า", href: "/jobs/close" },
     ],
   },
@@ -89,8 +91,8 @@ export const NAV: NavGroup[] = [
     href: "/quotation/list",
     items: [
       { title: "รายการใบเสนอราคา", href: "/quotation/list" },
-      { title: "สร้างใบเสนอราคา", href: "/quotation/new" },
-      { title: "แก้ไขใบเสนอราคา", href: "/quotation/edit" },
+      { title: "สร้างใบเสนอราคา", href: "/quotation/new", need: "add" },
+      { title: "แก้ไขใบเสนอราคา", href: "/quotation/edit", need: "edit" },
     ],
   },
   {
@@ -101,8 +103,8 @@ export const NAV: NavGroup[] = [
     href: "/sale/orders",
     items: [
       { title: "รายการใบสั่งขาย", href: "/sale/orders" },
-      { title: "สร้างใบสั่งขาย", href: "/sale/orders/new" },
-      { title: "แก้ไขใบสั่งขาย", href: "/sale/orders/edit" },
+      { title: "สร้างใบสั่งขาย", href: "/sale/orders/new", need: "add" },
+      { title: "แก้ไขใบสั่งขาย", href: "/sale/orders/edit", need: "edit" },
     ],
   },
   {

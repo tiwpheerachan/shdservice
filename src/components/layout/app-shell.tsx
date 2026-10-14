@@ -6,6 +6,8 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { AccessGuard } from "./access-guard";
 import { cn } from "@/lib/utils";
+import { usePathname } from "next/navigation";
+import { useAccess } from "@/lib/use-access";
 import { useLocalStorage } from "@/lib/use-client";
 import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes";
 
@@ -16,6 +18,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const collapsed = collapsedPref === "1";
   const [palette, setPalette] = React.useState(false);
   useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
+  // a page the user may not open is never rendered (AccessGuard redirects): no 403 API calls first
+  const allowed = useAccess().canPath(usePathname());
 
   const toggleCollapse = () => setCollapsedPref(collapsed ? "0" : "1");
 
@@ -52,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           collapsed={collapsed}
         />
         <main className="flex-1 p-3 sm:p-4 lg:p-6">
-          <div className="mx-auto w-full max-w-[1600px] space-y-4">{children}</div>
+          <div className="mx-auto w-full max-w-[1600px] space-y-4">{allowed ? children : null}</div>
         </main>
         <footer className="border-t border-border px-4 py-3 text-2xs text-muted-foreground no-print">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2">

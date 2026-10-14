@@ -12,6 +12,7 @@ import {
   CostSummary,
   AttachmentSection,
   FormActions,
+  VIEW_ONLY,
   JobFormProvider,
   useJobForm,
   fromJob,
@@ -273,7 +274,7 @@ function OutsourceForm() {
         <CostSummary />
         <AttachmentSection jobNo={job?.no} />
 
-        <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} cancelHref="/jobs/list" />
+        <FormActions saveLabel="บันทึกข้อมูล Out-Source" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Repair", "edit") ? undefined : VIEW_ONLY} />
       </RecordGate>
     </>
   );

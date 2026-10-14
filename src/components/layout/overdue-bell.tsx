@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/pop
 import { cn } from "@/lib/utils";
 import type { OverdueAlerts } from "@/server/services/alerts";
 import { useApi } from "@/data/db";
+import { useAccess } from "@/lib/use-access";
 
 /** background refresh; opening the bell re-checks when the last answer is older than a minute */
 const POLL_MS = 5 * 60_000;
@@ -27,6 +28,7 @@ export function OverdueBell() {
     revalidateOnFocus: true,
   });
   const [open, setOpen] = React.useState(false);
+  const { jobLink } = useAccess();
 
   const total = data?.total ?? 0;
   const mine = data?.scope === "mine";
@@ -100,7 +102,7 @@ export function OverdueBell() {
               {data.items.map((j) => (
                 <li key={j.no}>
                   <Link
-                    href={`/jobs/repair?job=${encodeURIComponent(j.no)}`}
+                    {...jobLink(j.no)}
                     onClick={() => setOpen(false)}
                     className="block px-4 py-2.5 transition-colors hover:bg-accent/50"
                   >

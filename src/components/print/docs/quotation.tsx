@@ -74,7 +74,9 @@ export async function QuotationDoc({ no }: { no: string }) {
           <p className="text-[14px] font-bold">{co.nameTh}</p>
           <p>{co.address}</p>
           <p>
-            โทรศัพท์ {co.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId || "xxxxxxxxxxxxx"}</span>
+            {/* a profile without a tax id / bank account prints nothing there, not a placeholder that looks real */}
+            โทรศัพท์ {co.phone}
+            {co.taxId && <>&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span></>}
           </p>
         </div>
       </header>
@@ -202,11 +204,15 @@ export async function QuotationDoc({ no }: { no: string }) {
         <tbody>
           <tr>
             <td rowSpan={hasDiscount ? 5 : 4} style={{ width: "58%" }}>
-              <p>รายละเอียดการโอนเงินชำระค่าสินค้าและบริการผ่านบัญชีบริษัทฯ ดังนี้</p>
-              <p className="mt-1 text-[10.5px]">
-                1. {co.bankName || "—"} {co.bankAccountType} เลขที่&nbsp;&nbsp;<span className="num">{co.bankAccountNo || "XXXXXXX"}</span>
-                {co.bankAccountName ? ` ชื่อบัญชี ${co.bankAccountName}` : ""}
-              </p>
+              {co.bankAccountNo && (
+                <>
+                  <p>รายละเอียดการโอนเงินชำระค่าสินค้าและบริการผ่านบัญชีบริษัทฯ ดังนี้</p>
+                  <p className="mt-1 text-[10.5px]">
+                    1. {co.bankName || "—"} {co.bankAccountType} เลขที่&nbsp;&nbsp;<span className="num">{co.bankAccountNo}</span>
+                    {co.bankAccountName ? ` ชื่อบัญชี ${co.bankAccountName}` : ""}
+                  </p>
+                </>
+              )}
             </td>
             <td className="w-[154px] text-right font-semibold">รวมเงิน / Total :</td>
             <td className="num w-[92px] text-right">{money(partsTotal)}</td>

@@ -196,10 +196,12 @@ export async function requireCan(
 ): Promise<CurrentUser> {
   const u = await requireUser(req);
   if (!(await can(u, module, action))) {
-    throw new HttpError(403, `ไม่มีสิทธิ์ ${action} ใน ${module ?? "ส่วนนี้"}`);
+    throw new HttpError(403, `ไม่มีสิทธิ์${ACTION_TH[action]}ใน ${module ?? "ส่วนนี้"}`);
   }
   return u;
 }
+/** the action in the 403 message — the module keeps its permission-screen name */
+const ACTION_TH: Record<Action, string> = { add: "เพิ่ม", edit: "แก้ไข", del: "ลบ", view: "ดู" };
 
 /** Every job screen — a job (and its calls/attachments) is readable from any of them. */
 export const JOB_MODULES: readonly Module[] = ["Job Management", "Job Assign", "Job Repair", "Job Closing"];

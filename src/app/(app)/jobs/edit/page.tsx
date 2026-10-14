@@ -11,6 +11,7 @@ import {
   OtherInfoSection,
   AttachmentSection,
   FormActions,
+  VIEW_ONLY,
   JobFormProvider,
   useJobForm,
   fromJob,
@@ -22,6 +23,7 @@ import { useJob, type JobDetail } from "@/lib/use-job";
 import { PrintButton } from "@/components/shared/print-button";
 import { TrackLink } from "@/components/shared/track-link";
 import { patchJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 
 function EditJobForm() {
   const { push } = useToast();
@@ -33,6 +35,7 @@ function EditJobForm() {
   });
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
+  const { can } = useAccess();
 
   // prefill the form whenever a job is loaded (from ?job= or the GO button)
   function prefill(job: JobDetail) {
@@ -87,6 +90,7 @@ function EditJobForm() {
           onSave={save}
           saving={saving}
           cancelHref="/jobs/list"
+          denied={can("Job Management", "edit") ? undefined : VIEW_ONLY}
           extra={
             <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
           }

@@ -23,14 +23,14 @@ export function Sidebar({
   onToggleCollapse: () => void;
 }) {
   const pathname = usePathname();
-  // hide menus the user has no `view` grant for (app_config); admin sees all
-  const { canPath } = useAccess();
+  // hide menus the user has no `view` grant for (app_config), and add/edit screens without that grant; admin sees all
+  const { canLink } = useAccess();
   const NAV = React.useMemo(
     () =>
-      ALL_NAV.map((g) => ({ ...g, items: g.items.filter((i) => canPath(i.href)) }))
+      ALL_NAV.map((g) => ({ ...g, items: g.items.filter(canLink) }))
         .filter((g) => g.items.length > 0)
         .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : g.items[0].href })),
-    [canPath]
+    [canLink]
   );
   const activeGroup = NAV.find((g) =>
     g.items.some((i) => i.href === pathname)

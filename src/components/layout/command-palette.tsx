@@ -21,8 +21,8 @@ export function CommandPalette({
   onOpenChange: (v: boolean) => void;
 }) {
   const leave = useLeave(); // asks first when a form on this page has unsaved edits
-  const { canPath } = useAccess();
-  const links = React.useMemo(() => EVERY_LINK.filter((l) => canPath(l.href)), [canPath]);
+  const { canLink } = useAccess();
+  const links = React.useMemo(() => EVERY_LINK.filter(canLink), [canLink]);
 
   const go = (href: string) => {
     onOpenChange(false);

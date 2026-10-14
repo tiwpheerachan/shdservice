@@ -47,11 +47,13 @@ export const JOB_FIELD_LABEL: Record<JobRequiredKey, string> = {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const text = z.string().optional();
 const date = z.union([z.literal(""), z.string().regex(ISO_DATE, "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)")]).optional();
-const numberLike = z
-  .union([z.number(), z.string()])
-  .optional()
-  .refine((v) => v === undefined || v === "" || Number.isFinite(Number(v)), "ต้องเป็นตัวเลข")
-  .refine((v) => v === undefined || v === "" || Number(v) >= 0, "ต้องไม่ติดลบ");
+// the message names the field: the toast lists messages without their field ("ต้องไม่ติดลบ" alone said nothing)
+const numberLike = (field: string) =>
+  z
+    .union([z.number(), z.string()])
+    .optional()
+    .refine((v) => v === undefined || v === "" || Number.isFinite(Number(v)), `${field}ต้องเป็นตัวเลข`)
+    .refine((v) => v === undefined || v === "" || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
 
 /** field types — everything optional here; what is required is decided per mode below */
 const jobInputShape = z.object({
@@ -65,7 +67,7 @@ const jobInputShape = z.object({
   channel: text,
   shopName: text,
   saleOrderDate: date,
-  warrantyMonth: numberLike,
+  warrantyMonth: numberLike("รับประกัน (เดือน) "),
   expireDate: date,
   warranty: text,
   productType: text,
@@ -84,12 +86,12 @@ const jobInputShape = z.object({
   symptoms: z.array(z.string()).optional(),
   symptomOther: text,
   remark: text,
-  estimateCost: numberLike,
-  depositCost: numberLike,
-  serviceCost: numberLike,
-  toolCost: numberLike,
-  deliveryCost: numberLike,
-  boxCost: numberLike,
+  estimateCost: numberLike("ค่าประเมินงานซ่อม"),
+  depositCost: numberLike("ค่ามัดจำงานซ่อม"),
+  serviceCost: numberLike("ค่าบริการการซ่อม"),
+  toolCost: numberLike("ค่าเครื่องมือพิเศษ"),
+  deliveryCost: numberLike("ค่าขนส่ง"),
+  boxCost: numberLike("ค่ากล่องพัสดุ"),
   engineerId: z.union([z.number(), z.string()]).optional(),
   engineerEmail: text,
   engineerName: text,

@@ -12,6 +12,7 @@ import {
 } from "@/data/db";
 import { int, cn } from "@/lib/utils";
 import { daysAgo, today } from "@/lib/dates";
+import { useAccess } from "@/lib/use-access";
 
 /* one restrained accent per status group — carried as a small dot + thin bar, never a fill */
 const TONE: Record<string, string> = {
@@ -73,6 +74,15 @@ function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: str
   if (type) p.set("type", type);
   return `/jobs/list?${p}`;
 }
+/** KPI card → the job list counting the same jobs: status group (the card's `sub` is the group name)
+ *  + create-date range + job type, like computeDashboard's `createdIn` */
+function kpiHref(g: { sub: string; label: string }, from: string, to: string, type: string) {
+  const p = new URLSearchParams({ src: "kpi", group: g.sub, label: g.label });
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  if (type) p.set("type", type);
+  return `/jobs/list?${p}`;
+}
 /** a clickable TAT count — zero stays a quiet dash */
 function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
   if (!n) return <span className="text-muted-foreground/30">–</span>;
@@ -85,6 +95,7 @@ function TatNum({ n, href, className }: { n: number; href: string; className?: s
 const thai = (iso: string) => { if (!iso) return ""; const [y, m, d] = iso.split("-").map(Number); return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`; };
 
 export default function DashboardPage() {
+  const canAdd = useAccess().can("Job Management", "add"); // เปิดงานใหม่ only for a role that may
   // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
   const [from, setFrom] = React.useState(() => daysAgo(29));
   const [to, setTo] = React.useState(() => today());
@@ -206,13 +217,15 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
-          <Link
-            href="/jobs/new"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            เปิดงานใหม่
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          {canAdd && (
+            <Link
+              href="/jobs/new"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              เปิดงานใหม่
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
       </div>
 
@@ -221,7 +234,7 @@ export default function DashboardPage() {
         {DASH_GROUPS.map((g) => (
           <Link
             key={g.key}
-            href="/jobs/list"
+            href={kpiHref(g, from, to, type)}
             className="group bg-card p-5 transition-colors hover:bg-accent/40"
           >
             <div className="flex items-center gap-2">

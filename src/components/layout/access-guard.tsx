@@ -3,7 +3,8 @@
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAccess } from "@/lib/use-access";
-import { ALL_LINKS } from "@/lib/nav";
+import { ALL_LINKS, findBreadcrumb } from "@/lib/nav";
+import { useToast } from "@/components/ui/toast";
 import { hardNavigate, toLogin } from "@/lib/navigation";
 import { useMe } from "@/lib/use-me";
 
@@ -19,15 +20,24 @@ export function AccessGuard() {
   const pathname = usePathname();
   const router = useRouter();
   const { canPath } = useAccess();
+  const { push } = useToast();
 
   // Page-level permission (app_config `view`): a user who types a URL they may
-  // not open is sent to the first menu they can see. The API enforces the same
-  // grants on every write regardless.
+  // not open is sent to the first menu they can see — and told why, not silently.
+  // (AppShell does not render that page, so it fires no API call first.) The API
+  // enforces the same grants on every write regardless.
   React.useEffect(() => {
     if (canPath(pathname)) return;
     const first = ALL_LINKS.find((l) => canPath(l.href));
+    const page = findBreadcrumb(pathname);
+    push({
+      kind: "warning",
+      id: "no-access", // one toast, also when the effect runs twice (dev Strict Mode)
+      title: `ไม่มีสิทธิ์เข้าหน้า ${page?.item?.title ?? page?.group.title ?? pathname}`,
+      desc: "ขอสิทธิ์ได้จากผู้ดูแลระบบ",
+    });
     router.replace(first ? first.href : "/pending");
-  }, [pathname, canPath, router]);
+  }, [pathname, canPath, router, push]);
 
   // still signed in / still approved? — read from /api/sso/me, which never extends the session
   // (so 30 min without activity really ends it). Every minute while the tab is visible, and at once

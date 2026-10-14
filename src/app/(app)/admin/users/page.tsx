@@ -118,10 +118,18 @@ export default function UsersPage() {
     setOpen(true);
   };
 
-  // Approve in ONE click — assign a default real role + Active immediately.
-  // (Change the role afterwards via the edit pencil if needed.)
-  const approveNow = (r: User) =>
-    quickSet(r, { role: "Customer Service", status: "Active" }, "อนุมัติแล้ว");
+  // อนุมัติ asks for the role first, nothing pre-picked: a silent default role handed people
+  // menus they should not have
+  const [approving, setApproving] = React.useState<User | null>(null);
+  const [approveRole, setApproveRole] = React.useState("");
+  const approveNow = (r: User) => {
+    setApproveRole("");
+    setApproving(r);
+  };
+  const confirmApprove = async () => {
+    if (!approving || !approveRole) return;
+    if (await quickSet(approving, { role: approveRole, status: "Active" }, "อนุมัติแล้ว")) setApproving(null);
+  };
 
   // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
   const pickPerson = (p: Person | null) => {
@@ -168,12 +176,14 @@ export default function UsersPage() {
       await postUser({ ...toForm(r), ...patch });
       push({ kind: "success", title: okTitle, desc: r.name });
       refetch();
+      return true;
     } catch (e) {
       push({
         kind: "error",
         title: "ทำรายการไม่สำเร็จ",
         desc: e instanceof Error ? e.message : String(e),
       });
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -266,11 +276,13 @@ export default function UsersPage() {
           <Badge tone="primary">{r.role}</Badge>
         ),
     },
-    { key: "branch", header: "สาขา / หน่วยงาน", hideBelow: "lg" },
+    // at 1280px (with the sidebar) every column did not fit and pushed Action off-screen:
+    // หน่วยงาน / ติดต่อ show only on wider screens (both stay in the edit dialog)
+    { key: "branch", header: "สาขา / หน่วยงาน", hideBelow: "xl" },
     {
       key: "email",
       header: "ติดต่อ",
-      hideBelow: "xl",
+      hideBelow: "2xl",
       cell: (r) => (
         <div className="space-y-0.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5">
@@ -303,7 +315,7 @@ export default function UsersPage() {
     {
       key: "action",
       header: "Action",
-      width: "150px",
+      width: "180px",
       align: "center",
       sortable: false,
       cell: (r) =>
@@ -318,7 +330,7 @@ export default function UsersPage() {
             </button>
           </div>
         ) : (
-          <div className="flex items-center justify-center gap-1.5">
+          <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
             {r.role === "รออนุมัติ" ? (
               <button
                 disabled={busyId === r.id}
@@ -441,6 +453,34 @@ export default function UsersPage() {
         rowKey={(r) => r.id}
         footerNote={filter !== NO_FILTER && VISIBLE.length !== USERS.length ? <span>· กรองจาก {USERS.length} คน</span> : undefined}
       />
+
+      <Modal
+        open={!!approving}
+        onClose={() => setApproving(null)}
+        title={`อนุมัติ ${approving?.name ?? ""}`}
+        description="เลือกบทบาทที่จะใช้ — สิทธิ์เมนูทั้งหมดมาจากบทบาทนี้"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setApproving(null)} disabled={busyId === approving?.id}>
+              ยกเลิก
+            </Button>
+            <Button size="sm" onClick={confirmApprove} disabled={!approveRole || busyId === approving?.id}>
+              {busyId === approving?.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              อนุมัติ
+            </Button>
+          </>
+        }
+      >
+        <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required>
+          <SearchSelect
+            placeholder="- - เลือกบทบาท - -"
+            value={approveRole}
+            onChange={setApproveRole}
+            options={strOptions(ROLE_OPTIONS.filter((x) => x !== "รออนุมัติ"))}
+          />
+        </Field>
+      </Modal>
 
       <Modal
         open={open}

@@ -67,8 +67,8 @@ function Action({
 }) {
   if (href)
     return (
-      // no prefetch: a page of 25 rows would fetch 50 screens nobody opens
-      <Link href={href} prefetch={false} title={label} aria-label={label} className={cn(BTN, className)}>
+      // no prefetch: a page of 25 rows would fetch 50 screens nobody opens; a print view (no app shell) opens in a new tab
+      <Link href={href} prefetch={false} target={href.startsWith("/print/") ? "_blank" : undefined} title={label} aria-label={label} className={cn(BTN, className)}>
         {children}
       </Link>
     );

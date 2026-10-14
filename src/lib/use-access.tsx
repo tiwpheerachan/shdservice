@@ -44,6 +44,15 @@ export function useAccess() {
       ...v,
       can: (module: Module | null, action: Action) => checkGrant(v.isAdmin, v.grants, module, action),
       canPath: (pathname: string) => canViewPath(v.isAdmin, v.grants, pathname),
+      /** a menu link: the page's `view`, plus the action it exists for (เปิดงานใหม่ = add, แก้ไข… = edit) */
+      canLink: (l: { href: string; need?: Action }) =>
+        canViewPath(v.isAdmin, v.grants, l.href) && (!l.need || checkGrant(v.isAdmin, v.grants, moduleForPath(l.href), l.need)),
+      /** where a job number opens: บันทึกงานซ่อม, or — for a role that cannot open that page — the
+       *  read-only receipt in a new tab (the print view only needs view on a job screen) */
+      jobLink: (no: string) =>
+        canViewPath(v.isAdmin, v.grants, "/jobs/repair")
+          ? { href: `/jobs/repair?job=${encodeURIComponent(no)}` }
+          : { href: `/print/job/${encodeURIComponent(no)}?auto=0`, target: "_blank" },
       /** grants for the page the user is on, by pathname */
       forPath: (pathname: string) => {
         const m = moduleForPath(pathname);

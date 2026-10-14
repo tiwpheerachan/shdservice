@@ -77,7 +77,8 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
           <p className="text-[14px] font-bold">{co.nameTh}</p>
           <p>{co.address}</p>
           <p>
-            โทรศัพท์ {co.phone}&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId || "xxxxxxxxxxxxx"}</span>
+            โทรศัพท์ {co.phone}
+            {co.taxId && <>&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span></>}
           </p>
         </div>
       </header>

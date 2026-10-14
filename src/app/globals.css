@@ -273,10 +273,12 @@
 }
 
 /* Toasts (bottom-right) sit above the sticky save bar on the pages that have one, so a toast never
-   covers "บันทึก" (sonner sets these offsets inline → !important). Same bar height as above. */
+   covers "บันทึก" (sonner sets these offsets inline → !important). Scrolled to the end, the bar rests
+   above main's bottom padding and the footer (~4.5rem, more when the footer wraps on a phone), so
+   clear that too — a toast under the cursor on "บันทึก" also paused its own timer (hover) for good. */
 html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-position="bottom"] {
-  --offset-bottom: calc(var(--actions-h) + 1rem) !important;
-  --mobile-offset-bottom: calc(var(--actions-h) + 1rem) !important;
+  --offset-bottom: calc(var(--actions-h) + 5.5rem) !important;
+  --mobile-offset-bottom: calc(var(--actions-h) + 6.5rem) !important;
 }
 
 @media print {

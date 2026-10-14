@@ -77,7 +77,7 @@ export function Topbar({
 
       <button
         onClick={onOpenPalette}
-        className="hidden items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-input hover:text-foreground sm:flex"
+        className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-input hover:text-foreground sm:flex"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="pr-6">ค้นหาเมนู…</span>
@@ -115,9 +115,10 @@ export function Topbar({
             {initials}
           </div>
         )}
-        <div className="hidden leading-tight lg:block">
-          <p className="text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
-          <p className="text-2xs text-muted-foreground">{me?.email ?? ""}</p>
+        {/* one line each, cut with … — a long email wrapped the topbar at 1280px */}
+        <div className="hidden min-w-0 max-w-48 leading-tight lg:block" title={me?.email}>
+          <p className="truncate text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
+          <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ""}</p>
         </div>
         {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
             /api/sso/logout silently signed the user out after every page load */}

@@ -26,8 +26,8 @@ export function ShippingLabel({
   district?: string;
   province?: string;
 }) {
-  // "ต. อ. จ." — names when the customer master has them, blanks (as the legacy form) when not
-  const tao = `ต.${subDistrict ? subDistrict + " " : " "}อ.${district ? district + " " : " "}จ.${province}`;
+  // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line (a bare "ต. อ. จ." printed before)
+  const tao = [subDistrict && `ต.${subDistrict}`, district && `อ.${district}`, province && `จ.${province}`].filter(Boolean).join(" ");
   return (
     <>
       <style>{`
@@ -57,7 +57,7 @@ export function ShippingLabel({
             <p className="font-bold">กรุณานำส่ง</p>
             <p className="mt-[3mm]">{name}</p>
             <p className="mt-[2mm]">{address}</p>
-            <p className="mt-[2mm]">{tao}</p>
+            {tao && <p className="mt-[2mm]">{tao}</p>}
             <p className="mt-[2mm]">โทร.<span className="num">{phone}</span></p>
           </div>
         </div>

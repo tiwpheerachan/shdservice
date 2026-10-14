@@ -23,7 +23,7 @@ import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-colum
 export default function AssignPage() {
   const { push } = useToast();
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
-  const { name: CURRENT_TECH, userId } = useAccess();
+  const { name: CURRENT_TECH, userId, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
   // filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
@@ -277,11 +277,15 @@ export default function AssignPage() {
           >
             ล้างการเลือก
           </Button>
-          <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
-            <UserCheck className="h-3.5 w-3.5" />
-            <span className="sm:hidden">ยืนยันรับงาน</span>
-            <span className="hidden sm:inline">ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;</span>
-          </Button>
+          {can("Job Assign", "edit") ? (
+            <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
+              <UserCheck className="h-3.5 w-3.5" />
+              <span className="sm:hidden">ยืนยันรับงาน</span>
+              <span className="hidden sm:inline">ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;</span>
+            </Button>
+          ) : (
+            <span role="note" className="text-xs font-medium text-warning">ไม่มีสิทธิ์รับงาน — ดูรายการได้อย่างเดียว</span>
+          )}
         </div>
       </div>
 

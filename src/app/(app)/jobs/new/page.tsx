@@ -20,6 +20,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { TrackLink } from "@/components/shared/track-link";
 import { postJson, errMsg } from "@/lib/api";
+import { useAccess } from "@/lib/use-access";
 import type { JobDetail } from "@/lib/use-job";
 
 function NewJobForm() {
@@ -28,6 +29,7 @@ function NewJobForm() {
   const { s, reset, validate, report, fromApi } = useJobForm();
   const attach = React.useRef<AttachmentsHandle>(null);
   const [saving, setSaving] = React.useState(false);
+  const { can } = useAccess();
   // after saving we stop here first so the tracking link can be copied and sent
   // to the customer right away (the job is trackable from the moment it exists)
   const [opened, setOpened] = React.useState<string | null>(null);
@@ -61,7 +63,7 @@ function NewJobForm() {
       <ProductSection variant="open" />
       <OtherInfoSection directory={false} />
       <AttachmentSection ref={attach} />
-      <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" />
+      <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Management", "add") ? undefined : "ไม่มีสิทธิ์เปิดงานใหม่ — ติดต่อผู้ดูแลระบบ"} />
 
       <Modal
         open={!!opened}

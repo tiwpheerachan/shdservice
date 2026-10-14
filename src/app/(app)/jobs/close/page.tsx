@@ -9,6 +9,7 @@ import {
   CustomerSection,
   ProductSection,
   FormActions,
+  VIEW_ONLY,
   JobFormProvider,
   useJobForm,
   fromJob,
@@ -348,7 +349,7 @@ function CloseForm() {
           </FieldGrid>
         </Section>
 
-        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" />
+        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Closing", "edit") ? undefined : VIEW_ONLY} />
       </RecordGate>
     </>
   );

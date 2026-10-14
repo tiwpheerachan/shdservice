@@ -12,6 +12,7 @@ import {
   CostSummary,
   AttachmentSection,
   FormActions,
+  VIEW_ONLY,
   JobFormProvider,
   useJobForm,
   fromJob,
@@ -267,7 +268,7 @@ function SwapRefundForm() {
         <CostSummary />
         <AttachmentSection jobNo={job?.no} />
 
-        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} cancelHref="/jobs/list" />
+        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Management", "edit") ? undefined : VIEW_ONLY} />
       </RecordGate>
     </>
   );

@@ -21,7 +21,7 @@ export type Column<T> = {
   headerWrap?: boolean;
   className?: string;
   sortable?: boolean;
-  hideBelow?: "sm" | "md" | "lg" | "xl";
+  hideBelow?: "sm" | "md" | "lg" | "xl" | "2xl";
 };
 
 /**
@@ -48,6 +48,7 @@ const HIDE: Record<string, string> = {
   md: "hidden md:table-cell",
   lg: "hidden lg:table-cell",
   xl: "hidden xl:table-cell",
+  "2xl": "hidden 2xl:table-cell",
 };
 
 export function DataTable<T extends Record<string, unknown>>({

@@ -46,6 +46,8 @@ type Filters = {
   /* status is chosen BY ID (list from job_status in the DB — the TAT link sends the id too); `status` keeps
      the name for display only. `open` (not Finished/Cancel) is set only by a dashboard TAT link. */
   statusId: string; open: boolean;
+  /** Pending | Repaired | Finished | Cancel — set only by a dashboard KPI card (counts by status group) */
+  statusGroup: string;
   /** open + past the customer due date — set only by the notification bell's link */
   overdue: boolean;
 };
@@ -55,7 +57,7 @@ const NO_FILTER: Filters = {
   dateBy: "create", from: "", to: "",
   customer: "", phone: "", tracking: "", imei: "", warranty: "",
   bounce: false, within30: false, cost: "", status: "",
-  statusId: "", open: false, overdue: false,
+  statusId: "", open: false, statusGroup: "", overdue: false,
 };
 /** query-string form of the applied filters — shared by the table hook and the Excel export */
 const toParams = (f: Filters) => ({
@@ -65,7 +67,7 @@ const toParams = (f: Filters) => ({
   customer: f.customer, phone: f.phone, tracking: f.tracking, imei: f.imei, warranty: f.warranty,
   bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost,
   // statusId wins over the name (exact id match — no trailing-space / spelling issues with names)
-  status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "",
+  status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "", statusGroup: f.statusGroup,
   overdue: f.overdue ? 1 : "",
 });
 
@@ -112,7 +114,8 @@ function StatChip({
 }
 
 export default function JobListPage() {
-  const { add: canAdd, edit: canEdit } = useAccess().forPath("/jobs/list");
+  const access = useAccess();
+  const { add: canAdd, edit: canEdit } = access.forPath("/jobs/list");
   const { data: JOB_TYPES } = useJobTypes();
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { data: BRANDS } = useManufacturers();
@@ -125,9 +128,12 @@ export default function JobListPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   // where a dashboard TAT deep link came from (shown as a clearable chip)
   const [tat, setTat] = React.useState<TatSource | null>(null);
+  // the dashboard KPI card a deep link came from (its label), shown the same way
+  const [kpi, setKpi] = React.useState<string | null>(null);
   // deep links:
   //   customer page  /jobs/list?customer=C43600 → prefilled ลูกค้า filter
   //   dashboard TAT  /jobs/list?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…&to=…&type=…
+  //   dashboard KPI  /jobs/list?src=kpi&group=Pending&label=…&from=…&to=…&type=… (same count as the card)
   //   bell           /jobs/list?src=overdue[&engineer=<user id>] → open jobs past their due date
   // Read on EVERY change of the URL, not only on mount: a link to this page from this page
   // (the bell in the topbar, back / forward) changes the query string without remounting.
@@ -156,6 +162,11 @@ export default function JobListPage() {
       });
       tatSrc = { bucket: g("bucket"), status: g("status"), type: g("type") };
     }
+    let kpiSrc: string | null = null;
+    if (g("src") === "kpi") {
+      Object.assign(next, { statusGroup: g("group"), dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type") });
+      kpiSrc = g("label") || g("group");
+    }
     if (g("src") === "overdue") {
       next.overdue = true;
       if (/^\d+$/.test(g("engineer"))) next.engineer = g("engineer");
@@ -166,11 +177,13 @@ export default function JobListPage() {
     setDraft(fresh);
     setFilters(fresh);
     setTat(tatSrc);
+    setKpi(kpiSrc);
   }, [search]);
   const clearAll = () => {
     setDraft(NO_FILTER);
     setFilters(NO_FILTER);
     setTat(null);
+    setKpi(null);
     dropDeepLink();
   };
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
@@ -228,7 +241,7 @@ export default function JobListPage() {
       header: "เลขที่งาน",
       width: "130px",
       cell: (r) => (
-        <Link href={`/jobs/repair?job=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
+        <Link {...access.jobLink(r.no)} prefetch={false} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -305,7 +318,7 @@ export default function JobListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          viewHref={`/jobs/repair?job=${encodeURIComponent(r.no)}`}
+          viewHref={access.jobLink(r.no).href}
           editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
         />
       ),
@@ -345,11 +358,13 @@ export default function JobListPage() {
 
       <FilterBar
         onSearch={() => {
-          // editing any of the TAT-defining fields leaves the TAT view: drop its hidden "open jobs only" too
+          // editing any of the TAT/KPI-defining fields leaves that view: drop its hidden "open jobs only" /
+          // status group too
           const TAT_KEYS = ["status", "statusId", "dateBy", "from", "to", "type"] as const;
-          const next = tat && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false } : draft;
+          const next = (tat || kpi) && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false, statusGroup: "" } : draft;
           if (next !== draft) {
             setTat(null);
+            setKpi(null);
             setDraft(next);
             dropDeepLink();
           }
@@ -466,14 +481,24 @@ export default function JobListPage() {
           </span>
         </div>
       )}
-      {tat && (
+      {(tat || kpi) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary-soft py-1 pl-3 pr-1 text-primary">
             <span>
-              จาก Dashboard TAT: <span className="font-medium">{tat.status || "ทุกสถานะ"}</span>
-              {" · "}{TAT_BUCKET[tat.bucket] ?? tat.bucket}
-              {tat.type && ` · ${tat.type}`}
-              {" · "}งานที่ยังไม่ปิด
+              {tat ? (
+                <>
+                  จาก Dashboard TAT: <span className="font-medium">{tat.status || "ทุกสถานะ"}</span>
+                  {" · "}{TAT_BUCKET[tat.bucket] ?? tat.bucket}
+                  {tat.type && ` · ${tat.type}`}
+                  {" · "}งานที่ยังไม่ปิด
+                </>
+              ) : (
+                <>
+                  จาก Dashboard: <span className="font-medium">{kpi}</span>
+                  {" · "}เปิดงาน {filters.from || filters.to ? `${filters.from || "…"} – ${filters.to || "…"}` : "ทุกช่วงวัน"}
+                  {filters.type && ` · ${filters.type}`}
+                </>
+              )}
               <span className="num tabular-nums"> ({loading ? "…" : total.toLocaleString("en-US")} งาน)</span>
             </span>
             <button

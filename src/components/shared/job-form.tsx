@@ -9,6 +9,7 @@ import {
   Coins,
   Paperclip,
   TriangleAlert,
+  Lock,
 } from "lucide-react";
 import { Section } from "./section";
 import { SymptomPicker } from "./symptom-picker";
@@ -1060,12 +1061,16 @@ export const AttachmentSection = React.forwardRef<AttachmentsHandle, { jobNo?: s
 });
 export type { AttachmentsHandle };
 
+/** FormActions `denied` on a screen the role may open but not save */
+export const VIEW_ONLY = "ไม่มีสิทธิ์แก้ไข — ดูข้อมูลได้อย่างเดียว";
+
 export function FormActions({
   onSave,
   saveLabel = "บันทึกข้อมูล",
   extra,
   saving = false,
   cancelHref,
+  denied,
 }: {
   onSave: () => void;
   saveLabel?: string;
@@ -1073,6 +1078,9 @@ export function FormActions({
   saving?: boolean;
   /** "ยกเลิก" → this list page (asks first when something is unsaved) */
   cancelHref: string;
+  /** the role lacks the grant to save here: this note (always on screen in the sticky bar) replaces
+   *  the save button, so a view-only user is told before typing instead of by a 403 at save */
+  denied?: string;
 }) {
   const leave = useLeave();
   return (
@@ -1081,9 +1089,16 @@ export function FormActions({
       <Button variant="outline" size="md" type="button" onClick={() => void leave(cancelHref)}>
         ยกเลิก
       </Button>
-      <Button size="md" onClick={onSave} disabled={saving}>
-        {saveLabel}
-      </Button>
+      {denied ? (
+        <p role="note" className="order-first mr-auto flex items-center gap-1.5 text-sm font-medium text-warning">
+          <Lock className="h-4 w-4 shrink-0" aria-hidden />
+          {denied}
+        </p>
+      ) : (
+        <Button size="md" onClick={onSave} disabled={saving}>
+          {saveLabel}
+        </Button>
+      )}
     </div>
   );
 }
