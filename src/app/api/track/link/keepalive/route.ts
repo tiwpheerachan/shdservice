@@ -3,6 +3,7 @@ import { hit, hmac } from "@/server/track-guard";
 import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
 import { extendLink } from "@/server/services/tracking";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     if (!expiresAt) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410);
     return trackJson({ ok: true, expiresAt });
   } catch (e) {
-    console.error("[track/link/keepalive]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/link/keepalive");
     return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 500);
   }
 }

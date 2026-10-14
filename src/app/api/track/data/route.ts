@@ -3,6 +3,7 @@ import { hit, isBlocked, block, consumeTicket, logEvent } from "@/server/track-g
 import { trackJson, trackCtx, readSmallJson } from "@/server/track-http";
 import { publicJobByNo } from "@/server/services/tracking";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     logEvent("ticket_consumed", { ipHash: c.ipKey, jobNo, requestId: c.requestId });
     return trackJson({ ok: true, job });
   } catch (e) {
-    console.error("[track/data]", e instanceof Error ? e.message : e);
+    logError(e, "track/data");
     return ticketFail();
   }
 }

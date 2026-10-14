@@ -4,6 +4,7 @@ import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
 import { jobNoForLink, markLinkOpened, linkExpiry } from "@/server/services/tracking";
 import { userFromRequest } from "@/server/auth";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
     // the page shows a countdown to this (and extends it while in use: /api/track/link/keepalive)
     return trackJson({ ok: true, ticket, expiresAt: await linkExpiry(jobNo) });
   } catch (e) {
-    console.error("[track/session]", e instanceof Error ? e.message : e);
+    logError(e, "track/session");
     return fail();
   }
 }

@@ -2,6 +2,7 @@
 // They call the drizzle-backed services directly (no HTTP round-trip).
 
 import type { MasterRow, Symptom } from "./mock";
+import { logError } from "@/lib/log";
 
 export type Order = { column: string; ascending?: boolean };
 
@@ -18,7 +19,7 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
     return await fn();
   } catch (e) {
      
-    console.error("DB fetch failed:", e instanceof Error ? e.message : e);
+    logError(e, "DB fetch failed");
     return [];
   }
 }

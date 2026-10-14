@@ -2,6 +2,7 @@ import "server-only";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
+import { logError } from "@/lib/log";
 
 /**
  * SERVER-ONLY database handle (drizzle over node-postgres).
@@ -36,7 +37,7 @@ function createPool() {
     options: "-c TimeZone=Asia/Bangkok -c statement_timeout=30000",
   });
   // An idle client dropped by the pooler emits 'error' on the pool; unhandled, it kills the process.
-  pool.on("error", (e) => console.error("[db] idle client error:", e.message));
+  pool.on("error", (e) => logError(e, "db idle client error"));
   return pool;
 }
 

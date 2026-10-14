@@ -7,6 +7,7 @@ import { findDoc } from "@/server/services/tracking";
 import { JobReceiptDoc } from "@/components/print/docs/job-receipt";
 import { QuotationDoc } from "@/components/print/docs/quotation";
 import { ReturnNoteDoc } from "@/components/print/docs/return-note";
+import { logError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export default async function Page({ params }: { params: Promise<{ ticket: strin
       }
     }
   } catch (e) {
-    console.error("[track/doc]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/doc");
     refusal = TRACK_MSG.docFail;
   }
   if (refusal || !doc) return <Refused text={refusal ?? TRACK_MSG.docExpired} />;

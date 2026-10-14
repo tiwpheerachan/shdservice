@@ -12,6 +12,9 @@ services:
     preDeployCommand: npm run db:migrate
     # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains
     startCommand: node node_modules/next/dist/bin/next start
+    # a deploy that boots but can't answer is not switched in. /api/health always answers 200
+    # (verdict in the body) so a Supabase blip never makes Render cycle the only instance.
+    healthCheckPath: /api/health
     envVars:
       # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
@@ -79,3 +82,7 @@ services:
       # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
       - key: TZ
         value: Asia/Bangkok
+      # startup env check (src/server/env.ts) logs what is missing; set ENV_STRICT=1 once those
+      # warnings are gone and a deploy with missing config then fails instead of going live
+      - key: ENV_STRICT
+        value: "0"

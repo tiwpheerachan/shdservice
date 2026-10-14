@@ -4,6 +4,7 @@ import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
 import { requestOtp } from "@/server/track-otp";
 import { smsAvailable } from "@/server/sms";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!r.ok) return r.reason === "rate" ? limited(TRACK_MSG.otpRate) : trackJson({ ok: false, error: TRACK_MSG.phoneInvalid }, 400);
     return trackJson({ ok: true, requestId: r.requestId, masked: r.masked, expiresIn: r.expiresIn, resendIn: r.resendIn });
   } catch (e) {
-    console.error("[track/otp/request]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/otp/request");
     return trackJson({ ok: false, error: TRACK_MSG.sessionFail }, 500);
   }
 }

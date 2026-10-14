@@ -3,6 +3,7 @@ import { hit, logEvent } from "@/server/track-guard";
 import { trackJson, trackCtx, readSmallJson } from "@/server/track-http";
 import { verifyOtp } from "@/server/track-otp";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     logEvent("otp_verified", { ipHash: c.ipKey, requestId: c.requestId });
     return trackJson({ ok: true, session: s.token, expiresAt: s.expiresAt });
   } catch (e) {
-    console.error("[track/otp/verify]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/otp/verify");
     return trackJson({ ok: false, error: TRACK_MSG.otpFail }, 500);
   }
 }

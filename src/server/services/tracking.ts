@@ -8,6 +8,7 @@ import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
 import { JS, effectiveDueText } from "./jobs";
 import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
 import { TRACK_STEPS, type PublicDoc, type PublicJob, type PublicJobSummary, type TrackDocKind, type TrackStepKey } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
@@ -238,7 +239,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
     return await fn();
   } catch (e) {
      
-    console.error("[track]", e instanceof Error ? e.message : e);
+    logError(e, "track");
     return null;
   }
 }

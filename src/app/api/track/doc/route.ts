@@ -4,6 +4,7 @@ import { trackJson, trackCtx, readSmallJson, str, TRACK_SESSION_HEADER } from "@
 import { touchSession } from "@/server/track-otp";
 import { findDoc, jobNoForCustomers, jobNoForLink } from "@/server/services/tracking";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     logEvent("doc_ticket_issued", { ipHash: c.ipKey, jobNo, result: doc.kind, requestId: c.requestId });
     return trackJson({ ok: true, url: `/track/doc/${ticket}` });
   } catch (e) {
-    console.error("[track/doc]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/doc");
     return trackJson({ ok: false, error: TRACK_MSG.docFail }, 500);
   }
 }

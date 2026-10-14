@@ -4,6 +4,7 @@ import { trackJson, trackCtx, TRACK_SESSION_HEADER } from "@/server/track-http";
 import { touchSession, endSession } from "@/server/track-otp";
 import { listJobsForCustomers } from "@/server/services/tracking";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     const jobs = await listJobsForCustomers(s.customerIds);
     return trackJson({ ok: true, ...jobs, expiresAt: s.expiresAt, maxExpiresAt: s.maxExpiresAt });
   } catch (e) {
-    console.error("[track/me]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/me");
     return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: "session" }, 500);
   }
 }

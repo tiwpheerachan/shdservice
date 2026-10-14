@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { appUser } from "@/db/schema";
 import { ownerEmails } from "@/lib/access";
 import { userFromRequest } from "@/server/auth";
+import { logError, scrubText } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,11 @@ const migrations = pgSchema("drizzle").table("__drizzle_migrations", { hash: var
  * Deployment health check — no secrets, no personal data. Tells whether the
  * server can reach Postgres, whether the app migrations were applied, and how
  * many app_user rows exist (so a "stuck on /pending" can be diagnosed).
+ *
+ * Always HTTP 200, with the verdict in the body ({"ok":false}): Render's health check
+ * restarts an instance that fails, and restarting the web service does not fix
+ * Supabase — it only turns a degraded site into no site (OneLink, same reason).
+ * An uptime monitor asserts on the body instead.
  */
 export async function GET(request: NextRequest) {
   // anonymous callers (uptime checks) get only up/down — config and counts are for System Admin
@@ -31,8 +37,9 @@ export async function GET(request: NextRequest) {
     try {
       await db.select({ id: appUser.userId }).from(appUser).limit(1);
       return NextResponse.json({ ok: true });
-    } catch {
-      return NextResponse.json({ ok: false }, { status: 503 });
+    } catch (e) {
+      logError(e, "health: database unreachable", {}, request);
+      return NextResponse.json({ ok: false });
     }
   }
   const out: Record<string, unknown> = {
@@ -58,9 +65,18 @@ export async function GET(request: NextRequest) {
     out.pendingUsers = users.pending;
     out.appColumnsPresent = cols.n > 0;
     out.migrationsRecorded = mig.n;
+    // dates are Thai wall-clock `timestamp` without time zone — both clocks must say Bangkok
+    const tz = await db.execute<{ tz: string; now: string }>(sql`select current_setting('TimeZone') as tz, to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as now`);
+    const row = tz.rows[0];
+    out.timezone = {
+      db: row?.tz,
+      process: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ok: row?.tz === "Asia/Bangkok" && Intl.DateTimeFormat().resolvedOptions().timeZone === "Asia/Bangkok",
+    };
+    out.clockSkewMs = row ? Date.now() - Date.parse(row.now) : null;
   } catch (e) {
     out.db = "error";
-    out.dbError = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    out.dbError = scrubText(e instanceof Error ? e.message : String(e)).slice(0, 300);
   }
-  return NextResponse.json(out, { status: out.db === "ok" ? 200 : 503 });
+  return NextResponse.json({ ok: out.db === "ok", ...out });
 }

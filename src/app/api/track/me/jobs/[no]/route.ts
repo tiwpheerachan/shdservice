@@ -4,6 +4,7 @@ import { trackJson, trackCtx, TRACK_SESSION_HEADER } from "@/server/track-http";
 import { touchSession } from "@/server/track-otp";
 import { publicJobForCustomers } from "@/server/services/tracking";
 import { TRACK_MSG } from "@/lib/track-public";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ no: string 
     logEvent("ticket_consumed", { ipHash: c.ipKey, jobNo: job.no, result: "otp", requestId: c.requestId });
     return trackJson({ ok: true, job, expiresAt: s.expiresAt });
   } catch (e) {
-    console.error("[track/me/jobs]", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "track/me/jobs");
     return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: "session" }, 500);
   }
 }

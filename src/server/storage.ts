@@ -1,6 +1,7 @@
 import "server-only";
 import sharp from "sharp";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isoDateTime } from "@/lib/dates";
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -83,26 +84,31 @@ export async function optimizeImage(file: File): Promise<File> {
 }
 
 let client: SupabaseClient | null = null;
+let bucketReady: Promise<void> | null = null;
 function storage() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Supabase Storage is not configured (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY)");
-  if (!client) client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  if (!client)
+    client = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      // a hung Storage must not hold upload requests (and memory on a 512 MB instance)
+      global: { fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) }) },
+    });
   return client.storage;
 }
 
 export function systemFileName(original: string): string {
   const ext = (original.match(/\.[A-Za-z0-9]{1,5}$/)?.[0] ?? "").toLowerCase();
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const stamp = isoDateTime(new Date(), { seconds: true }).replace(/\D/g, ""); // Bangkok, whatever the server TZ
   return `${stamp}${Math.random().toString(36).slice(2, 6)}${ext}`;
 }
 
 export async function uploadFile(path: string, file: File | Blob, contentType?: string): Promise<void> {
   const s = storage();
-  // create the bucket on first use (no-op if it exists)
-  await s.createBucket(BUCKET, { public: false }).catch(() => undefined);
+  // create the bucket on first use per process (no-op if it exists) — not a round-trip per upload
+  bucketReady ??= s.createBucket(BUCKET, { public: false }).then(() => undefined, () => undefined);
+  await bucketReady;
   const buf = Buffer.from(await file.arrayBuffer());
   const { error } = await s.from(BUCKET).upload(path, buf, { contentType: contentType || (file as File).type || "application/octet-stream", upsert: true });
   if (error) throw new Error(`อัปโหลดไฟล์ไม่สำเร็จ (Supabase Storage: ${error.message}) — ตรวจสอบ SUPABASE_SECRET_KEY / bucket "${BUCKET}"`);
