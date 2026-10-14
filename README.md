@@ -1,6 +1,6 @@
 # SHD Service System — Next.js UI
 
-ระบบบริหารงานบริการ/งานซ่อม (Service Management System) ออกแบบใหม่ทั้งหมดด้วย **Next.js 15 App Router + TypeScript + Tailwind CSS**
+ระบบบริหารงานบริการ/งานซ่อม (Service Management System) ออกแบบใหม่ทั้งหมดด้วย **Next.js 16 App Router + TypeScript + Tailwind CSS**
 เน้นความเสถียร ความเร็ว และ UI แบบ Modern Enterprise พร้อม **โหมดสว่าง / มืด / ตามระบบ**
 
 ---
@@ -21,9 +21,21 @@ npm run build
 npm start
 ```
 
-> ต้องใช้ Node.js 18.18+ (แนะนำ 20 LTS ขึ้นไป)
+> ต้องใช้ Node.js 24 LTS (`.nvmrc`) — Render ใช้ 24
 
 ---
+
+## Tests + CI
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `npm test` | test ที่ไม่ใช้ DB: validation (`test:schemas`), redirect หลัง login (`test:auth`) |
+| `npm run db:test:up` | เปิด Postgres ทิ้งได้ใน Docker (`tests/docker-compose.yml`, port 55442, tmpfs) |
+| `npm run db:test:prepare` | ทำให้เหมือน Supabase เปล่า (pgcrypto) + รัน migration ทั้งหมด |
+| `npm run test:db` | test ที่ใช้ DB: เลขเอกสารไม่ซ้ำเมื่อยิงพร้อมกัน (`test:running-no`), ความปลอดภัย /track (`test:track`, seed จาก `tests/seed.mts`) |
+
+test ที่ใช้ DB **ปฏิเสธทุก DB ที่ไม่ใช่ localhost** (`tests/db-url.mts`) — ไม่อ่าน `.env` เลย
+CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `yuu`: lint → tsc → `npm test` → migrate 2 รอบ (ต้องรันซ้ำได้) → `test:db` → `npm audit` (high) → build + gitleaks
 
 ## ฐานข้อมูล (drizzle + migrations)
 

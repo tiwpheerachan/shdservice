@@ -16,7 +16,12 @@
     "test:schemas": "tsx scripts/test-schemas.mts",
     "test:auth": "tsx scripts/test-auth.mts",
     "test:running-no": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-running-no.mts",
-    "test:track": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts"
+    "test:track": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts",
+    "test": "npm run -s test:schemas && npm run -s test:auth",
+    "test:db": "npm run -s test:running-no && npm run -s test:track",
+    "db:test:up": "docker compose -f tests/docker-compose.yml -p oneservice-test up -d --wait",
+    "db:test:down": "docker compose -f tests/docker-compose.yml -p oneservice-test down",
+    "db:test:prepare": "tsx tests/prepare-db.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",
@@ -54,5 +59,8 @@
     "tailwindcss": "4.3.3",
     "tsx": "4.23.13",
     "typescript": "5.7.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -1,16 +1,22 @@
 /**
  * npm run test:track (scripts/test-track.mts) — security tests for the public tracking flow (spec §AQ / §AR).
  *
- * Runs against DATABASE_URL (drizzle/0014 must be applied). It only WRITES to the
- * tracking tables (track_ticket / track_rate / track_block / track_event) and only
- * READS jobs — no job row is changed. Every request uses a TEST-NET IP
- * (203.0.113.0/24) so the script can delete exactly what it created afterwards.
- * Cloudflare Siteverify is mocked; nothing leaves the machine except DB queries.
+ * Runs ONLY against the throwaway local test database (tests/docker-compose.yml, migrated by
+ * tests/prepare-db.mts) — never .env's DATABASE_URL. tests/seed.mts wipes and re-creates the
+ * fixture jobs / customers / quotations and the tracking tables first, so the run may change
+ * job rows (fresh links, link timestamps) and leaves its rows behind for inspection.
+ * Every request uses a TEST-NET IP (203.0.113.0/24). Cloudflare Siteverify and ThaiBulkSMS are
+ * mocked; nothing leaves the machine except queries to the local DB.
  */
-import "dotenv/config";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { sql } from "drizzle-orm";
+import { TEST_DATABASE_URL, assertLocal } from "../tests/db-url.mts";
+import { seed } from "../tests/seed.mts";
+
+// the app modules read DATABASE_URL when they are imported (below) — point it at the test DB first
+assertLocal(TEST_DATABASE_URL);
+process.env.DATABASE_URL = TEST_DATABASE_URL;
 
 // ---- test environment (read at call time by the modules below) ----
 const ORIGIN_SECRET = "test-origin-secret-" + Math.random().toString(36).slice(2);
@@ -76,7 +82,8 @@ function otpProviderMock(url: string, init?: RequestInit) {
   return reply({}, 404);
 }
 
-const { db } = await import("@/db/client");
+const { db, pool } = await import("@/db/client");
+await seed(pool);
 const guard = await import("@/server/track-guard");
 const { clientIp } = await import("@/lib/client-ip");
 const { originAuthOk } = await import("@/lib/origin-auth");
@@ -157,19 +164,16 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
-// two real open jobs. Links live 1 day unopened / 15 min after opening (drizzle/0016), so the
-// run gives them FRESH links and puts the original token / timestamps back in `finally`.
-type Orig = { job_no: string; track_token: string | null; track_token_at: string | null; track_opened_at: string | null; track_link_expires_at: string | null };
-const pick = await db.execute<Orig>(sql`
-  SELECT j.job_no, j.track_token, j.track_token_at::text, j.track_opened_at::text, j.track_link_expires_at::text FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
+// the two seeded open jobs, with fresh links (links live 1 day unopened / 15 min after opening, drizzle/0016)
+const pick = await db.execute<{ job_no: string }>(sql`
+  SELECT j.job_no FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
    WHERE j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
    ORDER BY j.job_create_date DESC LIMIT 2`);
-assert.ok(pick.rows.length === 2, "need two open jobs in the DB");
-const originals = pick.rows;
-const JOB_A = { job_no: originals[0].job_no, track_token: await rotateToken(originals[0].job_no) };
-const JOB_B = { job_no: originals[1].job_no, track_token: await rotateToken(originals[1].job_no) };
+assert.ok(pick.rows.length === 2, "need two open jobs in the DB (tests/seed.mts)");
+const JOB_A = { job_no: pick.rows[0].job_no, track_token: await rotateToken(pick.rows[0].job_no) };
+const JOB_B = { job_no: pick.rows[1].job_no, track_token: await rotateToken(pick.rows[1].job_no) };
 const tempEmail = `track-test-${Date.now()}@example.invalid`;
-/** HMACs of the two test phone numbers — declared here so `finally` can clean up after them */
+/** HMACs of the two test phone numbers (their rate counters are cleared between tests) */
 let phoneHashes: string[] = [];
 try {
 
@@ -851,28 +855,7 @@ await test("no raw link token / ticket / Turnstile token / origin secret in trac
 
 } finally {
 console.log = realLog;
-// ---- OTP rows of this run (by the two test numbers) ----
-if (phoneHashes.length) {
-  await db.execute(sql`DELETE FROM track_otp WHERE phone_hash IN ${phoneHashes}`);
-  await db.execute(sql`DELETE FROM track_session WHERE phone_hash IN ${phoneHashes}`);
-  await db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
-}
-// ---- restore the two jobs' links exactly as they were ----
-for (const o of originals) {
-  await db.execute(sql`UPDATE job SET track_token = ${o.track_token}, track_token_at = ${o.track_token_at}::timestamp,
-    track_opened_at = ${o.track_opened_at}::timestamptz, track_link_expires_at = ${o.track_link_expires_at}::timestamptz WHERE job_no = ${o.job_no}`);
-}
-await db.execute(sql`DELETE FROM app_user WHERE email_address = ${tempEmail}`);
-// ---- cleanup: only what this run created ----
-const ipHashes = [...new Set(usedIps)].map((ip) => guard.hmac(`ip:${ip}`));
-await db.execute(sql`DELETE FROM track_event WHERE ip_hash IN ${ipHashes}`);
-await db.execute(sql`DELETE FROM track_rate WHERE key IN ${ipHashes} OR key = ${guard.hmac(`link:${"C".repeat(43)}`)}
-  OR key = ${guard.hmac(`link:${"B".repeat(43)}`)} OR key = ${guard.hmac(`link:${"D".repeat(43)}`)}
-  OR key = ${guard.hmac(`link:${JOB_A.track_token}`)} OR key = ${guard.hmac(`link:${JOB_B.track_token}`)}`);
-await db.execute(sql`DELETE FROM track_block WHERE key IN ${ipHashes.map((h) => `ticket:${h}`)}`);
-await db.execute(sql`DELETE FROM track_ticket WHERE host(issued_ip) LIKE '203.0.113.%'`);
-await db.execute(sql`DELETE FROM track_doc_ticket WHERE host(issued_ip) LIKE '203.0.113.%'`);
-await db.execute(sql`DELETE FROM track_rate WHERE key = ${guard.hmac("link:")}`);
+// no cleanup: tests/seed.mts wipes the fixture and tracking tables at the start of every run
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
