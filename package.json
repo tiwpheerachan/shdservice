@@ -21,7 +21,9 @@
     "test:db": "npm run -s test:running-no && npm run -s test:track",
     "db:test:up": "docker compose -f tests/docker-compose.yml -p oneservice-test up -d --wait",
     "db:test:down": "docker compose -f tests/docker-compose.yml -p oneservice-test down",
-    "db:test:prepare": "tsx tests/prepare-db.mts"
+    "db:test:prepare": "tsx tests/prepare-db.mts",
+    "db:dev:up": "docker compose -f docker-compose.yml -p oneservice-dev up -d --wait",
+    "db:dev:load": "tsx scripts/dev-db.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",

@@ -37,8 +37,10 @@ async function main() {
   const db = drizzle(pool);
 
   const force = process.argv.includes("--reset");
-  if (force && url.includes("izypdfhjbqctbopxhrqq") && process.env.ALLOW_PROD_DB !== "1") {
-    console.error("REFUSED: --reset against the PRODUCTION database. Set ALLOW_PROD_DB=1 if you really mean it.");
+  // production is migrated by Render (pre-deploy, RENDER is set there) — from a laptop, .env's
+  // DATABASE_URL is production, so a stray `npm run db:migrate` must not run against it
+  if (url.includes("bnntpshuoyzkzckepjse") && !process.env.RENDER && process.env.ALLOW_PROD_DB !== "1") {
+    console.error("REFUSED: this is the PRODUCTION database — Render migrates it on deploy. For the local dev DB: npm run db:dev:load. Set ALLOW_PROD_DB=1 only if you really mean it.");
     process.exit(1);
   }
   const { rows: j } = await pool.query<{ n: string }>(

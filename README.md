@@ -25,6 +25,17 @@ npm start
 
 ---
 
+## ฐานข้อมูลสำหรับพัฒนา (local)
+
+`.env` คือ **production** (`bnntps…`) — `npm run dev` ไม่ใช้มัน: `.env.development.local` ชี้ไปที่ Postgres ใน Docker
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `npm run db:dev:up` | เปิด dev DB (`docker-compose.yml`, port 55443, เก็บข้อมูลข้าม restart) |
+| `npm run db:dev:load` | ล้างแล้วโหลดใหม่จาก dump ระบบเดิม `../setupdata/out` (~10 วินาที) + รัน migration |
+
+ใน dev **อัปโหลดไฟล์ไม่ได้** (ตั้งใจ — key ใน `.env` เป็น bucket production) · `npm run db:migrate` / `next dev` กับ DB production ถูกปฏิเสธ เว้นแต่ตั้ง `ALLOW_PROD_DB=1` · production migrate เองตอน deploy (Render pre-deploy)
+
 ## Tests + CI
 
 | คำสั่ง | ทำอะไร |

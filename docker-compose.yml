@@ -1,0 +1,21 @@
+# Local development database (npm run db:dev:up / db:dev:load). Kept in a named volume
+# so it survives restarts; loopback-only port. `npm run dev` uses it via
+# .env.development.local — never the production database in .env.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: oneservice_dev
+      TZ: Asia/Bangkok
+      LANG: en_US.UTF-8
+    ports:
+      - "127.0.0.1:55443:5432"
+    volumes:
+      - devdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oneservice_dev"]
+      interval: 1s
+      retries: 30
+volumes:
+  devdata:

@@ -71,7 +71,7 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   `setupdata/load_supabase.sh` รัน `DROP TABLE … CASCADE` 52 ตาราง ไม่มีถาม · README บอกให้รันซ้ำได้
   `scripts/migrate.ts:46-64` reset journal เองอัตโนมัติถ้าไม่เจอ `app_user.lark_id`
   dev ใช้ `.env` ที่ชี้ Supabase pooler — `next dev`/`db:migrate:reset`/`test:track` ยิง DB จริงได้ทันที
-  ✅ 2026-10-14: `load_supabase.sh` ปฏิเสธ project prod (`izypdf…`) เว้นแต่ `I_UNDERSTAND_THIS_DROPS_PRODUCTION=1` + ต้องพิมพ์ DROP ยืนยันทุกครั้ง · `migrate.ts --reset` กับ prod ต้อง `ALLOW_PROD_DB=1`, บน Render ไม่ reset journal เอง · `next dev` กับ DB prod ต้อง `ALLOW_PROD_DB=1` (dev ใช้ project `bnntps…` อยู่แล้ว ไม่กระทบ) · README เตือนแล้ว
+  ✅ 2026-10-14: `load_supabase.sh` ปฏิเสธ project prod (`bnntps…`) เว้นแต่ `I_UNDERSTAND_THIS_DROPS_PRODUCTION=1` + ต้องพิมพ์ DROP ยืนยันทุกครั้ง · `migrate.ts --reset` กับ prod ต้อง `ALLOW_PROD_DB=1`, บน Render ไม่ reset journal เอง · `next dev` กับ DB prod ต้อง `ALLOW_PROD_DB=1` (dev ใช้ project `bnntps…` อยู่แล้ว ไม่กระทบ) · README เตือนแล้ว
 
 ---
 

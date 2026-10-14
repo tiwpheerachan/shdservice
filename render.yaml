@@ -22,10 +22,10 @@ services:
       - key: NODE_VERSION
         value: "24"
       - key: NEXT_PUBLIC_SUPABASE_URL
-        value: https://izypdfhjbqctbopxhrqq.supabase.co
+        value: https://bnntpshuoyzkzckepjse.supabase.co
       # publishable key is client-safe (it is sent to the browser anyway)
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-        value: sb_publishable_dAvafH_VnmK7OrlY1cWQEg_iO5M0NxB
+        value: sb_publishable_YUeHSX2d14JbsY1vt33N4A_4reG3RrT
       # SSO client id is public
       - key: SSO_CLIENT_ID
         value: cli_6e53e9248bcff7fb

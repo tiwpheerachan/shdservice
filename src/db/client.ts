@@ -18,7 +18,7 @@ import { logError } from "@/lib/log";
 const globalForDb = globalThis as unknown as { __shdPool?: Pool };
 
 /** Supabase project ref of PRODUCTION (render.yaml) — `next dev` must not write to it by accident. */
-const PROD_DB_REF = "izypdfhjbqctbopxhrqq";
+const PROD_DB_REF = "bnntpshuoyzkzckepjse";
 
 function createPool() {
   const url = process.env.DATABASE_URL;
