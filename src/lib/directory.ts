@@ -61,7 +61,7 @@ function headers() {
 export async function searchDirectory(q: string, limit = 20): Promise<DirectorySearch> {
   const h = headers();
   if (!h) throw new Error("CENTRAL_API_KEY is not configured on the server");
-  const res = await fetch(`${CENTRAL}/directory/search?q=${encodeURIComponent(q.trim())}&limit=${limit}`, { headers: h, cache: "no-store" });
+  const res = await fetch(`${CENTRAL}/directory/search?q=${encodeURIComponent(q.trim())}&limit=${limit}`, { headers: h, cache: "no-store", signal: AbortSignal.timeout(10_000) });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; need?: string };
     throw new Error(`directory responded ${res.status}${body.error ? ` (${body.error}${body.need ? `: ${body.need}` : ""})` : ""}`);
@@ -77,7 +77,7 @@ export async function lookupByEmail(email: string): Promise<DirectoryProfile | n
   const target = email.trim().toLowerCase();
   if (!h || !target) return null;
   try {
-    const res = await fetch(`${CENTRAL}/directory/user?email=${encodeURIComponent(target)}`, { headers: h, cache: "no-store" });
+    const res = await fetch(`${CENTRAL}/directory/user?email=${encodeURIComponent(target)}`, { headers: h, cache: "no-store", signal: AbortSignal.timeout(4_000) }); // enrichment only — login goes on without it
     if (!res.ok) return null;
     const data = (await res.json()) as { person?: Record<string, unknown> };
     return data.person ? mapPerson(data.person) : null;

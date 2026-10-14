@@ -6,9 +6,10 @@ export const PENDING_ROLE = "รออนุมัติ";
 export const ADMIN_ROLE = "System Admin";
 
 /**
- * Owner emails are ALWAYS treated as System Admin — a bootstrap so the person
- * running the system can never lock themselves out (e.g. after a DB reset).
- * Configure via OWNER_EMAILS (comma-separated); the defaults are the project owner.
+ * Owner emails become System Admin when their app_user row has no role yet — a
+ * bootstrap so a fresh DB always has an admin. An admin can still change or
+ * disable an owner later. Production reads OWNER_EMAILS (comma-separated) only;
+ * the built-in list applies to dev / test databases.
  */
 const DEFAULT_OWNERS = [
   "the.dataverse@shd-technology.co.th",
@@ -21,7 +22,7 @@ export function ownerEmails(): string[] {
     .split(/[,\s]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  return Array.from(new Set([...DEFAULT_OWNERS, ...fromEnv]));
+  return Array.from(new Set([...(process.env.NODE_ENV === "production" ? [] : DEFAULT_OWNERS), ...fromEnv]));
 }
 
 export function isOwner(email: string): boolean {

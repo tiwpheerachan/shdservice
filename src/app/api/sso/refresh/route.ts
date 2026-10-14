@@ -9,7 +9,7 @@ import {
   SEEN_TTL_S,
   type SessionUser,
 } from "@/lib/session";
-import { resolveUser } from "@/server/auth";
+import { resolveUser, HttpError } from "@/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
   if (!current) return NextResponse.json({ user: null }, { status: 401 });
 
   // the user row + session version decide — never the flags baked into the cookie
-  const u = await resolveUser(current).catch(() => null);
+  // DB unreachable (503) must not sign anyone out: keep the cookie, the client retries later
+  const u = await resolveUser(current).catch((e) => (e instanceof HttpError && e.status === 503 ? e : null));
+  if (u instanceof HttpError) return NextResponse.json({ error: u.message }, { status: 503 });
   if (!u) {
     const res = NextResponse.json({ user: null }, { status: 401 });
     res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });

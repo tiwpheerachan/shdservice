@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, SEEN_COOKIE } from "@/lib/session";
 import { originAuthMode, originAuthOk, originAuthSecret } from "@/lib/origin-auth";
 import { THEME_SCRIPT } from "@/lib/theme-script-source";
+import { appOrigin } from "@/lib/sso";
+import { log } from "@/lib/log";
 
 // Proxy (Next 16's name for middleware; always the Node.js runtime). It only
 // checks that a session cookie is PRESENT — the real verification (signature,
@@ -9,8 +11,9 @@ import { THEME_SCRIPT } from "@/lib/theme-script-source";
 // which is where it has always been; a stale cookie that gets past here is still
 // rejected there.
 //
-// It runs on EVERY path except /api/health, in three steps:
+// It runs on EVERY path except /api/health, in these steps:
 //   1. origin guard  — the request must come through Cloudflare (X-Origin-Auth)
+//      + CSRF: cookie-carrying /api writes from another site are refused
 //   2. /track        — security headers + CSP nonce for the public tracking pages
 //   3. login gate    — the old matcher's pages need a session cookie
 export const config = {
@@ -29,13 +32,30 @@ function guard(request: NextRequest): NextResponse | null {
   if (!originAuthSecret()) {
     // misconfigured production: fail closed rather than trusting spoofable headers
     if (mode === "enforce") return new NextResponse("Service misconfigured", { status: 503 });
-    console.warn(JSON.stringify({ event: "origin_auth_unconfigured", mode }));
+    log.warn("origin_auth_unconfigured", { mode });
     return null;
   }
   if (originAuthOk(request.headers)) return null;
   // never log the header value — only that it was missing / wrong
-  console.warn(JSON.stringify({ event: "origin_auth_failed", mode, path: request.nextUrl.pathname }));
+  log.warn("origin_auth_failed", { mode, path: request.nextUrl.pathname });
   return mode === "enforce" ? new NextResponse("Forbidden", { status: 403 }) : null;
+}
+
+/**
+ * CSRF, beside SameSite=Lax (which does not cover a sibling host on the same site):
+ * a cookie-carrying write to /api from a page that is not this app is refused.
+ * Browsers say where a request came from — Sec-Fetch-Site on every modern one,
+ * Origin on cross-origin POSTs. Neither header = not a browser page (curl, server),
+ * so it cannot be a forgery riding on someone's cookie. (OneLink lib/api/same-origin.ts)
+ */
+function crossSiteWrite(request: NextRequest): boolean {
+  if (/^(GET|HEAD|OPTIONS)$/.test(request.method)) return false;
+  if (!request.nextUrl.pathname.startsWith("/api/")) return false;
+  if (!request.cookies.get(SESSION_COOKIE)?.value) return false;
+  const site = request.headers.get("sec-fetch-site");
+  if (site) return site !== "same-origin" && site !== "none";
+  const origin = request.headers.get("origin");
+  return origin !== null && origin !== appOrigin(request);
 }
 
 /** CSP hash of the root layout's inline theme script (it cannot carry the nonce) — computed once */
@@ -82,6 +102,10 @@ async function trackPage(request: NextRequest): Promise<NextResponse> {
 export async function proxy(request: NextRequest) {
   const blocked = guard(request);
   if (blocked) return blocked;
+  if (crossSiteWrite(request)) {
+    log.warn("cross_site_write_refused", { path: request.nextUrl.pathname, site: request.headers.get("sec-fetch-site") });
+    return NextResponse.json({ error: "cross-site request refused" }, { status: 403 });
+  }
 
   const path = request.nextUrl.pathname;
   if (TRACK_PAGE.test(path)) return trackPage(request);

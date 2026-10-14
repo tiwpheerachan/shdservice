@@ -1,6 +1,6 @@
 import "server-only";
 import type { NextRequest } from "next/server";
-import { requireAdmin, requireUser, requireView, JOB_MODULES } from "@/server/auth";
+import { requireAdmin, requireUser, requireView, JOB_MODULES, HttpError } from "@/server/auth";
 import type { Module } from "@/lib/modules";
 import { pageAudit, listAudit, auditModules } from "@/server/audit";
 import { parsePageQuery, type Page } from "@/server/paging";
@@ -174,5 +174,5 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     case "job_stats":
       return [await jobStats()];
   }
-  throw Object.assign(new Error(`unknown resource: ${resource}`), { status: 404 });
+  throw new HttpError(404, `unknown resource: ${resource}`);
 }

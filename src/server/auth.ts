@@ -6,6 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appConfig, appUser } from "@/db/schema";
 import { verifySession, SESSION_COOKIE, type SessionUser } from "@/lib/session";
+import { logError, requestId } from "@/lib/log";
 import { isOwner, PENDING_ROLE } from "@/lib/access";
 import {
   ADMIN_USER_TYPE,
@@ -108,13 +109,14 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
   try {
     row = await cachedAppUser(session.email);
   } catch (e) {
-    console.error("[auth] user lookup failed:", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "auth user lookup failed");
     throw new HttpError(503, "ระบบฐานข้อมูลไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง");
   }
   if (!row) return null;
   // logout (any device) bumps session_version → every older cookie of this user is dead
   if ((row.sessionVersion ?? 0) !== session.sv) return null;
-  const userType = owner ? ADMIN_USER_TYPE : row.userType?.trim() || null;
+  // owner = bootstrap for a row that has no role yet; a role or disable set by an admin wins
+  const userType = row.userType?.trim() || (owner ? ADMIN_USER_TYPE : null);
   const isActive = row.recordStatus === "ACTIVE";
   const isAdmin = userType === ADMIN_USER_TYPE;
   return {
@@ -126,7 +128,7 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
     role: userType ?? PENDING_ROLE,
     isActive,
     isAdmin,
-    approved: owner || (!!userType && isActive),
+    approved: !!userType && isActive,
     session,
   };
 }
@@ -237,25 +239,48 @@ export function handle<T extends unknown[]>(
       if (e instanceof HttpError) {
         return NextResponse.json(e.details === undefined ? { error: e.message } : { error: e.message, details: e.details }, { status: e.status });
       }
-      // unexpected error: the details (SQL, parameters, stack) stay in the server log;
-      // the browser only gets a reference to quote when reporting it
+      // Postgres errors the user can act on (drizzle wraps the pg error in .cause)
+      const code = pgCode(e);
+      if (code === "23505") return NextResponse.json({ error: "ข้อมูลซ้ำกับที่มีอยู่แล้ว" }, { status: 409 });
+      if (code === "57014") return NextResponse.json({ error: "ใช้เวลานานเกินไป ลองจำกัดช่วงข้อมูลให้แคบลง" }, { status: 503 });
+      // unexpected error: the details (SQL, stack — parameters scrubbed) stay in the server log;
+      // the browser only gets a reference to quote when reporting it (= Cloudflare ray id when present)
+      const req = args[0] instanceof Request ? args[0] : undefined;
+      const ref = (req ? requestId(req) : crypto.randomUUID()).slice(0, 16);
+      logError(e, "unhandled API error", { ref }, req);
       const msg = e instanceof Error ? e.message : String(e);
-      const ref = crypto.randomUUID().slice(0, 8);
-       
-      console.error(`[api] ref=${ref}`, msg);
-      const status = /DATABASE_URL/.test(msg) ? 503 : 500;
+      const status = /DATABASE_URL/.test(msg) || code === "08006" || code === "57P01" ? 503 : 500;
       return NextResponse.json({ error: `เกิดข้อผิดพลาดในระบบ (รหัสอ้างอิง ${ref})`, ref }, { status });
     }
   };
 }
 
-/** Parse a JSON body or 400. */
+const MAX_JSON_BYTES = 1_000_000;
+
+/**
+ * Parse a JSON body or 400. Content-Type must be application/json: a cross-site
+ * <form> or text/plain fetch (no CORS preflight) can't produce it, so it closes
+ * the CSRF path that SameSite=Lax leaves to same-site sibling hosts.
+ */
 export async function readJson<T = Record<string, unknown>>(req: NextRequest): Promise<T> {
+  if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) throw new HttpError(415, "ต้องส่งข้อมูลเป็น JSON");
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_JSON_BYTES) throw new HttpError(413, "ข้อมูลใหญ่เกินไป");
+  const text = await req.text();
+  if (text.length > MAX_JSON_BYTES) throw new HttpError(413, "ข้อมูลใหญ่เกินไป");
   try {
-    return (await req.json()) as T;
+    return JSON.parse(text) as T;
   } catch {
     throw new HttpError(400, "invalid_json");
   }
+}
+
+/** SQLSTATE of a Postgres error, also when drizzle wraps it (DrizzleQueryError.cause). */
+function pgCode(e: unknown): string | undefined {
+  for (let x: unknown = e, i = 0; x && i < 3; x = (x as { cause?: unknown }).cause, i++) {
+    const c = (x as { code?: unknown }).code;
+    if (typeof c === "string" && /^[0-9A-Z]{5}$/.test(c)) return c;
+  }
+  return undefined;
 }
 
 // re-export for convenience in services

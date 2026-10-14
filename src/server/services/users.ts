@@ -40,7 +40,7 @@ export type SsoProfile = {
  * one when unknown), refreshes the SSO profile columns + last_login, forces
  * owners to System Admin, and returns the effective role/state.
  */
-export async function provisionSsoUser(p: SsoProfile): Promise<{
+export async function provisionSsoUser(p: SsoProfile, retried = false): Promise<{
   userId: number;
   userType: string | null;
   isActive: boolean;
@@ -60,7 +60,9 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
   };
 
   if (existing) {
-    const userType = owner ? ADMIN_USER_TYPE : existing.userType?.trim() || null;
+    // owner = bootstrap only: a row with no role yet becomes System Admin; a role or a
+    // disable an admin set later sticks (owners are no longer un-removable)
+    const userType = existing.userType?.trim() || (owner ? ADMIN_USER_TYPE : null);
     await db
       .update(appUser)
       .set({
@@ -68,9 +70,7 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
         firstName: existing.firstName?.trim() ? existing.firstName : first,
         lastName: existing.lastName?.trim() ? existing.lastName : last,
         phoneNo: existing.phoneNo?.trim() ? existing.phoneNo : p.phone.slice(0, 50) || null,
-        userType: owner ? ADMIN_USER_TYPE : existing.userType,
-        // owners are always ACTIVE; everyone else keeps their record_status
-        ...(owner ? { ...statusStamp(RS.ACTIVE, existing.userId), deleted: false } : {}),
+        userType,
         // only overwrite profile fields we actually received
         larkId: profile.larkId ?? existing.larkId,
         department: profile.department ?? existing.department,
@@ -82,15 +82,16 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
     return {
       userId: existing.userId,
       userType,
-      isActive: owner ? true : existing.recordStatus === RS.ACTIVE,
+      isActive: existing.recordStatus === RS.ACTIVE,
       sessionVersion: existing.sessionVersion ?? 0,
     };
   }
 
-  const [row] = await db
+  const insert = (username: string) =>
+    db
     .insert(appUser)
     .values({
-      username: email.split("@")[0].slice(0, 50),
+      username,
       password: "",
       firstName: first,
       lastName: last,
@@ -102,8 +103,29 @@ export async function provisionSsoUser(p: SsoProfile): Promise<{
       ...profile,
     })
     .returning({ userId: appUser.userId, sessionVersion: appUser.sessionVersion });
+  const local = email.split("@")[0].slice(0, 50);
+  let row: { userId: number; sessionVersion: number | null };
+  try {
+    [row] = await insert(local);
+  } catch (e) {
+    const constraint = pgConstraint(e);
+    // a second tab finished the first sign-in a moment ago → that row is ours
+    if (constraint === "ux_app_user_email" && !retried) return provisionSsoUser(p, true);
+    // legacy unique (username, password): somchai@a and somchai@b share the local part
+    if (constraint === "ix_username_and_password") [row] = await insert(`${local.slice(0, 44)}.${crypto.randomUUID().slice(0, 4)}`);
+    else throw e;
+  }
   userChanged(email);
   return { userId: row.userId, userType: owner ? ADMIN_USER_TYPE : null, isActive: true, sessionVersion: row.sessionVersion ?? 0 };
+}
+
+/** Name of the violated constraint of a Postgres unique error (drizzle wraps it in .cause). */
+function pgConstraint(e: unknown): string | undefined {
+  for (let x: unknown = e, i = 0; x && i < 3; x = (x as { cause?: unknown }).cause, i++) {
+    const c = x as { code?: unknown; constraint?: unknown };
+    if (c.code === "23505" && typeof c.constraint === "string") return c.constraint;
+  }
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ *

@@ -13,6 +13,7 @@ import { provisionSsoUser } from "@/server/services/users";
 import { audit } from "@/server/audit";
 import { db } from "@/db/client";
 import { PENDING_ROLE, isApproved } from "@/lib/access";
+import { log, logError, scrubText } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ async function provision(opts: {
     return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId, sessionVersion: r.sessionVersion };
   } catch (e) {
      
-    console.error("[sso] provision failed:", e instanceof Error ? e.message.split("\n")[0] : e);
+    logError(e, "sso provision failed");
     return null;
   }
 }
@@ -83,12 +84,15 @@ export async function GET(request: NextRequest) {
         client_secret: clientSecret,
       }),
       cache: "no-store",
+      // a hung SSO must not hold the callback (and a connection) open; no retry — the code is one-time
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
       // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
       const body = await res.text().catch(() => "");
        
-      console.error(`[sso] verify failed ${res.status} for client ${SSO.clientId}: ${body.slice(0, 300)}`);
+      // the central service names the account in its 403 text ("account x@… is inactive") — scrubbed
+      log.warn("sso verify failed", { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
       // a code that was already exchanged (page reload) while a session exists → just continue
       return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
     }
@@ -149,7 +153,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
      
-    console.error("[sso] audit login failed:", e instanceof Error ? e.message : e);
+    logError(e, "sso audit login failed");
   }
 
   const user: SessionUser = {

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, SEEN_COOKIE, verifySession } from "@/lib/session";
 import { appOrigin, isRouterFetch } from "@/lib/sso";
 import { bumpSessionVersion } from "@/server/auth";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     try {
       await bumpSessionVersion(session.email);
     } catch (e) {
-      console.error("[sso] logout: session_version bump failed:", e instanceof Error ? e.message.split("\n")[0] : e);
+      logError(e, "sso logout: session_version bump failed");
     }
   }
   const res = NextResponse.redirect(new URL("/login?bye=1", appOrigin(request)));
