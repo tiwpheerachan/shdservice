@@ -18,6 +18,8 @@ import { customerSchema, conflictErrors } from "../src/lib/validation/customer.t
 import { quotationSchema } from "../src/lib/validation/quotation.ts";
 import { saleOrderSchema } from "../src/lib/validation/sale-order.ts";
 import { masterSchema, modelSchema, userSchema, productSchema } from "../src/lib/validation/admin.ts";
+import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from "../src/lib/validation/stock.ts";
+import { fileProblem } from "../src/server/storage.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -203,6 +205,55 @@ test("an empty body still reports every rule (no early stop)", () => {
   assert.deepEqual(Object.keys(errorsOf(swapRefundActionSchema, {})).sort(), ["newSerial", "status"]);
   assert.deepEqual(Object.keys(errorsOf(saleOrderSchema, {})).sort(), ["customerCode", "lines", "salesId"]);
 });
+
+console.log("\nStock / assign / approve / call-log bodies (routes that had no schema)");
+const ok = (schema: Parameters<typeof validate>[0], data: unknown) => validate(schema, data).ok;
+test("qty: whole numbers 0–100,000 only (1.5 / -1 / 1e9 / 'abc' refused, '3' accepted)", () => {
+  const body = (qty: unknown) => ({ lines: [{ code: "P00001", qty }] });
+  assert.equal(ok(receiveSchema, body(3)), true);
+  assert.equal(ok(receiveSchema, body("3")), true);
+  assert.equal(ok(receiveSchema, body(0)), true); // 0 = skip line, the service filters it
+  for (const bad of [1.5, -1, 1e9, "abc"]) assert.equal(ok(receiveSchema, body(bad)), false, String(bad));
+});
+test("receive / issue need 1–500 lines; issue type is one of four", () => {
+  assert.equal(ok(receiveSchema, { lines: [] }), false);
+  assert.equal(ok(receiveSchema, {}), false);
+  assert.equal(ok(receiveSchema, { lines: Array.from({ length: 501 }, () => ({ code: "P1", qty: 1 })) }), false);
+  assert.equal(ok(issueSchema, { type: "job", ref: "J2600001", lines: [{ logId: 5, dtId: null, code: null, qty: 1 }] }), true);
+  assert.equal(ok(issueSchema, { type: "steal", lines: [{ code: "P1", qty: 1 }] }), false);
+});
+test("SO decision is approve | deny | reject — a typo is refused, not treated as reject", () => {
+  assert.equal(ok(approveSchema, { decision: "approve" }), true);
+  assert.equal(ok(approveSchema, { decision: "approvee" }), false);
+  assert.equal(ok(approveSchema, {}), false);
+});
+test("assign needs jobs + an engineer id; call log needs text", () => {
+  assert.equal(ok(assignSchema, { jobNos: ["J2600001"], engineerId: "12" }), true);
+  assert.equal(ok(assignSchema, { jobNos: [], engineerId: 12 }), false);
+  assert.equal(ok(assignSchema, { jobNos: ["J1"], engineerId: 0 }), false);
+  assert.equal(ok(callLogSchema, { detail: "   " }), false);
+  assert.equal(ok(callLogSchema, { detail: "x".repeat(1001) }), false);
+});
+
+console.log("\nUploaded files are what their type says (src/server/storage.ts fileProblem)");
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PDF = new TextEncoder().encode("%PDF-1.7\n");
+const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+const fileChecks: [string, File, boolean][] = [
+  ["real PNG", new File([PNG], "a.png", { type: "image/png" }), true],
+  ["real PDF", new File([PDF], "a.pdf", { type: "application/pdf" }), true],
+  ["SVG renamed .png", new File([SVG], "evil.png", { type: "image/png" }), false],
+  ["HTML declared as PDF", new File(["<html>"], "x.pdf", { type: "application/pdf" }), false],
+  ["no type at all", new File([PNG], "a", { type: "" }), false],
+  ["empty file", new File([], "a.png", { type: "image/png" }), false],
+  ["SVG type", new File([SVG], "a.svg", { type: "image/svg+xml" }), false],
+];
+for (const [name, file, accepted] of fileChecks) {
+  const problem = await fileProblem(file);
+  test(`${name} → ${accepted ? "accepted" : "refused"}`, () => assert.equal(problem === null, accepted, problem ?? ""));
+}
+const pdfAsImage = await fileProblem(new File([PDF], "a.pdf", { type: "application/pdf" }), new Set(["image/png"]));
+test("images-only kinds refuse a real PDF", () => assert.ok(pdfAsImage));
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

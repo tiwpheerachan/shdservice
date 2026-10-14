@@ -2,22 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 import { handle, requireCan, readJson, HttpError } from "@/server/auth";
 import { issueForJob, issueForSaleOrder, issueOther, returnFromJob } from "@/server/services/stock";
 import { markPartsIssued } from "@/server/services/jobs";
+import { assertValid } from "@/server/validate";
+import { issueSchema } from "@/lib/validation/stock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Body = {
-  type: "job" | "sale" | "other" | "return";
-  ref?: string;
-  payTo?: string;
-  remark?: string;
-  lines: { logId?: number; dtId?: number; code?: string; qty: number }[];
-};
-
 /** ตัดจ่ายอะไหล่ → WHO document (type 3 / 4 / 5); type "return" → WHI รับคืนจากการเบิก (type 2). */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, "Product Pick Stock", "add");
-  const b = await readJson<Body>(req);
+  const b = assertValid(issueSchema, await readJson(req));
   if (b.type === "job") {
     if (!b.ref) throw new HttpError(400, "ต้องระบุหมายเลขงาน");
     const r = await issueForJob({ jobNo: b.ref, remark: b.remark, payTo: b.payTo, lines: b.lines.map((l) => ({ logId: Number(l.logId), qty: Number(l.qty) })) }, user.userId);

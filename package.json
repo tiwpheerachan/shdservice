@@ -13,7 +13,7 @@
     "db:studio": "drizzle-kit studio",
     "files:validate": "tsx scripts/legacy-files.mts validate",
     "files:upload": "tsx scripts/legacy-files.mts upload all",
-    "test:schemas": "tsx scripts/test-schemas.mts",
+    "test:schemas": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-schemas.mts",
     "test:auth": "tsx scripts/test-auth.mts",
     "test:running-no": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-running-no.mts",
     "test:track": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts",

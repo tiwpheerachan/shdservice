@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handle, requireCan, readJson, requireView, JOB_MODULES } from "@/server/auth";
 import { addCallLog, listCallLogs } from "@/server/services/jobs";
+import { assertValid } from "@/server/validate";
+import { callLogSchema } from "@/lib/validation/stock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,6 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, "Job Management", "edit");
   const { no } = await ctx.params;
-  const body = await readJson<{ detail: string }>(req);
-  return NextResponse.json({ ok: true, rows: await addCallLog(decodeURIComponent(no), body.detail ?? "", user.userId) });
+  const body = assertValid(callLogSchema, await readJson(req));
+  return NextResponse.json({ ok: true, rows: await addCallLog(decodeURIComponent(no), body.detail, user.userId) });
 });
