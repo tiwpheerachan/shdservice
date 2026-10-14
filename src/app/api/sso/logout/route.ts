@@ -11,6 +11,10 @@ export async function GET(request: NextRequest) {
   // Next's client router prefetches links (RSC / Next-Router-Prefetch headers).
   // Never sign out on one of those — only on a real top-level navigation.
   if (isRouterFetch(request)) return new NextResponse(null, { status: 204 });
+  // a link on another site must not sign anyone out (on every device): only our own pages
+  // (same-origin) or a typed URL / bookmark ("none") may. No header = not a browser page.
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return NextResponse.redirect(new URL("/", appOrigin(request)));
   // server-side sign-out: bump app_user.session_version → this cookie AND every other
   // device's cookie for this user stop working (a copied cookie is dead too)
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);

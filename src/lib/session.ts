@@ -23,7 +23,10 @@ export type SessionUser = {
   email: string;
   name: string;
   avatar?: string;
-  sid?: string; // central session id (for Single-Logout checks)
+  sid?: string; // unused (older cookies) — superseded by sub + ssoIat
+  sub?: string; // central SSO subject — asked about at /sso/session (src/app/api/sso/refresh)
+  ssoIat?: number | null; // when the central session began (from /sso/verify)
+  chk?: number; // epoch ms — last time the central session answered "active"
   role?: string; // OneService role (from the users table); baked in at login
   approved?: boolean; // may this user actually enter the app?
   exp: number; // epoch ms — idle expiry, renewed by /refresh

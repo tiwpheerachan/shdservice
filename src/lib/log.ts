@@ -24,7 +24,7 @@ export function scrubError(e: unknown, depth = 0): unknown {
   return {
     name: e.name,
     ...(code !== undefined ? { code } : {}),
-    message: scrubText(e.message),
+    message: scrubText(e.message).slice(0, 2000),
     stack: e.stack ? scrubText(e.stack).split("\n").slice(0, 15).join("\n") : undefined,
     ...(e.cause !== undefined && depth < 2 ? { cause: scrubError(e.cause, depth + 1) } : {}),
   };
@@ -41,7 +41,9 @@ function write(level: Level, msg: string, fields: Fields) {
   try {
     line = JSON.stringify({ level, time: new Date().toISOString(), msg, ...fields });
   } catch {
-    line = JSON.stringify({ level, time: new Date().toISOString(), msg, note: "fields not serialisable" });
+    // one circular / BigInt field must not cost the error itself: keep the ids and err
+    const { err, reqId, ref } = fields as { err?: unknown; reqId?: unknown; ref?: unknown };
+    line = JSON.stringify({ level, time: new Date().toISOString(), msg, reqId, ref, err: String(JSON.stringify(err) ?? err), note: "other fields not serialisable" });
   }
   if (level === "info") console.log(line);
   else console.error(line);
@@ -52,9 +54,14 @@ export const log = {
   warn: (msg: string, fields: Fields = {}) => write("warn", msg, fields),
 };
 
+/** A path safe to log: /track/<token> and /track/doc/<ticket> are bearer links — never logged. */
+export function safePath(path: string): string {
+  return path.split("?")[0].replace(/^\/track\/doc\/[^/]+/, "/track/doc/[ticket]").replace(/^\/track\/(?!doc(?:\/|$))[^/]+/, "/track/[token]");
+}
+
 /** Request context for a log line: id, method and path — never the query string. */
 export function requestFields(req: Request): Fields {
-  return { reqId: requestId(req), method: req.method, path: new URL(req.url).pathname };
+  return { reqId: requestId(req), method: req.method, path: safePath(new URL(req.url).pathname) };
 }
 
 /** An error worth someone's attention, with its (scrubbed) stack. */

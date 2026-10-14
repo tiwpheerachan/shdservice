@@ -17,6 +17,9 @@ const nextConfig = {
   poweredByHeader: false,
   // nothing uses next/image — keep /_next/image (and its SSRF/cache advisories) switched off
   images: { unoptimized: true },
+  // the proxy buffers request bodies and SILENTLY truncates past this (default 10mb) —
+  // uploads are allowed up to 10 MB + multipart overhead, so a 9.9 MB file arrived cut off
+  experimental: { proxyClientMaxBodySize: "12mb" },
   // NEXT_DIST_DIR lets a production build/start run side by side with `next dev`
   // (both default to .next and corrupt each other). e.g. NEXT_DIST_DIR=.next-prod
   distDir: process.env.NEXT_DIST_DIR || ".next",

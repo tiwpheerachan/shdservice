@@ -12,6 +12,7 @@ const HERO = "/hero-shd.jpg";
 
 export default function PendingPage() {
   const [me, setMe] = React.useState<Me | null>(null);
+  const [disabled, setDisabled] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
   const [checkedAt, setCheckedAt] = React.useState<string | null>(null);
   const preview =
@@ -21,7 +22,10 @@ export default function PendingPage() {
   React.useEffect(() => {
     fetch("/api/sso/me")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.user && setMe(d.user))
+      .then((d) => {
+        if (d?.user) setMe(d.user);
+        setDisabled(!!d?.disabled);
+      })
       .catch(() => {});
   }, []);
 
@@ -73,13 +77,14 @@ export default function PendingPage() {
               </span>
             </span>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              รอการอนุมัติเข้าใช้งาน
+              {disabled ? "บัญชีถูกปิดการใช้งาน" : "รอการอนุมัติเข้าใช้งาน"}
             </h1>
           </div>
 
           <p className="animate-element animate-delay-200 text-sm leading-relaxed text-muted-foreground">
-            คุณยืนยันตัวตนสำเร็จแล้ว แต่ผู้ดูแลระบบยังไม่ได้กำหนดสิทธิ์ให้บัญชีนี้
-            ระบบจะพาเข้าใช้งานทันทีเมื่อได้รับอนุมัติ
+            {disabled
+              ? "ผู้ดูแลระบบปิดการใช้งานบัญชีนี้ไว้ หากคิดว่าไม่ถูกต้อง กรุณาติดต่อผู้ดูแลระบบ"
+              : "คุณยืนยันตัวตนสำเร็จแล้ว แต่ผู้ดูแลระบบยังไม่ได้กำหนดสิทธิ์ให้บัญชีนี้ ระบบจะพาเข้าใช้งานทันทีเมื่อได้รับอนุมัติ"}
           </p>
 
           {me && (
@@ -104,7 +109,7 @@ export default function PendingPage() {
                 </p>
               </div>
               <span className="shrink-0 rounded-full bg-primary-soft px-2.5 py-1 text-2xs font-medium text-primary">
-                รออนุมัติ
+                {disabled ? "ถูกปิด" : "รออนุมัติ"}
               </span>
             </div>
           )}

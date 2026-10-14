@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
     user: { email: session.email, name: user.name, avatar: user.avatar },
     exp: session.exp,
     approved: user.approved,
+    // has a role but the account is INACTIVE / DELETED → /pending says "disabled", not "awaiting approval"
+    disabled: !user.isActive && !!user.userType,
   });
   res.cookies.set(SEEN_COOKIE, "1", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: SEEN_TTL_S });
   return res;

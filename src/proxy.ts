@@ -3,7 +3,7 @@ import { SESSION_COOKIE, SEEN_COOKIE } from "@/lib/session";
 import { originAuthMode, originAuthOk, originAuthSecret } from "@/lib/origin-auth";
 import { THEME_SCRIPT } from "@/lib/theme-script-source";
 import { appOrigin } from "@/lib/sso";
-import { log } from "@/lib/log";
+import { log, safePath } from "@/lib/log";
 
 // Proxy (Next 16's name for middleware; always the Node.js runtime). It only
 // checks that a session cookie is PRESENT — the real verification (signature,
@@ -37,20 +37,20 @@ function guard(request: NextRequest): NextResponse | null {
   }
   if (originAuthOk(request.headers)) return null;
   // never log the header value — only that it was missing / wrong
-  log.warn("origin_auth_failed", { mode, path: request.nextUrl.pathname });
+  log.warn("origin_auth_failed", { mode, path: safePath(request.nextUrl.pathname) });
   return mode === "enforce" ? new NextResponse("Forbidden", { status: 403 }) : null;
 }
 
 /**
  * CSRF, beside SameSite=Lax (which does not cover a sibling host on the same site):
- * a cookie-carrying write to /api from a page that is not this app is refused.
+ * a cookie-carrying write from a page that is not this app is refused (any path — no
+ * server actions exist, and a path test would only invite encoding tricks).
  * Browsers say where a request came from — Sec-Fetch-Site on every modern one,
  * Origin on cross-origin POSTs. Neither header = not a browser page (curl, server),
  * so it cannot be a forgery riding on someone's cookie. (OneLink lib/api/same-origin.ts)
  */
 function crossSiteWrite(request: NextRequest): boolean {
   if (/^(GET|HEAD|OPTIONS)$/.test(request.method)) return false;
-  if (!request.nextUrl.pathname.startsWith("/api/")) return false;
   if (!request.cookies.get(SESSION_COOKIE)?.value) return false;
   const site = request.headers.get("sec-fetch-site");
   if (site) return site !== "same-origin" && site !== "none";
@@ -103,7 +103,7 @@ export async function proxy(request: NextRequest) {
   const blocked = guard(request);
   if (blocked) return blocked;
   if (crossSiteWrite(request)) {
-    log.warn("cross_site_write_refused", { path: request.nextUrl.pathname, site: request.headers.get("sec-fetch-site") });
+    log.warn("cross_site_write_refused", { path: safePath(request.nextUrl.pathname), site: request.headers.get("sec-fetch-site") });
     return NextResponse.json({ error: "cross-site request refused" }, { status: 403 });
   }
 

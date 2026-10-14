@@ -7,6 +7,31 @@ export const SSO = {
   sessionUrl: "https://sso.shd-technology.co.th/api/v1/sso/session",
 };
 
+/**
+ * Is this person's central session still active (signed out / switched off centrally →
+ * false)? POST /sso/session {client_id, client_secret, sub, iat} → {active}. Same call
+ * as OneBridge (lib/auth/sso.ts). "unavailable" = no usable answer; the caller decides.
+ * Server-only (client secret) — called from route handlers only.
+ */
+export async function centralSessionActive(sub: string, iat: number | null | undefined): Promise<boolean | "unavailable"> {
+  const secret = process.env.SSO_CLIENT_SECRET;
+  if (!secret) return "unavailable";
+  try {
+    const res = await fetch(SSO.sessionUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: SSO.clientId, client_secret: secret, sub, ...(iat ? { iat } : {}) }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) return "unavailable";
+    const body = (await res.json().catch(() => null)) as { active?: unknown } | null;
+    return typeof body?.active === "boolean" ? body.active : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
 export const STATE_COOKIE = "os_state";
 /** os_state holds the last few login states (newest first), separated by this. */
 export const STATE_SEP = ";";
@@ -26,7 +51,10 @@ export function safeNext(v: string | null | undefined): string {
   try {
     const base = "http://next.invalid";
     const url = new URL(s, base);
-    return url.origin === base ? url.pathname + url.search + url.hash : DEFAULT_AFTER_LOGIN;
+    const out = url.pathname + url.search + url.hash;
+    // the parser also folds "/./" and "/../" — "/.//evil" comes out as "//evil", which a
+    // redirect then reads as protocol-relative (another host). The result must stay a path.
+    return url.origin === base && !out.startsWith("//") ? out : DEFAULT_AFTER_LOGIN;
   } catch {
     return DEFAULT_AFTER_LOGIN;
   }

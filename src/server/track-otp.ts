@@ -28,9 +28,16 @@ export const OTP_TTL_SEC = 300;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_SEC = 60;
 export const OTP_PER_PHONE_HOUR = 3;
-/** a 4-digit code: 15 guesses/h was 360/day per target → cap the day and lock the number after many misses */
-export const OTP_PER_PHONE_DAY = 8;
-export const OTP_FAILS_PER_PHONE_DAY = 15;
+/**
+ * A 4-digit code: 15 guesses/h was 360/day per target → daily caps + a lock after many misses.
+ * Counted per number+IP first, so someone who knows a customer's number cannot lock THAT
+ * customer out from their own IP (review 2026-10-14); the per-number ceilings are higher and
+ * only bite a guesser spread over many IPs (≤ 30 guesses/day = 0.3% per day).
+ */
+export const OTP_PER_PHONE_DAY = 8; // per number + IP
+export const OTP_PER_PHONE_DAY_ALL = 20; // per number, any IP
+export const OTP_FAILS_PER_PHONE_DAY = 15; // per number + IP → that IP is locked out of the number
+export const OTP_FAILS_PER_PHONE_DAY_ALL = 30; // per number, any IP → the number is locked
 export const OTP_PHONE_LOCK_MIN = 24 * 60;
 /** company-wide SMS spend cap (SMS pumping / a list of customer numbers) — real sends only */
 export const OTP_SMS_PER_HOUR = 200;
@@ -96,8 +103,10 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   // both counters always count (no short-circuit), exactly like the two separate upserts before
   const coolOk = await hit("otp_phone_min", key, 1, OTP_RESEND_SEC);
   const hourOk = await hit("otp_phone_hour", key, OTP_PER_PHONE_HOUR, 3600);
-  const dayOk = await hit("otp_phone_day", key, OTP_PER_PHONE_DAY, 86400);
-  if (!coolOk || !hourOk || !dayOk || (await isBlocked(`phone:${key}`))) {
+  const ipKey = hmac(`phone-ip:${key}:${ip}`); // one hash — track_rate.key is varchar(128)
+  const dayOk = await hit("otp_phone_day", ipKey, OTP_PER_PHONE_DAY, 86400);
+  const dayAllOk = await hit("otp_phone_day_all", key, OTP_PER_PHONE_DAY_ALL, 86400);
+  if (!coolOk || !hourOk || !dayOk || !dayAllOk || (await isBlocked(`phone:${key}`)) || (await isBlocked(`phone:${ipKey}`))) {
     logEvent("otp_rate_limited", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
     return { ok: false, reason: "rate" };
   }
@@ -161,12 +170,15 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
     )
     .returning({ codeHash: trackOtp.codeHash, providerToken: trackOtp.providerToken, phoneHash: trackOtp.phoneHash });
   if (!tried) return null;
-  // a wrong code counts against the NUMBER for the day; too many → the number is locked for 24 h
+  // a wrong code counts against number+IP (locks that IP out of the number) and the number
+  // (locks it only past the higher ceiling) — both for 24 h
   const wrong = async () => {
-    if (!(await hit("otp_fail_phone_day", tried.phoneHash, OTP_FAILS_PER_PHONE_DAY, 86400))) {
-      await block(`phone:${tried.phoneHash}`, OTP_PHONE_LOCK_MIN);
-      logEvent("otp_phone_locked", { ipHash: hmac(`ip:${ip}`) });
-    }
+    const ipKey = hmac(`phone-ip:${tried.phoneHash}:${ip}`);
+    const ipOk = await hit("otp_fail_phone_day", ipKey, OTP_FAILS_PER_PHONE_DAY, 86400);
+    const allOk = await hit("otp_fail_phone_day_all", tried.phoneHash, OTP_FAILS_PER_PHONE_DAY_ALL, 86400);
+    if (!ipOk) await block(`phone:${ipKey}`, OTP_PHONE_LOCK_MIN);
+    if (!allOk) await block(`phone:${tried.phoneHash}`, OTP_PHONE_LOCK_MIN);
+    if (!ipOk || !allOk) logEvent("otp_phone_locked", { ipHash: hmac(`ip:${ip}`), result: allOk ? "ip" : "number" });
     return null;
   };
   if (tried.providerToken) {

@@ -10,6 +10,16 @@ import {
   type SessionUser,
 } from "@/lib/session";
 import { resolveUser, HttpError } from "@/server/auth";
+import { centralSessionActive } from "@/lib/sso";
+import { log } from "@/lib/log";
+
+const CENTRAL_CHECK_MS = 5 * 60 * 1000;
+
+/** SSO_SESSION_CHECK = off | log (default: ask, log "inactive", sign nobody out) | enforce */
+function centralCheckMode(): "off" | "log" | "enforce" {
+  const m = (process.env.SSO_SESSION_CHECK ?? "").trim().toLowerCase();
+  return m === "off" || m === "enforce" ? m : "log";
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +45,33 @@ export async function GET(request: NextRequest) {
   const role = u.role;
   const approved = u.approved;
 
+  // Single logout: someone signed out / switched off at the central SSO (left the company)
+  // loses this session at the next renewal instead of keeping it up to 12 h. Asked at most
+  // every CENTRAL_CHECK_MS; no answer keeps the session (an SSO outage must not sign
+  // everyone out — new sign-ins fail then anyway, and the 30-min idle / 12-h caps still hold).
+  let chk = current.chk;
+  const mode = centralCheckMode();
+  if (mode !== "off" && current.sub && Date.now() - (current.chk ?? 0) > CENTRAL_CHECK_MS) {
+    const active = await centralSessionActive(current.sub, current.ssoIat);
+    if (active === true) {
+      chk = Date.now();
+      // rollout: proves the endpoint answers for real users before switching to enforce
+      if (mode === "log") log.info("sso central session active", { userId: u.userId });
+    }
+    else if (active === false) {
+      log.warn("sso central session inactive", { userId: u.userId, mode });
+      if (mode === "enforce") {
+        const res = NextResponse.json({ user: null }, { status: 401 });
+        res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+        return res;
+      }
+    } else log.warn("sso central session check unavailable", { userId: u.userId });
+  } else if (mode === "log" && !current.sub) {
+    // rollout visibility: a session without sub is never checked (cookies from before this
+    // deploy, or /sso/verify not sending sub) — say so instead of looking like "all fine"
+    log.info("sso central session check skipped: no sub", { userId: u.userId });
+  }
+
   // renew the idle timer, but never past the absolute lifetime counted from sign-in
   const exp = Math.min(Date.now() + SESSION_TTL_MS, current.iat + SESSION_MAX_AGE_MS);
   const updated: SessionUser = {
@@ -42,6 +79,7 @@ export async function GET(request: NextRequest) {
     role,
     approved,
     exp,
+    chk,
   };
 
   const res = NextResponse.json({ approved, role, email: current.email });

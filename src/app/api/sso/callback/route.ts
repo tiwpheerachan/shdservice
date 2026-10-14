@@ -170,7 +170,10 @@ export async function GET(request: NextRequest) {
     email,
     name,
     avatar,
-    sid: str(identity.sid) || str(identity.session_id) || str(u.union_id),
+    // for the central-session check in /api/sso/refresh (sub is permanent; iat = that session)
+    sub: str(identity.sub) || str(u.sub) || undefined,
+    ssoIat: typeof identity.iat === "number" ? identity.iat : typeof u.iat === "number" ? u.iat : null,
+    chk: Date.now(),
     role,
     approved: isApproved(role, status),
     exp: Date.now() + SESSION_TTL_MS,

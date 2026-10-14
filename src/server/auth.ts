@@ -243,6 +243,7 @@ export function handle<T extends unknown[]>(
       const code = pgCode(e);
       if (code === "23505") return NextResponse.json({ error: "ข้อมูลซ้ำกับที่มีอยู่แล้ว" }, { status: 409 });
       if (code === "57014") return NextResponse.json({ error: "ใช้เวลานานเกินไป ลองจำกัดช่วงข้อมูลให้แคบลง" }, { status: 503 });
+      if (code === "40P01" || code === "40001") return NextResponse.json({ error: "มีผู้ใช้อื่นบันทึกข้อมูลเดียวกันพร้อมกัน กรุณาลองใหม่อีกครั้ง" }, { status: 409 });
       // unexpected error: the details (SQL, stack — parameters scrubbed) stay in the server log;
       // the browser only gets a reference to quote when reporting it (= Cloudflare ray id when present)
       const req = args[0] instanceof Request ? args[0] : undefined;
@@ -266,7 +267,7 @@ export async function readJson<T = Record<string, unknown>>(req: NextRequest): P
   if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) throw new HttpError(415, "ต้องส่งข้อมูลเป็น JSON");
   if (Number(req.headers.get("content-length") ?? 0) > MAX_JSON_BYTES) throw new HttpError(413, "ข้อมูลใหญ่เกินไป");
   const text = await req.text();
-  if (text.length > MAX_JSON_BYTES) throw new HttpError(413, "ข้อมูลใหญ่เกินไป");
+  if (Buffer.byteLength(text) > MAX_JSON_BYTES) throw new HttpError(413, "ข้อมูลใหญ่เกินไป"); // bytes — Thai is 3 per char
   try {
     return JSON.parse(text) as T;
   } catch {
