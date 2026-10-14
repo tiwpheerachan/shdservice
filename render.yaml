@@ -4,11 +4,14 @@ services:
     runtime: node
     region: singapore
     plan: starter
-    branch: main
+    branch: yuu
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
-    # db:migrate is idempotent (see scripts/migrate.ts) — safe to run on every deploy
-    buildCommand: npm ci --include=dev && npm run db:migrate && npm run build
-    startCommand: npm start
+    buildCommand: npm ci --include=dev && npm run build
+    # migrations run only AFTER a successful build (a failed build leaves the schema untouched),
+    # just before the new version takes traffic. db:migrate is idempotent (scripts/migrate.ts).
+    preDeployCommand: npm run db:migrate
+    # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains
+    startCommand: node node_modules/next/dist/bin/next start
     envVars:
       # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
@@ -73,3 +76,6 @@ services:
         value: --max-old-space-size=400
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
+      # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
+      - key: TZ
+        value: Asia/Bangkok

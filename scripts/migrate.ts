@@ -37,6 +37,10 @@ async function main() {
   const db = drizzle(pool);
 
   const force = process.argv.includes("--reset");
+  if (force && url.includes("izypdfhjbqctbopxhrqq") && process.env.ALLOW_PROD_DB !== "1") {
+    console.error("REFUSED: --reset against the PRODUCTION database. Set ALLOW_PROD_DB=1 if you really mean it.");
+    process.exit(1);
+  }
   const { rows: j } = await pool.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM information_schema.tables
       WHERE table_schema = $1 AND table_name = $2`,
@@ -53,6 +57,11 @@ async function main() {
       `SELECT count(*)::text AS n FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`
     );
     const hasEntries = applied[0]?.n !== "0";
+    if (!force && hasEntries && !appColumnsPresent && process.env.RENDER) {
+      // a deploy must never guess the journal is stale — a renamed column would re-run everything
+      console.error("app_user.lark_id missing but the journal says applied — check why, then run db:migrate:reset by hand");
+      process.exit(1);
+    }
     if (force || (hasEntries && !appColumnsPresent)) {
       console.log(
         force

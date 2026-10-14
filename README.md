@@ -49,7 +49,9 @@ npm start
 | `drizzle/0003_record_status.sql` | soft delete แบบเดียวทั้งระบบ: lookup `record_status` (ACTIVE/INACTIVE/DELETED) + คอลัมน์ในทุกตารางที่ลบได้ — ไม่มี hard delete, กู้คืนทาง SQL |
 | `scripts/migrate.ts` | `npm run db:migrate` — ตรวจจับกรณี reload dump ใหม่แล้วรัน migration ซ้ำให้เอง |
 
-**หลัง re-dump / reload ข้อมูลจากระบบเก่า** (`../setupdata/load_supabase.sh`) ให้รัน `npm run db:migrate` อีกครั้ง — migration ทุกไฟล์เขียนแบบรันซ้ำได้ และ script จะ reset journal ให้เมื่อพบว่าตาราง legacy ถูกสร้างใหม่
+**หลัง re-dump / reload ข้อมูลจากระบบเก่า** (`../setupdata/load_supabase.sh`) ให้รัน `npm run db:migrate` อีกครั้ง — migration ทุกไฟล์เขียนแบบรันซ้ำได้ และ script จะ reset journal ให้เมื่อพบว่าตาราง legacy ถูกสร้างใหม่ (ยกเว้นบน Render — ต้องรัน `db:migrate:reset` เอง)
+
+> ⚠️ **ห้ามรัน `load_supabase.sh` กับ production หลัง go-live** — มัน `DROP TABLE` ตาราง legacy ทั้งหมด งาน/ลูกค้า/สต็อก/audit ที่บันทึกหลัง dump หายหมด script จะปฏิเสธ project production เว้นแต่ตั้ง `I_UNDERSTAND_THIS_DROPS_PRODUCTION=1` · `db:migrate:reset` และ `next dev` กับ DB production ต้องตั้ง `ALLOW_PROD_DB=1`
 
 ### ผู้ใช้ / สิทธิ์
 - login ผ่าน Central SSO เหมือนเดิม → จับคู่กับ `app_user` ด้วยอีเมล (สร้างแถวใหม่แบบรออนุมัติถ้าไม่พบ)

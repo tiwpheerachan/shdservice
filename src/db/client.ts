@@ -16,16 +16,27 @@ import * as schema from "./schema";
  */
 const globalForDb = globalThis as unknown as { __shdPool?: Pool };
 
+/** Supabase project ref of PRODUCTION (render.yaml) — `next dev` must not write to it by accident. */
+const PROD_DB_REF = "izypdfhjbqctbopxhrqq";
+
 function createPool() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not configured on the server");
+  if (process.env.NODE_ENV === "development" && url.includes(PROD_DB_REF) && process.env.ALLOW_PROD_DB !== "1")
+    throw new Error("DATABASE_URL points at the PRODUCTION database from a dev server — set ALLOW_PROD_DB=1 if you really mean it");
   const pool = new Pool({
     connectionString: url,
     max: Number(process.env.DB_POOL_MAX ?? 5),
     // Supabase pooler needs TLS; local docker does not.
     ssl: /supabase\.co|supabase\.com|pooler/.test(url) ? { rejectUnauthorized: false } : undefined,
-    options: "-c TimeZone=Asia/Bangkok",
+    // fail fast instead of queueing forever when the pool/pooler is saturated,
+    // and stop a runaway query before it holds a connection for minutes
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    options: "-c TimeZone=Asia/Bangkok -c statement_timeout=30000",
   });
+  // An idle client dropped by the pooler emits 'error' on the pool; unhandled, it kills the process.
+  pool.on("error", (e) => console.error("[db] idle client error:", e.message));
   return pool;
 }
 
