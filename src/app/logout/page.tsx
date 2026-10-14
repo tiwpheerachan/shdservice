@@ -1,7 +1,7 @@
-import Link from "next/link";
-import { LogOut, ArrowLeft } from "lucide-react";
+import Link from 'next/link';
+import { LogOut, ArrowLeft } from 'lucide-react';
 
-export const metadata = { title: "ออกจากระบบ" };
+export const metadata = { title: 'ออกจากระบบ' };
 
 export default function LogoutPage() {
   return (
@@ -11,9 +11,7 @@ export default function LogoutPage() {
           <LogOut className="h-5 w-5" />
         </div>
         <h1 className="mt-4 text-lg font-semibold">ออกจากระบบเรียบร้อย</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          เซสชันของคุณถูกปิดแล้ว ขอบคุณที่ใช้งานระบบ
-        </p>
+        <p className="mt-1.5 text-sm text-muted-foreground">เซสชันของคุณถูกปิดแล้ว ขอบคุณที่ใช้งานระบบ</p>
         <Link
           href="/jobs/dashboard"
           className="mt-6 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"

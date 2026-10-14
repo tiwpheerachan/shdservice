@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { PageHeader } from "@/components/shared/page-header";
-import { QuotationForm, type QuotationFormHandle } from "@/components/shared/quotation-form";
-import { FormActions, VIEW_ONLY } from "@/components/shared/job-form";
-import { useToast } from "@/components/ui/toast";
-import { postJson, errMsg } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
+import * as React from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { PageHeader } from '@/components/shared/page-header';
+import { QuotationForm, type QuotationFormHandle } from '@/components/shared/quotation-form';
+import { FormActions, VIEW_ONLY } from '@/components/shared/job-form';
+import { useToast } from '@/components/ui/toast';
+import { postJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
 
 function NewQuotation() {
   const { push } = useToast();
@@ -23,11 +23,11 @@ function NewQuotation() {
     if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
     setSaving(true);
     try {
-      const d = await postJson<{ quotation: { no: string } }>("/api/quotations", p);
-      push({ kind: "success", title: "สร้างใบเสนอราคาแล้ว", desc: d.quotation.no });
+      const d = await postJson<{ quotation: { no: string } }>('/api/quotations', p);
+      push({ kind: 'success', title: 'สร้างใบเสนอราคาแล้ว', desc: d.quotation.no });
       router.push(`/quotation/edit?no=${encodeURIComponent(d.quotation.no)}`);
     } catch (e) {
-      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -35,12 +35,15 @@ function NewQuotation() {
 
   return (
     <>
-      <PageHeader
-        title="สร้างใบเสนอราคา"
-        description="ข้อมูลการเสนอราคา » เสนอราคางานซ่อม"
+      <PageHeader title="สร้างใบเสนอราคา" description="ข้อมูลการเสนอราคา » เสนอราคางานซ่อม" />
+      <QuotationForm ref={form} mode="new" jobNo={sp.get('job') ?? undefined} />
+      <FormActions
+        saveLabel="บันทึกใบเสนอราคา"
+        onSave={save}
+        saving={saving}
+        cancelHref="/quotation/list"
+        denied={can('Quotation', 'add') ? undefined : VIEW_ONLY}
       />
-      <QuotationForm ref={form} mode="new" jobNo={sp.get("job") ?? undefined} />
-      <FormActions saveLabel="บันทึกใบเสนอราคา" onSave={save} saving={saving} cancelHref="/quotation/list" denied={can("Quotation", "add") ? undefined : VIEW_ONLY} />
     </>
   );
 }

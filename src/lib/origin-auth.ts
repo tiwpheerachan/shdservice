@@ -13,18 +13,18 @@
  * In production a missing secret is a misconfiguration: `enforce` then answers
  * 503 (fail closed) instead of silently opening the door.
  */
-export type OriginAuthMode = "off" | "log" | "enforce";
+export type OriginAuthMode = 'off' | 'log' | 'enforce';
 
-export const ORIGIN_AUTH_HEADER = "x-origin-auth";
+export const ORIGIN_AUTH_HEADER = 'x-origin-auth';
 
 export function originAuthMode(): OriginAuthMode {
-  const m = (process.env.ORIGIN_AUTH_MODE ?? "").trim().toLowerCase();
-  if (m === "off" || m === "log" || m === "enforce") return m;
-  return process.env.NODE_ENV === "production" ? "enforce" : "off";
+  const m = (process.env.ORIGIN_AUTH_MODE ?? '').trim().toLowerCase();
+  if (m === 'off' || m === 'log' || m === 'enforce') return m;
+  return process.env.NODE_ENV === 'production' ? 'enforce' : 'off';
 }
 
 export function originAuthSecret(): string {
-  return (process.env.ORIGIN_AUTH_SECRET ?? "").trim();
+  return (process.env.ORIGIN_AUTH_SECRET ?? '').trim();
 }
 
 /** constant-time string compare (no early exit on the first differing char) */
@@ -39,5 +39,5 @@ function sameString(a: string, b: string): boolean {
 export function originAuthOk(headers: Headers): boolean {
   const secret = originAuthSecret();
   if (!secret) return false;
-  return sameString(headers.get(ORIGIN_AUTH_HEADER) ?? "", secret);
+  return sameString(headers.get(ORIGIN_AUTH_HEADER) ?? '', secret);
 }

@@ -1,20 +1,20 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireAdmin, readJson } from "@/server/auth";
-import { lookupByEmail } from "@/lib/directory";
-import { listSystemUsers, upsertUser } from "@/server/services/users";
-import { parseStatusMode } from "@/server/record-status";
-import { assertValid } from "@/server/validate";
-import { userSchema } from "@/lib/validation/admin";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireAdmin, readJson } from '@/server/auth';
+import { lookupByEmail } from '@/lib/directory';
+import { listSystemUsers, upsertUser } from '@/server/services/users';
+import { parseStatusMode } from '@/server/record-status';
+import { assertValid } from '@/server/validate';
+import { userSchema } from '@/lib/validation/admin';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 /** List system users (people who signed in via SSO). Admin only. */
 export const GET = handle(async (req: NextRequest) => {
   await requireAdmin(req);
-  const deleted = parseStatusMode(new URL(req.url).searchParams.get("deleted"));
+  const deleted = parseStatusMode(new URL(req.url).searchParams.get('deleted'));
   return NextResponse.json({ rows: await listSystemUsers(deleted) });
 });
 
@@ -34,18 +34,21 @@ export const POST = handle(async (req: NextRequest) => {
   // Enrich avatar/title (and fill blanks) from the directory when we have an email.
   const prof = email ? await lookupByEmail(email) : null;
 
-  const { user, created } = await upsertUser({
-    id: str(body.id) || undefined,
-    name,
-    role,
-    email,
-    username: str(body.username) || undefined,
-    code: str(body.code) || prof?.id || undefined,
-    branch: str(body.branch) || prof?.department || undefined,
-    phone: str(body.phone) || prof?.phone || undefined,
-    status: str(body.status) || undefined,
-    avatar: str(body.avatar) || prof?.avatar || undefined,
-    title: str(body.title) || prof?.title || undefined,
-  }, me.userId);
+  const { user, created } = await upsertUser(
+    {
+      id: str(body.id) || undefined,
+      name,
+      role,
+      email,
+      username: str(body.username) || undefined,
+      code: str(body.code) || prof?.id || undefined,
+      branch: str(body.branch) || prof?.department || undefined,
+      phone: str(body.phone) || prof?.phone || undefined,
+      status: str(body.status) || undefined,
+      avatar: str(body.avatar) || prof?.avatar || undefined,
+      title: str(body.title) || prof?.title || undefined,
+    },
+    me.userId,
+  );
   return NextResponse.json({ ok: true, user, created });
 });

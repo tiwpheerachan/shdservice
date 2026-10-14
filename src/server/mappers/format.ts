@@ -2,28 +2,28 @@
 // time zone holding Thai wall-clock time and uses sentinels (1900-01-01, -1, 0)
 // for "empty". The UI expects plain strings ("YYYY-MM-DD", "YYYY-MM-DD HH:mm").
 
-import { isoDate, isoDateTime } from "@/lib/dates";
+import { isoDate, isoDateTime } from '@/lib/dates';
 
-const pad = (n: number) => String(n).padStart(2, "0");
+const pad = (n: number) => String(n).padStart(2, '0');
 
 /** Is this legacy value a "no value" sentinel? */
 export function isSentinelDate(v: string | Date | null | undefined): boolean {
   if (!v) return true;
   if (v instanceof Date) return v.getUTCFullYear() < 1901; // a real instant (timestamptz)
-  return v.startsWith("1900-01-01") || v.startsWith("0001-01-01");
+  return v.startsWith('1900-01-01') || v.startsWith('0001-01-01');
 }
 
 /** `timestamp` (string from pg, Thai local) → "YYYY-MM-DD" or "". */
 export function fmtDate(v: string | Date | null | undefined): string {
-  if (isSentinelDate(v)) return "";
+  if (isSentinelDate(v)) return '';
   // a Date is a real instant (timestamptz) → its Thai calendar date, never the UTC one
-  return typeof v === "string" ? v.slice(0, 10) : isoDate(v!);
+  return typeof v === 'string' ? v.slice(0, 10) : isoDate(v!);
 }
 
 /** → "YYYY-MM-DD HH:mm" or "". */
 export function fmtDateTime(v: string | Date | null | undefined): string {
-  if (isSentinelDate(v)) return "";
-  return typeof v === "string" ? v.slice(0, 16).replace("T", " ") : isoDateTime(v!);
+  if (isSentinelDate(v)) return '';
+  return typeof v === 'string' ? v.slice(0, 16).replace('T', ' ') : isoDateTime(v!);
 }
 
 /** Current Thai wall-clock time as a pg-compatible `timestamp` string. */
@@ -47,8 +47,8 @@ export function thaiYear(): number {
 
 /** numeric/varchar money → number. */
 export function num(v: string | number | null | undefined): number {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+  if (v === null || v === undefined || v === '') return 0;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -57,18 +57,20 @@ export function money(n: number | null | undefined): string {
   return (Number.isFinite(n as number) ? (n as number) : 0).toFixed(2);
 }
 
-export const str = (v: unknown): string => (typeof v === "string" ? v.trim() : v == null ? "" : String(v));
+export const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v));
 export const int = (v: unknown, d = 0): number => {
-  const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
+  const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10);
   return Number.isFinite(n) ? n : d;
 };
 /** Date input ("YYYY-MM-DD" | "") → timestamp string or the legacy sentinel. */
 export const dateOrSentinel = (v: unknown): string => {
   const s = str(v);
-  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) + (s.length > 10 ? s.slice(10, 19).replace("T", " ") : " 00:00:00") : "1900-01-01 00:00:00";
+  return /^\d{4}-\d{2}-\d{2}/.test(s)
+    ? s.slice(0, 10) + (s.length > 10 ? s.slice(10, 19).replace('T', ' ') : ' 00:00:00')
+    : '1900-01-01 00:00:00';
 };
 export const dateOrNull = (v: unknown): string | null => {
   const s = str(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 };
-export const SENTINEL_TS = "1900-01-01 00:00:00";
+export const SENTINEL_TS = '1900-01-01 00:00:00';

@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { PackageCheck, ClipboardList, Wallet } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { JobSearch } from "@/components/shared/job-search";
-import { Section } from "@/components/shared/section";
+import * as React from 'react';
+import { PackageCheck, ClipboardList, Wallet } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { Section } from '@/components/shared/section';
 import {
   CustomerSection,
   ProductSection,
@@ -15,23 +15,23 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
-} from "@/components/shared/job-form";
-import { useAccess } from "@/lib/use-access";
-import { Tabs } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from "@/data/mock";
-import { useShippers, useShippingProfiles } from "@/data/db";
-import { baht } from "@/lib/utils";
-import { RecordGate } from "@/components/shared/record-gate";
-import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
-import { useJob, type JobDetail } from "@/lib/use-job";
-import { PrintButton } from "@/components/shared/print-button";
-import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
-import { today as thaiToday } from "@/lib/dates";
-import { closeActionSchema } from "@/lib/validation/job";
+} from '@/components/shared/job-form';
+import { useAccess } from '@/lib/use-access';
+import { Tabs } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Input, Select, Textarea } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { RETURN_METHODS, JOB_PAYMENT_METHODS, CLOSE_STATUS_OPTIONS } from '@/data/mock';
+import { useShippers, useShippingProfiles } from '@/data/db';
+import { baht } from '@/lib/utils';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { PrintButton } from '@/components/shared/print-button';
+import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
+import { today as thaiToday } from '@/lib/dates';
+import { closeActionSchema } from '@/lib/validation/job';
 
 function CloseForm() {
   const { push } = useToast();
@@ -40,35 +40,40 @@ function CloseForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
     onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
-    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
+    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
-  const [tab, setTab] = React.useState("product");
+  const [tab, setTab] = React.useState('product');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
     payType: JOB_PAYMENT_METHODS[0],
-    payAmount: "",
-    payDate: "",
-    payNo: "",
-    payDetail: "",
-    returnType: "",
-    returnDate: "",
-    courier: "",
-  shipperId: 0,
-    tracking: "",
-    returnDetail: "",
-    status: "",
+    payAmount: '',
+    payDate: '',
+    payNo: '',
+    payDetail: '',
+    returnType: '',
+    returnDate: '',
+    courier: '',
+    shipperId: 0,
+    tracking: '',
+    returnDetail: '',
+    status: '',
   });
   // editing a field clears its error (keys = the payload paths the rules report)
-  const ERR_KEY: Partial<Record<keyof typeof d, string>> = { status: "status", payType: "payment.type", returnType: "return.type", returnDate: "return.date" };
+  const ERR_KEY: Partial<Record<keyof typeof d, string>> = {
+    status: 'status',
+    payType: 'payment.type',
+    returnType: 'return.type',
+    returnDate: 'return.date',
+  };
   const upd = (p: Partial<typeof d>) => {
     setD((x) => ({ ...x, ...p }));
     (Object.keys(p) as (keyof typeof d)[]).forEach((k) => ERR_KEY[k] && act.clear(ERR_KEY[k]));
   };
-  const [slip, setSlip] = React.useState("");
+  const [slip, setSlip] = React.useState('');
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   // (the slip is not: an upload is saved to the job right away)
   const [saved, setSaved] = React.useState<typeof d | null>(null);
@@ -77,21 +82,21 @@ function CloseForm() {
   const onPickSlip = async (f: File | undefined) => {
     if (!f || !job) return;
     try {
-      const r = await uploadFile("job-slip", job.no, f);
+      const r = await uploadFile('job-slip', job.no, f);
       setSlip(r.path);
-      push({ kind: "success", title: "อัปโหลดสลิปแล้ว", desc: f.name });
+      push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
     } catch (e) {
-      push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
   // cost summary straight from the job row
   const SUMMARY = [
-    { label: "รวมค่าอะไหล่", v: job?.partsCost ?? 0 },
-    { label: "ค่าบริการการซ่อม", v: job?.serviceCost ?? 0 },
-    { label: "ค่าเครื่องมือพิเศษ", v: job?.toolCost ?? 0 },
-    { label: "ค่าขนส่ง", v: job?.deliveryCost ?? 0 },
-    { label: "ค่ากล่องพัสดุ", v: job?.boxCost ?? 0 },
+    { label: 'รวมค่าอะไหล่', v: job?.partsCost ?? 0 },
+    { label: 'ค่าบริการการซ่อม', v: job?.serviceCost ?? 0 },
+    { label: 'ค่าเครื่องมือพิเศษ', v: job?.toolCost ?? 0 },
+    { label: 'ค่าขนส่ง', v: job?.deliveryCost ?? 0 },
+    { label: 'ค่ากล่องพัสดุ', v: job?.boxCost ?? 0 },
   ];
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
 
@@ -101,17 +106,19 @@ function CloseForm() {
     const today = thaiToday(); // Thai calendar, not UTC
     const next = {
       payType: job.payment.type || JOB_PAYMENT_METHODS[0],
-      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : "",
+      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : '',
       payDate: today,
       payNo: job.payment.no,
       payDetail: job.payment.detail,
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
-      courier: SHIPPERS.find((c) => job.return.detail.includes(c)) ?? (job.return.detail.includes(" · ") ? (job.return.detail.split(" · ")[0] ?? "") : ""),
+      courier:
+        SHIPPERS.find((c) => job.return.detail.includes(c)) ??
+        (job.return.detail.includes(' · ') ? (job.return.detail.split(' · ')[0] ?? '') : ''),
       shipperId: job.return.shipperId ?? 0,
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
-      status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : "",
+      status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : '',
     };
     upd(next);
     setSaved(next);
@@ -124,19 +131,26 @@ function CloseForm() {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body = {
       payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
-      return: { type: d.returnType, date: d.returnDate, courier: d.courier, tracking: d.tracking, detail: d.returnDetail, shipperId: d.shipperId || undefined },
+      return: {
+        type: d.returnType,
+        date: d.returnDate,
+        courier: d.courier,
+        tracking: d.tracking,
+        detail: d.returnDetail,
+        shipperId: d.shipperId || undefined,
+      },
       status: d.status,
     };
-    const canEdit = can("Job Management", "edit");
+    const canEdit = can('Job Management', 'edit');
     if (!act.check(closeActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, body);
       setJob(r.job);
-      push({ kind: "success", title: "ปิดงานและบันทึกการส่งคืนเรียบร้อย", desc: `${r.job.no} · ${r.job.status}` });
+      push({ kind: 'success', title: 'ปิดงานและบันทึกการส่งคืนเรียบร้อย', desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {
-      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -153,14 +167,21 @@ function CloseForm() {
               ระบุ หมายเลขงาน
             </label>
             <JobSearch id="close-job-no" value={jobNo} scope="closable" onPick={go} />
-            <PrintButton label="พิมพ์ใบส่งคืน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}/return`} disabled={!job} />
+            <PrintButton
+              label="พิมพ์ใบส่งคืน"
+              kind="job"
+              no={job?.no ?? ''}
+              profileId={job?.documentProfileId}
+              href={`/print/job/${encodeURIComponent(job?.no ?? '')}/return`}
+              disabled={!job}
+            />
             <PrintButton
               label="พิมพ์ใบปะหน้าพัสดุ"
               title="ใบปะหน้าพัสดุ A5 สำหรับส่งคืนทางขนส่ง"
               kind="job"
-              no={job?.no ?? ""}
+              no={job?.no ?? ''}
               profileId={job?.documentProfileId}
-              href={`/print/job/${encodeURIComponent(job?.no ?? "")}/label`}
+              href={`/print/job/${encodeURIComponent(job?.no ?? '')}/label`}
               disabled={!job}
             />
           </div>
@@ -173,17 +194,27 @@ function CloseForm() {
         <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
           <FieldGrid>
             <Field label="หมายเลขงาน">
-              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job?.no ?? '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="วันที่เปิดงาน">
-              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job ? `${job.createDate} น.` : '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="ประเภทงาน">
-              <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
+              <ReadOnly>
+                {job
+                  ? `${job.jobType}${job.warranty ? ` (${job.warranty === 'IN' ? 'In-Warranty' : 'Out-Warranty'})` : ''}`
+                  : '—'}
+              </ReadOnly>
             </Field>
             <Field label="สถานะงาน (ปัจจุบัน)">
               <ReadOnly>
-                <Badge tone="success" dot>{job?.status ?? "—"}</Badge>
+                <Badge tone="success" dot>
+                  {job?.status ?? '—'}
+                </Badge>
               </ReadOnly>
             </Field>
           </FieldGrid>
@@ -193,34 +224,36 @@ function CloseForm() {
           value={tab}
           onChange={setTab}
           tabs={[
-            { key: "product", label: "ข้อมูลสินค้า" },
-            { key: "work", label: "รายละเอียดการดำเนินงาน" },
-            { key: "payment", label: "รายละเอียดการรับชำระเงิน" },
+            { key: 'product', label: 'ข้อมูลสินค้า' },
+            { key: 'work', label: 'รายละเอียดการดำเนินงาน' },
+            { key: 'payment', label: 'รายละเอียดการรับชำระเงิน' },
           ]}
         />
 
-        {tab === "product" && <ProductSection title="ข้อมูลสินค้า" />}
+        {tab === 'product' && <ProductSection title="ข้อมูลสินค้า" />}
 
-        {tab === "work" && (
+        {tab === 'work' && (
           <Section title="รายละเอียดการดำเนินงาน" icon={ClipboardList}>
             <FieldGrid>
               <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
-                <Textarea rows={2} readOnly value={form.symptoms.join(", ")} />
+                <Textarea rows={2} readOnly value={form.symptoms.join(', ')} />
               </Field>
               <Field label="วิธีการซ่อมที่ดำเนินการ" className="lg:col-span-2">
-                <Textarea rows={2} readOnly value={job?.repairDetail ?? ""} />
+                <Textarea rows={2} readOnly value={job?.repairDetail ?? ''} />
               </Field>
               <Field label="ช่างผู้รับผิดชอบ">
-                <ReadOnly>{job?.engineer || "—"}</ReadOnly>
+                <ReadOnly>{job?.engineer || '—'}</ReadOnly>
               </Field>
               <Field label="วันที่ซ่อมเสร็จ">
-                <ReadOnly><span className="num">{job?.repairedDate || "—"}</span></ReadOnly>
+                <ReadOnly>
+                  <span className="num">{job?.repairedDate || '—'}</span>
+                </ReadOnly>
               </Field>
             </FieldGrid>
           </Section>
         )}
 
-        {tab === "payment" && (
+        {tab === 'payment' && (
           <Section title="รายละเอียดการรับชำระเงิน" icon={Wallet}>
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -238,7 +271,7 @@ function CloseForm() {
                 </ul>
               </div>
               <FieldGrid cols={2}>
-                <Field label="วิธีการชำระเงิน" required error={act.errors["payment.type"]}>
+                <Field label="วิธีการชำระเงิน" required error={act.errors['payment.type']}>
                   <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
                     {JOB_PAYMENT_METHODS.map((p) => (
                       <option key={p}>{p}</option>
@@ -267,9 +300,20 @@ function CloseForm() {
                 </Field>
                 <Field label="สลิปหลักฐานการชำระ" wide>
                   <div className="flex items-center gap-2">
-                    <Input type="file" className="h-9 py-1.5 text-xs" accept=".jpg,.jpeg,.png,.webp,.pdf" disabled={!job} onChange={(e) => onPickSlip(e.target.files?.[0])} />
+                    <Input
+                      type="file"
+                      className="h-9 py-1.5 text-xs"
+                      accept=".jpg,.jpeg,.png,.webp,.pdf"
+                      disabled={!job}
+                      onChange={(e) => onPickSlip(e.target.files?.[0])}
+                    />
                     {slip && (
-                      <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
+                      <a
+                        href={fileUrl(slip)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 text-xs text-primary hover:underline"
+                      >
                         ดูสลิป
                       </a>
                     )}
@@ -285,7 +329,7 @@ function CloseForm() {
 
         <Section title="ข้อมูลการปิดงาน - ส่งคืนสินค้า" icon={PackageCheck}>
           <FieldGrid>
-            <Field label="วิธีการส่งคืนสินค้า" required error={act.errors["return.type"]}>
+            <Field label="วิธีการส่งคืนสินค้า" required error={act.errors['return.type']}>
               <Select value={d.returnType} onChange={(e) => upd({ returnType: e.target.value })}>
                 <option value="">- - Please Select - -</option>
                 {RETURN_METHODS.map((m) => (
@@ -294,18 +338,21 @@ function CloseForm() {
                 {d.returnType && !RETURN_METHODS.includes(d.returnType) && <option>{d.returnType}</option>}
               </Select>
             </Field>
-            <Field label="วันที่ส่งคืน" required error={act.errors["return.date"]}>
+            <Field label="วันที่ส่งคืน" required error={act.errors['return.date']}>
               <Input type="date" value={d.returnDate} onChange={(e) => upd({ returnDate: e.target.value })} />
             </Field>
-            <Field label="บริษัทขนส่ง" hint={d.shipperId ? "ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ" : undefined}>
+            <Field
+              label="บริษัทขนส่ง"
+              hint={d.shipperId ? 'ลูกค้าจะเห็นโลโก้และปุ่มติดตามพัสดุในหน้าติดตามสถานะ' : undefined}
+            >
               {/* โปรไฟล์บริษัทขนส่ง (ข้อมูลระบบ) — เลือก "อื่น ๆ" เพื่อพิมพ์ชื่อเองแบบระบบเดิม */}
               <Select
-                value={d.shipperId ? String(d.shipperId) : d.courier ? "other" : ""}
+                value={d.shipperId ? String(d.shipperId) : d.courier ? 'other' : ''}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === "other") return upd({ shipperId: 0, courier: "" });
+                  if (v === 'other') return upd({ shipperId: 0, courier: '' });
                   const p = SHIPPING.find((x) => String(x.id) === v);
-                  upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : "" });
+                  upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : '' });
                 }}
               >
                 <option value="">- - เลือก - -</option>
@@ -349,7 +396,13 @@ function CloseForm() {
           </FieldGrid>
         </Section>
 
-        <FormActions saveLabel="ยืนยันปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Closing", "edit") ? undefined : VIEW_ONLY} />
+        <FormActions
+          saveLabel="ยืนยันปิดงาน"
+          onSave={save}
+          saving={saving}
+          cancelHref="/jobs/list"
+          denied={can('Job Closing', 'edit') ? undefined : VIEW_ONLY}
+        />
       </RecordGate>
     </>
   );

@@ -1,34 +1,58 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { UserCheck, ListChecks, Wrench } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { JobSearch } from "@/components/shared/job-search";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect } from "@/components/shared/search-select";
-import { modelNameOptions } from "@/components/shared/model-picker";
-import { Field } from "@/components/ui/field";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Checkbox, Input, Select } from "@/components/ui/input";
-import { StatusBadge } from "@/components/ui/badge";
-import { useToast } from "@/components/ui/toast";
-import { type Job } from "@/data/mock";
-import { useJobsPage, useJobTypes, useManufacturers, useModels } from "@/data/db";
-import { api, postJson, errMsg, qs } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { isFilterActive } from "@/lib/utils";
-import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
+import * as React from 'react';
+import { UserCheck, ListChecks, Wrench } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect } from '@/components/shared/search-select';
+import { modelNameOptions } from '@/components/shared/model-picker';
+import { Field } from '@/components/ui/field';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Checkbox, Input, Select } from '@/components/ui/input';
+import { StatusBadge } from '@/components/ui/badge';
+import { useToast } from '@/components/ui/toast';
+import { type Job } from '@/data/mock';
+import { useJobsPage, useJobTypes, useManufacturers, useModels } from '@/data/db';
+import { api, postJson, errMsg, qs } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { isFilterActive } from '@/lib/utils';
+import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
 export default function AssignPage() {
   const { push } = useToast();
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
   const { name: CURRENT_TECH, userId, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
-  type AssignFilter = { no: string; ref: string; brand: string; model: string; type: string; customer: string; phone: string; imei: string; dateBy: "create" | "reception"; from: string; to: string };
-  const NO_FILTER: AssignFilter = { no: "", ref: "", brand: "", model: "", type: "", customer: "", phone: "", imei: "", dateBy: "create", from: "", to: "" };
+  type AssignFilter = {
+    no: string;
+    ref: string;
+    brand: string;
+    model: string;
+    type: string;
+    customer: string;
+    phone: string;
+    imei: string;
+    dateBy: 'create' | 'reception';
+    from: string;
+    to: string;
+  };
+  const NO_FILTER: AssignFilter = {
+    no: '',
+    ref: '',
+    brand: '',
+    model: '',
+    type: '',
+    customer: '',
+    phone: '',
+    imei: '',
+    dateBy: 'create',
+    from: '',
+    to: '',
+  };
   const [draft, setDraft] = React.useState<AssignFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<AssignFilter>(NO_FILTER);
   const setD = <K extends keyof AssignFilter>(k: K, v: AssignFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
@@ -38,15 +62,21 @@ export default function AssignPage() {
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
-  const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
-  const { rows: JOBS, total, loading, refetch, error: loadError } = useJobsPage({
+  const all = { placeholder: 'ทั้งหมด', emptyLabel: 'ทั้งหมด' };
+  const {
+    rows: JOBS,
+    total,
+    loading,
+    refetch,
+    error: loadError,
+  } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
     dir: table.sort?.dir,
     unassigned: 1,
     ...filter,
-    dateBy: filter.dateBy === "create" ? "" : filter.dateBy,
+    dateBy: filter.dateBy === 'create' ? '' : filter.dateBy,
   });
   const [saving, setSaving] = React.useState(false);
 
@@ -65,8 +95,7 @@ export default function AssignPage() {
       return n;
     });
 
-  const toggleAll = () =>
-    setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
+  const toggleAll = () => setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
 
   // type a job no → verify on the server that it is still waiting, then tick it
   const go = async (v: string) => {
@@ -74,7 +103,7 @@ export default function AssignPage() {
     const local = pool.find((j) => j.no === v);
     if (local) {
       setPicked((s) => new Set(s).add(local.no));
-      push({ kind: "success", title: "เลือกงานแล้ว", desc: local.no });
+      push({ kind: 'success', title: 'เลือกงานแล้ว', desc: local.no });
       return;
     }
     try {
@@ -82,12 +111,12 @@ export default function AssignPage() {
       const hit = d.rows.find((j) => j.no === v);
       if (hit) {
         setPicked((s) => new Set(s).add(hit.no));
-        push({ kind: "success", title: "เลือกงานแล้ว", desc: hit.no });
+        push({ kind: 'success', title: 'เลือกงานแล้ว', desc: hit.no });
       } else {
-        push({ kind: "warning", title: "ไม่พบงานนี้ในรายการรอรับมอบหมาย", desc: v });
+        push({ kind: 'warning', title: 'ไม่พบงานนี้ในรายการรอรับมอบหมาย', desc: v });
       }
     } catch (e) {
-      push({ kind: "error", title: "ค้นหาไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'ค้นหาไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
@@ -97,17 +126,17 @@ export default function AssignPage() {
     if (!list.length) return;
     setSaving(true);
     try {
-      const d = await postJson<{ assigned: number }>("/api/jobs/assign", { jobNos: list, engineerId: userId });
+      const d = await postJson<{ assigned: number }>('/api/jobs/assign', { jobNos: list, engineerId: userId });
       setRemoved((r) => new Set([...r, ...list]));
       setPicked(new Set());
       push({
-        kind: "success",
+        kind: 'success',
         title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
         desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ'",
       });
       refetch();
     } catch (e) {
-      push({ kind: "error", title: "รับงานไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'รับงานไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -115,65 +144,55 @@ export default function AssignPage() {
 
   const columns: Column<Job>[] = [
     {
-      key: "pick",
+      key: 'pick',
       header: (
         <label className="flex cursor-pointer items-center justify-center" title="เลือกทั้งหมด">
-          <Checkbox
-            checked={allSelected}
-            onChange={toggleAll}
-            aria-label="เลือกทั้งหมด"
-          />
+          <Checkbox checked={allSelected} onChange={toggleAll} aria-label="เลือกทั้งหมด" />
         </label>
       ),
-      width: "84px",
-      align: "center",
+      width: '84px',
+      align: 'center',
       sortable: false,
-      cell: (r) => (
-        <Checkbox
-          checked={picked.has(r.no)}
-          onChange={() => toggle(r.no)}
-          aria-label={`รับงาน ${r.no}`}
-        />
-      ),
+      cell: (r) => <Checkbox checked={picked.has(r.no)} onChange={() => toggle(r.no)} aria-label={`รับงาน ${r.no}`} />,
     },
     {
-      key: "no",
-      header: "หมายเลขงาน",
-      width: "130px",
+      key: 'no',
+      header: 'หมายเลขงาน',
+      width: '130px',
       cell: (r) => <span className="num font-medium text-primary">{r.no}</span>,
     },
     {
-      key: "openDate",
-      header: "วันที่เปิดงาน",
-      width: "140px",
+      key: 'openDate',
+      header: 'วันที่เปิดงาน',
+      width: '140px',
       cell: (r) => <span className="num text-xs">{r.openDate}</span>,
     },
     {
-      key: "receiveDate",
-      header: "วันที่รับเครื่อง",
-      width: "130px",
-      hideBelow: "lg",
+      key: 'receiveDate',
+      header: 'วันที่รับเครื่อง',
+      width: '130px',
+      hideBelow: 'lg',
       sortable: false,
       cell: (r) => <span className="num text-xs">{r.receptionDate || r.openDate.slice(0, 10)}</span>,
     },
     {
-      key: "customer",
-      header: "ลูกค้า",
+      key: 'customer',
+      header: 'ลูกค้า',
       minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
     },
     {
-      key: "so",
-      header: "เลขคำสั่งซื้อ",
-      width: "120px",
-      hideBelow: "xl",
+      key: 'so',
+      header: 'เลขคำสั่งซื้อ',
+      width: '120px',
+      hideBelow: 'xl',
       cell: (r) => <span className="num text-xs">{r.so}</span>,
     },
     brandModelColumn(),
-    { key: "jobType", header: "ประเภทงาน", hideBelow: "xl" },
+    { key: 'jobType', header: 'ประเภทงาน', hideBelow: 'xl' },
     {
-      key: "status",
-      header: "สถานะงาน",
+      key: 'status',
+      header: 'สถานะงาน',
       minWidth: COL_MIN_WIDTH.status,
       cell: (r) => <StatusBadge status={r.status} wrap />,
     },
@@ -206,40 +225,73 @@ export default function AssignPage() {
         onReset={resetFilters}
       >
         <Field label="เลขที่งาน">
-          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
+          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD('no', e.target.value)} />
         </Field>
         <Field label="เลขคำสั่งซื้อ">
-          <Input className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
+          <Input className="num" value={draft.ref} onChange={(e) => setD('ref', e.target.value)} />
         </Field>
         <Field label="ยี่ห้อ">
-          <SearchSelect {...all} value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))} options={BRAND_OPTIONS} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
+          <SearchSelect
+            {...all}
+            value={draft.brand}
+            onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: '' }))}
+            options={BRAND_OPTIONS}
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="รุ่น">
-          <SearchSelect {...all} value={draft.model} onChange={(v) => setD("model", v)} options={MODEL_OPTIONS} minWidth={360} searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…" />
+          <SearchSelect
+            {...all}
+            value={draft.model}
+            onChange={(v) => setD('model', v)}
+            options={MODEL_OPTIONS}
+            minWidth={360}
+            searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
+          />
         </Field>
         <Field label="ประเภทงาน">
-          <SearchSelect {...all} value={draft.type} onChange={(v) => setD("type", v)} options={JOB_TYPE_OPTIONS} />
+          <SearchSelect {...all} value={draft.type} onChange={(v) => setD('type', v)} options={JOB_TYPE_OPTIONS} />
         </Field>
         <Field label="ชื่อ-สกุล / รหัสลูกค้า">
-          <Input placeholder="ชื่อลูกค้า หรือ C43600" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+          <Input
+            placeholder="ชื่อลูกค้า หรือ C43600"
+            value={draft.customer}
+            onChange={(e) => setD('customer', e.target.value)}
+          />
         </Field>
         <Field label="เบอร์โทร">
-          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+          <Input
+            placeholder="08xxxxxxxx"
+            className="num"
+            inputMode="tel"
+            value={draft.phone}
+            onChange={(e) => setD('phone', e.target.value)}
+          />
         </Field>
         <Field label="IMEI / Serial No.">
-          <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
+          <Input className="num" value={draft.imei} onChange={(e) => setD('imei', e.target.value)} />
         </Field>
         <Field label="ช่วงวันที่ (ตาม)">
-          <Select value={draft.dateBy} onChange={(e) => setD("dateBy", e.target.value as AssignFilter["dateBy"])}>
+          <Select value={draft.dateBy} onChange={(e) => setD('dateBy', e.target.value as AssignFilter['dateBy'])}>
             <option value="create">วันที่เปิดงาน</option>
             <option value="reception">วันที่รับเครื่องซ่อม</option>
           </Select>
         </Field>
         <Field label="ตั้งแต่วันที่">
-          <Input type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => setD("from", e.target.value)} />
+          <Input
+            type="date"
+            value={draft.from}
+            max={draft.to || undefined}
+            onChange={(e) => setD('from', e.target.value)}
+          />
         </Field>
         <Field label="ถึงวันที่">
-          <Input type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => setD("to", e.target.value)} />
+          <Input
+            type="date"
+            value={draft.to}
+            min={draft.from || undefined}
+            onChange={(e) => setD('to', e.target.value)}
+          />
         </Field>
       </FilterBar>
 
@@ -249,10 +301,8 @@ export default function AssignPage() {
           <span className="flex items-center gap-2 text-sm font-medium">
             <ListChecks className="h-4 w-4 text-primary" />
             เลือกแล้ว
-            <span className="num rounded-md bg-primary/10 px-2 py-0.5 text-primary">
-              {picked.size}
-            </span>
-            / {total.toLocaleString("en-US")} งาน
+            <span className="num rounded-md bg-primary/10 px-2 py-0.5 text-primary">{picked.size}</span>/{' '}
+            {total.toLocaleString('en-US')} งาน
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Wrench className="h-3.5 w-3.5" />
@@ -261,30 +311,24 @@ export default function AssignPage() {
         </div>
         {/* wraps on phones: three buttons + the long confirm label are wider than 390px */}
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={toggleAll}
-            disabled={pool.length === 0}
-          >
-            {allSelected ? "ยกเลิกทั้งหมด" : "เลือกทั้งหมด"}
+          <Button size="sm" variant="outline" onClick={toggleAll} disabled={pool.length === 0}>
+            {allSelected ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setPicked(new Set())}
-            disabled={picked.size === 0}
-          >
+          <Button size="sm" variant="outline" onClick={() => setPicked(new Set())} disabled={picked.size === 0}>
             ล้างการเลือก
           </Button>
-          {can("Job Assign", "edit") ? (
+          {can('Job Assign', 'edit') ? (
             <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
               <UserCheck className="h-3.5 w-3.5" />
               <span className="sm:hidden">ยืนยันรับงาน</span>
-              <span className="hidden sm:inline">ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;</span>
+              <span className="hidden sm:inline">
+                ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
+              </span>
             </Button>
           ) : (
-            <span role="note" className="text-xs font-medium text-warning">ไม่มีสิทธิ์รับงาน — ดูรายการได้อย่างเดียว</span>
+            <span role="note" className="text-xs font-medium text-warning">
+              ไม่มีสิทธิ์รับงาน — ดูรายการได้อย่างเดียว
+            </span>
           )}
         </div>
       </div>
@@ -294,18 +338,16 @@ export default function AssignPage() {
         onClearFilters={resetFilters}
         columns={columns}
         rows={pool}
-        loading={loading} error={loadError} onRetry={refetch}
+        loading={loading}
+        error={loadError}
+        onRetry={refetch}
         rowKey={(r) => r.no}
-        rowClassName={(r) => (picked.has(r.no) ? "bg-primary/5" : "")}
+        rowClassName={(r) => (picked.has(r.no) ? 'bg-primary/5' : '')}
         searchable={false}
         emptyText="ไม่มีงานรอรับมอบหมาย"
         emptyHint="งานทั้งหมดมีผู้รับผิดชอบแล้ว"
         footerNote={
-          picked.size > 0 ? (
-            <span className="font-medium text-primary">
-              · เลือกไว้ {picked.size} งาน
-            </span>
-          ) : undefined
+          picked.size > 0 ? <span className="font-medium text-primary">· เลือกไว้ {picked.size} งาน</span> : undefined
         }
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />

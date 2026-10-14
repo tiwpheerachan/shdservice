@@ -9,7 +9,7 @@
 //   Person = { union_id, name, en_name, email, job_title, departments[], city, country,
 //              manager, manager_union_id, avatar_url, status }
 
-import { SSO_ORIGIN } from "@/lib/sso";
+import { SSO_ORIGIN } from '@/lib/sso';
 
 const CENTRAL = `${SSO_ORIGIN}/api/v1`;
 
@@ -34,7 +34,7 @@ export type DirectorySearch = {
   stale: boolean;
 };
 
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 export function mapPerson(p: Record<string, unknown>): DirectoryProfile {
   const depts = Array.isArray(p.departments) ? (p.departments as unknown[]).map(str).filter(Boolean) : [];
@@ -42,11 +42,11 @@ export function mapPerson(p: Record<string, unknown>): DirectoryProfile {
     id: str(p.union_id) || str(p.id) || str(p.email),
     name: str(p.name) || str(p.en_name),
     email: str(p.email).toLowerCase(),
-    department: depts.join(" / ") || str(p.department),
+    department: depts.join(' / ') || str(p.department),
     title: str(p.job_title) || str(p.title),
     phone: str(p.phone) || str(p.mobile),
     avatar: str(p.avatar_url) || str(p.avatar),
-    status: str(p.status) || "active",
+    status: str(p.status) || 'active',
     manager: str(p.manager),
   };
 }
@@ -62,11 +62,17 @@ function headers() {
  */
 export async function searchDirectory(q: string, limit = 20): Promise<DirectorySearch> {
   const h = headers();
-  if (!h) throw new Error("CENTRAL_API_KEY is not configured on the server");
-  const res = await fetch(`${CENTRAL}/directory/search?q=${encodeURIComponent(q.trim())}&limit=${limit}`, { headers: h, cache: "no-store", signal: AbortSignal.timeout(10_000) });
+  if (!h) throw new Error('CENTRAL_API_KEY is not configured on the server');
+  const res = await fetch(`${CENTRAL}/directory/search?q=${encodeURIComponent(q.trim())}&limit=${limit}`, {
+    headers: h,
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; need?: string };
-    throw new Error(`directory responded ${res.status}${body.error ? ` (${body.error}${body.need ? `: ${body.need}` : ""})` : ""}`);
+    throw new Error(
+      `directory responded ${res.status}${body.error ? ` (${body.error}${body.need ? `: ${body.need}` : ''})` : ''}`,
+    );
   }
   const data = (await res.json()) as { items?: unknown; synced_at?: string; stale?: boolean };
   const raw = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
@@ -79,7 +85,11 @@ export async function lookupByEmail(email: string): Promise<DirectoryProfile | n
   const target = email.trim().toLowerCase();
   if (!h || !target) return null;
   try {
-    const res = await fetch(`${CENTRAL}/directory/user?email=${encodeURIComponent(target)}`, { headers: h, cache: "no-store", signal: AbortSignal.timeout(4_000) }); // enrichment only — login goes on without it
+    const res = await fetch(`${CENTRAL}/directory/user?email=${encodeURIComponent(target)}`, {
+      headers: h,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(4_000),
+    }); // enrichment only — login goes on without it
     if (!res.ok) return null;
     const data = (await res.json()) as { person?: Record<string, unknown> };
     return data.person ? mapPerson(data.person) : null;

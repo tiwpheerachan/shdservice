@@ -1,12 +1,11 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { Eye, Pencil, Ban, Trash2, History } from "lucide-react";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import Link from 'next/link';
+import { Eye, Pencil, Ban, Trash2, History } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-const BTN =
-  "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors";
+const BTN = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors';
 
 /**
  * The icon buttons of a table row. Going to another page = a link (`viewHref` / `editHref`):
@@ -33,7 +32,12 @@ export function RowActions({
 }) {
   return (
     <div className="flex items-center justify-center gap-0.5">
-      <Action href={viewHref} onClick={onView} label="ดูรายละเอียด" className="hover:bg-primary-soft hover:text-primary">
+      <Action
+        href={viewHref}
+        onClick={onView}
+        label="ดูรายละเอียด"
+        className="hover:bg-primary-soft hover:text-primary"
+      >
         <Eye className="h-3.5 w-3.5" />
       </Action>
       <Action href={editHref} onClick={onEdit} label="แก้ไข" className="hover:bg-info-soft hover:text-info">
@@ -68,7 +72,14 @@ function Action({
   if (href)
     return (
       // no prefetch: a page of 25 rows would fetch 50 screens nobody opens; a print view (no app shell) opens in a new tab
-      <Link href={href} prefetch={false} target={href.startsWith("/print/") ? "_blank" : undefined} title={label} aria-label={label} className={cn(BTN, className)}>
+      <Link
+        href={href}
+        prefetch={false}
+        target={href.startsWith('/print/') ? '_blank' : undefined}
+        title={label}
+        aria-label={label}
+        className={cn(BTN, className)}
+      >
         {children}
       </Link>
     );

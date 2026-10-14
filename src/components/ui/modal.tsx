@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
-import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
+import { X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 /**
  * App modal — same props/look as before, now a Radix Dialog underneath
@@ -16,7 +16,7 @@ export function Modal({
   description,
   children,
   footer,
-  size = "md",
+  size = 'md',
 }: {
   open: boolean;
   onClose: () => void;
@@ -24,13 +24,13 @@ export function Modal({
   description?: string;
   children?: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const w = {
-    sm: "max-w-sm",
-    md: "max-w-lg",
-    lg: "max-w-2xl",
-    xl: "max-w-4xl",
+    sm: 'max-w-sm',
+    md: 'max-w-lg',
+    lg: 'max-w-2xl',
+    xl: 'max-w-4xl',
   }[size];
 
   return (
@@ -40,8 +40,8 @@ export function Modal({
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
           <DialogPrimitive.Content
             className={cn(
-              "relative z-10 w-full overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in",
-              w
+              'relative z-10 w-full overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in',
+              w,
             )}
           >
             <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-3.5">

@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Plus, Trash2, Wrench, Stethoscope } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { JobSearch } from "@/components/shared/job-search";
-import { Section } from "@/components/shared/section";
+import * as React from 'react';
+import { Plus, Trash2, Wrench, Stethoscope } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { Section } from '@/components/shared/section';
 import {
   CustomerSection,
   ProductSection,
@@ -18,24 +18,24 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
-} from "@/components/shared/job-form";
-import { useAccess } from "@/lib/use-access";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Textarea, Checkbox, NumberInput } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { REPAIR_STATUS_OPTIONS } from "@/data/mock";
-import { ProductPicker } from "@/components/shared/product-picker";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { SymptomPicker } from "@/components/shared/symptom-picker";
-import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from "@/data/db";
-import { baht } from "@/lib/utils";
-import { RecordGate } from "@/components/shared/record-gate";
-import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
-import { useJob, type JobDetail } from "@/lib/use-job";
-import { PrintButton } from "@/components/shared/print-button";
-import { postJson, errMsg } from "@/lib/api";
-import { repairActionSchema } from "@/lib/validation/job";
+} from '@/components/shared/job-form';
+import { useAccess } from '@/lib/use-access';
+import { Badge } from '@/components/ui/badge';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Input, Textarea, Checkbox, NumberInput } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { REPAIR_STATUS_OPTIONS } from '@/data/mock';
+import { ProductPicker } from '@/components/shared/product-picker';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { SymptomPicker } from '@/components/shared/symptom-picker';
+import { useProducts, useSymptoms, useSymptomStats, useModelSymptoms } from '@/data/db';
+import { baht } from '@/lib/utils';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { PrintButton } from '@/components/shared/print-button';
+import { postJson, errMsg } from '@/lib/api';
+import { repairActionSchema } from '@/lib/validation/job';
 
 type Line = {
   id: number;
@@ -61,15 +61,21 @@ function RepairForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
     onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
-    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
+    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
   const [lines, setLines] = React.useState<Line[]>([]);
-  const [detail, setDetail] = React.useState({ engineerSymptom: "", repairDetail: "", engineerRemark: "", newSerial: "", status: "" });
+  const [detail, setDetail] = React.useState({
+    engineerSymptom: '',
+    repairDetail: '',
+    engineerRemark: '',
+    newSerial: '',
+    status: '',
+  });
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(0);
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
@@ -84,8 +90,8 @@ function RepairForm() {
         engineerSymptom: job.engineerSymptom,
         repairDetail: job.repairDetail,
         engineerRemark: job.engineerRemark,
-        newSerial: "",
-        status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : "",
+        newSerial: '',
+        status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : '',
       },
       lines: job.parts.map((p) => ({
         id: ++idRef.current,
@@ -128,7 +134,7 @@ function RepairForm() {
         b: { pick: l.bPick, quote: l.bQuote, qty: l.bQty },
       })),
     };
-    const canEdit = can("Job Management", "edit");
+    const canEdit = can('Job Management', 'edit');
     if (!act.check(repairActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
@@ -136,9 +142,9 @@ function RepairForm() {
       adopt(await saveCommonSections(job.no, form, canEdit));
       const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, body);
       setJob(d.job);
-      push({ kind: "success", title: "บันทึกงานซ่อมเรียบร้อย", desc: `${d.job.no} · ${d.job.status}` });
+      push({ kind: 'success', title: 'บันทึกงานซ่อมเรียบร้อย', desc: `${d.job.no} · ${d.job.status}` });
     } catch (e) {
-      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -160,7 +166,7 @@ function RepairForm() {
         bPick: false,
         bQuote: false,
         bQty: 0,
-        status: p.onhand > 0 ? "พร้อมเบิก" : "รออะไหล่",
+        status: p.onhand > 0 ? 'พร้อมเบิก' : 'รออะไหล่',
       },
     ]);
   };
@@ -192,20 +198,30 @@ function RepairForm() {
         <Section title="ข้อมูลการเปิดงานซ่อม" icon={Wrench}>
           <FieldGrid>
             <Field label="หมายเลขงานซ่อม">
-              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job?.no ?? '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="วันที่เปิดงานซ่อม">
-              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job ? `${job.createDate} น.` : '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="เปิดงานซ่อมโดย">
-              <ReadOnly>{job?.createByName || "—"}</ReadOnly>
+              <ReadOnly>{job?.createByName || '—'}</ReadOnly>
             </Field>
             <Field label="ประเภทงานซ่อม">
-              <ReadOnly>{job ? `${job.jobType}${job.warranty ? ` (${job.warranty === "IN" ? "In-Warranty" : "Out-Warranty"})` : ""}` : "—"}</ReadOnly>
+              <ReadOnly>
+                {job
+                  ? `${job.jobType}${job.warranty ? ` (${job.warranty === 'IN' ? 'In-Warranty' : 'Out-Warranty'})` : ''}`
+                  : '—'}
+              </ReadOnly>
             </Field>
             <Field label="สถานะงานซ่อม (ปัจจุบัน)" wide>
               <ReadOnly>
-                <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
+                <Badge tone="warning" dot>
+                  {job?.status ?? '—'}
+                </Badge>
               </ReadOnly>
             </Field>
           </FieldGrid>
@@ -232,18 +248,30 @@ function RepairForm() {
             <table className="w-full min-w-[1080px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                  <th rowSpan={2} className="w-10 px-2 py-2 text-left">#</th>
-                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">รหัสอะไหล่</th>
-                  <th rowSpan={2} className="px-2 py-2 text-left">รายละเอียด</th>
-                  <th rowSpan={2} className="w-24 px-2 py-2 text-right">ราคา/หน่วย</th>
+                  <th rowSpan={2} className="w-10 px-2 py-2 text-left">
+                    #
+                  </th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">
+                    รหัสอะไหล่
+                  </th>
+                  <th rowSpan={2} className="px-2 py-2 text-left">
+                    รายละเอียด
+                  </th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-right">
+                    ราคา/หน่วย
+                  </th>
                   <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
                     เสนอราคาแบบ A (Normal)
                   </th>
                   <th colSpan={4} className="border-l border-border px-2 py-1.5 text-center">
                     เสนอราคาแบบ B (VIP)
                   </th>
-                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">สถานะ</th>
-                  <th rowSpan={2} className="w-16 px-2 py-2 text-center">Action</th>
+                  <th rowSpan={2} className="w-24 px-2 py-2 text-left">
+                    สถานะ
+                  </th>
+                  <th rowSpan={2} className="w-16 px-2 py-2 text-center">
+                    Action
+                  </th>
                 </tr>
                 <tr className="border-b border-border bg-muted/60 text-2xs text-muted-foreground">
                   <th className="w-14 border-l border-border px-2 py-1.5 text-center">เบิก</th>
@@ -274,10 +302,18 @@ function RepairForm() {
                       <td className="num px-2 py-2 text-right">{baht(l.price)}</td>
 
                       <td className="border-l border-border px-2 py-2 text-center">
-                        <Checkbox checked={l.aPick} disabled={l.locked} onChange={() => upd(l.id, { aPick: !l.aPick })} />
+                        <Checkbox
+                          checked={l.aPick}
+                          disabled={l.locked}
+                          onChange={() => upd(l.id, { aPick: !l.aPick })}
+                        />
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <Checkbox checked={l.aQuote} disabled={l.locked} onChange={() => upd(l.id, { aQuote: !l.aQuote })} />
+                        <Checkbox
+                          checked={l.aQuote}
+                          disabled={l.locked}
+                          onChange={() => upd(l.id, { aQuote: !l.aQuote })}
+                        />
                       </td>
                       <td className="px-2 py-2">
                         <NumberInput
@@ -289,15 +325,21 @@ function RepairForm() {
                           className="h-7 w-14 px-1.5 text-xs"
                         />
                       </td>
-                      <td className="num px-2 py-2 text-right">
-                        {baht(l.aQuote ? l.price * l.aQty : 0)}
-                      </td>
+                      <td className="num px-2 py-2 text-right">{baht(l.aQuote ? l.price * l.aQty : 0)}</td>
 
                       <td className="border-l border-border px-2 py-2 text-center">
-                        <Checkbox checked={l.bPick} disabled={l.locked} onChange={() => upd(l.id, { bPick: !l.bPick })} />
+                        <Checkbox
+                          checked={l.bPick}
+                          disabled={l.locked}
+                          onChange={() => upd(l.id, { bPick: !l.bPick })}
+                        />
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <Checkbox checked={l.bQuote} disabled={l.locked} onChange={() => upd(l.id, { bQuote: !l.bQuote })} />
+                        <Checkbox
+                          checked={l.bQuote}
+                          disabled={l.locked}
+                          onChange={() => upd(l.id, { bQuote: !l.bQuote })}
+                        />
                       </td>
                       <td className="px-2 py-2">
                         <NumberInput
@@ -309,12 +351,19 @@ function RepairForm() {
                           className="h-7 w-14 px-1.5 text-xs"
                         />
                       </td>
-                      <td className="num px-2 py-2 text-right">
-                        {baht(l.bQuote ? l.price * l.bQty : 0)}
-                      </td>
+                      <td className="num px-2 py-2 text-right">{baht(l.bQuote ? l.price * l.bQty : 0)}</td>
 
                       <td className="px-2 py-2">
-                        <Badge tone={/พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status) ? "success" : /รออะไหล่/.test(l.status) ? "danger" : "warning"} dot>
+                        <Badge
+                          tone={
+                            /พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status)
+                              ? 'success'
+                              : /รออะไหล่/.test(l.status)
+                                ? 'danger'
+                                : 'warning'
+                          }
+                          dot
+                        >
                           {l.status}
                         </Badge>
                       </td>
@@ -358,8 +407,10 @@ function RepairForm() {
               <SymptomPicker
                 multiple={false}
                 value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
-                onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? "" }))}
-                options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
+                onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? '' }))}
+                options={
+                  SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))
+                }
                 suggested={MODEL_SYMPTOMS}
                 suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
                 placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
@@ -374,13 +425,30 @@ function RepairForm() {
               />
             </Field>
             <Field label="หมายเหตุ" className="lg:col-span-2">
-              <Textarea rows={3} value={detail.engineerRemark} onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))} />
+              <Textarea
+                rows={3}
+                value={detail.engineerRemark}
+                onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))}
+              />
             </Field>
             <Field label="New Serial No.">
-              <Input className="num" value={detail.newSerial} onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))} />
+              <Input
+                className="num"
+                value={detail.newSerial}
+                onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))}
+              />
             </Field>
             <Field label="สถานะงานซ่อม" required error={act.errors.status}>
-              <SearchSelect value={detail.status} onChange={(v) => { setDetail((d) => ({ ...d, status: v })); act.clear("status"); }} options={strOptions(REPAIR_STATUS_OPTIONS)} minWidth={360} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+              <SearchSelect
+                value={detail.status}
+                onChange={(v) => {
+                  setDetail((d) => ({ ...d, status: v }));
+                  act.clear('status');
+                }}
+                options={strOptions(REPAIR_STATUS_OPTIONS)}
+                minWidth={360}
+                searchPlaceholder="พิมพ์ชื่อสถานะ…"
+              />
             </Field>
           </FieldGrid>
         </Section>
@@ -393,10 +461,17 @@ function RepairForm() {
           saveLabel="บันทึกงานซ่อม"
           onSave={save}
           saving={saving}
-          denied={can("Job Repair", "edit") ? undefined : VIEW_ONLY}
+          denied={can('Job Repair', 'edit') ? undefined : VIEW_ONLY}
           cancelHref="/jobs/list"
           extra={
-            <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
+            <PrintButton
+              label="พิมพ์ใบรับงาน"
+              kind="job"
+              no={job?.no ?? ''}
+              profileId={job?.documentProfileId}
+              href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+              disabled={!job}
+            />
           }
         />
       </RecordGate>

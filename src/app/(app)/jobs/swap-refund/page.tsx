@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { RefreshCcw, ClipboardList } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { JobSearch } from "@/components/shared/job-search";
-import { Section } from "@/components/shared/section";
+import * as React from 'react';
+import { RefreshCcw, ClipboardList } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { Section } from '@/components/shared/section';
 import {
   CustomerSection,
   ProductSection,
@@ -18,27 +18,27 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
-} from "@/components/shared/job-form";
-import { useAccess } from "@/lib/use-access";
-import { Tabs } from "@/components/ui/tabs";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { JOB_STATUS_OPTIONS } from "@/data/mock";
-import { RecordGate } from "@/components/shared/record-gate";
-import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
-import { useJob, type JobDetail } from "@/lib/use-job";
-import { postJson, errMsg } from "@/lib/api";
-import { today as thaiToday } from "@/lib/dates";
-import { swapRefundActionSchema } from "@/lib/validation/job";
+} from '@/components/shared/job-form';
+import { useAccess } from '@/lib/use-access';
+import { Tabs } from '@/components/ui/tabs';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { Badge } from '@/components/ui/badge';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Input, Select, Textarea } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { JOB_STATUS_OPTIONS } from '@/data/mock';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { postJson, errMsg } from '@/lib/api';
+import { today as thaiToday } from '@/lib/dates';
+import { swapRefundActionSchema } from '@/lib/validation/job';
 
 // parse the "key: value" lines this app writes into job.swap_refund_detail
 function parseSwap(text: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const i = line.indexOf(":");
+  for (const line of text.split('\n')) {
+    const i = line.indexOf(':');
     if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
   return out;
@@ -49,27 +49,27 @@ function SwapRefundForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
     onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
-    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
+    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
-  const [tab, setTab] = React.useState("product");
-  const [mode, setMode] = React.useState("swap");
+  const [tab, setTab] = React.useState('product');
+  const [mode, setMode] = React.useState('swap');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
-    inspection: "",
-    newSerial: "",
-    newModel: "",
-    swapDate: "",
-    docNo: "",
-    refundAmount: "",
-    refundMethod: "โอนเงินเข้าบัญชี",
-    refundRef: "",
-    refundDate: "",
-    detail: "",
-    status: "",
+    inspection: '',
+    newSerial: '',
+    newModel: '',
+    swapDate: '',
+    docNo: '',
+    refundAmount: '',
+    refundMethod: 'โอนเงินเข้าบัญชี',
+    refundRef: '',
+    refundDate: '',
+    detail: '',
+    status: '',
   });
   const upd = (p: Partial<typeof d>) => {
     setD((x) => ({ ...x, ...p }));
@@ -83,24 +83,24 @@ function SwapRefundForm() {
     reset(fromJob(job));
     const sw = parseSwap(job.swap.detail);
     const today = thaiToday(); // Thai calendar, not UTC
-    const refund = !!sw["ยอดเงินคืน"] || job.payment.amount < 0;
+    const refund = !!sw['ยอดเงินคืน'] || job.payment.amount < 0;
     const next = {
       inspection: job.repairDetail,
-      newSerial: (sw["New S/N"] ?? "").trim(),
-      newModel: sw["รุ่นที่เปลี่ยนให้"] ?? "",
-      swapDate: sw["วันที่เปลี่ยนเครื่อง"] || today,
+      newSerial: (sw['New S/N'] ?? '').trim(),
+      newModel: sw['รุ่นที่เปลี่ยนให้'] ?? '',
+      swapDate: sw['วันที่เปลี่ยนเครื่อง'] || today,
       docNo: job.swap.docNo,
-      refundAmount: sw["ยอดเงินคืน"] ?? (job.payment.amount < 0 ? String(Math.abs(job.payment.amount)) : ""),
-      refundMethod: sw["วิธีการคืนเงิน"] || "โอนเงินเข้าบัญชี",
-      refundRef: sw["เลขที่บัญชี/อ้างอิง"] ?? "",
-      refundDate: sw["วันที่คืนเงิน"] || today,
-      detail: sw["รายละเอียด"] ?? (job.swap.detail && Object.keys(sw).length === 0 ? job.swap.detail : ""),
+      refundAmount: sw['ยอดเงินคืน'] ?? (job.payment.amount < 0 ? String(Math.abs(job.payment.amount)) : ''),
+      refundMethod: sw['วิธีการคืนเงิน'] || 'โอนเงินเข้าบัญชี',
+      refundRef: sw['เลขที่บัญชี/อ้างอิง'] ?? '',
+      refundDate: sw['วันที่คืนเงิน'] || today,
+      detail: sw['รายละเอียด'] ?? (job.swap.detail && Object.keys(sw).length === 0 ? job.swap.detail : ''),
       // the job's current status, so saving without a change keeps it (the field is required)
-      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : "",
+      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : '',
     };
-    setMode(refund ? "refund" : "swap");
+    setMode(refund ? 'refund' : 'swap');
     upd(next);
-    setSaved({ mode: refund ? "refund" : "swap", d: next });
+    setSaved({ mode: refund ? 'refund' : 'swap', d: next });
   }
 
   const go = (v: string) => find(v);
@@ -109,19 +109,40 @@ function SwapRefundForm() {
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body =
-      mode === "swap"
-        ? { inspection: d.inspection, newSerial: d.newSerial, newModel: d.newModel, swapDate: d.swapDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined }
-        : { inspection: d.inspection, refundAmount: d.refundAmount, refundMethod: d.refundMethod, refundRef: d.refundRef, refundDate: d.refundDate, docNo: d.docNo, detail: d.detail, status: d.status || undefined };
-    const canEdit = can("Job Management", "edit");
+      mode === 'swap'
+        ? {
+            inspection: d.inspection,
+            newSerial: d.newSerial,
+            newModel: d.newModel,
+            swapDate: d.swapDate,
+            docNo: d.docNo,
+            detail: d.detail,
+            status: d.status || undefined,
+          }
+        : {
+            inspection: d.inspection,
+            refundAmount: d.refundAmount,
+            refundMethod: d.refundMethod,
+            refundRef: d.refundRef,
+            refundDate: d.refundDate,
+            docNo: d.docNo,
+            detail: d.detail,
+            status: d.status || undefined,
+          };
+    const canEdit = can('Job Management', 'edit');
     if (!act.check(swapRefundActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, body);
       setJob(r.job);
-      push({ kind: "success", title: mode === "swap" ? "บันทึกการเปลี่ยนเครื่องแล้ว" : "บันทึกการคืนเงินแล้ว", desc: `${r.job.no} · ${r.job.status}` });
+      push({
+        kind: 'success',
+        title: mode === 'swap' ? 'บันทึกการเปลี่ยนเครื่องแล้ว' : 'บันทึกการคืนเงินแล้ว',
+        desc: `${r.job.no} · ${r.job.status}`,
+      });
     } catch (e) {
-      if (!act.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!act.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -148,17 +169,23 @@ function SwapRefundForm() {
         <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
           <FieldGrid>
             <Field label="หมายเลขงาน">
-              <ReadOnly><span className="num">{job?.no ?? "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job?.no ?? '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="วันที่เปิดงาน">
-              <ReadOnly><span className="num">{job ? `${job.createDate} น.` : "—"}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{job ? `${job.createDate} น.` : '—'}</span>
+              </ReadOnly>
             </Field>
             <Field label="เปิดงานโดย">
-              <ReadOnly>{job?.createByName || "—"}</ReadOnly>
+              <ReadOnly>{job?.createByName || '—'}</ReadOnly>
             </Field>
             <Field label="สถานะงาน (ปัจจุบัน)">
               <ReadOnly>
-                <Badge tone="warning" dot>{job?.status ?? "—"}</Badge>
+                <Badge tone="warning" dot>
+                  {job?.status ?? '—'}
+                </Badge>
               </ReadOnly>
             </Field>
           </FieldGrid>
@@ -168,19 +195,19 @@ function SwapRefundForm() {
           value={tab}
           onChange={setTab}
           tabs={[
-            { key: "product", label: "ข้อมูลสินค้า" },
-            { key: "detail", label: "รายละเอียดการซ่อม" },
+            { key: 'product', label: 'ข้อมูลสินค้า' },
+            { key: 'detail', label: 'รายละเอียดการซ่อม' },
           ]}
         />
 
-        {tab === "product" ? (
+        {tab === 'product' ? (
           <ProductSection title="ข้อมูลสินค้า" variant="repair" />
         ) : (
           <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
             <FieldGrid>
               <MainSymptomField />
               <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set("symptomOther", e.target.value)} />
+                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
               </Field>
               <Field label="ผลการตรวจสอบ" wide>
                 <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
@@ -192,17 +219,17 @@ function SwapRefundForm() {
         <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
           <div className="mb-4 flex gap-2">
             {[
-              { k: "swap", l: "Swap — เปลี่ยนเครื่องใหม่" },
-              { k: "refund", l: "Refund — คืนเงิน" },
+              { k: 'swap', l: 'Swap — เปลี่ยนเครื่องใหม่' },
+              { k: 'refund', l: 'Refund — คืนเงิน' },
             ].map((o) => (
               <button
                 key={o.k}
                 onClick={() => setMode(o.k)}
                 className={
-                  "flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors " +
+                  'flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ' +
                   (mode === o.k
-                    ? "border-primary bg-primary-soft text-primary"
-                    : "border-border bg-card text-muted-foreground hover:border-input")
+                    ? 'border-primary bg-primary-soft text-primary'
+                    : 'border-border bg-card text-muted-foreground hover:border-input')
                 }
               >
                 {o.l}
@@ -211,7 +238,7 @@ function SwapRefundForm() {
           </div>
 
           <FieldGrid>
-            {mode === "swap" ? (
+            {mode === 'swap' ? (
               <>
                 <Field label="New Serial No." required error={act.errors.newSerial}>
                   <Input className="num" value={d.newSerial} onChange={(e) => upd({ newSerial: e.target.value })} />
@@ -260,7 +287,12 @@ function SwapRefundForm() {
               <Textarea rows={3} value={d.detail} onChange={(e) => upd({ detail: e.target.value })} />
             </Field>
             <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
-              <SearchSelect value={d.status} onChange={(v) => upd({ status: v })} options={strOptions(JOB_STATUS_OPTIONS)} searchPlaceholder="พิมพ์ชื่อสถานะ…" />
+              <SearchSelect
+                value={d.status}
+                onChange={(v) => upd({ status: v })}
+                options={strOptions(JOB_STATUS_OPTIONS)}
+                searchPlaceholder="พิมพ์ชื่อสถานะ…"
+              />
             </Field>
           </FieldGrid>
         </Section>
@@ -268,7 +300,13 @@ function SwapRefundForm() {
         <CostSummary />
         <AttachmentSection jobNo={job?.no} />
 
-        <FormActions saveLabel="บันทึกข้อมูล" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Management", "edit") ? undefined : VIEW_ONLY} />
+        <FormActions
+          saveLabel="บันทึกข้อมูล"
+          onSave={save}
+          saving={saving}
+          cancelHref="/jobs/list"
+          denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
+        />
       </RecordGate>
     </>
   );

@@ -1,24 +1,24 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { PackagePlus, Save } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { Section } from "@/components/shared/section";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect } from "@/components/shared/search-select";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Select, Textarea, NumberInput } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { useProducts, useManufacturers, useCategories } from "@/data/db";
-import { int, isFilterActive } from "@/lib/utils";
-import { postJson, errMsg } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { today } from "@/lib/dates";
-import { useClearOnChange, useFormErrors } from "@/lib/use-form-errors";
-import type { Product } from "@/data/mock";
+import * as React from 'react';
+import { PackagePlus, Save } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect } from '@/components/shared/search-select';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field, FieldGrid } from '@/components/ui/field';
+import { Input, Select, Textarea, NumberInput } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { useProducts, useManufacturers, useCategories } from '@/data/db';
+import { int, isFilterActive } from '@/lib/utils';
+import { postJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { today } from '@/lib/dates';
+import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import type { Product } from '@/data/mock';
 
 type Row = {
   sysCode: string;
@@ -35,10 +35,10 @@ type Row = {
 function toRows(products: Product[]): Row[] {
   return products.map((p) => ({
     sysCode: p.sysCode,
-    mfgCode: p.mfgCode ?? "",
+    mfgCode: p.mfgCode ?? '',
     name: p.name,
-    brand: p.brand ?? "",
-    category: p.category ?? "",
+    brand: p.brand ?? '',
+    category: p.category ?? '',
     status: p.status,
     onhand: p.onhand,
     qty: 0,
@@ -63,21 +63,26 @@ export default function ReceivePage() {
   // filter bar narrows which lines are SHOWN; quantities typed into hidden lines are kept
   // (the save reads `rows`, not the visible subset) and counted in the footer
   type LineFilter = { code: string; mfgCode: string; name: string; brand: string; category: string };
-  const NO_FILTER: LineFilter = { code: "", mfgCode: "", name: "", brand: "", category: "" };
+  const NO_FILTER: LineFilter = { code: '', mfgCode: '', name: '', brand: '', category: '' };
   const [draft, setDraft] = React.useState<LineFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<LineFilter>(NO_FILTER);
   const has = (v: string, t: string) => !t.trim() || v.toLowerCase().includes(t.trim().toLowerCase());
   const visible = React.useMemo(
     () =>
       rows.filter(
-        (r) => has(r.sysCode, filter.code) && has(r.mfgCode, filter.mfgCode) && has(r.name, filter.name) && (!filter.brand || r.brand === filter.brand) && (!filter.category || r.category === filter.category)
+        (r) =>
+          has(r.sysCode, filter.code) &&
+          has(r.mfgCode, filter.mfgCode) &&
+          has(r.name, filter.name) &&
+          (!filter.brand || r.brand === filter.brand) &&
+          (!filter.category || r.category === filter.category),
       ),
-    [rows, filter]
+    [rows, filter],
   );
-  const [po, setPo] = React.useState("");
+  const [po, setPo] = React.useState('');
   const [date, setDate] = React.useState(today); // Thai calendar — identical on the server and in the browser
-  const [supplier, setSupplier] = React.useState("");
-  const [remark, setRemark] = React.useState("");
+  const [supplier, setSupplier] = React.useState('');
+  const [remark, setRemark] = React.useState('');
   const [saving, setSaving] = React.useState(false);
 
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
@@ -86,19 +91,25 @@ export default function ReceivePage() {
   // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
   const save = async () => {
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
-    const e: Record<string, string> = lines.length ? {} : { lines: "ต้องระบุจำนวนรับเข้าอย่างน้อย 1 รายการ" };
+    const e: Record<string, string> = lines.length ? {} : { lines: 'ต้องระบุจำนวนรับเข้าอย่างน้อย 1 รายการ' };
     fe.setErrors(e);
     if (fe.report(e)) return;
     setSaving(true);
     try {
-      const d = await postJson<{ no: string; total: number }>("/api/stock/receive", { date, poRef: po, supplier, remark, lines });
-      push({ kind: "success", title: "บันทึกการรับเข้าแล้ว", desc: `${d.no} · รวม ${int(d.total)} ชิ้น` });
-      setPo("");
-      setSupplier("");
-      setRemark("");
+      const d = await postJson<{ no: string; total: number }>('/api/stock/receive', {
+        date,
+        poRef: po,
+        supplier,
+        remark,
+        lines,
+      });
+      push({ kind: 'success', title: 'บันทึกการรับเข้าแล้ว', desc: `${d.no} · รวม ${int(d.total)} ชิ้น` });
+      setPo('');
+      setSupplier('');
+      setRemark('');
       refetch();
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -113,43 +124,47 @@ export default function ReceivePage() {
 
   const columns: Column<Row>[] = [
     {
-      key: "no",
-      header: "#",
-      width: "52px",
-      align: "center",
+      key: 'no',
+      header: '#',
+      width: '52px',
+      align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
-      key: "sysCode",
-      header: "Item Code",
-      width: "110px",
+      key: 'sysCode',
+      header: 'Item Code',
+      width: '110px',
       cell: (r) => <span className="num font-medium">{r.sysCode}</span>,
     },
     {
-      key: "name",
-      header: "Item Name",
+      key: 'name',
+      header: 'Item Name',
       cell: (r) => <span className="line-clamp-2 max-w-[420px]">{r.name}</span>,
     },
     {
-      key: "status",
-      header: "สถานะ",
-      width: "100px",
-      cell: (r) => <Badge tone="success" dot>{r.status}</Badge>,
+      key: 'status',
+      header: 'สถานะ',
+      width: '100px',
+      cell: (r) => (
+        <Badge tone="success" dot>
+          {r.status}
+        </Badge>
+      ),
     },
     {
-      key: "onhand",
-      header: "คงเหลือ",
-      align: "right",
-      width: "90px",
+      key: 'onhand',
+      header: 'คงเหลือ',
+      align: 'right',
+      width: '90px',
       value: (r) => r.onhand,
       cell: (r) => int(r.onhand),
     },
     {
-      key: "qty",
-      header: "จำนวนรับเข้า",
-      align: "right",
-      width: "140px",
+      key: 'qty',
+      header: 'จำนวนรับเข้า',
+      align: 'right',
+      width: '140px',
       sortable: false,
       cell: (r) => (
         <NumberInput
@@ -203,7 +218,7 @@ export default function ReceivePage() {
             <Input placeholder="ชื่อผู้จัดส่ง" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
           </Field>
           <Field label="รับเข้าโดย">
-            <Input readOnly value={me || "—"} />
+            <Input readOnly value={me || '—'} />
           </Field>
           <Field label="หมายเหตุ" wide>
             <Textarea
@@ -216,24 +231,49 @@ export default function ReceivePage() {
         </FieldGrid>
       </Section>
 
-      <FilterBar
-        onSearch={() => setFilter(draft)}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={() => setFilter(draft)} onReset={resetFilters}>
         <Field label="รหัสอะไหล่ (ระบบ)">
-          <Input placeholder="P00012" className="num" value={draft.code} onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))} />
+          <Input
+            placeholder="P00012"
+            className="num"
+            value={draft.code}
+            onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))}
+          />
         </Field>
         <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-          <Input placeholder="เลข part" className="num" value={draft.mfgCode} onChange={(e) => setDraft((f) => ({ ...f, mfgCode: e.target.value }))} />
+          <Input
+            placeholder="เลข part"
+            className="num"
+            value={draft.mfgCode}
+            onChange={(e) => setDraft((f) => ({ ...f, mfgCode: e.target.value }))}
+          />
         </Field>
         <Field label="ชื่ออะไหล่">
-          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+          <Input
+            placeholder="พิมพ์บางส่วนของชื่อ"
+            value={draft.name}
+            onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))}
+          />
         </Field>
         <Field label="ยี่ห้อ (ผู้ผลิต)">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v }))} options={BRANDS.map((b) => ({ value: b.name, label: b.name }))} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.brand}
+            onChange={(v) => setDraft((f) => ({ ...f, brand: v }))}
+            options={BRANDS.map((b) => ({ value: b.name, label: b.name }))}
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="หมวดหมู่">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.category} onChange={(v) => setDraft((f) => ({ ...f, category: v }))} options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))} searchPlaceholder="พิมพ์ชื่อหมวดหมู่…" />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.category}
+            onChange={(v) => setDraft((f) => ({ ...f, category: v }))}
+            options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))}
+            searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
+          />
         </Field>
       </FilterBar>
 
@@ -252,7 +292,8 @@ export default function ReceivePage() {
         rowKey={(r) => r.sysCode}
         footerNote={
           <span className="font-medium text-foreground">
-            · รวมรับเข้า {int(totalQty)} ชิ้น ({totalLines} รายการ{hiddenLines ? ` — ${hiddenLines} รายการอยู่นอกตัวกรอง` : ""})
+            · รวมรับเข้า {int(totalQty)} ชิ้น ({totalLines} รายการ
+            {hiddenLines ? ` — ${hiddenLines} รายการอยู่นอกตัวกรอง` : ''})
           </span>
         }
       />

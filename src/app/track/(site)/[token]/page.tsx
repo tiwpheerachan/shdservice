@@ -1,10 +1,10 @@
-import { headers } from "next/headers";
-import { clientIp, ipBucket } from "@/lib/client-ip";
-import { TRACK_MSG } from "@/lib/track-public";
-import { hit, hmac, logEvent } from "@/server/track-guard";
-import { TrackClient } from "../track-client";
+import { headers } from 'next/headers';
+import { clientIp, ipBucket } from '@/lib/client-ip';
+import { TRACK_MSG } from '@/lib/track-public';
+import { hit, hmac, logEvent } from '@/server/track-guard';
+import { TrackClient } from '../track-client';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 /**
  * /track/<linkToken> — the page SHELL only.
@@ -21,20 +21,24 @@ export default async function Page({ params }: { params: Promise<{ token: string
 
   let allowed = true;
   try {
-    allowed = await hit("page_ip_min", ipKey, 30, 60);
+    allowed = await hit('page_ip_min', ipKey, 30, 60);
   } catch {
     allowed = true; // counter table unreachable → the captcha + API limits still stand
   }
-  logEvent(allowed ? "track_page_open" : "page_rate_limited", { ipHash: ipKey });
+  logEvent(allowed ? 'track_page_open' : 'page_rate_limited', { ipHash: ipKey });
   if (!allowed) {
-    return <div className="surface mx-auto max-w-md p-6 text-center text-sm text-muted-foreground">{TRACK_MSG.rateLimited}</div>;
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center text-sm text-muted-foreground">
+        {TRACK_MSG.rateLimited}
+      </div>
+    );
   }
 
-  let linkToken = "";
+  let linkToken = '';
   try {
     linkToken = decodeURIComponent(token).slice(0, 128);
   } catch {
-    linkToken = "";
+    linkToken = '';
   }
-  return <TrackClient mode="link" linkToken={linkToken} nonce={h.get("x-nonce") ?? undefined} />;
+  return <TrackClient mode="link" linkToken={linkToken} nonce={h.get('x-nonce') ?? undefined} />;
 }

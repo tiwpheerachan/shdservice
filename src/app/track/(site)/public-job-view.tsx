@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { CircleCheck, CircleDot, Circle, Ban, Truck, ExternalLink, FileText, Loader2 } from "lucide-react";
-import { TRACK_MSG, TRACK_STEPS, type PublicDoc, type PublicJob } from "@/lib/track-public";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { CircleCheck, CircleDot, Circle, Ban, Truck, ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { TRACK_MSG, TRACK_STEPS, type PublicDoc, type PublicJob } from '@/lib/track-public';
+import { cn } from '@/lib/utils';
 
 /**
  * Asks the server for a one-time document URL (POST /api/track/doc) — the caller adds its own
@@ -16,18 +16,18 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
   const reached = new Map(j.history.map((h) => [h.key, h.at]));
   const currentIndex = j.step ? TRACK_STEPS.findIndex((s) => s.key === j.step) : -1;
   const docs = onOpenDoc ? j.docs : [];
-  const [busy, setBusy] = React.useState("");
-  const [docError, setDocError] = React.useState("");
+  const [busy, setBusy] = React.useState('');
+  const [docError, setDocError] = React.useState('');
   /** pop-up blocked: a plain link the customer taps (the ticket lives 60 s) */
   const [fallback, setFallback] = React.useState<{ label: string; url: string } | null>(null);
 
   const openDoc = async (d: PublicDoc) => {
     if (!onOpenDoc || busy) return;
     setBusy(`${d.kind}:${d.ref}`);
-    setDocError("");
+    setDocError('');
     setFallback(null);
     // open the tab inside the click (pop-up blockers allow that), point it at the ticket once issued
-    const w = window.open("", "_blank");
+    const w = window.open('', '_blank');
     if (w) w.opener = null;
     try {
       const r = await onOpenDoc(d);
@@ -43,7 +43,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
       w?.close();
       setDocError(TRACK_MSG.docFail);
     } finally {
-      setBusy("");
+      setBusy('');
     }
   };
 
@@ -60,7 +60,11 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               disabled={!!busy}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
             >
-              {busy === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 text-primary" />}
+              {busy === key ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <FileText className="h-3.5 w-3.5 text-primary" />
+              )}
               {d.label}
             </button>
           );
@@ -73,13 +77,20 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
       {docError && <p className="text-danger">{docError}</p>}
       {fallback && (
         <p>
-          <a href={fallback.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">
+          <a
+            href={fallback.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-primary underline"
+          >
             แตะเพื่อเปิด {fallback.label}
-          </a>{" "}
+          </a>{' '}
           <span className="text-muted-foreground">(ใช้ได้ภายใน 1 นาที)</span>
         </p>
       )}
-      <p className="text-muted-foreground">เอกสารจะเปิดในแท็บใหม่ · เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์หากต้องการเก็บไฟล์</p>
+      <p className="text-muted-foreground">
+        เอกสารจะเปิดในแท็บใหม่ · เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์หากต้องการเก็บไฟล์
+      </p>
     </div>
   );
 
@@ -90,10 +101,10 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
         <h1 className="num mt-0.5 text-xl font-semibold tracking-tight">{j.no}</h1>
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:grid-cols-4">
           {[
-            ["ลูกค้า", j.customerMasked],
-            ["เครื่อง", j.brandModel || "—"],
-            ["S/N", j.deviceRef || "—"],
-            ["วันที่รับเครื่อง", j.receivedDate || "—"],
+            ['ลูกค้า', j.customerMasked],
+            ['เครื่อง', j.brandModel || '—'],
+            ['S/N', j.deviceRef || '—'],
+            ['วันที่รับเครื่อง', j.receivedDate || '—'],
           ].map(([k, v]) => (
             <div key={k}>
               <dt className="text-2xs text-muted-foreground">{k}</dt>
@@ -134,11 +145,11 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                       <Circle className="h-5 w-5 text-muted-foreground/40" />
                     )}
                     {i < TRACK_STEPS.length - 1 && (
-                      <span className={cn("my-0.5 w-px flex-1", done ? "bg-success/40" : "bg-border")} />
+                      <span className={cn('my-0.5 w-px flex-1', done ? 'bg-success/40' : 'bg-border')} />
                     )}
                   </div>
-                  <div className={cn("pb-5", !done && !now && "opacity-55")}>
-                    <p className={cn("text-sm font-medium", now && "text-primary")}>{s.label}</p>
+                  <div className={cn('pb-5', !done && !now && 'opacity-55')}>
+                    <p className={cn('text-sm font-medium', now && 'text-primary')}>{s.label}</p>
                     <p className="text-xs text-muted-foreground">{s.hint}</p>
                     {at && <p className="num mt-0.5 text-2xs text-muted-foreground">{at}</p>}
                     {docButtons(docs.filter((d) => d.step === s.key))}
@@ -156,13 +167,18 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                 <span className="grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-white ring-1 ring-border">
                   {j.courier?.logoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={j.courier.logoUrl} alt={j.courier.name} referrerPolicy="no-referrer" className="max-h-8 max-w-[56px] object-contain" />
+                    <img
+                      src={j.courier.logoUrl}
+                      alt={j.courier.name}
+                      referrerPolicy="no-referrer"
+                      className="max-h-8 max-w-[56px] object-contain"
+                    />
                   ) : (
                     <Truck className="h-4 w-4 text-muted-foreground" />
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-muted-foreground">{j.courier?.name || j.shipper || "การจัดส่งคืน"}</p>
+                  <p className="text-xs text-muted-foreground">{j.courier?.name || j.shipper || 'การจัดส่งคืน'}</p>
                   <p className="num text-sm font-semibold tracking-tight">{j.trackingNo}</p>
                 </div>
                 {j.courier?.trackUrl && (

@@ -1,13 +1,13 @@
-import "server-only";
-import { and, count, desc, eq, ne, sql } from "drizzle-orm";
-import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { db } from "@/db/client";
-import { appUser, customer, job, jobStatus, manufacturer } from "@/db/schema";
-import { cached } from "@/server/cache";
-import { RS } from "@/server/record-status";
-import { fmtDate } from "@/server/mappers/format";
-import type { CurrentUser } from "@/server/auth";
-import { daysOverdue, effectiveDue, effectiveDueText, overdueWhere } from "./jobs";
+import 'server-only';
+import { and, count, desc, eq, ne, sql } from 'drizzle-orm';
+import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { db } from '@/db/client';
+import { appUser, customer, job, jobStatus, manufacturer } from '@/db/schema';
+import { cached } from '@/server/cache';
+import { RS } from '@/server/record-status';
+import { fmtDate } from '@/server/mappers/format';
+import type { CurrentUser } from '@/server/auth';
+import { daysOverdue, effectiveDue, effectiveDueText, overdueWhere } from './jobs';
 
 /**
  * Notification bell (topbar): jobs past their customer due date that are still open
@@ -31,7 +31,7 @@ export type OverdueItem = {
 };
 export type OverdueOwner = { engineerId: number | null; name: string; count: number };
 export type OverdueAlerts = {
-  scope: "mine" | "all";
+  scope: 'mine' | 'all';
   /** the engineer the list is limited to (scope "mine") — for the "ดูทั้งหมด" link */
   engineerId: number | null;
   total: number;
@@ -42,22 +42,26 @@ export type OverdueAlerts = {
 
 const ITEM_LIMIT = 30;
 const OWNER_LIMIT = 8;
-const eng = alias(appUser, "eng");
-const opener = alias(appUser, "opener");
+const eng = alias(appUser, 'eng');
+const opener = alias(appUser, 'opener');
 const nameOf = (u: { firstName: AnyPgColumn; lastName: AnyPgColumn }) =>
   sql<string>`trim(coalesce(${u.firstName}, '') || ' ' || coalesce(${u.lastName}, ''))`;
 const assigned = sql`coalesce(${job.engineerId}, 0) > 0`;
 
-export const isEngineer = (u: CurrentUser) => (u.userType ?? "").trim() === "Engineer";
+export const isEngineer = (u: CurrentUser) => (u.userType ?? '').trim() === 'Engineer';
 
 export function overdueAlerts(u: CurrentUser): Promise<OverdueAlerts> {
   const mine = isEngineer(u);
   // one minute is fresh enough for a bell; keyed by scope so engineers never share a list
-  return cached(`alerts:overdue:${mine ? u.userId : "all"}`, 60_000, () => load(mine ? u.userId : null));
+  return cached(`alerts:overdue:${mine ? u.userId : 'all'}`, 60_000, () => load(mine ? u.userId : null));
 }
 
 async function load(engineerId: number | null): Promise<OverdueAlerts> {
-  const where = and(ne(job.recordStatus, RS.DELETED), overdueWhere, engineerId === null ? undefined : eq(job.engineerId, engineerId));
+  const where = and(
+    ne(job.recordStatus, RS.DELETED),
+    overdueWhere,
+    engineerId === null ? undefined : eq(job.engineerId, engineerId),
+  );
 
   const [[totals], owners, items] = await Promise.all([
     db
@@ -101,17 +105,21 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
   ]);
 
   return {
-    scope: engineerId === null ? "all" : "mine",
+    scope: engineerId === null ? 'all' : 'mine',
     engineerId,
     total: Number(totals?.total ?? 0),
     unassigned: Number(totals?.unassigned ?? 0),
-    owners: owners.map((o) => ({ engineerId: o.engineerId, name: o.name || `ผู้ใช้ #${o.engineerId}`, count: Number(o.count) })),
+    owners: owners.map((o) => ({
+      engineerId: o.engineerId,
+      name: o.name || `ผู้ใช้ #${o.engineerId}`,
+      count: Number(o.count),
+    })),
     items: items.map((r) => ({
       no: r.no,
-      product: [r.brand, r.model].filter(Boolean).join(" ").trim(),
+      product: [r.brand, r.model].filter(Boolean).join(' ').trim(),
       // customer_detail = "C43600 ชื่อ เบอร์" when the customer row is missing
-      customer: (r.customer ?? r.customerDetail ?? "").replace(/^[A-Z]\d+\s+/i, "").trim(),
-      status: (r.status ?? "").trim(),
+      customer: (r.customer ?? r.customerDetail ?? '').replace(/^[A-Z]\d+\s+/i, '').trim(),
+      status: (r.status ?? '').trim(),
       dueDate: fmtDate(r.dueDate),
       daysOver: r.daysOver,
       engineer: (r.engineerId ?? 0) > 0 ? r.engineer || `ผู้ใช้ #${r.engineerId}` : null,

@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Script from "next/script";
-import { Clock, Loader2, Search, ShieldCheck, Timer } from "lucide-react";
-import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from "@/lib/track-public";
-import { PublicJobView } from "./public-job-view";
-import { TrackOtp } from "./track-otp";
+import * as React from 'react';
+import Script from 'next/script';
+import { Clock, Loader2, Search, ShieldCheck, Timer } from 'lucide-react';
+import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from '@/lib/track-public';
+import { PublicJobView } from './public-job-view';
+import { TrackOtp } from './track-otp';
 
 /**
  * Browser side of customer tracking. Both entry points start behind the same gate:
@@ -32,25 +32,33 @@ declare global {
   }
 }
 
-const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
 /** reuse a gate token only while it is comfortably inside its 5-minute life */
 const TOKEN_FRESH_MS = 4 * 60_000;
 
 type Props =
-  | { mode: "link"; linkToken: string; nonce?: string }
-  | { mode: "form"; nonce?: string; otpAvailable: boolean; devOtpLog: boolean };
-type Phase = "gate" | "ready" | "done" | "expired";
+  | { mode: 'link'; linkToken: string; nonce?: string }
+  | { mode: 'form'; nonce?: string; otpAvailable: boolean; devOtpLog: boolean };
+type Phase = 'gate' | 'ready' | 'done' | 'expired';
 
 async function post(path: string, body: Record<string, string>) {
   const r = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    cache: "no-store",
-    credentials: "same-origin",
-    referrerPolicy: "no-referrer",
+    cache: 'no-store',
+    credentials: 'same-origin',
+    referrerPolicy: 'no-referrer',
   });
-  return (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string; ticket?: string; job?: PublicJob; expiresAt?: string; url?: string };
+  return (await r.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    reason?: string;
+    ticket?: string;
+    job?: PublicJob;
+    expiresAt?: string;
+    url?: string;
+  };
 }
 
 /** one Turnstile widget bound to a container while it is mounted */
@@ -58,12 +66,12 @@ function useTurnstile(
   el: React.RefObject<HTMLDivElement | null>,
   active: boolean,
   ready: boolean,
-  opts: () => Record<string, unknown>
+  opts: () => Record<string, unknown>,
 ) {
   const id = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!active || !ready || !SITE_KEY || !window.turnstile || !el.current || id.current) return;
-    id.current = window.turnstile.render(el.current, { sitekey: SITE_KEY, action: "track", language: "th", ...opts() });
+    id.current = window.turnstile.render(el.current, { sitekey: SITE_KEY, action: 'track', language: 'th', ...opts() });
     return () => {
       if (id.current && window.turnstile) window.turnstile.remove(id.current);
       id.current = null;
@@ -76,10 +84,10 @@ function useTurnstile(
 export function TrackClient(props: Props) {
   // the script may already be loaded (client-side navigation between /track pages); on a fresh page
   // it loads after hydration, so the server and the first browser render agree (false)
-  const [tsReady, setTsReady] = React.useState(() => typeof window !== "undefined" && !!window.turnstile);
-  const [phase, setPhase] = React.useState<Phase>("gate");
+  const [tsReady, setTsReady] = React.useState(() => typeof window !== 'undefined' && !!window.turnstile);
+  const [phase, setPhase] = React.useState<Phase>('gate');
   const [verifying, setVerifying] = React.useState(false);
-  const [error, setError] = React.useState("");
+  const [error, setError] = React.useState('');
   const [job, setJob] = React.useState<PublicJob | null>(null);
   const [linkExpiresAt, setLinkExpiresAt] = React.useState(0);
 
@@ -91,34 +99,37 @@ export function TrackClient(props: Props) {
   const waiter = React.useRef<((t: string | null) => void) | null>(null);
 
   /* ---------- link mode: session → ticket → data ---------- */
-  const linkToken = props.mode === "link" ? props.linkToken : "";
-  const runLink = React.useCallback(async (turnstileToken: string) => {
-    setError("");
-    try {
-      const s = await post("/api/track/session", { linkToken, turnstileToken });
-      // the link itself is expired / used up → hint + the lookup page, not the captcha again
-      if (s.reason === "link") {
-        setPhase("expired");
-        return;
+  const linkToken = props.mode === 'link' ? props.linkToken : '';
+  const runLink = React.useCallback(
+    async (turnstileToken: string) => {
+      setError('');
+      try {
+        const s = await post('/api/track/session', { linkToken, turnstileToken });
+        // the link itself is expired / used up → hint + the lookup page, not the captcha again
+        if (s.reason === 'link') {
+          setPhase('expired');
+          return;
+        }
+        if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
+        if (s.expiresAt) setLinkExpiresAt(Date.parse(s.expiresAt));
+        // the ticket exists only inside `s` for this one call — it is single-use, spent either way
+        const d = await post('/api/track/data', { ticket: s.ticket });
+        if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
+        setJob(d.job);
+        setPhase('done');
+      } catch (e) {
+        setError(e instanceof Error && e.message ? e.message : 'เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setPhase('gate');
       }
-      if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
-      if (s.expiresAt) setLinkExpiresAt(Date.parse(s.expiresAt));
-      // the ticket exists only inside `s` for this one call — it is single-use, spent either way
-      const d = await post("/api/track/data", { ticket: s.ticket });
-      if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
-      setJob(d.job);
-      setPhase("done");
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-      setPhase("gate");
-    }
-  }, [linkToken]);
+    },
+    [linkToken],
+  );
 
   // the link ran out (timer / keepalive / a refused document) — stable, so LinkResult's expiry timer
   // is armed once per expiry time
   const expireLink = React.useCallback(() => {
     setJob(null);
-    setPhase("expired");
+    setPhase('expired');
   }, []);
 
   // latest-callback ref: refreshed after every commit (never written during render), read only
@@ -126,30 +137,30 @@ export function TrackClient(props: Props) {
   const onGatePass = React.useRef<(t: string) => void>(() => {});
   React.useLayoutEffect(() => {
     onGatePass.current = (t: string) => {
-      setError("");
-      setPhase("ready");
-      if (props.mode === "link") void runLink(t);
+      setError('');
+      setPhase('ready');
+      if (props.mode === 'link') void runLink(t);
       else gateToken.current = { t, at: Date.now() };
     };
   });
 
   // 1. the gate: a visible checkbox — nothing else on the page until it passes
-  useTurnstile(gateEl, phase === "gate", tsReady, () => ({
-    appearance: "always",
+  useTurnstile(gateEl, phase === 'gate', tsReady, () => ({
+    appearance: 'always',
     callback: (t: string) => onGatePass.current(t),
-    "error-callback": () => setError(TRACK_MSG.unavailable),
+    'error-callback': () => setError(TRACK_MSG.unavailable),
   }));
 
   // 2. form mode, after the gate: a background widget that runs only when asked (execute)
-  const bgWidget = useTurnstile(bgEl, props.mode === "form" && phase === "ready", tsReady, () => ({
-    appearance: "interaction-only",
-    execution: "execute",
+  const bgWidget = useTurnstile(bgEl, props.mode === 'form' && phase === 'ready', tsReady, () => ({
+    appearance: 'interaction-only',
+    execution: 'execute',
     callback: (t: string) => {
       setVerifying(false);
       waiter.current?.(t);
       waiter.current = null;
     },
-    "error-callback": () => {
+    'error-callback': () => {
       setVerifying(false);
       waiter.current?.(null);
       waiter.current = null;
@@ -170,14 +181,14 @@ export function TrackClient(props: Props) {
         window.turnstile.reset(bgWidget.current);
         window.turnstile.execute(bgWidget.current);
       }),
-    [bgWidget]
+    [bgWidget],
   );
 
   if (!SITE_KEY) {
     // no site key in this build → fail closed, never show anything without the check
     return <Notice text={TRACK_MSG.unavailable} />;
   }
-  if (props.mode === "form" && !props.otpAvailable) {
+  if (props.mode === 'form' && !props.otpAvailable) {
     return <Notice text={TRACK_MSG.otpUnavailable} />;
   }
 
@@ -191,7 +202,7 @@ export function TrackClient(props: Props) {
   );
 
   /* ---------- 1. gate ---------- */
-  if (phase === "gate") {
+  if (phase === 'gate') {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
         {script}
@@ -214,7 +225,7 @@ export function TrackClient(props: Props) {
   }
 
   /* ---------- link expired / used up ---------- */
-  if (phase === "expired") {
+  if (phase === 'expired') {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
         <Clock className="mx-auto mb-3 h-9 w-9 text-warning" />
@@ -235,8 +246,8 @@ export function TrackClient(props: Props) {
   }
 
   /* ---------- link: result / loading ---------- */
-  if (props.mode === "link") {
-    if (phase === "done" && job)
+  if (props.mode === 'link') {
+    if (phase === 'done' && job)
       return (
         <LinkResult
           job={job}
@@ -275,7 +286,9 @@ const ACTIVE_WINDOW_MS = 60_000;
 const KEEPALIVE_WHEN_LEFT_MS = 5.5 * 60_000;
 const mmss = (ms: number) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
-  return s >= 3600 ? `${Math.floor(s / 3600)} ชม. ${Math.floor((s % 3600) / 60)} นาที` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return s >= 3600
+    ? `${Math.floor(s / 3600)} ชม. ${Math.floor((s % 3600) / 60)} นาที`
+    : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
 function LinkResult({
@@ -298,7 +311,7 @@ function LinkResult({
   React.useEffect(() => {
     lastInput.current = Date.now();
     const mark = () => (lastInput.current = Date.now());
-    const evts = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
+    const evts = ['pointerdown', 'keydown', 'scroll', 'touchstart'] as const;
     evts.forEach((e) => window.addEventListener(e, mark, { passive: true }));
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
@@ -320,8 +333,8 @@ function LinkResult({
     const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
     if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {
       lastKeepalive.current = now;
-      void post("/api/track/link/keepalive", { linkToken }).then((d) => {
-        if (d.reason === "link") onExpired();
+      void post('/api/track/link/keepalive', { linkToken }).then((d) => {
+        if (d.reason === 'link') onExpired();
         else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
       });
     }
@@ -330,18 +343,19 @@ function LinkResult({
   // documents: the link itself authorises them (the server ignores any job no from here)
   const openDoc = React.useCallback(
     async (d: { kind: string; ref: string }) => {
-      const r = await post("/api/track/doc", { linkToken, kind: d.kind, ref: d.ref });
-      if (r.reason === "link") onExpired();
+      const r = await post('/api/track/doc', { linkToken, kind: d.kind, ref: d.ref });
+      if (r.reason === 'link') onExpired();
       return { url: r.ok ? r.url : undefined, error: r.error };
     },
-    [linkToken, onExpired]
+    [linkToken, onExpired],
   );
 
   return (
     <div className="space-y-3">
       {expiresAt > 0 && (
         <p className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted-foreground">
-          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
+          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา{' '}
+          <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
           <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
         </p>
       )}

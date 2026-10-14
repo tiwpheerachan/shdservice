@@ -1,15 +1,15 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from "lucide-react";
-import { findBreadcrumb } from "@/lib/nav";
-import { ThemeToggle } from "./theme-toggle";
-import { SessionTimer } from "./session-timer";
-import { OverdueBell } from "./overdue-bell";
-import { cn } from "@/lib/utils";
-import { useMe } from "@/lib/use-me";
+import * as React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from 'lucide-react';
+import { findBreadcrumb } from '@/lib/nav';
+import { ThemeToggle } from './theme-toggle';
+import { SessionTimer } from './session-timer';
+import { OverdueBell } from './overdue-bell';
+import { cn } from '@/lib/utils';
+import { useMe } from '@/lib/use-me';
 
 export function Topbar({
   onOpenMobile,
@@ -29,8 +29,11 @@ export function Topbar({
   const [avatarError, setAvatarError] = React.useState(false);
 
   const initials = me?.name
-    ? me.name.replace(/^(คุณ|นาย|นาง|นางสาว)\s*/u, "").slice(0, 2).toUpperCase()
-    : "··";
+    ? me.name
+        .replace(/^(คุณ|นาย|นาง|นางสาว)\s*/u, '')
+        .slice(0, 2)
+        .toUpperCase()
+    : '··';
 
   return (
     <header className="sticky top-0 z-30 flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
@@ -45,19 +48,14 @@ export function Topbar({
       <button
         onClick={onToggleCollapse}
         className="hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:inline-flex"
-        aria-label={collapsed ? "ขยายเมนู" : "พับเมนู"}
+        aria-label={collapsed ? 'ขยายเมนู' : 'พับเมนู'}
         aria-pressed={collapsed}
-        title={collapsed ? "ขยายเมนู" : "พับเมนู"}
+        title={collapsed ? 'ขยายเมนู' : 'พับเมนู'}
       >
-        <PanelLeft
-          className={cn("h-[18px] w-[18px] transition-transform", collapsed && "rotate-180")}
-        />
+        <PanelLeft className={cn('h-[18px] w-[18px] transition-transform', collapsed && 'rotate-180')} />
       </button>
 
-      <nav
-        aria-label="breadcrumb"
-        className="hidden min-w-0 items-center gap-1.5 text-sm md:flex"
-      >
+      <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
         {crumb && (
           <>
             <span className="truncate text-muted-foreground">
@@ -81,9 +79,7 @@ export function Topbar({
       >
         <Search className="h-3.5 w-3.5" />
         <span className="pr-6">ค้นหาเมนู…</span>
-        <kbd className="rounded border border-border bg-muted px-1.5 py-px text-2xs">
-          Ctrl K
-        </kbd>
+        <kbd className="rounded border border-border bg-muted px-1.5 py-px text-2xs">Ctrl K</kbd>
       </button>
 
       <SessionTimer />
@@ -117,8 +113,8 @@ export function Topbar({
         )}
         {/* one line each, cut with … — a long email wrapped the topbar at 1280px */}
         <div className="hidden min-w-0 max-w-48 leading-tight lg:block" title={me?.email}>
-          <p className="truncate text-xs font-medium">{me?.name ?? "กำลังโหลด…"}</p>
-          <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ""}</p>
+          <p className="truncate text-xs font-medium">{me?.name ?? 'กำลังโหลด…'}</p>
+          <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ''}</p>
         </div>
         {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
             /api/sso/logout silently signed the user out after every page load */}
@@ -126,8 +122,8 @@ export function Topbar({
           href="/api/sso/logout"
           title="ออกจากระบบ"
           className={cn(
-            "rounded-md p-2 text-muted-foreground transition-colors",
-            "hover:bg-danger-soft hover:text-danger"
+            'rounded-md p-2 text-muted-foreground transition-colors',
+            'hover:bg-danger-soft hover:text-danger',
           )}
         >
           <LogOut className="h-4 w-4" />

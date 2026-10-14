@@ -1,24 +1,24 @@
-import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import { cva, type VariantProps } from 'class-variance-authority';
+import { cn } from '@/lib/utils';
 
-export type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "info";
+export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
 /** App badge — `tone` variants in the app palette (shadcn-style cva). */
 export const badgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap",
+  'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap',
   {
     variants: {
       tone: {
-        neutral: "bg-muted text-muted-foreground border-border",
-        primary: "bg-primary-soft text-primary border-primary/25",
-        success: "bg-success-soft text-success border-success/25",
-        warning: "bg-warning-soft text-warning border-warning/25",
-        danger: "bg-danger-soft text-danger border-danger/25",
-        info: "bg-info-soft text-info border-info/25",
+        neutral: 'bg-muted text-muted-foreground border-border',
+        primary: 'bg-primary-soft text-primary border-primary/25',
+        success: 'bg-success-soft text-success border-success/25',
+        warning: 'bg-warning-soft text-warning border-warning/25',
+        danger: 'bg-danger-soft text-danger border-danger/25',
+        info: 'bg-info-soft text-info border-info/25',
       },
     },
-    defaultVariants: { tone: "neutral" },
-  }
+    defaultVariants: { tone: 'neutral' },
+  },
 );
 
 export function Badge({
@@ -39,7 +39,11 @@ export function Badge({
   return (
     <span
       data-slot="badge"
-      className={cn(badgeVariants({ tone }), wrap && "items-start whitespace-normal rounded-lg [&>[data-dot]]:mt-[5px]", className)}
+      className={cn(
+        badgeVariants({ tone }),
+        wrap && 'items-start whitespace-normal rounded-lg [&>[data-dot]]:mt-[5px]',
+        className,
+      )}
     >
       {dot && <span data-dot className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
       {children}
@@ -48,30 +52,34 @@ export function Badge({
 }
 
 const isEmpty = (c: React.ReactNode): boolean =>
-  c === null || c === undefined || c === false || (typeof c === "string" && c.trim() === "") || (Array.isArray(c) && c.every(isEmpty));
+  c === null ||
+  c === undefined ||
+  c === false ||
+  (typeof c === 'string' && c.trim() === '') ||
+  (Array.isArray(c) && c.every(isEmpty));
 
 const JOB_TONE: Record<string, Tone> = {
-  "งานใหม่": "info",
-  "อยู่ระหว่างดำเนินการ": "warning",
-  "รอลูกค้าตอบกลับ": "warning",
-  "รออะไหล่": "warning",
-  "รออนุมัติ": "warning",
-  "ส่งซ่อม Out-Source": "info",
-  "ซ่อมเสร็จ": "success",
-  "ปิดงาน": "success",
-  "ส่งคืนลูกค้าแล้ว": "success",
-  "อนุมัติ": "success",
-  "ยกเลิก": "danger",
-  "ไม่อนุมัติ": "danger",
-  Active: "success",
-  Inactive: "neutral",
-  Cancel: "danger",
+  งานใหม่: 'info',
+  อยู่ระหว่างดำเนินการ: 'warning',
+  รอลูกค้าตอบกลับ: 'warning',
+  รออะไหล่: 'warning',
+  รออนุมัติ: 'warning',
+  'ส่งซ่อม Out-Source': 'info',
+  ซ่อมเสร็จ: 'success',
+  ปิดงาน: 'success',
+  ส่งคืนลูกค้าแล้ว: 'success',
+  อนุมัติ: 'success',
+  ยกเลิก: 'danger',
+  ไม่อนุมัติ: 'danger',
+  Active: 'success',
+  Inactive: 'neutral',
+  Cancel: 'danger',
 };
 
 /** `wrap` (table columns): a long status ("อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่") takes 2 lines */
 export function StatusBadge({ status, wrap }: { status: string; wrap?: boolean }) {
   return (
-    <Badge tone={JOB_TONE[status] ?? "neutral"} dot wrap={wrap}>
+    <Badge tone={JOB_TONE[status] ?? 'neutral'} dot wrap={wrap}>
       {status}
     </Badge>
   );

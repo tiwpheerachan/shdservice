@@ -1,6 +1,6 @@
-import { COMPANY } from "@/lib/company";
-import type { DocumentProfile } from "@/server/services/document-profiles";
-import { AutoPrint } from "./auto-print";
+import { COMPANY } from '@/lib/company';
+import type { DocumentProfile } from '@/server/services/document-profiles';
+import { AutoPrint } from './auto-print';
 
 /**
  * A4 document shell shared by every print view: company header, title box,
@@ -17,10 +17,19 @@ export function PrintFrame({
   docNo: string;
   meta: { label: string; value: string }[];
   /** ออกเอกสารในนาม — falls back to the static COMPANY block */
-  company?: Pick<DocumentProfile, "code" | "nameTh" | "nameEn" | "address" | "phone" | "email" | "taxId" | "logoUrl">;
+  company?: Pick<DocumentProfile, 'code' | 'nameTh' | 'nameEn' | 'address' | 'phone' | 'email' | 'taxId' | 'logoUrl'>;
   children: React.ReactNode;
 }) {
-  const co = company ?? { code: "SHD", nameTh: COMPANY.nameTh, nameEn: COMPANY.nameEn, address: COMPANY.address, phone: COMPANY.phone, email: COMPANY.email, taxId: COMPANY.taxId, logoUrl: COMPANY.logoMark };
+  const co = company ?? {
+    code: 'SHD',
+    nameTh: COMPANY.nameTh,
+    nameEn: COMPANY.nameEn,
+    address: COMPANY.address,
+    phone: COMPANY.phone,
+    email: COMPANY.email,
+    taxId: COMPANY.taxId,
+    logoUrl: COMPANY.logoMark,
+  };
   return (
     <div className="print-page">
       <AutoPrint />
@@ -46,7 +55,7 @@ export function PrintFrame({
             {meta.map((m) => (
               <div key={m.label} className="flex justify-end gap-2">
                 <dt className="text-neutral-500">{m.label}</dt>
-                <dd className="num">{m.value || "—"}</dd>
+                <dd className="num">{m.value || '—'}</dd>
               </div>
             ))}
           </dl>
@@ -57,10 +66,20 @@ export function PrintFrame({
   );
 }
 
-export function Box({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+export function Box({
+  title,
+  children,
+  className = '',
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <section className={`break-inside-avoid rounded border border-neutral-400 ${className}`}>
-      <h2 className="border-b border-neutral-400 bg-neutral-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide">{title}</h2>
+      <h2 className="border-b border-neutral-400 bg-neutral-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide">
+        {title}
+      </h2>
       <div className="px-3 py-2">{children}</div>
     </section>
   );
@@ -68,11 +87,13 @@ export function Box({ title, children, className = "" }: { title: string; childr
 
 export function KV({ items, cols = 2 }: { items: { k: string; v?: string | number | null }[]; cols?: 2 | 3 }) {
   return (
-    <dl className={`grid gap-x-6 gap-y-1 ${cols === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+    <dl className={`grid gap-x-6 gap-y-1 ${cols === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
       {items.map((it) => (
         <div key={it.k} className="flex gap-2">
           <dt className="w-32 shrink-0 text-neutral-500">{it.k}</dt>
-          <dd className="min-w-0 flex-1 wrap-break-word">{it.v === null || it.v === undefined || it.v === "" ? "—" : it.v}</dd>
+          <dd className="min-w-0 flex-1 wrap-break-word">
+            {it.v === null || it.v === undefined || it.v === '' ? '—' : it.v}
+          </dd>
         </div>
       ))}
     </dl>
@@ -93,4 +114,4 @@ export function Signatures({ left, right }: { left: string; right: string }) {
   );
 }
 
-export const money = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

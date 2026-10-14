@@ -1,5 +1,5 @@
-import { AutoPrint } from "./auto-print";
-import type { DocumentProfile } from "@/server/services/document-profiles";
+import { AutoPrint } from './auto-print';
+import type { DocumentProfile } from '@/server/services/document-profiles';
 
 /**
  * ใบปะหน้าพัสดุ A5 แนวนอน — the legacy "พิมพ์ใบสั่งขาย" sheet
@@ -12,12 +12,12 @@ export function ShippingLabel({
   name,
   address,
   phone,
-  subDistrict = "",
-  district = "",
-  province = "",
+  subDistrict = '',
+  district = '',
+  province = '',
 }: {
   /** ออกเอกสารในนาม — sender block + logo */
-  profile: Pick<DocumentProfile, "code" | "nameTh" | "addressLine1" | "addressLine2" | "phone" | "logoUrl">;
+  profile: Pick<DocumentProfile, 'code' | 'nameTh' | 'addressLine1' | 'addressLine2' | 'phone' | 'logoUrl'>;
   docNo: string;
   name: string;
   address: string;
@@ -27,7 +27,9 @@ export function ShippingLabel({
   province?: string;
 }) {
   // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line (a bare "ต. อ. จ." printed before)
-  const tao = [subDistrict && `ต.${subDistrict}`, district && `อ.${district}`, province && `จ.${province}`].filter(Boolean).join(" ");
+  const tao = [subDistrict && `ต.${subDistrict}`, district && `อ.${district}`, province && `จ.${province}`]
+    .filter(Boolean)
+    .join(' ');
   return (
     <>
       <style>{`
@@ -58,7 +60,9 @@ export function ShippingLabel({
             <p className="mt-[3mm]">{name}</p>
             <p className="mt-[2mm]">{address}</p>
             {tao && <p className="mt-[2mm]">{tao}</p>}
-            <p className="mt-[2mm]">โทร.<span className="num">{phone}</span></p>
+            <p className="mt-[2mm]">
+              โทร.<span className="num">{phone}</span>
+            </p>
           </div>
         </div>
       </div>

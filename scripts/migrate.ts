@@ -13,72 +13,76 @@
  *
  *  - `--reset` forces that behaviour.
  */
-import "dotenv/config";
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { dbSsl } from "../src/db/ssl";
+import 'dotenv/config';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { dbSsl } from '../src/db/ssl';
 
-const MIGRATIONS_FOLDER = "./drizzle";
-const JOURNAL_SCHEMA = "drizzle";
-const JOURNAL_TABLE = "__drizzle_migrations";
+const MIGRATIONS_FOLDER = './drizzle';
+const JOURNAL_SCHEMA = 'drizzle';
+const JOURNAL_TABLE = '__drizzle_migrations';
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) {
-    console.error("DATABASE_URL is not set (use the Supabase *Session pooler*, port 5432).");
+    console.error('DATABASE_URL is not set (use the Supabase *Session pooler*, port 5432).');
     process.exit(1);
   }
   const pool = new Pool({
     connectionString: url,
     max: 1,
     ssl: dbSsl(url), // same TLS rules as the app (src/db/ssl.ts)
-    options: "-c TimeZone=Asia/Bangkok",
+    options: '-c TimeZone=Asia/Bangkok',
   });
   // RAISE NOTICE from a migration (e.g. 0022 "duplicate …, unique index NOT created") must reach
   // the deploy log — node-postgres drops notices nobody listens for
-  pool.on("connect", (c) => c.on("notice", (n) => console.warn(`NOTICE: ${n.message}`)));
+  pool.on('connect', (c) => c.on('notice', (n) => console.warn(`NOTICE: ${n.message}`)));
   const db = drizzle(pool);
 
-  const force = process.argv.includes("--reset");
+  const force = process.argv.includes('--reset');
   // production is migrated by Render (pre-deploy, RENDER is set there) — from a laptop, .env's
   // DATABASE_URL is production, so a stray `npm run db:migrate` must not run against it
-  if (url.includes("bnntpshuoyzkzckepjse") && !process.env.RENDER && process.env.ALLOW_PROD_DB !== "1") {
-    console.error("REFUSED: this is the PRODUCTION database — Render migrates it on deploy. For the local dev DB: npm run db:dev:load. Set ALLOW_PROD_DB=1 only if you really mean it.");
+  if (url.includes('bnntpshuoyzkzckepjse') && !process.env.RENDER && process.env.ALLOW_PROD_DB !== '1') {
+    console.error(
+      'REFUSED: this is the PRODUCTION database — Render migrates it on deploy. For the local dev DB: npm run db:dev:load. Set ALLOW_PROD_DB=1 only if you really mean it.',
+    );
     process.exit(1);
   }
   const { rows: j } = await pool.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM information_schema.tables
       WHERE table_schema = $1 AND table_name = $2`,
-    [JOURNAL_SCHEMA, JOURNAL_TABLE]
+    [JOURNAL_SCHEMA, JOURNAL_TABLE],
   );
-  const journalExists = j[0]?.n !== "0";
+  const journalExists = j[0]?.n !== '0';
   if (journalExists) {
     const { rows: c } = await pool.query<{ n: string }>(
       `SELECT count(*)::text AS n FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'app_user' AND column_name = 'lark_id'`
+        WHERE table_schema = 'public' AND table_name = 'app_user' AND column_name = 'lark_id'`,
     );
-    const appColumnsPresent = c[0]?.n !== "0";
+    const appColumnsPresent = c[0]?.n !== '0';
     const { rows: applied } = await pool.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`
+      `SELECT count(*)::text AS n FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`,
     );
-    const hasEntries = applied[0]?.n !== "0";
+    const hasEntries = applied[0]?.n !== '0';
     if (!force && hasEntries && !appColumnsPresent && process.env.RENDER) {
       // a deploy must never guess the journal is stale — a renamed column would re-run everything
-      console.error("app_user.lark_id missing but the journal says applied — check why, then run db:migrate:reset by hand");
+      console.error(
+        'app_user.lark_id missing but the journal says applied — check why, then run db:migrate:reset by hand',
+      );
       process.exit(1);
     }
     if (force || (hasEntries && !appColumnsPresent)) {
       console.log(
         force
-          ? "--reset: clearing the migration journal, all migrations will re-run"
-          : "legacy tables were reloaded since the last migrate — re-running all migrations"
+          ? '--reset: clearing the migration journal, all migrations will re-run'
+          : 'legacy tables were reloaded since the last migrate — re-running all migrations',
       );
       await pool.query(`DELETE FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`);
     }
   }
 
-  console.log(`migrating ${url.replace(/:\/\/([^:]+):[^@]+@/, "://$1:***@")}`);
+  console.log(`migrating ${url.replace(/:\/\/([^:]+):[^@]+@/, '://$1:***@')}`);
   await migrate(db, {
     migrationsFolder: MIGRATIONS_FOLDER,
     migrationsSchema: JOURNAL_SCHEMA,
@@ -86,9 +90,9 @@ async function main() {
   });
 
   const { rows } = await pool.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`
+    `SELECT count(*)::text AS n FROM ${JOURNAL_SCHEMA}.${JOURNAL_TABLE}`,
   );
-  console.log(`done — ${rows[0]?.n ?? "?"} migration(s) recorded`);
+  console.log(`done — ${rows[0]?.n ?? '?'} migration(s) recorded`);
   await pool.end();
 }
 

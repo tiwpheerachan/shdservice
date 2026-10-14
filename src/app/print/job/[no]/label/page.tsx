@@ -1,10 +1,10 @@
-import { notFound } from "next/navigation";
-import { getJob } from "@/server/services/jobs";
-import { getCustomerByCode, addressNames } from "@/server/services/customers";
-import { ShippingLabel } from "@/components/print/shipping-label";
-import { profileForDocument } from "@/server/services/document-profiles";
+import { notFound } from 'next/navigation';
+import { getJob } from '@/server/services/jobs';
+import { getCustomerByCode, addressNames } from '@/server/services/customers';
+import { ShippingLabel } from '@/components/print/shipping-label';
+import { profileForDocument } from '@/server/services/document-profiles';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 /** ใบปะหน้าพัสดุสำหรับงานซ่อมที่ส่งคืนทางขนส่ง — same A5 sheet as the sale order, keyed by job no. */
 export default async function Page({ params }: { params: Promise<{ no: string }> }) {
@@ -18,9 +18,9 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
     <ShippingLabel
       profile={co}
       docNo={j.no}
-      name={j.customer?.name ?? ""}
-      address={j.customer?.address ?? ""}
-      phone={j.customer?.phone ?? ""}
+      name={j.customer?.name ?? ''}
+      address={j.customer?.address ?? ''}
+      phone={j.customer?.phone ?? ''}
       subDistrict={names.subDistrict}
       district={names.district}
       province={names.province}

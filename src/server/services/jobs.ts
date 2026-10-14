@@ -1,8 +1,25 @@
-import "server-only";
-import { cached, TTL_MASTER } from "@/server/cache";
-import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
-import { alias, unionAll } from "drizzle-orm/pg-core";
-import { db, type Tx } from "@/db/client";
+import 'server-only';
+import { cached, TTL_MASTER } from '@/server/cache';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { alias, unionAll } from 'drizzle-orm/pg-core';
+import { db, type Tx } from '@/db/client';
 import {
   appUser,
   documentAttach,
@@ -17,13 +34,13 @@ import {
   model,
   productType,
   symptom,
-} from "@/db/schema";
-import type { Job } from "@/data/mock";
-import { HttpError, fullName, findAppUserByEmail } from "@/server/auth";
-import { assertVersion } from "@/server/http-error";
-import { nextRunningNo } from "@/db/running-no";
-import { audit, diff, auditFor, type AuditRow } from "@/server/audit";
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
+} from '@/db/schema';
+import type { Job } from '@/data/mock';
+import { HttpError, fullName, findAppUserByEmail } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
+import { nextRunningNo } from '@/db/running-no';
+import { audit, diff, auditFor, type AuditRow } from '@/server/audit';
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import {
   dateOrNull,
   dateOrSentinel,
@@ -36,12 +53,12 @@ import {
   num,
   SENTINEL_TS,
   str,
-} from "@/server/mappers/format";
-import { getCustomerByCode, getCustomerById } from "./customers";
-import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
-import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from "./stock";
-import { RS, statusStamp } from "@/server/record-status";
-import { addDays } from "@/lib/dates";
+} from '@/server/mappers/format';
+import { getCustomerByCode, getCustomerById } from './customers';
+import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
+import { RS, statusStamp } from '@/server/record-status';
+import { addDays } from '@/lib/dates';
 import {
   jobSchema,
   filledRequired,
@@ -50,8 +67,8 @@ import {
   swapRefundActionSchema,
   closeActionSchema,
   type JobRequiredKey,
-} from "@/lib/validation/job";
-import { assertValid } from "@/server/validate";
+} from '@/lib/validation/job';
+import { assertValid } from '@/server/validate';
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -84,11 +101,11 @@ export const JS = {
   CLOSED_WAIT_PICKUP: 24,
 } as const;
 
-const REPAIRED_GROUP = "Repaired";
-const FINISHED_GROUP = "Finished";
+const REPAIRED_GROUP = 'Repaired';
+const FINISHED_GROUP = 'Finished';
 
-const eng = alias(appUser, "eng");
-const opener = alias(appUser, "opener");
+const eng = alias(appUser, 'eng');
+const opener = alias(appUser, 'opener');
 
 /** the job type's target turnaround in days (job_type.default_due_days; 7 when the job has no type) */
 const slaDays = sql`coalesce((${db.select({ d: jobType.defaultDueDays }).from(jobType).where(eq(jobType.jobTypeId, job.jobTypeId))}), 7)`;
@@ -107,12 +124,12 @@ export const effectiveDueText = sql<string>`to_char(${effectiveDue}, 'YYYY-MM-DD
  * Status helpers (cached name ↔ id)
  * ------------------------------------------------------------------ */
 export function jobStatuses() {
-  return cached("jobstatus:all", 300_000, async () => {
+  return cached('jobstatus:all', 300_000, async () => {
     const rows = await db.select().from(jobStatus).orderBy(asc(jobStatus.displayOrder), asc(jobStatus.jobStatusId));
     return rows.map((r) => ({
       id: r.jobStatusId,
-      name: r.jobStatusName?.trim() ?? "",
-      group: r.jobStatusGroup?.trim() ?? "",
+      name: r.jobStatusName?.trim() ?? '',
+      group: r.jobStatusGroup?.trim() ?? '',
       order: r.displayOrder ?? 0,
       active: r.isActive !== false,
     }));
@@ -127,7 +144,7 @@ export async function statusIdByName(name: string): Promise<number> {
 }
 
 async function statusGroup(id: number) {
-  return (await jobStatuses()).find((r) => r.id === id)?.group ?? "";
+  return (await jobStatuses()).find((r) => r.id === id)?.group ?? '';
 }
 
 /** Insert a job_log row — call on EVERY status change (legacy invariant). */
@@ -142,8 +159,8 @@ export async function logStatus(tx: Tx, jobNo: string, statusId: number, byUserI
  * other save committed (duplicate job_log rows, lost parts totals).
  */
 async function lockJob(tx: Tx, jobNo: string): Promise<number | null> {
-  const [r] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for("update");
-  if (!r) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  const [r] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
+  if (!r) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   return r.status;
 }
 
@@ -160,13 +177,16 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
     extra.jobClosedDate = nowThai();
     extra.jobClosedBy = byUserId;
   }
-  await tx.update(job).set({ jobStatusId: statusId, ...extra }).where(eq(job.jobNo, jobNo));
+  await tx
+    .update(job)
+    .set({ jobStatusId: statusId, ...extra })
+    .where(eq(job.jobNo, jobNo));
   await logStatus(tx, jobNo, statusId, byUserId);
   const name = (await jobStatuses()).find((r) => r.id === statusId)?.name ?? String(statusId);
   await audit(tx, byUserId, {
-    action: "STATUS",
-    module: "Job Management",
-    entity: "job",
+    action: 'STATUS',
+    module: 'Job Management',
+    entity: 'job',
     key: jobNo,
     summary: `เปลี่ยนสถานะงาน → ${name}`,
     changes: { jobStatusId: [current ?? null, statusId] },
@@ -226,44 +246,44 @@ type ListRow = { [K in keyof typeof listSelect]: FieldData<(typeof listSelect)[K
 
 function toJob(r: ListRow): Job {
   return {
-    no: r.no ?? "",
+    no: r.no ?? '',
     openDate: fmtDateTime(r.openDate),
-    customer: r.customer?.trim() ?? "",
-    so: r.so ?? "",
-    brandModel: [r.brand, r.modelName].filter(Boolean).join(" "),
-    jobType: r.jobType ?? "",
+    customer: r.customer?.trim() ?? '',
+    so: r.so ?? '',
+    brandModel: [r.brand, r.modelName].filter(Boolean).join(' '),
+    jobType: r.jobType ?? '',
     owner: fullName(r.engFirst, r.engLast),
-    status: r.status?.trim() ?? "",
-    imei: r.imei ?? "",
+    status: r.status?.trim() ?? '',
+    imei: r.imei ?? '',
     amount: num(r.amount),
     // extra DB-backed fields (optional on the UI type)
     statusId: r.statusId ?? 0,
-    statusGroup: r.statusGroup ?? "",
+    statusGroup: r.statusGroup ?? '',
     customerId: r.customerId ?? 0,
     engineerId: r.engineerId ?? 0,
     isBounce: !!r.isBounce,
-    serial: r.serial ?? "",
-    channel: r.channel ?? "",
-    receptionType: r.receptionType ?? "",
+    serial: r.serial ?? '',
+    channel: r.channel ?? '',
+    receptionType: r.receptionType ?? '',
     receptionDate: fmtDate(r.receptionDate),
-    warranty: r.warranty ?? "",
-    symptom: r.symptom ?? "",
-    symptomOther: r.symptomOther ?? "",
-    repairDetail: r.repairDetail ?? "",
+    warranty: r.warranty ?? '',
+    symptom: r.symptom ?? '',
+    symptomOther: r.symptomOther ?? '',
+    repairDetail: r.repairDetail ?? '',
     repairedDate: fmtDateTime(r.repairedDate),
     closedDate: fmtDateTime(r.closedDate),
-    returnType: r.returnType ?? "",
-    returnTracking: r.returnTracking ?? "",
+    returnType: r.returnType ?? '',
+    returnTracking: r.returnTracking ?? '',
     returnDate: fmtDateTime(r.returnDate),
-    paymentType: r.paymentType ?? "",
+    paymentType: r.paymentType ?? '',
     paymentAmount: num(r.paymentAmount),
     dueDate: fmtDate(r.dueDate),
     openedBy: fullName(r.openerFirst, r.openerLast),
-    jobTypeDetail: r.jobTypeDetail ?? "",
-    quotationNo: r.quotationNo ?? "",
+    jobTypeDetail: r.jobTypeDetail ?? '',
+    quotationNo: r.quotationNo ?? '',
     serviceCost: num(r.serviceCost),
     partsCost: num(r.partsCost),
-    modelDetail: r.modelDetail ?? "",
+    modelDetail: r.modelDetail ?? '',
   };
 }
 
@@ -313,7 +333,7 @@ export type JobFilters = {
   /** jobs the close screen can act on: Repaired group, or closed but still waiting for a tracking no / pickup */
   closable?: boolean;
   /** which date column from/to apply to (default create) — reception = วันที่รับเครื่องซ่อม */
-  dateBy?: "create" | "reception" | "repaired" | "closed";
+  dateBy?: 'create' | 'reception' | 'repaired' | 'closed';
   symptom?: string; // symptom name (engineer's or customer's)
   returnType?: string;
   /* ---- job-list filter bar (each one is AND-ed; text ones are partial matches) ---- */
@@ -330,14 +350,20 @@ export type JobFilters = {
   warranty?: string; // IN | OUT
   bounce?: boolean; // งานซ่อมซ้ำ (is_job_bounce)
   within30?: boolean; // เปิดงานภายใน 30 วันหลังวันที่ขาย
-  cost?: "yes" | "no"; // ค่าใช้จ่ายเก็บลูกค้า: มี (job_total_cost > 0) / ไม่มี
+  cost?: 'yes' | 'no'; // ค่าใช้จ่ายเก็บลูกค้า: มี (job_total_cost > 0) / ไม่มี
 };
 
-const dateCol = (by?: JobFilters["dateBy"]) =>
-  by === "reception" ? job.jobReceptionDate : by === "repaired" ? job.jobRepairedDate : by === "closed" ? job.jobClosedDate : job.jobCreateDate;
+const dateCol = (by?: JobFilters['dateBy']) =>
+  by === 'reception'
+    ? job.jobReceptionDate
+    : by === 'repaired'
+      ? job.jobRepairedDate
+      : by === 'closed'
+        ? job.jobClosedDate
+        : job.jobCreateDate;
 /** job_reception_date is a DATE column — compare with plain dates, the others are timestamps */
-const dayStart = (by: JobFilters["dateBy"], d: string) => (by === "reception" ? d : `${d} 00:00:00`);
-const dayEnd = (by: JobFilters["dateBy"], d: string) => (by === "reception" ? d : `${d} 23:59:59`);
+const dayStart = (by: JobFilters['dateBy'], d: string) => (by === 'reception' ? d : `${d} 00:00:00`);
+const dayEnd = (by: JobFilters['dateBy'], d: string) => (by === 'reception' ? d : `${d} 23:59:59`);
 
 /** "today" on the Thai calendar — job dates are stored as Thai wall-clock */
 const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
@@ -354,7 +380,7 @@ const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
 export const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .select({ id: jobStatus.jobStatusId })
   .from(jobStatus)
-  .where(notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"]))}))`;
+  .where(notInArray(jobStatus.jobStatusGroup, ['Finished', 'Cancel']))}))`;
 
 /**
  * Overdue = still open, and its real due date (effectiveDue) is before today. isOpenJob narrows to
@@ -367,7 +393,10 @@ export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
-  const from = ymd(f.from), to = ymd(f.to), closedFrom = ymd(f.closedFrom), closedTo = ymd(f.closedTo);
+  const from = ymd(f.from),
+    to = ymd(f.to),
+    closedFrom = ymd(f.closedFrom),
+    closedTo = ymd(f.closedTo);
   return and(
     // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for
     f.includeCancelled ? undefined : ne(job.recordStatus, RS.DELETED),
@@ -378,7 +407,7 @@ export function jobWhere(q: string, f: JobFilters) {
           ilike(job.jobReferenceNo, `%${term}%`),
           ilike(job.productImeiNo, `%${term}%`),
           ilike(job.productSerial, `%${term}%`),
-          ilike(job.productModelName, `%${term}%`)
+          ilike(job.productModelName, `%${term}%`),
         )
       : undefined,
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
@@ -395,48 +424,63 @@ export function jobWhere(q: string, f: JobFilters) {
     f.channel ? eq(job.productSaleOutChannel, f.channel) : undefined,
     from ? gte(dateCol(f.dateBy), dayStart(f.dateBy, from)) : undefined,
     to ? lte(dateCol(f.dateBy), dayEnd(f.dateBy, to)) : undefined,
-    f.symptom ? or(eq(symptom.symptomName, f.symptom), sql`exists (select 1 from job_symptom js join symptom s2 on s2.symptom_id = js.symptom_id where js.job_no = ${job.jobNo} and s2.symptom_name = ${f.symptom})`) : undefined,
+    f.symptom
+      ? or(
+          eq(symptom.symptomName, f.symptom),
+          sql`exists (select 1 from job_symptom js join symptom s2 on s2.symptom_id = js.symptom_id where js.job_no = ${job.jobNo} and s2.symptom_name = ${f.symptom})`,
+        )
+      : undefined,
     f.returnType ? eq(job.returnCustomerType, f.returnType) : undefined,
     closedFrom ? gte(job.jobClosedDate, `${closedFrom} 00:00:00`) : undefined,
     closedTo ? lte(job.jobClosedDate, `${closedTo} 23:59:59`) : undefined,
-    f.customerCode ? sql`${job.customerDetail} like ${f.customerCode + " %"}` : undefined,
+    f.customerCode ? sql`${job.customerDetail} like ${f.customerCode + ' %'}` : undefined,
     f.unassigned
-      ? and(
-          isOpenJob,
-          or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`)
-        )
+      ? and(isOpenJob, or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`))
       : undefined,
     f.closable
-      ? or(eq(jobStatus.jobStatusGroup, "Repaired"), inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]))
+      ? or(
+          eq(jobStatus.jobStatusGroup, 'Repaired'),
+          inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]),
+        )
       : undefined,
     // ---- job-list filter bar ----
     f.no ? ilike(job.jobNo, `%${f.no.trim()}%`) : undefined,
     f.ref ? ilike(job.jobReferenceNo, `%${f.ref.trim()}%`) : undefined,
     // brand/model are matched without adding joins to the count query
-    f.brand ? sql`${job.productBrandId} in (select manufacturer_id from manufacturer where manufacturer_name = ${f.brand})` : undefined,
+    f.brand
+      ? sql`${job.productBrandId} in (select manufacturer_id from manufacturer where manufacturer_name = ${f.brand})`
+      : undefined,
     f.model ? eq(job.productModelName, f.model) : undefined,
     f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
     f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
     f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
-    f.phone && f.phone.replace(/\D/g, "")
-      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\D', '', 'g') LIKE ${"%" + f.phone.replace(/\D/g, "") + "%"}`
+    f.phone && f.phone.replace(/\D/g, '')
+      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\D', '', 'g') LIKE ${'%' + f.phone.replace(/\D/g, '') + '%'}`
       : undefined,
     f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
-    f.imei ? or(ilike(job.productImeiNo, `%${f.imei.trim()}%`), ilike(job.productSerial, `%${f.imei.trim()}%`)) : undefined,
+    f.imei
+      ? or(ilike(job.productImeiNo, `%${f.imei.trim()}%`), ilike(job.productSerial, `%${f.imei.trim()}%`))
+      : undefined,
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
     f.bounce ? eq(job.isJobBounce, true) : undefined,
-    f.within30 ? sql`${job.productSaleOrderDate} is not null and ${job.jobCreateDate}::date - ${job.productSaleOrderDate} between 0 and 30` : undefined,
-    f.cost === "yes" ? sql`coalesce(${job.jobTotalCost}, 0) > 0` : f.cost === "no" ? sql`coalesce(${job.jobTotalCost}, 0) = 0` : undefined
+    f.within30
+      ? sql`${job.productSaleOrderDate} is not null and ${job.jobCreateDate}::date - ${job.productSaleOrderDate} between 0 and 30`
+      : undefined,
+    f.cost === 'yes'
+      ? sql`coalesce(${job.jobTotalCost}, 0) > 0`
+      : f.cost === 'no'
+        ? sql`coalesce(${job.jobTotalCost}, 0) = 0`
+        : undefined,
   );
 }
 
 export function filtersFromQuery(f: Record<string, string>): JobFilters {
   return {
     status: f.status,
-    statusId: /^\d+$/.test(f.statusId ?? "") ? Number(f.statusId) : undefined, // junk → NaN would 500
+    statusId: /^\d+$/.test(f.statusId ?? '') ? Number(f.statusId) : undefined, // junk → NaN would 500
     statusGroup: f.statusGroup,
-    open: f.open === "1",
+    open: f.open === '1',
     type: f.type,
     engineer: f.engineer,
     channel: f.channel,
@@ -445,11 +489,11 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
     closedFrom: f.closedFrom,
     closedTo: f.closedTo,
     customerCode: f.customerCode,
-    includeCancelled: f.includeCancelled === "1",
-    unassigned: f.unassigned === "1",
-    overdue: f.overdue === "1",
-    closable: f.closable === "1",
-    dateBy: f.dateBy === "reception" || f.dateBy === "repaired" || f.dateBy === "closed" ? f.dateBy : undefined,
+    includeCancelled: f.includeCancelled === '1',
+    unassigned: f.unassigned === '1',
+    overdue: f.overdue === '1',
+    closable: f.closable === '1',
+    dateBy: f.dateBy === 'reception' || f.dateBy === 'repaired' || f.dateBy === 'closed' ? f.dateBy : undefined,
     symptom: f.symptom,
     returnType: f.returnType,
     no: f.no,
@@ -463,9 +507,9 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
     tracking: f.tracking,
     imei: f.imei,
     warranty: f.warranty,
-    bounce: f.bounce === "1",
-    within30: f.within30 === "1",
-    cost: f.cost === "yes" || f.cost === "no" ? f.cost : undefined,
+    bounce: f.bounce === '1',
+    within30: f.within30 === '1',
+    cost: f.cost === 'yes' || f.cost === 'no' ? f.cost : undefined,
   };
 }
 
@@ -493,7 +537,7 @@ export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> 
 /** Un-paged list for reports (server-filtered, capped). */
 export async function listJobs(f: JobFilters & { q?: string; limit?: number } = {}): Promise<Job[]> {
   const rows = await baseQuery()
-    .where(jobWhere(f.q ?? "", f))
+    .where(jobWhere(f.q ?? '', f))
     .orderBy(desc(job.jobCreateDate), desc(job.jobNo))
     .limit(Math.min(f.limit ?? 5000, 20000));
   return rows.map(toJob);
@@ -615,7 +659,7 @@ export type JobDetail = {
 };
 
 export async function getJob(jobNo: string): Promise<JobDetail | null> {
-  const engSym = alias(symptom, "eng_sym");
+  const engSym = alias(symptom, 'eng_sym');
   const [r] = await db
     .select({
       j: job,
@@ -656,8 +700,8 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       .leftJoin(symptom, eq(symptom.symptomId, jobSymptom.symptomId))
       .where(eq(jobSymptom.jobNo, jobNo)),
     (async () => {
-      const sendBy = alias(appUser, "send_by");
-      const recvBy = alias(appUser, "recv_by");
+      const sendBy = alias(appUser, 'send_by');
+      const recvBy = alias(appUser, 'recv_by');
       return db
         .select({
           f: jobSendForwardDt,
@@ -676,65 +720,90 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     db
       .select()
       .from(documentAttach)
-      .where(and(eq(documentAttach.referenceTopic, "Jobs"), eq(documentAttach.referenceItemCode, jobNo), ne(documentAttach.recordStatus, RS.DELETED)))
+      .where(
+        and(
+          eq(documentAttach.referenceTopic, 'Jobs'),
+          eq(documentAttach.referenceItemCode, jobNo),
+          ne(documentAttach.recordStatus, RS.DELETED),
+        ),
+      )
       .orderBy(asc(documentAttach.documentAttachId)),
     db
-      .select({ statusId: jobLog.jobStatusId, status: jobStatus.jobStatusName, date: jobLog.jobLogDate, f: appUser.firstName, l: appUser.lastName })
+      .select({
+        statusId: jobLog.jobStatusId,
+        status: jobStatus.jobStatusName,
+        date: jobLog.jobLogDate,
+        f: appUser.firstName,
+        l: appUser.lastName,
+      })
       .from(jobLog)
       .leftJoin(jobStatus, eq(jobStatus.jobStatusId, jobLog.jobStatusId))
       .leftJoin(appUser, eq(appUser.userId, jobLog.jobActionBy))
       .where(eq(jobLog.jobNo, jobNo))
       .orderBy(desc(jobLog.jobLogDate), desc(jobLog.jobLogId)), // newest first, like call log / audit
-    auditFor("job", jobNo, 100),
+    auditFor('job', jobNo, 100),
   ]);
 
-  const symptomIds = syms.length ? syms.map((s) => s.id) : j.productSymptomId && j.productSymptomId > 0 ? [j.productSymptomId] : [];
-  const symptoms = syms.length ? syms.map((s) => s.name ?? "").filter(Boolean) : r.symptomName ? [r.symptomName] : [];
+  const symptomIds = syms.length
+    ? syms.map((s) => s.id)
+    : j.productSymptomId && j.productSymptomId > 0
+      ? [j.productSymptomId]
+      : [];
+  const symptoms = syms.length ? syms.map((s) => s.name ?? '').filter(Boolean) : r.symptomName ? [r.symptomName] : [];
 
   return {
     no: j.jobNo,
     documentProfileId: j.documentProfileId ?? SHD_PROFILE_ID,
     statusId: j.jobStatusId ?? 0,
-    status: r.status?.trim() ?? "",
-    statusGroup: r.statusGroup ?? "",
+    status: r.status?.trim() ?? '',
+    statusGroup: r.statusGroup ?? '',
     createDate: fmtDateTime(j.jobCreateDate),
     createBy: j.jobCreateBy ?? 0,
     createByName: fullName(r.openerFirst, r.openerLast),
     jobTypeId: j.jobTypeId ?? 0,
-    jobType: r.jobType ?? "",
-    jobTypeDetail: j.jobTypeDetail ?? "",
+    jobType: r.jobType ?? '',
+    jobTypeDetail: j.jobTypeDetail ?? '',
     customer: cust
-      ? { id: cust.id ?? 0, code: cust.code, name: cust.name, taxId: cust.taxId, address: cust.address, phone: cust.phone, line: cust.line, email: cust.email }
+      ? {
+          id: cust.id ?? 0,
+          code: cust.code,
+          name: cust.name,
+          taxId: cust.taxId,
+          address: cust.address,
+          phone: cust.phone,
+          line: cust.line,
+          email: cust.email,
+        }
       : null,
-    customerDetail: j.customerDetail ?? "",
-    so: j.jobReferenceNo ?? "",
-    channel: j.productSaleOutChannel ?? "",
-    shopName: j.productSaleOutShopName ?? "",
+    customerDetail: j.customerDetail ?? '',
+    so: j.jobReferenceNo ?? '',
+    channel: j.productSaleOutChannel ?? '',
+    shopName: j.productSaleOutShopName ?? '',
     saleOrderDate: fmtDate(j.productSaleOrderDate),
     warrantyMonth: j.productWarrantyMonth ?? 0,
     expireDate: fmtDate(j.productExpireDate),
-    warranty: j.productWarranty ?? "",
+    warranty: j.productWarranty ?? '',
     productTypeId: j.productTypeId ?? 0,
-    productType: r.productType ?? "",
-    imei: j.productImeiNo ?? "",
-    serial: j.productSerial ?? "",
+    productType: r.productType ?? '',
+    imei: j.productImeiNo ?? '',
+    serial: j.productSerial ?? '',
     brandId: j.productBrandId ?? 0,
-    brand: r.brand ?? "",
+    brand: r.brand ?? '',
     modelId: j.productModelId ?? 0,
-    modelCode: r.modelCode ?? "",
-    modelName: j.productModelName ?? "",
-    modelDetail: j.productModelDetail ?? "",
-    color: j.productColor ?? "",
+    modelCode: r.modelCode ?? '',
+    modelName: j.productModelName ?? '',
+    modelDetail: j.productModelDetail ?? '',
+    color: j.productColor ?? '',
     receptionDate: fmtDate(j.jobReceptionDate),
-    receptionTrackingNo: j.jobReceptionTrackingNo ?? "",
-    receptionShipper: j.jobReceptionShipper ?? "",
-    receptionType: j.jobReceptionType ?? "",
-    equipment: j.productEquipment ?? "",
-    fault: j.productFault ?? "",
+    receptionTrackingNo: j.jobReceptionTrackingNo ?? '',
+    receptionShipper: j.jobReceptionShipper ?? '',
+    receptionType: j.jobReceptionType ?? '',
+    equipment: j.productEquipment ?? '',
+    fault: j.productFault ?? '',
     symptomIds,
     symptoms,
-    symptomOther: j.productSymptomOther ?? "",
-    remark: j.jobRemark ?? "",
+    symptomOther: j.productSymptomOther ?? '',
+    remark: j.jobRemark ?? '',
     estimateCost: num(j.estimateCost),
     depositCost: num(j.depositCost),
     partsCost: num(j.sparePartTotalCost),
@@ -748,45 +817,55 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     engineerId: j.engineerId ?? 0,
     engineer: fullName(r.engFirst, r.engLast),
     engineerSymptomId: j.engineerSymptomId ?? 0,
-    engineerSymptom: r.engSymptom ?? "",
-    repairDetail: j.engineerRepairDetail ?? "",
-    engineerRemark: j.engineerRemark ?? "",
+    engineerSymptom: r.engSymptom ?? '',
+    repairDetail: j.engineerRepairDetail ?? '',
+    engineerRemark: j.engineerRemark ?? '',
     repairedDate: fmtDateTime(j.jobRepairedDate),
     closedDate: fmtDateTime(j.jobClosedDate),
     payment: {
-      type: j.jobPaymentType ?? "",
-      no: j.jobPaymentNo ?? "",
+      type: j.jobPaymentType ?? '',
+      no: j.jobPaymentNo ?? '',
       amount: num(j.jobPaymentAmount),
-      detail: j.jobPaymentDetail ?? "",
-      slip: j.jobPaymentSlipFileName ?? "",
+      detail: j.jobPaymentDetail ?? '',
+      slip: j.jobPaymentSlipFileName ?? '',
     },
     return: {
       date: fmtDateTime(j.jobReturnDate),
-      type: j.returnCustomerType ?? "",
-      tracking: j.returnCustomerTrackingNo ?? "",
-      detail: j.returnCustomerDetail ?? "",
+      type: j.returnCustomerType ?? '',
+      tracking: j.returnCustomerTrackingNo ?? '',
+      detail: j.returnCustomerDetail ?? '',
       shipperId: j.returnShipperId ?? 0,
     },
-    swap: { detail: j.swapRefundDetail ?? "", docNo: j.swapRefundDocumentNo ?? "" },
-    quotationNo: j.quotationNoApproved ?? "",
+    swap: { detail: j.swapRefundDetail ?? '', docNo: j.swapRefundDocumentNo ?? '' },
+    quotationNo: j.quotationNoApproved ?? '',
     isBounce: !!j.isJobBounce,
-    gspnNo: j.jobReferenceNoGspn ?? "",
+    gspnNo: j.jobReferenceNoGspn ?? '',
     outsource: fwd.map((x) => ({
       id: x.f.id,
-      sendTo: x.f.sendToName ?? "",
-      sendDetail: x.f.sendDetail ?? "",
+      sendTo: x.f.sendToName ?? '',
+      sendDetail: x.f.sendDetail ?? '',
       sendDate: fmtDate(x.f.sendDate),
       sendBy: fullName(x.sf, x.sl),
       sendById: Math.max(0, x.f.sendBy ?? 0),
       receiveDate: fmtDate(x.f.receiveDate),
       receiveBy: fullName(x.rf, x.rl),
       receiveById: Math.max(0, x.f.receiveBy ?? 0),
-      receiveDetail: x.f.receiveDetail ?? "",
-      status: x.f.sendStatus ?? "",
+      receiveDetail: x.f.receiveDetail ?? '',
+      status: x.f.sendStatus ?? '',
     })),
     parts,
-    attachments: atts.map((a) => ({ id: a.documentAttachId, name: a.originalFileName ?? "", file: a.systemFileName ?? "", remark: a.remark ?? "" })),
-    logs: logs.map((l) => ({ statusId: l.statusId ?? 0, status: l.status?.trim() ?? "", date: fmtDateTime(l.date), by: fullName(l.f, l.l) })),
+    attachments: atts.map((a) => ({
+      id: a.documentAttachId,
+      name: a.originalFileName ?? '',
+      file: a.systemFileName ?? '',
+      remark: a.remark ?? '',
+    })),
+    logs: logs.map((l) => ({
+      statusId: l.statusId ?? 0,
+      status: l.status?.trim() ?? '',
+      date: fmtDateTime(l.date),
+      by: fullName(l.f, l.l),
+    })),
     history,
     version: j.rowVersion,
   };
@@ -847,35 +926,77 @@ export type JobInput = {
  * person (email + name), find that person in app_user or create a pending row
  * so the assignment is kept (they get their role when an admin approves).
  */
-async function resolveEngineer(i: { engineerId?: number | string; engineerEmail?: string; engineerName?: string }): Promise<number> {
+async function resolveEngineer(i: {
+  engineerId?: number | string;
+  engineerEmail?: string;
+  engineerName?: string;
+}): Promise<number> {
   const id = int(i.engineerId, 0);
   if (id > 0) return id;
   const email = str(i.engineerEmail).toLowerCase();
   if (!email) return 0;
   const found = await findAppUserByEmail(email);
   if (found) return found.userId;
-  const local = email.split("@")[0] ?? email;
+  const local = email.split('@')[0] ?? email;
   const name = str(i.engineerName) || local;
-  const [first = "", ...rest] = name.split(/\s+/); // split always yields at least one element
+  const [first = '', ...rest] = name.split(/\s+/); // split always yields at least one element
   const [row] = await db
     .insert(appUser)
-    .values({ username: local.slice(0, 50), password: "", firstName: first.slice(0, 50), lastName: rest.join(" ").slice(0, 50), userType: null, isActive: true, emailAddress: email })
+    .values({
+      username: local.slice(0, 50),
+      password: '',
+      firstName: first.slice(0, 50),
+      lastName: rest.join(' ').slice(0, 50),
+      userType: null,
+      isActive: true,
+      emailAddress: email,
+    })
     .returning({ id: appUser.userId });
-  if (!row) throw new Error("app_user insert returned no row");
+  if (!row) throw new Error('app_user insert returned no row');
   return row.id;
 }
 
 async function lookups(i: JobInput) {
-  const [jt] = i.jobType ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, i.jobType)).limit(1) : [];
-  const [pt] = i.productType ? await db.select({ id: productType.productTypeId }).from(productType).where(eq(productType.productTypeName, i.productType)).limit(1) : [];
-  const [mf] = i.brand ? await db.select({ id: manufacturer.manufacturerId }).from(manufacturer).where(eq(manufacturer.manufacturerName, i.brand)).limit(1) : [];
+  const [jt] = i.jobType
+    ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, i.jobType)).limit(1)
+    : [];
+  const [pt] = i.productType
+    ? await db
+        .select({ id: productType.productTypeId })
+        .from(productType)
+        .where(eq(productType.productTypeName, i.productType))
+        .limit(1)
+    : [];
+  const [mf] = i.brand
+    ? await db
+        .select({ id: manufacturer.manufacturerId })
+        .from(manufacturer)
+        .where(eq(manufacturer.manufacturerName, i.brand))
+        .limit(1)
+    : [];
   const [md] = i.modelCode
-    ? await db.select({ id: model.modelId, name: model.modelName, mfg: model.manufacturerId }).from(model).where(eq(model.modelCode, i.modelCode)).limit(1)
+    ? await db
+        .select({ id: model.modelId, name: model.modelName, mfg: model.manufacturerId })
+        .from(model)
+        .where(eq(model.modelCode, i.modelCode))
+        .limit(1)
     : [];
   const names = (i.symptoms ?? []).map((s) => str(s)).filter(Boolean);
-  const syms = names.length ? await db.select({ id: symptom.symptomId, name: symptom.symptomName }).from(symptom).where(inArray(symptom.symptomName, names)) : [];
+  const syms = names.length
+    ? await db
+        .select({ id: symptom.symptomId, name: symptom.symptomName })
+        .from(symptom)
+        .where(inArray(symptom.symptomName, names))
+    : [];
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
-  return { jobTypeId: jt?.id, productTypeId: pt?.id, brandId: mf?.id ?? md?.mfg ?? null, modelId: md?.id, modelName: md?.name, symIds };
+  return {
+    jobTypeId: jt?.id,
+    productTypeId: pt?.id,
+    brandId: mf?.id ?? md?.mfg ?? null,
+    modelId: md?.id,
+    modelName: md?.name,
+    symIds,
+  };
 }
 
 function costFields(i: JobInput) {
@@ -920,21 +1041,21 @@ async function requiredFilledNow(jobNo: string): Promise<JobRequiredKey[] | null
     .where(eq(job.jobNo, jobNo))
     .limit(1);
   if (!r) return null;
-  const txt = (v: string | null) => v ?? ""; // "0" / "-" placeholders: isRequiredFilled decides
-  const id = (v: number | null) => ((v ?? 0) > 0 ? "x" : "");
-  const day = (v: string | null) => (v && !isSentinelDate(v) ? v : "");
+  const txt = (v: string | null) => v ?? ''; // "0" / "-" placeholders: isRequiredFilled decides
+  const id = (v: number | null) => ((v ?? 0) > 0 ? 'x' : '');
+  const day = (v: string | null) => (v && !isSentinelDate(v) ? v : '');
   return filledRequired({
     customerCode: id(r.customerId),
     jobType: id(r.jobTypeId),
     so: txt(r.so),
     channel: txt(r.channel),
     saleOrderDate: day(r.saleOrderDate),
-    warrantyMonth: r.warrantyMonth ?? "",
+    warrantyMonth: r.warrantyMonth ?? '',
     expireDate: day(r.expireDate),
     serial: txt(r.serial),
     brand: id(r.brandId),
     modelCode: id(r.modelId),
-    symptoms: id(r.symptomId) ? ["x"] : [],
+    symptoms: id(r.symptomId) ? ['x'] : [],
     dueDate: day(r.due),
   });
 }
@@ -942,16 +1063,16 @@ async function requiredFilledNow(jobNo: string): Promise<JobRequiredKey[] | null
 export async function createJob(i: JobInput, byUserId: number): Promise<JobDetail> {
   assertJob(i); // a new job: every required field
   const cust = await getCustomerByCode(str(i.customerCode));
-  if (!cust) throw new HttpError(400, "ต้องเลือกลูกค้าก่อนเปิดงาน");
+  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้าก่อนเปิดงาน');
   const lk = await lookups(i);
-  if (!lk.jobTypeId) throw new HttpError(400, "ต้องเลือกประเภทงานหลัก");
+  if (!lk.jobTypeId) throw new HttpError(400, 'ต้องเลือกประเภทงานหลัก');
   const c = costFields(i);
   const now = nowThai();
   const engineerId = await resolveEngineer(i);
   const profile = await issuingProfile(i.documentProfileId);
 
   const jobNo = await db.transaction(async (tx) => {
-    const no = await nextRunningNo(tx, "Job");
+    const no = await nextRunningNo(tx, 'Job');
     await tx.insert(job).values({
       jobNo: no,
       documentProfileId: profile.id,
@@ -984,52 +1105,52 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       productFault: str(i.fault).slice(0, 100),
       estimateCost: money(num(i.estimateCost)),
       depositCost: money(num(i.depositCost)),
-      sparePartTotalCost: "0.00",
+      sparePartTotalCost: '0.00',
       serviceCost: money(c.service),
       serviceToolCost: money(c.tool),
       deliveryCost: money(c.delivery),
       cartonBoxCost: money(c.box),
       jobTotalCost: money(c.service + c.tool + c.delivery + c.box),
       jobReferenceNo: str(i.so).slice(0, 50),
-      jobReferenceNoGspn: "",
+      jobReferenceNoGspn: '',
       jobGspnCreateDate: SENTINEL_TS,
       jobRemark: str(i.remark),
       engineerId,
       engineerSymptomId: 0,
-      engineerRepairDetail: "",
-      engineerRemark: "",
-      jobPaymentType: "",
-      jobPaymentNo: "",
-      jobPaymentAmount: "0.00",
-      jobPaymentDetail: "",
+      engineerRepairDetail: '',
+      engineerRemark: '',
+      jobPaymentType: '',
+      jobPaymentNo: '',
+      jobPaymentAmount: '0.00',
+      jobPaymentDetail: '',
       jobReturnDate: SENTINEL_TS,
-      returnCustomerType: "",
-      returnCustomerTrackingNo: "",
-      returnCustomerDetail: "",
+      returnCustomerType: '',
+      returnCustomerTrackingNo: '',
+      returnCustomerDetail: '',
       jobReturnBy: 0,
-      sparePartReplace: "",
+      sparePartReplace: '',
       productWarranty: str(i.warranty).slice(0, 50),
-      quotationNoApproved: "",
-      productSaleOutChannel: str(i.channel).slice(0, 50) || "ยังไม่ระบุ",
+      quotationNoApproved: '',
+      productSaleOutChannel: str(i.channel).slice(0, 50) || 'ยังไม่ระบุ',
       productSaleOrderDate: dateOrNull(i.saleOrderDate),
       productWarrantyMonth: int(i.warrantyMonth, 0),
       productExpireDate: dateOrNull(i.expireDate),
-      jobReceptionType: str(i.receptionType).slice(0, 50) || "ไม่ระบุ",
+      jobReceptionType: str(i.receptionType).slice(0, 50) || 'ไม่ระบุ',
       jobReceptionDate: dateOrNull(i.receptionDate) ?? now.slice(0, 10),
       jobReceptionTrackingNo: str(i.receptionTrackingNo).slice(0, 50),
       jobReceptionShipper: str(i.receptionShipper).slice(0, 50),
-      swapRefundDetail: "",
-      jobPaymentSlipFileName: "",
-      swapRefundDocumentNo: "",
+      swapRefundDetail: '',
+      jobPaymentSlipFileName: '',
+      swapRefundDocumentNo: '',
       isJobBounce: !!i.isBounce,
       productSaleOutShopName: str(i.shopName).slice(0, 100),
     });
     await logStatus(tx, no, JS.NEW, byUserId);
     await writeSymptoms(tx, no, lk.symIds);
     await audit(tx, byUserId, {
-      action: "CREATE",
-      module: "Job Management",
-      entity: "job",
+      action: 'CREATE',
+      module: 'Job Management',
+      entity: 'job',
       key: no,
       summary: `เปิดงานใหม่ · ${cust.code} ${cust.name} · ${str(i.brand)} ${str(i.modelCode)}`.trim(),
     });
@@ -1044,7 +1165,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
     .select({ status: job.jobStatusId, custId: job.customerId, due: effectiveDueText })
     .from(job)
     .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   assertJob(i, (await requiredFilledNow(jobNo)) ?? undefined); // never worse than it is now
   const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
   const lk = await lookups(i);
@@ -1053,59 +1174,61 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
   const engineerId = i.engineerId !== undefined || i.engineerEmail ? await resolveEngineer(i) : undefined;
 
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for("update");
-    if (!existing) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
+    if (!existing) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
     assertVersion(i.version, existing.rowVersion);
     const parts = num(existing?.sparePartTotalCost);
     const values = {
-        ...(cust ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) } : {}),
-        // the due date is written (and becomes "picked by a user") only when it was changed: saving
-        // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
-        ...(i.dueDate !== undefined && str(i.dueDate) !== (cur.due ?? "")
-          ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
-          : {}),
-        ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
-        jobTypeDetail: str(i.jobTypeDetail).slice(0, 50),
-        productImeiNo: str(i.imei).slice(0, 50),
-        productSerial: str(i.serial).slice(0, 50),
-        ...(lk.productTypeId ? { productTypeId: lk.productTypeId } : {}),
-        ...(lk.brandId ? { productBrandId: lk.brandId } : {}),
-        ...(lk.modelId ? { productModelId: lk.modelId, productModelName: (lk.modelName ?? "").slice(0, 50) } : {}),
-        productModelDetail: str(i.modelDetail).slice(0, 200),
-        productColor: str(i.color).slice(0, 50),
-        ...(lk.symIds.length ? { productSymptomId: lk.symIds[0] } : {}),
-        productSymptomOther: str(i.symptomOther).slice(0, 200),
-        productEquipment: str(i.equipment).slice(0, 100),
-        productFault: str(i.fault).slice(0, 100),
-        estimateCost: money(num(i.estimateCost)),
-        depositCost: money(num(i.depositCost)),
-        serviceCost: money(c.service),
-        serviceToolCost: money(c.tool),
-        deliveryCost: money(c.delivery),
-        cartonBoxCost: money(c.box),
-        jobTotalCost: money(parts + c.service + c.tool + c.delivery + c.box),
-        jobReferenceNo: str(i.so).slice(0, 50),
-        jobRemark: str(i.remark),
-        ...(engineerId !== undefined ? { engineerId } : {}),
-        productWarranty: str(i.warranty).slice(0, 50),
-        productSaleOutChannel: str(i.channel).slice(0, 50) || "ยังไม่ระบุ",
-        productSaleOrderDate: dateOrNull(i.saleOrderDate),
-        productWarrantyMonth: int(i.warrantyMonth, 0),
-        productExpireDate: dateOrNull(i.expireDate),
-        jobReceptionType: str(i.receptionType).slice(0, 50) || "ไม่ระบุ",
-        jobReceptionDate: dateOrNull(i.receptionDate),
-        jobReceptionTrackingNo: str(i.receptionTrackingNo).slice(0, 50),
-        jobReceptionShipper: str(i.receptionShipper).slice(0, 50),
-        productSaleOutShopName: str(i.shopName).slice(0, 100),
-        ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
-      };
+      ...(cust
+        ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) }
+        : {}),
+      // the due date is written (and becomes "picked by a user") only when it was changed: saving
+      // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
+      ...(i.dueDate !== undefined && str(i.dueDate) !== (cur.due ?? '')
+        ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
+        : {}),
+      ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
+      jobTypeDetail: str(i.jobTypeDetail).slice(0, 50),
+      productImeiNo: str(i.imei).slice(0, 50),
+      productSerial: str(i.serial).slice(0, 50),
+      ...(lk.productTypeId ? { productTypeId: lk.productTypeId } : {}),
+      ...(lk.brandId ? { productBrandId: lk.brandId } : {}),
+      ...(lk.modelId ? { productModelId: lk.modelId, productModelName: (lk.modelName ?? '').slice(0, 50) } : {}),
+      productModelDetail: str(i.modelDetail).slice(0, 200),
+      productColor: str(i.color).slice(0, 50),
+      ...(lk.symIds.length ? { productSymptomId: lk.symIds[0] } : {}),
+      productSymptomOther: str(i.symptomOther).slice(0, 200),
+      productEquipment: str(i.equipment).slice(0, 100),
+      productFault: str(i.fault).slice(0, 100),
+      estimateCost: money(num(i.estimateCost)),
+      depositCost: money(num(i.depositCost)),
+      serviceCost: money(c.service),
+      serviceToolCost: money(c.tool),
+      deliveryCost: money(c.delivery),
+      cartonBoxCost: money(c.box),
+      jobTotalCost: money(parts + c.service + c.tool + c.delivery + c.box),
+      jobReferenceNo: str(i.so).slice(0, 50),
+      jobRemark: str(i.remark),
+      ...(engineerId !== undefined ? { engineerId } : {}),
+      productWarranty: str(i.warranty).slice(0, 50),
+      productSaleOutChannel: str(i.channel).slice(0, 50) || 'ยังไม่ระบุ',
+      productSaleOrderDate: dateOrNull(i.saleOrderDate),
+      productWarrantyMonth: int(i.warrantyMonth, 0),
+      productExpireDate: dateOrNull(i.expireDate),
+      jobReceptionType: str(i.receptionType).slice(0, 50) || 'ไม่ระบุ',
+      jobReceptionDate: dateOrNull(i.receptionDate),
+      jobReceptionTrackingNo: str(i.receptionTrackingNo).slice(0, 50),
+      jobReceptionShipper: str(i.receptionShipper).slice(0, 50),
+      productSaleOutShopName: str(i.shopName).slice(0, 100),
+      ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
+    };
     await tx.update(job).set(values).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Job Management",
-      entity: "job",
+      action: 'UPDATE',
+      module: 'Job Management',
+      entity: 'job',
       key: jobNo,
-      summary: "แก้ไขข้อมูลงาน",
+      summary: 'แก้ไขข้อมูลงาน',
       changes: diff(existing as Record<string, unknown>, values as Record<string, unknown>),
     });
     if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) await writeSymptoms(tx, jobNo, lk.symIds);
@@ -1118,25 +1241,38 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
  * Assign (จนท.รับมอบหมายงาน)
  * ------------------------------------------------------------------ */
 export async function assignJobs(jobNos: string[], engineerId: number, byUserId: number): Promise<number> {
-  if (!jobNos.length) throw new HttpError(400, "ยังไม่ได้เลือกงาน");
-  if (!engineerId) throw new HttpError(400, "ต้องเลือกช่าง");
+  if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
+  if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
   let n = 0;
   await db.transaction(async (tx) => {
-    const rows = await tx.select({ no: job.jobNo, status: job.jobStatusId }).from(job).where(inArray(job.jobNo, jobNos)).orderBy(job.jobNo).for("update");
+    const rows = await tx
+      .select({ no: job.jobNo, status: job.jobStatusId })
+      .from(job)
+      .where(inArray(job.jobNo, jobNos))
+      .orderBy(job.jobNo)
+      .for('update');
     if (!rows.length) return;
     // one UPDATE + one audit INSERT for the whole batch; only NEW jobs also change status
-    await tx.update(job).set({ engineerId }).where(inArray(job.jobNo, rows.map((r) => r.no)));
+    await tx
+      .update(job)
+      .set({ engineerId })
+      .where(
+        inArray(
+          job.jobNo,
+          rows.map((r) => r.no),
+        ),
+      );
     await audit(
       tx,
       byUserId,
       rows.map((r) => ({
-        action: "ASSIGN" as const,
-        module: "Job Assign",
-        entity: "job",
+        action: 'ASSIGN' as const,
+        module: 'Job Assign',
+        entity: 'job',
         key: r.no,
         summary: `มอบหมายงานให้ช่าง #${engineerId}`,
         changes: { engineerId: [null, engineerId] },
-      }))
+      })),
     );
     for (const r of rows) if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
     n = rows.length;
@@ -1178,9 +1314,13 @@ export type RepairInput = {
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
   assertValid(repairActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId, eng: job.engineerId }).from(job).where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const [es] = i.engineerSymptom
-    ? await db.select({ id: symptom.symptomId }).from(symptom).where(eq(symptom.symptomName, i.engineerSymptom)).limit(1)
+    ? await db
+        .select({ id: symptom.symptomId })
+        .from(symptom)
+        .where(eq(symptom.symptomName, i.engineerSymptom))
+        .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   let newRequests = false;
@@ -1189,20 +1329,31 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     const status = await lockJob(tx, jobNo);
     let partsTotal = 0;
     if (i.parts) {
-      const existing = await tx.select().from(jobOrderSparePartLog).where(eq(jobOrderSparePartLog.jobNo, jobNo)).for("update");
+      const existing = await tx
+        .select()
+        .from(jobOrderSparePartLog)
+        .where(eq(jobOrderSparePartLog.jobNo, jobNo))
+        .for('update');
       const keep = new Set(i.parts.map((p) => p.logId).filter((x): x is number => !!x));
       const codes = i.parts.map((p) => str(p.code)).filter(Boolean);
       // still-pending rows are the only existing ones whose booking can move (cancel / re-book)
       const pending = existing.filter((e) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0);
-      const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? "")]);
-      await lockStock(tx, [...map.values()].map((p) => p.id));
+      const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? '')]);
+      await lockStock(
+        tx,
+        [...map.values()].map((p) => p.id),
+      );
 
       // rows removed in the UI: cancel while still pending (nothing issued yet)
       for (const e of pending) {
         if (!keep.has(e.jobOrderLogId)) {
-          await tx.update(jobOrderSparePartLog).set({ orderStatusId: PART.CANCELLED }).where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
-          const prod = map.get(e.sparePartCode ?? "");
-          if (prod && e.isSpecial) await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
+          await tx
+            .update(jobOrderSparePartLog)
+            .set({ orderStatusId: PART.CANCELLED })
+            .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
+          const prod = map.get(e.sparePartCode ?? '');
+          if (prod && e.isSpecial)
+            await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
         }
       }
 
@@ -1234,7 +1385,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
             // still editable: re-book the delta
             const before = e.isSpecial ? (e.requestQty ?? 0) : 0;
             const after = values.isSpecial ? values.requestQty : 0;
-            if (prod && after !== before) await adjustQty(tx, prod.id, { booking: after - before }, { allowNegative: true });
+            if (prod && after !== before)
+              await adjustQty(tx, prod.id, { booking: after - before }, { allowNegative: true });
             await tx.update(jobOrderSparePartLog).set(values).where(eq(jobOrderSparePartLog.jobOrderLogId, p.logId));
             partsTotal += useA ? totalA : 0;
           } else {
@@ -1248,7 +1400,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         await tx.insert(jobOrderSparePartLog).values({
           jobNo,
           sparePartCode: str(p.code),
-          sparePartSerialNo: "",
+          sparePartSerialNo: '',
           stockId: 1,
           ...values,
           orderStatusId: PART.REQUESTED,
@@ -1275,37 +1427,38 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 
     // ---- job fields ----
     const [j] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
-    if (!j) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo); // locked by lockJob above — cannot vanish
+    if (!j) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo); // locked by lockJob above — cannot vanish
     const service = i.serviceCost !== undefined ? num(i.serviceCost) : num(j.serviceCost);
     const tool = i.toolCost !== undefined ? num(i.toolCost) : num(j.serviceToolCost);
     const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
     const box = i.boxCost !== undefined ? num(i.boxCost) : num(j.cartonBoxCost);
     const repairValues = {
-        ...(es ? { engineerSymptomId: es.id } : {}),
-        ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
-        ...(i.engineerRemark !== undefined ? { engineerRemark: str(i.engineerRemark).slice(0, 200) } : {}),
-        ...(i.newSerial ? { sparePartReplace: `New S/N: ${str(i.newSerial)}`.slice(0, 300) } : {}),
-        engineerId: cur.eng && cur.eng > 0 ? cur.eng : byUserId,
-        sparePartTotalCost: money(partsTotal),
-        serviceCost: money(service),
-        serviceToolCost: money(tool),
-        deliveryCost: money(delivery),
-        cartonBoxCost: money(box),
-        jobTotalCost: money(partsTotal + service + tool + delivery + box),
-      };
+      ...(es ? { engineerSymptomId: es.id } : {}),
+      ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
+      ...(i.engineerRemark !== undefined ? { engineerRemark: str(i.engineerRemark).slice(0, 200) } : {}),
+      ...(i.newSerial ? { sparePartReplace: `New S/N: ${str(i.newSerial)}`.slice(0, 300) } : {}),
+      engineerId: cur.eng && cur.eng > 0 ? cur.eng : byUserId,
+      sparePartTotalCost: money(partsTotal),
+      serviceCost: money(service),
+      serviceToolCost: money(tool),
+      deliveryCost: money(delivery),
+      cartonBoxCost: money(box),
+      jobTotalCost: money(partsTotal + service + tool + delivery + box),
+    };
     await tx.update(job).set(repairValues).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Job Repair",
-      entity: "job",
+      action: 'UPDATE',
+      module: 'Job Repair',
+      entity: 'job',
       key: jobNo,
-      summary: `บันทึกงานซ่อม${i.parts ? ` · อะไหล่ ${i.parts.length} รายการ` : ""}`,
+      summary: `บันทึกงานซ่อม${i.parts ? ` · อะไหล่ ${i.parts.length} รายการ` : ''}`,
       changes: diff(j as unknown as Record<string, unknown>, repairValues as Record<string, unknown>),
     });
 
     // ---- status: explicit choice wins; new stock requests move a new/in-progress job to 11 ----
     let target = newStatus;
-    if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS)) target = JS.PARTS_REQUESTED;
+    if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS))
+      target = JS.PARTS_REQUESTED;
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
   return (await getJob(jobNo))!;
@@ -1314,7 +1467,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 /** Called by stock after issuing all pending requests of a job. */
 export async function markPartsIssued(jobNo: string, byUserId: number) {
   await db.transaction(async (tx) => {
-    const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for("update");
+    const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
     if (!cur || cur.status !== JS.PARTS_REQUESTED) return;
     // recount under the job lock: a repair saved since the issue may have requested more parts
     const [waiting] = await tx
@@ -1324,8 +1477,8 @@ export async function markPartsIssued(jobNo: string, byUserId: number) {
         and(
           eq(jobOrderSparePartLog.jobNo, jobNo),
           eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
-          sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`
-        )
+          sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
+        ),
       );
     if ((waiting?.n ?? 0) === 0) await setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, cur.status);
   });
@@ -1348,7 +1501,12 @@ export type OutsourceInput = {
  * ส่งโดย / รับโดย: an active staff member, or the person already on the row (who may have left
  * since — keeping them is never an error). Anything else is a 400 under that field.
  */
-async function staffOrKeep(id: number | undefined, current: number | null | undefined, field: string, fallback: number): Promise<number> {
+async function staffOrKeep(
+  id: number | undefined,
+  current: number | null | undefined,
+  field: string,
+  fallback: number,
+): Promise<number> {
   if (id === undefined) return fallback;
   if (id === current) return id;
   const [u] = await db
@@ -1356,26 +1514,31 @@ async function staffOrKeep(id: number | undefined, current: number | null | unde
     .from(appUser)
     .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
     .limit(1);
-  if (!u) throw new HttpError(400, "ข้อมูลไม่ถูกต้อง 1 ช่อง", { fields: { [field]: "ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน" } });
+  if (!u)
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { [field]: 'ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน' } });
   return id;
 }
 
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const [es] = i.engineerSymptom
-    ? await db.select({ id: symptom.symptomId }).from(symptom).where(eq(symptom.symptomName, i.engineerSymptom)).limit(1)
+    ? await db
+        .select({ id: symptom.symptomId })
+        .from(symptom)
+        .where(eq(symptom.symptomName, i.engineerSymptom))
+        .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   const [openRow] = await db
     .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
     .from(jobSendForwardDt)
-    .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, "ส่งเครื่องซ่อมแล้ว")))
+    .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว')))
     .orderBy(desc(jobSendForwardDt.id))
     .limit(1);
-  const sendBy = await staffOrKeep(i.send?.by, openRow?.sendBy, "send.by", byUserId);
-  const receiveBy = await staffOrKeep(i.receive?.by, openRow?.receiveBy, "receive.by", byUserId);
+  const sendBy = await staffOrKeep(i.send?.by, openRow?.sendBy, 'send.by', byUserId);
+  const receiveBy = await staffOrKeep(i.receive?.by, openRow?.receiveBy, 'receive.by', byUserId);
 
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
@@ -1386,19 +1549,27 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     };
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Job Repair",
-      entity: "job",
+      action: 'UPDATE',
+      module: 'Job Repair',
+      entity: 'job',
       key: jobNo,
-      summary: i.send ? `ส่งซ่อมต่อ → ${str(i.send.to)}` : i.receive ? `รับคืนจาก Out-Source (${str(i.receive.from)})` : "บันทึกงานส่งซ่อมต่อ",
-      changes: diff(null, { ...fields, ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}), ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}) }),
+      summary: i.send
+        ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
+        : i.receive
+          ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
+          : 'บันทึกงานส่งซ่อมต่อ',
+      changes: diff(null, {
+        ...fields,
+        ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
+        ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}),
+      }),
     });
 
     let target = newStatus;
     const open = await tx
       .select()
       .from(jobSendForwardDt)
-      .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, "ส่งเครื่องซ่อมแล้ว")))
+      .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว')))
       .orderBy(desc(jobSendForwardDt.id))
       .limit(1);
 
@@ -1409,7 +1580,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
           receiveBy,
           receiveDetail: str(i.receive.detail).slice(0, 100),
-          sendStatus: "รับเครื่องซ่อมแล้ว",
+          sendStatus: 'รับเครื่องซ่อมแล้ว',
         })
         .where(eq(jobSendForwardDt.id, open[0].id));
       target ??= JS.OUTSOURCE_RECEIVED;
@@ -1417,7 +1588,12 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       if (open[0]) {
         await tx
           .update(jobSendForwardDt)
-          .set({ sendToName: str(i.send.to).slice(0, 50), sendDetail: str(i.send.detail).slice(0, 100), sendDate: dateOrSentinel(i.send.date ?? nowThai()), sendBy })
+          .set({
+            sendToName: str(i.send.to).slice(0, 50),
+            sendDetail: str(i.send.detail).slice(0, 100),
+            sendDate: dateOrSentinel(i.send.date ?? nowThai()),
+            sendBy,
+          })
           .where(eq(jobSendForwardDt.id, open[0].id));
       } else {
         await tx.insert(jobSendForwardDt).values({
@@ -1428,8 +1604,8 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           sendBy,
           receiveDate: SENTINEL_TS,
           receiveBy: -1,
-          receiveDetail: "",
-          sendStatus: "ส่งเครื่องซ่อมแล้ว",
+          receiveDetail: '',
+          sendStatus: 'ส่งเครื่องซ่อมแล้ว',
         });
       }
       target ??= JS.OUTSOURCE_SENT;
@@ -1441,7 +1617,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
 
 /** Distinct outsource vendors seen in the data (for the dropdown). */
 export function listOutsourceVendors(): Promise<string[]> {
-  return cached("jobs:vendors", 5 * TTL_MASTER, loadOutsourceVendors);
+  return cached('jobs:vendors', 5 * TTL_MASTER, loadOutsourceVendors);
 }
 async function loadOutsourceVendors(): Promise<string[]> {
   const rows = await db
@@ -1449,12 +1625,12 @@ async function loadOutsourceVendors(): Promise<string[]> {
     .from(jobSendForwardDt)
     .groupBy(jobSendForwardDt.sendToName)
     .orderBy(desc(count()));
-  return rows.map((r) => r.name?.trim() ?? "").filter(Boolean);
+  return rows.map((r) => r.name?.trim() ?? '').filter(Boolean);
 }
 
 /** งานย่อย (job.job_type_detail) — every value the legacy data uses, most common first. */
 export function listJobTypeDetails(): Promise<string[]> {
-  return cached("jobs:type_details", 5 * TTL_MASTER, loadJobTypeDetails);
+  return cached('jobs:type_details', 5 * TTL_MASTER, loadJobTypeDetails);
 }
 async function loadJobTypeDetails(): Promise<string[]> {
   const rows = await db
@@ -1463,7 +1639,7 @@ async function loadJobTypeDetails(): Promise<string[]> {
     .where(sql`coalesce(${job.jobTypeDetail},'') <> ''`)
     .groupBy(job.jobTypeDetail)
     .orderBy(desc(count()));
-  return rows.map((r) => r.v?.trim() ?? "").filter(Boolean);
+  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
 }
 
 /** บริษัทขนส่ง (job.job_reception_shipper) — free text in the legacy app; top values as suggestions. */
@@ -1478,7 +1654,7 @@ async function loadShippers(limit: number): Promise<string[]> {
     .groupBy(job.jobReceptionShipper)
     .orderBy(desc(count()))
     .limit(limit);
-  return rows.map((r) => r.v?.trim() ?? "").filter(Boolean);
+  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
 }
 
 /** Shop Name (job.product_sale_out_shop_name) — free text in the legacy app (511 spellings);
@@ -1495,7 +1671,7 @@ async function loadShopNames(limit: number): Promise<string[]> {
     .groupBy(v)
     .orderBy(desc(count()))
     .limit(limit);
-  return rows.map((r) => r.v ?? "").filter(Boolean);
+  return rows.map((r) => r.v ?? '').filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1518,41 +1694,44 @@ export type SwapRefundInput = {
 export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId: number): Promise<JobDetail> {
   assertValid(swapRefundActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   const lines = [
-    i.newSerial ? `New S/N: ${str(i.newSerial)}` : "",
-    i.newModel ? `รุ่นที่เปลี่ยนให้: ${str(i.newModel)}` : "",
-    i.swapDate ? `วันที่เปลี่ยนเครื่อง: ${str(i.swapDate)}` : "",
-    num(i.refundAmount) > 0 ? `ยอดเงินคืน: ${num(i.refundAmount).toFixed(2)}` : "",
-    i.refundMethod ? `วิธีการคืนเงิน: ${str(i.refundMethod)}` : "",
-    i.refundRef ? `เลขที่บัญชี/อ้างอิง: ${str(i.refundRef)}` : "",
-    i.refundDate ? `วันที่คืนเงิน: ${str(i.refundDate)}` : "",
-    i.detail ? `รายละเอียด: ${str(i.detail)}` : "",
+    i.newSerial ? `New S/N: ${str(i.newSerial)}` : '',
+    i.newModel ? `รุ่นที่เปลี่ยนให้: ${str(i.newModel)}` : '',
+    i.swapDate ? `วันที่เปลี่ยนเครื่อง: ${str(i.swapDate)}` : '',
+    num(i.refundAmount) > 0 ? `ยอดเงินคืน: ${num(i.refundAmount).toFixed(2)}` : '',
+    i.refundMethod ? `วิธีการคืนเงิน: ${str(i.refundMethod)}` : '',
+    i.refundRef ? `เลขที่บัญชี/อ้างอิง: ${str(i.refundRef)}` : '',
+    i.refundDate ? `วันที่คืนเงิน: ${str(i.refundDate)}` : '',
+    i.detail ? `รายละเอียด: ${str(i.detail)}` : '',
   ].filter(Boolean);
   await db.transaction(async (tx) => {
-    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for("update");
+    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
     const swapValues = {
-        ...(i.inspection !== undefined ? { engineerRepairDetail: str(i.inspection).slice(0, 200) } : {}),
-        swapRefundDetail: lines.join("\n"),
-        swapRefundDocumentNo: str(i.docNo).slice(0, 100),
-        ...(i.newSerial ? { sparePartReplace: `New S/N: ${str(i.newSerial)}`.slice(0, 300) } : {}),
-        ...(num(i.refundAmount) > 0
-          ? {
-              jobPaymentType: str(i.refundMethod).slice(0, 50),
-              jobPaymentNo: str(i.refundRef).slice(0, 50),
-              jobPaymentAmount: money(-Math.abs(num(i.refundAmount))),
-              jobPaymentDetail: `Refund ${str(i.refundDate)}`.slice(0, 100),
-            }
-          : {}),
-      };
+      ...(i.inspection !== undefined ? { engineerRepairDetail: str(i.inspection).slice(0, 200) } : {}),
+      swapRefundDetail: lines.join('\n'),
+      swapRefundDocumentNo: str(i.docNo).slice(0, 100),
+      ...(i.newSerial ? { sparePartReplace: `New S/N: ${str(i.newSerial)}`.slice(0, 300) } : {}),
+      ...(num(i.refundAmount) > 0
+        ? {
+            jobPaymentType: str(i.refundMethod).slice(0, 50),
+            jobPaymentNo: str(i.refundRef).slice(0, 50),
+            jobPaymentAmount: money(-Math.abs(num(i.refundAmount))),
+            jobPaymentDetail: `Refund ${str(i.refundDate)}`.slice(0, 100),
+          }
+        : {}),
+    };
     await tx.update(job).set(swapValues).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Job Management",
-      entity: "job",
+      action: 'UPDATE',
+      module: 'Job Management',
+      entity: 'job',
       key: jobNo,
-      summary: num(i.refundAmount) > 0 ? `บันทึก Refund ${num(i.refundAmount).toFixed(2)} บาท` : "บันทึก Swap / เปลี่ยนเครื่อง",
+      summary:
+        num(i.refundAmount) > 0
+          ? `บันทึก Refund ${num(i.refundAmount).toFixed(2)} บาท`
+          : 'บันทึก Swap / เปลี่ยนเครื่อง',
       changes: diff(before as Record<string, unknown>, swapValues as Record<string, unknown>),
     });
     if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before?.jobStatusId ?? null);
@@ -1573,42 +1752,45 @@ export type CloseInput = {
 export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): Promise<JobDetail> {
   assertValid(closeActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const newStatus = await statusIdByName(i.status);
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
     const pay = i.payment ?? {};
     const ret = i.return ?? {};
     const fields = {
-        ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
-        ...(pay.type || num(pay.amount) > 0
-          ? {
-              jobPaymentType: str(pay.type).slice(0, 50),
-              jobPaymentNo: str(pay.no).slice(0, 50),
-              jobPaymentAmount: money(num(pay.amount)),
-              jobPaymentDetail: [pay.date ? `ชำระ ${str(pay.date)}` : "", str(pay.detail)].filter(Boolean).join(" · ").slice(0, 100),
-            }
-          : {}),
-        ...(ret.type || ret.tracking || ret.date
-          ? {
-              jobReturnDate: dateOrSentinel(ret.date ?? nowThai()),
-              returnCustomerType: str(ret.type).slice(0, 50),
-              returnCustomerTrackingNo: str(ret.tracking).slice(0, 50),
-              returnCustomerDetail: [str(ret.courier), str(ret.detail)].filter(Boolean).join(" · ").slice(0, 100),
-              // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
-              returnShipperId: Number(ret.shipperId) > 0 ? Number(ret.shipperId) : null,
-              jobReturnBy: byUserId,
-            }
-          : {}),
+      ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
+      ...(pay.type || num(pay.amount) > 0
+        ? {
+            jobPaymentType: str(pay.type).slice(0, 50),
+            jobPaymentNo: str(pay.no).slice(0, 50),
+            jobPaymentAmount: money(num(pay.amount)),
+            jobPaymentDetail: [pay.date ? `ชำระ ${str(pay.date)}` : '', str(pay.detail)]
+              .filter(Boolean)
+              .join(' · ')
+              .slice(0, 100),
+          }
+        : {}),
+      ...(ret.type || ret.tracking || ret.date
+        ? {
+            jobReturnDate: dateOrSentinel(ret.date ?? nowThai()),
+            returnCustomerType: str(ret.type).slice(0, 50),
+            returnCustomerTrackingNo: str(ret.tracking).slice(0, 50),
+            returnCustomerDetail: [str(ret.courier), str(ret.detail)].filter(Boolean).join(' · ').slice(0, 100),
+            // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
+            returnShipperId: Number(ret.shipperId) > 0 ? Number(ret.shipperId) : null,
+            jobReturnBy: byUserId,
+          }
+        : {}),
     };
     const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Job Closing",
-      entity: "job",
+      action: 'UPDATE',
+      module: 'Job Closing',
+      entity: 'job',
       key: jobNo,
-      summary: "บันทึกปิดงาน / ส่งคืนสินค้า",
+      summary: 'บันทึกปิดงาน / ส่งคืนสินค้า',
       changes: diff(before as Record<string, unknown>, fields as Record<string, unknown>),
     });
     await setStatus(tx, jobNo, newStatus, byUserId, status);
@@ -1619,12 +1801,18 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
 /* ------------------------------------------------------------------ *
  * Attachments (document_attach) — files live in Supabase Storage
  * ------------------------------------------------------------------ */
-export async function addAttachment(jobNo: string, originalName: string, systemName: string, remark = "", byUserId = 0) {
+export async function addAttachment(
+  jobNo: string,
+  originalName: string,
+  systemName: string,
+  remark = '',
+  byUserId = 0,
+) {
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(documentAttach)
       .values({
-        referenceTopic: "Jobs",
+        referenceTopic: 'Jobs',
         referenceItemCode: jobNo,
         originalFileName: originalName.slice(0, 50),
         systemFileName: systemName.slice(0, 50),
@@ -1632,17 +1820,36 @@ export async function addAttachment(jobNo: string, originalName: string, systemN
         isActive: true,
       })
       .returning({ id: documentAttach.documentAttachId });
-    if (!row) throw new Error("document_attach insert returned no row");
-    await audit(tx, byUserId, { action: "UPLOAD", module: "Job Management", entity: "job", key: jobNo, summary: `แนบไฟล์ ${originalName}`, changes: { file: [null, systemName] } });
+    if (!row) throw new Error('document_attach insert returned no row');
+    await audit(tx, byUserId, {
+      action: 'UPLOAD',
+      module: 'Job Management',
+      entity: 'job',
+      key: jobNo,
+      summary: `แนบไฟล์ ${originalName}`,
+      changes: { file: [null, systemName] },
+    });
     return row.id;
   });
 }
 
 export async function removeAttachment(id: number, byUserId = 0) {
   await db.transaction(async (tx) => {
-    const [row] = await tx.select({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName }).from(documentAttach).where(eq(documentAttach.documentAttachId, id));
-    await tx.update(documentAttach).set(statusStamp(RS.DELETED, byUserId)).where(eq(documentAttach.documentAttachId, id));
-    await audit(tx, byUserId, { action: "DELETE", module: "Job Management", entity: "job", key: row?.jobNo ?? String(id), summary: `ลบไฟล์แนบ ${row?.name ?? id}` });
+    const [row] = await tx
+      .select({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName })
+      .from(documentAttach)
+      .where(eq(documentAttach.documentAttachId, id));
+    await tx
+      .update(documentAttach)
+      .set(statusStamp(RS.DELETED, byUserId))
+      .where(eq(documentAttach.documentAttachId, id));
+    await audit(tx, byUserId, {
+      action: 'DELETE',
+      module: 'Job Management',
+      entity: 'job',
+      key: row?.jobNo ?? String(id),
+      summary: `ลบไฟล์แนบ ${row?.name ?? id}`,
+    });
   });
 }
 
@@ -1655,9 +1862,9 @@ export type DashRange = { from?: string; to?: string; type?: string };
 // 30 s memo per date range (the dashboard is opened constantly). cached() gives parallel callers the
 // same in-flight computation, so the page's panels never compute it more than once.
 export function dashboard(range: DashRange = {}) {
-  const from = ymd(range.from) ?? "";
-  const to = ymd(range.to) ?? "";
-  const type = (range.type ?? "").trim();
+  const from = ymd(range.from) ?? '';
+  const to = ymd(range.to) ?? '';
+  const type = (range.type ?? '').trim();
   return cached(`dashboard:${from}|${to}|${type}`, 30_000, () => computeDashboard(from, to, type));
 }
 
@@ -1668,33 +1875,36 @@ function periodKeys(lo: string, hi: string, daily: boolean): string[] {
     for (let d = lo; d <= hi && keys.length < 400; d = addDays(d, 1)) keys.push(d);
     return keys;
   }
-  let [y = NaN, m = NaN] = lo.slice(0, 7).split("-").map(Number); // missing part → NaN, as before
+  let [y = NaN, m = NaN] = lo.slice(0, 7).split('-').map(Number); // missing part → NaN, as before
   const end = hi.slice(0, 7);
-  for (let k = lo.slice(0, 7); k <= end && keys.length < 1200; ) {
+  for (let k = lo.slice(0, 7); k <= end && keys.length < 1200;) {
     keys.push(k);
     m += 1;
     if (m > 12) [y, m] = [y + 1, 1];
-    k = `${y}-${String(m).padStart(2, "0")}`;
+    k = `${y}-${String(m).padStart(2, '0')}`;
   }
   return keys;
 }
 
-const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+const TH_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
 /**
  * Everything except the TAT table follows the date range (job_create_date;
  * the "closed" line of the chart uses job_closed_date). Empty from/to = all time.
  * TAT is a snapshot of the jobs still open right now, by design.
  */
-async function computeDashboard(from: string, to: string, type = "") {
+async function computeDashboard(from: string, to: string, type = '') {
   // optional job-type filter: resolve the name once, then filter every query by id (unknown name → no rows)
-  const typeId = type ? ((await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, type)).limit(1))[0]?.id ?? -1) : null;
+  const typeId = type
+    ? ((await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, type)).limit(1))[0]
+        ?.id ?? -1)
+    : null;
   const ofType = typeId === null ? undefined : eq(job.jobTypeId, typeId);
   const createdIn = and(
     ne(job.recordStatus, RS.DELETED),
     typeId === null ? undefined : eq(job.jobTypeId, typeId),
     from ? gte(job.jobCreateDate, `${from} 00:00:00`) : undefined,
-    to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined
+    to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined,
   );
   // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound.
   // "today" is the Thai calendar day (job dates are stored as Thai wall-clock), so each bucket maps
@@ -1715,7 +1925,7 @@ async function computeDashboard(from: string, to: string, type = "") {
               today: sql<string>`to_char(current_date, 'YYYY-MM-DD')`,
             })
             .from(job);
-    if (!bounds) throw new Error("min(job_create_date) returned no row"); // an aggregate always returns one
+    if (!bounds) throw new Error('min(job_create_date) returned no row'); // an aggregate always returns one
     const lo = daily ? from || bounds.first : `${(from || bounds.first).slice(0, 7)}-01`;
     const hi = to || bounds.today;
     const perPeriod = async (col: typeof job.jobCreateDate | typeof job.jobClosedDate) => {
@@ -1724,7 +1934,14 @@ async function computeDashboard(from: string, to: string, type = "") {
       const rows = await db
         .select({ k, n: count() })
         .from(job)
-        .where(and(ne(job.recordStatus, RS.DELETED), ofType, gte(col, `${lo} 00:00:00`), lt(col, `${addDays(hi, 1)} 00:00:00`)))
+        .where(
+          and(
+            ne(job.recordStatus, RS.DELETED),
+            ofType,
+            gte(col, `${lo} 00:00:00`),
+            lt(col, `${addDays(hi, 1)} 00:00:00`),
+          ),
+        )
         .groupBy(k);
       return new Map(rows.map((r) => [r.k, Number(r.n)]));
     };
@@ -1765,11 +1982,20 @@ async function computeDashboard(from: string, to: string, type = "") {
       .limit(8),
   ]);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
-  const G: Record<string, { key: string; label: string; sub: string; tone: "primary" | "warning" | "info" | "success" | "danger"; ord: number }> = {
-    Pending: { key: "pending", label: "งานระหว่างดำเนินการ", sub: "Pending", tone: "warning", ord: 1 },
-    Repaired: { key: "repaired", label: "ซ่อมเสร็จ / รอปิดงาน", sub: "Repaired", tone: "info", ord: 2 },
-    Finished: { key: "finished", label: "ปิดงานแล้ว", sub: "Finished", tone: "success", ord: 3 },
-    Cancel: { key: "cancel", label: "ยกเลิก", sub: "Cancel", tone: "danger", ord: 4 },
+  const G: Record<
+    string,
+    {
+      key: string;
+      label: string;
+      sub: string;
+      tone: 'primary' | 'warning' | 'info' | 'success' | 'danger';
+      ord: number;
+    }
+  > = {
+    Pending: { key: 'pending', label: 'งานระหว่างดำเนินการ', sub: 'Pending', tone: 'warning', ord: 1 },
+    Repaired: { key: 'repaired', label: 'ซ่อมเสร็จ / รอปิดงาน', sub: 'Repaired', tone: 'info', ord: 2 },
+    Finished: { key: 'finished', label: 'ปิดงานแล้ว', sub: 'Finished', tone: 'success', ord: 3 },
+    Cancel: { key: 'cancel', label: 'ยกเลิก', sub: 'Cancel', tone: 'danger', ord: 4 },
   };
   const dashGroups = Object.entries(G)
     .map(([g, meta]) => {
@@ -1780,7 +2006,7 @@ async function computeDashboard(from: string, to: string, type = "") {
 
   const tatRows = tat.map((r) => ({
     statusId: Number(r.statusId),
-    status: String(r.status ?? "").trim(),
+    status: String(r.status ?? '').trim(),
     d13: Number(r.d13),
     d47: Number(r.d47),
     d814: Number(r.d814),
@@ -1789,14 +2015,22 @@ async function computeDashboard(from: string, to: string, type = "") {
   }));
 
   const monthlyRows = trend.map((r) => {
-    const [y, mo, d] = r.k.split("-");
-    const label = daily ? `${Number(d)} ${TH_MONTH[Number(mo) - 1]}` : `${TH_MONTH[Number(mo) - 1]} ${String(Number(y) + 543).slice(-2)}`;
+    const [y, mo, d] = r.k.split('-');
+    const label = daily
+      ? `${Number(d)} ${TH_MONTH[Number(mo) - 1]}`
+      : `${TH_MONTH[Number(mo) - 1]} ${String(Number(y) + 543).slice(-2)}`;
     return { m: label, open: Number(r.open), close: Number(r.close) };
   });
 
-  const topSymptoms = top.map((t) => ({ name: t.name ?? "", count: Number(t.n) }));
+  const topSymptoms = top.map((t) => ({ name: t.name ?? '', count: Number(t.n) }));
 
-  return { groups: dashGroups, tat: tatRows, monthly: monthlyRows, granularity: daily ? ("day" as const) : ("month" as const), topSymptoms };
+  return {
+    groups: dashGroups,
+    tat: tatRows,
+    monthly: monthlyRows,
+    granularity: daily ? ('day' as const) : ('month' as const),
+    topSymptoms,
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1804,16 +2038,19 @@ async function computeDashboard(from: string, to: string, type = "") {
  * ------------------------------------------------------------------ */
 /** Active symptoms ordered by how often they were used, most common first (5 min memo; a symptom edit drops it). */
 export function symptomStats() {
-  return cached("master:symptoms:stats", 300_000, async () => {
+  return cached('master:symptoms:stats', 300_000, async () => {
     // every use of a symptom: the job's main symptom + its extra ones (not counting the main one twice)
     const used = unionAll(
-      db.select({ sid: job.productSymptomId }).from(job).where(and(ne(job.recordStatus, RS.DELETED), gt(job.productSymptomId, 0))),
+      db
+        .select({ sid: job.productSymptomId })
+        .from(job)
+        .where(and(ne(job.recordStatus, RS.DELETED), gt(job.productSymptomId, 0))),
       db
         .select({ sid: jobSymptom.symptomId })
         .from(jobSymptom)
         .innerJoin(job, eq(job.jobNo, jobSymptom.jobNo))
-        .where(and(ne(job.recordStatus, RS.DELETED), ne(jobSymptom.symptomId, job.productSymptomId)))
-    ).as("u");
+        .where(and(ne(job.recordStatus, RS.DELETED), ne(jobSymptom.symptomId, job.productSymptomId))),
+    ).as('u');
     const rows = await db
       .select({ id: symptom.symptomId, name: symptom.symptomName, grp: symptom.symptomGroupName, n: count(used.sid) })
       .from(symptom)
@@ -1821,7 +2058,7 @@ export function symptomStats() {
       .where(eq(symptom.recordStatus, RS.ACTIVE))
       .groupBy(symptom.symptomId, symptom.symptomName, symptom.symptomGroupName)
       .orderBy(desc(count(used.sid)), asc(symptom.symptomName));
-    return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), group: x.grp ?? "", count: Number(x.n) }));
+    return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? '').trim(), group: x.grp ?? '', count: Number(x.n) }));
   });
 }
 
@@ -1840,8 +2077,8 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
       .from(jobSymptom)
       .innerJoin(job, eq(job.jobNo, jobSymptom.jobNo))
       .innerJoin(model, eq(model.modelId, job.productModelId))
-      .where(and(ofModel, ne(jobSymptom.symptomId, job.productSymptomId)))
-  ).as("u");
+      .where(and(ofModel, ne(jobSymptom.symptomId, job.productSymptomId))),
+  ).as('u');
   const rows = await db
     .select({ id: symptom.symptomId, name: symptom.symptomName, n: count() })
     .from(used)
@@ -1850,7 +2087,7 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
     .groupBy(symptom.symptomId, symptom.symptomName)
     .orderBy(desc(count()))
     .limit(limit);
-  return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? "").trim(), count: Number(x.n) }));
+  return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? '').trim(), count: Number(x.n) }));
 }
 
 export { eq };
@@ -1859,23 +2096,37 @@ export { eq };
  * Call log (job_call_log)
  * ------------------------------------------------------------------ */
 export async function listCallLogs(jobNo: string) {
-  const { jobCallLog } = await import("@/db/schema");
+  const { jobCallLog } = await import('@/db/schema');
   const rows = await db
-    .select({ id: jobCallLog.jobCallLogId, detail: jobCallLog.callLogDescription, date: jobCallLog.callLogDate, f: appUser.firstName, l: appUser.lastName })
+    .select({
+      id: jobCallLog.jobCallLogId,
+      detail: jobCallLog.callLogDescription,
+      date: jobCallLog.callLogDate,
+      f: appUser.firstName,
+      l: appUser.lastName,
+    })
     .from(jobCallLog)
     .leftJoin(appUser, eq(appUser.userId, jobCallLog.callLogBy))
     .where(eq(jobCallLog.jobNo, jobNo))
     .orderBy(desc(jobCallLog.callLogDate), desc(jobCallLog.jobCallLogId));
-  return rows.map((r) => ({ id: r.id, detail: r.detail ?? "", date: fmtDateTime(r.date), by: fullName(r.f, r.l) }));
+  return rows.map((r) => ({ id: r.id, detail: r.detail ?? '', date: fmtDateTime(r.date), by: fullName(r.f, r.l) }));
 }
 
 export async function addCallLog(jobNo: string, detail: string, byUserId: number) {
-  const { jobCallLog } = await import("@/db/schema");
+  const { jobCallLog } = await import('@/db/schema');
   const text = str(detail).slice(0, 200);
-  if (!text) throw new HttpError(400, "ต้องระบุรายละเอียด");
+  if (!text) throw new HttpError(400, 'ต้องระบุรายละเอียด');
   await db.transaction(async (tx) => {
-    await tx.insert(jobCallLog).values({ jobNo, callLogDescription: text, callLogDate: nowThai(), callLogBy: byUserId });
-    await audit(tx, byUserId, { action: "CREATE", module: "Job Management", entity: "job", key: jobNo, summary: `บันทึกการโทร: ${text}`.slice(0, 200) });
+    await tx
+      .insert(jobCallLog)
+      .values({ jobNo, callLogDescription: text, callLogDate: nowThai(), callLogBy: byUserId });
+    await audit(tx, byUserId, {
+      action: 'CREATE',
+      module: 'Job Management',
+      entity: 'job',
+      key: jobNo,
+      summary: `บันทึกการโทร: ${text}`.slice(0, 200),
+    });
   });
   return listCallLogs(jobNo);
 }
@@ -1883,7 +2134,7 @@ export async function addCallLog(jobNo: string, detail: string, byUserId: number
 /** Header chips of the job list — counts over the whole table (a GROUP BY over every job, so 30 s memo
  *  like the dashboard; job writes have no cache invalidation, the chips may lag by up to 30 s). */
 export function jobStats() {
-  return cached("jobs:stats", 30_000, loadJobStats);
+  return cached('jobs:stats', 30_000, loadJobStats);
 }
 async function loadJobStats() {
   const rows = await db
@@ -1899,7 +2150,7 @@ async function loadJobStats() {
     const n = Number(r.n);
     total += n;
     if (r.id === JS.NEW) fresh += n;
-    else if (r.group === "Finished" || r.group === "Repaired") done += n;
+    else if (r.group === 'Finished' || r.group === 'Repaired') done += n;
   }
   return { total, fresh, done, progress: total - fresh - done };
 }

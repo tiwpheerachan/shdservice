@@ -1,27 +1,27 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Plus } from "lucide-react";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { PageHeader } from "./page-header";
-import { RowActions } from "./row-actions";
-import { FilterBar } from "./filter-bar";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ui/confirm";
-import type { MasterRow } from "@/data/mock";
-import { postJson, errMsg, exportXlsx } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
-import { masterSchema } from "@/lib/validation/admin";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import { Plus } from 'lucide-react';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { PageHeader } from './page-header';
+import { RowActions } from './row-actions';
+import { FilterBar } from './filter-bar';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
+import { Field, FieldGrid } from '@/components/ui/field';
+import { Input, Select, Textarea } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+import type { MasterRow } from '@/data/mock';
+import { postJson, errMsg, exportXlsx } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { masterSchema } from '@/lib/validation/admin';
+import { ExportButton } from '@/components/shared/export-button';
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
-export type MasterKind = "categories" | "manufacturers" | "colors" | "job_types" | "product_types" | "symptoms";
+export type MasterKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types' | 'symptoms';
 
 export type MasterConfig = {
   kind: MasterKind;
@@ -50,25 +50,25 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     setRows(config.rows);
   }
   const [open, setOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<(MasterRow & { group?: string }) | null>(
-    null
-  );
-  const [form, setForm] = React.useState({ name: "", status: "Active", group: "", detail: "", days: "" });
+  const [editing, setEditing] = React.useState<(MasterRow & { group?: string }) | null>(null);
+  const [form, setForm] = React.useState({ name: '', status: 'Active', group: '', detail: '', days: '' });
   const [saving, setSaving] = React.useState(false);
 
   // filter bar (ชื่อ + สถานะ) — applied on ค้นหา; the lists are small so this is done in the browser
-  type MasterFilter = { name: string; status: "" | "Active" | "Inactive" };
-  const NO_FILTER: MasterFilter = { name: "", status: "" };
+  type MasterFilter = { name: string; status: '' | 'Active' | 'Inactive' };
+  const NO_FILTER: MasterFilter = { name: '', status: '' };
   const [draft, setDraft] = React.useState<MasterFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<MasterFilter>(NO_FILTER);
   const visible = React.useMemo(() => {
     const term = filter.name.trim().toLowerCase();
-    return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!filter.status || r.status === filter.status));
+    return rows.filter(
+      (r) => (!term || r.name.toLowerCase().includes(term)) && (!filter.status || r.status === filter.status),
+    );
   }, [rows, filter]);
 
   // group options = configured list ∪ values already in the DB
   const groupOptions = React.useMemo(() => {
-    const set = new Set<string>(["", ...(config.extraOptions ?? [])]);
+    const set = new Set<string>(['', ...(config.extraOptions ?? [])]);
     for (const r of rows) if (r.group) set.add(r.group);
     return Array.from(set);
   }, [rows, config.extraOptions]);
@@ -77,13 +77,19 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   useClearOnChange(fe.clear, form);
   const openNew = () => {
     setEditing(null);
-    setForm({ name: "", status: "Active", group: "", detail: "", days: config.daysLabel ? "7" : "" });
+    setForm({ name: '', status: 'Active', group: '', detail: '', days: config.daysLabel ? '7' : '' });
     fe.setErrors({});
     setOpen(true);
   };
   const openEdit = (r: MasterRow & { group?: string }) => {
     setEditing(r);
-    setForm({ name: r.name, status: r.status, group: r.group ?? "", detail: r.detail ?? "", days: r.days != null ? String(r.days) : "" });
+    setForm({
+      name: r.name,
+      status: r.status,
+      group: r.group ?? '',
+      detail: r.detail ?? '',
+      days: r.days != null ? String(r.days) : '',
+    });
     fe.setErrors({});
     setOpen(true);
   };
@@ -106,12 +112,12 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       upsertRow(d.row);
       setOpen(false);
       push({
-        kind: "success",
-        title: editing ? "บันทึกการแก้ไขแล้ว" : "เพิ่มข้อมูลใหม่แล้ว",
+        kind: 'success',
+        title: editing ? 'บันทึกการแก้ไขแล้ว' : 'เพิ่มข้อมูลใหม่แล้ว',
         desc: `${config.title} — ${d.row.name}`,
       });
     } catch (e) {
-      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -121,20 +127,24 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   const toggleStatus = async (id: string) => {
     const r = rows.find((x) => x.id === id);
     if (!r) return;
-    const next = r.status === "Active" ? "Inactive" : "Active";
+    const next = r.status === 'Active' ? 'Inactive' : 'Active';
     try {
-      await postJson("/api/admin/records", { table: config.kind, id, status: next === "Inactive" ? "INACTIVE" : "ACTIVE" });
+      await postJson('/api/admin/records', {
+        table: config.kind,
+        id,
+        status: next === 'Inactive' ? 'INACTIVE' : 'ACTIVE',
+      });
       setRows((s) => s.map((x) => (x.id === id ? { ...x, status: next } : x)));
-      push({ kind: "success", title: "เปลี่ยนสถานะเรียบร้อย", desc: `${r.name} → ${next}` });
+      push({ kind: 'success', title: 'เปลี่ยนสถานะเรียบร้อย', desc: `${r.name} → ${next}` });
     } catch (e) {
-      push({ kind: "error", title: "เปลี่ยนสถานะไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'เปลี่ยนสถานะไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
   const remove = async (r: MasterRow) => {
     if (!isAdmin) return; // the delete button only shows for an admin
     const ok = await confirm({
-      tone: "danger",
+      tone: 'danger',
       title: `ลบ${config.title} "${r.name}"?`,
       description: (
         <>
@@ -143,95 +153,89 @@ export function MasterTable({ config }: { config: MasterConfig }) {
           การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่ต้องการหยุดใช้ชั่วคราว ให้เปลี่ยนสถานะเป็น Inactive แทน
         </>
       ),
-      confirmLabel: "ลบ",
+      confirmLabel: 'ลบ',
     });
     if (!ok) return;
     try {
-      await postJson("/api/admin/records", { table: config.kind, id: r.id, status: "DELETED" });
+      await postJson('/api/admin/records', { table: config.kind, id: r.id, status: 'DELETED' });
       setRows((s) => s.filter((x) => x.id !== r.id));
-      push({ kind: "success", title: "ลบข้อมูลแล้ว", desc: r.name });
+      push({ kind: 'success', title: 'ลบข้อมูลแล้ว', desc: r.name });
     } catch (e) {
-      push({ kind: "error", title: "ลบไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'ลบไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
   const columns: Column<MasterRow & { group?: string }>[] = [
     {
-      key: "no",
-      header: "#",
-      width: "56px",
-      align: "center",
+      key: 'no',
+      header: '#',
+      width: '56px',
+      align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
-      key: "name",
+      key: 'name',
       header: config.nameLabel,
       cell: (r) => <span className="font-medium">{r.name}</span>,
     },
     ...(config.detailLabel
       ? [
           {
-            key: "detail",
+            key: 'detail',
             header: config.detailLabel,
-            hideBelow: "md" as const,
-            cell: (r: MasterRow) => (
-              <span className="text-muted-foreground">{r.detail || "—"}</span>
-            ),
+            hideBelow: 'md' as const,
+            cell: (r: MasterRow) => <span className="text-muted-foreground">{r.detail || '—'}</span>,
           },
         ]
       : []),
     ...(config.daysLabel
       ? [
           {
-            key: "days",
+            key: 'days',
             header: config.daysLabel,
-            align: "right" as const,
+            align: 'right' as const,
             value: (r: MasterRow & { group?: string }) => r.days ?? 0,
-            cell: (r: MasterRow & { group?: string }) => <span className="num">{r.days ?? "—"}</span>,
+            cell: (r: MasterRow & { group?: string }) => <span className="num">{r.days ?? '—'}</span>,
           },
         ]
       : []),
     ...(config.extraLabel
       ? [
           {
-            key: "group",
+            key: 'group',
             header: config.extraLabel,
-            hideBelow: "lg" as const,
-            cell: (r: MasterRow & { group?: string }) => (
-              <Badge tone="info">{r.group}</Badge>
-            ),
+            hideBelow: 'lg' as const,
+            cell: (r: MasterRow & { group?: string }) => <Badge tone="info">{r.group}</Badge>,
           },
         ]
       : []),
     {
-      key: "id",
-      header: "ID",
-      width: "110px",
-      hideBelow: "sm",
+      key: 'id',
+      header: 'ID',
+      width: '110px',
+      hideBelow: 'sm',
       cell: (r) => <span className="num text-xs text-muted-foreground">{r.id}</span>,
     },
     {
-      key: "status",
-      header: "สถานะ",
-      width: "110px",
+      key: 'status',
+      header: 'สถานะ',
+      width: '110px',
       cell: (r) => (
         <button onClick={() => toggleStatus(r.id)} title="คลิกเพื่อสลับสถานะ">
-          <Badge tone={r.status === "Active" ? "success" : "neutral"} dot>
+          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
             {r.status}
           </Badge>
         </button>
       ),
     },
     {
-      key: "action",
-      header: "Action",
-      width: "110px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '110px',
+      align: 'center',
       sortable: false,
-      cell: (r) => (
-        <RowActions onEdit={() => openEdit(r)} onDelete={isAdmin ? () => remove(r) : undefined} />
-      ),
+      cell: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={isAdmin ? () => remove(r) : undefined} />,
     },
   ];
 
@@ -242,7 +246,9 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         description={config.description}
         actions={
           <>
-            <ExportButton run={() => exportXlsx(config.kind, { deleted: "exclude", q: filter.name, status: filter.status })} />
+            <ExportButton
+              run={() => exportXlsx(config.kind, { deleted: 'exclude', q: filter.name, status: filter.status })}
+            />
             <Button size="sm" onClick={openNew}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มข้อมูล
@@ -261,10 +267,17 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }}
       >
         <Field label={config.nameLabel}>
-          <Input placeholder={`พิมพ์บางส่วนของ${config.nameLabel}`} value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+          <Input
+            placeholder={`พิมพ์บางส่วนของ${config.nameLabel}`}
+            value={draft.name}
+            onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))}
+          />
         </Field>
         <Field label="สถานะ">
-          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as MasterFilter["status"] }))}>
+          <Select
+            value={draft.status}
+            onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as MasterFilter['status'] }))}
+          >
             <option value="">ทั้งหมด</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
@@ -272,13 +285,14 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         </Field>
       </FilterBar>
 
-      <DataTable searchable={false}
+      <DataTable
+        searchable={false}
         columns={columns}
         rows={visible}
         rowKey={(r) => r.id}
         footerNote={
           <span className="hidden sm:inline">
-            · Active {visible.filter((r) => r.status === "Active").length} รายการ
+            · Active {visible.filter((r) => r.status === 'Active').length} รายการ
           </span>
         }
       />

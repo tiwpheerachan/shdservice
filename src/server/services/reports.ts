@@ -1,21 +1,32 @@
-import "server-only";
-import { count, eq, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
-import { db } from "@/db/client";
-import { appUser, approveStatus, customer, job, jobStatus, jobType, quotationHd, quotationStatus, saleOutHd, symptom } from "@/db/schema";
-import { num } from "@/server/mappers/format";
-import { jobWhere, type JobFilters } from "./jobs";
-import { quotationWhere, type QuotationFilters } from "./quotations";
-import { saleOrderWhere, type SaleOrderFilters } from "./sale-orders";
+import 'server-only';
+import { count, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import { db } from '@/db/client';
+import {
+  appUser,
+  approveStatus,
+  customer,
+  job,
+  jobStatus,
+  jobType,
+  quotationHd,
+  quotationStatus,
+  saleOutHd,
+  symptom,
+} from '@/db/schema';
+import { num } from '@/server/mappers/format';
+import { jobWhere, type JobFilters } from './jobs';
+import { quotationWhere, type QuotationFilters } from './quotations';
+import { saleOrderWhere, type SaleOrderFilters } from './sale-orders';
 
 /**
  * KPI tiles for the report screens — computed in one query over the SAME
  * filters the paged table uses, so the numbers cover the whole range even
  * though the table only shows a page.
  */
-const eng = alias(appUser, "eng");
+const eng = alias(appUser, 'eng');
 
-async function jobBase(f: JobFilters, q = "") {
+async function jobBase(f: JobFilters, q = '') {
   return db
     .select({
       total: count(),
@@ -37,9 +48,9 @@ async function jobBase(f: JobFilters, q = "") {
     .where(jobWhere(q, f));
 }
 
-export async function jobReportSummary(f: JobFilters, q = "") {
+export async function jobReportSummary(f: JobFilters, q = '') {
   const [r] = await jobBase(f, q);
-  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   const [top] = await db
     .select({ channel: job.productSaleOutChannel, n: count() })
     .from(job)
@@ -61,11 +72,11 @@ export async function jobReportSummary(f: JobFilters, q = "") {
     paid: num(r.paid),
     avgTat: tatN ? Math.round((num(r.tatSum) / tatN) * 10) / 10 : 0,
     over30: num(r.over30),
-    topChannel: top?.channel?.trim() || "—",
+    topChannel: top?.channel?.trim() || '—',
   };
 }
 
-export async function quotationReportSummary(f: QuotationFilters, q = "") {
+export async function quotationReportSummary(f: QuotationFilters, q = '') {
   const [r] = await db
     .select({
       total: count(),
@@ -78,12 +89,12 @@ export async function quotationReportSummary(f: QuotationFilters, q = "") {
     .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
     .where(quotationWhere(q, f));
-  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   return { total: Number(r.total), agreed: num(r.agreed), amount: num(r.amount), agreedAmount: num(r.agreedAmount) };
 }
 
-export async function saleOrderReportSummary(f: SaleOrderFilters, q = "") {
-  const creator = alias(appUser, "creator");
+export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
+  const creator = alias(appUser, 'creator');
   const [r] = await db
     .select({
       total: count(),
@@ -94,7 +105,7 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = "") {
     .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
     .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
     .where(saleOrderWhere(q, f));
-  if (!r) throw new Error("aggregate returned no row"); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   const total = Number(r.total);
   const amount = num(r.amount);
   return { total, approved: num(r.approved), amount, avg: total ? amount / total : 0 };

@@ -1,47 +1,54 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge, type Tone } from "@/components/ui/badge";
-import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Modal } from "@/components/ui/modal";
-import { useAuditPage, useAuditModules, type AuditRow } from "@/data/db";
-import { exportXlsx } from "@/lib/api";
-import { isFilterActive } from "@/lib/utils";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge, type Tone } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Modal } from '@/components/ui/modal';
+import { useAuditPage, useAuditModules, type AuditRow } from '@/data/db';
+import { exportXlsx } from '@/lib/api';
+import { isFilterActive } from '@/lib/utils';
+import { ExportButton } from '@/components/shared/export-button';
 
 // action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
-  CREATE: { label: "เพิ่ม", tone: "success" },
-  UPDATE: { label: "แก้ไข", tone: "info" },
-  DELETE: { label: "ลบ", tone: "danger" },
-  STATUS: { label: "เปลี่ยนสถานะ", tone: "warning" },
-  APPROVE: { label: "อนุมัติ", tone: "primary" },
-  ASSIGN: { label: "มอบหมาย", tone: "info" },
-  ISSUE: { label: "จ่ายสต๊อก", tone: "warning" },
-  RECEIVE: { label: "รับเข้า", tone: "success" },
-  RETURN: { label: "รับคืน", tone: "success" },
-  UPLOAD: { label: "แนบไฟล์", tone: "neutral" },
-  LOGIN: { label: "เข้าสู่ระบบ", tone: "neutral" },
+  CREATE: { label: 'เพิ่ม', tone: 'success' },
+  UPDATE: { label: 'แก้ไข', tone: 'info' },
+  DELETE: { label: 'ลบ', tone: 'danger' },
+  STATUS: { label: 'เปลี่ยนสถานะ', tone: 'warning' },
+  APPROVE: { label: 'อนุมัติ', tone: 'primary' },
+  ASSIGN: { label: 'มอบหมาย', tone: 'info' },
+  ISSUE: { label: 'จ่ายสต๊อก', tone: 'warning' },
+  RECEIVE: { label: 'รับเข้า', tone: 'success' },
+  RETURN: { label: 'รับคืน', tone: 'success' },
+  UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
+  LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
 };
 
 type Filters = { from: string; to: string; user: string; module: string; action: string; key: string; q: string };
-const NO_FILTER: Filters = { from: "", to: "", user: "", module: "", action: "", key: "", q: "" };
+const NO_FILTER: Filters = { from: '', to: '', user: '', module: '', action: '', key: '', q: '' };
 
-const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
+const fmt = (v: unknown) =>
+  v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 
 export default function AuditPage() {
   const { data: MODULES } = useAuditModules();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 50, q: "", sort: null });
-  const { rows, total, loading, error: loadError, refetch: retryLoad } = useAuditPage({
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 50, q: '', sort: null });
+  const {
+    rows,
+    total,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useAuditPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -51,27 +58,42 @@ export default function AuditPage() {
   const [detail, setDetail] = React.useState<AuditRow | null>(null);
 
   const columns: Column<AuditRow>[] = [
-    { key: "at", header: "เวลา", width: "150px", cell: (r) => <span className="num text-xs">{r.at}</span> },
-    { key: "user", header: "ผู้ใช้", width: "180px", cell: (r) => <span className="line-clamp-1">{r.user || "—"}</span> },
+    { key: 'at', header: 'เวลา', width: '150px', cell: (r) => <span className="num text-xs">{r.at}</span> },
     {
-      key: "action",
-      header: "การกระทำ",
-      width: "120px",
+      key: 'user',
+      header: 'ผู้ใช้',
+      width: '180px',
+      cell: (r) => <span className="line-clamp-1">{r.user || '—'}</span>,
+    },
+    {
+      key: 'action',
+      header: 'การกระทำ',
+      width: '120px',
       cell: (r) => (
-        <Badge tone={ACTION[r.action]?.tone ?? "neutral"} dot>
+        <Badge tone={ACTION[r.action]?.tone ?? 'neutral'} dot>
           {ACTION[r.action]?.label ?? r.action}
         </Badge>
       ),
     },
-    { key: "module", header: "โมดูล", hideBelow: "lg", width: "160px" },
-    { key: "key", header: "เลขที่ / รหัส", width: "130px", cell: (r) => <span className="num font-medium">{r.key}</span> },
-    { key: "summary", header: "รายละเอียด", sortable: false, cell: (r) => <span className="line-clamp-2">{r.summary}</span> },
+    { key: 'module', header: 'โมดูล', hideBelow: 'lg', width: '160px' },
     {
-      key: "changes",
-      header: "ค่าที่เปลี่ยน",
+      key: 'key',
+      header: 'เลขที่ / รหัส',
+      width: '130px',
+      cell: (r) => <span className="num font-medium">{r.key}</span>,
+    },
+    {
+      key: 'summary',
+      header: 'รายละเอียด',
       sortable: false,
-      width: "110px",
-      align: "center",
+      cell: (r) => <span className="line-clamp-2">{r.summary}</span>,
+    },
+    {
+      key: 'changes',
+      header: 'ค่าที่เปลี่ยน',
+      sortable: false,
+      width: '110px',
+      align: 'center',
       cell: (r) =>
         r.changes ? (
           <Button variant="ghost" size="sm" onClick={() => setDetail(r)}>
@@ -93,9 +115,7 @@ export default function AuditPage() {
       <PageHeader
         title="ประวัติการใช้งาน (Audit Log)"
         description="ข้อมูลระบบ » ใครทำอะไร กับรายการไหน เมื่อไร — บันทึกทุกการเพิ่ม/แก้ไข/ลบ/เปลี่ยนสถานะ/อนุมัติ/จ่ายสต๊อก และการเข้าสู่ระบบ"
-        actions={
-          <ExportButton run={() => exportXlsx("audit_log", { ...filters })} />
-        }
+        actions={<ExportButton run={() => exportXlsx('audit_log', { ...filters })} />}
       />
 
       <FilterBar
@@ -106,25 +126,46 @@ export default function AuditPage() {
         onReset={resetFilters}
       >
         <Field label="วันที่ (ตั้งแต่)">
-          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
+          <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
         <Field label="วันที่ (ถึง)">
-          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
+          <Input type="date" value={draft.to} onChange={(e) => setD('to', e.target.value)} />
         </Field>
         <Field label="ผู้ใช้">
-          <Input placeholder="ชื่อ หรือ user id" value={draft.user} onChange={(e) => setD("user", e.target.value)} />
+          <Input placeholder="ชื่อ หรือ user id" value={draft.user} onChange={(e) => setD('user', e.target.value)} />
         </Field>
         <Field label="โมดูล">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.module} onChange={(v) => setD("module", v)} options={strOptions(MODULES)} />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.module}
+            onChange={(v) => setD('module', v)}
+            options={strOptions(MODULES)}
+          />
         </Field>
         <Field label="การกระทำ">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.action} onChange={(v) => setD("action", v)} options={Object.entries(ACTION).map(([k, v]) => ({ value: k, label: v.label, sub: k }))} />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.action}
+            onChange={(v) => setD('action', v)}
+            options={Object.entries(ACTION).map(([k, v]) => ({ value: k, label: v.label, sub: k }))}
+          />
         </Field>
         <Field label="เลขที่ / รหัส">
-          <Input placeholder="J2612088 / Q2600462 / P00012" className="num" value={draft.key} onChange={(e) => setD("key", e.target.value.trim())} />
+          <Input
+            placeholder="J2612088 / Q2600462 / P00012"
+            className="num"
+            value={draft.key}
+            onChange={(e) => setD('key', e.target.value.trim())}
+          />
         </Field>
         <Field label="รายละเอียด / ชื่อผู้ใช้">
-          <Input placeholder="ข้อความในรายละเอียด หรือชื่อผู้ใช้" value={draft.q} onChange={(e) => setD("q", e.target.value)} />
+          <Input
+            placeholder="ข้อความในรายละเอียด หรือชื่อผู้ใช้"
+            value={draft.q}
+            onChange={(e) => setD('q', e.target.value)}
+          />
         </Field>
       </FilterBar>
 
@@ -135,7 +176,9 @@ export default function AuditPage() {
         columns={columns}
         rows={rows}
         rowKey={(r) => String(r.id)}
-        loading={loading} error={loadError} onRetry={retryLoad}
+        loading={loading}
+        error={loadError}
+        onRetry={retryLoad}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />
@@ -143,8 +186,8 @@ export default function AuditPage() {
       <Modal
         open={!!detail}
         onClose={() => setDetail(null)}
-        title={detail ? `${ACTION[detail.action]?.label ?? detail.action} · ${detail.key}` : ""}
-        description={detail ? `${detail.at} · ${detail.user || "—"} · ${detail.summary}` : undefined}
+        title={detail ? `${ACTION[detail.action]?.label ?? detail.action} · ${detail.key}` : ''}
+        description={detail ? `${detail.at} · ${detail.user || '—'} · ${detail.summary}` : undefined}
         size="lg"
       >
         {detail?.changes && (

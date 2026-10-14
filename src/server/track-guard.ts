@@ -1,9 +1,9 @@
-import "server-only";
-import { createHash, createHmac, randomBytes } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
-import { db } from "@/db/client";
-import { trackBlock, trackDocTicket, trackEvent, trackRate, trackTicket } from "@/db/schema";
-import { logError } from "@/lib/log";
+import 'server-only';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { and, eq, gt, lt, sql } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { trackBlock, trackDocTicket, trackEvent, trackRate, trackTicket } from '@/db/schema';
+import { logError } from '@/lib/log';
 
 /**
  * Security plumbing for the public tracking flow (drizzle/0014):
@@ -28,23 +28,23 @@ export const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => 
  * hashing
  * ------------------------------------------------------------------ */
 
-export const sha256 = (v: string | Buffer) => createHash("sha256").update(v).digest();
+export const sha256 = (v: string | Buffer) => createHash('sha256').update(v).digest();
 
 let warnedLogSecret = false;
-const fallbackSecret = randomBytes(32).toString("hex"); // per process: not correlatable, but never plain
+const fallbackSecret = randomBytes(32).toString('hex'); // per process: not correlatable, but never plain
 function logSecret(): string {
-  const s = (process.env.TRACK_LOG_SECRET ?? "").trim();
+  const s = (process.env.TRACK_LOG_SECRET ?? '').trim();
   if (s) return s;
   if (!warnedLogSecret) {
     warnedLogSecret = true;
-    console.warn(JSON.stringify({ event: "track_log_secret_missing" }));
+    console.warn(JSON.stringify({ event: 'track_log_secret_missing' }));
   }
   return fallbackSecret;
 }
 /** HMAC-SHA256 (hex) — correlates the same IP / link without storing it */
-export const hmac = (v: string) => createHmac("sha256", logSecret()).update(v).digest("hex");
+export const hmac = (v: string) => createHmac('sha256', logSecret()).update(v).digest('hex');
 
-export const normalizeUa = (ua: string | null | undefined) => (ua ?? "").trim().replace(/\s+/g, " ").slice(0, 512);
+export const normalizeUa = (ua: string | null | undefined) => (ua ?? '').trim().replace(/\s+/g, ' ').slice(0, 512);
 
 /* ------------------------------------------------------------------ *
  * rate limits + blocks
@@ -57,8 +57,16 @@ export const normalizeUa = (ua: string | null | undefined) => (ua ?? "").trim().
 export async function hit(bucket: string, key: string, limit: number, windowSec: number): Promise<boolean> {
   const [r] = await db
     .insert(trackRate)
-    .values({ bucket, key, hits: 1, windowStart: sql`to_timestamp(floor(extract(epoch FROM now()) / ${windowSec}) * ${windowSec})` })
-    .onConflictDoUpdate({ target: [trackRate.bucket, trackRate.key, trackRate.windowStart], set: { hits: sql`${trackRate.hits} + 1` } })
+    .values({
+      bucket,
+      key,
+      hits: 1,
+      windowStart: sql`to_timestamp(floor(extract(epoch FROM now()) / ${windowSec}) * ${windowSec})`,
+    })
+    .onConflictDoUpdate({
+      target: [trackRate.bucket, trackRate.key, trackRate.windowStart],
+      set: { hits: sql`${trackRate.hits} + 1` },
+    })
     .returning({ hits: trackRate.hits });
   return Number(r?.hits ?? 0) <= limit;
 }
@@ -74,7 +82,10 @@ export async function isBlocked(key: string): Promise<boolean> {
 
 export async function block(key: string, minutes: number): Promise<void> {
   const until = dbNowPlus(minutes * 60);
-  await db.insert(trackBlock).values({ key, blockedUntil: until }).onConflictDoUpdate({ target: trackBlock.key, set: { blockedUntil: until } });
+  await db
+    .insert(trackBlock)
+    .values({ key, blockedUntil: until })
+    .onConflictDoUpdate({ target: trackBlock.key, set: { blockedUntil: until } });
 }
 
 /* ------------------------------------------------------------------ *
@@ -88,44 +99,48 @@ export async function block(key: string, minutes: number): Promise<void> {
 export const TEST_SECRET = /^[123]x0{20,40}AA$/;
 
 function expectedHostname(): string {
-  const explicit = (process.env.TURNSTILE_EXPECTED_HOSTNAME ?? "").trim();
+  const explicit = (process.env.TURNSTILE_EXPECTED_HOSTNAME ?? '').trim();
   if (explicit) return explicit.toLowerCase();
   try {
-    return new URL(process.env.APP_BASE_URL ?? "").hostname.toLowerCase();
+    return new URL(process.env.APP_BASE_URL ?? '').hostname.toLowerCase();
   } catch {
-    return "";
+    return '';
   }
 }
 
-export type TurnstileResult = "ok" | "fail" | "unavailable";
+export type TurnstileResult = 'ok' | 'fail' | 'unavailable';
 
-export async function verifyTurnstile(token: string, ip: string, fetchImpl: typeof fetch = fetch): Promise<TurnstileResult> {
-  const secret = (process.env.TURNSTILE_SECRET_KEY ?? "").trim();
-  const prod = process.env.NODE_ENV === "production";
-  if (!secret || (prod && TEST_SECRET.test(secret))) return "unavailable";
-  if (!token || token.length > 4096) return "fail";
+export async function verifyTurnstile(
+  token: string,
+  ip: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TurnstileResult> {
+  const secret = (process.env.TURNSTILE_SECRET_KEY ?? '').trim();
+  const prod = process.env.NODE_ENV === 'production';
+  if (!secret || (prod && TEST_SECRET.test(secret))) return 'unavailable';
+  if (!token || token.length > 4096) return 'fail';
   const testMode = !prod && TEST_SECRET.test(secret);
   const host = expectedHostname();
-  if (!host && !testMode) return "unavailable"; // cannot check the hostname → do not trust the token
+  if (!host && !testMode) return 'unavailable'; // cannot check the hostname → do not trust the token
 
   let d: { success?: unknown; hostname?: unknown; action?: unknown };
   try {
     const body = new URLSearchParams({ secret, response: token, remoteip: ip });
-    const r = await fetchImpl("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
+    const r = await fetchImpl('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
       body,
       signal: AbortSignal.timeout(5_000),
     });
-    if (!r.ok) return "unavailable";
+    if (!r.ok) return 'unavailable';
     d = (await r.json()) as typeof d;
   } catch {
-    return "unavailable"; // timeout / DNS / network / malformed JSON
+    return 'unavailable'; // timeout / DNS / network / malformed JSON
   }
-  if (!d || typeof d !== "object" || d.success !== true) return "fail";
-  if (testMode) return "ok"; // test keys answer hostname "example.com" and no action
-  if (typeof d.hostname !== "string" || d.hostname.toLowerCase() !== host) return "fail";
-  if (d.action !== "track") return "fail";
-  return "ok";
+  if (!d || typeof d !== 'object' || d.success !== true) return 'fail';
+  if (testMode) return 'ok'; // test keys answer hostname "example.com" and no action
+  if (typeof d.hostname !== 'string' || d.hostname.toLowerCase() !== host) return 'fail';
+  if (d.action !== 'track') return 'fail';
+  return 'ok';
 }
 
 /* ------------------------------------------------------------------ *
@@ -138,7 +153,7 @@ const TICKET_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 export async function issueTicket(jobNo: string, ip: string, ua: string): Promise<string> {
   // expired rows go on every issue (indexed on expires_at — cheap at this volume)
   await db.delete(trackTicket).where(lt(trackTicket.expiresAt, dbNow));
-  const raw = randomBytes(32).toString("base64url"); // 256 bits
+  const raw = randomBytes(32).toString('base64url'); // 256 bits
   await db.insert(trackTicket).values({
     tokenHash: sha256(raw),
     jobNo,
@@ -155,7 +170,7 @@ export async function issueTicket(jobNo: string, ip: string, ua: string): Promis
  * (the caller must not tell which).
  */
 export async function consumeTicket(raw: unknown, ip: string, ua: string): Promise<string | null> {
-  if (typeof raw !== "string" || !TICKET_SHAPE.test(raw)) return null;
+  if (typeof raw !== 'string' || !TICKET_SHAPE.test(raw)) return null;
   const [r] = await db
     .delete(trackTicket)
     .where(
@@ -163,8 +178,8 @@ export async function consumeTicket(raw: unknown, ip: string, ua: string): Promi
         eq(trackTicket.tokenHash, sha256(raw)),
         gt(trackTicket.expiresAt, dbNow),
         eq(trackTicket.issuedIp, ip),
-        eq(trackTicket.uaHash, sha256(normalizeUa(ua)))
-      )
+        eq(trackTicket.uaHash, sha256(normalizeUa(ua))),
+      ),
     )
     .returning({ jobNo: trackTicket.jobNo });
   return r?.jobNo ?? null;
@@ -182,7 +197,7 @@ export type DocTicket = { jobNo: string; kind: string; ref: string };
 /** issue a 60-second, single-use ticket for ONE document of one job, bound to IP + User-Agent */
 export async function issueDocTicket(d: DocTicket, ip: string, ua: string): Promise<string> {
   await db.delete(trackDocTicket).where(lt(trackDocTicket.expiresAt, dbNow));
-  const raw = randomBytes(32).toString("base64url"); // 256 bits
+  const raw = randomBytes(32).toString('base64url'); // 256 bits
   await db.insert(trackDocTicket).values({
     tokenHash: sha256(raw),
     jobNo: d.jobNo,
@@ -197,7 +212,7 @@ export async function issueDocTicket(d: DocTicket, ip: string, ua: string): Prom
 
 /** consume a document ticket (one atomic DELETE) — null = invalid / used / expired / other IP / other UA */
 export async function consumeDocTicket(raw: unknown, ip: string, ua: string): Promise<DocTicket | null> {
-  if (typeof raw !== "string" || !TICKET_SHAPE.test(raw)) return null;
+  if (typeof raw !== 'string' || !TICKET_SHAPE.test(raw)) return null;
   const [r] = await db
     .delete(trackDocTicket)
     .where(
@@ -205,8 +220,8 @@ export async function consumeDocTicket(raw: unknown, ip: string, ua: string): Pr
         eq(trackDocTicket.tokenHash, sha256(raw)),
         gt(trackDocTicket.expiresAt, dbNow),
         eq(trackDocTicket.issuedIp, ip),
-        eq(trackDocTicket.uaHash, sha256(normalizeUa(ua)))
-      )
+        eq(trackDocTicket.uaHash, sha256(normalizeUa(ua))),
+      ),
     )
     .returning({ jobNo: trackDocTicket.jobNo, kind: trackDocTicket.kind, ref: trackDocTicket.ref });
   return r ?? null;
@@ -217,33 +232,33 @@ export async function consumeDocTicket(raw: unknown, ip: string, ua: string): Pr
  * ------------------------------------------------------------------ */
 
 export type TrackEvent =
-  | "track_page_open"
-  | "page_rate_limited"
-  | "turnstile_pass"
-  | "turnstile_fail"
-  | "turnstile_unavailable"
-  | "session_rate_limited"
-  | "link_invalid"
-  | "form_locked"
-  | "ticket_issued"
-  | "ticket_consumed"
-  | "ticket_invalid"
-  | "ticket_block_triggered"
-  | "data_rate_limited"
-  | "otp_rate_limited"
-  | "otp_sent"
-  | "otp_send_failed"
-  | "otp_check_failed"
-  | "otp_unknown_phone"
-  | "otp_sms_global_cap"
-  | "otp_phone_locked"
-  | "otp_verified"
-  | "otp_invalid"
-  | "customer_session_invalid"
-  | "doc_ticket_issued"
-  | "doc_opened"
-  | "doc_ticket_invalid"
-  | "doc_rate_limited";
+  | 'track_page_open'
+  | 'page_rate_limited'
+  | 'turnstile_pass'
+  | 'turnstile_fail'
+  | 'turnstile_unavailable'
+  | 'session_rate_limited'
+  | 'link_invalid'
+  | 'form_locked'
+  | 'ticket_issued'
+  | 'ticket_consumed'
+  | 'ticket_invalid'
+  | 'ticket_block_triggered'
+  | 'data_rate_limited'
+  | 'otp_rate_limited'
+  | 'otp_sent'
+  | 'otp_send_failed'
+  | 'otp_check_failed'
+  | 'otp_unknown_phone'
+  | 'otp_sms_global_cap'
+  | 'otp_phone_locked'
+  | 'otp_verified'
+  | 'otp_invalid'
+  | 'customer_session_invalid'
+  | 'doc_ticket_issued'
+  | 'doc_opened'
+  | 'doc_ticket_invalid'
+  | 'doc_rate_limited';
 
 /**
  * Never pass a raw token / ticket / Turnstile token / secret here — only the
@@ -251,13 +266,20 @@ export type TrackEvent =
  */
 export function logEvent(
   event: TrackEvent,
-  f: { ipHash?: string; linkHash?: string; jobNo?: string; result?: string; requestId?: string } = {}
+  f: { ipHash?: string; linkHash?: string; jobNo?: string; result?: string; requestId?: string } = {},
 ): void {
   void db
     .insert(trackEvent)
-    .values({ event, result: f.result ?? "", ipHash: f.ipHash ?? null, linkHash: f.linkHash ?? null, jobNo: f.jobNo ?? null, requestId: f.requestId ?? null })
+    .values({
+      event,
+      result: f.result ?? '',
+      ipHash: f.ipHash ?? null,
+      linkHash: f.linkHash ?? null,
+      jobNo: f.jobNo ?? null,
+      requestId: f.requestId ?? null,
+    })
     .then(() => undefined)
-    .catch((e) => logError(e, "track_event"));
+    .catch((e) => logError(e, 'track_event'));
   // ~1 in 200 writes also trims old rows (counters > 2 h, blocks ended, events > 30 days)
   if (Math.random() < 0.005) void housekeeping();
 }
@@ -268,6 +290,6 @@ async function housekeeping() {
     await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
     await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));
   } catch (e) {
-    logError(e, "track_housekeeping");
+    logError(e, 'track_housekeeping');
   }
 }

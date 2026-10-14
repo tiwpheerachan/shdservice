@@ -9,10 +9,10 @@ services:
       TZ: Asia/Bangkok
       LANG: en_US.UTF-8
     ports:
-      - "127.0.0.1:55442:5432"
+      - '127.0.0.1:55442:5432'
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d oneservice_test"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d oneservice_test']
       interval: 1s
       retries: 30

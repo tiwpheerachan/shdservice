@@ -1,9 +1,9 @@
-import "server-only";
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import * as schema from "./schema";
-import { dbSsl } from "./ssl";
-import { logError } from "@/lib/log";
+import 'server-only';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import * as schema from './schema';
+import { dbSsl } from './ssl';
+import { logError } from '@/lib/log';
 
 /**
  * SERVER-ONLY database handle (drizzle over node-postgres).
@@ -19,13 +19,15 @@ import { logError } from "@/lib/log";
 const globalForDb = globalThis as unknown as { __shdPool?: Pool };
 
 /** Supabase project ref of PRODUCTION (render.yaml) — `next dev` must not write to it by accident. */
-const PROD_DB_REF = "bnntpshuoyzkzckepjse";
+const PROD_DB_REF = 'bnntpshuoyzkzckepjse';
 
 function createPool() {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is not configured on the server");
-  if (process.env.NODE_ENV === "development" && url.includes(PROD_DB_REF) && process.env.ALLOW_PROD_DB !== "1")
-    throw new Error("DATABASE_URL points at the PRODUCTION database from a dev server — set ALLOW_PROD_DB=1 if you really mean it");
+  if (!url) throw new Error('DATABASE_URL is not configured on the server');
+  if (process.env.NODE_ENV === 'development' && url.includes(PROD_DB_REF) && process.env.ALLOW_PROD_DB !== '1')
+    throw new Error(
+      'DATABASE_URL points at the PRODUCTION database from a dev server — set ALLOW_PROD_DB=1 if you really mean it',
+    );
   const pool = new Pool({
     connectionString: url,
     max: Number(process.env.DB_POOL_MAX ?? 5),
@@ -35,10 +37,10 @@ function createPool() {
     // and stop a runaway query before it holds a connection for minutes
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
-    options: "-c TimeZone=Asia/Bangkok -c statement_timeout=30000",
+    options: '-c TimeZone=Asia/Bangkok -c statement_timeout=30000',
   });
   // An idle client dropped by the pooler emits 'error' on the pool; unhandled, it kills the process.
-  pool.on("error", (e) => logError(e, "db idle client error"));
+  pool.on('error', (e) => logError(e, 'db idle client error'));
   return pool;
 }
 
@@ -47,4 +49,4 @@ export const pool = globalForDb.__shdPool ?? (globalForDb.__shdPool = createPool
 
 export const db = drizzle(pool, { schema });
 export type Db = typeof db;
-export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];

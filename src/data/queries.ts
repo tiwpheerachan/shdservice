@@ -1,13 +1,13 @@
 // Server-side getters used by the admin master pages (server components).
 // They call the drizzle-backed services directly (no HTTP round-trip).
 
-import type { MasterRow, Symptom } from "./mock";
-import { logError } from "@/lib/log";
+import type { MasterRow, Symptom } from './mock';
+import { logError } from '@/lib/log';
 
 export type Order = { column: string; ascending?: boolean };
 
 // record_status view: active = ACTIVE only (dropdowns) · exclude = hide DELETED (lists) · only = DELETED · all
-export type DeletedMode = "active" | "exclude" | "only" | "all";
+export type DeletedMode = 'active' | 'exclude' | 'only' | 'all';
 
 /**
  * Resilient wrapper for server components: if the DB is unreachable (e.g.
@@ -18,7 +18,7 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
   try {
     return await fn();
   } catch (e) {
-    logError(e, "DB fetch failed");
+    logError(e, 'DB fetch failed');
     return [];
   }
 }
@@ -26,19 +26,21 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
 // Admin tables list newest first (the services return id ASC, which the form
 // dropdowns keep — that is the order people know from the legacy app). Copy
 // before reversing: the service hands out its cached array.
-const newestFirst = <T,>(rows: T[]) => [...rows].reverse();
+const newestFirst = <T>(rows: T[]) => [...rows].reverse();
 // brands are the one master people scan alphabetically
-const byName = <T extends { name: string }>(rows: T[]) => [...rows].sort((a, b) => a.name.localeCompare(b.name, "th"));
+const byName = <T extends { name: string }>(rows: T[]) => [...rows].sort((a, b) => a.name.localeCompare(b.name, 'th'));
 
 export const getCategories = (): Promise<MasterRow[]> =>
-  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("categories", "exclude")));
+  safe(async () => newestFirst(await (await import('@/server/services/masters')).listSimple('categories', 'exclude')));
 export const getManufacturers = (): Promise<MasterRow[]> =>
-  safe(async () => byName(await (await import("@/server/services/masters")).listSimple("manufacturers", "exclude")));
+  safe(async () => byName(await (await import('@/server/services/masters')).listSimple('manufacturers', 'exclude')));
 export const getColors = (): Promise<MasterRow[]> =>
-  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("colors", "exclude")));
+  safe(async () => newestFirst(await (await import('@/server/services/masters')).listSimple('colors', 'exclude')));
 export const getJobTypes = (): Promise<MasterRow[]> =>
-  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("job_types", "exclude")));
+  safe(async () => newestFirst(await (await import('@/server/services/masters')).listSimple('job_types', 'exclude')));
 export const getProductTypes = (): Promise<MasterRow[]> =>
-  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSimple("product_types", "exclude")));
+  safe(async () =>
+    newestFirst(await (await import('@/server/services/masters')).listSimple('product_types', 'exclude')),
+  );
 export const getSymptoms = (): Promise<Symptom[]> =>
-  safe(async () => newestFirst(await (await import("@/server/services/masters")).listSymptoms("exclude")));
+  safe(async () => newestFirst(await (await import('@/server/services/masters')).listSymptoms('exclude')));

@@ -5,7 +5,7 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
-    public details?: unknown
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -17,6 +17,7 @@ export class HttpError extends Error {
  * written. A request without a version (older client / script) keeps the old last-write-wins.
  */
 export function assertVersion(sent: unknown, current: number) {
-  if (sent === undefined || sent === null || sent === "") return;
-  if (Number(sent) !== current) throw new HttpError(409, "มีผู้อื่นแก้ไขเอกสารนี้ไปแล้ว กรุณาโหลดใหม่", { stale: true });
+  if (sent === undefined || sent === null || sent === '') return;
+  if (Number(sent) !== current)
+    throw new HttpError(409, 'มีผู้อื่นแก้ไขเอกสารนี้ไปแล้ว กรุณาโหลดใหม่', { stale: true });
 }

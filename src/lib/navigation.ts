@@ -1,4 +1,4 @@
-import { allowUnload } from "@/lib/use-unsaved-changes";
+import { allowUnload } from '@/lib/use-unsaved-changes';
 
 /**
  * Full page loads — for the few moments the app must start clean instead of routing client-side
@@ -11,14 +11,14 @@ import { allowUnload } from "@/lib/use-unsaved-changes";
  * The /login page's button is the only way into SSO.
  */
 export function hardNavigate(path: string) {
-  if (typeof window === "undefined") return;
+  if (typeof window === 'undefined') return;
   allowUnload(); // the app decided — an unsaved form can't be saved without the session anyway
   window.location.assign(new URL(path, window.location.origin).href);
 }
 
 /** session expired → our /login with the "expired" note, back to this exact page (filters included) after */
 export function toLogin() {
-  if (typeof window === "undefined") return;
+  if (typeof window === 'undefined') return;
   const here = window.location.pathname + window.location.search;
   hardNavigate(`/login?expired=1&next=${encodeURIComponent(here)}`);
 }

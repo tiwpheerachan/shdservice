@@ -1,70 +1,58 @@
-import Link from "next/link";
-import {
-  FilePlus2,
-  Wrench,
-  PackageCheck,
-  FileText,
-  ShoppingCart,
-  PackageMinus,
-  Boxes,
-  ArrowRight,
-} from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
+import Link from 'next/link';
+import { FilePlus2, Wrench, PackageCheck, FileText, ShoppingCart, PackageMinus, Boxes, ArrowRight } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
 
-export const metadata = { title: "รายงาน" };
+export const metadata = { title: 'รายงาน' };
 
 const REPORTS = [
   {
-    href: "/reports/open-job",
+    href: '/reports/open-job',
     icon: FilePlus2,
-    title: "รายงานการเปิดงานซ่อม",
-    desc: "สรุปจำนวนงานที่เปิดใหม่ แยกตามช่วงเวลา ประเภทงาน และช่องทางรับเข้า",
+    title: 'รายงานการเปิดงานซ่อม',
+    desc: 'สรุปจำนวนงานที่เปิดใหม่ แยกตามช่วงเวลา ประเภทงาน และช่องทางรับเข้า',
   },
   {
-    href: "/reports/repair-job",
+    href: '/reports/repair-job',
     icon: Wrench,
-    title: "รายงานการซ่อม",
-    desc: "ผลการซ่อม อาการเสีย อะไหล่ที่ใช้ และช่างผู้รับผิดชอบ",
+    title: 'รายงานการซ่อม',
+    desc: 'ผลการซ่อม อาการเสีย อะไหล่ที่ใช้ และช่างผู้รับผิดชอบ',
   },
   {
-    href: "/reports/close-job",
+    href: '/reports/close-job',
     icon: PackageCheck,
-    title: "รายงานการปิดงานซ่อม",
-    desc: "งานที่ปิดแล้ว วิธีการส่งคืน และระยะเวลาดำเนินงาน (TAT)",
+    title: 'รายงานการปิดงานซ่อม',
+    desc: 'งานที่ปิดแล้ว วิธีการส่งคืน และระยะเวลาดำเนินงาน (TAT)',
   },
   {
-    href: "/reports/quotation",
+    href: '/reports/quotation',
     icon: FileText,
-    title: "รายงานการเสนอราคา",
-    desc: "ใบเสนอราคาทั้งหมด อัตราการอนุมัติ และมูลค่ารวม",
+    title: 'รายงานการเสนอราคา',
+    desc: 'ใบเสนอราคาทั้งหมด อัตราการอนุมัติ และมูลค่ารวม',
   },
   {
-    href: "/reports/sale-order",
+    href: '/reports/sale-order',
     icon: ShoppingCart,
-    title: "รายงานการขาย",
-    desc: "ยอดขายตามใบสั่งขาย แยกตามพนักงานขายและช่วงเวลา",
+    title: 'รายงานการขาย',
+    desc: 'ยอดขายตามใบสั่งขาย แยกตามพนักงานขายและช่วงเวลา',
   },
   {
-    href: "/reports/product-used",
+    href: '/reports/product-used',
     icon: PackageMinus,
-    title: "รายงานการเบิกจ่ายอะไหล่",
-    desc: "อะไหล่ที่ถูกเบิกใช้ในงานซ่อมและใบสั่งขาย",
+    title: 'รายงานการเบิกจ่ายอะไหล่',
+    desc: 'อะไหล่ที่ถูกเบิกใช้ในงานซ่อมและใบสั่งขาย',
   },
   {
-    href: "/reports/product-onhand",
+    href: '/reports/product-onhand',
     icon: Boxes,
-    title: "รายงานอะไหล่คงเหลือ",
-    desc: "ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ",
+    title: 'รายงานอะไหล่คงเหลือ',
+    desc: 'ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ',
   },
 ];
 
 export default function ReportsPage() {
   return (
     <>
-      <PageHeader
-        title="รายงาน"
-        description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไขและส่งออกเป็น Excel / PDF"
-      />
+      <PageHeader title="รายงาน" description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไขและส่งออกเป็น Excel / PDF" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {REPORTS.map((r) => (
           <Link

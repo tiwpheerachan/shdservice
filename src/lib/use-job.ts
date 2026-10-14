@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useSearchParams } from "next/navigation";
-import { useRecord } from "@/lib/use-record";
-import type { JobDetail } from "@/server/services/jobs";
+import { useSearchParams } from 'next/navigation';
+import { useRecord } from '@/lib/use-record';
+import type { JobDetail } from '@/server/services/jobs';
 
 export type { JobDetail };
 
@@ -19,14 +19,22 @@ export function useJob(
     onMissing?: (no: string, message: string) => void;
     /** every job that arrives (loaded or saved) — the page fills its form from it */
     onRecord?: (job: JobDetail) => void;
-  } = {}
+  } = {},
 ) {
-  const initial = useSearchParams().get("job") ?? "";
+  const initial = useSearchParams().get('job') ?? '';
   const r = useRecord<JobDetail>({
     url: (no) => `/api/jobs/${encodeURIComponent(no)}`,
     pick: (d: { job: JobDetail }) => d.job,
     initial,
     ...opts,
   });
-  return { jobNo: r.data?.no ?? r.no, job: r.data, loading: r.loading, error: r.error, find: r.find, setJob: r.setData, reload: r.reload };
+  return {
+    jobNo: r.data?.no ?? r.no,
+    job: r.data,
+    loading: r.loading,
+    error: r.error,
+    find: r.find,
+    setJob: r.setData,
+    reload: r.reload,
+  };
 }

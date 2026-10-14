@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import * as React from "react";
+import * as React from 'react';
 
 /*
  * Values only the browser has (localStorage, the clock), read with useSyncExternalStore: the server
@@ -12,7 +12,11 @@ const never = () => () => {};
 
 /** false on the server and during hydration, true after */
 export function useIsClient(): boolean {
-  return React.useSyncExternalStore(never, () => true, () => false);
+  return React.useSyncExternalStore(
+    never,
+    () => true,
+    () => false,
+  );
 }
 
 /** when this component mounted in the browser (null on the server / during hydration) */
@@ -22,7 +26,7 @@ export function useMountTime(): Date | null {
   return isClient ? at : null;
 }
 
-const SAME_TAB = "shd-local-storage"; // the "storage" event only fires in OTHER tabs
+const SAME_TAB = 'shd-local-storage'; // the "storage" event only fires in OTHER tabs
 
 function read(key: string, fallback: string): string {
   try {
@@ -45,19 +49,19 @@ export function useLocalStorage(key: string, fallback: string): [string, (value:
       const onSameTab = (e: Event) => {
         if ((e as CustomEvent<string>).detail === key) changed();
       };
-      window.addEventListener("storage", onStorage);
+      window.addEventListener('storage', onStorage);
       window.addEventListener(SAME_TAB, onSameTab);
       return () => {
-        window.removeEventListener("storage", onStorage);
+        window.removeEventListener('storage', onStorage);
         window.removeEventListener(SAME_TAB, onSameTab);
       };
     },
-    [key]
+    [key],
   );
   const value = React.useSyncExternalStore(
     subscribe,
     () => read(key, fallback),
-    () => fallback
+    () => fallback,
   );
   const set = React.useCallback(
     (v: string) => {
@@ -68,7 +72,7 @@ export function useLocalStorage(key: string, fallback: string): [string, (value:
       }
       window.dispatchEvent(new CustomEvent(SAME_TAB, { detail: key }));
     },
-    [key]
+    [key],
   );
   return [value, set];
 }

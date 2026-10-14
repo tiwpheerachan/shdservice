@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
-import { COMPANY } from "@/lib/company";
+import type { Metadata } from 'next';
+import { COMPANY } from '@/lib/company';
 
 export const metadata: Metadata = {
-  title: "ติดตามสถานะงานซ่อม",
+  title: 'ติดตามสถานะงานซ่อม',
   robots: { index: false, follow: false },
 };
 
@@ -34,8 +34,9 @@ export default function TrackLayout({ children }: { children: React.ReactNode })
           <p>{COMPANY.address}</p>
           <p>โทร {COMPANY.phone}</p>
           <p className="mt-2 text-warning">
-            หน้านี้แสดงสถานะงานซ่อมเท่านั้น · <strong>ระบบนี้ไม่ขอรหัสผ่าน เลขบัตรเครดิต หรือให้โอนเงินผ่านลิงก์</strong> —
-            หากพบหน้าที่ขอข้อมูลเหล่านี้ กรุณาแจ้งศูนย์บริการ
+            หน้านี้แสดงสถานะงานซ่อมเท่านั้น ·{' '}
+            <strong>ระบบนี้ไม่ขอรหัสผ่าน เลขบัตรเครดิต หรือให้โอนเงินผ่านลิงก์</strong> — หากพบหน้าที่ขอข้อมูลเหล่านี้
+            กรุณาแจ้งศูนย์บริการ
           </p>
         </div>
       </footer>

@@ -1,27 +1,27 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Plus, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { RowActions } from "@/components/shared/row-actions";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { PeoplePicker, type Person } from "@/components/shared/people-picker";
-import { useToast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ui/confirm";
-import { ROLES, type User } from "@/data/mock";
-import { useUsers, useRoles } from "@/data/db";
-import { errMsg, exportXlsx, postJson } from "@/lib/api";
-import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
-import { userSchema } from "@/lib/validation/admin";
-import { isFilterActive } from "@/lib/utils";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import { Plus, ShieldCheck, Mail, Phone, Loader2, Clock, RefreshCw } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { RowActions } from '@/components/shared/row-actions';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
+import { Field, FieldGrid } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/input';
+import { PeoplePicker, type Person } from '@/components/shared/people-picker';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+import { ROLES, type User } from '@/data/mock';
+import { useUsers, useRoles } from '@/data/db';
+import { errMsg, exportXlsx, postJson } from '@/lib/api';
+import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { userSchema } from '@/lib/validation/admin';
+import { isFilterActive } from '@/lib/utils';
+import { ExportButton } from '@/components/shared/export-button';
 
 type UserForm = {
   id: string;
@@ -37,47 +37,47 @@ type UserForm = {
 };
 
 const EMPTY: UserForm = {
-  id: "",
-  code: "",
-  name: "",
-  username: "",
+  id: '',
+  code: '',
+  name: '',
+  username: '',
   role: ROLES[0],
-  branch: "",
-  email: "",
-  phone: "",
-  status: "Active",
-  avatar: "",
+  branch: '',
+  email: '',
+  phone: '',
+  status: 'Active',
+  avatar: '',
 };
 
 export default function UsersPage() {
   const { push } = useToast();
   const confirm = useConfirm();
-  const [view, setView] = React.useState<"active" | "deleted">("active");
-  const { data: USERS, loading, refetch } = useUsers(
-    view === "deleted" ? "only" : "exclude"
-  );
+  const [view, setView] = React.useState<'active' | 'deleted'>('active');
+  const { data: USERS, loading, refetch } = useUsers(view === 'deleted' ? 'only' : 'exclude');
   // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
   const { data: dbRoles } = useRoles();
-  const ROLE_OPTIONS = React.useMemo(
-    () => (dbRoles.length ? [...dbRoles, "รออนุมัติ"] : ROLES),
-    [dbRoles]
-  );
-  const pendingCount = USERS.filter((u) => u.role === "รออนุมัติ").length;
+  const ROLE_OPTIONS = React.useMemo(() => (dbRoles.length ? [...dbRoles, 'รออนุมัติ'] : ROLES), [dbRoles]);
+  const pendingCount = USERS.filter((u) => u.role === 'รออนุมัติ').length;
 
   // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
-  type UserFilter = { name: string; username: string; role: string; status: "" | "Active" | "Inactive" };
-  const NO_FILTER: UserFilter = { name: "", username: "", role: "", status: "" };
+  type UserFilter = { name: string; username: string; role: string; status: '' | 'Active' | 'Inactive' };
+  const NO_FILTER: UserFilter = { name: '', username: '', role: '', status: '' };
   const [draft, setDraft] = React.useState<UserFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<UserFilter>(NO_FILTER);
   const VISIBLE = React.useMemo(() => {
-    const has = (v: string | null | undefined, t: string) => !t.trim() || (v ?? "").toLowerCase().includes(t.trim().toLowerCase());
+    const has = (v: string | null | undefined, t: string) =>
+      !t.trim() || (v ?? '').toLowerCase().includes(t.trim().toLowerCase());
     return USERS.filter(
-      (u) => has(u.name, filter.name) && has(u.username, filter.username) && (!filter.role || u.role === filter.role) && (!filter.status || u.status === filter.status)
+      (u) =>
+        has(u.name, filter.name) &&
+        has(u.username, filter.username) &&
+        (!filter.role || u.role === filter.role) &&
+        (!filter.status || u.status === filter.status),
     );
   }, [USERS, filter]);
   // auto-refresh so users who just signed in (pending) show up without a reload
   React.useEffect(() => {
-    if (view !== "active") return;
+    if (view !== 'active') return;
     const id = setInterval(() => refetch(), 25000);
     return () => clearInterval(id);
   }, [refetch, view]);
@@ -88,8 +88,7 @@ export default function UsersPage() {
 
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
-  const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) =>
-    setForm((f) => ({ ...f, [k]: v }));
+  const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const openAdd = () => {
     setForm(EMPTY);
@@ -100,15 +99,15 @@ export default function UsersPage() {
 
   const toForm = (r: User): UserForm => ({
     id: r.id,
-    code: r.code ?? "",
-    name: r.name ?? "",
-    username: r.username ?? "",
+    code: r.code ?? '',
+    name: r.name ?? '',
+    username: r.username ?? '',
     role: r.role ?? ROLES[0],
-    branch: r.branch ?? "",
-    email: r.email ?? "",
-    phone: r.phone ?? "",
-    status: r.status ?? "Active",
-    avatar: r.avatar ?? "",
+    branch: r.branch ?? '',
+    email: r.email ?? '',
+    phone: r.phone ?? '',
+    status: r.status ?? 'Active',
+    avatar: r.avatar ?? '',
   });
 
   const openEdit = (r: User) => {
@@ -121,14 +120,14 @@ export default function UsersPage() {
   // อนุมัติ asks for the role first, nothing pre-picked: a silent default role handed people
   // menus they should not have
   const [approving, setApproving] = React.useState<User | null>(null);
-  const [approveRole, setApproveRole] = React.useState("");
+  const [approveRole, setApproveRole] = React.useState('');
   const approveNow = (r: User) => {
-    setApproveRole("");
+    setApproveRole('');
     setApproving(r);
   };
   const confirmApprove = async () => {
     if (!approving || !approveRole) return;
-    if (await quickSet(approving, { role: approveRole, status: "Active" }, "อนุมัติแล้ว")) setApproving(null);
+    if (await quickSet(approving, { role: approveRole, status: 'Active' }, 'อนุมัติแล้ว')) setApproving(null);
   };
 
   // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
@@ -138,7 +137,7 @@ export default function UsersPage() {
       ...f,
       name: p.name || f.name,
       email: (p.email || f.email).toLowerCase(),
-      username: p.email ? (p.email.split("@")[0] ?? p.email) : f.username,
+      username: p.email ? (p.email.split('@')[0] ?? p.email) : f.username,
       code: p.id || f.code,
       branch: p.department || f.branch,
       avatar: p.avatar || f.avatar,
@@ -147,7 +146,7 @@ export default function UsersPage() {
 
   // a 401 refreshes the session and retries once, then goes to /login (api.ts) — a valid write is
   // never silently lost to an expiring cookie; field errors come back as ApiError details
-  const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>("/api/admin/users", body);
+  const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>('/api/admin/users', body);
 
   const save = async () => {
     if (fe.report(fe.run(userSchema, form))) return; // the API checks the same
@@ -155,14 +154,14 @@ export default function UsersPage() {
     try {
       const data = await postUser(form);
       push({
-        kind: "success",
-        title: data.created ? "เพิ่มผู้ใช้งานแล้ว" : "บันทึกการแก้ไขแล้ว",
+        kind: 'success',
+        title: data.created ? 'เพิ่มผู้ใช้งานแล้ว' : 'บันทึกการแก้ไขแล้ว',
         desc: `${form.name} · ${form.role}`,
       });
       setOpen(false);
       refetch();
     } catch (e) {
-      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -174,13 +173,13 @@ export default function UsersPage() {
     setBusyId(r.id);
     try {
       await postUser({ ...toForm(r), ...patch });
-      push({ kind: "success", title: okTitle, desc: r.name });
+      push({ kind: 'success', title: okTitle, desc: r.name });
       refetch();
       return true;
     } catch (e) {
       push({
-        kind: "error",
-        title: "ทำรายการไม่สำเร็จ",
+        kind: 'error',
+        title: 'ทำรายการไม่สำเร็จ',
         desc: e instanceof Error ? e.message : String(e),
       });
       return false;
@@ -193,7 +192,7 @@ export default function UsersPage() {
   const softSet = async (r: User, deleted: boolean) => {
     if (deleted) {
       const ok = await confirm({
-        tone: "danger",
+        tone: 'danger',
         title: `ลบผู้ใช้ ${r.name}?`,
         description: (
           <>
@@ -202,23 +201,23 @@ export default function UsersPage() {
             กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่พักการใช้งาน ให้แก้ไขแล้วเลือกสถานะ Inactive แทน
           </>
         ),
-        confirmLabel: "ลบผู้ใช้",
+        confirmLabel: 'ลบผู้ใช้',
       });
       if (!ok) return;
     }
     setBusyId(r.id);
     try {
-      await postJson("/api/admin/records", { table: "users", id: r.id, deleted });
+      await postJson('/api/admin/records', { table: 'users', id: r.id, deleted });
       push({
-        kind: "success",
-        title: deleted ? "ย้ายไปรายการที่ลบแล้ว" : "กู้คืนแล้ว",
+        kind: 'success',
+        title: deleted ? 'ย้ายไปรายการที่ลบแล้ว' : 'กู้คืนแล้ว',
         desc: r.name,
       });
       refetch();
     } catch (e) {
       push({
-        kind: "error",
-        title: "ทำรายการไม่สำเร็จ",
+        kind: 'error',
+        title: 'ทำรายการไม่สำเร็จ',
         desc: e instanceof Error ? e.message : String(e),
       });
     } finally {
@@ -228,16 +227,16 @@ export default function UsersPage() {
 
   const columns: Column<User>[] = [
     {
-      key: "no",
-      header: "#",
-      width: "52px",
-      align: "center",
+      key: 'no',
+      header: '#',
+      width: '52px',
+      align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
-      key: "name",
-      header: "ชื่อผู้ใช้งาน",
+      key: 'name',
+      header: 'ชื่อผู้ใช้งาน',
       cell: (r) => (
         <div className="flex items-center gap-2.5">
           {r.avatar ? (
@@ -249,7 +248,7 @@ export default function UsersPage() {
               decoding="async"
               className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
               onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
               }}
             />
           ) : (
@@ -265,10 +264,10 @@ export default function UsersPage() {
       ),
     },
     {
-      key: "role",
-      header: "ประเภทผู้ใช้งาน / สิทธิ์",
+      key: 'role',
+      header: 'ประเภทผู้ใช้งาน / สิทธิ์',
       cell: (r) =>
-        r.role === "รออนุมัติ" ? (
+        r.role === 'รออนุมัติ' ? (
           <Badge tone="warning" dot>
             {r.role}
           </Badge>
@@ -278,11 +277,11 @@ export default function UsersPage() {
     },
     // at 1280px (with the sidebar) every column did not fit and pushed Action off-screen:
     // หน่วยงาน / ติดต่อ show only on wider screens (both stay in the edit dialog)
-    { key: "branch", header: "สาขา / หน่วยงาน", hideBelow: "xl" },
+    { key: 'branch', header: 'สาขา / หน่วยงาน', hideBelow: 'xl' },
     {
-      key: "email",
-      header: "ติดต่อ",
-      hideBelow: "2xl",
+      key: 'email',
+      header: 'ติดต่อ',
+      hideBelow: '2xl',
       cell: (r) => (
         <div className="space-y-0.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5">
@@ -297,29 +296,29 @@ export default function UsersPage() {
       ),
     },
     {
-      key: "lastLogin",
-      header: "เข้าใช้งานล่าสุด",
-      hideBelow: "md",
-      cell: (r) => <span className="num text-xs">{r.lastLogin || "—"}</span>,
+      key: 'lastLogin',
+      header: 'เข้าใช้งานล่าสุด',
+      hideBelow: 'md',
+      cell: (r) => <span className="num text-xs">{r.lastLogin || '—'}</span>,
     },
     {
-      key: "status",
-      header: "สถานะ",
-      width: "100px",
+      key: 'status',
+      header: 'สถานะ',
+      width: '100px',
       cell: (r) => (
-        <Badge tone={r.status === "Active" ? "success" : "neutral"} dot>
+        <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
           {r.status}
         </Badge>
       ),
     },
     {
-      key: "action",
-      header: "Action",
-      width: "180px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '180px',
+      align: 'center',
       sortable: false,
       cell: (r) =>
-        view === "deleted" ? (
+        view === 'deleted' ? (
           <div className="flex items-center justify-center">
             <button
               disabled={busyId === r.id}
@@ -331,7 +330,7 @@ export default function UsersPage() {
           </div>
         ) : (
           <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
-            {r.role === "รออนุมัติ" ? (
+            {r.role === 'รออนุมัติ' ? (
               <button
                 disabled={busyId === r.id}
                 onClick={() => approveNow(r)}
@@ -339,10 +338,10 @@ export default function UsersPage() {
               >
                 อนุมัติ
               </button>
-            ) : r.status === "Active" ? (
+            ) : r.status === 'Active' ? (
               <button
                 disabled={busyId === r.id}
-                onClick={() => quickSet(r, { status: "Inactive" }, "ถอนสิทธิ์แล้ว")}
+                onClick={() => quickSet(r, { status: 'Inactive' }, 'ถอนสิทธิ์แล้ว')}
                 className="rounded-md border border-danger/30 px-2.5 py-1 text-2xs font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-50"
               >
                 ถอนสิทธิ์
@@ -350,7 +349,7 @@ export default function UsersPage() {
             ) : (
               <button
                 disabled={busyId === r.id}
-                onClick={() => quickSet(r, { status: "Active" }, "คืนสิทธิ์แล้ว")}
+                onClick={() => quickSet(r, { status: 'Active' }, 'คืนสิทธิ์แล้ว')}
                 className="rounded-md border border-success/30 px-2.5 py-1 text-2xs font-medium text-success transition-colors hover:bg-success-soft disabled:opacity-50"
               >
                 คืนสิทธิ์
@@ -374,7 +373,7 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <ExportButton run={() => exportXlsx("users", { deleted: view === "deleted" ? "only" : "exclude" })} />
+            <ExportButton run={() => exportXlsx('users', { deleted: view === 'deleted' ? 'only' : 'exclude' })} />
             <Button size="sm" onClick={openAdd}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มผู้ใช้งาน
@@ -384,31 +383,25 @@ export default function UsersPage() {
       />
 
       <div className="mb-3 inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
-        {(["active", "deleted"] as const).map((v) => (
+        {(['active', 'deleted'] as const).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
             className={
-              "rounded-md px-3.5 py-1.5 font-medium transition-colors " +
-              (view === v
-                ? "bg-card text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground")
+              'rounded-md px-3.5 py-1.5 font-medium transition-colors ' +
+              (view === v ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground')
             }
           >
-            {v === "active" ? "ผู้ใช้งาน" : "รายการที่ลบ"}
+            {v === 'active' ? 'ผู้ใช้งาน' : 'รายการที่ลบ'}
           </button>
         ))}
       </div>
 
-      {view === "active" && pendingCount > 0 && (
+      {view === 'active' && pendingCount > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-3">
           <Clock className="h-4 w-4 shrink-0 text-warning" />
-          <span className="text-sm font-medium text-warning">
-            มี {pendingCount} บัญชีรอการอนุมัติ
-          </span>
-          <span className="text-2xs text-warning/80">
-            กด “อนุมัติ” ที่แถวนั้นเพื่อกำหนดบทบาทและเปิดสิทธิ์ใช้งาน
-          </span>
+          <span className="text-sm font-medium text-warning">มี {pendingCount} บัญชีรอการอนุมัติ</span>
+          <span className="text-2xs text-warning/80">กด “อนุมัติ” ที่แถวนั้นเพื่อกำหนดบทบาทและเปิดสิทธิ์ใช้งาน</span>
           <button
             onClick={() => refetch()}
             className="ml-auto flex items-center gap-1.5 rounded-md border border-warning/30 px-2.5 py-1 text-2xs font-medium text-warning transition-colors hover:bg-warning/10"
@@ -426,16 +419,34 @@ export default function UsersPage() {
         onReset={resetFilters}
       >
         <Field label="ชื่อ-สกุล ผู้ใช้ระบบ">
-          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))} />
+          <Input
+            placeholder="พิมพ์บางส่วนของชื่อ"
+            value={draft.name}
+            onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))}
+          />
         </Field>
         <Field label="Username">
-          <Input placeholder="username" className="num" value={draft.username} onChange={(e) => setDraft((f) => ({ ...f, username: e.target.value }))} />
+          <Input
+            placeholder="username"
+            className="num"
+            value={draft.username}
+            onChange={(e) => setDraft((f) => ({ ...f, username: e.target.value }))}
+          />
         </Field>
         <Field label="ประเภทผู้ใช้งาน">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.role} onChange={(v) => setDraft((f) => ({ ...f, role: v }))} options={strOptions(ROLE_OPTIONS)} />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.role}
+            onChange={(v) => setDraft((f) => ({ ...f, role: v }))}
+            options={strOptions(ROLE_OPTIONS)}
+          />
         </Field>
         <Field label="สถานะ">
-          <Select value={draft.status} onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as UserFilter["status"] }))}>
+          <Select
+            value={draft.status}
+            onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as UserFilter['status'] }))}
+          >
             <option value="">ทั้งหมด</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
@@ -451,13 +462,15 @@ export default function UsersPage() {
         rows={VISIBLE}
         loading={loading}
         rowKey={(r) => r.id}
-        footerNote={filter !== NO_FILTER && VISIBLE.length !== USERS.length ? <span>· กรองจาก {USERS.length} คน</span> : undefined}
+        footerNote={
+          filter !== NO_FILTER && VISIBLE.length !== USERS.length ? <span>· กรองจาก {USERS.length} คน</span> : undefined
+        }
       />
 
       <Modal
         open={!!approving}
         onClose={() => setApproving(null)}
-        title={`อนุมัติ ${approving?.name ?? ""}`}
+        title={`อนุมัติ ${approving?.name ?? ''}`}
         description="เลือกบทบาทที่จะใช้ — สิทธิ์เมนูทั้งหมดมาจากบทบาทนี้"
         size="sm"
         footer={
@@ -477,7 +490,7 @@ export default function UsersPage() {
             placeholder="- - เลือกบทบาท - -"
             value={approveRole}
             onChange={setApproveRole}
-            options={strOptions(ROLE_OPTIONS.filter((x) => x !== "รออนุมัติ"))}
+            options={strOptions(ROLE_OPTIONS.filter((x) => x !== 'รออนุมัติ'))}
           />
         </Field>
       </Modal>
@@ -485,7 +498,7 @@ export default function UsersPage() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "แก้ไขผู้ใช้ระบบ" : "เพิ่มผู้ใช้ระบบ"}
+        title={editing ? 'แก้ไขผู้ใช้ระบบ' : 'เพิ่มผู้ใช้ระบบ'}
         size="lg"
         footer={
           <>
@@ -494,14 +507,17 @@ export default function UsersPage() {
             </Button>
             <Button size="sm" onClick={save} disabled={saving}>
               {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {editing ? "บันทึกข้อมูล" : "เพิ่มผู้ใช้งาน"}
+              {editing ? 'บันทึกข้อมูล' : 'เพิ่มผู้ใช้งาน'}
             </Button>
           </>
         }
       >
         {!editing && (
           <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
-            <Field label="ค้นหาพนักงานจากไดเรกทอรี Lark" hint="เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ">
+            <Field
+              label="ค้นหาพนักงานจากไดเรกทอรี Lark"
+              hint="เลือกจากรายชื่อจริง แล้วระบบจะเติมชื่อ อีเมล และหน่วยงานให้อัตโนมัติ"
+            >
               <PeoplePicker value={null} onChange={pickPerson} placeholder="พิมพ์ชื่อพนักงาน SHD เพื่อค้นหา…" />
             </Field>
           </div>
@@ -522,40 +538,41 @@ export default function UsersPage() {
               </span>
             )}
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{form.name || "—"}</p>
-              <p className="truncate text-2xs text-muted-foreground">{form.email || "ยังไม่ได้เลือกพนักงาน"}</p>
+              <p className="truncate text-sm font-medium">{form.name || '—'}</p>
+              <p className="truncate text-2xs text-muted-foreground">{form.email || 'ยังไม่ได้เลือกพนักงาน'}</p>
             </div>
           </div>
         )}
 
         <FieldGrid cols={2}>
           <Field label="ชื่อ-สกุล" required error={fe.errors.name}>
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+            <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
           <Field label="อีเมล" error={fe.errors.email}>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => set("email", e.target.value)}
-            />
+            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
           </Field>
           <Field label="Username">
-            <Input value={form.username} onChange={(e) => set("username", e.target.value)} />
+            <Input value={form.username} onChange={(e) => set('username', e.target.value)} />
           </Field>
           <Field label="รหัสพนักงาน / Lark ID">
-            <Input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="—" />
+            <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="—" />
           </Field>
-          <Field label="ประเภทผู้ใช้งาน / สิทธิ์" required error={fe.errors.role} hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้">
-            <SearchSelect value={form.role} onChange={(v) => set("role", v)} options={strOptions(ROLE_OPTIONS)} />
+          <Field
+            label="ประเภทผู้ใช้งาน / สิทธิ์"
+            required
+            error={fe.errors.role}
+            hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้"
+          >
+            <SearchSelect value={form.role} onChange={(v) => set('role', v)} options={strOptions(ROLE_OPTIONS)} />
           </Field>
           <Field label="สาขา / หน่วยงาน">
-            <Input value={form.branch} onChange={(e) => set("branch", e.target.value)} />
+            <Input value={form.branch} onChange={(e) => set('branch', e.target.value)} />
           </Field>
           <Field label="เบอร์โทรศัพท์">
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
           </Field>
           <Field label="สถานะ">
-            <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
+            <Select value={form.status} onChange={(e) => set('status', e.target.value)}>
               <option>Active</option>
               <option>Inactive</option>
             </Select>

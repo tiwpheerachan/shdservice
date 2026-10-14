@@ -1,37 +1,37 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Sidebar } from "./sidebar";
-import { Topbar } from "./topbar";
-import { CommandPalette } from "./command-palette";
-import { AccessGuard } from "./access-guard";
-import { cn } from "@/lib/utils";
-import { usePathname } from "next/navigation";
-import { useAccess } from "@/lib/use-access";
-import { useLocalStorage } from "@/lib/use-client";
-import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes";
+import * as React from 'react';
+import { Sidebar } from './sidebar';
+import { Topbar } from './topbar';
+import { CommandPalette } from './command-palette';
+import { AccessGuard } from './access-guard';
+import { cn } from '@/lib/utils';
+import { usePathname } from 'next/navigation';
+import { useAccess } from '@/lib/use-access';
+import { useLocalStorage } from '@/lib/use-client';
+import { useUnsavedChangesGuard } from '@/lib/use-unsaved-changes';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   // collapsed sidebar is remembered per browser (and follows a change made in another tab)
-  const [collapsedPref, setCollapsedPref] = useLocalStorage("shd-sidebar-collapsed", "0");
-  const collapsed = collapsedPref === "1";
+  const [collapsedPref, setCollapsedPref] = useLocalStorage('shd-sidebar-collapsed', '0');
+  const collapsed = collapsedPref === '1';
   const [palette, setPalette] = React.useState(false);
   useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
   // a page the user may not open is never rendered (AccessGuard redirects): no 403 API calls first
   const allowed = useAccess().canPath(usePathname());
 
-  const toggleCollapse = () => setCollapsedPref(collapsed ? "0" : "1");
+  const toggleCollapse = () => setCollapsedPref(collapsed ? '0' : '1');
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPalette((v) => !v);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   return (
@@ -45,8 +45,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
       <div
         className={cn(
-          "flex min-h-screen flex-col transition-[padding] duration-200 ease-out",
-          collapsed ? "lg:pl-[72px]" : "lg:pl-[268px]"
+          'flex min-h-screen flex-col transition-[padding] duration-200 ease-out',
+          collapsed ? 'lg:pl-[72px]' : 'lg:pl-[268px]',
         )}
       >
         <Topbar

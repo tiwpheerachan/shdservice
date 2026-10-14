@@ -1,15 +1,15 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireCan, readJson } from "@/server/auth";
-import { idempotent } from "@/server/idempotency";
-import { saveCustomer, type CustomerInput } from "@/server/services/customers";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireCan, readJson } from '@/server/auth';
+import { idempotent } from '@/server/idempotency';
+import { saveCustomer, type CustomerInput } from '@/server/services/customers';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /** Create (add) or update (edit) a customer. */
 export const POST = handle(async (req: NextRequest) => {
   const body = await readJson<CustomerInput>(req);
-  const user = await requireCan(req, "Customer", body.code ? "edit" : "add");
+  const user = await requireCan(req, 'Customer', body.code ? 'edit' : 'add');
   return idempotent(req, user.userId, async () => {
     const row = await saveCustomer(body, user.userId);
     return NextResponse.json({ ok: true, row }, { status: body.code ? 200 : 201 });

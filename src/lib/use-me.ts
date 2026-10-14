@@ -1,19 +1,19 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import useSWR from "swr";
+import * as React from 'react';
+import useSWR from 'swr';
 
 export type Me = { name: string; email: string; avatar?: string };
 type MeResponse = { user: Me | null; exp?: number; approved?: boolean; unauthorized?: boolean };
 
-export const ME_KEY = "/api/sso/me";
+export const ME_KEY = '/api/sso/me';
 
 /**
  * quiet fetch — never redirects by itself: a 401 comes back as `unauthorized` (AccessGuard decides
  * what to do); a network error throws, so swr keeps the last answer
  */
 async function fetchMe(url: string): Promise<MeResponse> {
-  const r = await fetch(url, { cache: "no-store" });
+  const r = await fetch(url, { cache: 'no-store' });
   if (r.status === 401) return { user: null, unauthorized: true };
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as MeResponse;
@@ -37,7 +37,7 @@ export function useMe(opts: { poll?: number } = {}) {
   const refresh = React.useCallback(() => mutate(), [mutate]); // stable — safe in effect deps
   return {
     user: data?.user ?? null,
-    exp: typeof data?.exp === "number" ? data.exp : null,
+    exp: typeof data?.exp === 'number' ? data.exp : null,
     /** undefined until known */
     approved: data?.approved,
     unauthorized: !!data?.unauthorized,

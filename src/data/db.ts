@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import useSWR, { mutate, type SWRConfiguration } from "swr";
-import { api, qs, errMsg, onApiWrite } from "@/lib/api";
-import type { Order, DeletedMode } from "./queries";
+import * as React from 'react';
+import useSWR, { mutate, type SWRConfiguration } from 'swr';
+import { api, qs, errMsg, onApiWrite } from '@/lib/api';
+import type { Order, DeletedMode } from './queries';
 import type {
   User,
   Permission,
@@ -20,7 +20,7 @@ import type {
   TatRow,
   MonthlyRow,
   TopSymptom,
-} from "./mock";
+} from './mock';
 
 export type { Order, DeletedMode };
 
@@ -61,7 +61,7 @@ const SWR_OPTS: SWRConfiguration = {
 };
 
 const fetchedAt = new Map<string, number>();
-const fetcher = async <T,>(url: string): Promise<T> => {
+const fetcher = async <T>(url: string): Promise<T> => {
   const d = await api<T>(url);
   fetchedAt.set(url, Date.now());
   return d;
@@ -70,7 +70,7 @@ const fetcher = async <T,>(url: string): Promise<T> => {
 /** Forget every list's age and re-fetch the ones on screen — called after each write. */
 export function invalidateLists() {
   fetchedAt.clear();
-  void mutate((key) => typeof key === "string" && key.startsWith("/api/data/"));
+  void mutate((key) => typeof key === 'string' && key.startsWith('/api/data/'));
 }
 onApiWrite(invalidateLists);
 
@@ -91,17 +91,17 @@ function sortRows<T>(rows: T[], order?: Order): T[] {
   return [...rows].sort((a, b) => {
     const x = a[col] as unknown;
     const y = b[col] as unknown;
-    if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
-    return String(x ?? "").localeCompare(String(y ?? ""), "th") * dir;
+    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    return String(x ?? '').localeCompare(String(y ?? ''), 'th') * dir;
   });
 }
 
 export function useTable<T>(
   table: string,
   order?: Order,
-  deleted: DeletedMode = "exclude",
+  deleted: DeletedMode = 'exclude',
   params: Params = {},
-  ttl: number = TTL_DEFAULT
+  ttl: number = TTL_DEFAULT,
 ): TableState<T> {
   const url = `/api/data/${table}${qs({ deleted, ...params })}`;
   const { data, error, isLoading, mutate: revalidate } = useSWR<T[]>(url, fetcher, SWR_OPTS);
@@ -111,7 +111,7 @@ export function useTable<T>(
   const asc = order?.ascending;
   const rows = React.useMemo(
     () => sortRows(Array.isArray(data) ? data : [], col ? { column: col, ascending: asc } : undefined),
-    [data, col, asc]
+    [data, col, asc],
   );
   const refetch = React.useCallback(() => {
     void revalidate();
@@ -134,12 +134,12 @@ export type PageParams = {
   pageSize: number;
   q?: string;
   sort?: string;
-  dir?: "asc" | "desc";
+  dir?: 'asc' | 'desc';
 } & Params;
 
 const EMPTY: never[] = [];
 
-export function usePagedTable<T>(table: string, params: PageParams, deleted: DeletedMode = "exclude"): PageState<T> {
+export function usePagedTable<T>(table: string, params: PageParams, deleted: DeletedMode = 'exclude'): PageState<T> {
   const url = `/api/data/${table}${qs({ paged: 1, deleted, ...params })}`;
   const { data, error, isLoading, mutate: revalidate } = useSWR<{ rows: T[]; total: number }>(url, fetcher, SWR_OPTS);
   useStaleCheck(url, data !== undefined, TTL_DEFAULT, revalidate);
@@ -149,27 +149,39 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
 
   // on error drop the rows keepPreviousData kept from the PREVIOUS page/filter — otherwise the
   // table shows last filter's results under the new one and the error row never appears
-  return { rows: error ? EMPTY : (data?.rows ?? EMPTY), total: error ? 0 : (data?.total ?? 0), loading: isLoading, error: error ? errMsg(error) : null, refetch };
+  return {
+    rows: error ? EMPTY : (data?.rows ?? EMPTY),
+    total: error ? 0 : (data?.total ?? 0),
+    loading: isLoading,
+    error: error ? errMsg(error) : null,
+    refetch,
+  };
 }
 
 /* ------------------------------------------------------------------ *
  * Named hooks — one per resource, with the display order used by the UI.
  * ------------------------------------------------------------------ */
 
-export const useUsers = (deleted: DeletedMode = "exclude") =>
-  useTable<User>("users", undefined, deleted, {}, TTL_MASTER); // server order: pending → active (name) → inactive
-export const usePermissions = () => useTable<Permission>("permissions", { column: "id" }, "exclude", {}, TTL_MASTER);
+export const useUsers = (deleted: DeletedMode = 'exclude') =>
+  useTable<User>('users', undefined, deleted, {}, TTL_MASTER); // server order: pending → active (name) → inactive
+export const usePermissions = () => useTable<Permission>('permissions', { column: 'id' }, 'exclude', {}, TTL_MASTER);
 // Master lookups feed dropdowns → ACTIVE rows only (INACTIVE stay visible on the admin pages).
-export const useCategories = (mode: DeletedMode = "active") => useTable<MasterRow>("categories", { column: "id" }, mode, {}, TTL_MASTER);
-export const useManufacturers = (mode: DeletedMode = "active") =>
-  useTable<MasterRow>("manufacturers", { column: "name" }, mode, {}, TTL_MASTER);
-export const useColors = (mode: DeletedMode = "active") => useTable<MasterRow>("colors", { column: "id" }, mode, {}, TTL_MASTER);
-export const useJobTypes = (mode: DeletedMode = "active") => useTable<MasterRow>("job_types", { column: "id" }, mode, {}, TTL_MASTER);
-export const useProductTypes = (mode: DeletedMode = "active") =>
-  useTable<MasterRow>("product_types", { column: "id" }, mode, {}, TTL_MASTER);
-export const useSymptoms = (mode: DeletedMode = "active") => useTable<Symptom>("symptoms", { column: "id" }, mode, {}, TTL_MASTER);
-export const useModels = (mode: DeletedMode = "active") => useTable<Model>("models", { column: "code" }, mode, {}, TTL_MASTER);
-export const useModelsPage = (params: PageParams, mode: DeletedMode = "exclude") => usePagedTable<Model>("models", params, mode);
+export const useCategories = (mode: DeletedMode = 'active') =>
+  useTable<MasterRow>('categories', { column: 'id' }, mode, {}, TTL_MASTER);
+export const useManufacturers = (mode: DeletedMode = 'active') =>
+  useTable<MasterRow>('manufacturers', { column: 'name' }, mode, {}, TTL_MASTER);
+export const useColors = (mode: DeletedMode = 'active') =>
+  useTable<MasterRow>('colors', { column: 'id' }, mode, {}, TTL_MASTER);
+export const useJobTypes = (mode: DeletedMode = 'active') =>
+  useTable<MasterRow>('job_types', { column: 'id' }, mode, {}, TTL_MASTER);
+export const useProductTypes = (mode: DeletedMode = 'active') =>
+  useTable<MasterRow>('product_types', { column: 'id' }, mode, {}, TTL_MASTER);
+export const useSymptoms = (mode: DeletedMode = 'active') =>
+  useTable<Symptom>('symptoms', { column: 'id' }, mode, {}, TTL_MASTER);
+export const useModels = (mode: DeletedMode = 'active') =>
+  useTable<Model>('models', { column: 'code' }, mode, {}, TTL_MASTER);
+export const useModelsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
+  usePagedTable<Model>('models', params, mode);
 /** Audit trail (System Admin) — see src/server/audit.ts */
 export type AuditRow = {
   id: number;
@@ -183,32 +195,29 @@ export type AuditRow = {
   summary: string;
   changes: Record<string, [unknown, unknown]> | null;
 };
-export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>("audit_log", params, "all");
-export const useAuditModules = () => useTable<string>("audit_modules", undefined, "exclude", {}, TTL_MASTER);
+export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>('audit_log', params, 'all');
+export const useAuditModules = () => useTable<string>('audit_modules', undefined, 'exclude', {}, TTL_MASTER);
 /** Dropdown/picker list: ACTIVE products, lite fields only (code/name/onhand/price/brand/category). */
 export const useProducts = (params: Params = {}) =>
-  useTable<Product>("products", { column: "sysCode" }, "active", { fields: "lite", ...params });
-export const useProductsPage = (params: PageParams, mode: DeletedMode = "exclude") =>
-  usePagedTable<Product & { value: number }>("products", params, mode);
+  useTable<Product>('products', { column: 'sysCode' }, 'active', { fields: 'lite', ...params });
+export const useProductsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
+  usePagedTable<Product & { value: number }>('products', params, mode);
 export type ProductStats = { total: number; qty: number; value: number; low: number; out: number };
-export const useProductStats = (params: Params = {}, mode: DeletedMode = "exclude") =>
-  useTable<ProductStats>("product_stats", undefined, mode, params);
-export const useMovements = (params: Params = {}) =>
-  useTable<Movement>("movements", undefined, "exclude", params);
-export const useMovementsPage = (params: PageParams) => usePagedTable<Movement>("movements", params);
+export const useProductStats = (params: Params = {}, mode: DeletedMode = 'exclude') =>
+  useTable<ProductStats>('product_stats', undefined, mode, params);
+export const useMovements = (params: Params = {}) => useTable<Movement>('movements', undefined, 'exclude', params);
+export const useMovementsPage = (params: PageParams) => usePagedTable<Movement>('movements', params);
 /** Recent customers (server caps the list); pass { q } to search the whole table. */
-export const useCustomers = (params: Params = {}) => useTable<Customer>("customers", undefined, "exclude", params);
-export const useCustomersPage = (params: PageParams, deleted: DeletedMode = "exclude") =>
-  usePagedTable<Customer>("customers", params, deleted);
+export const useCustomers = (params: Params = {}) => useTable<Customer>('customers', undefined, 'exclude', params);
+export const useCustomersPage = (params: PageParams, deleted: DeletedMode = 'exclude') =>
+  usePagedTable<Customer>('customers', params, deleted);
 /** Server-filtered job list (reports, dropdowns). Use useJobsPage for the big list. */
-export const useJobs = (params: Params = {}) => useTable<Job>("jobs", undefined, "exclude", params);
-export const useJobsPage = (params: PageParams) => usePagedTable<Job>("jobs", params);
-export const useQuotations = (params: Params = {}) =>
-  useTable<Quotation>("quotations", undefined, "exclude", params);
-export const useQuotationsPage = (params: PageParams) => usePagedTable<Quotation>("quotations", params);
-export const useSaleOrders = (params: Params = {}) =>
-  useTable<SaleOrder>("sale_orders", undefined, "exclude", params);
-export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>("sale_orders", params);
+export const useJobs = (params: Params = {}) => useTable<Job>('jobs', undefined, 'exclude', params);
+export const useJobsPage = (params: PageParams) => usePagedTable<Job>('jobs', params);
+export const useQuotations = (params: Params = {}) => useTable<Quotation>('quotations', undefined, 'exclude', params);
+export const useQuotationsPage = (params: PageParams) => usePagedTable<Quotation>('quotations', params);
+export const useSaleOrders = (params: Params = {}) => useTable<SaleOrder>('sale_orders', undefined, 'exclude', params);
+export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>('sale_orders', params);
 
 /** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT is a live snapshot (date-independent, but follows `type`) */
 export type DashRange = { from?: string; to?: string; type?: string };
@@ -216,57 +225,87 @@ export type Dashboard = {
   groups: DashGroup[];
   tat: TatRow[];
   monthly: MonthlyRow[];
-  granularity: "day" | "month";
+  granularity: 'day' | 'month';
   topSymptoms: TopSymptom[];
 };
 /** the whole dashboard in ONE request — the server computes it once per range (30 s cache) */
 export function useDashboard(range: DashRange = {}) {
-  const { data, loading, error, refetch } = useTable<Dashboard>("dashboard", undefined, "exclude", range);
+  const { data, loading, error, refetch } = useTable<Dashboard>('dashboard', undefined, 'exclude', range);
   return { data: data[0] ?? null, loading, error, refetch };
 }
 
 /* ---- lookups added for the real backend ---- */
 export type Staff = { id: number; name: string; userType: string };
-export const useStaff = () => useTable<Staff>("staff", undefined, "exclude", {}, TTL_MASTER);
-export const useRoles = () => useTable<string>("roles", undefined, "exclude", {}, TTL_MASTER);
-export const useModules = () => useTable<string>("modules", undefined, "exclude", {}, TTL_MASTER);
-export const useProvinces = () => useTable<{ id: number; name: string }>("provinces", undefined, "exclude", {}, TTL_MASTER);
+export const useStaff = () => useTable<Staff>('staff', undefined, 'exclude', {}, TTL_MASTER);
+export const useRoles = () => useTable<string>('roles', undefined, 'exclude', {}, TTL_MASTER);
+export const useModules = () => useTable<string>('modules', undefined, 'exclude', {}, TTL_MASTER);
+export const useProvinces = () =>
+  useTable<{ id: number; name: string }>('provinces', undefined, 'exclude', {}, TTL_MASTER);
 export const useJobStatuses = () =>
-  useTable<{ id: number; name: string; group: string; order: number; active: boolean }>("job_statuses", undefined, "exclude", {}, TTL_MASTER);
-export const useVendors = () => useTable<string>("vendors", undefined, "exclude", {}, TTL_MASTER);
+  useTable<{ id: number; name: string; group: string; order: number; active: boolean }>(
+    'job_statuses',
+    undefined,
+    'exclude',
+    {},
+    TTL_MASTER,
+  );
+export const useVendors = () => useTable<string>('vendors', undefined, 'exclude', {}, TTL_MASTER);
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
-export const useJobTypeDetails = () => useTable<string>("job_type_details", undefined, "exclude", {}, TTL_MASTER);
-export type DocumentProfileLite = { id: number; code: string; nameTh: string; nameEn: string; isDefault: boolean; logoUrl: string };
+export const useJobTypeDetails = () => useTable<string>('job_type_details', undefined, 'exclude', {}, TTL_MASTER);
+export type DocumentProfileLite = {
+  id: number;
+  code: string;
+  nameTh: string;
+  nameEn: string;
+  isDefault: boolean;
+  logoUrl: string;
+};
 /** โปรไฟล์ผู้ออกเอกสาร (active) — dropdown "ออกเอกสารในนาม" */
-export const useDocumentProfiles = () => useTable<DocumentProfileLite>("document_profiles", undefined, "exclude", {}, TTL_MASTER);
-export const useShippers = () => useTable<string>("shippers", undefined, "exclude", {}, TTL_MASTER);
+export const useDocumentProfiles = () =>
+  useTable<DocumentProfileLite>('document_profiles', undefined, 'exclude', {}, TTL_MASTER);
+export const useShippers = () => useTable<string>('shippers', undefined, 'exclude', {}, TTL_MASTER);
 /** Shop Name suggestions (most used, trimmed) — เปิดงานใหม่ / แก้ไขงาน */
-export const useShopNames = () => useTable<string>("shop_names", undefined, "exclude", {}, TTL_MASTER);
+export const useShopNames = () => useTable<string>('shop_names', undefined, 'exclude', {}, TTL_MASTER);
 /** โปรไฟล์บริษัทขนส่ง (active) — dropdown ตอนปิดงาน + โลโก้/ลิงก์ติดตามในหน้าลูกค้า */
 export type ShippingProfileLite = { id: number; code: string; nameTh: string; logoUrl: string; trackUrl: string };
-export const useShippingProfiles = () => useTable<ShippingProfileLite>("shipping_profiles", undefined, "exclude", {}, TTL_MASTER);
+export const useShippingProfiles = () =>
+  useTable<ShippingProfileLite>('shipping_profiles', undefined, 'exclude', {}, TTL_MASTER);
 /** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
 export type SymptomStat = { id: number; name: string; group: string; count: number };
-export const useSymptomStats = () => useTable<SymptomStat>("symptom_stats", undefined, "exclude", {}, TTL_MASTER);
-export const useModelSymptoms = (model: string) => useTable<{ id: number; name: string; count: number }>("model_symptoms", undefined, "exclude", { model }, TTL_MASTER);
+export const useSymptomStats = () => useTable<SymptomStat>('symptom_stats', undefined, 'exclude', {}, TTL_MASTER);
+export const useModelSymptoms = (model: string) =>
+  useTable<{ id: number; name: string; count: number }>('model_symptoms', undefined, 'exclude', { model }, TTL_MASTER);
 export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
-export const useIssuedLines = (params: Params = {}) => useTable<IssuedLine>("issued_lines", undefined, "exclude", params);
-export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>("issued_lines", params);
+export const useIssuedLines = (params: Params = {}) =>
+  useTable<IssuedLine>('issued_lines', undefined, 'exclude', params);
+export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>('issued_lines', params);
 export type IssuedStats = { lines: number; qty: number; value: number; top: string };
-export const useIssuedStats = (params: Params = {}) => useTable<IssuedStats>("issued_stats", undefined, "exclude", params);
+export const useIssuedStats = (params: Params = {}) =>
+  useTable<IssuedStats>('issued_stats', undefined, 'exclude', params);
 
 /* ---- report KPI summaries (same filters as the paged tables) ---- */
-export type JobSummary = { total: number; fresh: number; done: number; amount: number; paid: number; avgTat: number; over30: number; topChannel: string };
-export const useJobSummary = (params: Params = {}) => useTable<JobSummary>("job_summary", undefined, "exclude", params);
+export type JobSummary = {
+  total: number;
+  fresh: number;
+  done: number;
+  amount: number;
+  paid: number;
+  avgTat: number;
+  over30: number;
+  topChannel: string;
+};
+export const useJobSummary = (params: Params = {}) => useTable<JobSummary>('job_summary', undefined, 'exclude', params);
 export type QuotationSummary = { total: number; agreed: number; amount: number; agreedAmount: number };
-export const useQuotationSummary = (params: Params = {}) => useTable<QuotationSummary>("quotation_summary", undefined, "exclude", params);
+export const useQuotationSummary = (params: Params = {}) =>
+  useTable<QuotationSummary>('quotation_summary', undefined, 'exclude', params);
 export type SaleOrderSummary = { total: number; approved: number; amount: number; avg: number };
-export const useSaleOrderSummary = (params: Params = {}) => useTable<SaleOrderSummary>("sale_order_summary", undefined, "exclude", params);
+export const useSaleOrderSummary = (params: Params = {}) =>
+  useTable<SaleOrderSummary>('sale_order_summary', undefined, 'exclude', params);
 export const useJobStats = () =>
-  useTable<{ total: number; fresh: number; done: number; progress: number }>("job_stats");
+  useTable<{ total: number; fresh: number; done: number; progress: number }>('job_stats');
 /** Job numbers for reference dropdowns: recent open jobs (default), or `mode` = "pending_parts" / "returnable" (ตัดจ่าย / รับคืน). */
-export const useJobNos = (limit = 50, mode?: "pending_parts" | "returnable") =>
-  useTable<string>("job_nos", undefined, "exclude", mode ? { limit, mode } : { limit });
+export const useJobNos = (limit = 50, mode?: 'pending_parts' | 'returnable') =>
+  useTable<string>('job_nos', undefined, 'exclude', mode ? { limit, mode } : { limit });
 
 /* ------------------------------------------------------------------ *
  * useApi — one read of any app API (not a /api/data list) through the same swr cache, so no
@@ -293,8 +332,8 @@ export type ApiOpts<T = unknown> = {
 };
 
 /** background fetch: never redirects — a failure keeps the last answer on screen */
-const quietFetcher = async <T,>(url: string): Promise<T> => {
-  const r = await fetch(url, { cache: "no-store" });
+const quietFetcher = async <T>(url: string): Promise<T> => {
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = (await r.json()) as T;
   fetchedAt.set(url, Date.now());
@@ -302,22 +341,37 @@ const quietFetcher = async <T,>(url: string): Promise<T> => {
 };
 
 export function useApi<T>(url: string | null, opts: ApiOpts<T> = {}) {
-  const { data, error, isLoading, isValidating, mutate: swrMutate } = useSWR<T>(url, opts.quiet ? quietFetcher : fetcher, {
+  const {
+    data,
+    error,
+    isLoading,
+    isValidating,
+    mutate: swrMutate,
+  } = useSWR<T>(url, opts.quiet ? quietFetcher : fetcher, {
     ...SWR_OPTS,
     keepPreviousData: !!opts.keepPrevious,
     ...(opts.fresh ? { revalidateOnMount: true, revalidateIfStale: true } : {}),
     ...(opts.refreshInterval ? { refreshInterval: opts.refreshInterval } : {}),
-    ...(opts.revalidateOnFocus ? { revalidateOnFocus: true, focusThrottleInterval: opts.refreshInterval ?? 5_000 } : {}),
+    ...(opts.revalidateOnFocus
+      ? { revalidateOnFocus: true, focusThrottleInterval: opts.refreshInterval ?? 5_000 }
+      : {}),
     // only pass the callbacks a caller gave: swr spreads options over its defaults, so an explicit
     // `undefined` would replace its no-op and crash every read
     ...(opts.onError ? { onError: (e: unknown) => opts.onError?.(errMsg(e)) } : {}),
     ...(opts.onSuccess ? { onSuccess: (d: T) => opts.onSuccess?.(d) } : {}),
   });
-  useStaleCheck(url ?? "", data !== undefined && !!url && !opts.fresh, opts.ttl ?? TTL_DEFAULT, swrMutate);
+  useStaleCheck(url ?? '', data !== undefined && !!url && !opts.fresh, opts.ttl ?? TTL_DEFAULT, swrMutate);
   /** ms since this key was last read from the server (Infinity when never) */
   const ageMs = React.useCallback(() => {
     const at = url ? fetchedAt.get(url) : undefined;
     return at ? Date.now() - at : Infinity;
   }, [url]);
-  return { data, error: error ? errMsg(error) : null, loading: isLoading, validating: isValidating, mutate: swrMutate, ageMs };
+  return {
+    data,
+    error: error ? errMsg(error) : null,
+    loading: isLoading,
+    validating: isValidating,
+    mutate: swrMutate,
+    ageMs,
+  };
 }

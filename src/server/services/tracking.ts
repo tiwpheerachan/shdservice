@@ -1,15 +1,22 @@
-import "server-only";
-import { randomBytes } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
-import { db } from "@/db/client";
-import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from "@/db/schema";
-import { RS } from "@/server/record-status";
-import { fmtDate, isSentinelDate, nowThai } from "@/server/mappers/format";
-import { JS, effectiveDueText } from "./jobs";
-import { getShippingProfile, trackUrlFor } from "./shipping-profiles";
-import { TRACK_STEPS, type PublicDoc, type PublicJob, type PublicJobSummary, type TrackDocKind, type TrackStepKey } from "@/lib/track-public";
-import { logError } from "@/lib/log";
-import { sha256 } from "@/server/track-guard";
+import 'server-only';
+import { randomBytes } from 'node:crypto';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from '@/db/schema';
+import { RS } from '@/server/record-status';
+import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
+import { JS, effectiveDueText } from './jobs';
+import { getShippingProfile, trackUrlFor } from './shipping-profiles';
+import {
+  TRACK_STEPS,
+  type PublicDoc,
+  type PublicJob,
+  type PublicJobSummary,
+  type TrackDocKind,
+  type TrackStepKey,
+} from '@/lib/track-public';
+import { logError } from '@/lib/log';
+import { sha256 } from '@/server/track-guard';
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
@@ -53,35 +60,41 @@ const linkExpiresAt = sql<string>`CASE WHEN ${job.trackOpenedAt} IS NOT NULL
     ELSE ${linkIssuedAt} + make_interval(hours => ${LINK_UNOPENED_HOURS}) END`;
 const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpiresAt} > now())`;
 
-export type { PublicJob, TrackStepKey } from "@/lib/track-public";
-export { TRACK_STEPS } from "@/lib/track-public";
+export type { PublicJob, TrackStepKey } from '@/lib/track-public';
+export { TRACK_STEPS } from '@/lib/track-public';
 
 /** 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere) */
 function stepOf(statusId: number, group: string): TrackStepKey | null {
-  if (statusId === JS.CANCELLED || statusId === JS.REPAIR_CANCELLED || group === "Cancel") return null;
-  if (statusId === JS.NEW) return "received";
-  if (statusId === JS.WAIT_PARTS || statusId === JS.WAIT_QUOTE || statusId === JS.QUOTED || statusId === JS.QUOTE_EXPIRED) return "waiting";
-  if (group === "Repaired") return "repaired";
-  if (group === "Finished") return "returned";
-  return "diagnosing";
+  if (statusId === JS.CANCELLED || statusId === JS.REPAIR_CANCELLED || group === 'Cancel') return null;
+  if (statusId === JS.NEW) return 'received';
+  if (
+    statusId === JS.WAIT_PARTS ||
+    statusId === JS.WAIT_QUOTE ||
+    statusId === JS.QUOTED ||
+    statusId === JS.QUOTE_EXPIRED
+  )
+    return 'waiting';
+  if (group === 'Repaired') return 'repaired';
+  if (group === 'Finished') return 'returned';
+  return 'diagnosing';
 }
 
 const maskName = (full: string) => {
-  const name = full.trim().replace(/^[A-Z]\d+\s+/i, ""); // customer_detail = "C43600 ชื่อ เบอร์"
-  const first = name.split(/\s+/)[0] ?? "";
-  return first ? `คุณ ${first.slice(0, 3)}…` : "ลูกค้า";
+  const name = full.trim().replace(/^[A-Z]\d+\s+/i, ''); // customer_detail = "C43600 ชื่อ เบอร์"
+  const first = name.split(/\s+/)[0] ?? '';
+  return first ? `คุณ ${first.slice(0, 3)}…` : 'ลูกค้า';
 };
 const maskRef = (v: string) => {
-  const s = (v ?? "").trim();
-  return s.length > 4 ? `••••${s.slice(-4)}` : s ? "••••" : "";
+  const s = (v ?? '').trim();
+  return s.length > 4 ? `••••${s.slice(-4)}` : s ? '••••' : '';
 };
 
 export function newToken() {
-  return randomBytes(32).toString("base64url");
+  return randomBytes(32).toString('base64url');
 }
 
 /** what the DB holds for a link (drizzle/0025) — same digest as the migration's backfill */
-export const tokenHash = (token: string) => sha256(token).toString("hex");
+export const tokenHash = (token: string) => sha256(token).toString('hex');
 
 /* ------------------------------------------------------------------ *
  * Lookup
@@ -130,9 +143,21 @@ const CUSTOMER_QUOTATION_STATUSES = [2, 3, 4, 6, 8, 9];
  * The documents of one job, in timeline order:
  *   ใบรับงานซ่อม (every job) · ใบเสนอราคา (each sent quotation) · ใบส่งคืนสินค้า (once the job is closed)
  */
-async function docsFor(row: { no: string; group: string | null; closedDate: string | null; receivedDate: string | null; createDate: string | null }): Promise<PublicDoc[]> {
+async function docsFor(row: {
+  no: string;
+  group: string | null;
+  closedDate: string | null;
+  receivedDate: string | null;
+  createDate: string | null;
+}): Promise<PublicDoc[]> {
   const docs: PublicDoc[] = [
-    { kind: "job", ref: row.no, label: "ใบรับงานซ่อม", date: fmtDate(row.receivedDate ?? row.createDate), step: "received" },
+    {
+      kind: 'job',
+      ref: row.no,
+      label: 'ใบรับงานซ่อม',
+      date: fmtDate(row.receivedDate ?? row.createDate),
+      step: 'received',
+    },
   ];
   const qs = await db
     .select({ no: quotationHd.quotationNo, at: quotationHd.createDate })
@@ -141,22 +166,28 @@ async function docsFor(row: { no: string; group: string | null; closedDate: stri
       and(
         eq(quotationHd.referenceJobNo, row.no),
         ne(quotationHd.recordStatus, RS.DELETED),
-        inArray(quotationHd.quotationStatusId, CUSTOMER_QUOTATION_STATUSES)
-      )
+        inArray(quotationHd.quotationStatusId, CUSTOMER_QUOTATION_STATUSES),
+      ),
     )
     .orderBy(asc(quotationHd.createDate))
     .limit(10);
   for (const q of qs) {
-    const no = (q.no ?? "").trim();
-    if (no) docs.push({ kind: "quotation", ref: no, label: `ใบเสนอราคา ${no}`, date: fmtDate(q.at), step: "waiting" });
+    const no = (q.no ?? '').trim();
+    if (no) docs.push({ kind: 'quotation', ref: no, label: `ใบเสนอราคา ${no}`, date: fmtDate(q.at), step: 'waiting' });
   }
-  if (row.group?.trim() === "Finished" && !isSentinelDate(row.closedDate)) {
-    docs.push({ kind: "return", ref: row.no, label: "ใบส่งคืนสินค้า", date: fmtDate(row.closedDate), step: "returned" });
+  if (row.group?.trim() === 'Finished' && !isSentinelDate(row.closedDate)) {
+    docs.push({
+      kind: 'return',
+      ref: row.no,
+      label: 'ใบส่งคืนสินค้า',
+      date: fmtDate(row.closedDate),
+      step: 'returned',
+    });
   }
   return docs;
 }
 
-const DOC_KINDS: readonly TrackDocKind[] = ["job", "quotation", "return"];
+const DOC_KINDS: readonly TrackDocKind[] = ['job', 'quotation', 'return'];
 
 /**
  * Is this document of this job still one the customer may open? Checked when the ticket is
@@ -165,8 +196,8 @@ const DOC_KINDS: readonly TrackDocKind[] = ["job", "quotation", "return"];
  */
 export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promise<PublicDoc | null> {
   return quiet(async () => {
-    if (typeof kind !== "string" || !DOC_KINDS.includes(kind as TrackDocKind)) return null;
-    if (typeof ref !== "string" || !/^[A-Za-z0-9-]{1,50}$/.test(ref)) return null;
+    if (typeof kind !== 'string' || !DOC_KINDS.includes(kind as TrackDocKind)) return null;
+    if (typeof ref !== 'string' || !/^[A-Za-z0-9-]{1,50}$/.test(ref)) return null;
     const [row] = await base(eq(job.jobNo, jobNo));
     if (!row || row.recordStatus === RS.DELETED) return null;
     const docs = await docsFor(row);
@@ -195,14 +226,14 @@ async function toPublic(row: Row): Promise<PublicJob> {
   // first time each step was reached
   const seen = new Map<TrackStepKey, string>();
   for (const l of logs) {
-    const k = stepOf(l.statusId ?? -1, l.group?.trim() ?? "");
+    const k = stepOf(l.statusId ?? -1, l.group?.trim() ?? '');
     if (k && !seen.has(k)) seen.set(k, fmtDate(l.at));
   }
-  const step = stepOf(row.statusId ?? -1, row.group?.trim() ?? "");
-  if (step && !seen.has(step)) seen.set(step, "");
+  const step = stepOf(row.statusId ?? -1, row.group?.trim() ?? '');
+  if (step && !seen.has(step)) seen.set(step, '');
 
   // courier of the return leg (jobs closed before drizzle/0013 have none → plain tracking number)
-  const trackingNo = (row.trackingNo ?? "").trim();
+  const trackingNo = (row.trackingNo ?? '').trim();
   const profile = row.shipperId ? await getShippingProfile(row.shipperId) : null;
   const courier =
     profile && !profile.isDeleted
@@ -216,17 +247,17 @@ async function toPublic(row: Row): Promise<PublicJob> {
 
   return {
     no: row.no,
-    customerMasked: maskName(row.customerName ?? row.customerDetail ?? ""),
-    brandModel: [row.brand, row.model].filter(Boolean).join(" ").trim(),
-    deviceRef: maskRef(row.serial || row.imei || ""),
+    customerMasked: maskName(row.customerName ?? row.customerDetail ?? ''),
+    brandModel: [row.brand, row.model].filter(Boolean).join(' ').trim(),
+    deviceRef: maskRef(row.serial || row.imei || ''),
     receivedDate: fmtDate(row.receivedDate ?? row.createDate),
     dueDate: fmtDate(row.dueDate),
     step,
-    stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : "ยกเลิกรายการ",
+    stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : 'ยกเลิกรายการ',
     cancelled: step === null,
     history,
-    shipper: (row.shipper ?? "").trim(),
-    trackingNo: (row.trackingNo ?? "").trim(),
+    shipper: (row.shipper ?? '').trim(),
+    trackingNo: (row.trackingNo ?? '').trim(),
     closedDate: fmtDate(row.closedDate),
     courier,
     docs: await docsFor(row),
@@ -242,7 +273,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
     return await fn();
   } catch (e) {
-    logError(e, "track");
+    logError(e, 'track');
     return null;
   }
 }
@@ -254,7 +285,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
 /** /track/<linkToken> → job number, or null (bad shape / unknown / deleted / expired — never say which) */
 export async function jobNoForLink(token: string): Promise<string | null> {
   return quiet(async () => {
-    const t = (token ?? "").trim();
+    const t = (token ?? '').trim();
     if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
     // looked up by its hash: a near-miss token has an unrelated hash, so timing reveals nothing about it
     const [row] = await db
@@ -281,7 +312,11 @@ const isoUtc = (col: SQL) => sql<string | null>`to_char((${col}) AT TIME ZONE 'U
 
 /** when the current link of this job stops working (ISO) — shown as the page's countdown */
 export async function linkExpiry(jobNo: string): Promise<string | null> {
-  const [r] = await db.select({ at: isoUtc(linkExpiresAt) }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
+  const [r] = await db
+    .select({ at: isoUtc(linkExpiresAt) })
+    .from(job)
+    .where(eq(job.jobNo, jobNo))
+    .limit(1);
   return r?.at ?? null;
 }
 
@@ -292,7 +327,7 @@ export async function linkExpiry(jobNo: string): Promise<string | null> {
  */
 export async function extendLink(token: string): Promise<string | null> {
   return quiet(async () => {
-    const t = (token ?? "").trim();
+    const t = (token ?? '').trim();
     if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null;
     const [r] = await db
       .update(job)
@@ -306,8 +341,8 @@ export async function extendLink(token: string): Promise<string | null> {
           eq(job.trackTokenHash, tokenHash(t)),
           ne(job.recordStatus, RS.DELETED),
           isNotNull(job.trackOpenedAt),
-          gt(job.trackLinkExpiresAt, sql`now()`)
-        )
+          gt(job.trackLinkExpiresAt, sql`now()`),
+        ),
       )
       .returning({ at: isoUtc(sql`${job.trackLinkExpiresAt}`) });
     if (r?.at) return r.at;
@@ -322,7 +357,7 @@ export async function extendLink(token: string): Promise<string | null> {
 }
 
 export type LinkStatus = {
-  state: "unopened" | "opened" | "expired";
+  state: 'unopened' | 'opened' | 'expired';
   issuedAt: string | null; // ISO
   openedAt: string | null; // ISO
   expiresAt: string | null; // ISO
@@ -340,9 +375,9 @@ export async function linkStatus(jobNo: string): Promise<LinkStatus> {
     .from(job)
     .where(eq(job.jobNo, jobNo))
     .limit(1);
-  if (!r) return { state: "expired", issuedAt: null, openedAt: null, expiresAt: null };
+  if (!r) return { state: 'expired', issuedAt: null, openedAt: null, expiresAt: null };
   return {
-    state: !r.live ? "expired" : r.openedAt ? "opened" : "unopened",
+    state: !r.live ? 'expired' : r.openedAt ? 'opened' : 'unopened',
     issuedAt: r.issuedAt,
     openedAt: r.openedAt,
     expiresAt: r.expiresAt,
@@ -375,7 +410,9 @@ export const HISTORY_YEARS = 2;
  * Every job of these customers: still in progress, plus finished / cancelled ones from the
  * last 2 years. Summary fields only — the full (masked) job needs publicJobForCustomers.
  */
-export async function listJobsForCustomers(customerIds: number[]): Promise<{ active: PublicJobSummary[]; history: PublicJobSummary[] }> {
+export async function listJobsForCustomers(
+  customerIds: number[],
+): Promise<{ active: PublicJobSummary[]; history: PublicJobSummary[] }> {
   const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
   if (!ids.length) return { active: [], history: [] };
   const rows = await db
@@ -401,8 +438,8 @@ export async function listJobsForCustomers(customerIds: number[]): Promise<{ act
         // in progress, or closed / cancelled within the history window (1900-01-01 = "not closed" in the legacy DB)
         sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN ('Finished','Cancel')
           OR CASE WHEN ${job.jobClosedDate} > '1901-01-01' THEN ${job.jobClosedDate} ELSE ${job.jobCreateDate} END
-             >= (now() AT TIME ZONE 'Asia/Bangkok') - make_interval(years => ${HISTORY_YEARS}))`
-      )
+             >= (now() AT TIME ZONE 'Asia/Bangkok') - make_interval(years => ${HISTORY_YEARS}))`,
+      ),
     )
     .orderBy(sql`${job.jobCreateDate} DESC`)
     .limit(200);
@@ -410,17 +447,17 @@ export async function listJobsForCustomers(customerIds: number[]): Promise<{ act
   const active: PublicJobSummary[] = [];
   const history: PublicJobSummary[] = [];
   for (const r of rows) {
-    const group = r.group?.trim() ?? "";
+    const group = r.group?.trim() ?? '';
     const step = stepOf(r.statusId ?? -1, group);
-    const done = group === "Finished" || group === "Cancel";
+    const done = group === 'Finished' || group === 'Cancel';
     const item: PublicJobSummary = {
       no: r.no,
-      brandModel: [r.brand, r.model].filter(Boolean).join(" ").trim(),
-      deviceRef: maskRef(r.serial || r.imei || ""),
+      brandModel: [r.brand, r.model].filter(Boolean).join(' ').trim(),
+      deviceRef: maskRef(r.serial || r.imei || ''),
       receivedDate: fmtDate(r.receivedDate ?? r.createDate),
-      closedDate: isSentinelDate(r.closedDate) ? "" : fmtDate(r.closedDate),
+      closedDate: isSentinelDate(r.closedDate) ? '' : fmtDate(r.closedDate),
       step,
-      stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : "ยกเลิกรายการ",
+      stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : 'ยกเลิกรายการ',
       cancelled: step === null,
     };
     (done ? history : active).push(item);
@@ -431,7 +468,7 @@ export async function listJobsForCustomers(customerIds: number[]): Promise<{ act
 /** one job's (masked) detail — only when it belongs to these customers and is not deleted */
 export async function publicJobForCustomers(jobNo: string, customerIds: number[]): Promise<PublicJob | null> {
   return quiet(async () => {
-    const no = (jobNo ?? "").trim().toUpperCase();
+    const no = (jobNo ?? '').trim().toUpperCase();
     if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
     const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
     if (!ids.length) return null;
@@ -444,7 +481,7 @@ export async function publicJobForCustomers(jobNo: string, customerIds: number[]
 /** the job number, only when that job belongs to these customers and is not deleted */
 export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): Promise<string | null> {
   return quiet(async () => {
-    const no = (typeof jobNo === "string" ? jobNo : "").trim().toUpperCase();
+    const no = (typeof jobNo === 'string' ? jobNo : '').trim().toUpperCase();
     if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
     const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
     if (!ids.length) return null;
@@ -459,7 +496,7 @@ export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): 
 
 /** the customer link for a token the caller just generated (staff copy it into LINE) */
 export function trackLinkFor(token: string, baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/track/${token}`;
+  return `${baseUrl.replace(/\/+$/, '')}/track/${token}`;
 }
 
 /** a new link: only its hash is stored, fresh 1-day window, not opened yet */
@@ -482,7 +519,7 @@ export async function ensureToken(jobNo: string): Promise<string> {
     .set(issue(token))
     .where(and(eq(job.jobNo, jobNo), isNull(job.trackTokenHash)))
     .returning({ no: job.jobNo });
-  return r.length ? token : "";
+  return r.length ? token : '';
 }
 
 /** staff action: old link stops working immediately; the new one gets a fresh 1-day window */
@@ -497,4 +534,3 @@ export async function trackingReady(jobNo: string): Promise<boolean> {
   if (!QUOTATION_REQUIRED) return true;
   return hasQuotation(jobNo);
 }
-

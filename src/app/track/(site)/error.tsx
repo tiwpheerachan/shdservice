@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 /**
  * Customer-facing: a tracking page failed (DB blip). Keeps the company header from the

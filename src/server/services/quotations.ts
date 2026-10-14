@@ -1,32 +1,41 @@
-import "server-only";
-import { cached } from "@/server/cache";
-import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
-import { db } from "@/db/client";
-import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from "@/db/schema";
-import type { Quotation } from "@/data/mock";
-import { HttpError, fullName } from "@/server/auth";
-import { assertVersion } from "@/server/http-error";
-import { nextRunningNo } from "@/db/running-no";
-import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
-import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
-import { getCustomerByCode } from "./customers";
-import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
-import { getJob } from "./jobs";
-import { RS, statusFilter, statusStamp, type StatusMode } from "@/server/record-status";
-import { quotationSchema } from "@/lib/validation/quotation";
-import { assertValid } from "@/server/validate";
+import 'server-only';
+import { cached } from '@/server/cache';
+import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
+import type { Quotation } from '@/data/mock';
+import { HttpError, fullName } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
+import { nextRunningNo } from '@/db/running-no';
+import { audit, diff } from '@/server/audit';
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
+import { getCustomerByCode } from './customers';
+import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { getJob } from './jobs';
+import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
+import { quotationSchema } from '@/lib/validation/quotation';
+import { assertValid } from '@/server/validate';
 
 /** quotation_status ids (from the dump) */
-export const QS = { WAIT: 1, SENT: 2, AGREED: 3, DECLINED: 4, CANCELLED: 5, AGREED_WAIT_PAY: 6, EXPIRED: 8, AGREED_WAIT_PARTS: 9 } as const;
+export const QS = {
+  WAIT: 1,
+  SENT: 2,
+  AGREED: 3,
+  DECLINED: 4,
+  CANCELLED: 5,
+  AGREED_WAIT_PAY: 6,
+  EXPIRED: 8,
+  AGREED_WAIT_PARTS: 9,
+} as const;
 const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
 
 /** UI type labels ↔ legacy quotation_type values */
-const TYPE_LABEL: Record<string, Quotation["type"]> = { Normal: "Type A (Normal)", VIP: "Type B (VIP)" };
-const TYPE_VALUE: Record<string, string> = { "Type A (Normal)": "Normal", "Type B (VIP)": "VIP" };
+const TYPE_LABEL: Record<string, Quotation['type']> = { Normal: 'Type A (Normal)', VIP: 'Type B (VIP)' };
+const TYPE_VALUE: Record<string, string> = { 'Type A (Normal)': 'Normal', 'Type B (VIP)': 'VIP' };
 
 export function quotationStatuses() {
-  return cached("quotationstatus:all", 300_000, async () => {
+  return cached('quotationstatus:all', 300_000, async () => {
     const rows = await db.select().from(quotationStatus).orderBy(asc(quotationStatus.quotationStatusId));
     return rows.map((r) => ({ id: r.quotationStatusId, name: r.quotationStatusName.trim() }));
   });
@@ -60,22 +69,22 @@ const listSelect = {
   createBy: appUser.firstName,
   createByLast: appUser.lastName,
 };
-type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]["_"]["data"] | null };
+type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]['_']['data'] | null };
 
 function toQuotation(r: ListRow): Quotation {
   return {
-    no: r.no ?? "",
+    no: r.no ?? '',
     date: fmtDateTime(r.date),
-    type: TYPE_LABEL[r.type?.trim() ?? "Normal"] ?? "Type A (Normal)",
-    customer: r.customer ?? r.customerCode ?? "",
-    jobRef: r.jobRef ?? "",
-    imei: r.imei ?? "",
-    brandModel: [r.brand, r.modelName].filter(Boolean).join(" "),
+    type: TYPE_LABEL[r.type?.trim() ?? 'Normal'] ?? 'Type A (Normal)',
+    customer: r.customer ?? r.customerCode ?? '',
+    jobRef: r.jobRef ?? '',
+    imei: r.imei ?? '',
+    brandModel: [r.brand, r.modelName].filter(Boolean).join(' '),
     amount: num(r.amount),
-    status: r.status?.trim() ?? "",
+    status: r.status?.trim() ?? '',
     statusId: r.statusId ?? 0,
-    customerCode: r.customerCode ?? "",
-    warranty: r.warranty ?? "",
+    customerCode: r.customerCode ?? '',
+    warranty: r.warranty ?? '',
     partsAmount: num(r.parts),
     serviceAmount: num(r.service),
     discountAmount: num(r.discount),
@@ -106,30 +115,42 @@ const SORT = {
   type: quotationHd.quotationType,
 };
 
-export type QuotationFilters = { status?: string; from?: string; to?: string; deleted?: StatusMode; jobNo?: string; type?: string; warranty?: string; brand?: string };
+export type QuotationFilters = {
+  status?: string;
+  from?: string;
+  to?: string;
+  deleted?: StatusMode;
+  jobNo?: string;
+  type?: string;
+  warranty?: string;
+  brand?: string;
+};
 
 export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
-  const from = ymd(f.from), to = ymd(f.to);
+  const from = ymd(f.from),
+    to = ymd(f.to);
   return and(
-    statusFilter(quotationHd.recordStatus, f.deleted ?? "exclude"),
+    statusFilter(quotationHd.recordStatus, f.deleted ?? 'exclude'),
     term
       ? or(
           ilike(quotationHd.quotationNo, `%${term}%`),
           ilike(quotationHd.referenceJobNo, `%${term}%`),
           ilike(customer.customerName, `%${term}%`),
           ilike(quotationHd.customerCode, `%${term}%`),
-          ilike(job.productImeiNo, `%${term}%`)
+          ilike(job.productImeiNo, `%${term}%`),
         )
       : undefined,
     f.status ? eq(quotationStatus.quotationStatusName, f.status) : undefined,
     from ? gte(quotationHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(quotationHd.createDate, `${to} 23:59:59`) : undefined,
     f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
-    f.type ? eq(quotationHd.quotationType, f.type.includes("VIP") ? "VIP" : f.type.includes("Normal") ? "Normal" : f.type) : undefined,
+    f.type
+      ? eq(quotationHd.quotationType, f.type.includes('VIP') ? 'VIP' : f.type.includes('Normal') ? 'Normal' : f.type)
+      : undefined,
     // ข้อมูลเครื่องมาจากงานที่อ้างถึง (job) — กรองที่ server ให้ครบทุกหน้า ไม่ใช่เฉพาะหน้าที่โหลด
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
-    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined
+    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
   );
 }
 
@@ -156,7 +177,7 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
 
 export async function listQuotations(f: QuotationFilters & { q?: string; limit?: number } = {}): Promise<Quotation[]> {
   const rows = await base()
-    .where(quotationWhere(f.q ?? "", f))
+    .where(quotationWhere(f.q ?? '', f))
     .orderBy(desc(quotationHd.createDate))
     .limit(Math.min(f.limit ?? 5000, 20000));
   return rows.map(toQuotation);
@@ -165,7 +186,7 @@ export async function listQuotations(f: QuotationFilters & { q?: string; limit?:
 export type QuotationLine = {
   id?: number;
   lineNumber: number;
-  itemType: "SparePart" | "Service" | "Delivery";
+  itemType: 'SparePart' | 'Service' | 'Delivery';
   code: string;
   detail: string;
   qty: number;
@@ -206,33 +227,43 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   if (!r) return null;
   const [hd] = await db.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).limit(1);
   if (!hd) return null; // deleted between the two reads
-  const dts = await db.select().from(quotationDt).where(eq(quotationDt.quotationNo, no)).orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
+  const dts = await db
+    .select()
+    .from(quotationDt)
+    .where(eq(quotationDt.quotationNo, no))
+    .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
   const [cust, jb, [creator]] = await Promise.all([
     hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
     hd.referenceJobNo ? getJob(hd.referenceJobNo) : null,
-    hd.createBy ? db.select({ phone: appUser.phoneNo, email: appUser.emailAddress }).from(appUser).where(eq(appUser.userId, hd.createBy)).limit(1) : Promise.resolve([undefined]),
+    hd.createBy
+      ? db
+          .select({ phone: appUser.phoneNo, email: appUser.emailAddress })
+          .from(appUser)
+          .where(eq(appUser.userId, hd.createBy))
+          .limit(1)
+      : Promise.resolve([undefined]),
   ]);
   return {
     ...toQuotation(r),
-    contactName: hd.customerContactName ?? "",
+    contactName: hd.customerContactName ?? '',
     customerDetail: cust,
     job: jb,
     lines: dts.map((d) => ({
       id: d.quotationDtId,
       lineNumber: d.lineNumber ?? 0,
-      itemType: (d.itemType as QuotationLine["itemType"]) ?? "SparePart",
-      code: d.itemCode ?? "",
-      detail: d.itemDetail ?? "",
+      itemType: (d.itemType as QuotationLine['itemType']) ?? 'SparePart',
+      code: d.itemCode ?? '',
+      detail: d.itemDetail ?? '',
       qty: num(d.quantity),
-      unit: d.unit ?? "หน่วย",
+      unit: d.unit ?? 'หน่วย',
       unitPrice: num(d.unitPrice),
       discount: num(d.unitPriceDiscount),
       discountPercent: num(d.unitPriceDiscountPercent),
       total: num(d.totalPrice),
     })),
-    remark: hd.remark ?? "",
-    discountType: hd.discountType ?? "ไม่มีส่วนลด",
-    discountFormula: hd.discountFormula ?? "0%",
+    remark: hd.remark ?? '',
+    discountType: hd.discountType ?? 'ไม่มีส่วนลด',
+    discountFormula: hd.discountFormula ?? '0%',
     sumExclude: num(hd.sumExcludeAmount),
     afterDiscount: num(hd.afterDiscountAmount),
     totalBase: num(hd.totalBaseAmount),
@@ -240,10 +271,10 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     totalAmount: num(hd.totalAmount),
     rounding: num(hd.roundingAmount),
     netAmount: num(hd.netAmount),
-    approveRemark: hd.customerApproveRemark ?? "",
+    approveRemark: hd.customerApproveRemark ?? '',
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
-    createdByPhone: creator?.phone ?? "",
-    createdByEmail: creator?.email ?? "",
+    createdByPhone: creator?.phone ?? '',
+    createdByEmail: creator?.email ?? '',
     version: hd.rowVersion,
   };
 }
@@ -256,11 +287,11 @@ export type QuotationInput = {
   customerCode: string;
   contactName?: string;
   jobNo?: string;
-  lines: Omit<QuotationLine, "lineNumber" | "total">[];
+  lines: Omit<QuotationLine, 'lineNumber' | 'total'>[];
   serviceAmount?: number | string;
   discountType?: string;
   discountValue?: number | string; // number in บาท or %
-  discountUnit?: "บาท" | "%";
+  discountUnit?: 'บาท' | '%';
   vatRate?: number | string;
   remark?: string;
   status?: string; // name
@@ -277,16 +308,20 @@ export function computeTotals(i: {
   delivery?: number;
   discountType: string;
   discountValue: number;
-  discountUnit: "บาท" | "%";
+  discountUnit: 'บาท' | '%';
   vatRate: number;
 }) {
   const sumExclude = i.parts + i.service + (i.delivery ?? 0);
   let baseForDiscount = sumExclude;
-  if (i.discountType === "ส่วนลดค่าบริการ") baseForDiscount = i.service;
-  else if (i.discountType === "ส่วนลดค่าอะไหล่") baseForDiscount = i.parts;
-  else if (i.discountType === "ไม่มีส่วนลด") baseForDiscount = 0;
+  if (i.discountType === 'ส่วนลดค่าบริการ') baseForDiscount = i.service;
+  else if (i.discountType === 'ส่วนลดค่าอะไหล่') baseForDiscount = i.parts;
+  else if (i.discountType === 'ไม่มีส่วนลด') baseForDiscount = 0;
   const discount =
-    i.discountType === "ไม่มีส่วนลด" ? 0 : i.discountUnit === "%" ? Math.round(baseForDiscount * i.discountValue) / 100 : Math.min(i.discountValue, baseForDiscount);
+    i.discountType === 'ไม่มีส่วนลด'
+      ? 0
+      : i.discountUnit === '%'
+        ? Math.round(baseForDiscount * i.discountValue) / 100
+        : Math.min(i.discountValue, baseForDiscount);
   const afterDiscount = sumExclude - discount;
   const totalBase = afterDiscount;
   const vat = Math.round(totalBase * i.vatRate) / 100;
@@ -299,35 +334,62 @@ export function computeTotals(i: {
 export async function saveQuotation(i: QuotationInput, byUserId: number): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
   const [before] = i.no
-    ? await db.select({ jobNo: quotationHd.referenceJobNo }).from(quotationHd).where(eq(quotationHd.quotationNo, i.no)).limit(1)
+    ? await db
+        .select({ jobNo: quotationHd.referenceJobNo })
+        .from(quotationHd)
+        .where(eq(quotationHd.quotationNo, i.no))
+        .limit(1)
     : [];
   assertValid(quotationSchema(!i.no || !!str(before?.jobNo)), i);
   if (str(i.jobNo)) {
-    const [found] = await db.select({ no: job.jobNo }).from(job).where(eq(job.jobNo, str(i.jobNo).toUpperCase())).limit(1);
-    if (!found) throw new HttpError(400, "ไม่พบหมายเลขงาน", { fields: { jobNo: `ไม่พบหมายเลขงาน ${str(i.jobNo).toUpperCase()}` } });
+    const [found] = await db
+      .select({ no: job.jobNo })
+      .from(job)
+      .where(eq(job.jobNo, str(i.jobNo).toUpperCase()))
+      .limit(1);
+    if (!found)
+      throw new HttpError(400, 'ไม่พบหมายเลขงาน', {
+        fields: { jobNo: `ไม่พบหมายเลขงาน ${str(i.jobNo).toUpperCase()}` },
+      });
   }
   const cust = await getCustomerByCode(str(i.customerCode));
-  if (!cust) throw new HttpError(400, "ต้องเลือกลูกค้า", { fields: { customerCode: "ไม่พบลูกค้ารายนี้" } });
-  const lines = (i.lines ?? []).filter((l) => str(l.code) || str(l.detail)).map((l, idx) => {
-    const qty = num(l.qty) || 1;
-    const price = num(l.unitPrice);
-    const disc = num(l.discount);
-    return { ...l, lineNumber: idx + 1, qty, unitPrice: price, discount: disc, total: Math.round((qty * price - disc) * 100) / 100 };
-  });
-  const parts = lines.filter((l) => (l.itemType ?? "SparePart") !== "Delivery").reduce((s, l) => s + l.total, 0);
-  const delivery = lines.filter((l) => l.itemType === "Delivery").reduce((s, l) => s + l.total, 0);
+  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
+  const lines = (i.lines ?? [])
+    .filter((l) => str(l.code) || str(l.detail))
+    .map((l, idx) => {
+      const qty = num(l.qty) || 1;
+      const price = num(l.unitPrice);
+      const disc = num(l.discount);
+      return {
+        ...l,
+        lineNumber: idx + 1,
+        qty,
+        unitPrice: price,
+        discount: disc,
+        total: Math.round((qty * price - disc) * 100) / 100,
+      };
+    });
+  const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
+  const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
   const service = num(i.serviceAmount);
-  const discountType = str(i.discountType) || "ไม่มีส่วนลด";
+  const discountType = str(i.discountType) || 'ไม่มีส่วนลด';
   const discountValue = num(i.discountValue);
-  const discountUnit: "บาท" | "%" = i.discountUnit === "%" ? "%" : "บาท";
+  const discountUnit: 'บาท' | '%' = i.discountUnit === '%' ? '%' : 'บาท';
   const vatRate = num(i.vatRate);
   const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
-  const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || "Normal");
+  const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
   // a quotation raised from a job is issued under the job's profile unless the user picked another
-  const jobProfileId = !i.no && str(i.jobNo)
-    ? (await db.select({ p: job.documentProfileId }).from(job).where(eq(job.jobNo, str(i.jobNo).toUpperCase())).limit(1))[0]?.p ?? undefined
-    : undefined;
+  const jobProfileId =
+    !i.no && str(i.jobNo)
+      ? ((
+          await db
+            .select({ p: job.documentProfileId })
+            .from(job)
+            .where(eq(job.jobNo, str(i.jobNo).toUpperCase()))
+            .limit(1)
+        )[0]?.p ?? undefined)
+      : undefined;
 
   const no = await db.transaction(async (tx) => {
     const values = {
@@ -337,7 +399,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       serviceAmount: money(service),
       sumExcludeAmount: money(t.sumExclude),
       discountType,
-      discountFormula: discountType === "ไม่มีส่วนลด" ? "0%" : `${discountValue}${discountUnit}`,
+      discountFormula: discountType === 'ไม่มีส่วนลด' ? '0%' : `${discountValue}${discountUnit}`,
       discountAmount: money(t.discount),
       afterDiscountAmount: money(t.afterDiscount),
       totalBaseAmount: money(t.totalBase),
@@ -354,29 +416,35 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     };
     let no = i.no;
     if (no) {
-      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for("update");
-      if (!prev) throw new HttpError(404, "ไม่พบใบเสนอราคา " + no);
+      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for('update');
+      if (!prev) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + no);
       assertVersion(i.version, prev.rowVersion);
       const upd = {
         ...values,
-        customerApproveDate: AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,
+        customerApproveDate:
+          AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,
         // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API
         ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
       };
       await tx.update(quotationHd).set(upd).where(eq(quotationHd.quotationNo, no));
       await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
-      const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? "";
+      const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
       await audit(tx, byUserId, {
-        action: prev.quotationStatusId !== statusId ? "STATUS" : "UPDATE",
-        module: "Quotation",
-        entity: "quotation_hd",
+        action: prev.quotationStatusId !== statusId ? 'STATUS' : 'UPDATE',
+        module: 'Quotation',
+        entity: 'quotation_hd',
         key: no,
-        summary: prev.quotationStatusId !== statusId ? `สถานะใบเสนอราคา → ${statusName}` : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
-        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, { skip: ["customerApproveDate"] }),
+        summary:
+          prev.quotationStatusId !== statusId
+            ? `สถานะใบเสนอราคา → ${statusName}`
+            : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
+        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, {
+          skip: ['customerApproveDate'],
+        }),
       });
     } else {
       const profile = await issuingProfile(i.documentProfileId ?? jobProfileId);
-      no = await nextRunningNo(tx, "Quotation");
+      no = await nextRunningNo(tx, 'Quotation');
       await tx.insert(quotationHd).values({
         ...values,
         documentProfileId: profile.id,
@@ -387,11 +455,11 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
       });
       await audit(tx, byUserId, {
-        action: "CREATE",
-        module: "Quotation",
-        entity: "quotation_hd",
+        action: 'CREATE',
+        module: 'Quotation',
+        entity: 'quotation_hd',
         key: no,
-        summary: `สร้างใบเสนอราคา · งาน ${values.referenceJobNo || "-"} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
+        summary: `สร้างใบเสนอราคา · งาน ${values.referenceJobNo || '-'} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
       });
     }
     if (lines.length) {
@@ -399,16 +467,16 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         lines.map((l) => ({
           quotationNo: no!,
           lineNumber: l.lineNumber,
-          itemType: l.itemType ?? "SparePart",
+          itemType: l.itemType ?? 'SparePart',
           itemCode: str(l.code).slice(0, 50),
           itemDetail: str(l.detail).slice(0, 100),
           quantity: String(l.qty),
-          unit: (str(l.unit) || "หน่วย").slice(0, 10),
+          unit: (str(l.unit) || 'หน่วย').slice(0, 10),
           unitPrice: l.unitPrice.toFixed(2),
           unitPriceDiscount: l.discount.toFixed(2),
           totalPrice: l.total.toFixed(2),
           unitPriceDiscountPercent: num(l.discountPercent).toFixed(2),
-        }))
+        })),
       );
     }
     // customer agreed → remember the approved quotation on the job (no status sync — decided 2026-09-15)

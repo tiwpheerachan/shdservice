@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Shown by the App Router while the (app) layout resolves the session on a
@@ -31,7 +31,7 @@ export default function AppLoading() {
           {Array.from({ length: 8 }, (_, i) => (
             <div key={i} className="flex items-center gap-4 px-3 py-3">
               <Skeleton className="h-3.5 w-20" />
-              <Skeleton className={i % 2 ? "h-3.5 w-1/3" : "h-3.5 w-1/2"} />
+              <Skeleton className={i % 2 ? 'h-3.5 w-1/3' : 'h-3.5 w-1/2'} />
               <Skeleton className="ml-auto h-3.5 w-16" />
             </div>
           ))}

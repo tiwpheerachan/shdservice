@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from "lucide-react";
-import { Section } from "./section";
-import { CustomerSelect } from "./customer-select";
-import { ProductPicker } from "./product-picker";
-import { ProfileSelect } from "./profile-select";
-import { Button } from "@/components/ui/button";
-import { Field, FieldGrid, ReadOnly } from "@/components/ui/field";
-import { Input, Textarea, Radio, NumberInput } from "@/components/ui/input";
-import { SearchSelect } from "@/components/shared/search-select";
-import { useToast } from "@/components/ui/toast";
-import { PAYMENT_METHODS, type Customer } from "@/data/mock";
-import { useProducts, useStaff } from "@/data/db";
-import { baht } from "@/lib/utils";
-import { errMsg, uploadFile, fileUrl } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { useFormErrors } from "@/lib/use-form-errors";
-import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
-import { saleOrderSchema } from "@/lib/validation/sale-order";
-import { useMountTime } from "@/lib/use-client";
-import { isoDateTime } from "@/lib/dates";
+import * as React from 'react';
+import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from 'lucide-react';
+import { Section } from './section';
+import { CustomerSelect } from './customer-select';
+import { ProductPicker } from './product-picker';
+import { ProfileSelect } from './profile-select';
+import { Button } from '@/components/ui/button';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Input, Textarea, Radio, NumberInput } from '@/components/ui/input';
+import { SearchSelect } from '@/components/shared/search-select';
+import { useToast } from '@/components/ui/toast';
+import { PAYMENT_METHODS, type Customer } from '@/data/mock';
+import { useProducts, useStaff } from '@/data/db';
+import { baht } from '@/lib/utils';
+import { errMsg, uploadFile, fileUrl } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { useFormErrors } from '@/lib/use-form-errors';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { saleOrderSchema } from '@/lib/validation/sale-order';
+import { useMountTime } from '@/lib/use-client';
+import { isoDateTime } from '@/lib/dates';
 
-type Line = { id: number; code: string; name: string; qty: number; price: number; type: "SparePart" | "Service" };
+type Line = { id: number; code: string; name: string; qty: number; price: number; type: 'SparePart' | 'Service' };
 
 /** GET /api/sale-orders/:no (subset the form uses) */
 export type SaleOrderLoaded = {
@@ -38,8 +38,16 @@ export type SaleOrderLoaded = {
   slip: string;
   documentProfileId?: number; // ออกเอกสารในนาม
   version?: number; // row_version — the edit page sends it back with its save
-  customerDetail: { code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string };
-  lines: { code: string; name: string; type: "SparePart" | "Service"; qty: number; price: number }[];
+  customerDetail: {
+    code: string;
+    taxId: string;
+    name: string;
+    address: string;
+    phone: string;
+    line: string;
+    email: string;
+  };
+  lines: { code: string; name: string; type: 'SparePart' | 'Service'; qty: number; price: number }[];
 };
 
 export type SaleOrderPayload = {
@@ -47,7 +55,7 @@ export type SaleOrderPayload = {
   documentProfileId?: number;
   customerCode: string;
   salesId?: number;
-  lines: { code: string; qty: number; price: number; name: string; type: "SparePart" | "Service" }[];
+  lines: { code: string; qty: number; price: number; name: string; type: 'SparePart' | 'Service' }[];
   paymentType: string;
   paymentAmount: string;
   slip: string;
@@ -75,25 +83,47 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     // an existing SO fills the form when it mounts — the edit page remounts the form (key) for every
     // order it loads or saves, so this is the one place the form takes `initial`
     const [lines, setLines] = React.useState<Line[]>(() =>
-      (initial?.lines ?? []).map((l, i) => ({ id: i + 1, code: l.code, name: l.name, qty: l.qty, price: l.price, type: l.type }))
+      (initial?.lines ?? []).map((l, i) => ({
+        id: i + 1,
+        code: l.code,
+        name: l.name,
+        qty: l.qty,
+        price: l.price,
+        type: l.type,
+      })),
     );
-    const [code, setCode] = React.useState("");
+    const [code, setCode] = React.useState('');
     const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม
     const [qty, setQty] = React.useState(1);
     const [customer, setCustomer] = React.useState<Customer | null>(() => {
       const c = initial?.customerDetail;
-      return c ? { code: c.code, name: c.name, address: c.address, phone: c.phone, email: c.email, line: c.line, taxId: c.taxId, status: "Active" } : null;
+      return c
+        ? {
+            code: c.code,
+            name: c.name,
+            address: c.address,
+            phone: c.phone,
+            email: c.email,
+            line: c.line,
+            taxId: c.taxId,
+            status: 'Active',
+          }
+        : null;
     });
     // พนักงานขาย: the one picked here, else the order's own salesperson, else (a new order) the
     // signed-in user — derived, so it is right whichever of the order / the staff list arrives first
     const [pickedSalesId, setSalesId] = React.useState<number>(0);
     const salesId =
       pickedSalesId ||
-      (initial ? STAFF.find((x) => x.name === initial.sales)?.id ?? 0 : userId && STAFF.some((x) => x.id === userId) ? userId : 0);
+      (initial
+        ? (STAFF.find((x) => x.name === initial.sales)?.id ?? 0)
+        : userId && STAFF.some((x) => x.id === userId)
+          ? userId
+          : 0);
     const [payment, setPayment] = React.useState(initial?.paymentType || PAYMENT_METHODS[0]);
-    const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : "");
-    const [remark, setRemark] = React.useState(initial?.remark ?? "");
-    const [slip, setSlip] = React.useState(initial?.slip ?? "");
+    const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : '');
+    const [remark, setRemark] = React.useState(initial?.remark ?? '');
+    const [slip, setSlip] = React.useState(initial?.slip ?? '');
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
     const [submit, setSubmit] = React.useState((initial?.approveId ?? 0) >= 2);
 
@@ -107,30 +137,43 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         return;
       }
       try {
-        const d = await uploadFile("sale-order-slip", no, f);
+        const d = await uploadFile('sale-order-slip', no, f);
         setSlip(d.path);
         setSaved((x) => ({ ...x, slip: d.path })); // saved to the order right away — not an edit
-        push({ kind: "success", title: "อัปโหลดสลิปแล้ว", desc: f.name });
+        push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
       } catch (e) {
-        push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+        push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
       }
     };
     // the order's own date, or (a new order) when the screen opened — Thai time, browser only
     const openedAt = useMountTime();
-    const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : "");
+    const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : '');
     const idRef = React.useRef(initial?.lines.length ?? 0);
 
     // the form as it opened (a loaded order, or empty) — anything else is an unsaved edit; the edit
     // page remounts the form for every order it loads or saves
-    const now = { profileId, customer: customer?.code ?? "", pickedSalesId, lines, payment, payAmount, remark, slip, submit };
+    const now = {
+      profileId,
+      customer: customer?.code ?? '',
+      pickedSalesId,
+      lines,
+      payment,
+      payAmount,
+      remark,
+      slip,
+      submit,
+    };
     const [saved, setSaved] = React.useState(now);
     useUnsavedChanges(JSON.stringify(now) !== JSON.stringify(saved));
 
     const add = () => {
       const p = PRODUCTS.find((x) => x.sysCode === code);
       if (!p) return;
-      setLines((s) => [...s, { id: ++idRef.current, code: p.sysCode, name: p.name, qty, price: p.price, type: "SparePart" }]);
-      setCode("");
+      setLines((s) => [
+        ...s,
+        { id: ++idRef.current, code: p.sysCode, name: p.name, qty, price: p.price, type: 'SparePart' },
+      ]);
+      setCode('');
       setQty(1);
     };
 
@@ -138,19 +181,19 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
     // a value that changes takes its error away
     const { clear } = fe;
-    React.useEffect(() => clear("customerCode"), [customer, clear]);
-    React.useEffect(() => clear("salesId"), [salesId, clear]);
-    React.useEffect(() => clear("lines"), [lines.length, clear]);
-    React.useEffect(() => clear("paymentAmount"), [payAmount, clear]);
+    React.useEffect(() => clear('customerCode'), [customer, clear]);
+    React.useEffect(() => clear('salesId'), [salesId, clear]);
+    React.useEffect(() => clear('lines'), [lines.length, clear]);
+    React.useEffect(() => clear('paymentAmount'), [payAmount, clear]);
 
     React.useImperativeHandle(ref, () => ({
       uploadPendingSlip: async (no: string) => {
         if (!pendingSlip) return;
         try {
-          await uploadFile("sale-order-slip", no, pendingSlip);
+          await uploadFile('sale-order-slip', no, pendingSlip);
           setPendingSlip(null);
         } catch (e) {
-          push({ kind: "error", title: "อัปโหลดสลิปไม่สำเร็จ", desc: errMsg(e) });
+          push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
         }
       },
       validate: () => !fe.report(fe.run(saleOrderSchema, payloadOf())),
@@ -158,21 +201,27 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       payload: () => payloadOf(),
     }));
     const payloadOf = (): SaleOrderPayload => ({
-        no: soNo || initial?.no || undefined,
-        documentProfileId: profileId || undefined,
-        customerCode: customer?.code ?? "",
-        salesId: salesId || undefined,
-        lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
-        paymentType: payment,
-        paymentAmount: payAmount,
-        slip: slip.includes("/") ? slip : "",
-        remark,
-        submit,
-      });
+      no: soNo || initial?.no || undefined,
+      documentProfileId: profileId || undefined,
+      customerCode: customer?.code ?? '',
+      salesId: salesId || undefined,
+      lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
+      paymentType: payment,
+      paymentAmount: payAmount,
+      slip: slip.includes('/') ? slip : '',
+      remark,
+      submit,
+    });
 
     return (
       <>
-        <Section title="Customer Info" icon={UserRound} description={customer ? "ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)" : "เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่"}>
+        <Section
+          title="Customer Info"
+          icon={UserRound}
+          description={
+            customer ? 'ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)' : 'เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่'
+          }
+        >
           <Field error={fe.errors.customerCode}>
             <CustomerSelect value={customer} onChange={setCustomer} />
           </Field>
@@ -182,25 +231,28 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           <FieldGrid>
             <Field label="เลขใบสั่งขาย">
               <ReadOnly>
-                <span className="num">{soNo ?? initial?.no ?? "Generate Auto"}</span>
+                <span className="num">{soNo ?? initial?.no ?? 'Generate Auto'}</span>
               </ReadOnly>
             </Field>
             <ProfileSelect
               value={profileId}
               onChange={(id, how) => {
                 setProfileId(id);
-                if (how !== "user") setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
+                if (how !== 'user') setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
               }}
-              doc={soNo || initial?.no ? { kind: "sale_order", no: soNo || initial?.no || "" } : undefined} />
+              doc={soNo || initial?.no ? { kind: 'sale_order', no: soNo || initial?.no || '' } : undefined}
+            />
             <Field label="วันที่สร้าง">
-              <ReadOnly><span className="num">{date}</span></ReadOnly>
+              <ReadOnly>
+                <span className="num">{date}</span>
+              </ReadOnly>
             </Field>
             <Field label="สร้างโดย">
-              <ReadOnly>{initial?.createdBy || me || "—"}</ReadOnly>
+              <ReadOnly>{initial?.createdBy || me || '—'}</ReadOnly>
             </Field>
             <Field label="พนักงานขาย" required error={fe.errors.salesId}>
               <SearchSelect
-                value={salesId ? String(salesId) : ""}
+                value={salesId ? String(salesId) : ''}
                 onChange={(v) => setSalesId(Number(v) || 0)}
                 options={STAFF.map((u) => ({ value: String(u.id), label: u.name, sub: u.userType || undefined }))}
                 placeholder="- - ยังไม่ระบุ - -"
@@ -211,22 +263,20 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           </FieldGrid>
         </Section>
 
-        <Section
-          title="รายการสินค้า"
-          icon={ShoppingCart}
-          bodyClassName="p-0"
-        >
+        <Section title="รายการสินค้า" icon={ShoppingCart} bodyClassName="p-0">
           <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
             <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1" error={fe.errors.lines}>
-              <ProductPicker id="so-product" products={PRODUCTS} value={code} clearable onPick={(p) => setCode(p?.code ?? "")} placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…" />
+              <ProductPicker
+                id="so-product"
+                products={PRODUCTS}
+                value={code}
+                clearable
+                onPick={(p) => setCode(p?.code ?? '')}
+                placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…"
+              />
             </Field>
             <Field label="จำนวน" className="sm:w-28">
-              <NumberInput
-                min={1}
-                placeholder="1"
-                value={qty}
-                onChange={(n) => setQty(n)}
-              />
+              <NumberInput min={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
             </Field>
             <Field label="หน่วยนับ" className="sm:w-28">
               <Input readOnly value="Pcs." />
@@ -271,7 +321,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                           aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
                           min={1}
                           value={l.qty}
-                          onChange={(n) => setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))}
+                          onChange={(n) =>
+                            setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
+                          }
                           className="ml-auto h-8 w-16 text-right text-xs"
                         />
                       </td>
@@ -288,9 +340,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                           className="ml-auto h-8 w-24 text-right text-xs"
                         />
                       </td>
-                      <td className="num px-3 py-2 text-right font-medium">
-                        {baht(l.qty * l.price)}
-                      </td>
+                      <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
                       <td className="px-3 py-2 text-center">
                         <button
                           onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
@@ -335,14 +385,17 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 step="0.01"
                 min={0}
                 inputMode="decimal"
-                placeholder={total ? total.toFixed(2) : "0.00"}
+                placeholder={total ? total.toFixed(2) : '0.00'}
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}
                 className="num text-right"
               />
             </Field>
-            <Field label="สลิปหลักฐานการโอน" hint={slip.includes("/") ? undefined : slip ? `จะอัปโหลดหลังบันทึก: ${slip}` : undefined}>
+            <Field
+              label="สลิปหลักฐานการโอน"
+              hint={slip.includes('/') ? undefined : slip ? `จะอัปโหลดหลังบันทึก: ${slip}` : undefined}
+            >
               <div className="flex items-center gap-2">
                 <Input
                   type="file"
@@ -350,8 +403,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                   accept=".jpg,.jpeg,.png,.webp,.pdf"
                   onChange={(e) => onPickSlip(e.target.files?.[0])}
                 />
-                {slip.includes("/") && (
-                  <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline">
+                {slip.includes('/') && (
+                  <a
+                    href={fileUrl(slip)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 text-xs text-primary hover:underline"
+                  >
                     ดูสลิป
                   </a>
                 )}
@@ -363,8 +421,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             <Field label="Action" required wide group="radiogroup">
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
                 {[
-                  { k: false, l: "กำลังดำเนินการจัดทำ (In Progress)" },
-                  { k: true, l: "Send To Approve" },
+                  { k: false, l: 'กำลังดำเนินการจัดทำ (In Progress)' },
+                  { k: true, l: 'Send To Approve' },
                 ].map((a) => (
                   <label key={a.l} className="flex cursor-pointer items-center gap-2 text-sm">
                     <Radio name="so-action" checked={submit === a.k} onChange={() => setSubmit(a.k)} />
@@ -377,5 +435,5 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         </Section>
       </>
     );
-  }
+  },
 );

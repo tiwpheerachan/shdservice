@@ -1,5 +1,5 @@
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 export type { ClassValue };
 
@@ -8,20 +8,19 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-export const baht = (n: number) =>
-  n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const baht = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export const int = (n: number) => n.toLocaleString("th-TH");
+export const int = (n: number) => n.toLocaleString('th-TH');
 
 export const pct = (n: number) =>
-  `${n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  `${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 
 export function fmtDateTime(s: string) {
   return s;
 }
 
 export function slugTitle(s: string) {
-  return s.replace(/-/g, " ");
+  return s.replace(/-/g, ' ');
 }
 
 /**
@@ -40,5 +39,5 @@ export const SEARCH_MIN_HINT = `พิมพ์อย่างน้อย ${SEA
 export function isFilterActive<F extends object>(current: F, defaults: F): boolean {
   const a = current as Record<string, unknown>;
   const b = defaults as Record<string, unknown>;
-  return Object.keys({ ...b, ...a }).some((k) => String(a[k] ?? "") !== String(b[k] ?? ""));
+  return Object.keys({ ...b, ...a }).some((k) => String(a[k] ?? '') !== String(b[k] ?? ''));
 }

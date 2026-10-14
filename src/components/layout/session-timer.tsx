@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Timer, RotateCw } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useMe } from "@/lib/use-me";
-import { toLogin } from "@/lib/navigation";
+import * as React from 'react';
+import { Timer, RotateCw } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useMe } from '@/lib/use-me';
+import { toLogin } from '@/lib/navigation';
 
 const WARN_SECONDS = 5 * 60;
 const AUTO_REFRESH_EVERY_MS = 5 * 60 * 1000; // activity-based renewal, at most every 5 min (TTL is 30 min)
@@ -24,7 +24,7 @@ export function SessionTimer() {
   const refresh = React.useCallback(async () => {
     lastRefresh.current = Date.now();
     try {
-      const r = await fetch("/api/sso/refresh", { cache: "no-store" });
+      const r = await fetch('/api/sso/refresh', { cache: 'no-store' });
       if (r.status === 401) {
         toLogin();
         return;
@@ -46,7 +46,7 @@ export function SessionTimer() {
       if (Date.now() - lastRefresh.current > AUTO_REFRESH_EVERY_MS) void refresh();
     };
     // reading/scrolling counts as activity too — not just clicks and typing
-    const events = ["click", "keydown", "scroll", "pointerdown", "touchstart"] as const;
+    const events = ['click', 'keydown', 'scroll', 'pointerdown', 'touchstart'] as const;
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onActivity));
   }, [refresh]);
@@ -58,10 +58,10 @@ export function SessionTimer() {
     if (left === 0) toLogin();
   }, [left]);
 
-  const p = (n: number) => String(n).padStart(2, "0");
+  const p = (n: number) => String(n).padStart(2, '0');
   const label =
     left === null
-      ? "--:--"
+      ? '--:--'
       : left >= 3600
         ? `${p(Math.floor(left / 3600))}:${p(Math.floor((left % 3600) / 60))}:${p(left % 60)}`
         : `${p(Math.floor(left / 60))}:${p(left % 60)}`;
@@ -70,10 +70,8 @@ export function SessionTimer() {
   return (
     <div
       className={cn(
-        "hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs sm:flex",
-        warn
-          ? "border-warning/30 bg-warning-soft text-warning"
-          : "border-border bg-muted/60 text-muted-foreground"
+        'hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs sm:flex',
+        warn ? 'border-warning/30 bg-warning-soft text-warning' : 'border-border bg-muted/60 text-muted-foreground',
       )}
       title="เซสชันหมดอายุเมื่อไม่มีการใช้งาน 30 นาที — ใช้งานอยู่จะต่ออายุให้อัตโนมัติ หรือกดปุ่มเพื่อต่ออายุ"
     >

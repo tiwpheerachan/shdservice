@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { FileSearch, SearchX } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import * as React from 'react';
+import { FileSearch, SearchX } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * The edit / workflow screens that start with "ระบุหมายเลข…": until a record is loaded the form and
@@ -35,9 +35,10 @@ export function RecordGate({
   const focusSearch = () => {
     const el = document.getElementById(searchId);
     if (!el) return;
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.focus({ preventScroll: true });
-    if (el instanceof HTMLButtonElement) el.click(); // JobSearch: open its list
+    if (el instanceof HTMLButtonElement)
+      el.click(); // JobSearch: open its list
     else if (el instanceof HTMLInputElement) el.select();
   };
 
@@ -62,17 +63,21 @@ export function RecordGate({
           </div>
         ) : (
           <div className="surface flex flex-col items-center gap-3 px-4 py-14 text-center">
-            <div className={`grid h-12 w-12 place-items-center rounded-full ${error ? "bg-danger-soft text-danger" : "bg-primary-soft text-primary"}`}>
+            <div
+              className={`grid h-12 w-12 place-items-center rounded-full ${error ? 'bg-danger-soft text-danger' : 'bg-primary-soft text-primary'}`}
+            >
               {error ? <SearchX className="h-6 w-6" aria-hidden /> : <FileSearch className="h-6 w-6" aria-hidden />}
             </div>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold">{error ? `เรียกข้อมูล${noun}ไม่สำเร็จ` : `ระบุหมายเลข${noun}เพื่อเรียกข้อมูล`}</h2>
-              <p className="max-w-md text-sm text-muted-foreground" role={error ? "alert" : undefined}>
+              <h2 className="text-base font-semibold">
+                {error ? `เรียกข้อมูล${noun}ไม่สำเร็จ` : `ระบุหมายเลข${noun}เพื่อเรียกข้อมูล`}
+              </h2>
+              <p className="max-w-md text-sm text-muted-foreground" role={error ? 'alert' : undefined}>
                 {error ?? `ค้นหาหรือพิมพ์หมายเลข${noun}ในช่องด้านบน ข้อมูลและปุ่มบันทึกจะแสดงเมื่อเรียกข้อมูลสำเร็จ`}
               </p>
             </div>
-            <Button variant={error ? "outline" : "primary"} size="md" type="button" onClick={focusSearch}>
-              {error ? "ค้นหาใหม่" : `ค้นหา${noun}`}
+            <Button variant={error ? 'outline' : 'primary'} size="md" type="button" onClick={focusSearch}>
+              {error ? 'ค้นหาใหม่' : `ค้นหา${noun}`}
             </Button>
           </div>
         ))}

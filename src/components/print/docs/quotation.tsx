@@ -1,22 +1,22 @@
-import { notFound } from "next/navigation";
-import { getQuotation } from "@/server/services/quotations";
-import { AutoPrint } from "@/components/print/auto-print";
-import { money } from "@/components/print/print-frame";
-import { QUOTATION_VALIDITY } from "@/lib/company";
-import { profileForDocument } from "@/server/services/document-profiles";
-import { bahtText } from "@/lib/thai-baht";
+import { notFound } from 'next/navigation';
+import { getQuotation } from '@/server/services/quotations';
+import { AutoPrint } from '@/components/print/auto-print';
+import { money } from '@/components/print/print-frame';
+import { QUOTATION_VALIDITY } from '@/lib/company';
+import { profileForDocument } from '@/server/services/document-profiles';
+import { bahtText } from '@/lib/thai-baht';
 
 const dmy = (s: string) => {
   // "2026-09-17 16:37" / "2026-09-17" → "17-09-2026" (legacy prints dd-mm-yyyy)
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? "");
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : s || "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s || '';
 };
 const stamp = () => {
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
+  const p = (n: number) => String(n).padStart(2, '0');
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
-const or = (v: string | null | undefined, dash = "") => (v && v.trim() ? v : dash);
+const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : dash);
 
 /**
  * ใบเสนอราคา — laid out to match the legacy form (setupdata/receipt/Q2600468_163754.pdf):
@@ -32,10 +32,15 @@ export async function QuotationDoc({ no }: { no: string }) {
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);
   const hasDiscount = (q.discountAmount ?? 0) > 0;
-  const contactLine = [q.createdByPhone && `Tel. : ${q.createdByPhone}`, q.createdByEmail && `Email : ${q.createdByEmail}`].filter(Boolean).join("  ");
+  const contactLine = [
+    q.createdByPhone && `Tel. : ${q.createdByPhone}`,
+    q.createdByEmail && `Email : ${q.createdByEmail}`,
+  ]
+    .filter(Boolean)
+    .join('  ');
   const engineer = j?.engineer?.trim() || q.createdBy;
-  const model = j ? [j.brand, j.modelName].filter(Boolean).join(" ") : q.brandModel;
-  const lbl = "text-neutral-700";
+  const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
+  const lbl = 'text-neutral-700';
 
   return (
     <div className="print-page qt text-[11.5px] leading-[1.35] text-black">
@@ -76,7 +81,11 @@ export async function QuotationDoc({ no }: { no: string }) {
           <p>
             {/* a profile without a tax id / bank account prints nothing there, not a placeholder that looks real */}
             โทรศัพท์ {co.phone}
-            {co.taxId && <>&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span></>}
+            {co.taxId && (
+              <>
+                &nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span>
+              </>
+            )}
           </p>
         </div>
       </header>
@@ -123,7 +132,7 @@ export async function QuotationDoc({ no }: { no: string }) {
                   </tr>
                   <tr>
                     <td className="k">IMEI No. :</td>
-                    <td className="num">{or(j ? [j.imei, j.serial].filter(Boolean).join(" / ") : q.imei)}</td>
+                    <td className="num">{or(j ? [j.imei, j.serial].filter(Boolean).join(' / ') : q.imei)}</td>
                   </tr>
                   <tr>
                     <td className="k gap">ช่าง :</td>
@@ -144,10 +153,12 @@ export async function QuotationDoc({ no }: { no: string }) {
                   <tr>
                     <td className="w-1/2 br pad">
                       <p>
-                        <span className="font-semibold">เลขที่ / No. :</span>&nbsp;&nbsp;<span className="num font-semibold">{q.no}</span>
+                        <span className="font-semibold">เลขที่ / No. :</span>&nbsp;&nbsp;
+                        <span className="num font-semibold">{q.no}</span>
                       </p>
                       <p className="mt-0.5">
-                        <span className={lbl}>วันที่ / Date :</span>&nbsp;&nbsp;<span className="num">{dmy(q.date)}</span>
+                        <span className={lbl}>วันที่ / Date :</span>&nbsp;&nbsp;
+                        <span className="num">{dmy(q.date)}</span>
                       </p>
                     </td>
                     <td className="pad text-center">
@@ -163,53 +174,79 @@ export async function QuotationDoc({ no }: { no: string }) {
       </table>
 
       <p className="mt-1.5 text-center text-[10px]">
-        บริษัทฯ ขอเรียนแจ้งเสนอราคาและเงื่อนไขสำหรับท่านดังนี้ / We are please to submit you the following described here in at price, items and terms stated.
+        บริษัทฯ ขอเรียนแจ้งเสนอราคาและเงื่อนไขสำหรับท่านดังนี้ / We are please to submit you the following described
+        here in at price, items and terms stated.
       </p>
 
       {/* ── items ── */}
       <div className="items-wrap mt-1">
-      <table className="items">
-        <thead>
-          <tr>
-            <th className="w-[44px]">ลำดับ<br />No.</th>
-            <th>รายการ<br />Description</th>
-            <th className="w-[62px]">จำนวน<br />Qty.</th>
-            <th className="w-[92px]">ราคาต่อหน่วย<br />Unit Price</th>
-            <th className="w-[92px]">จำนวนเงิน<br />Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {q.lines.map((l, i) => (
-            <tr key={l.id ?? i}>
-              <td className="num text-center">{i + 1}</td>
-              <td>
-                {l.code && <span className="num">{l.code} </span>}
-                {l.detail}
-              </td>
-              <td className="num text-center">{l.qty}</td>
-              <td className="num text-right">{money(l.unitPrice)}</td>
-              <td className="num text-right">{money(l.total)}</td>
+        <table className="items">
+          <thead>
+            <tr>
+              <th className="w-[44px]">
+                ลำดับ
+                <br />
+                No.
+              </th>
+              <th>
+                รายการ
+                <br />
+                Description
+              </th>
+              <th className="w-[62px]">
+                จำนวน
+                <br />
+                Qty.
+              </th>
+              <th className="w-[92px]">
+                ราคาต่อหน่วย
+                <br />
+                Unit Price
+              </th>
+              <th className="w-[92px]">
+                จำนวนเงิน
+                <br />
+                Amount
+              </th>
             </tr>
-          ))}
-          {/* filler row keeps the table full-height like the legacy form */}
-          <tr className="fill">
-            <td /><td /><td /><td /><td />
-          </tr>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {q.lines.map((l, i) => (
+              <tr key={l.id ?? i}>
+                <td className="num text-center">{i + 1}</td>
+                <td>
+                  {l.code && <span className="num">{l.code} </span>}
+                  {l.detail}
+                </td>
+                <td className="num text-center">{l.qty}</td>
+                <td className="num text-right">{money(l.unitPrice)}</td>
+                <td className="num text-right">{money(l.total)}</td>
+              </tr>
+            ))}
+            {/* filler row keeps the table full-height like the legacy form */}
+            <tr className="fill">
+              <td />
+              <td />
+              <td />
+              <td />
+              <td />
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* ── bank details + totals ── */}
       <table className="sum">
         <tbody>
           <tr>
-            <td rowSpan={hasDiscount ? 5 : 4} style={{ width: "58%" }}>
+            <td rowSpan={hasDiscount ? 5 : 4} style={{ width: '58%' }}>
               {co.bankAccountNo && (
                 <>
                   <p>รายละเอียดการโอนเงินชำระค่าสินค้าและบริการผ่านบัญชีบริษัทฯ ดังนี้</p>
                   <p className="mt-1 text-[10.5px]">
-                    1. {co.bankName || "—"} {co.bankAccountType} เลขที่&nbsp;&nbsp;<span className="num">{co.bankAccountNo}</span>
-                    {co.bankAccountName ? ` ชื่อบัญชี ${co.bankAccountName}` : ""}
+                    1. {co.bankName || '—'} {co.bankAccountType} เลขที่&nbsp;&nbsp;
+                    <span className="num">{co.bankAccountNo}</span>
+                    {co.bankAccountName ? ` ชื่อบัญชี ${co.bankAccountName}` : ''}
                   </p>
                 </>
               )}
@@ -223,7 +260,9 @@ export async function QuotationDoc({ no }: { no: string }) {
           </tr>
           {hasDiscount && (
             <tr>
-              <td className="text-right font-semibold">ส่วนลด / Discount {q.discountType !== "ไม่มีส่วนลด" ? `(${q.discountFormula})` : ""} :</td>
+              <td className="text-right font-semibold">
+                ส่วนลด / Discount {q.discountType !== 'ไม่มีส่วนลด' ? `(${q.discountFormula})` : ''} :
+              </td>
               <td className="num text-right">-{money(q.discountAmount ?? 0)}</td>
             </tr>
           )}
@@ -254,18 +293,30 @@ export async function QuotationDoc({ no }: { no: string }) {
           <tr>
             <td className="w-[58%] br sig text-center">
               <p className="text-[10.5px]">กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้มาที่</p>
-              <p className="mt-1">Email : {q.createdByEmail || co.email || "—"}</p>
+              <p className="mt-1">Email : {q.createdByEmail || co.email || '—'}</p>
               <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
-              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5"><span>(</span><span>)</span></p>
-              <p className="mt-2">วันที่ <span className="inline-block w-[120px] border-b border-black text-center">&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;</span></p>
+              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
+                <span>(</span>
+                <span>)</span>
+              </p>
+              <p className="mt-2">
+                วันที่{' '}
+                <span className="inline-block w-[120px] border-b border-black text-center">
+                  &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
+                </span>
+              </p>
             </td>
             <td className="sig">
-              <p className="text-center font-semibold">ในนาม<br />{co.nameTh}</p>
+              <p className="text-center font-semibold">
+                ในนาม
+                <br />
+                {co.nameTh}
+              </p>
               <div className="mt-5 flex items-end gap-2">
                 <span className="font-semibold">เสนอราคาโดย :</span>
                 <span className="flex-1 border-b border-black" />
               </div>
-              <p className="mt-1 text-center">( {or(q.createdBy, "—")} )</p>
+              <p className="mt-1 text-center">( {or(q.createdBy, '—')} )</p>
               <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
             </td>
           </tr>

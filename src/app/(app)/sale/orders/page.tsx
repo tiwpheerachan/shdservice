@@ -1,44 +1,50 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { Plus } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect } from "@/components/shared/search-select";
-import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { type SaleOrder } from "@/data/mock";
-import { useSaleOrdersPage, useStaff } from "@/data/db";
-import { baht, isFilterActive } from "@/lib/utils";
-import { useAccess } from "@/lib/use-access";
-import { exportXlsx } from "@/lib/api";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import Link from 'next/link';
+import { Plus } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect } from '@/components/shared/search-select';
+import { RowActions } from '@/components/shared/row-actions';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/input';
+import { type SaleOrder } from '@/data/mock';
+import { useSaleOrdersPage, useStaff } from '@/data/db';
+import { baht, isFilterActive } from '@/lib/utils';
+import { useAccess } from '@/lib/use-access';
+import { exportXlsx } from '@/lib/api';
+import { ExportButton } from '@/components/shared/export-button';
 
 // approve_status.approve_name_th → badge tone
-const TONE: Record<string, "warning" | "success" | "danger" | "info"> = {
-  "รออนุมัติ": "warning",
-  "อนุมัติแล้ว": "success",
-  "ปฏิเสธ": "danger",
-  "แก้ไขข้อมูล": "danger",
-  "กำลังดำเนินการจัดทำ": "info",
+const TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
+  รออนุมัติ: 'warning',
+  อนุมัติแล้ว: 'success',
+  ปฏิเสธ: 'danger',
+  แก้ไขข้อมูล: 'danger',
+  กำลังดำเนินการจัดทำ: 'info',
 };
 
 type Filters = { no: string; customer: string; from: string; to: string; code: string; sales: string; approve: string };
-const NO_FILTER: Filters = { no: "", customer: "", from: "", to: "", code: "", sales: "", approve: "" };
+const NO_FILTER: Filters = { no: '', customer: '', from: '', to: '', code: '', sales: '', approve: '' };
 
 export default function SaleOrderPage() {
-  const { add: canAdd, edit: canEdit } = useAccess().forPath("/sale/orders");
+  const { add: canAdd, edit: canEdit } = useAccess().forPath('/sale/orders');
   const { data: USERS } = useStaff();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
-  const { rows: SALE_ORDERS, total, loading, error: loadError, refetch: retryLoad } = useSaleOrdersPage({
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const {
+    rows: SALE_ORDERS,
+    total,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useSaleOrdersPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q || filters.no || filters.customer || filters.code,
@@ -52,62 +58,65 @@ export default function SaleOrderPage() {
 
   const columns: Column<SaleOrder>[] = [
     {
-      key: "no",
-      header: "SO No.",
-      width: "120px",
+      key: 'no',
+      header: 'SO No.',
+      width: '120px',
       cell: (r) => (
-        <Link href={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`} className="num font-medium text-primary hover:underline">
+        <Link
+          href={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`}
+          className="num font-medium text-primary hover:underline"
+        >
           {r.no}
         </Link>
       ),
     },
     {
-      key: "date",
-      header: "วันที่สั่ง",
-      width: "110px",
+      key: 'date',
+      header: 'วันที่สั่ง',
+      width: '110px',
       cell: (r) => <span className="num text-xs">{r.date}</span>,
     },
     {
-      key: "customer",
-      header: "ชื่อลูกค้า",
+      key: 'customer',
+      header: 'ชื่อลูกค้า',
       cell: (r) => <span className="line-clamp-1 max-w-[260px]">{r.customer}</span>,
     },
     {
-      key: "amount",
-      header: "จำนวนเงิน",
-      align: "right",
-      width: "120px",
+      key: 'amount',
+      header: 'จำนวนเงิน',
+      align: 'right',
+      width: '120px',
       value: (r) => r.amount,
       cell: (r) => <span className="font-medium">{baht(r.amount)}</span>,
     },
-    { key: "sales", header: "พนักงานขาย", hideBelow: "md" },
+    { key: 'sales', header: 'พนักงานขาย', hideBelow: 'md' },
     {
-      key: "approve",
-      header: "สถานะอนุมัติ",
-      width: "160px",
+      key: 'approve',
+      header: 'สถานะอนุมัติ',
+      width: '160px',
       cell: (r) => (
-        <Badge tone={TONE[r.approve] ?? "neutral"} dot>
+        <Badge tone={TONE[r.approve] ?? 'neutral'} dot>
           {r.approve}
         </Badge>
       ),
     },
     {
-      key: "stockDoc",
-      header: "เลขจ่ายสต๊อก",
-      hideBelow: "xl",
-      cell: (r) => <span className="num text-xs">{r.stockDoc || "—"}</span>,
+      key: 'stockDoc',
+      header: 'เลขจ่ายสต๊อก',
+      hideBelow: 'xl',
+      cell: (r) => <span className="num text-xs">{r.stockDoc || '—'}</span>,
     },
     {
-      key: "tracking",
-      header: "TrackingNo",
-      hideBelow: "xl",
-      cell: (r) => <span className="num text-xs">{r.tracking || "—"}</span>,
+      key: 'tracking',
+      header: 'TrackingNo',
+      hideBelow: 'xl',
+      cell: (r) => <span className="num text-xs">{r.tracking || '—'}</span>,
     },
     {
-      key: "action",
-      header: "Action",
-      width: "110px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '110px',
+      align: 'center',
       sortable: false,
       cell: (r) => (
         <RowActions
@@ -130,7 +139,17 @@ export default function SaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
-            <ExportButton run={() => exportXlsx("sale_orders", { q: table.q || filters.no || filters.customer || filters.code, from: filters.from, to: filters.to, sales: filters.sales, approve: filters.approve })} />
+            <ExportButton
+              run={() =>
+                exportXlsx('sale_orders', {
+                  q: table.q || filters.no || filters.customer || filters.code,
+                  from: filters.from,
+                  to: filters.to,
+                  sales: filters.sales,
+                  approve: filters.approve,
+                })
+              }
+            />
             {canAdd && (
               <Link href="/sale/orders/new">
                 <Button size="sm">
@@ -150,25 +169,37 @@ export default function SaleOrderPage() {
         onReset={resetFilters}
       >
         <Field label="เลขใบสั่งขาย (SO)">
-          <Input className="num" placeholder="SO2600760" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
+          <Input
+            className="num"
+            placeholder="SO2600760"
+            value={draft.no}
+            onChange={(e) => setD('no', e.target.value)}
+          />
         </Field>
         <Field label="ชื่อลูกค้า">
-          <Input value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+          <Input value={draft.customer} onChange={(e) => setD('customer', e.target.value)} />
         </Field>
         <Field label="วันที่สั่งขาย (ตั้งแต่)">
-          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
+          <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
         <Field label="วันที่สั่งขาย (ถึง)">
-          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
+          <Input type="date" value={draft.to} onChange={(e) => setD('to', e.target.value)} />
         </Field>
         <Field label="รหัสอะไหล่-อุปกรณ์เสริม">
-          <Input className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
+          <Input className="num" value={draft.code} onChange={(e) => setD('code', e.target.value)} />
         </Field>
         <Field label="พนักงานขาย">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.sales} onChange={(v) => setD("sales", v)} options={USERS.map((u) => ({ value: String(u.id), label: u.name }))} searchPlaceholder="พิมพ์ชื่อพนักงานขาย…" />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.sales}
+            onChange={(v) => setD('sales', v)}
+            options={USERS.map((u) => ({ value: String(u.id), label: u.name }))}
+            searchPlaceholder="พิมพ์ชื่อพนักงานขาย…"
+          />
         </Field>
         <Field label="สถานะการอนุมัติ">
-          <Select value={draft.approve} onChange={(e) => setD("approve", e.target.value)}>
+          <Select value={draft.approve} onChange={(e) => setD('approve', e.target.value)}>
             <option value="">ทั้งหมด</option>
             {Object.keys(TONE).map((s) => (
               <option key={s}>{s}</option>
@@ -183,7 +214,9 @@ export default function SaleOrderPage() {
         searchable={false}
         columns={columns}
         rows={SALE_ORDERS}
-        loading={loading} error={loadError} onRetry={retryLoad}
+        loading={loading}
+        error={loadError}
+        onRetry={retryLoad}
         rowKey={(r) => r.no}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

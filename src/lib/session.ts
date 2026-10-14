@@ -5,7 +5,7 @@
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-export const SESSION_COOKIE = "os_session";
+export const SESSION_COOKIE = 'os_session';
 // Idle timeout: the timer in the topbar renews the cookie on activity (≤ every
 // 5 min), so an active user never hits this; 30 min without activity → /login.
 export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -16,7 +16,7 @@ export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 // proxy tell "session expired" (→ /login with a message) apart from a
 // first visit (→ /login without it). Set by /api/sso/me + /refresh (JSON responses,
 // never on the callback redirect — see the single-Set-Cookie note there).
-export const SEEN_COOKIE = "os_seen";
+export const SEEN_COOKIE = 'os_seen';
 export const SEEN_TTL_S = 30 * 24 * 60 * 60;
 
 export type SessionUser = {
@@ -35,14 +35,14 @@ export type SessionUser = {
 };
 
 function b64url(bytes: Uint8Array) {
-  let bin = "";
+  let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function unb64url(s: string) {
-  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
   const pad = s.length % 4 ? 4 - (s.length % 4) : 0;
-  const bin = atob(s + "=".repeat(pad));
+  const bin = atob(s + '='.repeat(pad));
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return arr;
@@ -56,60 +56,48 @@ function unb64url(s: string) {
 //
 // The dev fallback string is public (it is in this file): it only ever applies in
 // local development when no secret is configured at all.
-const DEV_FALLBACK_SECRET = "dev-only-insecure-secret-change-me";
+const DEV_FALLBACK_SECRET = 'dev-only-insecure-secret-change-me';
 const MIN_SECRET_LENGTH = 32;
 function candidateSecrets(): [string, ...string[]] {
-  const own = (process.env.SESSION_SECRET ?? "").trim();
+  const own = (process.env.SESSION_SECRET ?? '').trim();
   if (own.length >= MIN_SECRET_LENGTH) return [own];
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === 'production') {
     throw new Error(`SESSION_SECRET is not configured (random, at least ${MIN_SECRET_LENGTH} characters)`);
   }
-  const [first, ...rest] = [own, process.env.CENTRAL_API_KEY ?? ""].map((s) => s.trim()).filter(Boolean);
+  const [first, ...rest] = [own, process.env.CENTRAL_API_KEY ?? ''].map((s) => s.trim()).filter(Boolean);
   return first ? [first, ...rest] : [DEV_FALLBACK_SECRET];
 }
 
 function importKey(secret: string) {
-  return crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"]
-  );
+  return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
 }
 
 export async function signSession(user: SessionUser): Promise<string> {
   const payload = b64url(enc.encode(JSON.stringify(user)));
   const key = await importKey(candidateSecrets()[0]);
-  const sig = new Uint8Array(
-    await crypto.subtle.sign("HMAC", key, enc.encode(payload))
-  );
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(payload)));
   return `${payload}.${b64url(sig)}`;
 }
 
-export async function verifySession(
-  token?: string | null
-): Promise<SessionUser | null> {
-  if (!token || !token.includes(".")) return null;
-  const [payload, sig] = token.split(".");
+export async function verifySession(token?: string | null): Promise<SessionUser | null> {
+  if (!token || !token.includes('.')) return null;
+  const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
   try {
     let ok = false;
     for (const secret of candidateSecrets()) {
-      ok = await crypto.subtle.verify(
-        "HMAC",
-        await importKey(secret),
-        unb64url(sig),
-        enc.encode(payload)
-      );
+      ok = await crypto.subtle.verify('HMAC', await importKey(secret), unb64url(sig), enc.encode(payload));
       if (ok) break;
     }
     if (!ok) return null;
     const user = JSON.parse(dec.decode(unb64url(payload))) as SessionUser;
     if (!user.exp || user.exp < Date.now()) return null;
     // absolute lifetime + version stamp are mandatory (older cookies lack them → sign in again)
-    if (typeof user.iat !== "number" || Date.now() - user.iat > SESSION_MAX_AGE_MS) return null;
-    if (typeof user.sv !== "number") return null;
+    if (typeof user.iat !== 'number' || Date.now() - user.iat > SESSION_MAX_AGE_MS) return null;
+    if (typeof user.sv !== 'number') return null;
     return user;
   } catch {
     return null;

@@ -1,45 +1,76 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useSearchParams } from "next/navigation";
-import { useRouter } from "next/navigation";
-import { Plus, MapPin } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { RowActions } from "@/components/shared/row-actions";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect } from "@/components/shared/search-select";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
-import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { CUSTOMER_TYPES, type Customer } from "@/data/mock";
-import { useApi, useCustomersPage, useProvinces } from "@/data/db";
-import { CustomerFields, ConflictNotice, EMPTY_CUSTOMER, toCustomerForm, type CustomerFormValues, type CustomerConflict } from "@/components/shared/customer-form";
-import { postJson, errMsg, qs, exportXlsx, ApiError } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { useFormErrors } from "@/lib/use-form-errors";
-import { customerSchema } from "@/lib/validation/customer";
-import { isFilterActive } from "@/lib/utils";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { Plus, MapPin } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { RowActions } from '@/components/shared/row-actions';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect } from '@/components/shared/search-select';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
+import { Field } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { CUSTOMER_TYPES, type Customer } from '@/data/mock';
+import { useApi, useCustomersPage, useProvinces } from '@/data/db';
+import {
+  CustomerFields,
+  ConflictNotice,
+  EMPTY_CUSTOMER,
+  toCustomerForm,
+  type CustomerFormValues,
+  type CustomerConflict,
+} from '@/components/shared/customer-form';
+import { postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { useFormErrors } from '@/lib/use-form-errors';
+import { customerSchema } from '@/lib/validation/customer';
+import { isFilterActive } from '@/lib/utils';
+import { ExportButton } from '@/components/shared/export-button';
 
 function CustomersPageInner() {
   const { push } = useToast();
   const router = useRouter();
-  const { add: canAdd, edit: canEdit } = useAccess().forPath("/customers");
+  const { add: canAdd, edit: canEdit } = useAccess().forPath('/customers');
 
   // server-side paging / search over the customer table (43k rows)
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // filter bar (applied on ค้นหา) — every field is AND-ed on the server; same params feed the Excel export
-  type CustomerFilter = { code: string; name: string; phone: string; email: string; taxId: string; type: string; province: string; status: "" | "Active" | "Inactive" };
-  const NO_FILTER: CustomerFilter = { code: "", name: "", phone: "", email: "", taxId: "", type: "", province: "", status: "" };
+  type CustomerFilter = {
+    code: string;
+    name: string;
+    phone: string;
+    email: string;
+    taxId: string;
+    type: string;
+    province: string;
+    status: '' | 'Active' | 'Inactive';
+  };
+  const NO_FILTER: CustomerFilter = {
+    code: '',
+    name: '',
+    phone: '',
+    email: '',
+    taxId: '',
+    type: '',
+    province: '',
+    status: '',
+  };
   const [draft, setDraft] = React.useState<CustomerFilter>(NO_FILTER);
   const [filter, setFilter] = React.useState<CustomerFilter>(NO_FILTER);
   const setD = <K extends keyof CustomerFilter>(k: K, v: CustomerFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const { data: PROVINCES } = useProvinces();
-  const { rows: CUSTOMERS, total, loading, refetch, error: loadError } = useCustomersPage({
+  const {
+    rows: CUSTOMERS,
+    total,
+    loading,
+    refetch,
+    error: loadError,
+  } = useCustomersPage({
     page: table.page,
     pageSize: table.pageSize,
     sort: table.sort?.key,
@@ -68,7 +99,7 @@ function CustomersPageInner() {
   //   ?edit=C43601 (from the job / quotation / SO forms) → that customer's form (swr answer's callback)
   //   ?new=1&phone=…&name=… → a new customer's form with those filled in (adjusted while rendering)
   const sp = useSearchParams();
-  const editCode = sp.get("edit")?.trim() ?? "";
+  const editCode = sp.get('edit')?.trim() ?? '';
   const editLinkOpened = React.useRef(false);
   useApi<{ rows: Customer[] }>(editCode ? `/api/customers/lookup${qs({ q: editCode })}` : null, {
     fresh: true,
@@ -80,10 +111,10 @@ function CustomersPageInner() {
     },
   });
   const [newLinkHandled, setNewLinkHandled] = React.useState(false);
-  if (!editCode && sp.get("new") && canAdd && !newLinkHandled) {
+  if (!editCode && sp.get('new') && canAdd && !newLinkHandled) {
     setNewLinkHandled(true);
     openForm(null);
-    setForm((f) => ({ ...f, phone: sp.get("phone") ?? "", name: sp.get("name") ?? "" }));
+    setForm((f) => ({ ...f, phone: sp.get('phone') ?? '', name: sp.get('name') ?? '' }));
   }
 
   const save = async () => {
@@ -92,15 +123,15 @@ function CustomersPageInner() {
     setSaving(true);
     setConflicts(null);
     try {
-      const d = await postJson<{ row: Customer }>("/api/customers", { ...form, code: editing?.code || undefined });
+      const d = await postJson<{ row: Customer }>('/api/customers', { ...form, code: editing?.code || undefined });
       setOpen(false);
-      push({ kind: "success", title: "บันทึกข้อมูลลูกค้าแล้ว", desc: `${d.row.code} · ${d.row.name}` });
+      push({ kind: 'success', title: 'บันทึกข้อมูลลูกค้าแล้ว', desc: `${d.row.code} · ${d.row.name}` });
       refetch();
     } catch (e) {
       // 409 = phone / email / tax id already belongs to another customer (server refuses)
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
       if (details?.conflicts?.length) setConflicts(details.conflicts);
-      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -108,27 +139,25 @@ function CustomersPageInner() {
 
   const columns: Column<Customer>[] = [
     {
-      key: "code",
-      header: "รหัสลูกค้า",
-      width: "120px",
+      key: 'code',
+      header: 'รหัสลูกค้า',
+      width: '120px',
       cell: (r) => <span className="num font-medium">{r.code}</span>,
     },
     {
-      key: "name",
-      header: "ชื่อ-สกุล",
+      key: 'name',
+      header: 'ชื่อ-สกุล',
       cell: (r) => (
         <div className="min-w-0">
           <p className="truncate font-medium">{r.name}</p>
-          <p className="num truncate text-2xs text-muted-foreground">
-            เลขผู้เสียภาษี {r.taxId || "—"}
-          </p>
+          <p className="num truncate text-2xs text-muted-foreground">เลขผู้เสียภาษี {r.taxId || '—'}</p>
         </div>
       ),
     },
     {
-      key: "address",
-      header: "ที่อยู่",
-      hideBelow: "lg",
+      key: 'address',
+      header: 'ที่อยู่',
+      hideBelow: 'lg',
       cell: (r) => (
         <span className="line-clamp-2 flex max-w-[360px] gap-1.5 text-muted-foreground">
           <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
@@ -137,27 +166,27 @@ function CustomersPageInner() {
       ),
     },
     {
-      key: "phone",
-      header: "เบอร์โทรศัพท์",
-      width: "140px",
+      key: 'phone',
+      header: 'เบอร์โทรศัพท์',
+      width: '140px',
       cell: (r) => <span className="num">{r.phone}</span>,
     },
-    { key: "email", header: "Email", hideBelow: "xl" },
+    { key: 'email', header: 'Email', hideBelow: 'xl' },
     {
-      key: "status",
-      header: "สถานะ",
-      width: "100px",
+      key: 'status',
+      header: 'สถานะ',
+      width: '100px',
       cell: (r) => (
-        <Badge tone={r.status === "Active" ? "success" : "neutral"} dot>
+        <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
           {r.status}
         </Badge>
       ),
     },
     {
-      key: "action",
-      header: "Action",
-      width: "110px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '110px',
+      align: 'center',
       sortable: false,
       cell: (r) => (
         <RowActions
@@ -181,7 +210,7 @@ function CustomersPageInner() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
-            <ExportButton run={() => exportXlsx("customers", { ...filter })} />
+            <ExportButton run={() => exportXlsx('customers', { ...filter })} />
             {canAdd && (
               <Button size="sm" onClick={() => openForm(null)}>
                 <Plus className="h-3.5 w-3.5" />
@@ -199,22 +228,33 @@ function CustomersPageInner() {
         onReset={resetFilters}
       >
         <Field label="รหัสลูกค้า">
-          <Input placeholder="C43600" className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
+          <Input
+            placeholder="C43600"
+            className="num"
+            value={draft.code}
+            onChange={(e) => setD('code', e.target.value)}
+          />
         </Field>
         <Field label="ชื่อ-สกุล">
-          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD("name", e.target.value)} />
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD('name', e.target.value)} />
         </Field>
         <Field label="เบอร์โทรศัพท์">
-          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+          <Input
+            placeholder="08xxxxxxxx"
+            className="num"
+            inputMode="tel"
+            value={draft.phone}
+            onChange={(e) => setD('phone', e.target.value)}
+          />
         </Field>
         <Field label="Email">
-          <Input placeholder="name@example.com" value={draft.email} onChange={(e) => setD("email", e.target.value)} />
+          <Input placeholder="name@example.com" value={draft.email} onChange={(e) => setD('email', e.target.value)} />
         </Field>
         <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี">
-          <Input className="num" value={draft.taxId} onChange={(e) => setD("taxId", e.target.value)} />
+          <Input className="num" value={draft.taxId} onChange={(e) => setD('taxId', e.target.value)} />
         </Field>
         <Field label="ประเภทลูกค้า">
-          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+          <Select value={draft.type} onChange={(e) => setD('type', e.target.value)}>
             <option value="">ทั้งหมด</option>
             {CUSTOMER_TYPES.map((t) => (
               <option key={t}>{t}</option>
@@ -224,7 +264,7 @@ function CustomersPageInner() {
         <Field label="จังหวัด">
           <SearchSelect
             value={draft.province}
-            onChange={(v) => setD("province", v)}
+            onChange={(v) => setD('province', v)}
             options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -232,7 +272,7 @@ function CustomersPageInner() {
           />
         </Field>
         <Field label="สถานะ">
-          <Select value={draft.status} onChange={(e) => setD("status", e.target.value as CustomerFilter["status"])}>
+          <Select value={draft.status} onChange={(e) => setD('status', e.target.value as CustomerFilter['status'])}>
             <option value="">ทั้งหมด</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
@@ -246,7 +286,9 @@ function CustomersPageInner() {
         searchable={false}
         columns={columns}
         rows={CUSTOMERS}
-        loading={loading} error={loadError} onRetry={refetch}
+        loading={loading}
+        error={loadError}
+        onRetry={refetch}
         rowKey={(r) => r.code}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
       />
@@ -254,19 +296,19 @@ function CustomersPageInner() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={viewOnly ? "ข้อมูลลูกค้า" : editing ? "แก้ไขข้อมูลลูกค้า" : "เพิ่มลูกค้าใหม่"}
+        title={viewOnly ? 'ข้อมูลลูกค้า' : editing ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
         description={
           viewOnly
             ? `Mode: View · Customer Id #${editing?.code}`
             : editing
               ? `Mode: Edit Data · Customer Id #${editing.code}`
-              : "Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ"
+              : 'Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ'
         }
         size="xl"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
-              {viewOnly ? "ปิด" : "ยกเลิก"}
+              {viewOnly ? 'ปิด' : 'ยกเลิก'}
             </Button>
             {!viewOnly && (
               <Button size="sm" onClick={save} disabled={saving}>
@@ -277,26 +319,36 @@ function CustomersPageInner() {
         }
       >
         <fieldset disabled={viewOnly} className="contents">
-        <CustomerFields
-          form={form}
-          setForm={setForm}
-          editing={editing}
-          errors={fe.errors}
-          clearError={fe.clear}
-          extra={
-            viewOnly && editing ? (
-              <>
-                <Field label="วันที่สร้าง">
-                  <Input readOnly value={editing.createdDate || "—"} className="num" />
-                </Field>
-                <Field label="สร้างโดย">
-                  <Input readOnly value={editing.createdBy || "—"} />
-                </Field>
-              </>
-            ) : null
-          }
-        />
-        {conflicts && <div className="mt-4"><ConflictNotice conflicts={conflicts} onPick={(code) => { const hit = CUSTOMERS.find((c) => c.code === code); if (hit) openForm(hit); }} /></div>}
+          <CustomerFields
+            form={form}
+            setForm={setForm}
+            editing={editing}
+            errors={fe.errors}
+            clearError={fe.clear}
+            extra={
+              viewOnly && editing ? (
+                <>
+                  <Field label="วันที่สร้าง">
+                    <Input readOnly value={editing.createdDate || '—'} className="num" />
+                  </Field>
+                  <Field label="สร้างโดย">
+                    <Input readOnly value={editing.createdBy || '—'} />
+                  </Field>
+                </>
+              ) : null
+            }
+          />
+          {conflicts && (
+            <div className="mt-4">
+              <ConflictNotice
+                conflicts={conflicts}
+                onPick={(code) => {
+                  const hit = CUSTOMERS.find((c) => c.code === code);
+                  if (hit) openForm(hit);
+                }}
+              />
+            </div>
+          )}
         </fieldset>
       </Modal>
     </>

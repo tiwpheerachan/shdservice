@@ -1,11 +1,11 @@
-import "server-only";
-import { cached, invalidate, TTL_MASTER } from "@/server/cache";
-import { asc, eq, ne, and, isNull } from "drizzle-orm";
-import { db } from "@/db/client";
-import { documentProfile, job, quotationHd, saleOutHd } from "@/db/schema";
-import { HttpError } from "@/server/auth";
-import { audit, diff } from "@/server/audit";
-import { nowThai } from "@/server/mappers/format";
+import 'server-only';
+import { cached, invalidate, TTL_MASTER } from '@/server/cache';
+import { asc, eq, ne, and, isNull } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { documentProfile, job, quotationHd, saleOutHd } from '@/db/schema';
+import { HttpError } from '@/server/auth';
+import { audit, diff } from '@/server/audit';
+import { nowThai } from '@/server/mappers/format';
 
 /**
  * "ออกเอกสารในนาม" — the company/brand whose letterhead (logo, name, address,
@@ -46,7 +46,7 @@ export type DocumentProfile = {
 };
 
 export const SHD_PROFILE_ID = 1;
-const BUILTIN_LOGO = "/logo-shd-mark.png";
+const BUILTIN_LOGO = '/logo-shd-mark.png';
 
 type Row = typeof documentProfile.$inferSelect;
 function toProfile(r: Row): DocumentProfile {
@@ -57,7 +57,7 @@ function toProfile(r: Row): DocumentProfile {
     nameEn: r.nameEn,
     addressLine1: r.addressLine1,
     addressLine2: r.addressLine2,
-    address: [r.addressLine1, r.addressLine2].filter(Boolean).join(" "),
+    address: [r.addressLine1, r.addressLine2].filter(Boolean).join(' '),
     phone: r.phone,
     email: r.email,
     taxId: r.taxId,
@@ -88,14 +88,18 @@ async function loadDocumentProfiles(activeOnly: boolean): Promise<DocumentProfil
 }
 
 export async function getDocumentProfile(id: number | null | undefined): Promise<DocumentProfile | null> {
-  const [r] = await db.select().from(documentProfile).where(eq(documentProfile.id, id && id > 0 ? id : SHD_PROFILE_ID)).limit(1);
+  const [r] = await db
+    .select()
+    .from(documentProfile)
+    .where(eq(documentProfile.id, id && id > 0 ? id : SHD_PROFILE_ID))
+    .limit(1);
   return r ? toProfile(r) : null;
 }
 
 /** Profile a document should print with: its own, else the default (SHD). */
 export async function profileForDocument(id: number | null | undefined): Promise<DocumentProfile> {
   const p = (await getDocumentProfile(id)) ?? (await getDocumentProfile(SHD_PROFILE_ID));
-  if (!p) throw new HttpError(500, "ไม่พบโปรไฟล์ผู้ออกเอกสาร (document_profile ยังไม่ได้ migrate)");
+  if (!p) throw new HttpError(500, 'ไม่พบโปรไฟล์ผู้ออกเอกสาร (document_profile ยังไม่ได้ migrate)');
   return p;
 }
 
@@ -103,7 +107,9 @@ export async function defaultDocumentProfile(): Promise<DocumentProfile> {
   const [r] = await db
     .select()
     .from(documentProfile)
-    .where(and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)))
+    .where(
+      and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)),
+    )
     .limit(1);
   return r ? toProfile(r) : profileForDocument(SHD_PROFILE_ID);
 }
@@ -116,7 +122,7 @@ export async function defaultDocumentProfile(): Promise<DocumentProfile> {
 export async function issuingProfile(requested: number | null | undefined): Promise<DocumentProfile> {
   if (!requested || requested <= 0) return defaultDocumentProfile();
   const p = await getDocumentProfile(requested);
-  if (!p || !p.isActive || p.isDeleted) throw new HttpError(400, "โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน");
+  if (!p || !p.isActive || p.isDeleted) throw new HttpError(400, 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน');
   return p;
 }
 
@@ -126,30 +132,44 @@ export async function issuingProfile(requested: number | null | undefined): Prom
  * default cannot be deleted — pick another default first.
  */
 export async function deleteDocumentProfile(id: number, byUserId: number): Promise<void> {
-  if (id === SHD_PROFILE_ID) throw new HttpError(400, "โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)");
+  if (id === SHD_PROFILE_ID) throw new HttpError(400, 'โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)');
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
-    if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
-    if (before.isDefault) throw new HttpError(400, "โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ");
+    if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+    if (before.isDefault)
+      throw new HttpError(400, 'โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ');
     // any document ever issued under this profile? (stops at the first hit)
     const hadDocuments =
-      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, id)).limit(1)).length > 0 ||
-      (await tx.select({ id: quotationHd.documentProfileId }).from(quotationHd).where(eq(quotationHd.documentProfileId, id)).limit(1)).length > 0 ||
-      (await tx.select({ id: saleOutHd.documentProfileId }).from(saleOutHd).where(eq(saleOutHd.documentProfileId, id)).limit(1)).length > 0;
+      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, id)).limit(1)).length >
+        0 ||
+      (
+        await tx
+          .select({ id: quotationHd.documentProfileId })
+          .from(quotationHd)
+          .where(eq(quotationHd.documentProfileId, id))
+          .limit(1)
+      ).length > 0 ||
+      (
+        await tx
+          .select({ id: saleOutHd.documentProfileId })
+          .from(saleOutHd)
+          .where(eq(saleOutHd.documentProfileId, id))
+          .limit(1)
+      ).length > 0;
     await tx
       .update(documentProfile)
       .set({ deletedAt: nowThai(), deletedBy: byUserId, isDefault: false, updatedAt: nowThai() })
       .where(eq(documentProfile.id, id));
     await audit(tx, byUserId, {
-      action: "DELETE",
-      module: "Admin",
-      entity: "document_profile",
+      action: 'DELETE',
+      module: 'Admin',
+      entity: 'document_profile',
       key: id,
-      summary: `ลบโปรไฟล์ผู้ออกเอกสาร ${before.code} — ${before.nameTh}${hadDocuments ? " (เคยออกเอกสารแล้ว เอกสารเดิมยังพิมพ์ได้)" : ""}`,
+      summary: `ลบโปรไฟล์ผู้ออกเอกสาร ${before.code} — ${before.nameTh}${hadDocuments ? ' (เคยออกเอกสารแล้ว เอกสารเดิมยังพิมพ์ได้)' : ''}`,
       changes: { deletedAt: [null, nowThai()] },
     });
   });
-  invalidate("docprofiles:");
+  invalidate('docprofiles:');
 }
 
 export type DocumentProfileInput = {
@@ -171,15 +191,15 @@ export type DocumentProfileInput = {
   sortOrder?: number;
 };
 
-const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 /** document-type prefixes are system-wide (see db/running-no.ts) — stored on the row only because the columns are NOT NULL */
-const SYSTEM_PREFIXES = { prefixJob: "J", prefixQuotation: "Q", prefixSaleOrder: "SO" } as const;
+const SYSTEM_PREFIXES = { prefixJob: 'J', prefixQuotation: 'Q', prefixSaleOrder: 'SO' } as const;
 
 export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: number): Promise<DocumentProfile> {
   const code = str(i.code, 20).toUpperCase();
   const nameTh = str(i.nameTh);
-  if (!code) throw new HttpError(400, "ต้องระบุรหัสโปรไฟล์ (เช่น SHD)");
-  if (!nameTh) throw new HttpError(400, "ต้องระบุชื่อบริษัท");
+  if (!code) throw new HttpError(400, 'ต้องระบุรหัสโปรไฟล์ (เช่น SHD)');
+  if (!nameTh) throw new HttpError(400, 'ต้องระบุชื่อบริษัท');
 
   const values = {
     code,
@@ -214,11 +234,16 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     let before: Row | undefined;
     if (i.id) {
       [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).limit(1);
-      if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
-      if (before.isDefault && values.isDefault === false) throw new HttpError(400, "ต้องมีโปรไฟล์เริ่มต้น 1 รายการ — ตั้งรายการอื่นเป็นเริ่มต้นก่อน");
-      if (before.isDefault && values.isActive === false) throw new HttpError(400, "ปิดใช้งานโปรไฟล์เริ่มต้นไม่ได้");
+      if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+      if (before.isDefault && values.isDefault === false)
+        throw new HttpError(400, 'ต้องมีโปรไฟล์เริ่มต้น 1 รายการ — ตั้งรายการอื่นเป็นเริ่มต้นก่อน');
+      if (before.isDefault && values.isActive === false) throw new HttpError(400, 'ปิดใช้งานโปรไฟล์เริ่มต้นไม่ได้');
     }
-    if (values.isDefault) await tx.update(documentProfile).set({ isDefault: false }).where(i.id ? ne(documentProfile.id, i.id) : undefined);
+    if (values.isDefault)
+      await tx
+        .update(documentProfile)
+        .set({ isDefault: false })
+        .where(i.id ? ne(documentProfile.id, i.id) : undefined);
 
     let row: Row | undefined;
     if (before) {
@@ -226,16 +251,16 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     } else {
       [row] = await tx.insert(documentProfile).values(values).returning();
     }
-    if (!row) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (!row) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await audit(tx, byUserId, {
-      action: before ? "UPDATE" : "CREATE",
-      module: "Admin",
-      entity: "document_profile",
+      action: before ? 'UPDATE' : 'CREATE',
+      module: 'Admin',
+      entity: 'document_profile',
       key: row.id,
-      summary: `${before ? "แก้ไข" : "เพิ่ม"}โปรไฟล์ผู้ออกเอกสาร ${row.code} ${row.nameTh}`,
+      summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์ผู้ออกเอกสาร ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
-    invalidate("docprofiles:");
+    invalidate('docprofiles:');
     return toProfile(row);
   });
 }
@@ -243,11 +268,18 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
 export async function setDocumentProfileLogo(id: number, logoPath: string, byUserId: number): Promise<void> {
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
-    if (!before) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.id, id));
-    await audit(tx, byUserId, { action: "UPDATE", module: "Admin", entity: "document_profile", key: id, summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`, changes: { logoPath: [before.logoPath, logoPath] } });
+    await audit(tx, byUserId, {
+      action: 'UPDATE',
+      module: 'Admin',
+      entity: 'document_profile',
+      key: id,
+      summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`,
+      changes: { logoPath: [before.logoPath, logoPath] },
+    });
   });
-  invalidate("docprofiles:");
+  invalidate('docprofiles:');
 }
 
 /* ------------------------------------------------------------------ *
@@ -255,15 +287,45 @@ export async function setDocumentProfileLogo(id: number, logoPath: string, byUse
  * number never changes (numbers are not brand-specific). Audited under the
  * document's own module so it shows in the job's history.
  * ------------------------------------------------------------------ */
-export type DocumentKind = "job" | "quotation" | "sale_order";
+export type DocumentKind = 'job' | 'quotation' | 'sale_order';
 const DOC = {
-  job: { table: job, key: job.jobNo, col: job.documentProfileId, module: "Job Management", entity: "job", label: "งาน" },
-  quotation: { table: quotationHd, key: quotationHd.quotationNo, col: quotationHd.documentProfileId, module: "Quotation", entity: "quotation_hd", label: "ใบเสนอราคา" },
-  sale_order: { table: saleOutHd, key: saleOutHd.saleOutHdNo, col: saleOutHd.documentProfileId, module: "Sale Order", entity: "sale_out_hd", label: "ใบสั่งขาย" },
+  job: {
+    table: job,
+    key: job.jobNo,
+    col: job.documentProfileId,
+    module: 'Job Management',
+    entity: 'job',
+    label: 'งาน',
+  },
+  quotation: {
+    table: quotationHd,
+    key: quotationHd.quotationNo,
+    col: quotationHd.documentProfileId,
+    module: 'Quotation',
+    entity: 'quotation_hd',
+    label: 'ใบเสนอราคา',
+  },
+  sale_order: {
+    table: saleOutHd,
+    key: saleOutHd.saleOutHdNo,
+    col: saleOutHd.documentProfileId,
+    module: 'Sale Order',
+    entity: 'sale_out_hd',
+    label: 'ใบสั่งขาย',
+  },
 } as const;
-export const DOC_MODULE: Record<DocumentKind, "Job Management" | "Quotation" | "Sale Order"> = { job: "Job Management", quotation: "Quotation", sale_order: "Sale Order" };
+export const DOC_MODULE: Record<DocumentKind, 'Job Management' | 'Quotation' | 'Sale Order'> = {
+  job: 'Job Management',
+  quotation: 'Quotation',
+  sale_order: 'Sale Order',
+};
 
-export async function setDocumentProfile(kind: DocumentKind, no: string, profileId: number, byUserId: number): Promise<DocumentProfile> {
+export async function setDocumentProfile(
+  kind: DocumentKind,
+  no: string,
+  profileId: number,
+  byUserId: number,
+): Promise<DocumentProfile> {
   const d = DOC[kind];
   const target = await issuingProfile(profileId); // must exist, be active and not deleted
   await db.transaction(async (tx) => {
@@ -274,7 +336,7 @@ export async function setDocumentProfile(kind: DocumentKind, no: string, profile
     const from = await getDocumentProfile(cur);
     await tx.update(d.table).set({ documentProfileId: target.id }).where(eq(d.key, no));
     await audit(tx, byUserId, {
-      action: "UPDATE",
+      action: 'UPDATE',
       module: d.module,
       entity: d.entity,
       key: no,

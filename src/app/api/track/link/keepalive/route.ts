@@ -1,12 +1,12 @@
-import type { NextRequest } from "next/server";
-import { hit, hmac } from "@/server/track-guard";
-import { trackJson, trackCtx, readSmallJson, str } from "@/server/track-http";
-import { extendLink } from "@/server/services/tracking";
-import { TRACK_MSG } from "@/lib/track-public";
-import { logError } from "@/lib/log";
+import type { NextRequest } from 'next/server';
+import { hit, hmac } from '@/server/track-guard';
+import { trackJson, trackCtx, readSmallJson, str } from '@/server/track-http';
+import { extendLink } from '@/server/services/tracking';
+import { TRACK_MSG } from '@/lib/track-public';
+import { logError } from '@/lib/log';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/track/link/keepalive { linkToken } → { expiresAt }
@@ -19,14 +19,17 @@ export async function POST(req: NextRequest) {
   try {
     const body = await readSmallJson(req);
     const linkToken = str(body.linkToken, 128).trim();
-    if (!(await hit("link_keepalive_ip_min", c.ipKey, 20, 60)) || !(await hit("link_keepalive_min", hmac(`link:${linkToken}`), 10, 60))) {
+    if (
+      !(await hit('link_keepalive_ip_min', c.ipKey, 20, 60)) ||
+      !(await hit('link_keepalive_min', hmac(`link:${linkToken}`), 10, 60))
+    ) {
       return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429);
     }
     const expiresAt = await extendLink(linkToken);
-    if (!expiresAt) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410);
+    if (!expiresAt) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 410);
     return trackJson({ ok: true, expiresAt });
   } catch (e) {
-    logError(e, "track/link/keepalive");
-    return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 500);
+    logError(e, 'track/link/keepalive');
+    return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 500);
   }
 }

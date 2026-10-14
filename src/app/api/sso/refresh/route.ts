@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from 'next/server';
 import {
   verifySession,
   signSession,
@@ -8,21 +8,21 @@ import {
   SEEN_COOKIE,
   SEEN_TTL_S,
   type SessionUser,
-} from "@/lib/session";
-import { resolveUser, HttpError } from "@/server/auth";
-import { centralSessionActive } from "@/lib/sso";
-import { log } from "@/lib/log";
+} from '@/lib/session';
+import { resolveUser, HttpError } from '@/server/auth';
+import { centralSessionActive } from '@/lib/sso';
+import { log } from '@/lib/log';
 
 const CENTRAL_CHECK_MS = 5 * 60 * 1000;
 
 /** SSO_SESSION_CHECK = off | log (default: ask, log "inactive", sign nobody out) | enforce */
-function centralCheckMode(): "off" | "log" | "enforce" {
-  const m = (process.env.SSO_SESSION_CHECK ?? "").trim().toLowerCase();
-  return m === "off" || m === "enforce" ? m : "log";
+function centralCheckMode(): 'off' | 'log' | 'enforce' {
+  const m = (process.env.SSO_SESSION_CHECK ?? '').trim().toLowerCase();
+  return m === 'off' || m === 'enforce' ? m : 'log';
 }
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * Re-read the caller's role/status from app_user and re-issue the session cookie
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   if (u instanceof HttpError) return NextResponse.json({ error: u.message }, { status: 503 });
   if (!u) {
     const res = NextResponse.json({ user: null }, { status: 401 });
-    res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
     return res;
   }
   const role = u.role;
@@ -51,25 +51,24 @@ export async function GET(request: NextRequest) {
   // everyone out — new sign-ins fail then anyway, and the 30-min idle / 12-h caps still hold).
   let chk = current.chk;
   const mode = centralCheckMode();
-  if (mode !== "off" && current.sub && Date.now() - (current.chk ?? 0) > CENTRAL_CHECK_MS) {
+  if (mode !== 'off' && current.sub && Date.now() - (current.chk ?? 0) > CENTRAL_CHECK_MS) {
     const active = await centralSessionActive(current.sub, current.ssoIat);
     if (active === true) {
       chk = Date.now();
       // rollout: proves the endpoint answers for real users before switching to enforce
-      if (mode === "log") log.info("sso central session active", { userId: u.userId });
-    }
-    else if (active === false) {
-      log.warn("sso central session inactive", { userId: u.userId, mode });
-      if (mode === "enforce") {
+      if (mode === 'log') log.info('sso central session active', { userId: u.userId });
+    } else if (active === false) {
+      log.warn('sso central session inactive', { userId: u.userId, mode });
+      if (mode === 'enforce') {
         const res = NextResponse.json({ user: null }, { status: 401 });
-        res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+        res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
         return res;
       }
-    } else log.warn("sso central session check unavailable", { userId: u.userId });
-  } else if (mode === "log" && !current.sub) {
+    } else log.warn('sso central session check unavailable', { userId: u.userId });
+  } else if (mode === 'log' && !current.sub) {
     // rollout visibility: a session without sub is never checked (cookies from before this
     // deploy, or /sso/verify not sending sub) — say so instead of looking like "all fine"
-    log.info("sso central session check skipped: no sub", { userId: u.userId });
+    log.info('sso central session check skipped: no sub', { userId: u.userId });
   }
 
   // renew the idle timer, but never past the absolute lifetime counted from sign-in
@@ -85,11 +84,17 @@ export async function GET(request: NextRequest) {
   const res = NextResponse.json({ approved, role, email: current.email });
   res.cookies.set(SESSION_COOKIE, await signSession(updated), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
     maxAge: Math.max(0, Math.floor((exp - Date.now()) / 1000)),
   });
-  res.cookies.set(SEEN_COOKIE, "1", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: SEEN_TTL_S });
+  res.cookies.set(SEEN_COOKIE, '1', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SEEN_TTL_S,
+  });
   return res;
 }

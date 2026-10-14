@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import * as React from "react";
+import * as React from 'react';
 
 /** `value`, but only after it has stopped changing for `ms` — for search-as-you-type */
 export function useDebouncedValue<T>(value: T, ms: number): T {

@@ -1,19 +1,19 @@
-import "server-only";
-import { cached, TTL_STATIC } from "@/server/cache";
-import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
-import { orderBy, offsetOf, totalOf, type Page, type PageQuery } from "@/server/paging";
-import { db } from "@/db/client";
-import type { Tx } from "@/db/client";
-import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from "@/db/schema";
-import type { Customer } from "@/data/mock";
-import { HttpError, fullName } from "@/server/auth";
-import { assertVersion } from "@/server/http-error";
-import { nowThai, str, fmtDateTime } from "@/server/mappers/format";
-import { nextRunningNo } from "@/db/running-no";
-import { audit, diff } from "@/server/audit";
-import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
-import { customerSchema, conflictErrors } from "@/lib/validation/customer";
-import { assertValid } from "@/server/validate";
+import 'server-only';
+import { cached, TTL_STATIC } from '@/server/cache';
+import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { orderBy, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
+import { db } from '@/db/client';
+import type { Tx } from '@/db/client';
+import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from '@/db/schema';
+import type { Customer } from '@/data/mock';
+import { HttpError, fullName } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
+import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
+import { nextRunningNo } from '@/db/running-no';
+import { audit, diff } from '@/server/audit';
+import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
+import { customerSchema, conflictErrors } from '@/lib/validation/customer';
+import { assertValid } from '@/server/validate';
 
 export type DeletedMode = StatusMode;
 
@@ -21,37 +21,37 @@ type Row = typeof customer.$inferSelect;
 
 /** Legacy `use_price_group` values ↔ UI labels. */
 export const PRICE_GROUP_LABEL: Record<string, string> = {
-  Retail: "ขายปลีก (Retail Price)",
-  Wholesale: "ขายส่ง (Wholesale Price)",
-  Special: "ราคาพิเศษ (Special Price)",
+  Retail: 'ขายปลีก (Retail Price)',
+  Wholesale: 'ขายส่ง (Wholesale Price)',
+  Special: 'ราคาพิเศษ (Special Price)',
 };
 const PRICE_GROUP_VALUE: Record<string, string> = Object.fromEntries(
-  Object.entries(PRICE_GROUP_LABEL).map(([k, v]) => [v, k])
+  Object.entries(PRICE_GROUP_LABEL).map(([k, v]) => [v, k]),
 );
 
-export function toCustomer(r: Row, createdBy = ""): Customer {
+export function toCustomer(r: Row, createdBy = ''): Customer {
   return {
     createdDate: fmtDateTime(r.createdDate),
     createdBy,
-    code: r.customerCode ?? "",
-    name: r.customerName ?? "",
-    address: r.customerAddress ?? "",
-    phone: r.phoneNumber ?? "",
-    email: r.email ?? "",
-    line: r.lineId ?? "",
-    taxId: r.customerCardId ?? "",
+    code: r.customerCode ?? '',
+    name: r.customerName ?? '',
+    address: r.customerAddress ?? '',
+    phone: r.phoneNumber ?? '',
+    email: r.email ?? '',
+    line: r.lineId ?? '',
+    taxId: r.customerCardId ?? '',
     status: uiStatus(r.recordStatus),
     // extra DB-backed fields (optional on the UI type)
     id: r.customerId,
-    type: r.customerType ?? "Normal",
+    type: r.customerType ?? 'Normal',
     online: r.isCustomerOnline !== false,
-    address1: r.customerAddress1 ?? "",
-    address2: r.customerAddress2 ?? "",
+    address1: r.customerAddress1 ?? '',
+    address2: r.customerAddress2 ?? '',
     cityId: r.cityId ?? -1,
     districtId: r.districtId ?? -1,
     subDistrictId: r.subDistrictId ?? -1,
-    postalCode: r.postalCode ?? "",
-    priceGroup: PRICE_GROUP_LABEL[r.usePriceGroup ?? "Retail"] ?? PRICE_GROUP_LABEL.Retail,
+    postalCode: r.postalCode ?? '',
+    priceGroup: PRICE_GROUP_LABEL[r.usePriceGroup ?? 'Retail'] ?? PRICE_GROUP_LABEL.Retail,
     version: r.rowVersion,
   };
 }
@@ -72,16 +72,25 @@ export type CustomerFilters = {
   status?: string; // Active | Inactive
 };
 export const customerFiltersFromQuery = (f: Record<string, string>): CustomerFilters => ({
-  code: f.code, name: f.name, phone: f.phone, email: f.email, taxId: f.taxId, type: f.type, province: f.province, status: f.status,
+  code: f.code,
+  name: f.name,
+  phone: f.phone,
+  email: f.email,
+  taxId: f.taxId,
+  type: f.type,
+  province: f.province,
+  status: f.status,
 });
 
-export async function listCustomers(opts: {
-  q?: string;
-  deleted?: DeletedMode;
-  limit?: number;
-  filters?: CustomerFilters;
-} = {}): Promise<Customer[]> {
-  const { q = "", deleted = "exclude", limit = 500, filters = {} } = opts;
+export async function listCustomers(
+  opts: {
+    q?: string;
+    deleted?: DeletedMode;
+    limit?: number;
+    filters?: CustomerFilters;
+  } = {},
+): Promise<Customer[]> {
+  const { q = '', deleted = 'exclude', limit = 500, filters = {} } = opts;
   const rows = await db
     .select()
     .from(customer)
@@ -106,12 +115,12 @@ const SORT = {
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\D', '', 'g')`;
-const phoneHas = (digits: string) => sql`${phoneDigits} LIKE ${"%" + digits + "%"}`;
+const phoneHas = (digits: string) => sql`${phoneDigits} LIKE ${'%' + digits + '%'}`;
 
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
-  const termDigits = term.replace(/\D/g, "");
+  const termDigits = term.replace(/\D/g, '');
   const search = term
     ? or(
         ilike(customer.customerCode, `%${term}%`),
@@ -119,11 +128,11 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
         ilike(customer.phoneNumber, `%${term}%`),
         termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
         ilike(customer.email, `%${term}%`),
-        ilike(customer.customerCardId, `%${term}%`)
+        ilike(customer.customerCardId, `%${term}%`),
       )
     : undefined;
   const like = (v?: string) => (v && v.trim() ? `%${v.trim()}%` : null);
-  const phone = f.phone ? f.phone.replace(/\D/g, "") : "";
+  const phone = f.phone ? f.phone.replace(/\D/g, '') : '';
   return and(
     active,
     search,
@@ -134,12 +143,20 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
     like(f.taxId) ? ilike(customer.customerCardId, like(f.taxId)!) : undefined,
     f.type ? eq(customer.customerType, f.type) : undefined,
     f.province && /^\d+$/.test(f.province) ? eq(customer.cityId, Number(f.province)) : undefined,
-    f.status === "Active" ? eq(customer.recordStatus, "ACTIVE") : f.status === "Inactive" ? eq(customer.recordStatus, "INACTIVE") : undefined
+    f.status === 'Active'
+      ? eq(customer.recordStatus, 'ACTIVE')
+      : f.status === 'Inactive'
+        ? eq(customer.recordStatus, 'INACTIVE')
+        : undefined,
   );
 }
 
 /** Server-side page for the customer list (43k rows). */
-export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclude", f: CustomerFilters = {}): Promise<Page<Customer>> {
+export async function pageCustomers(
+  p: PageQuery,
+  deleted: DeletedMode = 'exclude',
+  f: CustomerFilters = {},
+): Promise<Page<Customer>> {
   const w = customerWhere(p.q, deleted, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
@@ -153,7 +170,12 @@ export async function pageCustomers(p: PageQuery, deleted: DeletedMode = "exclud
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  return { rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
+  return {
+    rows: rows.map((r) => toCustomer(r.c, fullName(r.f, r.l))),
+    total: totalOf(counted),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
 }
 
 export async function getCustomerByCode(code: string): Promise<Customer | null> {
@@ -191,36 +213,66 @@ export type CustomerInput = {
 async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
   const parts: string[] = [str(i.address1), str(i.address2)];
   if (i.subDistrictId && i.subDistrictId > 0) {
-    const [sd] = await tx.select({ n: mtSubDistrict.nameTh }).from(mtSubDistrict).where(eq(mtSubDistrict.subDistrictId, i.subDistrictId));
-    if (sd) parts.push((i.cityId === 10 ? "แขวง" : "ต.") + sd.n);
+    const [sd] = await tx
+      .select({ n: mtSubDistrict.nameTh })
+      .from(mtSubDistrict)
+      .where(eq(mtSubDistrict.subDistrictId, i.subDistrictId));
+    if (sd) parts.push((i.cityId === 10 ? 'แขวง' : 'ต.') + sd.n);
   }
   if (i.districtId && i.districtId > 0) {
-    const [d] = await tx.select({ n: mtDistrict.nameTh }).from(mtDistrict).where(eq(mtDistrict.districtId, i.districtId));
-    if (d) parts.push((i.cityId === 10 ? "เขต" : "อ.") + d.n);
+    const [d] = await tx
+      .select({ n: mtDistrict.nameTh })
+      .from(mtDistrict)
+      .where(eq(mtDistrict.districtId, i.districtId));
+    if (d) parts.push((i.cityId === 10 ? 'เขต' : 'อ.') + d.n);
   }
   if (i.cityId && i.cityId > 0) {
     const [c] = await tx.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, i.cityId));
-    if (c) parts.push((i.cityId === 10 ? "" : "จ.") + c.n);
+    if (c) parts.push((i.cityId === 10 ? '' : 'จ.') + c.n);
   }
   parts.push(str(i.postalCode));
-  return parts.filter(Boolean).join(" ").slice(0, 200);
+  return parts.filter(Boolean).join(' ').slice(0, 200);
 }
 
 /** ตำบล / อำเภอ / จังหวัด names for a customer's ids — blanks when not picked (legacy customers). */
-export async function addressNames(c: { cityId?: number; districtId?: number; subDistrictId?: number } | null | undefined) {
-  const pick = async (q: Promise<{ n: string }[]> | null) => (q ? ((await q)[0]?.n ?? "") : "");
-  const sdId = c?.subDistrictId ?? 0, dId = c?.districtId ?? 0, cId = c?.cityId ?? 0;
+export async function addressNames(
+  c: { cityId?: number; districtId?: number; subDistrictId?: number } | null | undefined,
+) {
+  const pick = async (q: Promise<{ n: string }[]> | null) => (q ? ((await q)[0]?.n ?? '') : '');
+  const sdId = c?.subDistrictId ?? 0,
+    dId = c?.districtId ?? 0,
+    cId = c?.cityId ?? 0;
   const [subDistrict, district, province] = await Promise.all([
-    pick(sdId > 0 ? db.select({ n: mtSubDistrict.nameTh }).from(mtSubDistrict).where(eq(mtSubDistrict.subDistrictId, sdId)).limit(1) : null),
-    pick(dId > 0 ? db.select({ n: mtDistrict.nameTh }).from(mtDistrict).where(eq(mtDistrict.districtId, dId)).limit(1) : null),
+    pick(
+      sdId > 0
+        ? db
+            .select({ n: mtSubDistrict.nameTh })
+            .from(mtSubDistrict)
+            .where(eq(mtSubDistrict.subDistrictId, sdId))
+            .limit(1)
+        : null,
+    ),
+    pick(
+      dId > 0
+        ? db.select({ n: mtDistrict.nameTh }).from(mtDistrict).where(eq(mtDistrict.districtId, dId)).limit(1)
+        : null,
+    ),
     pick(cId > 0 ? db.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, cId)).limit(1) : null),
   ]);
   return { subDistrict, district, province };
 }
 
-export type CustomerConflict = { field: "phone" | "email" | "taxId"; value: string; code: string; name: string; phone: string; email: string; taxId: string };
+export type CustomerConflict = {
+  field: 'phone' | 'email' | 'taxId';
+  value: string;
+  code: string;
+  name: string;
+  phone: string;
+  email: string;
+  taxId: string;
+};
 
-const digits = (v: unknown) => str(v).replace(/\D/g, "");
+const digits = (v: unknown) => str(v).replace(/\D/g, '');
 const normEmail = (v: unknown) => str(v).toLowerCase();
 
 /**
@@ -230,24 +282,56 @@ const normEmail = (v: unknown) => str(v).toLowerCase();
  */
 export async function findCustomerConflicts(
   v: { phone?: string; email?: string; taxId?: string },
-  excludeCode?: string
+  excludeCode?: string,
 ): Promise<CustomerConflict[]> {
   const phone = digits(v.phone);
   const email = normEmail(v.email);
   const taxId = digits(v.taxId);
-  const checks: { field: CustomerConflict["field"]; value: string; cond: ReturnType<typeof sql> }[] = [];
-  if (phone.length >= 6) checks.push({ field: "phone", value: phone, cond: sql`regexp_replace(coalesce(${customer.phoneNumber},''), '\\D', '', 'g') = ${phone}` });
-  if (email) checks.push({ field: "email", value: email, cond: sql`lower(trim(coalesce(${customer.email},''))) = ${email}` });
-  if (taxId.length >= 5) checks.push({ field: "taxId", value: taxId, cond: sql`regexp_replace(coalesce(${customer.customerCardId},''), '\\D', '', 'g') = ${taxId}` });
+  const checks: { field: CustomerConflict['field']; value: string; cond: ReturnType<typeof sql> }[] = [];
+  if (phone.length >= 6)
+    checks.push({
+      field: 'phone',
+      value: phone,
+      cond: sql`regexp_replace(coalesce(${customer.phoneNumber},''), '\\D', '', 'g') = ${phone}`,
+    });
+  if (email)
+    checks.push({ field: 'email', value: email, cond: sql`lower(trim(coalesce(${customer.email},''))) = ${email}` });
+  if (taxId.length >= 5)
+    checks.push({
+      field: 'taxId',
+      value: taxId,
+      cond: sql`regexp_replace(coalesce(${customer.customerCardId},''), '\\D', '', 'g') = ${taxId}`,
+    });
   if (!checks.length) return [];
   const out: CustomerConflict[] = [];
   for (const c of checks) {
     const rows = await db
-      .select({ code: customer.customerCode, name: customer.customerName, phone: customer.phoneNumber, email: customer.email, taxId: customer.customerCardId })
+      .select({
+        code: customer.customerCode,
+        name: customer.customerName,
+        phone: customer.phoneNumber,
+        email: customer.email,
+        taxId: customer.customerCardId,
+      })
       .from(customer)
-      .where(and(c.cond, sql`${customer.recordStatus} <> 'DELETED'`, excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined))
+      .where(
+        and(
+          c.cond,
+          sql`${customer.recordStatus} <> 'DELETED'`,
+          excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
+        ),
+      )
       .limit(5);
-    for (const r of rows) out.push({ field: c.field, value: c.value, code: r.code ?? "", name: r.name ?? "", phone: r.phone ?? "", email: r.email ?? "", taxId: r.taxId ?? "" });
+    for (const r of rows)
+      out.push({
+        field: c.field,
+        value: c.value,
+        code: r.code ?? '',
+        name: r.name ?? '',
+        phone: r.phone ?? '',
+        email: r.email ?? '',
+        taxId: r.taxId ?? '',
+      });
   }
   return out;
 }
@@ -270,7 +354,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   const conflicts = await findCustomerConflicts(check, i.code);
   const [first] = conflicts;
   if (first) {
-    const label = { phone: "เบอร์โทรศัพท์", email: "อีเมล", taxId: "เลขบัตร/ผู้เสียภาษี" };
+    const label = { phone: 'เบอร์โทรศัพท์', email: 'อีเมล', taxId: 'เลขบัตร/ผู้เสียภาษี' };
     throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, {
       conflicts,
       fields: conflictErrors(conflicts),
@@ -281,7 +365,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     const values = {
       customerName: name,
       customerCardId: str(i.taxId).slice(0, 20),
-      customerType: str(i.type) || "Normal",
+      customerType: str(i.type) || 'Normal',
       isCustomerOnline: i.online !== false,
       customerAddress: await composeAddress(tx, i),
       customerAddress1: str(i.address1).slice(0, 100),
@@ -293,32 +377,45 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       phoneNumber: phone,
       email: str(i.email).slice(0, 50),
       lineId: str(i.line).slice(0, 50),
-      usePriceGroup: PRICE_GROUP_VALUE[str(i.priceGroup)] ?? (str(i.priceGroup) || "Retail"),
+      usePriceGroup: PRICE_GROUP_VALUE[str(i.priceGroup)] ?? (str(i.priceGroup) || 'Retail'),
       ...statusStamp(fromUiStatus(i.status), byUserId),
     };
     if (i.code) {
-      const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for("update");
+      const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for('update');
       if (before) assertVersion(i.version, before.rowVersion);
       const [row] = await tx.update(customer).set(values).where(eq(customer.customerCode, i.code)).returning();
-      if (!row) throw new HttpError(404, "customer not found");
-      await audit(tx, byUserId, { action: "UPDATE", module: "Customer", entity: "customer", key: i.code, summary: `แก้ไขลูกค้า ${name}`, changes: diff(before as Record<string, unknown>, values as Record<string, unknown>) });
+      if (!row) throw new HttpError(404, 'customer not found');
+      await audit(tx, byUserId, {
+        action: 'UPDATE',
+        module: 'Customer',
+        entity: 'customer',
+        key: i.code,
+        summary: `แก้ไขลูกค้า ${name}`,
+        changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
+      });
       return toCustomer(row);
     }
-    const code = await nextRunningNo(tx, "Customer");
+    const code = await nextRunningNo(tx, 'Customer');
     const [row] = await tx
       .insert(customer)
-      .values({ ...values, customerCode: code, createdDate: nowThai(), createBy: byUserId, faxNumber: "" })
+      .values({ ...values, customerCode: code, createdDate: nowThai(), createBy: byUserId, faxNumber: '' })
       .returning();
-    if (!row) throw new Error("customer insert returned no row");
-    await audit(tx, byUserId, { action: "CREATE", module: "Customer", entity: "customer", key: code, summary: `เพิ่มลูกค้า ${name} · ${phone}` });
+    if (!row) throw new Error('customer insert returned no row');
+    await audit(tx, byUserId, {
+      action: 'CREATE',
+      module: 'Customer',
+      entity: 'customer',
+      key: code,
+      summary: `เพิ่มลูกค้า ${name} · ${phone}`,
+    });
     return toCustomer(row);
   });
 }
 
 /* Address master data for cascading dropdowns */
 export function listProvinces() {
-  return cached("provinces", TTL_STATIC, () =>
-    db.select({ id: mtCity.cityId, name: mtCity.nameTh }).from(mtCity).orderBy(asc(mtCity.nameTh))
+  return cached('provinces', TTL_STATIC, () =>
+    db.select({ id: mtCity.cityId, name: mtCity.nameTh }).from(mtCity).orderBy(asc(mtCity.nameTh)),
   );
 }
 export async function listDistricts(cityId: number) {

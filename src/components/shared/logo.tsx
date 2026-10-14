@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils';
 
 /**
  * The real "one service" wordmark — transparent PNG, two variants that swap by
@@ -11,13 +11,13 @@ export function Logo({
 }: {
   className?: string;
   /** force a single variant (for pages with a fixed background) */
-  variant?: "navy" | "white";
+  variant?: 'navy' | 'white';
 }) {
-  if (variant === "white") {
+  if (variant === 'white') {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src="/logo-dark.png" alt="OneService" className={className} />;
   }
-  if (variant === "navy") {
+  if (variant === 'navy') {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src="/logo.png" alt="OneService" className={className} />;
   }
@@ -27,9 +27,9 @@ export function Logo({
   return (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="OneService" loading="lazy" className={cn("block dark:hidden", className)} />
+      <img src="/logo.png" alt="OneService" loading="lazy" className={cn('block dark:hidden', className)} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo-dark.png" alt="OneService" loading="lazy" className={cn("hidden dark:block", className)} />
+      <img src="/logo-dark.png" alt="OneService" loading="lazy" className={cn('hidden dark:block', className)} />
     </>
   );
 }

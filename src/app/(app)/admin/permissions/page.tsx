@@ -1,36 +1,36 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Save, ShieldCheck, Loader2 } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { Field } from "@/components/ui/field";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { ROLES, type Permission } from "@/data/mock";
-import { usePermissions, useRoles, useModules } from "@/data/db";
-import { postJson } from "@/lib/api";
+import * as React from 'react';
+import { Save, ShieldCheck, Loader2 } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { Field } from '@/components/ui/field';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { ROLES, type Permission } from '@/data/mock';
+import { usePermissions, useRoles, useModules } from '@/data/db';
+import { postJson } from '@/lib/api';
 
 // เมนูงาน (module) และบทบาท (user_type) มาจากตาราง app_config ของระบบเดิม
 // — ค่า fallback ด้านล่างใช้เฉพาะระหว่างโหลด
 const FALLBACK_MENUS = [
-  "Job Management",
-  "Job Assign",
-  "Job Repair",
-  "Job Closing",
-  "Product",
-  "Product Onhand",
-  "Product Receive Stock",
-  "Product Pick Stock",
-  "Customer",
-  "Quotation",
-  "Sale Order",
+  'Job Management',
+  'Job Assign',
+  'Job Repair',
+  'Job Closing',
+  'Product',
+  'Product Onhand',
+  'Product Receive Stock',
+  'Product Pick Stock',
+  'Customer',
+  'Quotation',
+  'Sale Order',
 ];
-const FALLBACK_ROLES = ROLES.filter((r) => r !== "รออนุมัติ");
+const FALLBACK_ROLES = ROLES.filter((r) => r !== 'รออนุมัติ');
 
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;
@@ -67,8 +67,8 @@ export default function PermissionsPage() {
   const role = inRoles(pickedRole) ? pickedRole : (dbRoles[0] ?? pickedRole); // not in roles ⇒ dbRoles is non-empty
   // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
   // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
-  const [menuFilter, setMenuFilter] = React.useState("");
-  const [draftPick, setDraft] = React.useState({ role: firstRole, menu: "" });
+  const [menuFilter, setMenuFilter] = React.useState('');
+  const [draftPick, setDraft] = React.useState({ role: firstRole, menu: '' });
   const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] ?? draftPick.role };
   const [saving, setSaving] = React.useState(false);
 
@@ -92,13 +92,13 @@ export default function PermissionsPage() {
     setSaving(true);
     try {
       const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
-      await postJson("/api/admin/permissions", { items }); // 401 → refresh + retry → /login (api.ts)
-      push({ kind: "success", title: "บันทึกสิทธิ์แล้ว", desc: `บทบาท: ${role}` });
+      await postJson('/api/admin/permissions', { items }); // 401 → refresh + retry → /login (api.ts)
+      push({ kind: 'success', title: 'บันทึกสิทธิ์แล้ว', desc: `บทบาท: ${role}` });
       refetch();
     } catch (e) {
       push({
-        kind: "error",
-        title: "บันทึกไม่สำเร็จ",
+        kind: 'error',
+        title: 'บันทึกไม่สำเร็จ',
         desc: e instanceof Error ? e.message : String(e),
       });
     } finally {
@@ -109,36 +109,32 @@ export default function PermissionsPage() {
   const check = (field: keyof Cell, header: string): Column<Permission> => ({
     key: field,
     header,
-    align: "center",
-    width: "130px",
+    align: 'center',
+    width: '130px',
     sortable: false,
     cell: (r) => (
-      <Checkbox
-        checked={!!r[field]}
-        onChange={() => toggle(r.menu, field)}
-        aria-label={`${header} · ${r.menu}`}
-      />
+      <Checkbox checked={!!r[field]} onChange={() => toggle(r.menu, field)} aria-label={`${header} · ${r.menu}`} />
     ),
   });
 
   const columns: Column<Permission>[] = [
     {
-      key: "no",
-      header: "#",
-      width: "52px",
-      align: "center",
+      key: 'no',
+      header: '#',
+      width: '52px',
+      align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
-      key: "menu",
-      header: "เมนูงาน",
+      key: 'menu',
+      header: 'เมนูงาน',
       cell: (r) => <span className="font-medium">{r.menu}</span>,
     },
-    check("add", "เพิ่ม"),
-    check("edit", "แก้ไข"),
-    check("del", "ลบ"),
-    check("view", "ดู"),
+    check('add', 'เพิ่ม'),
+    check('edit', 'แก้ไข'),
+    check('del', 'ลบ'),
+    check('view', 'ดู'),
   ];
 
   return (
@@ -160,16 +156,26 @@ export default function PermissionsPage() {
           setMenuFilter(draft.menu);
         }}
         onReset={() => {
-          setDraft({ role: firstRole, menu: "" });
+          setDraft({ role: firstRole, menu: '' });
           setRole(firstRole);
-          setMenuFilter("");
+          setMenuFilter('');
         }}
       >
         <Field label="ประเภทผู้ใช้งาน" required>
-          <SearchSelect value={draft.role} onChange={(v) => setDraft((d) => ({ ...d, role: v }))} options={strOptions(ASSIGNABLE_ROLES)} />
+          <SearchSelect
+            value={draft.role}
+            onChange={(v) => setDraft((d) => ({ ...d, role: v }))}
+            options={strOptions(ASSIGNABLE_ROLES)}
+          />
         </Field>
         <Field label="เมนูงาน">
-          <SearchSelect placeholder="ทั้งหมด" emptyLabel="ทั้งหมด" value={draft.menu} onChange={(v) => setDraft((d) => ({ ...d, menu: v }))} options={strOptions(MENUS)} />
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.menu}
+            onChange={(v) => setDraft((d) => ({ ...d, menu: v }))}
+            options={strOptions(MENUS)}
+          />
         </Field>
       </FilterBar>
 
@@ -185,7 +191,9 @@ export default function PermissionsPage() {
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" />
             กำลังกำหนดสิทธิ์ของ <Badge tone="primary">{role}</Badge>
-            <span className="num">{viewRows.length} / {MENUS.length} เมนู</span>
+            <span className="num">
+              {viewRows.length} / {MENUS.length} เมนู
+            </span>
           </span>
         }
       />

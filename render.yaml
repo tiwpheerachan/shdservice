@@ -23,7 +23,7 @@ services:
     envVars:
       # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
-        value: "24"
+        value: '24'
       - key: NEXT_PUBLIC_SUPABASE_URL
         value: https://bnntpshuoyzkzckepjse.supabase.co
       # publishable key is client-safe (it is sent to the browser anyway)
@@ -89,7 +89,7 @@ services:
       - key: NODE_OPTIONS
         value: --max-old-space-size=400
       - key: NEXT_TELEMETRY_DISABLED
-        value: "1"
+        value: '1'
       # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
       - key: TZ
         value: Asia/Bangkok
@@ -97,4 +97,4 @@ services:
       # config exits the process → the health check fails → Render keeps the old version (pre-deploy
       # migrations have run by then). Optional features only warn. Log line "env check …" lists them.
       - key: ENV_STRICT
-        value: "1"
+        value: '1'

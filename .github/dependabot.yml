@@ -21,4 +21,4 @@ updates:
       timezone: Asia/Bangkok
     groups:
       actions:
-        patterns: ["*"]
+        patterns: ['*']

@@ -1,8 +1,8 @@
-import "server-only";
-import sharp from "sharp";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { isoDateTime } from "@/lib/dates";
-import { HttpError } from "@/server/http-error";
+import 'server-only';
+import sharp from 'sharp';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { isoDateTime } from '@/lib/dates';
+import { HttpError } from '@/server/http-error';
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -15,7 +15,7 @@ import { HttpError } from "@/server/http-error";
  * 786/822 and job attachments from the old server's FileUpload folder; rows
  * whose file was missing on the old server just show their file name.
  */
-export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "oneservice";
+export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'oneservice';
 
 export const filePath = {
   attachment: (jobNo: string, file: string) => `jobs/${jobNo}/attachments/${file}`,
@@ -28,22 +28,27 @@ export const filePath = {
 
 /** Accept either a stored full path or a bare file name (legacy / short columns). */
 export function resolvePath(stored: string, fallback: (file: string) => string): string {
-  return stored.includes("/") ? stored : fallback(stored);
+  return stored.includes('/') ? stored : fallback(stored);
 }
 
-export const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+export const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 /** extension stored for each accepted type — never the one in the user's file name */
-const EXT: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf" };
+const EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'application/pdf': '.pdf',
+};
 
 /** first bytes of each accepted type (OneLink lib/api/validate.ts) */
 const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
 const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
-  "image/png": (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
-  "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  "image/webp": (b) => ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP",
-  "application/pdf": (b) => ascii(b, 0, 5) === "%PDF-",
+  'image/png': (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/webp': (b) => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP',
+  'application/pdf': (b) => ascii(b, 0, 5) === '%PDF-',
 };
 
 /**
@@ -53,12 +58,13 @@ const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
  * Returns an error message (Thai) or null.
  */
 export async function fileProblem(file: File, types: ReadonlySet<string> = ALLOWED_TYPES): Promise<string | null> {
-  if (file.size === 0) return "ไฟล์ว่างเปล่า";
-  if (file.size > MAX_FILE_BYTES) return "ไฟล์ใหญ่เกิน 10MB";
-  const label = [...types].map((t) => EXT[t]?.slice(1).toUpperCase()).join(", ");
+  if (file.size === 0) return 'ไฟล์ว่างเปล่า';
+  if (file.size > MAX_FILE_BYTES) return 'ไฟล์ใหญ่เกิน 10MB';
+  const label = [...types].map((t) => EXT[t]?.slice(1).toUpperCase()).join(', ');
   if (!types.has(file.type)) return `รองรับเฉพาะ ${label}`;
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
-  if (!SIGNATURES[file.type]?.(head)) return `ไฟล์ไม่ใช่ ${EXT[file.type]?.slice(1).toUpperCase()} จริง — รองรับเฉพาะ ${label}`;
+  if (!SIGNATURES[file.type]?.(head))
+    return `ไฟล์ไม่ใช่ ${EXT[file.type]?.slice(1).toUpperCase()} จริง — รองรับเฉพาะ ${label}`;
   return null;
 }
 
@@ -84,25 +90,30 @@ export async function optimizeImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
   const input = Buffer.from(await file.arrayBuffer());
   // header only (no decode): reject decompression bombs before sharp allocates the pixels
-  const meta = await sharp(input, { failOn: "none", limitInputPixels: false }).metadata().catch(() => null);
+  const meta = await sharp(input, { failOn: 'none', limitInputPixels: false })
+    .metadata()
+    .catch(() => null);
   if (meta?.width && meta.height && meta.width * meta.height > MAX_IMAGE_PIXELS) throw new ImageTooLargeError();
   try {
-    const img = sharp(input, { failOn: "none", limitInputPixels: MAX_IMAGE_PIXELS })
+    const img = sharp(input, { failOn: 'none', limitInputPixels: MAX_IMAGE_PIXELS })
       .rotate()
-      .resize({ width: IMAGE_MAX_EDGE, height: IMAGE_MAX_EDGE, fit: "inside", withoutEnlargement: true });
+      .resize({ width: IMAGE_MAX_EDGE, height: IMAGE_MAX_EDGE, fit: 'inside', withoutEnlargement: true });
     let type = file.type;
     let name = file.name;
     let out: Buffer;
     // phones/screens often export photos as PNG with a fully opaque alpha channel — stats().isOpaque sees through that
-    if (type === "image/png" && !(await sharp(input, { failOn: "none", limitInputPixels: MAX_IMAGE_PIXELS }).stats()).isOpaque) {
+    if (
+      type === 'image/png' &&
+      !(await sharp(input, { failOn: 'none', limitInputPixels: MAX_IMAGE_PIXELS }).stats()).isOpaque
+    ) {
       out = await img.png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
-    } else if (type === "image/webp") {
+    } else if (type === 'image/webp') {
       out = await img.webp({ quality: 82 }).toBuffer();
     } else {
       out = await img.jpeg({ quality: 82, mozjpeg: true }).toBuffer();
-      if (type === "image/png") {
-        type = "image/jpeg";
-        name = name.replace(/\.png$/i, "") + ".jpg";
+      if (type === 'image/png') {
+        type = 'image/jpeg';
+        name = name.replace(/\.png$/i, '') + '.jpg';
       }
     }
     if (out.length >= input.length && type === file.type) return file;
@@ -117,31 +128,45 @@ let bucketReady: Promise<void> | null = null;
 function storage() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new HttpError(503, "ระบบจัดเก็บไฟล์ยังไม่ได้ตั้งค่า (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY) — แนบไฟล์ไม่ได้ชั่วคราว");
+  if (!url || !key)
+    throw new HttpError(
+      503,
+      'ระบบจัดเก็บไฟล์ยังไม่ได้ตั้งค่า (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY) — แนบไฟล์ไม่ได้ชั่วคราว',
+    );
   if (!client)
     client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
       // a hung Storage must not hold upload requests (and memory on a 512 MB instance)
-      global: { fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) }) },
+      global: {
+        fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) }),
+      },
     });
   return client.storage;
 }
 
 /** Stored name: Bangkok timestamp + random + the extension of the file's (checked) type. */
 export function systemFileName(type: string): string {
-  const ext = EXT[type] ?? "";
-  const stamp = isoDateTime(new Date(), { seconds: true }).replace(/\D/g, ""); // Bangkok, whatever the server TZ
+  const ext = EXT[type] ?? '';
+  const stamp = isoDateTime(new Date(), { seconds: true }).replace(/\D/g, ''); // Bangkok, whatever the server TZ
   return `${stamp}${Math.random().toString(36).slice(2, 6)}${ext}`;
 }
 
 export async function uploadFile(path: string, file: File | Blob, contentType?: string): Promise<void> {
   const s = storage();
   // create the bucket on first use per process (no-op if it exists) — not a round-trip per upload
-  bucketReady ??= s.createBucket(BUCKET, { public: false }).then(() => undefined, () => undefined);
+  bucketReady ??= s.createBucket(BUCKET, { public: false }).then(
+    () => undefined,
+    () => undefined,
+  );
   await bucketReady;
   const buf = Buffer.from(await file.arrayBuffer());
-  const { error } = await s.from(BUCKET).upload(path, buf, { contentType: contentType || (file as File).type || "application/octet-stream", upsert: true });
-  if (error) throw new Error(`อัปโหลดไฟล์ไม่สำเร็จ (Supabase Storage: ${error.message}) — ตรวจสอบ SUPABASE_SECRET_KEY / bucket "${BUCKET}"`);
+  const { error } = await s
+    .from(BUCKET)
+    .upload(path, buf, { contentType: contentType || (file as File).type || 'application/octet-stream', upsert: true });
+  if (error)
+    throw new Error(
+      `อัปโหลดไฟล์ไม่สำเร็จ (Supabase Storage: ${error.message}) — ตรวจสอบ SUPABASE_SECRET_KEY / bucket "${BUCKET}"`,
+    );
 }
 
 export async function signedUrl(path: string, seconds = 600): Promise<string | null> {
@@ -151,5 +176,8 @@ export async function signedUrl(path: string, seconds = 600): Promise<string | n
 }
 
 export async function removeFile(path: string): Promise<void> {
-  await storage().from(BUCKET).remove([path]).catch(() => undefined);
+  await storage()
+    .from(BUCKET)
+    .remove([path])
+    .catch(() => undefined);
 }

@@ -1,10 +1,10 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireUser, HttpError } from "@/server/auth";
-import { signedUrl } from "@/server/storage";
-import { rateLimit } from "@/server/rate-limit";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireUser, HttpError } from '@/server/auth';
+import { signedUrl } from '@/server/storage';
+import { rateLimit } from '@/server/rate-limit';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/files?path=products/P00230/x.jpg → 302 to a short-lived signed URL.
@@ -22,19 +22,22 @@ const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
 const URL_TTL_S = 300;
 
 export const GET = handle(async (req: NextRequest) => {
-  const path = (new URL(req.url).searchParams.get("path") ?? "").replace(/^\/+/, "");
+  const path = (new URL(req.url).searchParams.get('path') ?? '').replace(/^\/+/, '');
   // no traversal, no control characters, no backslashes, sane length
-  if (!path || path.length > 300 || path.includes("..") || /[\x00-\x1f\\]/.test(path)) throw new HttpError(400, "path required");
+  if (!path || path.length > 300 || path.includes('..') || /[\x00-\x1f\\]/.test(path))
+    throw new HttpError(400, 'path required');
 
   const isPublic = PUBLIC_PATH.test(path);
   // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)
-  if (isPublic) await rateLimit(req, "files-public", 120);
+  if (isPublic) await rateLimit(req, 'files-public', 120);
   else {
     await requireUser(req);
-    if (!STAFF_PATH.test(path)) throw new HttpError(404, "ไม่พบไฟล์");
+    if (!STAFF_PATH.test(path)) throw new HttpError(404, 'ไม่พบไฟล์');
   }
   const url = await signedUrl(path, URL_TTL_S);
-  if (!url) throw new HttpError(404, "ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)");
+  if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)');
   // the browser may reuse the redirect only while the signed URL is still valid
-  return NextResponse.redirect(url, { headers: { "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${URL_TTL_S - 60}` } });
+  return NextResponse.redirect(url, {
+    headers: { 'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${URL_TTL_S - 60}` },
+  });
 });

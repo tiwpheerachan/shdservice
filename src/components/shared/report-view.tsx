@@ -1,32 +1,32 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Download, Printer, FileSpreadsheet } from "lucide-react";
-import { PageHeader } from "./page-header";
-import { FilterBar } from "./filter-bar";
-import { DataTable, type Column, type ServerTable } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { SearchSelect, strOptions } from "./search-select";
-import { ExportButton } from "./export-button";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { Download, Printer, FileSpreadsheet } from 'lucide-react';
+import { PageHeader } from './page-header';
+import { FilterBar } from './filter-bar';
+import { DataTable, type Column, type ServerTable } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/input';
+import { SearchSelect, strOptions } from './search-select';
+import { ExportButton } from './export-button';
+import { cn } from '@/lib/utils';
 
 export type ReportFilter =
-  | { kind: "text"; key?: string; label: string; placeholder?: string; value?: string }
-  | { kind: "date"; key?: string; label: string; value?: string }
-  | { kind: "select"; key?: string; label: string; options: string[]; value?: string };
+  | { kind: 'text'; key?: string; label: string; placeholder?: string; value?: string }
+  | { kind: 'date'; key?: string; label: string; value?: string }
+  | { kind: 'select'; key?: string; label: string; options: string[]; value?: string };
 
 /** values keyed by filter `key` (or label); "ทั้งหมด" (and the old "Select All" / "ALL" labels) → "" */
 export type ReportValues = Record<string, string>;
-const ALL = new Set(["ทั้งหมด", "- - Select All - -", "- - Select ALL - -", "ALL"]);
+const ALL = new Set(['ทั้งหมด', '- - Select All - -', '- - Select ALL - -', 'ALL']);
 
 const keyOf = (f: ReportFilter) => f.key ?? f.label;
 
 /** each filter's starting value: its `value`, else a select's first option, else "" */
 function defaultsOf(filters: ReportFilter[]): ReportValues {
   const v: ReportValues = {};
-  for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === "select" ? f.options[0] ?? "" : "");
+  for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === 'select' ? (f.options[0] ?? '') : '');
   return v;
 }
 
@@ -48,7 +48,7 @@ export function ReportView<T extends Record<string, unknown>>({
   title: string;
   description: string;
   filters: ReportFilter[];
-  kpis: { label: string; value: string; tone?: "primary" | "success" | "warning" | "danger" }[];
+  kpis: { label: string; value: string; tone?: 'primary' | 'success' | 'warning' | 'danger' }[];
   columns: Column<T>[];
   rows: T[];
   rowKey: (r: T, i: number) => string;
@@ -65,20 +65,20 @@ export function ReportView<T extends Record<string, unknown>>({
 }) {
   // the defaults the filters declare change (a page passes new ones) → the form starts over from
   // them: adjusted while rendering (React's "state from props" pattern), not in an effect pass
-  const defaultsKey = filters.map((f) => `${keyOf(f)}=${f.value ?? ""}`).join("|");
+  const defaultsKey = filters.map((f) => `${keyOf(f)}=${f.value ?? ''}`).join('|');
   const [values, setValues] = React.useState<ReportValues>(() => defaultsOf(filters));
   const [seenKey, setSeenKey] = React.useState(defaultsKey);
   if (seenKey !== defaultsKey) {
     setSeenKey(defaultsKey);
     setValues(defaultsOf(filters));
   }
-  const clean = (v: ReportValues) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, ALL.has(x) ? "" : x]));
+  const clean = (v: ReportValues) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, ALL.has(x) ? '' : x]));
 
   const toneMap = {
-    primary: "text-primary",
-    success: "text-success",
-    warning: "text-warning",
-    danger: "text-danger",
+    primary: 'text-primary',
+    success: 'text-success',
+    warning: 'text-warning',
+    danger: 'text-danger',
   };
 
   return (
@@ -93,11 +93,7 @@ export function ReportView<T extends Record<string, unknown>>({
               พิมพ์รายงาน
             </Button>
             {onExport && <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />}
-            <Button
-              size="sm"
-              onClick={() => window.print()}
-              title="เปิดหน้าต่างพิมพ์ — เลือก 'บันทึกเป็น PDF'"
-            >
+            <Button size="sm" onClick={() => window.print()} title="เปิดหน้าต่างพิมพ์ — เลือก 'บันทึกเป็น PDF'">
               <Download className="h-3.5 w-3.5" />
               PDF
             </Button>
@@ -118,26 +114,29 @@ export function ReportView<T extends Record<string, unknown>>({
       >
         {filters.map((f) => {
           const k = keyOf(f);
-          const v = values[k] ?? "";
+          const v = values[k] ?? '';
           const set = (x: string) => setValues((s) => ({ ...s, [k]: x }));
           return (
             <Field key={f.label} label={f.label}>
-              {f.kind === "text" && <Input placeholder={f.placeholder} value={v} onChange={(e) => set(e.target.value)} />}
-              {f.kind === "date" && <Input type="date" value={v} onChange={(e) => set(e.target.value)} />}
-              {f.kind === "select" && (() => {
-                // options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique
-                const opts = Array.from(new Set(f.options));
-                // same rule as the rest of the app: long lists are searchable, 2–5 fixed choices stay a plain select
-                return opts.length > 5 ? (
-                  <SearchSelect value={v} onChange={set} options={strOptions(opts)} />
-                ) : (
-                  <Select value={v} onChange={(e) => set(e.target.value)}>
-                    {opts.map((o) => (
-                      <option key={o}>{o}</option>
-                    ))}
-                  </Select>
-                );
-              })()}
+              {f.kind === 'text' && (
+                <Input placeholder={f.placeholder} value={v} onChange={(e) => set(e.target.value)} />
+              )}
+              {f.kind === 'date' && <Input type="date" value={v} onChange={(e) => set(e.target.value)} />}
+              {f.kind === 'select' &&
+                (() => {
+                  // options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique
+                  const opts = Array.from(new Set(f.options));
+                  // same rule as the rest of the app: long lists are searchable, 2–5 fixed choices stay a plain select
+                  return opts.length > 5 ? (
+                    <SearchSelect value={v} onChange={set} options={strOptions(opts)} />
+                  ) : (
+                    <Select value={v} onChange={(e) => set(e.target.value)}>
+                      {opts.map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </Select>
+                  );
+                })()}
             </Field>
           );
         })}
@@ -148,12 +147,7 @@ export function ReportView<T extends Record<string, unknown>>({
           {kpis.map((k) => (
             <div key={k.label} className="surface p-4">
               <p className="truncate text-2xs text-muted-foreground">{k.label}</p>
-              <p
-                className={cn(
-                  "num mt-1 text-xl font-semibold tracking-tight",
-                  k.tone && toneMap[k.tone]
-                )}
-              >
+              <p className={cn('num mt-1 text-xl font-semibold tracking-tight', k.tone && toneMap[k.tone])}>
                 {k.value}
               </p>
             </div>
@@ -161,7 +155,16 @@ export function ReportView<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} error={error} onRetry={onRetry} rowKey={rowKey} server={server} />
+      <DataTable
+        searchable={false}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        error={error}
+        onRetry={onRetry}
+        rowKey={rowKey}
+        server={server}
+      />
     </>
   );
 }

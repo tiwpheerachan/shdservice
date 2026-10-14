@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useServerInsertedHTML } from "next/navigation";
-import { THEME_SCRIPT } from "@/lib/theme-script-source";
+import * as React from 'react';
+import { useServerInsertedHTML } from 'next/navigation';
+import { THEME_SCRIPT } from '@/lib/theme-script-source';
 
 /**
  * The theme bootstrap goes into the server HTML only (useServerInsertedHTML — Next's hook for

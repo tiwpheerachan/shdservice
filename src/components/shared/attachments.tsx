@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Paperclip, Trash2, Upload, FileText } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ui/confirm";
-import { api, del, errMsg } from "@/lib/api";
-import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
+import * as React from 'react';
+import { Paperclip, Trash2, Upload, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+import { api, del, errMsg } from '@/lib/api';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 
 type Row = { id: number; name: string; note: string; file?: string; pending?: File };
 
@@ -19,12 +19,15 @@ type Row = { id: number; name: string; note: string; file?: string; pending?: Fi
  */
 export type AttachmentsHandle = { uploadPending: (jobNo: string) => Promise<void> };
 
-export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function Attachments({ jobNo }, ref) {
+export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function Attachments(
+  { jobNo },
+  ref,
+) {
   const { push } = useToast();
   const confirm = useConfirm();
   const [rows, setRows] = React.useState<Row[]>([]);
   const [file, setFile] = React.useState<File | null>(null);
-  const [note, setNote] = React.useState("");
+  const [note, setNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const idRef = React.useRef(0);
   // files queued for a job not saved yet are an unsaved edit (they upload with the job)
@@ -37,8 +40,13 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
       return;
     }
     let active = true;
-    api<{ job: { attachments: { id: number; name: string; file: string; remark: string }[] } }>(`/api/jobs/${encodeURIComponent(jobNo)}`)
-      .then((d) => active && setRows(d.job.attachments.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file }))))
+    api<{ job: { attachments: { id: number; name: string; file: string; remark: string }[] } }>(
+      `/api/jobs/${encodeURIComponent(jobNo)}`,
+    )
+      .then(
+        (d) =>
+          active && setRows(d.job.attachments.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file }))),
+      )
       .catch(() => {});
     return () => {
       active = false;
@@ -47,10 +55,13 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
 
   const upload = async (target: string, f: File, remark: string) => {
     const fd = new FormData();
-    fd.append("file", f);
-    fd.append("jobNo", target);
-    fd.append("remark", remark);
-    return api<{ row: { id: number; name: string; file: string; remark: string } }>("/api/attachments", { method: "POST", body: fd });
+    fd.append('file', f);
+    fd.append('jobNo', target);
+    fd.append('remark', remark);
+    return api<{ row: { id: number; name: string; file: string; remark: string } }>('/api/attachments', {
+      method: 'POST',
+      body: fd,
+    });
   };
 
   React.useImperativeHandle(ref, () => ({
@@ -60,7 +71,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
         try {
           await upload(target, r.pending!, r.note);
         } catch (e) {
-          push({ kind: "error", title: `แนบไฟล์ ${r.name} ไม่สำเร็จ`, desc: errMsg(e) });
+          push({ kind: 'error', title: `แนบไฟล์ ${r.name} ไม่สำเร็จ`, desc: errMsg(e) });
         }
       }
       // the queue belonged to that job — the next new job starts with none (a failed file was toasted
@@ -72,14 +83,14 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
   const add = async () => {
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      push({ kind: "error", title: "ไฟล์ใหญ่เกิน 10MB", desc: file.name });
+      push({ kind: 'error', title: 'ไฟล์ใหญ่เกิน 10MB', desc: file.name });
       return;
     }
     if (!jobNo) {
       // queue until the job exists
-      setRows((r) => [...r, { id: -(++idRef.current), name: file.name, note, pending: file }]);
+      setRows((r) => [...r, { id: -++idRef.current, name: file.name, note, pending: file }]);
       setFile(null);
-      setNote("");
+      setNote('');
       return;
     }
     setBusy(true);
@@ -87,10 +98,10 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
       const d = await upload(jobNo, file, note);
       setRows((r) => [...r, { id: d.row.id, name: d.row.name, note: d.row.remark, file: d.row.file }]);
       setFile(null);
-      setNote("");
-      push({ kind: "success", title: "แนบไฟล์แล้ว", desc: d.row.name });
+      setNote('');
+      push({ kind: 'success', title: 'แนบไฟล์แล้ว', desc: d.row.name });
     } catch (e) {
-      push({ kind: "error", title: "แนบไฟล์ไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'แนบไฟล์ไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setBusy(false);
     }
@@ -102,34 +113,32 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
       return;
     }
     const ok = await confirm({
-      tone: "danger",
-      title: "ลบไฟล์แนบ?",
+      tone: 'danger',
+      title: 'ลบไฟล์แนบ?',
       description: (
         <>
           <span className="font-medium">{r.name}</span> จะถูกลบออกจากงานนี้ — ไฟล์ที่ลบแล้วกู้คืนไม่ได้ ต้องอัปโหลดใหม่
         </>
       ),
-      confirmLabel: "ลบไฟล์",
+      confirmLabel: 'ลบไฟล์',
     });
     if (!ok) return;
     try {
       await del(`/api/attachments/${r.id}`);
       setRows((s) => s.filter((x) => x.id !== r.id));
     } catch (e) {
-      push({ kind: "error", title: "ลบไฟล์ไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'ลบไฟล์ไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
-  const name = file?.name ?? "";
+  const name = file?.name ?? '';
 
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
           <Upload className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">
-            {name || "เลือกไฟล์แนบ (PDF, JPG, PNG — ไม่เกิน 10MB)"}
-          </span>
+          <span className="truncate">{name || 'เลือกไฟล์แนบ (PDF, JPG, PNG — ไม่เกิน 10MB)'}</span>
           <input
             type="file"
             className="hidden"
@@ -190,7 +199,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.note || "—"}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{r.note || '—'}</td>
                   <td className="px-3 py-2 text-center">
                     <button
                       onClick={() => remove(r)}

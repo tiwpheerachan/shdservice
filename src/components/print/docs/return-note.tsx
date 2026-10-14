@@ -1,25 +1,25 @@
-import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { db } from "@/db/client";
-import { appUser } from "@/db/schema";
-import { getJob } from "@/server/services/jobs";
-import { AutoPrint } from "@/components/print/auto-print";
-import { money } from "@/components/print/print-frame";
-import { RETURN_TERMS } from "@/lib/company";
-import { profileForDocument } from "@/server/services/document-profiles";
-import { bahtText } from "@/lib/thai-baht";
+import { notFound } from 'next/navigation';
+import { eq } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { appUser } from '@/db/schema';
+import { getJob } from '@/server/services/jobs';
+import { AutoPrint } from '@/components/print/auto-print';
+import { money } from '@/components/print/print-frame';
+import { RETURN_TERMS } from '@/lib/company';
+import { profileForDocument } from '@/server/services/document-profiles';
+import { bahtText } from '@/lib/thai-baht';
 
 const dmy = (s: string) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? "");
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : s || "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s || '';
 };
 const stamp = () => {
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
+  const p = (n: number) => String(n).padStart(2, '0');
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
-const or = (v: string | null | undefined, dash = "") => (v && v.trim() ? v : dash);
-const warrantyLabel = (w: string) => (w === "IN" ? "ในประกัน" : w === "OUT" ? "นอกประกัน" : w);
+const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : dash);
+const warrantyLabel = (w: string) => (w === 'IN' ? 'ในประกัน' : w === 'OUT' ? 'นอกประกัน' : w);
 
 /**
  * ใบส่งคืนสินค้า / RETURN & REPAIR NOTE — same form language as the quotation
@@ -33,12 +33,19 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
   const co = await profileForDocument(j.documentProfileId); // ออกเอกสารในนาม
   const c = j.customer;
   const parts = j.parts.filter((p) => p.statusId === 3 || p.granted > 0);
-  const [eng] = j.engineerId > 0
-    ? await db.select({ phone: appUser.phoneNo, email: appUser.emailAddress }).from(appUser).where(eq(appUser.userId, j.engineerId)).limit(1)
-    : [undefined];
-  const contactLine = [eng?.phone && `Tel. : ${eng.phone}`, eng?.email && `Email : ${eng.email}`].filter(Boolean).join("  ");
+  const [eng] =
+    j.engineerId > 0
+      ? await db
+          .select({ phone: appUser.phoneNo, email: appUser.emailAddress })
+          .from(appUser)
+          .where(eq(appUser.userId, j.engineerId))
+          .limit(1)
+      : [undefined];
+  const contactLine = [eng?.phone && `Tel. : ${eng.phone}`, eng?.email && `Email : ${eng.email}`]
+    .filter(Boolean)
+    .join('  ');
   const shipping = j.deliveryCost + j.boxCost;
-  const lbl = "text-neutral-700";
+  const lbl = 'text-neutral-700';
 
   return (
     <div className="print-page qt text-[11.5px] leading-[1.35] text-black">
@@ -78,7 +85,11 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
           <p>{co.address}</p>
           <p>
             โทรศัพท์ {co.phone}
-            {co.taxId && <>&nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span></>}
+            {co.taxId && (
+              <>
+                &nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span>
+              </>
+            )}
           </p>
         </div>
       </header>
@@ -117,11 +128,11 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
                   </tr>
                   <tr>
                     <td className="k">Model :</td>
-                    <td>{or([j.brand, j.modelName].filter(Boolean).join(" "))}</td>
+                    <td>{or([j.brand, j.modelName].filter(Boolean).join(' '))}</td>
                   </tr>
                   <tr>
                     <td className="k">IMEI / Serial :</td>
-                    <td className="num">{or([j.imei, j.serial].filter(Boolean).join(" / "))}</td>
+                    <td className="num">{or([j.imei, j.serial].filter(Boolean).join(' / '))}</td>
                   </tr>
                   <tr>
                     <td className="k">การรับประกัน :</td>
@@ -146,18 +157,22 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
                   <tr>
                     <td className="w-1/2 br pad">
                       <p>
-                        <span className="font-semibold">เลขที่ / No. :</span>&nbsp;&nbsp;<span className="num font-semibold">{j.no}</span>
+                        <span className="font-semibold">เลขที่ / No. :</span>&nbsp;&nbsp;
+                        <span className="num font-semibold">{j.no}</span>
                       </p>
                       <p className="mt-0.5">
-                        <span className={lbl}>วันที่ปิดงาน / Date :</span>&nbsp;&nbsp;<span className="num">{dmy(j.closedDate) || "—"}</span>
+                        <span className={lbl}>วันที่ปิดงาน / Date :</span>&nbsp;&nbsp;
+                        <span className="num">{dmy(j.closedDate) || '—'}</span>
                       </p>
                     </td>
                     <td className="pad">
                       <p>
-                        <span className={lbl}>วันที่รับเครื่อง :</span>&nbsp;&nbsp;<span className="num">{dmy(j.createDate)}</span>
+                        <span className={lbl}>วันที่รับเครื่อง :</span>&nbsp;&nbsp;
+                        <span className="num">{dmy(j.createDate)}</span>
                       </p>
                       <p className="mt-0.5">
-                        <span className={lbl}>วันที่ซ่อมเสร็จ :</span>&nbsp;&nbsp;<span className="num">{dmy(j.repairedDate) || "—"}</span>
+                        <span className={lbl}>วันที่ซ่อมเสร็จ :</span>&nbsp;&nbsp;
+                        <span className="num">{dmy(j.repairedDate) || '—'}</span>
                       </p>
                     </td>
                   </tr>
@@ -173,71 +188,127 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
         <tbody>
           <tr>
             <td className="k pt-1">อาการที่แจ้ง :</td>
-            <td className="pt-1">{or(j.symptoms.join(", ") || j.symptomOther, "—")}</td>
+            <td className="pt-1">{or(j.symptoms.join(', ') || j.symptomOther, '—')}</td>
           </tr>
           <tr>
             <td className="k">อาการที่ตรวจพบ :</td>
-            <td>{or(j.engineerSymptom, "—")}</td>
+            <td>{or(j.engineerSymptom, '—')}</td>
           </tr>
           <tr>
             <td className="k pb-1">วิธีการซ่อม :</td>
-            <td className="whitespace-pre-line pb-1">{or(j.repairDetail, "—")}{j.engineerRemark ? ` (${j.engineerRemark})` : ""}</td>
+            <td className="whitespace-pre-line pb-1">
+              {or(j.repairDetail, '—')}
+              {j.engineerRemark ? ` (${j.engineerRemark})` : ''}
+            </td>
           </tr>
         </tbody>
       </table>
 
       {/* ── parts ── */}
       <div className="items-wrap mt-1.5">
-      <table className="items">
-        <thead>
-          <tr>
-            <th className="w-[44px]">ลำดับ<br />No.</th>
-            <th>รายการอะไหล่ที่เปลี่ยน<br />Description</th>
-            <th className="w-[62px]">จำนวน<br />Qty.</th>
-            <th className="w-[92px]">ราคาต่อหน่วย<br />Unit Price</th>
-            <th className="w-[92px]">จำนวนเงิน<br />Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {parts.length === 0 && (
+        <table className="items">
+          <thead>
             <tr>
-              <td /><td className="text-neutral-500">— ไม่มีการเปลี่ยนอะไหล่ —</td><td /><td /><td />
+              <th className="w-[44px]">
+                ลำดับ
+                <br />
+                No.
+              </th>
+              <th>
+                รายการอะไหล่ที่เปลี่ยน
+                <br />
+                Description
+              </th>
+              <th className="w-[62px]">
+                จำนวน
+                <br />
+                Qty.
+              </th>
+              <th className="w-[92px]">
+                ราคาต่อหน่วย
+                <br />
+                Unit Price
+              </th>
+              <th className="w-[92px]">
+                จำนวนเงิน
+                <br />
+                Amount
+              </th>
             </tr>
-          )}
-          {parts.map((p, i) => {
-            const qty = p.granted || p.requested;
-            return (
-              <tr key={p.logId}>
-                <td className="num text-center">{i + 1}</td>
-                <td>
-                  <span className="num">{p.code} </span>
-                  {p.name}
-                  {!p.isQuotation && <span className="text-neutral-600"> (ในประกัน / ไม่คิดเงิน)</span>}
-                </td>
-                <td className="num text-center">{qty}</td>
-                <td className="num text-right">{money(p.isQuotation ? p.unitPrice : 0)}</td>
-                <td className="num text-right">{money(p.isQuotation ? qty * p.unitPrice : 0)}</td>
+          </thead>
+          <tbody>
+            {parts.length === 0 && (
+              <tr>
+                <td />
+                <td className="text-neutral-500">— ไม่มีการเปลี่ยนอะไหล่ —</td>
+                <td />
+                <td />
+                <td />
               </tr>
-            );
-          })}
-          <tr className="fill">
-            <td /><td /><td /><td /><td />
-          </tr>
-        </tbody>
-      </table>
+            )}
+            {parts.map((p, i) => {
+              const qty = p.granted || p.requested;
+              return (
+                <tr key={p.logId}>
+                  <td className="num text-center">{i + 1}</td>
+                  <td>
+                    <span className="num">{p.code} </span>
+                    {p.name}
+                    {!p.isQuotation && <span className="text-neutral-600"> (ในประกัน / ไม่คิดเงิน)</span>}
+                  </td>
+                  <td className="num text-center">{qty}</td>
+                  <td className="num text-right">{money(p.isQuotation ? p.unitPrice : 0)}</td>
+                  <td className="num text-right">{money(p.isQuotation ? qty * p.unitPrice : 0)}</td>
+                </tr>
+              );
+            })}
+            <tr className="fill">
+              <td />
+              <td />
+              <td />
+              <td />
+              <td />
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* ── return / payment + totals ── */}
       <table className="sum">
         <tbody>
           <tr>
-            <td rowSpan={6} style={{ width: "58%" }}>
+            <td rowSpan={6} style={{ width: '58%' }}>
               <table className="kv text-[11px]">
                 <tbody>
-                  <tr><td className="k">การส่งคืน :</td><td>{or(j.return.type, "—")}{j.return.date ? `  วันที่ ${dmy(j.return.date)}` : ""}</td></tr>
-                  <tr><td className="k">ขนส่ง / เลขพัสดุ :</td><td className="num">{[j.return.detail, j.return.tracking].filter(Boolean).join("  ·  ") || "—"}</td></tr>
-                  <tr><td className="k">ชำระเงิน :</td><td>{[j.payment.type, j.payment.amount ? `${money(j.payment.amount)} บาท` : "", j.payment.no ? `(เลขที่ ${j.payment.no})` : ""].filter(Boolean).join("  ") || "—"}</td></tr>
-                  {j.payment.detail && <tr><td className="k">รายละเอียด :</td><td>{j.payment.detail}</td></tr>}
+                  <tr>
+                    <td className="k">การส่งคืน :</td>
+                    <td>
+                      {or(j.return.type, '—')}
+                      {j.return.date ? `  วันที่ ${dmy(j.return.date)}` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="k">ขนส่ง / เลขพัสดุ :</td>
+                    <td className="num">{[j.return.detail, j.return.tracking].filter(Boolean).join('  ·  ') || '—'}</td>
+                  </tr>
+                  <tr>
+                    <td className="k">ชำระเงิน :</td>
+                    <td>
+                      {[
+                        j.payment.type,
+                        j.payment.amount ? `${money(j.payment.amount)} บาท` : '',
+                        j.payment.no ? `(เลขที่ ${j.payment.no})` : '',
+                      ]
+                        .filter(Boolean)
+                        .join('  ') || '—'}
+                    </td>
+                  </tr>
+                  {j.payment.detail && (
+                    <tr>
+                      <td className="k">รายละเอียด :</td>
+                      <td>{j.payment.detail}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </td>
@@ -265,7 +336,9 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
             <td className="num text-right font-bold">{money(j.totalCost)}</td>
           </tr>
           <tr>
-            <td className="words text-center font-semibold" colSpan={3}>({bahtText(j.totalCost)})</td>
+            <td className="words text-center font-semibold" colSpan={3}>
+              ({bahtText(j.totalCost)})
+            </td>
           </tr>
         </tbody>
       </table>
@@ -277,16 +350,28 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
             <td className="w-[58%] br sig text-center">
               <p className="text-[10.5px]">ได้ตรวจสอบและรับสินค้าคืนเรียบร้อยแล้ว</p>
               <p className="mt-3 font-semibold">ผู้รับสินค้า (ลูกค้า)</p>
-              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5"><span>(</span><span>)</span></p>
-              <p className="mt-2">วันที่ <span className="inline-block w-[120px] border-b border-black text-center">&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;</span></p>
+              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
+                <span>(</span>
+                <span>)</span>
+              </p>
+              <p className="mt-2">
+                วันที่{' '}
+                <span className="inline-block w-[120px] border-b border-black text-center">
+                  &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
+                </span>
+              </p>
             </td>
             <td className="sig">
-              <p className="text-center font-semibold">ในนาม<br />{co.nameTh}</p>
+              <p className="text-center font-semibold">
+                ในนาม
+                <br />
+                {co.nameTh}
+              </p>
               <div className="mt-5 flex items-end gap-2">
                 <span className="font-semibold">ผู้ส่งคืน / ช่าง :</span>
                 <span className="flex-1 border-b border-black" />
               </div>
-              <p className="mt-1 text-center">( {or(j.engineer, "—")} )</p>
+              <p className="mt-1 text-center">( {or(j.engineer, '—')} )</p>
               <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
             </td>
           </tr>

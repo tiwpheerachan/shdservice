@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import useSWR from "swr";
-import { api, errMsg } from "@/lib/api";
+import * as React from 'react';
+import useSWR from 'swr';
+import { api, errMsg } from '@/lib/api';
 
 /**
  * One record looked up by its number for the "ระบุหมายเลข… → แก้ไข" screens (jobs, quotations,
@@ -27,7 +27,7 @@ export function useRecord<T>(opts: {
   onRecord?: (record: T) => void;
 }) {
   const norm = (v: string) => v.trim().toUpperCase();
-  const [no, setNo] = React.useState(() => norm(opts.initial ?? ""));
+  const [no, setNo] = React.useState(() => norm(opts.initial ?? ''));
   const quiet = React.useRef(!!no); // the URL's record opens without a "found" toast
   const key = no ? opts.url(no) : null;
 
@@ -59,10 +59,11 @@ export function useRecord<T>(opts: {
       const n = norm(v);
       if (!n) return;
       quiet.current = false;
-      if (n === no) void mutate(); // the same number again → read it again
+      if (n === no)
+        void mutate(); // the same number again → read it again
       else setNo(n);
     },
-    [no, mutate]
+    [no, mutate],
   );
   const setData = (d: T) => {
     void mutate(d, { revalidate: false });

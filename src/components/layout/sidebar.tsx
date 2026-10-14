@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
-import { NAV as ALL_NAV, type NavGroup } from "@/lib/nav";
-import { Logo } from "@/components/shared/logo";
-import { cn } from "@/lib/utils";
-import { useAccess } from "@/lib/use-access";
+import * as React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { ChevronRight, Check, X, PanelLeftClose } from 'lucide-react';
+import { NAV as ALL_NAV, type NavGroup } from '@/lib/nav';
+import { Logo } from '@/components/shared/logo';
+import { cn } from '@/lib/utils';
+import { useAccess } from '@/lib/use-access';
 
 type Flyout = { id: string; top: number; left: number };
 
@@ -30,15 +30,11 @@ export function Sidebar({
       ALL_NAV.map((g) => ({ ...g, items: g.items.filter(canLink) }))
         .filter((g) => g.items.length > 0)
         .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : (g.items[0]?.href ?? g.href) })), // items non-empty (filtered above)
-    [canLink]
+    [canLink],
   );
-  const activeGroup = NAV.find((g) =>
-    g.items.some((i) => i.href === pathname)
-  )?.id;
+  const activeGroup = NAV.find((g) => g.items.some((i) => i.href === pathname))?.id;
 
-  const [open, setOpen] = React.useState<string[]>(
-    activeGroup ? [activeGroup] : ["jobs"]
-  );
+  const [open, setOpen] = React.useState<string[]>(activeGroup ? [activeGroup] : ['jobs']);
 
   // moving to a page of another group opens that group (adjusted while rendering; the user can
   // still close it — only a change of page re-opens)
@@ -48,8 +44,7 @@ export function Sidebar({
     if (activeGroup && !open.includes(activeGroup)) setOpen([...open, activeGroup]);
   }
 
-  const toggle = (id: string) =>
-    setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const toggle = (id: string) => setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   /* ---------- collapsed hover flyout ---------- */
   const [flyout, setFlyout] = React.useState<Flyout | null>(null);
@@ -94,24 +89,24 @@ export function Sidebar({
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground",
-          "border-r border-sidebar-border shadow-xs transition-[width,transform] duration-200 ease-out no-print",
-          collapsed ? "lg:w-[72px]" : "lg:w-[268px]",
-          "w-[268px]",
-          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          'fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground',
+          'border-r border-sidebar-border shadow-xs transition-[width,transform] duration-200 ease-out no-print',
+          collapsed ? 'lg:w-[72px]' : 'lg:w-[268px]',
+          'w-[268px]',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         )}
       >
         {/* brand */}
         <div
           className={cn(
-            "flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-sidebar-border",
-            collapsed ? "justify-center px-0" : "px-3"
+            'flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-sidebar-border',
+            collapsed ? 'justify-center px-0' : 'px-3',
           )}
         >
           {collapsed ? (
             <div
               className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-xs ring-1 ring-inset ring-white/15"
-              style={{ background: "linear-gradient(135deg,#43a6f8,#55d5a1)" }}
+              style={{ background: 'linear-gradient(135deg,#43a6f8,#55d5a1)' }}
             >
               <Check className="h-5 w-5" strokeWidth={3} />
             </div>
@@ -156,11 +151,11 @@ export function Sidebar({
                       onToggleCollapse();
                     }}
                     className={cn(
-                      "flex h-11 w-full items-center justify-center rounded-xl transition-colors",
+                      'flex h-11 w-full items-center justify-center rounded-xl transition-colors',
                       groupActive || flyout?.id === g.id
-                        ? "bg-primary/12 text-primary"
-                        : "text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                      groupActive && "bg-primary text-primary-foreground shadow-xs hover:bg-primary"
+                        ? 'bg-primary/12 text-primary'
+                        : 'text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                      groupActive && 'bg-primary text-primary-foreground shadow-xs hover:bg-primary',
                     )}
                   >
                     <Icon className="h-[19px] w-[19px]" />
@@ -170,18 +165,18 @@ export function Sidebar({
                     onClick={() => toggle(g.id)}
                     aria-expanded={isOpen}
                     className={cn(
-                      "group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-colors",
+                      'group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-colors',
                       groupActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                     )}
                   >
                     <span
                       className={cn(
-                        "grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors",
+                        'grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors',
                         groupActive
-                          ? "bg-primary/15 text-primary"
-                          : "text-sidebar-muted group-hover:text-sidebar-foreground"
+                          ? 'bg-primary/15 text-primary'
+                          : 'text-sidebar-muted group-hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-[17px] w-[17px]" />
@@ -189,18 +184,16 @@ export function Sidebar({
                     <span className="flex-1 truncate text-left">{g.title}</span>
                     <span
                       className={cn(
-                        "num rounded-full px-1.5 py-px text-2xs tabular-nums",
-                        groupActive
-                          ? "bg-primary/15 text-primary"
-                          : "text-sidebar-muted"
+                        'num rounded-full px-1.5 py-px text-2xs tabular-nums',
+                        groupActive ? 'bg-primary/15 text-primary' : 'text-sidebar-muted',
                       )}
                     >
                       {g.no}
                     </span>
                     <ChevronRight
                       className={cn(
-                        "h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-transform duration-200",
-                        isOpen && "rotate-90"
+                        'h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-transform duration-200',
+                        isOpen && 'rotate-90',
                       )}
                     />
                   </button>
@@ -209,8 +202,8 @@ export function Sidebar({
                 {!collapsed && (
                   <div
                     className={cn(
-                      "grid transition-[grid-template-rows] duration-200 ease-out",
-                      isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                      'grid transition-[grid-template-rows] duration-200 ease-out',
+                      isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
                     )}
                   >
                     <div className="overflow-hidden">
@@ -223,10 +216,10 @@ export function Sidebar({
                                 href={i.href}
                                 onClick={onCloseMobile}
                                 className={cn(
-                                  "relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                                  'relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                                   active
-                                    ? "bg-primary/10 font-medium text-primary"
-                                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                    ? 'bg-primary/10 font-medium text-primary'
+                                    : 'text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                                 )}
                               >
                                 {active && (
@@ -250,13 +243,11 @@ export function Sidebar({
           <button
             onClick={onToggleCollapse}
             className={cn(
-              "hidden w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex",
-              collapsed && "justify-center"
+              'hidden w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex',
+              collapsed && 'justify-center',
             )}
           >
-            <PanelLeftClose
-              className={cn("h-4 w-4 transition-transform", collapsed && "rotate-180")}
-            />
+            <PanelLeftClose className={cn('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
             {!collapsed && <span>ย่อเมนู</span>}
           </button>
         </div>
@@ -276,9 +267,7 @@ export function Sidebar({
             <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/12 text-primary">
               {FlyoutIcon && <FlyoutIcon className="h-3.5 w-3.5" />}
             </span>
-            <span className="truncate text-xs font-semibold text-foreground">
-              {flyoutGroup.title}
-            </span>
+            <span className="truncate text-xs font-semibold text-foreground">{flyoutGroup.title}</span>
           </div>
           <div className="my-1 h-px bg-border" />
           <ul className="max-h-[70vh] space-y-0.5 overflow-y-auto">
@@ -291,10 +280,10 @@ export function Sidebar({
                     href={i.href}
                     onClick={() => setFlyout(null)}
                     className={cn(
-                      "block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                      'block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                       active
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        ? 'bg-primary/10 font-medium text-primary'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                     )}
                   >
                     {i.title}

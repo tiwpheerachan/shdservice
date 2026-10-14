@@ -1,11 +1,11 @@
-import "server-only";
-import { and, asc, eq, isNull, ne } from "drizzle-orm";
-import { db } from "@/db/client";
-import { shippingProfile } from "@/db/schema";
-import { HttpError } from "@/server/auth";
-import { audit, diff } from "@/server/audit";
-import { cached, invalidate, TTL_MASTER } from "@/server/cache";
-import { nowThai } from "@/server/mappers/format";
+import 'server-only';
+import { and, asc, eq, isNull, ne } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { shippingProfile } from '@/db/schema';
+import { HttpError } from '@/server/auth';
+import { audit, diff } from '@/server/audit';
+import { cached, invalidate, TTL_MASTER } from '@/server/cache';
+import { nowThai } from '@/server/mappers/format';
 
 /**
  * "โปรไฟล์บริษัทขนส่ง" (drizzle/0013) — the courier a repaired device is shipped
@@ -34,7 +34,7 @@ const toProfile = (r: Row): ShippingProfile => ({
   nameTh: r.nameTh,
   nameEn: r.nameEn,
   logoPath: r.logoPath,
-  logoUrl: r.logoPath ? `/api/files?path=${encodeURIComponent(r.logoPath)}` : "",
+  logoUrl: r.logoPath ? `/api/files?path=${encodeURIComponent(r.logoPath)}` : '',
   trackUrl: r.trackUrl,
   isActive: r.isActive,
   isDeleted: !!r.deletedAt,
@@ -59,9 +59,9 @@ export async function getShippingProfile(id: number | null | undefined): Promise
 }
 
 /** final URL for a parcel, or "" when the courier has no template */
-export function trackUrlFor(profile: Pick<ShippingProfile, "trackUrl"> | null, trackingNo: string): string {
-  const no = (trackingNo ?? "").trim();
-  if (!profile?.trackUrl || !no) return "";
+export function trackUrlFor(profile: Pick<ShippingProfile, 'trackUrl'> | null, trackingNo: string): string {
+  const no = (trackingNo ?? '').trim();
+  if (!profile?.trackUrl || !no) return '';
   return profile.trackUrl.replace(/\{no\}/gi, encodeURIComponent(no));
 }
 
@@ -75,16 +75,16 @@ export type ShippingProfileInput = {
   sortOrder?: number;
 };
 
-const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
 export async function saveShippingProfile(i: ShippingProfileInput, byUserId: number): Promise<ShippingProfile> {
   const code = str(i.code, 20).toUpperCase();
   const nameTh = str(i.nameTh);
   const trackUrl = str(i.trackUrl, 300);
-  if (!code) throw new HttpError(400, "ต้องระบุรหัส (เช่น FLASH)");
-  if (!nameTh) throw new HttpError(400, "ต้องระบุชื่อบริษัทขนส่ง");
-  if (trackUrl && !/^https:\/\//i.test(trackUrl)) throw new HttpError(400, "ลิงก์ติดตามต้องขึ้นต้นด้วย https://");
-  if (trackUrl && !/\{no\}/i.test(trackUrl)) throw new HttpError(400, "ลิงก์ติดตามต้องมี {no} ตรงตำแหน่งเลขพัสดุ");
+  if (!code) throw new HttpError(400, 'ต้องระบุรหัส (เช่น FLASH)');
+  if (!nameTh) throw new HttpError(400, 'ต้องระบุชื่อบริษัทขนส่ง');
+  if (trackUrl && !/^https:\/\//i.test(trackUrl)) throw new HttpError(400, 'ลิงก์ติดตามต้องขึ้นต้นด้วย https://');
+  if (trackUrl && !/\{no\}/i.test(trackUrl)) throw new HttpError(400, 'ลิงก์ติดตามต้องมี {no} ตรงตำแหน่งเลขพัสดุ');
 
   const values = {
     code,
@@ -106,21 +106,21 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
     let before: Row | undefined;
     if (i.id) {
       [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, i.id)).limit(1);
-      if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
+      if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     }
     const [row] = before
       ? await tx.update(shippingProfile).set(values).where(eq(shippingProfile.id, before.id)).returning()
       : await tx.insert(shippingProfile).values(values).returning();
-    if (!row) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (!row) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await audit(tx, byUserId, {
-      action: before ? "UPDATE" : "CREATE",
-      module: "Admin",
-      entity: "shipping_profile",
+      action: before ? 'UPDATE' : 'CREATE',
+      module: 'Admin',
+      entity: 'shipping_profile',
       key: row.id,
-      summary: `${before ? "แก้ไข" : "เพิ่ม"}โปรไฟล์บริษัทขนส่ง ${row.code} ${row.nameTh}`,
+      summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์บริษัทขนส่ง ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
-    invalidate("shippers:");
+    invalidate('shippers:');
     return toProfile(row);
   });
 }
@@ -129,36 +129,36 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
 export async function deleteShippingProfile(id: number, byUserId: number): Promise<void> {
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
-    if (!before || before.deletedAt) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx
       .update(shippingProfile)
       .set({ deletedAt: nowThai(), deletedBy: byUserId, updatedAt: nowThai() })
       .where(eq(shippingProfile.id, id));
     await audit(tx, byUserId, {
-      action: "DELETE",
-      module: "Admin",
-      entity: "shipping_profile",
+      action: 'DELETE',
+      module: 'Admin',
+      entity: 'shipping_profile',
       key: id,
       summary: `ลบโปรไฟล์บริษัทขนส่ง ${before.code} — ${before.nameTh}`,
       changes: { deletedAt: [null, nowThai()] },
     });
   });
-  invalidate("shippers:");
+  invalidate('shippers:');
 }
 
 export async function setShippingProfileLogo(id: number, logoPath: string, byUserId: number): Promise<void> {
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
-    if (!before) throw new HttpError(404, "ไม่พบโปรไฟล์");
+    if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(shippingProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(shippingProfile.id, id));
     await audit(tx, byUserId, {
-      action: "UPDATE",
-      module: "Admin",
-      entity: "shipping_profile",
+      action: 'UPDATE',
+      module: 'Admin',
+      entity: 'shipping_profile',
       key: id,
       summary: `เปลี่ยนโลโก้บริษัทขนส่ง ${before.code}`,
       changes: { logoPath: [before.logoPath, logoPath] },
     });
   });
-  invalidate("shippers:");
+  invalidate('shippers:');
 }

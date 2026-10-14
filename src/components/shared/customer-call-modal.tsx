@@ -1,38 +1,26 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import {
-  Phone,
-  Mail,
-  MapPin,
-  MessageSquare,
-  Hash,
-  Copy,
-  Check,
-  IdCard,
-  Plus,
-  Clock,
-  User,
-} from "lucide-react";
-import { Modal } from "@/components/ui/modal";
-import { Button } from "@/components/ui/button";
-import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Tabs } from "@/components/ui/tabs";
-import { useToast } from "@/components/ui/toast";
-import { useApi, useJobs } from "@/data/db";
-import type { Customer } from "@/data/mock";
-import { baht, cn } from "@/lib/utils";
-import { postJson, errMsg } from "@/lib/api";
+import * as React from 'react';
+import { Phone, Mail, MapPin, MessageSquare, Hash, Copy, Check, IdCard, Plus, Clock, User } from 'lucide-react';
+import { Modal } from '@/components/ui/modal';
+import { Button } from '@/components/ui/button';
+import { Badge, StatusBadge } from '@/components/ui/badge';
+import { Tabs } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
+import { useApi, useJobs } from '@/data/db';
+import type { Customer } from '@/data/mock';
+import { baht, cn } from '@/lib/utils';
+import { postJson, errMsg } from '@/lib/api';
 
 type CallLog = { id: number; detail: string; date: string; by: string };
 
 // job_status_group Finished/Repaired = done
-const DONE_GROUPS = new Set(["Finished", "Repaired"]);
+const DONE_GROUPS = new Set(['Finished', 'Repaired']);
 
 function initials(name: string) {
-  const clean = name.replace(/^(คุณ|บริษัท|ห้างหุ้นส่วนจำกัด|ร้าน)\s*/u, "").trim();
+  const clean = name.replace(/^(คุณ|บริษัท|ห้างหุ้นส่วนจำกัด|ร้าน)\s*/u, '').trim();
   const parts = clean.split(/\s+/).filter(Boolean);
-  return (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return (parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '');
 }
 
 function InfoRow({
@@ -53,7 +41,7 @@ function InfoRow({
       </span>
       <div className="min-w-0">
         <p className="text-2xs text-muted-foreground">{label}</p>
-        <p className={cn("wrap-break-word text-sm text-foreground", mono && "num")}>
+        <p className={cn('wrap-break-word text-sm text-foreground', mono && 'num')}>
           {value?.trim() ? value : <span className="text-muted-foreground/60">—</span>}
         </p>
       </div>
@@ -74,29 +62,33 @@ export function CustomerCallModal({
 }) {
   const { push } = useToast();
   // job history of this customer (server-filtered by customer code)
-  const { data: JOBS } = useJobs(customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 });
-  const [tab, setTab] = React.useState("history");
-  const [text, setText] = React.useState("");
+  const { data: JOBS } = useJobs(
+    customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 },
+  );
+  const [tab, setTab] = React.useState('history');
+  const [text, setText] = React.useState('');
   const [copied, setCopied] = React.useState(false);
 
   // opened again / another job or customer → the draft starts clean (adjusted while rendering)
-  const session = `${open ? 1 : 0}|${jobNo ?? ""}|${customer?.code ?? ""}`;
+  const session = `${open ? 1 : 0}|${jobNo ?? ''}|${customer?.code ?? ''}`;
   const [seenSession, setSeenSession] = React.useState(session);
   if (seenSession !== session) {
     setSeenSession(session);
-    setText("");
+    setText('');
     setCopied(false);
-    setTab("history");
+    setTab('history');
   }
 
   // this job's call log (job_call_log), read fresh every time the dialog opens
-  const calls = useApi<{ rows: CallLog[] }>(open && jobNo ? `/api/jobs/${encodeURIComponent(jobNo)}/calls` : null, { fresh: true });
-  const log = React.useMemo(() => (open && jobNo ? calls.data?.rows ?? [] : []), [open, jobNo, calls.data]);
+  const calls = useApi<{ rows: CallLog[] }>(open && jobNo ? `/api/jobs/${encodeURIComponent(jobNo)}/calls` : null, {
+    fresh: true,
+  });
+  const log = React.useMemo(() => (open && jobNo ? (calls.data?.rows ?? []) : []), [open, jobNo, calls.data]);
 
   const history = React.useMemo(() => (customer ? JOBS : []), [JOBS, customer]);
   const hist = {
     total: history.length,
-    done: history.filter((j) => DONE_GROUPS.has(j.statusGroup ?? "")).length,
+    done: history.filter((j) => DONE_GROUPS.has(j.statusGroup ?? '')).length,
     value: history.reduce((s, j) => s + j.amount, 0),
   };
 
@@ -106,10 +98,10 @@ export function CustomerCallModal({
     try {
       const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
       void calls.mutate(d, { revalidate: false }); // the server answers with the updated log
-      setText("");
-      push({ kind: "success", title: "เพิ่มบันทึกการโทรแล้ว", desc: jobNo });
+      setText('');
+      push({ kind: 'success', title: 'เพิ่มบันทึกการโทรแล้ว', desc: jobNo });
     } catch (e) {
-      push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
@@ -120,7 +112,7 @@ export function CustomerCallModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      push({ kind: "error", title: "คัดลอกไม่สำเร็จ" });
+      push({ kind: 'error', title: 'คัดลอกไม่สำเร็จ' });
     }
   };
 
@@ -138,9 +130,7 @@ export function CustomerCallModal({
       }
     >
       {!customer ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          ไม่พบข้อมูลลูกค้าสำหรับงานนี้
-        </p>
+        <p className="py-8 text-center text-sm text-muted-foreground">ไม่พบข้อมูลลูกค้าสำหรับงานนี้</p>
       ) : (
         <div className="space-y-5">
           {/* identity header */}
@@ -153,29 +143,21 @@ export function CustomerCallModal({
               <p className="num mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Hash className="h-3 w-3" />
                 {customer.code}
-                <Badge
-                  tone={customer.status === "Active" ? "success" : "neutral"}
-                  dot
-                  className="ml-1"
-                >
+                <Badge tone={customer.status === 'Active' ? 'success' : 'neutral'} dot className="ml-1">
                   {customer.status}
                 </Badge>
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <a href={`tel:${customer.phone.replace(/[^0-9+]/g, "")}`}>
+              <a href={`tel:${customer.phone.replace(/[^0-9+]/g, '')}`}>
                 <Button size="sm">
                   <Phone className="h-3.5 w-3.5" />
                   โทร
                 </Button>
               </a>
               <Button size="sm" variant="outline" onClick={copyPhone}>
-                {copied ? (
-                  <Check className="h-3.5 w-3.5 text-success" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-                {copied ? "คัดลอกแล้ว" : "คัดลอกเบอร์"}
+                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? 'คัดลอกแล้ว' : 'คัดลอกเบอร์'}
               </Button>
             </div>
           </div>
@@ -197,13 +179,13 @@ export function CustomerCallModal({
               value={tab}
               onChange={setTab}
               tabs={[
-                { key: "history", label: `ประวัติงาน (${hist.total})` },
-                { key: "calls", label: `Call Log (${log.length})` },
+                { key: 'history', label: `ประวัติงาน (${hist.total})` },
+                { key: 'calls', label: `Call Log (${log.length})` },
               ]}
             />
           </div>
 
-          {tab === "history" ? (
+          {tab === 'history' ? (
             <div className="space-y-3">
               {/* history summary */}
               <div className="grid grid-cols-3 gap-2.5">
@@ -213,15 +195,11 @@ export function CustomerCallModal({
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                   <p className="text-2xs text-muted-foreground">ปิดงาน / เสร็จ</p>
-                  <p className="num text-lg font-semibold tabular-nums text-success">
-                    {hist.done}
-                  </p>
+                  <p className="num text-lg font-semibold tabular-nums text-success">{hist.done}</p>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                   <p className="text-2xs text-muted-foreground">มูลค่ารวม</p>
-                  <p className="num text-lg font-semibold tabular-nums text-primary">
-                    {baht(hist.value)}
-                  </p>
+                  <p className="num text-lg font-semibold tabular-nums text-primary">{baht(hist.value)}</p>
                 </div>
               </div>
 
@@ -241,32 +219,20 @@ export function CustomerCallModal({
                     <tbody>
                       {history.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan={6}
-                            className="px-3 py-8 text-center text-xs text-muted-foreground"
-                          >
+                          <td colSpan={6} className="px-3 py-8 text-center text-xs text-muted-foreground">
                             ลูกค้ารายนี้ยังไม่มีประวัติงานในระบบ
                           </td>
                         </tr>
                       ) : (
                         history.map((j) => (
-                          <tr
-                            key={j.no}
-                            className="border-b border-border/70 last:border-0 hover:bg-accent/50"
-                          >
-                            <td className="num px-3 py-2 font-medium text-primary">
-                              {j.no}
-                            </td>
-                            <td className="num px-3 py-2 text-xs text-muted-foreground">
-                              {j.openDate.slice(0, 10)}
-                            </td>
+                          <tr key={j.no} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
+                            <td className="num px-3 py-2 font-medium text-primary">{j.no}</td>
+                            <td className="num px-3 py-2 text-xs text-muted-foreground">{j.openDate.slice(0, 10)}</td>
                             <td className="px-3 py-2">{j.brandModel}</td>
                             <td className="px-3 py-2 text-xs">
                               <Badge tone="primary">{j.jobType}</Badge>
                             </td>
-                            <td className="num px-3 py-2 text-right tabular-nums">
-                              {baht(j.amount)}
-                            </td>
+                            <td className="num px-3 py-2 text-right tabular-nums">{baht(j.amount)}</td>
                             <td className="px-3 py-2">
                               <StatusBadge status={j.status} />
                             </td>
@@ -284,63 +250,59 @@ export function CustomerCallModal({
                 <MessageSquare className="h-4 w-4 text-primary" />
                 บันทึกการโทร (Call Log)
                 {log.length > 0 && (
-                  <span className="num rounded-full bg-primary/10 px-1.5 text-2xs text-primary">
-                    {log.length}
-                  </span>
+                  <span className="num rounded-full bg-primary/10 px-1.5 text-2xs text-primary">{log.length}</span>
                 )}
               </div>
 
               <div className="flex gap-2">
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addLog()}
-                placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
-                className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <Button size="sm" onClick={addLog}>
-                <Plus className="h-3.5 w-3.5" />
-                เพิ่มรายการ
-              </Button>
-            </div>
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addLog()}
+                  placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
+                  className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <Button size="sm" onClick={addLog}>
+                  <Plus className="h-3.5 w-3.5" />
+                  เพิ่มรายการ
+                </Button>
+              </div>
 
-            <div className="mt-3 overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                    <th className="w-10 px-3 py-2 text-center">#</th>
-                    <th className="px-3 py-2 text-left">รายละเอียด</th>
-                    <th className="w-36 px-3 py-2 text-left">วันที่</th>
-                    <th className="w-32 px-3 py-2 text-left">โดย</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {log.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                        ยังไม่มีบันทึกการโทร — เพิ่มรายการแรกได้เลย
-                      </td>
+              <div className="mt-3 overflow-hidden rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
+                      <th className="w-10 px-3 py-2 text-center">#</th>
+                      <th className="px-3 py-2 text-left">รายละเอียด</th>
+                      <th className="w-36 px-3 py-2 text-left">วันที่</th>
+                      <th className="w-32 px-3 py-2 text-left">โดย</th>
                     </tr>
-                  ) : (
-                    log.map((l, i) => (
-                      <tr key={l.id} className="border-b border-border/70 last:border-0">
-                        <td className="num px-3 py-2 text-center text-muted-foreground">
-                          {log.length - i}
+                  </thead>
+                  <tbody>
+                    {log.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                          ยังไม่มีบันทึกการโทร — เพิ่มรายการแรกได้เลย
                         </td>
-                        <td className="px-3 py-2">{l.detail}</td>
-                        <td className="num px-3 py-2 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {l.date}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-xs">{l.by}</td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ) : (
+                      log.map((l, i) => (
+                        <tr key={l.id} className="border-b border-border/70 last:border-0">
+                          <td className="num px-3 py-2 text-center text-muted-foreground">{log.length - i}</td>
+                          <td className="px-3 py-2">{l.detail}</td>
+                          <td className="num px-3 py-2 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {l.date}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-xs">{l.by}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

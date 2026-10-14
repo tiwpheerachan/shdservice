@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { AlertTriangle, Info } from "lucide-react";
-import { Modal } from "./modal";
-import { Button } from "./button";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { AlertTriangle, Info } from 'lucide-react';
+import { Modal } from './modal';
+import { Button } from './button';
+import { cn } from '@/lib/utils';
 
 /**
  * App-wide confirmation dialog — a promise-based drop-in for `window.confirm`:
@@ -22,7 +22,7 @@ export type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   /** danger = red confirm button (delete / cancel a document); default = primary */
-  tone?: "danger" | "default";
+  tone?: 'danger' | 'default';
 };
 
 type Pending = ConfirmOptions & { resolve: (ok: boolean) => void };
@@ -39,13 +39,13 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
           return { ...o, resolve };
         });
       }),
-    []
+    [],
   );
   const settle = (ok: boolean) => {
     pending?.resolve(ok);
     setPending(null);
   };
-  const danger = pending?.tone === "danger";
+  const danger = pending?.tone === 'danger';
 
   return (
     <Ctx.Provider value={confirm}>
@@ -53,24 +53,31 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
       <Modal
         open={!!pending}
         onClose={() => settle(false)}
-        title={pending?.title ?? ""}
+        title={pending?.title ?? ''}
         size="sm"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => settle(false)}>
-              {pending?.cancelLabel ?? "ยกเลิก"}
+              {pending?.cancelLabel ?? 'ยกเลิก'}
             </Button>
-            <Button variant={danger ? "danger" : "primary"} size="sm" autoFocus onClick={() => settle(true)}>
-              {pending?.confirmLabel ?? (danger ? "ยืนยันลบ" : "ยืนยัน")}
+            <Button variant={danger ? 'danger' : 'primary'} size="sm" autoFocus onClick={() => settle(true)}>
+              {pending?.confirmLabel ?? (danger ? 'ยืนยันลบ' : 'ยืนยัน')}
             </Button>
           </>
         }
       >
         <div className="flex gap-3">
-          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", danger ? "bg-danger-soft text-danger" : "bg-primary-soft text-primary")}>
+          <span
+            className={cn(
+              'grid h-9 w-9 shrink-0 place-items-center rounded-lg',
+              danger ? 'bg-danger-soft text-danger' : 'bg-primary-soft text-primary',
+            )}
+          >
             {danger ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
           </span>
-          <div className="min-w-0 text-sm leading-relaxed text-foreground/90">{pending?.description ?? "ต้องการดำเนินการต่อหรือไม่?"}</div>
+          <div className="min-w-0 text-sm leading-relaxed text-foreground/90">
+            {pending?.description ?? 'ต้องการดำเนินการต่อหรือไม่?'}
+          </div>
         </div>
       </Modal>
     </Ctx.Provider>
@@ -79,6 +86,6 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 
 export function useConfirm() {
   const c = React.useContext(Ctx);
-  if (!c) throw new Error("useConfirm() must be used inside <ConfirmProvider>");
+  if (!c) throw new Error('useConfirm() must be used inside <ConfirmProvider>');
   return c;
 }

@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import type { z } from "zod";
-import { ApiError, isStale } from "@/lib/api";
-import { useToast } from "@/components/ui/toast";
-import { summary, validate, type FieldErrors } from "@/lib/validation";
+import * as React from 'react';
+import type { z } from 'zod';
+import { ApiError, isStale } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
+import { summary, validate, type FieldErrors } from '@/lib/validation';
 
 /**
  * Form errors shown the same way everywhere:
@@ -40,11 +40,15 @@ export function useFormErrors() {
     (e: FieldErrors, title?: string) => {
       const msgs = Object.values(e);
       if (!msgs.length) return false;
-      push({ kind: "error", title: title ?? summary(e), desc: msgs.slice(0, 3).join(" · ") + (msgs.length > 3 ? " …" : "") });
+      push({
+        kind: 'error',
+        title: title ?? summary(e),
+        desc: msgs.slice(0, 3).join(' · ') + (msgs.length > 3 ? ' …' : ''),
+      });
       focusFirstInvalid();
       return true;
     },
-    [push]
+    [push],
   );
 
   /** an API answer with field errors → shown under the fields; a stale-version 409 → toast with
@@ -53,10 +57,10 @@ export function useFormErrors() {
     (err: unknown) => {
       if (isStale(err)) {
         push({
-          kind: "error",
+          kind: 'error',
           title: (err as ApiError).message,
-          desc: "ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง",
-          action: { label: "โหลดใหม่", onClick: () => window.location.reload() },
+          desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง',
+          action: { label: 'โหลดใหม่', onClick: () => window.location.reload() },
         });
         return true;
       }
@@ -66,7 +70,7 @@ export function useFormErrors() {
       report(fields, (err as ApiError).message); // the API's own summary ("กรอกข้อมูลไม่ครบ …" / "…มีลูกค้าอยู่แล้ว")
       return true;
     },
-    [report, push]
+    [report, push],
   );
 
   return { errors, setErrors, run, clear, report, fromApi };
@@ -76,7 +80,7 @@ export function useFormErrors() {
 export function apiFieldErrors(err: unknown): FieldErrors | null {
   if (!(err instanceof ApiError) || (err.status !== 400 && err.status !== 409)) return null;
   const f = (err.details as { fields?: unknown } | undefined)?.fields;
-  return f && typeof f === "object" && Object.keys(f).length ? (f as FieldErrors) : null;
+  return f && typeof f === 'object' && Object.keys(f).length ? (f as FieldErrors) : null;
 }
 
 /** after React has painted the errors: bring the first invalid control into view and focus it */
@@ -84,7 +88,7 @@ export function focusFirstInvalid() {
   requestAnimationFrame(() => {
     const el = document.querySelector<HTMLElement>('main [aria-invalid="true"], [role="dialog"] [aria-invalid="true"]');
     if (!el) return;
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.focus({ preventScroll: true });
   });
 }

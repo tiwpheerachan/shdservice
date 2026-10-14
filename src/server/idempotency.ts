@@ -1,8 +1,8 @@
-import "server-only";
-import { NextResponse, type NextRequest } from "next/server";
-import { sql } from "drizzle-orm";
-import { db } from "@/db/client";
-import { HttpError } from "@/server/http-error";
+import 'server-only';
+import { NextResponse, type NextRequest } from 'next/server';
+import { sql } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { HttpError } from '@/server/http-error';
 
 /**
  * Idempotency-Key on create POSTs (drizzle/0026 idempotency_key). The client sends one key per
@@ -14,9 +14,9 @@ import { HttpError } from "@/server/http-error";
  * No header → `fn` runs exactly as before.
  */
 export async function idempotent(req: NextRequest, userId: number, fn: () => Promise<Response>): Promise<Response> {
-  const key = req.headers.get("idempotency-key")?.trim();
+  const key = req.headers.get('idempotency-key')?.trim();
   if (!key) return fn();
-  if (key.length > 100) throw new HttpError(400, "Idempotency-Key ยาวเกินไป");
+  if (key.length > 100) throw new HttpError(400, 'Idempotency-Key ยาวเกินไป');
   const route = `${req.method} ${req.nextUrl.pathname}`.slice(0, 200);
 
   await db.execute(sql`DELETE FROM idempotency_key WHERE created_at < now() - interval '24 hours'`); // purge as we go
@@ -30,15 +30,17 @@ export async function idempotent(req: NextRequest, userId: number, fn: () => Pro
   if (!claimed.rows.length) {
     const [hit] = (
       await db.execute<{ route: string; status: number | null; response: unknown }>(
-        sql`SELECT route, status, response FROM idempotency_key WHERE user_id = ${userId} AND key = ${key}`
+        sql`SELECT route, status, response FROM idempotency_key WHERE user_id = ${userId} AND key = ${key}`,
       )
     ).rows;
-    if (hit && hit.route !== route) throw new HttpError(422, "Idempotency-Key นี้ใช้กับคำขออื่นไปแล้ว");
-    if (!hit || hit.response === null) throw new HttpError(409, "กำลังบันทึกรายการนี้อยู่ กรุณารอสักครู่แล้วลองอีกครั้ง");
-    return NextResponse.json(hit.response, { status: hit.status ?? 200, headers: { "Idempotent-Replayed": "true" } });
+    if (hit && hit.route !== route) throw new HttpError(422, 'Idempotency-Key นี้ใช้กับคำขออื่นไปแล้ว');
+    if (!hit || hit.response === null)
+      throw new HttpError(409, 'กำลังบันทึกรายการนี้อยู่ กรุณารอสักครู่แล้วลองอีกครั้ง');
+    return NextResponse.json(hit.response, { status: hit.status ?? 200, headers: { 'Idempotent-Replayed': 'true' } });
   }
 
-  const release = () => db.execute(sql`DELETE FROM idempotency_key WHERE user_id = ${userId} AND key = ${key} AND response IS NULL`);
+  const release = () =>
+    db.execute(sql`DELETE FROM idempotency_key WHERE user_id = ${userId} AND key = ${key} AND response IS NULL`);
   let res: Response;
   try {
     res = await fn();
@@ -51,6 +53,8 @@ export async function idempotent(req: NextRequest, userId: number, fn: () => Pro
     return res;
   }
   const body: unknown = await res.clone().json();
-  await db.execute(sql`UPDATE idempotency_key SET status = ${res.status}, response = ${JSON.stringify(body)}::jsonb WHERE user_id = ${userId} AND key = ${key}`);
+  await db.execute(
+    sql`UPDATE idempotency_key SET status = ${res.status}, response = ${JSON.stringify(body)}::jsonb WHERE user_id = ${userId} AND key = ${key}`,
+  );
   return res;
 }

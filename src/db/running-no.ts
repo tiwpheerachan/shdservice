@@ -1,8 +1,8 @@
-import "server-only";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { runningNo } from "./schema";
-import type { Tx } from "./client";
-import { thaiYear } from "@/server/mappers/format";
+import 'server-only';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { runningNo } from './schema';
+import type { Tx } from './client';
+import { thaiYear } from '@/server/mappers/format';
 
 /**
  * Document numbers come from the legacy `running_no` table:
@@ -17,24 +17,17 @@ import { thaiYear } from "@/server/mappers/format";
  * profile (SHD = 1 keeps the legacy J / Q / SO). Everything else is one series.
  */
 export type RunningType =
-  | "Job"
-  | "Quotation"
-  | "SaleOrder"
-  | "Inventory-In"
-  | "Inventory-Out"
-  | "Customer"
-  | "Product"
-  | "Model";
+  'Job' | 'Quotation' | 'SaleOrder' | 'Inventory-In' | 'Inventory-Out' | 'Customer' | 'Product' | 'Model';
 
 const DEFAULTS: Record<RunningType, { prefix: string; yearly: boolean; len: number }> = {
-  Job: { prefix: "J", yearly: true, len: 5 },
-  Quotation: { prefix: "Q", yearly: true, len: 5 },
-  SaleOrder: { prefix: "SO", yearly: true, len: 5 },
-  "Inventory-In": { prefix: "WHI", yearly: true, len: 5 },
-  "Inventory-Out": { prefix: "WHO", yearly: true, len: 5 },
-  Customer: { prefix: "C", yearly: false, len: 5 },
-  Product: { prefix: "P", yearly: false, len: 5 },
-  Model: { prefix: "MD", yearly: false, len: 5 },
+  Job: { prefix: 'J', yearly: true, len: 5 },
+  Quotation: { prefix: 'Q', yearly: true, len: 5 },
+  SaleOrder: { prefix: 'SO', yearly: true, len: 5 },
+  'Inventory-In': { prefix: 'WHI', yearly: true, len: 5 },
+  'Inventory-Out': { prefix: 'WHO', yearly: true, len: 5 },
+  Customer: { prefix: 'C', yearly: false, len: 5 },
+  Product: { prefix: 'P', yearly: false, len: 5 },
+  Model: { prefix: 'MD', yearly: false, len: 5 },
 };
 
 /**
@@ -42,7 +35,7 @@ const DEFAULTS: Record<RunningType, { prefix: string; yearly: boolean; len: numb
  * (normalised in 0007, re-asserted in 0010). Numbers are ONE series per document
  * type for the whole company — "ออกเอกสารในนาม" never changes the number.
  */
-const COMPANY_ROWS: ReadonlySet<RunningType> = new Set(["Job", "Quotation", "SaleOrder"]);
+const COMPANY_ROWS: ReadonlySet<RunningType> = new Set(['Job', 'Quotation', 'SaleOrder']);
 
 export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> {
   const def = DEFAULTS[type];
@@ -56,7 +49,10 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`running_no:${type}:${year}`}))`);
 
   // lock the row for this type(+profile)+year (or the type's single row for non-yearly)
-  const sameSeries = and(eq(runningNo.runningType, type), companyId === null ? undefined : eq(runningNo.companyId, companyId));
+  const sameSeries = and(
+    eq(runningNo.runningType, type),
+    companyId === null ? undefined : eq(runningNo.companyId, companyId),
+  );
   const cols = {
     runningId: runningNo.runningId,
     prefix: runningNo.prefix,
@@ -65,13 +61,20 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
     lengthYear: runningNo.lengthYear,
     lengthNumber: runningNo.lengthNumber,
   };
-  let [row]: { runningId: number; prefix: string; pyear: number; number: number; lengthYear: number; lengthNumber: number }[] = await tx
+  let [row]: {
+    runningId: number;
+    prefix: string;
+    pyear: number;
+    number: number;
+    lengthYear: number;
+    lengthNumber: number;
+  }[] = await tx
     .select(cols)
     .from(runningNo)
     .where(and(sameSeries, eq(runningNo.pyear, year)))
     .orderBy(desc(runningNo.runningId))
     .limit(1)
-    .for("update");
+    .for('update');
 
   if (!row && def.yearly) {
     // new year: the legacy app either updated the single row (Job/SaleOrder) or
@@ -128,11 +131,9 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   if (!row) throw new Error(`running_no: insert … returning gave no row for ${type} ${year}`);
 
   const next = Number(row.number) + 1;
-  await tx
-    .update(runningNo)
-    .set({ number: next })
-    .where(eq(runningNo.runningId, row.runningId));
+  await tx.update(runningNo).set({ number: next }).where(eq(runningNo.runningId, row.runningId));
 
-  const yy = Number(row.lengthYear) === 2 ? String(row.pyear).slice(-2) : Number(row.lengthYear) === 4 ? String(row.pyear) : "";
-  return `${row.prefix}${yy}${String(next).padStart(Number(row.lengthNumber), "0")}`;
+  const yy =
+    Number(row.lengthYear) === 2 ? String(row.pyear).slice(-2) : Number(row.lengthYear) === 4 ? String(row.pyear) : '';
+  return `${row.prefix}${yy}${String(next).padStart(Number(row.lengthNumber), '0')}`;
 }

@@ -1,12 +1,12 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireAdmin, readJson, HttpError } from "@/server/auth";
-import { listModules, listPermissions, listRoles, savePermissions } from "@/server/services/users";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireAdmin, readJson, HttpError } from '@/server/auth';
+import { listModules, listPermissions, listRoles, savePermissions } from '@/server/services/users';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const bool = (v: unknown) => v === true || v === "true";
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+const bool = (v: unknown) => v === true || v === 'true';
 
 /** Permission matrix (app_config) + the role and module lists. Admin only. */
 export const GET = handle(async (req: NextRequest) => {
@@ -31,7 +31,7 @@ export const POST = handle(async (req: NextRequest) => {
         }))
         .filter((r) => r.role && r.menu)
     : [];
-  if (items.length === 0) throw new HttpError(400, "no items");
+  if (items.length === 0) throw new HttpError(400, 'no items');
   const saved = await savePermissions(items, me.userId);
   return NextResponse.json({ ok: true, saved });
 });

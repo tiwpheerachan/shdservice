@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/shared/page-header";
-import { SaleOrderForm, type SaleOrderFormHandle } from "@/components/shared/sale-order-form";
-import { FormActions, VIEW_ONLY } from "@/components/shared/job-form";
-import { useToast } from "@/components/ui/toast";
-import { postJson, errMsg } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import { PageHeader } from '@/components/shared/page-header';
+import { SaleOrderForm, type SaleOrderFormHandle } from '@/components/shared/sale-order-form';
+import { FormActions, VIEW_ONLY } from '@/components/shared/job-form';
+import { useToast } from '@/components/ui/toast';
+import { postJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
 
 export default function NewSaleOrderPage() {
   const { push } = useToast();
@@ -22,12 +22,12 @@ export default function NewSaleOrderPage() {
     if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
     setSaving(true);
     try {
-      const d = await postJson<{ order: { no: string } }>("/api/sale-orders", p);
+      const d = await postJson<{ order: { no: string } }>('/api/sale-orders', p);
       await form.current?.uploadPendingSlip(d.order.no);
-      push({ kind: "success", title: "สร้างใบสั่งขายแล้ว", desc: d.order.no });
+      push({ kind: 'success', title: 'สร้างใบสั่งขายแล้ว', desc: d.order.no });
       router.push(`/sale/orders/edit?no=${encodeURIComponent(d.order.no)}`);
     } catch (e) {
-      if (!form.current?.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -35,12 +35,15 @@ export default function NewSaleOrderPage() {
 
   return (
     <>
-      <PageHeader
-        title="สร้างใบสั่งขาย"
-        description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Add New Sale Order"
-      />
+      <PageHeader title="สร้างใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Add New Sale Order" />
       <SaleOrderForm ref={form} />
-      <FormActions saveLabel="บันทึกใบสั่งขาย" onSave={save} saving={saving} cancelHref="/sale/orders" denied={can("Sale Order", "add") ? undefined : VIEW_ONLY} />
+      <FormActions
+        saveLabel="บันทึกใบสั่งขาย"
+        onSave={save}
+        saving={saving}
+        cancelHref="/sale/orders"
+        denied={can('Sale Order', 'add') ? undefined : VIEW_ONLY}
+      />
     </>
   );
 }

@@ -1,25 +1,19 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
-import { Command as CommandPrimitive } from "cmdk";
-import { Search, CornerDownLeft } from "lucide-react";
-import { ALL_LINKS as EVERY_LINK } from "@/lib/nav";
-import { useAccess } from "@/lib/use-access";
-import { useLeave } from "@/lib/use-unsaved-changes";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
+import { Command as CommandPrimitive } from 'cmdk';
+import { Search, CornerDownLeft } from 'lucide-react';
+import { ALL_LINKS as EVERY_LINK } from '@/lib/nav';
+import { useAccess } from '@/lib/use-access';
+import { useLeave } from '@/lib/use-unsaved-changes';
+import { cn } from '@/lib/utils';
 
 /**
  * ⌘K menu search — cmdk (fuzzy matching, keyboard navigation, aria listbox)
  * inside a Radix Dialog (focus trap, Esc, scroll lock). Same look as before.
  */
-export function CommandPalette({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
+export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const leave = useLeave(); // asks first when a form on this page has unsaved edits
   const { canLink } = useAccess();
   const links = React.useMemo(() => EVERY_LINK.filter(canLink), [canLink]);
@@ -34,11 +28,11 @@ export function CommandPalette({
       <DialogPrimitive.Portal>
         <div className="fixed inset-0 z-80 flex items-start justify-center p-4 pt-[12vh] no-print">
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
-          <DialogPrimitive.Content
-            className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in"
-          >
+          <DialogPrimitive.Content className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in">
             <DialogPrimitive.Title className="sr-only">ค้นหาเมนู</DialogPrimitive.Title>
-            <DialogPrimitive.Description className="sr-only">พิมพ์เพื่อค้นหาเมนู แล้วกด Enter เพื่อไป</DialogPrimitive.Description>
+            <DialogPrimitive.Description className="sr-only">
+              พิมพ์เพื่อค้นหาเมนู แล้วกด Enter เพื่อไป
+            </DialogPrimitive.Description>
             <CommandPrimitive label="ค้นหาเมนู" loop>
               <div className="flex items-center gap-2 border-b border-border px-3.5">
                 <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -61,8 +55,8 @@ export function CommandPalette({
                     value={`${r.title} ${r.group}`}
                     onSelect={() => go(r.href)}
                     className={cn(
-                      "group flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
-                      "data-[selected=true]:bg-primary-soft data-[selected=true]:text-primary hover:bg-accent"
+                      'group flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                      'data-[selected=true]:bg-primary-soft data-[selected=true]:text-primary hover:bg-accent',
                     )}
                   >
                     <span className="truncate">

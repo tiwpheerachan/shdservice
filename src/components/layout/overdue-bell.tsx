@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { Bell, CalendarClock, UserRound, UserX } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
-import { cn } from "@/lib/utils";
-import type { OverdueAlerts } from "@/server/services/alerts";
-import { useApi } from "@/data/db";
-import { useAccess } from "@/lib/use-access";
+import * as React from 'react';
+import Link from 'next/link';
+import { Bell, CalendarClock, UserRound, UserX } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
+import { cn } from '@/lib/utils';
+import type { OverdueAlerts } from '@/server/services/alerts';
+import { useApi } from '@/data/db';
+import { useAccess } from '@/lib/use-access';
 
 /** background refresh; opening the bell re-checks when the last answer is older than a minute */
 const POLL_MS = 5 * 60_000;
@@ -22,7 +22,7 @@ const FRESH_MS = 60_000;
 export function OverdueBell() {
   // quiet background poll through swr: every 5 min, paused while the tab is hidden, once more
   // when a tab comes back after that long; a failed answer keeps the last one on screen
-  const { data, mutate, ageMs } = useApi<OverdueAlerts>("/api/alerts/overdue", {
+  const { data, mutate, ageMs } = useApi<OverdueAlerts>('/api/alerts/overdue', {
     quiet: true,
     refreshInterval: POLL_MS,
     revalidateOnFocus: true,
@@ -31,9 +31,9 @@ export function OverdueBell() {
   const { jobLink } = useAccess();
 
   const total = data?.total ?? 0;
-  const mine = data?.scope === "mine";
+  const mine = data?.scope === 'mine';
   const listHref = (engineerId?: number | null) =>
-    `/jobs/list?src=overdue${engineerId ? `&engineer=${engineerId}` : ""}`;
+    `/jobs/list?src=overdue${engineerId ? `&engineer=${engineerId}` : ''}`;
 
   return (
     <Popover
@@ -46,14 +46,14 @@ export function OverdueBell() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={total ? `งานเกินกำหนดส่ง ${total} งาน` : "การแจ้งเตือน"}
+          aria-label={total ? `งานเกินกำหนดส่ง ${total} งาน` : 'การแจ้งเตือน'}
           title="งานเกินกำหนดส่ง"
           className="relative rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
         >
           <Bell className="h-4 w-4" />
           {total > 0 && (
             <span className="num absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
-              {total > 99 ? "99+" : total}
+              {total > 99 ? '99+' : total}
             </span>
           )}
         </button>
@@ -63,11 +63,16 @@ export function OverdueBell() {
           <div>
             <p className="text-sm font-semibold">งานเกินกำหนดส่ง</p>
             <p className="text-2xs text-muted-foreground">
-              {mine ? "งานที่คุณรับผิดชอบ" : "ทุกงาน"} · ยังไม่ปิดงาน และเลยวันที่กำหนดส่งลูกค้าแล้ว
+              {mine ? 'งานที่คุณรับผิดชอบ' : 'ทุกงาน'} · ยังไม่ปิดงาน และเลยวันที่กำหนดส่งลูกค้าแล้ว
             </p>
           </div>
-          <span className={cn("num rounded-full px-2 py-0.5 text-xs font-semibold", total ? "bg-danger-soft text-danger" : "bg-success-soft text-success")}>
-            {total.toLocaleString("en-US")}
+          <span
+            className={cn(
+              'num rounded-full px-2 py-0.5 text-xs font-semibold',
+              total ? 'bg-danger-soft text-danger' : 'bg-success-soft text-success',
+            )}
+          >
+            {total.toLocaleString('en-US')}
           </span>
         </div>
 
@@ -82,7 +87,8 @@ export function OverdueBell() {
               <div className="flex flex-wrap gap-1.5 border-b border-border px-4 py-2.5">
                 {data.unassigned > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-2xs font-medium text-warning">
-                    <UserX className="h-3 w-3" /> ยังไม่มอบหมายช่าง <span className="num">{data.unassigned.toLocaleString("en-US")}</span>
+                    <UserX className="h-3 w-3" /> ยังไม่มอบหมายช่าง{' '}
+                    <span className="num">{data.unassigned.toLocaleString('en-US')}</span>
                   </span>
                 )}
                 {data.owners.map((o) => (
@@ -92,7 +98,7 @@ export function OverdueBell() {
                     onClick={() => setOpen(false)}
                     className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-2xs text-foreground transition-colors hover:bg-accent"
                   >
-                    {o.name} <span className="num text-muted-foreground">{o.count.toLocaleString("en-US")}</span>
+                    {o.name} <span className="num text-muted-foreground">{o.count.toLocaleString('en-US')}</span>
                   </Link>
                 ))}
               </div>
@@ -109,11 +115,11 @@ export function OverdueBell() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="num text-sm font-semibold text-primary">{j.no}</span>
                       <span className="num inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-2xs font-medium text-danger">
-                        <CalendarClock className="h-3 w-3" /> เกิน {j.daysOver.toLocaleString("en-US")} วัน
+                        <CalendarClock className="h-3 w-3" /> เกิน {j.daysOver.toLocaleString('en-US')} วัน
                       </span>
                     </div>
                     <p className="mt-0.5 truncate text-xs">
-                      {j.product || "—"}
+                      {j.product || '—'}
                       {j.customer && <span className="text-muted-foreground"> · {j.customer}</span>}
                     </p>
                     <p className="mt-0.5 truncate text-2xs text-muted-foreground">
@@ -144,8 +150,8 @@ export function OverdueBell() {
               className="block border-t border-border px-4 py-2.5 text-center text-xs font-medium text-primary hover:bg-accent/50"
             >
               {total > data.items.length
-                ? `ดูทั้งหมด ${total.toLocaleString("en-US")} งานในรายการงาน`
-                : "เปิดในรายการงาน"}
+                ? `ดูทั้งหมด ${total.toLocaleString('en-US')} งานในรายการงาน`
+                : 'เปิดในรายการงาน'}
             </Link>
           </>
         )}

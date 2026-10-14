@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { cn } from '@/lib/utils';
 
 /**
  * Field = label + one control (+ hint / error). The label is tied to the control automatically:
@@ -34,9 +34,9 @@ const FieldContext = React.createContext<FieldCtx | null>(null);
 
 export type FieldControlProps = {
   id?: string;
-  "aria-describedby"?: string;
-  "aria-invalid"?: boolean;
-  "aria-labelledby"?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
+  'aria-labelledby'?: string;
 };
 
 /**
@@ -54,9 +54,9 @@ export function useFieldControl(ownId?: string, opts: { labelable?: boolean } = 
   if (!primary) return ownId ? { id: ownId } : {};
   return {
     id: ownId ?? ctx.id,
-    "aria-describedby": ctx.describedBy,
-    "aria-invalid": ctx.invalid || undefined,
-    ...(labelable ? {} : { "aria-labelledby": ctx.labelId }),
+    'aria-describedby': ctx.describedBy,
+    'aria-invalid': ctx.invalid || undefined,
+    ...(labelable ? {} : { 'aria-labelledby': ctx.labelId }),
   };
 }
 
@@ -81,13 +81,15 @@ export function Field({
   children: React.ReactNode;
   wide?: boolean;
   /** the children are options with their own labels (radios / checkboxes) — the label names the group */
-  group?: "radiogroup" | "group";
+  group?: 'radiogroup' | 'group';
 }) {
   const auto = React.useId();
   const labelId = `${auto}-label`;
   // a single child that brings its own id (e.g. <ProductPicker id="so-product" />) keeps it
   const childId =
-    React.isValidElement<{ id?: unknown }>(children) && typeof children.props.id === "string" ? children.props.id : undefined;
+    React.isValidElement<{ id?: unknown }>(children) && typeof children.props.id === 'string'
+      ? children.props.id
+      : undefined;
   const id = htmlFor ?? childId ?? `${auto}-control`;
   const hintId = hint && !error ? `${auto}-hint` : undefined;
   const errorId = error ? `${auto}-error` : undefined;
@@ -105,16 +107,20 @@ export function Field({
   }, []);
   const ctx = React.useMemo<FieldCtx>(
     () => ({ id, labelId, describedBy: errorId ?? hintId, invalid: !!error, owner: owner?.token ?? null, register }),
-    [id, labelId, errorId, hintId, error, owner, register]
+    [id, labelId, errorId, hintId, error, owner, register],
   );
   // `for` only when it reaches a real form control: one that registered as labelable, or an id the
   // page named itself (htmlFor / the child's own id)
   const labelFor = htmlFor ?? childId ?? (!group && owner?.labelable ? id : undefined);
 
   return (
-    <div className={cn("min-w-0", wide && "col-span-full", className)}>
+    <div className={cn('min-w-0', wide && 'col-span-full', className)}>
       {label && (
-        <label id={labelId} htmlFor={labelFor} className="mb-1.5 flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        <label
+          id={labelId}
+          htmlFor={labelFor}
+          className="mb-1.5 flex items-center gap-1 text-xs font-medium text-muted-foreground"
+        >
           {required && (
             <span className="text-danger" aria-hidden>
               *
@@ -126,7 +132,12 @@ export function Field({
       )}
       <FieldContext.Provider value={ctx}>
         {group ? (
-          <div role={group} aria-labelledby={label ? labelId : undefined} aria-describedby={errorId ?? hintId} aria-required={group === "radiogroup" && required ? true : undefined}>
+          <div
+            role={group}
+            aria-labelledby={label ? labelId : undefined}
+            aria-describedby={errorId ?? hintId}
+            aria-required={group === 'radiogroup' && required ? true : undefined}
+          >
             {children}
           </div>
         ) : (
@@ -157,15 +168,11 @@ export function FieldGrid({
   children: React.ReactNode;
 }) {
   const map = {
-    2: "sm:grid-cols-2",
-    3: "sm:grid-cols-2 lg:grid-cols-3",
-    4: "sm:grid-cols-2 lg:grid-cols-4",
+    2: 'sm:grid-cols-2',
+    3: 'sm:grid-cols-2 lg:grid-cols-3',
+    4: 'sm:grid-cols-2 lg:grid-cols-4',
   } as const;
-  return (
-    <div className={cn("grid grid-cols-1 gap-x-4 gap-y-3.5", map[cols], className)}>
-      {children}
-    </div>
-  );
+  return <div className={cn('grid grid-cols-1 gap-x-4 gap-y-3.5', map[cols], className)}>{children}</div>;
 }
 
 /** a value shown in a Field that cannot be edited — announced as "<label>, read-only, <value>" */

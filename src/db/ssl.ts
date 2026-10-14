@@ -9,6 +9,6 @@
  */
 export function dbSsl(url: string) {
   if (!/supabase\.co|supabase\.com|pooler/.test(url)) return undefined;
-  const ca = (process.env.DB_SSL_CA ?? "").replace(/\\n/g, "\n").trim();
+  const ca = (process.env.DB_SSL_CA ?? '').replace(/\\n/g, '\n').trim();
   return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
 }

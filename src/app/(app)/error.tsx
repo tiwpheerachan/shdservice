@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { TriangleAlert } from "lucide-react";
+import Link from 'next/link';
+import { TriangleAlert } from 'lucide-react';
 
 /**
  * A page of the staff app threw while rendering (DB blip, a bug). Keeps the app
@@ -28,7 +28,10 @@ export default function AppError({ error, retry }: { error: Error & { digest?: s
           >
             ลองใหม่
           </button>
-          <Link href="/jobs/dashboard" className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-muted">
+          <Link
+            href="/jobs/dashboard"
+            className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-muted"
+          >
             กลับหน้าหลัก
           </Link>
         </div>

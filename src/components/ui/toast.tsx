@@ -1,20 +1,33 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { toast } from "sonner";
-import { Toaster } from "@/components/shadcn/sonner";
-import { CheckCircle2, Info, AlertTriangle, XCircle } from "lucide-react";
+import * as React from 'react';
+import { toast } from 'sonner';
+import { Toaster } from '@/components/shadcn/sonner';
+import { CheckCircle2, Info, AlertTriangle, XCircle } from 'lucide-react';
 
-type ToastKind = "success" | "error" | "info" | "warning";
+type ToastKind = 'success' | 'error' | 'info' | 'warning';
 /** `id`: the same id replaces a toast instead of stacking a second one; `action`: a button — the toast then stays until used or closed */
-type ToastInput = { kind: ToastKind; title: string; desc?: string; id?: string; action?: { label: string; onClick: () => void } };
+type ToastInput = {
+  kind: ToastKind;
+  title: string;
+  desc?: string;
+  id?: string;
+  action?: { label: string; onClick: () => void };
+};
 
 /**
  * App toasts — same `useToast().push({ kind, title, desc })` API as before, now
  * rendered by Sonner (stacking, pause on hover, swipe to dismiss, a11y live region).
  */
 const push = (t: ToastInput) => {
-  const fn = t.kind === "error" ? toast.error : t.kind === "success" ? toast.success : t.kind === "warning" ? toast.warning : toast.info;
+  const fn =
+    t.kind === 'error'
+      ? toast.error
+      : t.kind === 'success'
+        ? toast.success
+        : t.kind === 'warning'
+          ? toast.warning
+          : toast.info;
   fn(t.title, { description: t.desc, id: t.id, ...(t.action && { action: t.action, duration: Infinity }) });
 };
 
@@ -23,10 +36,10 @@ const Ctx = React.createContext<{ push: (t: ToastInput) => void }>({ push });
 export const useToast = () => React.useContext(Ctx);
 
 const TONE: Record<ToastKind, string> = {
-  success: "border-success/30! bg-success-soft! text-success!",
-  error: "border-danger/30! bg-danger-soft! text-danger!",
-  info: "border-info/30! bg-info-soft! text-info!",
-  warning: "border-warning/30! bg-warning-soft! text-warning!",
+  success: 'border-success/30! bg-success-soft! text-success!',
+  error: 'border-danger/30! bg-danger-soft! text-danger!',
+  info: 'border-info/30! bg-info-soft! text-info!',
+  warning: 'border-warning/30! bg-warning-soft! text-warning!',
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -49,11 +62,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         }}
         toastOptions={{
           classNames: {
-            toast: "items-start! gap-2.5! rounded-lg! border! bg-card! p-3! shadow-pop! font-sans! w-[min(360px,calc(100vw-2rem))]!",
-            title: "text-sm! font-medium! text-card-foreground!",
-            description: "mt-0.5! text-xs! text-muted-foreground!",
-            icon: "mt-0.5! m-0!",
-            closeButton: "static! order-last! ml-auto! h-auto! w-auto! rounded! border-0! bg-transparent! p-0.5! text-muted-foreground! translate-x-0! translate-y-0! hover:bg-black/5! dark:hover:bg-white/10!",
+            toast:
+              'items-start! gap-2.5! rounded-lg! border! bg-card! p-3! shadow-pop! font-sans! w-[min(360px,calc(100vw-2rem))]!',
+            title: 'text-sm! font-medium! text-card-foreground!',
+            description: 'mt-0.5! text-xs! text-muted-foreground!',
+            icon: 'mt-0.5! m-0!',
+            closeButton:
+              'static! order-last! ml-auto! h-auto! w-auto! rounded! border-0! bg-transparent! p-0.5! text-muted-foreground! translate-x-0! translate-y-0! hover:bg-black/5! dark:hover:bg-white/10!',
             success: TONE.success,
             error: TONE.error,
             info: TONE.info,

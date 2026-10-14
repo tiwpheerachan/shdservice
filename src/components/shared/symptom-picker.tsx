@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
-import { Check, ChevronsUpDown, Search, Star, X } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
-import { cn } from "@/lib/utils";
-import { int } from "@/lib/utils";
-import { useFieldControl } from "@/components/ui/field";
+import * as React from 'react';
+import { Command as CommandPrimitive } from 'cmdk';
+import { Check, ChevronsUpDown, Search, Star, X } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
+import { cn } from '@/lib/utils';
+import { int } from '@/lib/utils';
+import { useFieldControl } from '@/components/ui/field';
 
 export type SymptomOption = { id: number; name: string; count?: number };
 
@@ -23,10 +23,10 @@ export function SymptomPicker({
   onChange,
   options,
   suggested = [],
-  suggestedLabel = "อาการที่พบบ่อยของรุ่นนี้",
+  suggestedLabel = 'อาการที่พบบ่อยของรุ่นนี้',
   multiple = true,
   disabled = false,
-  placeholder = "พิมพ์ค้นหาอาการเสีย… เช่น แบต, จอ, ชาร์จ",
+  placeholder = 'พิมพ์ค้นหาอาการเสีย… เช่น แบต, จอ, ชาร์จ',
 }: {
   value: string[];
   onChange: (names: string[]) => void;
@@ -40,7 +40,7 @@ export function SymptomPicker({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(); // tie to the surrounding <Field> label
   const listId = React.useId();
-  const [q, setQ] = React.useState("");
+  const [q, setQ] = React.useState('');
   const selected = new Set(value);
 
   const toggle = (name: string) => {
@@ -63,7 +63,7 @@ export function SymptomPicker({
   // plain render function (NOT a nested component): a component defined inside render
   // gets a new identity every render, so cmdk items remount between pointerdown and
   // click and mouse selection never fires
-  const renderItem = (o: SymptomOption, keyPrefix = "") => {
+  const renderItem = (o: SymptomOption, keyPrefix = '') => {
     const on = selected.has(o.name);
     return (
       <CommandPrimitive.Item
@@ -71,14 +71,14 @@ export function SymptomPicker({
         value={o.name}
         onSelect={() => toggle(o.name)}
         className={cn(
-          "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none",
-          "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+          'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none',
+          'data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground',
         )}
       >
         <span
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border",
-            on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card"
+            'grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border',
+            on ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-card',
           )}
         >
           {on && <Check className="h-3 w-3" />}
@@ -98,8 +98,10 @@ export function SymptomPicker({
             <span
               key={name}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-                i === 0 && multiple ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground"
+                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
+                i === 0 && multiple
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-foreground',
               )}
             >
               {multiple &&
@@ -107,14 +109,24 @@ export function SymptomPicker({
                   <Star className="h-3 w-3 fill-current" aria-label="อาการหลัก" />
                 ) : (
                   !disabled && (
-                    <button type="button" onClick={() => makePrimary(name)} title="ตั้งเป็นอาการหลัก" className="rounded-full text-muted-foreground hover:text-primary">
+                    <button
+                      type="button"
+                      onClick={() => makePrimary(name)}
+                      title="ตั้งเป็นอาการหลัก"
+                      className="rounded-full text-muted-foreground hover:text-primary"
+                    >
                       <Star className="h-3 w-3" />
                     </button>
                   )
                 ))}
               {name}
               {!disabled && (
-                <button type="button" onClick={() => remove(name)} aria-label={`เอา ${name} ออก`} className="ml-0.5 rounded-full opacity-70 hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => remove(name)}
+                  aria-label={`เอา ${name} ออก`}
+                  className="ml-0.5 rounded-full opacity-70 hover:opacity-100"
+                >
                   <X className="h-3 w-3" />
                 </button>
               )}
@@ -123,7 +135,13 @@ export function SymptomPicker({
         </div>
       )}
 
-      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
+      <Popover
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (!o) setQ('');
+        }}
+      >
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -132,12 +150,12 @@ export function SymptomPicker({
             aria-haspopup="listbox"
             aria-controls={listId}
             {...field}
-          aria-label={field.id ? undefined : placeholder}
+            aria-label={field.id ? undefined : placeholder}
             aria-expanded={open}
             className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground",
-              "transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20",
-              "disabled:cursor-not-allowed disabled:bg-muted"
+              'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground',
+              'transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
+              'disabled:cursor-not-allowed disabled:bg-muted',
             )}
           >
             <Search className="h-3.5 w-3.5 shrink-0" />
@@ -149,7 +167,10 @@ export function SymptomPicker({
               <span
                 role="button"
                 aria-label="ล้างค่า"
-                onClick={(e) => { e.stopPropagation(); onChange([]); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange([]);
+                }}
                 className="rounded-full p-0.5 opacity-70 hover:bg-accent hover:opacity-100"
               >
                 <X className="h-3.5 w-3.5" />
@@ -158,8 +179,16 @@ export function SymptomPicker({
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
-          <CommandPrimitive shouldFilter={false} loop className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground">
+        <PopoverContent
+          align="start"
+          className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <CommandPrimitive
+            shouldFilter={false}
+            loop
+            className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
+          >
             <div className="flex items-center gap-2 border-b border-border px-3">
               <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
               <CommandPrimitive.Input
@@ -169,19 +198,29 @@ export function SymptomPicker({
                 placeholder={placeholder}
                 className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
               />
-              {multiple && <span className="num shrink-0 text-2xs text-muted-foreground">{value.length} เลือกแล้ว</span>}
+              {multiple && (
+                <span className="num shrink-0 text-2xs text-muted-foreground">{value.length} เลือกแล้ว</span>
+              )}
             </div>
             <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
               {sugOptions.length === 0 && restOptions.length === 0 && (
-                <p className="px-3 py-6 text-center text-sm text-muted-foreground">ไม่พบอาการเสีย "{q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน</p>
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  ไม่พบอาการเสีย "{q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน
+                </p>
               )}
               {sugOptions.length > 0 && (
-                <CommandPrimitive.Group heading={suggestedLabel} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-primary">
-                  {sugOptions.map((o) => renderItem(o, "s-"))}
+                <CommandPrimitive.Group
+                  heading={suggestedLabel}
+                  className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-primary"
+                >
+                  {sugOptions.map((o) => renderItem(o, 's-'))}
                 </CommandPrimitive.Group>
               )}
               {restOptions.length > 0 && (
-                <CommandPrimitive.Group heading={sugOptions.length ? "ทั้งหมด (เรียงตามที่ใช้บ่อย)" : undefined} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-muted-foreground">
+                <CommandPrimitive.Group
+                  heading={sugOptions.length ? 'ทั้งหมด (เรียงตามที่ใช้บ่อย)' : undefined}
+                  className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-muted-foreground"
+                >
                   {restOptions.map((o) => renderItem(o))}
                 </CommandPrimitive.Group>
               )}
@@ -189,7 +228,13 @@ export function SymptomPicker({
             {multiple && (
               <div className="flex items-center justify-between border-t border-border px-3 py-1.5 text-2xs text-muted-foreground">
                 <span>Enter = เลือก/ยกเลิก · ★ ตัวแรก = อาการหลัก</span>
-                <button type="button" onClick={() => setOpen(false)} className="font-medium text-primary hover:underline">เสร็จ</button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  เสร็จ
+                </button>
               </div>
             )}
           </CommandPrimitive>

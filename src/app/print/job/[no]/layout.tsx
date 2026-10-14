@@ -1,7 +1,7 @@
-import { notFound } from "next/navigation";
-import { userFromCookies, canViewAny, JOB_MODULES } from "@/server/auth";
+import { notFound } from 'next/navigation';
+import { userFromCookies, canViewAny, JOB_MODULES } from '@/server/auth';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 /**
  * Every job print view (receipt, /return, /label — customer name, address, phone) needs

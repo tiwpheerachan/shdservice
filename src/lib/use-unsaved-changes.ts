@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useRouter } from "next/navigation";
-import { useConfirm, type ConfirmOptions } from "@/components/ui/confirm";
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import { useConfirm, type ConfirmOptions } from '@/components/ui/confirm';
 
 /**
  * Unsaved changes — leaving a form with edits that were never saved asks first.
@@ -35,10 +35,10 @@ export function useUnsavedChanges(dirty: boolean | (() => boolean)) {
     latest.current = dirty;
   });
   React.useLayoutEffect(() => {
-    const id = Symbol("unsaved");
+    const id = Symbol('unsaved');
     checks.set(id, () => {
       const d = latest.current;
-      return typeof d === "function" ? d() : d;
+      return typeof d === 'function' ? d() : d;
     });
     return () => {
       checks.delete(id);
@@ -47,11 +47,11 @@ export function useUnsavedChanges(dirty: boolean | (() => boolean)) {
 }
 
 const LEAVE: ConfirmOptions = {
-  tone: "danger",
-  title: "ออกโดยไม่บันทึก?",
-  description: "ข้อมูลที่แก้ไขในหน้านี้ยังไม่ได้บันทึก ถ้าออกตอนนี้ ข้อมูลที่แก้ไขจะหายไป",
-  confirmLabel: "ออกโดยไม่บันทึก",
-  cancelLabel: "อยู่ต่อ",
+  tone: 'danger',
+  title: 'ออกโดยไม่บันทึก?',
+  description: 'ข้อมูลที่แก้ไขในหน้านี้ยังไม่ได้บันทึก ถ้าออกตอนนี้ ข้อมูลที่แก้ไขจะหายไป',
+  confirmLabel: 'ออกโดยไม่บันทึก',
+  cancelLabel: 'อยู่ต่อ',
 };
 
 /** go to `href` — asks first when a form on this page has unsaved edits; true = went */
@@ -64,7 +64,7 @@ export function useLeave() {
       router.push(href);
       return true;
     },
-    [router, confirm]
+    [router, confirm],
   );
 }
 
@@ -78,7 +78,7 @@ export function useUnsavedChangesGuard() {
     const onUnload = (e: BeforeUnloadEvent) => {
       if (unloadAllowed || !hasUnsavedChanges()) return;
       e.preventDefault();
-      e.returnValue = ""; // Safari / older Chrome still need it
+      e.returnValue = ''; // Safari / older Chrome still need it
     };
 
     // an in-app link (sidebar, breadcrumbs, bell…): held before next/link sees the click, asked, then
@@ -87,8 +87,8 @@ export function useUnsavedChangesGuard() {
     let replaying = false;
     const onClick = (e: MouseEvent) => {
       if (replaying || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
-      if (!(a instanceof HTMLAnchorElement) || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+      const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+      if (!(a instanceof HTMLAnchorElement) || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
       const to = new URL(a.href, window.location.href);
       if (to.origin !== window.location.origin) return;
       if (to.pathname === window.location.pathname && to.search === window.location.search) return; // this page / #anchor
@@ -100,7 +100,7 @@ export function useUnsavedChangesGuard() {
         if (!a.isConnected) return router.push(to.pathname + to.search + to.hash); // its menu closed meanwhile
         replaying = true;
         try {
-          const handled = !a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          const handled = !a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
           if (!handled) allowUnload(); // a plain <a>: the browser loads the page — already answered
         } finally {
           replaying = false;
@@ -108,11 +108,11 @@ export function useUnsavedChangesGuard() {
       });
     };
 
-    window.addEventListener("beforeunload", onUnload);
-    window.addEventListener("click", onClick, true);
+    window.addEventListener('beforeunload', onUnload);
+    window.addEventListener('click', onClick, true);
     return () => {
-      window.removeEventListener("beforeunload", onUnload);
-      window.removeEventListener("click", onClick, true);
+      window.removeEventListener('beforeunload', onUnload);
+      window.removeEventListener('click', onClick, true);
     };
   }, [confirm, router]);
 }

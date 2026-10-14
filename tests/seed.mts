@@ -9,9 +9,9 @@
  *                cancelled (5) quotation, TJ00003 finished + closed (return note)
  *   TJ00001 / TJ00002 are the two newest open jobs → JOB_A / JOB_B
  */
-import { pathToFileURL } from "node:url";
-import { Pool } from "pg";
-import { TEST_DATABASE_URL, assertLocal } from "./db-url.mts";
+import { pathToFileURL } from 'node:url';
+import { Pool } from 'pg';
+import { TEST_DATABASE_URL, assertLocal } from './db-url.mts';
 
 export async function seed(db: { query(text: string): Promise<unknown> }): Promise<void> {
   await db.query(`
@@ -46,8 +46,8 @@ export async function seed(db: { query(text: string): Promise<unknown> }): Promi
 // standalone: npx tsx tests/seed.mts
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   assertLocal(TEST_DATABASE_URL);
-  const pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1, options: "-c TimeZone=Asia/Bangkok" });
+  const pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1, options: '-c TimeZone=Asia/Bangkok' });
   await seed(pool);
   await pool.end();
-  console.log("seeded");
+  console.log('seeded');
 }

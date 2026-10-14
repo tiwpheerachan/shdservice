@@ -1,33 +1,33 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Eye } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge, type Tone } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
-import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from "@/data/mock";
-import { useApi, useMovementsPage } from "@/data/db";
-import { int, isFilterActive } from "@/lib/utils";
-import { exportXlsx } from "@/lib/api";
-import { ExportButton } from "@/components/shared/export-button";
+import * as React from 'react';
+import { Eye } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge, type Tone } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
+import { Field } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from '@/data/mock';
+import { useApi, useMovementsPage } from '@/data/db';
+import { int, isFilterActive } from '@/lib/utils';
+import { exportXlsx } from '@/lib/api';
+import { ExportButton } from '@/components/shared/export-button';
 
 type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
 type Filters = { from: string; to: string; type: string; warehouse: string; code: string; doc: string; ref: string };
-const NO_FILTER: Filters = { from: "", to: "", type: "", warehouse: "", code: "", doc: "", ref: "" };
+const NO_FILTER: Filters = { from: '', to: '', type: '', warehouse: '', code: '', doc: '', ref: '' };
 
 const DOC_TYPES = STOCK_MOVE_TYPES;
 
 function typeTone(type: string): Tone {
-  if (/รับเข้า|รับคืน/.test(type)) return "success";
-  if (/จ่าย|เบิก/.test(type)) return "warning";
-  if (/โอน/.test(type)) return "info";
-  return "neutral";
+  if (/รับเข้า|รับคืน/.test(type)) return 'success';
+  if (/จ่าย|เบิก/.test(type)) return 'warning';
+  if (/โอน/.test(type)) return 'info';
+  return 'neutral';
 }
 
 export default function InventoryPage() {
@@ -36,8 +36,14 @@ export default function InventoryPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   // inventory_hd (20k rows) — server-side paging; filters + table search run on the server
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
-  const { rows: MOVEMENTS, total, loading, error: loadError, refetch: retryLoad } = useMovementsPage({
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const {
+    rows: MOVEMENTS,
+    total,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useMovementsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q,
@@ -53,59 +59,62 @@ export default function InventoryPage() {
 
   const [viewDoc, setViewDoc] = React.useState<Movement | null>(null);
   // the lines of the document being viewed — read fresh each time a document is opened
-  const docLines = useApi<{ rows: LineRow[] }>(viewDoc ? `/api/stock/movements/${encodeURIComponent(viewDoc.doc)}` : null, {
-    fresh: true,
-    onError: (msg) => push({ kind: "error", title: "โหลดรายการไม่สำเร็จ", desc: msg }),
-  });
+  const docLines = useApi<{ rows: LineRow[] }>(
+    viewDoc ? `/api/stock/movements/${encodeURIComponent(viewDoc.doc)}` : null,
+    {
+      fresh: true,
+      onError: (msg) => push({ kind: 'error', title: 'โหลดรายการไม่สำเร็จ', desc: msg }),
+    },
+  );
   const lines = React.useMemo(() => docLines.data?.rows ?? [], [docLines.data]);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
 
   const columns: Column<Movement>[] = [
     {
-      key: "no",
-      header: "#",
-      width: "52px",
-      align: "center",
+      key: 'no',
+      header: '#',
+      width: '52px',
+      align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
-      key: "doc",
-      header: "Document No.",
-      width: "130px",
+      key: 'doc',
+      header: 'Document No.',
+      width: '130px',
       cell: (r) => <span className="num font-medium">{r.doc}</span>,
     },
     {
-      key: "type",
-      header: "ประเภทเอกสาร",
+      key: 'type',
+      header: 'ประเภทเอกสาร',
       cell: (r) => <Badge tone={typeTone(r.type)}>{r.type}</Badge>,
     },
     {
-      key: "ref",
-      header: "อ้างอิงถึง",
-      width: "120px",
-      cell: (r) => <span className="num text-primary">{r.ref || "—"}</span>,
+      key: 'ref',
+      header: 'อ้างอิงถึง',
+      width: '120px',
+      cell: (r) => <span className="num text-primary">{r.ref || '—'}</span>,
     },
     {
-      key: "date",
-      header: "วันที่",
-      width: "140px",
+      key: 'date',
+      header: 'วันที่',
+      width: '140px',
       cell: (r) => <span className="num text-xs">{r.date}</span>,
     },
-    { key: "by", header: "โดย", hideBelow: "md" },
-    { key: "from", header: "From-Location", hideBelow: "lg" },
-    { key: "to", header: "To-Location", hideBelow: "lg" },
+    { key: 'by', header: 'โดย', hideBelow: 'md' },
+    { key: 'from', header: 'From-Location', hideBelow: 'lg' },
+    { key: 'to', header: 'To-Location', hideBelow: 'lg' },
     {
-      key: "remark",
-      header: "Remark",
-      hideBelow: "xl",
-      cell: (r) => <span className="text-muted-foreground">{r.remark || "—"}</span>,
+      key: 'remark',
+      header: 'Remark',
+      hideBelow: 'xl',
+      cell: (r) => <span className="text-muted-foreground">{r.remark || '—'}</span>,
     },
     {
-      key: "action",
-      header: "Action",
-      width: "90px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '90px',
+      align: 'center',
       sortable: false,
       cell: (r) => (
         <Button size="sm" variant="outline" onClick={() => setViewDoc(r)}>
@@ -127,7 +136,19 @@ export default function InventoryPage() {
         title="ประวัติการเคลื่อนไหวเข้า-ออก"
         description="Stock Module » ประวัติการเคลื่อนไหวเข้า-ออก ของอะไหล่ทั้งหมด"
         actions={
-          <ExportButton run={() => exportXlsx("movements", { q: table.q, from: filters.from, to: filters.to, type: filters.type, code: filters.code, doc: filters.doc, ref: filters.ref })} />
+          <ExportButton
+            run={() =>
+              exportXlsx('movements', {
+                q: table.q,
+                from: filters.from,
+                to: filters.to,
+                type: filters.type,
+                code: filters.code,
+                doc: filters.doc,
+                ref: filters.ref,
+              })
+            }
+          />
         }
       />
 
@@ -138,13 +159,13 @@ export default function InventoryPage() {
         onReset={resetFilters}
       >
         <Field label="วันที่สร้างเอกสาร (ตั้งแต่)">
-          <Input type="date" value={draft.from} onChange={(e) => setD("from", e.target.value)} />
+          <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
         <Field label="วันที่สร้างเอกสาร (ถึง)">
-          <Input type="date" value={draft.to} onChange={(e) => setD("to", e.target.value)} />
+          <Input type="date" value={draft.to} onChange={(e) => setD('to', e.target.value)} />
         </Field>
         <Field label="ประเภทเอกสาร">
-          <Select value={draft.type} onChange={(e) => setD("type", e.target.value)}>
+          <Select value={draft.type} onChange={(e) => setD('type', e.target.value)}>
             <option value="">ทั้งหมด</option>
             {DOC_TYPES.map((t) => (
               <option key={t}>{t}</option>
@@ -152,7 +173,7 @@ export default function InventoryPage() {
           </Select>
         </Field>
         <Field label="คลังสินค้า">
-          <Select value={draft.warehouse} onChange={(e) => setD("warehouse", e.target.value)}>
+          <Select value={draft.warehouse} onChange={(e) => setD('warehouse', e.target.value)}>
             <option value="">ทั้งหมด</option>
             {WAREHOUSES.map((w) => (
               <option key={w}>{w}</option>
@@ -160,13 +181,28 @@ export default function InventoryPage() {
           </Select>
         </Field>
         <Field label="รหัสอะไหล่">
-          <Input placeholder="P02534" className="num" value={draft.code} onChange={(e) => setD("code", e.target.value)} />
+          <Input
+            placeholder="P02534"
+            className="num"
+            value={draft.code}
+            onChange={(e) => setD('code', e.target.value)}
+          />
         </Field>
         <Field label="หมายเลขเอกสาร">
-          <Input placeholder="WHO2602139" className="num" value={draft.doc} onChange={(e) => setD("doc", e.target.value)} />
+          <Input
+            placeholder="WHO2602139"
+            className="num"
+            value={draft.doc}
+            onChange={(e) => setD('doc', e.target.value)}
+          />
         </Field>
         <Field label="อ้างอิงเอกสาร">
-          <Input placeholder="J2611143 / SO2600730" className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
+          <Input
+            placeholder="J2611143 / SO2600730"
+            className="num"
+            value={draft.ref}
+            onChange={(e) => setD('ref', e.target.value)}
+          />
         </Field>
       </FilterBar>
 
@@ -176,7 +212,9 @@ export default function InventoryPage() {
         searchable={false}
         columns={columns}
         rows={MOVEMENTS}
-        loading={loading} error={loadError} onRetry={retryLoad}
+        loading={loading}
+        error={loadError}
+        onRetry={retryLoad}
         rowKey={(r) => r.doc}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
@@ -187,9 +225,7 @@ export default function InventoryPage() {
         onClose={() => setViewDoc(null)}
         size="xl"
         title="รายละเอียดเอกสารเคลื่อนไหว"
-        description={
-          viewDoc ? `${viewDoc.doc} · ${viewDoc.type}` : undefined
-        }
+        description={viewDoc ? `${viewDoc.doc} · ${viewDoc.type}` : undefined}
         footer={
           <Button variant="outline" size="sm" onClick={() => setViewDoc(null)}>
             ปิด
@@ -224,9 +260,9 @@ export default function InventoryPage() {
                         <td className="px-3 py-2">
                           <span className="line-clamp-1 max-w-[320px]">{l.name}</span>
                         </td>
-                        <td className="px-3 py-2 text-muted-foreground">{l.supplier || "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{l.supplier || '—'}</td>
                         <td className="px-3 py-2 text-muted-foreground">—</td>
-                        <td className="px-3 py-2 text-muted-foreground">{l.ref || "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{l.ref || '—'}</td>
                         <td className="num px-3 py-2 text-right">{int(l.qty)}</td>
                         <td className="px-3 py-2">{l.unit}</td>
                         <td className="px-3 py-2 text-muted-foreground">—</td>
@@ -245,9 +281,7 @@ export default function InventoryPage() {
                 </table>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              หมายเหตุ: {viewDoc.remark || "—"}
-            </p>
+            <p className="text-xs text-muted-foreground">หมายเหตุ: {viewDoc.remark || '—'}</p>
           </div>
         )}
       </Modal>

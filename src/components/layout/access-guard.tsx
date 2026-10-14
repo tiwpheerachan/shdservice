@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { useAccess } from "@/lib/use-access";
-import { ALL_LINKS, findBreadcrumb } from "@/lib/nav";
-import { useToast } from "@/components/ui/toast";
-import { hardNavigate, toLogin } from "@/lib/navigation";
-import { useMe } from "@/lib/use-me";
+import * as React from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAccess } from '@/lib/use-access';
+import { ALL_LINKS, findBreadcrumb } from '@/lib/nav';
+import { useToast } from '@/components/ui/toast';
+import { hardNavigate, toLogin } from '@/lib/navigation';
+import { useMe } from '@/lib/use-me';
 
 /**
  * Client-side authorization watchdog. The server layout only re-checks approval
@@ -31,12 +31,12 @@ export function AccessGuard() {
     const first = ALL_LINKS.find((l) => canPath(l.href));
     const page = findBreadcrumb(pathname);
     push({
-      kind: "warning",
-      id: "no-access", // one toast, also when the effect runs twice (dev Strict Mode)
+      kind: 'warning',
+      id: 'no-access', // one toast, also when the effect runs twice (dev Strict Mode)
       title: `ไม่มีสิทธิ์เข้าหน้า ${page?.item?.title ?? page?.group.title ?? pathname}`,
-      desc: "ขอสิทธิ์ได้จากผู้ดูแลระบบ",
+      desc: 'ขอสิทธิ์ได้จากผู้ดูแลระบบ',
     });
-    router.replace(first ? first.href : "/pending");
+    router.replace(first ? first.href : '/pending');
   }, [pathname, canPath, router, push]);
 
   // still signed in / still approved? — read from /api/sso/me, which never extends the session
@@ -48,8 +48,9 @@ export function AccessGuard() {
     void refresh();
   }, [pathname, refresh]);
   React.useEffect(() => {
-    if (me.unauthorized) toLogin(); // expired / signed out on another device
-    else if (me.approved === false) hardNavigate("/pending"); // approval revoked → reload into the pending page
+    if (me.unauthorized)
+      toLogin(); // expired / signed out on another device
+    else if (me.approved === false) hardNavigate('/pending'); // approval revoked → reload into the pending page
   }, [me.unauthorized, me.approved]);
 
   return null;

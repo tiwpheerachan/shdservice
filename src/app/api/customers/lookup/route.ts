@@ -1,16 +1,16 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireView, JOB_MODULES } from "@/server/auth";
-import { rateLimit } from "@/server/rate-limit";
-import { getCustomerByCode, listCustomers } from "@/server/services/customers";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireView, JOB_MODULES } from '@/server/auth';
+import { rateLimit } from '@/server/rate-limit';
+import { getCustomerByCode, listCustomers } from '@/server/services/customers';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /** Find customers by code / tax id / name / phone (job & quotation forms). */
 export const GET = handle(async (req: NextRequest) => {
-  await rateLimit(req, "lookup", 120);
-  await requireView(req, ["Customer", ...JOB_MODULES, "Quotation", "Sale Order"]);
-  const q = (new URL(req.url).searchParams.get("q") ?? "").trim();
+  await rateLimit(req, 'lookup', 120);
+  await requireView(req, ['Customer', ...JOB_MODULES, 'Quotation', 'Sale Order']);
+  const q = (new URL(req.url).searchParams.get('q') ?? '').trim();
   if (!q) return NextResponse.json({ rows: [] });
   const exact = await getCustomerByCode(q);
   if (exact) return NextResponse.json({ rows: [exact] });

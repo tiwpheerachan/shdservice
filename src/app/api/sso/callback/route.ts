@@ -1,24 +1,18 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { clientIp } from "@/lib/client-ip";
-import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from "@/lib/sso";
-import {
-  signSession,
-  verifySession,
-  SESSION_COOKIE,
-  SESSION_TTL_MS,
-  type SessionUser,
-} from "@/lib/session";
-import { lookupByEmail } from "@/lib/directory";
-import { provisionSsoUser } from "@/server/services/users";
-import { audit } from "@/server/audit";
-import { db } from "@/db/client";
-import { PENDING_ROLE, isApproved } from "@/lib/access";
-import { log, logError, scrubText } from "@/lib/log";
+import { NextResponse, type NextRequest } from 'next/server';
+import { clientIp } from '@/lib/client-ip';
+import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
+import { signSession, verifySession, SESSION_COOKIE, SESSION_TTL_MS, type SessionUser } from '@/lib/session';
+import { lookupByEmail } from '@/lib/directory';
+import { provisionSsoUser } from '@/server/services/users';
+import { audit } from '@/server/audit';
+import { db } from '@/db/client';
+import { PENDING_ROLE, isApproved } from '@/lib/access';
+import { log, logError, scrubText } from '@/lib/log';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const str = (v: unknown) => (typeof v === "string" ? v : "");
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 /**
  * Auto-provision the signed-in employee into `app_user` (the single user table)
@@ -38,36 +32,41 @@ async function provision(opts: {
 }): Promise<{ role: string; status: string; userId: number; sessionVersion: number } | null> {
   try {
     const r = await provisionSsoUser(opts);
-    return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId, sessionVersion: r.sessionVersion };
+    return {
+      role: r.userType ?? PENDING_ROLE,
+      status: r.isActive ? 'Active' : 'Inactive',
+      userId: r.userId,
+      sessionVersion: r.sessionVersion,
+    };
   } catch (e) {
-    logError(e, "sso provision failed");
+    logError(e, 'sso provision failed');
     return null;
   }
 }
 
 /** {email: "string(24)", user: {sub: "string(35)", …}} — the structure of a value, none of its content */
 function shapeOf(v: unknown, depth = 0): unknown {
-  if (v === null) return "null";
+  if (v === null) return 'null';
   if (Array.isArray(v)) return `array(${v.length})`;
-  if (typeof v === "object") {
+  if (typeof v === 'object') {
     if (depth >= 2) return `object(${Object.keys(v as object).length} keys)`;
     return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shapeOf(x, depth + 1)]));
   }
-  return typeof v === "string" ? `string(${v.length})` : typeof v;
+  return typeof v === 'string' ? `string(${v.length})` : typeof v;
 }
 
 function fail(request: NextRequest, reason: string) {
-  const to = new URL("/login", appOrigin(request));
-  to.searchParams.set("error", reason);
+  const to = new URL('/login', appOrigin(request));
+  to.searchParams.set('error', reason);
   return NextResponse.redirect(to);
 }
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? "").split(STATE_SEP).filter(Boolean);
-  const nextFromState = safeNext(state?.split("|")[1]);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? '').split(STATE_SEP).filter(Boolean);
+  const nextFromState = safeNext(state?.split('|')[1]);
 
   // Reloading the callback URL (or a second tab finishing after the first) must
   // not throw the user out: if this browser already holds a valid session, go on.
@@ -75,42 +74,42 @@ export async function GET(request: NextRequest) {
   const continueIfSignedIn = () =>
     existing ? NextResponse.redirect(new URL(nextFromState, appOrigin(request))) : null;
 
-  if (!code) return continueIfSignedIn() ?? fail(request, "missing_code");
-  if (!state || !cookieStates.includes(state))
-    return continueIfSignedIn() ?? fail(request, "state_mismatch");
+  if (!code) return continueIfSignedIn() ?? fail(request, 'missing_code');
+  if (!state || !cookieStates.includes(state)) return continueIfSignedIn() ?? fail(request, 'state_mismatch');
 
   const clientSecret = process.env.SSO_CLIENT_SECRET;
-  if (!clientSecret) return fail(request, "server_not_configured");
+  if (!clientSecret) return fail(request, 'server_not_configured');
 
   let identity: Record<string, unknown>;
   try {
     // verify authenticates the app with client_id + client_secret (in the body)
     const res = await fetch(SSO.verifyUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code,
         client_id: SSO.clientId,
         client_secret: clientSecret,
       }),
-      cache: "no-store",
+      cache: 'no-store',
       // a hung SSO must not hold the callback (and a connection) open; no retry — the code is one-time
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
       // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
-      const body = await res.text().catch(() => "");
+      const body = await res.text().catch(() => '');
       // the central service names the account in its 403 text ("account x@… is inactive") — scrubbed
-      log.warn("sso verify failed", { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
+      log.warn('sso verify failed', { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
       // a code that was already exchanged (page reload) while a session exists → just continue
       return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
     }
     identity = await res.json();
     // SSO_DEBUG=shape (or 1): what /sso/verify answered — field names, types and sizes,
     // never a value (safe in production for one sign-in; needed before keying users on `sub`)
-    if (process.env.SSO_DEBUG === "shape" || process.env.SSO_DEBUG === "1") log.info("sso verify shape", { shape: shapeOf(identity) });
+    if (process.env.SSO_DEBUG === 'shape' || process.env.SSO_DEBUG === '1')
+      log.info('sso verify shape', { shape: shapeOf(identity) });
   } catch {
-    return fail(request, "verify_unreachable");
+    return fail(request, 'verify_unreachable');
   }
 
   // central may nest the user under `user` / `profile` / `data`
@@ -124,42 +123,42 @@ export async function GET(request: NextRequest) {
   // `user`/`profile` object can exist without one (e.g. phone-only Lark accounts)
   const email = str(identity.email).trim() || str(u.email).trim();
   if (!email) {
-
-    console.error(`[sso] no email in verify response; top-level keys: ${JSON.stringify(Object.keys(identity))} user keys: ${JSON.stringify(Object.keys(u ?? {}))}`);
-    return fail(request, "no_email");
+    console.error(
+      `[sso] no email in verify response; top-level keys: ${JSON.stringify(Object.keys(identity))} user keys: ${JSON.stringify(Object.keys(u ?? {}))}`,
+    );
+    return fail(request, 'no_email');
   }
 
   // Enrich with the full directory profile (department, title, phone, avatar).
   const prof = await lookupByEmail(email);
 
-  const name =
-    str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split("@")[0] ?? email);
-  const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
+  const name = str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split('@')[0] ?? email);
+  const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || '';
 
   const provisioned = await provision({
     email,
     name,
-    larkId: prof?.id ?? "",
-    department: prof?.department ?? "",
-    phone: prof?.phone ?? "",
+    larkId: prof?.id ?? '',
+    department: prof?.department ?? '',
+    phone: prof?.phone ?? '',
     avatar,
-    title: prof?.title ?? "",
+    title: prof?.title ?? '',
   });
-  if (!provisioned) return fail(request, "db_unavailable");
+  if (!provisioned) return fail(request, 'db_unavailable');
   const { role, status, userId, sessionVersion } = provisioned;
 
   // audit: LOGIN (best-effort — never blocks sign-in)
   try {
     await audit(db, userId, {
-      action: "LOGIN",
-      module: "Auth",
-      entity: "app_user",
+      action: 'LOGIN',
+      module: 'Auth',
+      entity: 'app_user',
       key: userId || email,
       summary: `เข้าสู่ระบบ ${email} · ${role}`,
-      meta: { ip: clientIp(request.headers), ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
+      meta: { ip: clientIp(request.headers), ua: request.headers.get('user-agent')?.slice(0, 200) ?? null },
     });
   } catch (e) {
-    logError(e, "sso audit login failed");
+    logError(e, 'sso audit login failed');
   }
 
   const user: SessionUser = {
@@ -168,7 +167,7 @@ export async function GET(request: NextRequest) {
     avatar,
     // for the central-session check in /api/sso/refresh (sub is permanent; iat = that session)
     sub: str(identity.sub) || str(u.sub) || undefined,
-    ssoIat: typeof identity.iat === "number" ? identity.iat : typeof u.iat === "number" ? u.iat : null,
+    ssoIat: typeof identity.iat === 'number' ? identity.iat : typeof u.iat === 'number' ? u.iat : null,
     chk: Date.now(),
     role,
     approved: isApproved(role, status),
@@ -183,9 +182,9 @@ export async function GET(request: NextRequest) {
   // os_state has Max-Age=600 and expires on its own.
   res.cookies.set(SESSION_COOKIE, await signSession(user), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
   return res;

@@ -1,13 +1,13 @@
-import type { NextRequest } from "next/server";
-import { hit, hmac, isBlocked, issueDocTicket, logEvent } from "@/server/track-guard";
-import { trackJson, trackCtx, readSmallJson, str, TRACK_SESSION_HEADER } from "@/server/track-http";
-import { touchSession } from "@/server/track-otp";
-import { findDoc, jobNoForCustomers, jobNoForLink } from "@/server/services/tracking";
-import { TRACK_MSG } from "@/lib/track-public";
-import { logError } from "@/lib/log";
+import type { NextRequest } from 'next/server';
+import { hit, hmac, isBlocked, issueDocTicket, logEvent } from '@/server/track-guard';
+import { trackJson, trackCtx, readSmallJson, str, TRACK_SESSION_HEADER } from '@/server/track-http';
+import { touchSession } from '@/server/track-otp';
+import { findDoc, jobNoForCustomers, jobNoForLink } from '@/server/services/tracking';
+import { TRACK_MSG } from '@/lib/track-public';
+import { logError } from '@/lib/log';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/track/doc { kind, ref, jobNo | linkToken } → { url: "/track/doc/<ticket>" }
@@ -23,9 +23,13 @@ export async function POST(req: NextRequest) {
   const c = trackCtx(req);
   const notFound = () => trackJson({ ok: false, error: TRACK_MSG.docFail }, 404);
   try {
-    if (!(await hit("doc_ip_min", c.ipKey, 10, 60)) || !(await hit("doc_ip_hour", c.ipKey, 60, 3600)) || (await isBlocked(`ticket:${c.ipKey}`))) {
-      logEvent("doc_rate_limited", { ipHash: c.ipKey, requestId: c.requestId });
-      return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { "Retry-After": "60" });
+    if (
+      !(await hit('doc_ip_min', c.ipKey, 10, 60)) ||
+      !(await hit('doc_ip_hour', c.ipKey, 60, 3600)) ||
+      (await isBlocked(`ticket:${c.ipKey}`))
+    ) {
+      logEvent('doc_rate_limited', { ipHash: c.ipKey, requestId: c.requestId });
+      return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
     }
     const body = await readSmallJson(req);
 
@@ -33,26 +37,26 @@ export async function POST(req: NextRequest) {
     const sessionToken = req.headers.get(TRACK_SESSION_HEADER);
     if (sessionToken) {
       const s = await touchSession(sessionToken, c.ip, c.ua, true);
-      if (!s) return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: "session" }, 401);
+      if (!s) return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: 'session' }, 401);
       jobNo = await jobNoForCustomers(str(body.jobNo, 50), s.customerIds);
     } else {
       const linkToken = str(body.linkToken, 128).trim();
-      if (!(await hit("doc_link_min", hmac(`link:${linkToken}`), 10, 60))) {
-        logEvent("doc_rate_limited", { ipHash: c.ipKey, result: "link", requestId: c.requestId });
-        return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { "Retry-After": "60" });
+      if (!(await hit('doc_link_min', hmac(`link:${linkToken}`), 10, 60))) {
+        logEvent('doc_rate_limited', { ipHash: c.ipKey, result: 'link', requestId: c.requestId });
+        return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
       }
       jobNo = await jobNoForLink(linkToken);
-      if (!jobNo) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: "link" }, 410);
+      if (!jobNo) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 410);
     }
     if (!jobNo) return notFound();
 
     const doc = await findDoc(jobNo, body.kind, body.ref);
     if (!doc) return notFound();
     const ticket = await issueDocTicket({ jobNo, kind: doc.kind, ref: doc.ref }, c.ip, c.ua);
-    logEvent("doc_ticket_issued", { ipHash: c.ipKey, jobNo, result: doc.kind, requestId: c.requestId });
+    logEvent('doc_ticket_issued', { ipHash: c.ipKey, jobNo, result: doc.kind, requestId: c.requestId });
     return trackJson({ ok: true, url: `/track/doc/${ticket}` });
   } catch (e) {
-    logError(e, "track/doc");
+    logError(e, 'track/doc');
     return trackJson({ ok: false, error: TRACK_MSG.docFail }, 500);
   }
 }

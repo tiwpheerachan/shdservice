@@ -3,52 +3,52 @@
 // client (sidebar / button visibility). Admin & report screens have no legacy
 // module: they are System Admin only.
 
-export type Action = "add" | "edit" | "del" | "view";
+export type Action = 'add' | 'edit' | 'del' | 'view';
 
 export type Module =
-  | "Job Management"
-  | "Job Assign"
-  | "Job Repair"
-  | "Job Closing"
-  | "Product"
-  | "Product Onhand"
-  | "Product Receive Stock"
-  | "Product Pick Stock"
-  | "Customer"
-  | "Quotation"
-  | "Sale Order";
+  | 'Job Management'
+  | 'Job Assign'
+  | 'Job Repair'
+  | 'Job Closing'
+  | 'Product'
+  | 'Product Onhand'
+  | 'Product Receive Stock'
+  | 'Product Pick Stock'
+  | 'Customer'
+  | 'Quotation'
+  | 'Sale Order';
 
 /** Route prefix → module. First match wins (most specific first). */
 const ROUTE_MODULES: [string, Module][] = [
-  ["/jobs/assign", "Job Assign"],
-  ["/jobs/repair", "Job Repair"],
-  ["/jobs/outsource", "Job Repair"],
-  ["/jobs/close", "Job Closing"],
-  ["/jobs", "Job Management"],
-  ["/stock/products", "Product"],
-  ["/stock/inventory", "Product Onhand"],
-  ["/stock/receive", "Product Receive Stock"],
-  ["/stock/pick", "Product Pick Stock"],
-  ["/customers", "Customer"],
-  ["/quotation", "Quotation"],
-  ["/sale", "Sale Order"],
+  ['/jobs/assign', 'Job Assign'],
+  ['/jobs/repair', 'Job Repair'],
+  ['/jobs/outsource', 'Job Repair'],
+  ['/jobs/close', 'Job Closing'],
+  ['/jobs', 'Job Management'],
+  ['/stock/products', 'Product'],
+  ['/stock/inventory', 'Product Onhand'],
+  ['/stock/receive', 'Product Receive Stock'],
+  ['/stock/pick', 'Product Pick Stock'],
+  ['/customers', 'Customer'],
+  ['/quotation', 'Quotation'],
+  ['/sale', 'Sale Order'],
 ];
 
 /** Routes that only System Admin may use (no legacy module covers them). */
-export const ADMIN_ONLY_PREFIXES = ["/admin", "/reports"];
+export const ADMIN_ONLY_PREFIXES = ['/admin', '/reports'];
 /** Exceptions inside the admin-only prefixes that every approved user may open. */
-export const EVERYONE_PATHS = ["/admin/guide"];
+export const EVERYONE_PATHS = ['/admin/guide'];
 
-export const ADMIN_USER_TYPE = "System Admin";
+export const ADMIN_USER_TYPE = 'System Admin';
 
 export function moduleForPath(pathname: string): Module | null {
-  const hit = ROUTE_MODULES.find(([p]) => pathname === p || pathname.startsWith(p + "/"));
+  const hit = ROUTE_MODULES.find(([p]) => pathname === p || pathname.startsWith(p + '/'));
   return hit ? hit[1] : null;
 }
 
 export function isAdminOnlyPath(pathname: string): boolean {
-  if (EVERYONE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) return false;
-  return ADMIN_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  if (EVERYONE_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))) return false;
+  return ADMIN_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
 export type Grant = { add: boolean; edit: boolean; del: boolean; view: boolean };
@@ -58,12 +58,7 @@ export const NO_GRANT: Grant = { add: false, edit: false, del: false, view: fals
 export const FULL_GRANT: Grant = { add: true, edit: true, del: true, view: true };
 
 /** Pure check used on both sides. `grants` is keyed by module name. */
-export function checkGrant(
-  isAdmin: boolean,
-  grants: GrantMap,
-  module: Module | null,
-  action: Action
-): boolean {
+export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | null, action: Action): boolean {
   if (isAdmin) return true;
   if (!module) return false;
   return !!grants[module]?.[action];
@@ -75,5 +70,5 @@ export function canViewPath(isAdmin: boolean, grants: GrantMap, pathname: string
   if (isAdminOnlyPath(pathname)) return false;
   const m = moduleForPath(pathname);
   // routes without a module (e.g. "/") are open to every approved user
-  return m ? checkGrant(false, grants, m, "view") : true;
+  return m ? checkGrant(false, grants, m, 'view') : true;
 }

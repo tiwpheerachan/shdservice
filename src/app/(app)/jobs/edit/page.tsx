@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { PageHeader } from "@/components/shared/page-header";
-import { JobSearch } from "@/components/shared/job-search";
-import { JobHistorySection } from "@/components/shared/job-history";
+import * as React from 'react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { JobHistorySection } from '@/components/shared/job-history';
 import {
   CustomerSection,
   JobOpenSection,
@@ -16,22 +16,22 @@ import {
   useJobForm,
   fromJob,
   toJobInput,
-} from "@/components/shared/job-form";
-import { useToast } from "@/components/ui/toast";
-import { RecordGate } from "@/components/shared/record-gate";
-import { useJob, type JobDetail } from "@/lib/use-job";
-import { PrintButton } from "@/components/shared/print-button";
-import { TrackLink } from "@/components/shared/track-link";
-import { patchJson, errMsg } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
+} from '@/components/shared/job-form';
+import { useToast } from '@/components/ui/toast';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { PrintButton } from '@/components/shared/print-button';
+import { TrackLink } from '@/components/shared/track-link';
+import { patchJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
 
 function EditJobForm() {
   const { push } = useToast();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({
     onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: j.no }),
-    onMissing: (no) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: no }),
+    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
+    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
@@ -51,11 +51,14 @@ function EditJobForm() {
     if (report(validate())) return; // a required field that had a value must keep one
     setSaving(true);
     try {
-      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, { ...toJobInput(s), status: undefined });
+      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, {
+        ...toJobInput(s),
+        status: undefined,
+      });
       setJob(d.job);
-      push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว", desc: d.job.no });
+      push({ kind: 'success', title: 'บันทึกการแก้ไขงานแล้ว', desc: d.job.no });
     } catch (e) {
-      if (!fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -78,7 +81,7 @@ function EditJobForm() {
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="edit-job-no">
         <CustomerSection />
-        <JobOpenSection jobNo={job?.no} status={job?.status ?? "อยู่ระหว่างดำเนินการ"} />
+        <JobOpenSection jobNo={job?.no} status={job?.status ?? 'อยู่ระหว่างดำเนินการ'} />
         <ProductSection variant="open" />
         <OtherInfoSection directory={false} />
         <AttachmentSection jobNo={job?.no} />
@@ -90,9 +93,16 @@ function EditJobForm() {
           onSave={save}
           saving={saving}
           cancelHref="/jobs/list"
-          denied={can("Job Management", "edit") ? undefined : VIEW_ONLY}
+          denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
           extra={
-            <PrintButton label="พิมพ์ใบรับงาน" kind="job" no={job?.no ?? ""} profileId={job?.documentProfileId} href={`/print/job/${encodeURIComponent(job?.no ?? "")}`} disabled={!job} />
+            <PrintButton
+              label="พิมพ์ใบรับงาน"
+              kind="job"
+              no={job?.no ?? ''}
+              profileId={job?.documentProfileId}
+              href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+              disabled={!job}
+            />
           }
         />
       </RecordGate>

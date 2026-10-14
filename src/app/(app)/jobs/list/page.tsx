@@ -1,79 +1,138 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import {
-  Plus,
-  Printer,
-  Layers,
-  Sparkles,
-  Loader2,
-  CheckCircle2,
-  Phone,
-  X,
-} from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { SearchSelect, strOptions } from "@/components/shared/search-select";
-import { modelNameOptions } from "@/components/shared/model-picker";
-import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column, type ServerTableState } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { StatusBadge, Badge } from "@/components/ui/badge";
-import { Field } from "@/components/ui/field";
-import { Input, Select, Checkbox } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import dynamic from "next/dynamic";
+import * as React from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { Plus, Printer, Layers, Sparkles, Loader2, CheckCircle2, Phone, X } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { modelNameOptions } from '@/components/shared/model-picker';
+import { RowActions } from '@/components/shared/row-actions';
+import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { StatusBadge, Badge } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Input, Select, Checkbox } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import dynamic from 'next/dynamic';
 
 // call-log modal — loaded on first open, not with the list page
-const CustomerCallModal = dynamic(() => import("@/components/shared/customer-call-modal").then((m) => m.CustomerCallModal), { ssr: false });
-import { WARRANTY_OPTIONS, type Job, type Customer } from "@/data/mock";
-import { useJobsPage, useJobTypes, useStaff, useJobStats, useManufacturers, useModels, useJobTypeDetails, useJobStatuses } from "@/data/db";
-import { baht, cn, isFilterActive } from "@/lib/utils";
-import { api, qs, exportXlsx } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import { brandModelColumn, COL_MIN_WIDTH } from "@/components/shared/table-columns";
-import { ExportButton } from "@/components/shared/export-button";
+const CustomerCallModal = dynamic(
+  () => import('@/components/shared/customer-call-modal').then((m) => m.CustomerCallModal),
+  { ssr: false },
+);
+import { WARRANTY_OPTIONS, type Job, type Customer } from '@/data/mock';
+import {
+  useJobsPage,
+  useJobTypes,
+  useStaff,
+  useJobStats,
+  useManufacturers,
+  useModels,
+  useJobTypeDetails,
+  useJobStatuses,
+} from '@/data/db';
+import { baht, cn, isFilterActive } from '@/lib/utils';
+import { api, qs, exportXlsx } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
+import { ExportButton } from '@/components/shared/export-button';
 
 /** Filter bar — every field is AND-ed on the server (see JobFilters in services/jobs.ts). */
 type Filters = {
-  no: string; ref: string; brand: string; model: string; type: string; typeDetail: string;
-  createdBy: string; engineer: string;
-  dateBy: "create" | "reception" | "closed"; from: string; to: string;
-  customer: string; phone: string; tracking: string; imei: string; warranty: string;
-  bounce: boolean; within30: boolean; cost: "" | "yes" | "no"; status: string;
+  no: string;
+  ref: string;
+  brand: string;
+  model: string;
+  type: string;
+  typeDetail: string;
+  createdBy: string;
+  engineer: string;
+  dateBy: 'create' | 'reception' | 'closed';
+  from: string;
+  to: string;
+  customer: string;
+  phone: string;
+  tracking: string;
+  imei: string;
+  warranty: string;
+  bounce: boolean;
+  within30: boolean;
+  cost: '' | 'yes' | 'no';
+  status: string;
   /* status is chosen BY ID (list from job_status in the DB — the TAT link sends the id too); `status` keeps
      the name for display only. `open` (not Finished/Cancel) is set only by a dashboard TAT link. */
-  statusId: string; open: boolean;
+  statusId: string;
+  open: boolean;
   /** Pending | Repaired | Finished | Cancel — set only by a dashboard KPI card (counts by status group) */
   statusGroup: string;
   /** open + past the customer due date — set only by the notification bell's link */
   overdue: boolean;
 };
 const NO_FILTER: Filters = {
-  no: "", ref: "", brand: "", model: "", type: "", typeDetail: "",
-  createdBy: "", engineer: "",
-  dateBy: "create", from: "", to: "",
-  customer: "", phone: "", tracking: "", imei: "", warranty: "",
-  bounce: false, within30: false, cost: "", status: "",
-  statusId: "", open: false, statusGroup: "", overdue: false,
+  no: '',
+  ref: '',
+  brand: '',
+  model: '',
+  type: '',
+  typeDetail: '',
+  createdBy: '',
+  engineer: '',
+  dateBy: 'create',
+  from: '',
+  to: '',
+  customer: '',
+  phone: '',
+  tracking: '',
+  imei: '',
+  warranty: '',
+  bounce: false,
+  within30: false,
+  cost: '',
+  status: '',
+  statusId: '',
+  open: false,
+  statusGroup: '',
+  overdue: false,
 };
 /** query-string form of the applied filters — shared by the table hook and the Excel export */
 const toParams = (f: Filters) => ({
-  no: f.no, ref: f.ref, brand: f.brand, model: f.model, type: f.type, typeDetail: f.typeDetail,
-  createdBy: f.createdBy, engineer: f.engineer,
-  dateBy: f.dateBy === "create" ? "" : f.dateBy, from: f.from, to: f.to,
-  customer: f.customer, phone: f.phone, tracking: f.tracking, imei: f.imei, warranty: f.warranty,
-  bounce: f.bounce ? 1 : "", within30: f.within30 ? 1 : "", cost: f.cost,
+  no: f.no,
+  ref: f.ref,
+  brand: f.brand,
+  model: f.model,
+  type: f.type,
+  typeDetail: f.typeDetail,
+  createdBy: f.createdBy,
+  engineer: f.engineer,
+  dateBy: f.dateBy === 'create' ? '' : f.dateBy,
+  from: f.from,
+  to: f.to,
+  customer: f.customer,
+  phone: f.phone,
+  tracking: f.tracking,
+  imei: f.imei,
+  warranty: f.warranty,
+  bounce: f.bounce ? 1 : '',
+  within30: f.within30 ? 1 : '',
+  cost: f.cost,
   // statusId wins over the name (exact id match — no trailing-space / spelling issues with names)
-  status: f.statusId ? "" : f.status, statusId: f.statusId, open: f.open ? 1 : "", statusGroup: f.statusGroup,
-  overdue: f.overdue ? 1 : "",
+  status: f.statusId ? '' : f.status,
+  statusId: f.statusId,
+  open: f.open ? 1 : '',
+  statusGroup: f.statusGroup,
+  overdue: f.overdue ? 1 : '',
 });
 
 /** dashboard TAT buckets (keys match the dashboard's TatKey) */
 const TAT_BUCKET: Record<string, string> = {
-  d13: "1–3 วัน", d47: "4–7 วัน", d814: "8–14 วัน", d1530: "15–30 วัน", over30: "เกิน 30 วัน", total: "ทุกช่วงวัน",
+  d13: '1–3 วัน',
+  d47: '4–7 วัน',
+  d814: '8–14 วัน',
+  d1530: '15–30 วัน',
+  over30: 'เกิน 30 วัน',
+  total: 'ทุกช่วงวัน',
 };
 type TatSource = { bucket: string; status: string; type: string };
 
@@ -87,18 +146,18 @@ function StatChip({
   icon: React.ElementType;
   label: string;
   value: number;
-  tone: "primary" | "info" | "warning" | "success";
+  tone: 'primary' | 'info' | 'warning' | 'success';
   loading?: boolean;
 }) {
   const c = {
-    primary: "text-primary bg-primary-soft",
-    info: "text-info bg-info-soft",
-    warning: "text-warning bg-warning-soft",
-    success: "text-success bg-success-soft",
+    primary: 'text-primary bg-primary-soft',
+    info: 'text-info bg-info-soft',
+    warning: 'text-warning bg-warning-soft',
+    success: 'text-success bg-success-soft',
   }[tone];
   return (
     <div className="surface flex items-center gap-3 p-3">
-      <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", c)}>
+      <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-lg', c)}>
         <Icon className="h-[18px] w-[18px]" />
       </span>
       <div className="min-w-0">
@@ -106,7 +165,7 @@ function StatChip({
         {loading ? (
           <Skeleton className="mt-1 h-5 w-12" />
         ) : (
-          <p className="num text-lg font-semibold leading-tight tabular-nums">{value.toLocaleString("en-US")}</p>
+          <p className="num text-lg font-semibold leading-tight tabular-nums">{value.toLocaleString('en-US')}</p>
         )}
       </div>
     </div>
@@ -115,7 +174,7 @@ function StatChip({
 
 export default function JobListPage() {
   const access = useAccess();
-  const { add: canAdd, edit: canEdit } = access.forPath("/jobs/list");
+  const { add: canAdd, edit: canEdit } = access.forPath('/jobs/list');
   const { data: JOB_TYPES } = useJobTypes();
   const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
   const { data: BRANDS } = useManufacturers();
@@ -143,7 +202,7 @@ export default function JobListPage() {
   const dropDeepLink = () => {
     if (!window.location.search) return;
     ownUrlChange.current = true;
-    window.history.replaceState(null, "", window.location.pathname);
+    window.history.replaceState(null, '', window.location.pathname);
   };
   React.useEffect(() => {
     if (ownUrlChange.current) {
@@ -151,25 +210,36 @@ export default function JobListPage() {
       return;
     }
     const p = new URLSearchParams(search);
-    const g = (k: string) => p.get(k)?.trim() ?? "";
+    const g = (k: string) => p.get(k)?.trim() ?? '';
     const next: Partial<Filters> = {};
     let tatSrc: TatSource | null = null;
-    if (g("customer")) next.customer = g("customer");
-    if (g("src") === "tat") {
+    if (g('customer')) next.customer = g('customer');
+    if (g('src') === 'tat') {
       Object.assign(next, {
-        open: g("open") === "1", statusId: /^\d+$/.test(g("statusId")) ? g("statusId") : "", status: g("status"),
-        dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type"),
+        open: g('open') === '1',
+        statusId: /^\d+$/.test(g('statusId')) ? g('statusId') : '',
+        status: g('status'),
+        dateBy: 'create' as const,
+        from: g('from'),
+        to: g('to'),
+        type: g('type'),
       });
-      tatSrc = { bucket: g("bucket"), status: g("status"), type: g("type") };
+      tatSrc = { bucket: g('bucket'), status: g('status'), type: g('type') };
     }
     let kpiSrc: string | null = null;
-    if (g("src") === "kpi") {
-      Object.assign(next, { statusGroup: g("group"), dateBy: "create" as const, from: g("from"), to: g("to"), type: g("type") });
-      kpiSrc = g("label") || g("group");
+    if (g('src') === 'kpi') {
+      Object.assign(next, {
+        statusGroup: g('group'),
+        dateBy: 'create' as const,
+        from: g('from'),
+        to: g('to'),
+        type: g('type'),
+      });
+      kpiSrc = g('label') || g('group');
     }
-    if (g("src") === "overdue") {
+    if (g('src') === 'overdue') {
       next.overdue = true;
-      if (/^\d+$/.test(g("engineer"))) next.engineer = g("engineer");
+      if (/^\d+$/.test(g('engineer'))) next.engineer = g('engineer');
     }
     // a deep link (or navigating back to the plain list) starts from a clean filter set,
     // so e.g. one engineer from the bell never lingers when the next link has none
@@ -187,23 +257,36 @@ export default function JobListPage() {
     dropDeepLink();
   };
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: "", sort: null });
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // models narrow to the chosen brand (1,171 models in total)
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
-  const STAFF_OPTIONS = React.useMemo(() => STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined })), [STAFF]);
-  const all = { placeholder: "ทั้งหมด", emptyLabel: "ทั้งหมด" };
+  const STAFF_OPTIONS = React.useMemo(
+    () => STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined })),
+    [STAFF],
+  );
+  const all = { placeholder: 'ทั้งหมด', emptyLabel: 'ทั้งหมด' };
   // every status in the DB (25, incl. ones the old hard-coded list missed), in workflow order
   const { data: JOB_STATUSES } = useJobStatuses();
   const STATUS_OPTIONS = React.useMemo(
     () =>
       [...JOB_STATUSES]
         .sort((a, b) => a.order - b.order)
-        .map((s) => ({ value: String(s.id), label: s.name.trim(), sub: s.active ? s.group : `${s.group} · ไม่ใช้งาน` })),
-    [JOB_STATUSES]
+        .map((s) => ({
+          value: String(s.id),
+          label: s.name.trim(),
+          sub: s.active ? s.group : `${s.group} · ไม่ใช้งาน`,
+        })),
+    [JOB_STATUSES],
   );
-  const { rows: JOBS, total, loading, error: loadError, refetch: retryLoad } = useJobsPage({
+  const {
+    rows: JOBS,
+    total,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useJobsPage({
     page: table.page,
     pageSize: table.pageSize,
     q: table.q, // quick search box in the table (job no / customer / order no / IMEI / serial / model)
@@ -222,7 +305,7 @@ export default function JobListPage() {
 
   // customer_detail = "C12150 ชื่อ เบอร์" → look the customer up by code
   const openCall = async (job: Job) => {
-    const code = job.customer.split(/\s+/)[0] ?? "";
+    const code = job.customer.split(/\s+/)[0] ?? '';
     let customer: Customer | null = null;
     try {
       const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
@@ -237,9 +320,9 @@ export default function JobListPage() {
 
   const columns: Column<Job>[] = [
     {
-      key: "no",
-      header: "เลขที่งาน",
-      width: "130px",
+      key: 'no',
+      header: 'เลขที่งาน',
+      width: '130px',
       cell: (r) => (
         <Link {...access.jobLink(r.no)} prefetch={false} className="num font-medium text-primary hover:underline">
           {r.no}
@@ -247,14 +330,14 @@ export default function JobListPage() {
       ),
     },
     {
-      key: "openDate",
-      header: "วันที่เปิดงาน",
-      width: "140px",
+      key: 'openDate',
+      header: 'วันที่เปิดงาน',
+      width: '140px',
       cell: (r) => <span className="num text-xs">{r.openDate}</span>,
     },
     {
-      key: "customer",
-      header: "ลูกค้า",
+      key: 'customer',
+      header: 'ลูกค้า',
       minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => (
         <span className="flex items-center gap-2">
@@ -272,32 +355,36 @@ export default function JobListPage() {
       ),
     },
     {
-      key: "so",
-      header: "เลขคำสั่งซื้อ",
-      width: "120px",
-      hideBelow: "lg",
+      key: 'so',
+      header: 'เลขคำสั่งซื้อ',
+      width: '120px',
+      hideBelow: 'lg',
       cell: (r) => <span className="num text-xs">{r.so}</span>,
     },
     brandModelColumn(),
     {
-      key: "jobType",
-      header: "ประเภทงาน",
-      hideBelow: "xl",
-      cell: (r) => <Badge tone="primary" wrap>{r.jobType}</Badge>,
+      key: 'jobType',
+      header: 'ประเภทงาน',
+      hideBelow: 'xl',
+      cell: (r) => (
+        <Badge tone="primary" wrap>
+          {r.jobType}
+        </Badge>
+      ),
     },
-    { key: "owner", header: "ผู้รับผิดชอบ", hideBelow: "lg" },
+    { key: 'owner', header: 'ผู้รับผิดชอบ', hideBelow: 'lg' },
     {
-      key: "amount",
-      header: "มูลค่า",
-      align: "right",
-      width: "100px",
-      hideBelow: "xl",
+      key: 'amount',
+      header: 'มูลค่า',
+      align: 'right',
+      width: '100px',
+      hideBelow: 'xl',
       value: (r) => r.amount,
       cell: (r) => baht(r.amount),
     },
     {
-      key: "status",
-      header: "สถานะงาน",
+      key: 'status',
+      header: 'สถานะงาน',
       minWidth: COL_MIN_WIDTH.status,
       cell: (r) => (
         <span className="flex flex-wrap items-center gap-1">
@@ -311,10 +398,10 @@ export default function JobListPage() {
       ),
     },
     {
-      key: "action",
-      header: "Action",
-      width: "110px",
-      align: "center",
+      key: 'action',
+      header: 'Action',
+      width: '110px',
+      align: 'center',
       sortable: false,
       cell: (r) => (
         <RowActions
@@ -329,14 +416,14 @@ export default function JobListPage() {
     <>
       <PageHeader
         title="รายการงานทั้งหมด"
-        description={`ทะเบียนงานบริการทั้งหมด ${stats.total.toLocaleString("en-US")} รายการในระบบ`}
+        description={`ทะเบียนงานบริการทั้งหมด ${stats.total.toLocaleString('en-US')} รายการในระบบ`}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <ExportButton run={() => exportXlsx("jobs", { q: table.q, ...toParams(filters) })} />
+            <ExportButton run={() => exportXlsx('jobs', { q: table.q, ...toParams(filters) })} />
             {canAdd && (
               <Link href="/jobs/new">
                 <Button size="sm">
@@ -353,15 +440,24 @@ export default function JobListPage() {
         <StatChip icon={Layers} label="งานทั้งหมด" value={stats.total} tone="primary" loading={statsLoading} />
         <StatChip icon={Sparkles} label="งานใหม่" value={stats.fresh} tone="info" loading={statsLoading} />
         <StatChip icon={Loader2} label="กำลังดำเนินการ" value={stats.progress} tone="warning" loading={statsLoading} />
-        <StatChip icon={CheckCircle2} label="ซ่อมเสร็จ / ปิดงาน" value={stats.done} tone="success" loading={statsLoading} />
+        <StatChip
+          icon={CheckCircle2}
+          label="ซ่อมเสร็จ / ปิดงาน"
+          value={stats.done}
+          tone="success"
+          loading={statsLoading}
+        />
       </div>
 
       <FilterBar
         onSearch={() => {
           // editing any of the TAT/KPI-defining fields leaves that view: drop its hidden "open jobs only" /
           // status group too
-          const TAT_KEYS = ["status", "statusId", "dateBy", "from", "to", "type"] as const;
-          const next = (tat || kpi) && TAT_KEYS.some((k) => draft[k] !== filters[k]) ? { ...draft, open: false, statusGroup: "" } : draft;
+          const TAT_KEYS = ['status', 'statusId', 'dateBy', 'from', 'to', 'type'] as const;
+          const next =
+            (tat || kpi) && TAT_KEYS.some((k) => draft[k] !== filters[k])
+              ? { ...draft, open: false, statusGroup: '' }
+              : draft;
           if (next !== draft) {
             setTat(null);
             setKpi(null);
@@ -373,65 +469,122 @@ export default function JobListPage() {
         onReset={clearAll}
       >
         <Field label="เลขที่งาน">
-          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD("no", e.target.value)} />
+          <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD('no', e.target.value)} />
         </Field>
         <Field label="เลขคำสั่งซื้อ">
-          <Input placeholder="เลขคำสั่งซื้อ Shopee / Lazada …" className="num" value={draft.ref} onChange={(e) => setD("ref", e.target.value)} />
+          <Input
+            placeholder="เลขคำสั่งซื้อ Shopee / Lazada …"
+            className="num"
+            value={draft.ref}
+            onChange={(e) => setD('ref', e.target.value)}
+          />
         </Field>
         <Field label="ยี่ห้อ">
-          <SearchSelect {...all} value={draft.brand} onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: "" }))} options={BRAND_OPTIONS} searchPlaceholder="พิมพ์ชื่อยี่ห้อ…" />
+          <SearchSelect
+            {...all}
+            value={draft.brand}
+            onChange={(v) => setDraft((f) => ({ ...f, brand: v, model: '' }))}
+            options={BRAND_OPTIONS}
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="รุ่น">
-          <SearchSelect {...all} value={draft.model} onChange={(v) => setD("model", v)} options={MODEL_OPTIONS} minWidth={360} searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…" />
+          <SearchSelect
+            {...all}
+            value={draft.model}
+            onChange={(v) => setD('model', v)}
+            options={MODEL_OPTIONS}
+            minWidth={360}
+            searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
+          />
         </Field>
         <Field label="ประเภทงาน">
-          <SearchSelect {...all} value={draft.type} onChange={(v) => setD("type", v)} options={JOB_TYPE_OPTIONS} />
+          <SearchSelect {...all} value={draft.type} onChange={(v) => setD('type', v)} options={JOB_TYPE_OPTIONS} />
         </Field>
         <Field label="งานย่อย">
-          <SearchSelect {...all} value={draft.typeDetail} onChange={(v) => setD("typeDetail", v)} options={strOptions(JOB_TYPE_DETAILS)} />
+          <SearchSelect
+            {...all}
+            value={draft.typeDetail}
+            onChange={(v) => setD('typeDetail', v)}
+            options={strOptions(JOB_TYPE_DETAILS)}
+          />
         </Field>
         <Field label="เปิดงานโดย">
-          <SearchSelect {...all} value={draft.createdBy} onChange={(v) => setD("createdBy", v)} options={STAFF_OPTIONS} searchPlaceholder="พิมพ์ชื่อพนักงาน…" />
+          <SearchSelect
+            {...all}
+            value={draft.createdBy}
+            onChange={(v) => setD('createdBy', v)}
+            options={STAFF_OPTIONS}
+            searchPlaceholder="พิมพ์ชื่อพนักงาน…"
+          />
         </Field>
         <Field label="ผู้รับผิดชอบ">
-          <SearchSelect {...all} value={draft.engineer} onChange={(v) => setD("engineer", v)} options={STAFF_OPTIONS} searchPlaceholder="พิมพ์ชื่อช่าง…" />
+          <SearchSelect
+            {...all}
+            value={draft.engineer}
+            onChange={(v) => setD('engineer', v)}
+            options={STAFF_OPTIONS}
+            searchPlaceholder="พิมพ์ชื่อช่าง…"
+          />
         </Field>
         {/* which date the range applies to — empty dates = all */}
         <Field label="ช่วงวันที่ (ตาม)">
-          <Select value={draft.dateBy} onChange={(e) => setD("dateBy", e.target.value as Filters["dateBy"])}>
+          <Select value={draft.dateBy} onChange={(e) => setD('dateBy', e.target.value as Filters['dateBy'])}>
             <option value="create">วันที่เปิดงาน</option>
             <option value="reception">วันที่รับเครื่องซ่อม</option>
             <option value="closed">วันที่ปิดงาน-ส่งคืน</option>
           </Select>
         </Field>
         <Field label="ตั้งแต่วันที่">
-          <Input type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => setD("from", e.target.value)} />
+          <Input
+            type="date"
+            value={draft.from}
+            max={draft.to || undefined}
+            onChange={(e) => setD('from', e.target.value)}
+          />
         </Field>
         <Field label="ถึงวันที่">
-          <Input type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => setD("to", e.target.value)} />
+          <Input
+            type="date"
+            value={draft.to}
+            min={draft.from || undefined}
+            onChange={(e) => setD('to', e.target.value)}
+          />
         </Field>
         <Field label="ชื่อ-สกุล / รหัสลูกค้า">
-          <Input placeholder="ชื่อลูกค้า หรือ C43600" value={draft.customer} onChange={(e) => setD("customer", e.target.value)} />
+          <Input
+            placeholder="ชื่อลูกค้า หรือ C43600"
+            value={draft.customer}
+            onChange={(e) => setD('customer', e.target.value)}
+          />
         </Field>
         <Field label="เบอร์โทร">
-          <Input placeholder="08xxxxxxxx" className="num" inputMode="tel" value={draft.phone} onChange={(e) => setD("phone", e.target.value)} />
+          <Input
+            placeholder="08xxxxxxxx"
+            className="num"
+            inputMode="tel"
+            value={draft.phone}
+            onChange={(e) => setD('phone', e.target.value)}
+          />
         </Field>
         <Field label="เลขพัสดุจากลูกค้า">
-          <Input className="num" value={draft.tracking} onChange={(e) => setD("tracking", e.target.value)} />
+          <Input className="num" value={draft.tracking} onChange={(e) => setD('tracking', e.target.value)} />
         </Field>
         <Field label="IMEI / Serial No.">
-          <Input className="num" value={draft.imei} onChange={(e) => setD("imei", e.target.value)} />
+          <Input className="num" value={draft.imei} onChange={(e) => setD('imei', e.target.value)} />
         </Field>
         <Field label="Warranty">
-          <Select value={draft.warranty} onChange={(e) => setD("warranty", e.target.value)}>
+          <Select value={draft.warranty} onChange={(e) => setD('warranty', e.target.value)}>
             <option value="">ทั้งหมด</option>
             {WARRANTY_OPTIONS.map((w) => (
-              <option key={w} value={w}>{w === "IN" ? "IN — ในประกัน" : "OUT — นอกประกัน"}</option>
+              <option key={w} value={w}>
+                {w === 'IN' ? 'IN — ในประกัน' : 'OUT — นอกประกัน'}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="ค่าใช้จ่าย (เก็บลูกค้า)">
-          <Select value={draft.cost} onChange={(e) => setD("cost", e.target.value as Filters["cost"])}>
+          <Select value={draft.cost} onChange={(e) => setD('cost', e.target.value as Filters['cost'])}>
             <option value="">ทั้งหมด</option>
             <option value="yes">มีค่าใช้จ่าย</option>
             <option value="no">ไม่มีค่าใช้จ่าย</option>
@@ -440,8 +593,10 @@ export default function JobListPage() {
         <Field label="สถานะงาน">
           <SearchSelect
             {...all}
-            value={draft.statusId || (STATUS_OPTIONS.find((o) => o.label === draft.status.trim())?.value ?? "")}
-            onChange={(v) => setDraft((f) => ({ ...f, statusId: v, status: STATUS_OPTIONS.find((o) => o.value === v)?.label ?? "" }))}
+            value={draft.statusId || (STATUS_OPTIONS.find((o) => o.label === draft.status.trim())?.value ?? '')}
+            onChange={(v) =>
+              setDraft((f) => ({ ...f, statusId: v, status: STATUS_OPTIONS.find((o) => o.value === v)?.label ?? '' }))
+            }
             options={STATUS_OPTIONS}
             minWidth={360}
             searchPlaceholder="พิมพ์ชื่อสถานะ…"
@@ -450,11 +605,11 @@ export default function JobListPage() {
         <Field label="เฉพาะงาน" className="sm:col-span-2" group="group">
           <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
             <label className="inline-flex cursor-pointer items-center gap-2">
-              <Checkbox checked={draft.bounce} onChange={(e) => setD("bounce", e.target.checked)} />
+              <Checkbox checked={draft.bounce} onChange={(e) => setD('bounce', e.target.checked)} />
               งานซ่อมซ้ำ
             </label>
             <label className="inline-flex cursor-pointer items-center gap-2">
-              <Checkbox checked={draft.within30} onChange={(e) => setD("within30", e.target.checked)} />
+              <Checkbox checked={draft.within30} onChange={(e) => setD('within30', e.target.checked)} />
               ซ่อมภายใน 30 วันหลังการขาย
             </label>
           </div>
@@ -466,8 +621,9 @@ export default function JobListPage() {
           <span className="inline-flex items-center gap-2 rounded-full border border-danger/30 bg-danger-soft py-1 pl-3 pr-1 text-danger">
             <span>
               จากการแจ้งเตือน: <span className="font-medium">งานเกินกำหนดส่ง</span>
-              {filters.engineer && ` · ช่าง ${STAFF.find((s) => String(s.id) === filters.engineer)?.name ?? `#${filters.engineer}`}`}
-              <span className="num tabular-nums"> ({loading ? "…" : total.toLocaleString("en-US")} งาน)</span>
+              {filters.engineer &&
+                ` · ช่าง ${STAFF.find((s) => String(s.id) === filters.engineer)?.name ?? `#${filters.engineer}`}`}
+              <span className="num tabular-nums"> ({loading ? '…' : total.toLocaleString('en-US')} งาน)</span>
             </span>
             <button
               type="button"
@@ -487,19 +643,21 @@ export default function JobListPage() {
             <span>
               {tat ? (
                 <>
-                  จาก Dashboard TAT: <span className="font-medium">{tat.status || "ทุกสถานะ"}</span>
-                  {" · "}{TAT_BUCKET[tat.bucket] ?? tat.bucket}
+                  จาก Dashboard TAT: <span className="font-medium">{tat.status || 'ทุกสถานะ'}</span>
+                  {' · '}
+                  {TAT_BUCKET[tat.bucket] ?? tat.bucket}
                   {tat.type && ` · ${tat.type}`}
-                  {" · "}งานที่ยังไม่ปิด
+                  {' · '}งานที่ยังไม่ปิด
                 </>
               ) : (
                 <>
                   จาก Dashboard: <span className="font-medium">{kpi}</span>
-                  {" · "}เปิดงาน {filters.from || filters.to ? `${filters.from || "…"} – ${filters.to || "…"}` : "ทุกช่วงวัน"}
+                  {' · '}เปิดงาน{' '}
+                  {filters.from || filters.to ? `${filters.from || '…'} – ${filters.to || '…'}` : 'ทุกช่วงวัน'}
                   {filters.type && ` · ${filters.type}`}
                 </>
               )}
-              <span className="num tabular-nums"> ({loading ? "…" : total.toLocaleString("en-US")} งาน)</span>
+              <span className="num tabular-nums"> ({loading ? '…' : total.toLocaleString('en-US')} งาน)</span>
             </span>
             <button
               type="button"
@@ -520,7 +678,9 @@ export default function JobListPage() {
         searchable={false}
         columns={columns}
         rows={JOBS}
-        loading={loading} error={loadError} onRetry={retryLoad}
+        loading={loading}
+        error={loadError}
+        onRetry={retryLoad}
         rowKey={(r) => r.no}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />

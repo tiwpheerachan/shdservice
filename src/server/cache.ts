@@ -1,5 +1,5 @@
-import "server-only";
-import { LRUCache } from "lru-cache";
+import 'server-only';
+import { LRUCache } from 'lru-cache';
 
 /**
  * In-process cache for small, read-mostly lookups (master lists, staff, statuses, dashboard,
@@ -42,6 +42,6 @@ export async function cached<T>(key: string, ttlMs: number, load: () => Promise<
 }
 
 /** Drop every key starting with `prefix` ("" = everything). */
-export function invalidate(prefix = "") {
+export function invalidate(prefix = '') {
   for (const k of [...store.keys()]) if (k.startsWith(prefix)) store.delete(k);
 }

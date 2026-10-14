@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
-import { Check, ChevronsUpDown, Search, X } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/shadcn/popover";
-import { cn } from "@/lib/utils";
-import { useFieldControl } from "@/components/ui/field";
+import * as React from 'react';
+import { Command as CommandPrimitive } from 'cmdk';
+import { Check, ChevronsUpDown, Search, X } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
+import { cn } from '@/lib/utils';
+import { useFieldControl } from '@/components/ui/field';
 
 export type SearchOption = { value: string; label: string; sub?: string };
 
@@ -15,7 +15,7 @@ const MAX_ROWS = 100;
 export const strOptions = (list: readonly string[]): SearchOption[] => list.map((v) => ({ value: v, label: v }));
 /** keep a saved value that is no longer in the list (inactive / legacy) selectable, so it still shows */
 export const withCurrent = (opts: SearchOption[], value: string): SearchOption[] =>
-  value && !opts.some((o) => o.value === value) ? [{ value, label: value, sub: "ค่าเดิม" }, ...opts] : opts;
+  value && !opts.some((o) => o.value === value) ? [{ value, label: value, sub: 'ค่าเดิม' }, ...opts] : opts;
 
 /**
  * Searchable single select (cmdk) — a drop-in for a plain <Select> with a long list.
@@ -25,9 +25,9 @@ export function SearchSelect({
   options,
   value,
   onChange,
-  placeholder = "- - Please Select - -",
+  placeholder = '- - Please Select - -',
   emptyLabel,
-  searchPlaceholder = "พิมพ์เพื่อค้นหา…",
+  searchPlaceholder = 'พิมพ์เพื่อค้นหา…',
   minWidth = 280,
   disabled = false,
   id,
@@ -48,29 +48,38 @@ export function SearchSelect({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(id); // tie to the surrounding <Field> label
   const listId = React.useId();
-  const [q, setQ] = React.useState("");
+  const [q, setQ] = React.useState('');
   const selected = options.find((o) => o.value === value);
 
   // matches = everything that fits the search; rows = what is rendered (capped for long lists)
   const matches = React.useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return options;
-    const full = words.join(" ");
+    const full = words.join(' ');
     return options
-      .filter((o) => words.every((w) => `${o.label} ${o.sub ?? ""}`.toLowerCase().includes(w)))
-      .sort((a, b) => Number(!a.label.toLowerCase().startsWith(full)) - Number(!b.label.toLowerCase().startsWith(full)));
+      .filter((o) => words.every((w) => `${o.label} ${o.sub ?? ''}`.toLowerCase().includes(w)))
+      .sort(
+        (a, b) => Number(!a.label.toLowerCase().startsWith(full)) - Number(!b.label.toLowerCase().startsWith(full)),
+      );
   }, [options, q]);
   const rows = matches.length > MAX_ROWS ? matches.slice(0, MAX_ROWS) : matches;
 
   const pick = (v: string) => {
     onChange(v);
     setOpen(false);
-    setQ("");
+    setQ('');
   };
-  const itemCls = "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground";
+  const itemCls =
+    'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground';
 
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setQ('');
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -100,7 +109,11 @@ export function SearchSelect({
         style={{ minWidth }}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <CommandPrimitive shouldFilter={false} loop className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground">
+        <CommandPrimitive
+          shouldFilter={false}
+          loop
+          className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
+        >
           <div className="flex items-center gap-2 border-b border-border px-3">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
@@ -111,26 +124,35 @@ export function SearchSelect({
               className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
             />
             {q && (
-              <button type="button" onClick={() => setQ("")} className="text-muted-foreground hover:text-foreground" aria-label="ล้างคำค้น">
+              <button
+                type="button"
+                onClick={() => setQ('')}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="ล้างคำค้น"
+              >
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
           <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
             {emptyLabel && !q.trim() && (
-              <CommandPrimitive.Item value="__empty__" onSelect={() => pick("")} className={cn(itemCls, "text-muted-foreground")}>
-                <Check className={cn("h-3.5 w-3.5 shrink-0", value ? "opacity-0" : "opacity-100")} />
+              <CommandPrimitive.Item
+                value="__empty__"
+                onSelect={() => pick('')}
+                className={cn(itemCls, 'text-muted-foreground')}
+              >
+                <Check className={cn('h-3.5 w-3.5 shrink-0', value ? 'opacity-0' : 'opacity-100')} />
                 {emptyLabel}
               </CommandPrimitive.Item>
             )}
             {rows.length === 0 && (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                {options.length === 0 ? "กำลังโหลด…" : `ไม่พบรายการที่ตรงกับ "${q.trim()}"`}
+                {options.length === 0 ? 'กำลังโหลด…' : `ไม่พบรายการที่ตรงกับ "${q.trim()}"`}
               </p>
             )}
             {rows.map((o) => (
               <CommandPrimitive.Item key={o.value} value={o.value} onSelect={() => pick(o.value)} className={itemCls}>
-                <Check className={cn("h-3.5 w-3.5 shrink-0", o.value === value ? "opacity-100" : "opacity-0")} />
+                <Check className={cn('h-3.5 w-3.5 shrink-0', o.value === value ? 'opacity-100' : 'opacity-0')} />
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 {o.sub && <span className="shrink-0 text-2xs text-muted-foreground">{o.sub}</span>}
               </CommandPrimitive.Item>
@@ -138,7 +160,8 @@ export function SearchSelect({
           </CommandPrimitive.List>
           {matches.length > rows.length && (
             <p className="border-t border-border px-3 py-1.5 text-2xs text-muted-foreground">
-              แสดง {rows.length.toLocaleString("en-US")} จาก {matches.length.toLocaleString("en-US")} รายการ — พิมพ์เพื่อค้นหาเพิ่ม
+              แสดง {rows.length.toLocaleString('en-US')} จาก {matches.length.toLocaleString('en-US')} รายการ —
+              พิมพ์เพื่อค้นหาเพิ่ม
             </p>
           )}
         </CommandPrimitive>

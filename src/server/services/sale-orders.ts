@@ -1,27 +1,27 @@
-import "server-only";
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
-import { db } from "@/db/client";
-import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from "@/db/schema";
-import type { SaleOrder } from "@/data/mock";
-import { HttpError, fullName } from "@/server/auth";
-import { assertVersion } from "@/server/http-error";
-import { nextRunningNo } from "@/db/running-no";
-import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from "@/server/paging";
-import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
-import { getCustomerByCode, addressNames } from "./customers";
-import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
-import { issueForSaleOrder, productsChanged } from "./stock";
-import { RS, statusFilter, type StatusMode } from "@/server/record-status";
-import { saleOrderSchema } from "@/lib/validation/sale-order";
-import { assertValid } from "@/server/validate";
+import 'server-only';
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import { db } from '@/db/client';
+import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
+import type { SaleOrder } from '@/data/mock';
+import { HttpError, fullName } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
+import { nextRunningNo } from '@/db/running-no';
+import { audit, diff } from '@/server/audit';
+import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
+import { getCustomerByCode, addressNames } from './customers';
+import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { issueForSaleOrder, productsChanged } from './stock';
+import { RS, statusFilter, type StatusMode } from '@/server/record-status';
+import { saleOrderSchema } from '@/lib/validation/sale-order';
+import { assertValid } from '@/server/validate';
 
 /** approve_status ids */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
 
-const creator = alias(appUser, "creator");
-const approver = alias(appUser, "approver");
+const creator = alias(appUser, 'creator');
+const approver = alias(appUser, 'approver');
 
 const listSelect = {
   no: saleOutHd.saleOutHdNo,
@@ -44,27 +44,27 @@ const listSelect = {
   deliveryDate: saleOutHd.deliveryDate,
   remark: saleOutHd.remarkHd,
 };
-type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]["_"]["data"] | null };
+type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]['_']['data'] | null };
 
 function toSaleOrder(r: ListRow): SaleOrder {
   return {
-    no: r.no ?? "",
+    no: r.no ?? '',
     date: fmtDateTime(r.date),
-    customer: r.customer ?? "",
+    customer: r.customer ?? '',
     amount: num(r.amount),
     sales: fullName(r.salesFirst, r.salesLast),
-    approve: r.approve?.trim() ?? "",
-    stockDoc: r.stockDoc ?? "",
-    tracking: r.tracking ?? "",
+    approve: r.approve?.trim() ?? '',
+    stockDoc: r.stockDoc ?? '',
+    tracking: r.tracking ?? '',
     approveId: r.approveId ?? 0,
-    customerCode: r.customerCode ?? "",
-    paymentType: r.paymentType ?? "",
+    customerCode: r.customerCode ?? '',
+    paymentType: r.paymentType ?? '',
     paymentAmount: num(r.paymentAmount),
     cancelled: r.status === RS.DELETED,
     approveDate: fmtDateTime(r.approveDate),
     approvedBy: fullName(r.approverFirst, r.approverLast),
     deliveryDate: fmtDateTime(r.deliveryDate),
-    remark: r.remark ?? "",
+    remark: r.remark ?? '',
   };
 }
 
@@ -91,22 +91,27 @@ export type SaleOrderFilters = { approve?: string; from?: string; to?: string; s
 
 export function saleOrderWhere(q: string, f: SaleOrderFilters) {
   const term = q.trim();
-  const from = ymd(f.from), to = ymd(f.to);
+  const from = ymd(f.from),
+    to = ymd(f.to);
   return and(
-    statusFilter(saleOutHd.recordStatus, f.deleted ?? "exclude"),
+    statusFilter(saleOutHd.recordStatus, f.deleted ?? 'exclude'),
     term
       ? or(
           ilike(saleOutHd.saleOutHdNo, `%${term}%`),
           ilike(saleOutHd.customerName, `%${term}%`),
           ilike(saleOutHd.customerCode, `%${term}%`),
           ilike(saleOutHd.customerPhoneNumber, `%${term}%`),
-          ilike(saleOutHd.deliveryTrackingNo, `%${term}%`)
+          ilike(saleOutHd.deliveryTrackingNo, `%${term}%`),
         )
       : undefined,
     f.approve ? eq(approveStatus.approveNameTh, f.approve) : undefined,
     from ? gte(saleOutHd.documentCreateDate, `${from} 00:00:00`) : undefined,
     to ? lte(saleOutHd.documentCreateDate, `${to} 23:59:59`) : undefined,
-    f.sales ? (/^\d+$/.test(f.sales) ? eq(saleOutHd.documentCreateBy, Number(f.sales)) : ilike(creator.firstName, `%${f.sales}%`)) : undefined
+    f.sales
+      ? /^\d+$/.test(f.sales)
+        ? eq(saleOutHd.documentCreateBy, Number(f.sales))
+        : ilike(creator.firstName, `%${f.sales}%`)
+      : undefined,
   );
 }
 
@@ -131,7 +136,7 @@ export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise
 
 export async function listSaleOrders(f: SaleOrderFilters & { q?: string; limit?: number } = {}): Promise<SaleOrder[]> {
   const rows = await base()
-    .where(saleOrderWhere(f.q ?? "", f))
+    .where(saleOrderWhere(f.q ?? '', f))
     .orderBy(desc(saleOutHd.documentCreateDate))
     .limit(Math.min(f.limit ?? 5000, 20000));
   return rows.map(toSaleOrder);
@@ -143,7 +148,7 @@ export type SaleOrderLine = {
   productId: number;
   code: string;
   name: string;
-  type: "SparePart" | "Service";
+  type: 'SparePart' | 'Service';
   qty: number;
   unit: string;
   price: number;
@@ -153,9 +158,17 @@ export type SaleOrderLine = {
 
 export type SaleOrderDetail = SaleOrder & {
   customerDetail: {
-    code: string; taxId: string; name: string; address: string; phone: string; line: string; email: string;
+    code: string;
+    taxId: string;
+    name: string;
+    address: string;
+    phone: string;
+    line: string;
+    email: string;
     /** ตำบล / อำเภอ / จังหวัด names from the customer master (blank when the customer has no province picked) — for the shipping label's "ต. อ. จ." line */
-    subDistrict: string; district: string; province: string;
+    subDistrict: string;
+    district: string;
+    province: string;
   };
   lines: SaleOrderLine[];
   totalBase: number;
@@ -185,13 +198,13 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
   return {
     ...toSaleOrder(r),
     customerDetail: {
-      code: hd.customerCode ?? "",
-      taxId: hd.customerCardId ?? "",
-      name: hd.customerName ?? "",
-      address: hd.customerAddress ?? "",
-      phone: hd.customerPhoneNumber ?? "",
-      line: cust?.line ?? "",
-      email: cust?.email ?? "",
+      code: hd.customerCode ?? '',
+      taxId: hd.customerCardId ?? '',
+      name: hd.customerName ?? '',
+      address: hd.customerAddress ?? '',
+      phone: hd.customerPhoneNumber ?? '',
+      line: cust?.line ?? '',
+      email: cust?.email ?? '',
       subDistrict,
       district,
       province,
@@ -200,19 +213,19 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       id: d.saleOutDtId,
       listNo: d.listNo ?? 0,
       productId: d.productId ?? 0,
-      code: d.productCode ?? "",
-      name: name ?? d.remarkDt ?? "",
-      type: (d.productType as "SparePart" | "Service") ?? "SparePart",
+      code: d.productCode ?? '',
+      name: name ?? d.remarkDt ?? '',
+      type: (d.productType as 'SparePart' | 'Service') ?? 'SparePart',
       qty: d.saleOutQuantity,
-      unit: "Pcs.",
+      unit: 'Pcs.',
       price: num(d.saleOutPrice),
       amount: num(d.amountDt),
-      picked: d.pickInventoryNo ?? "",
+      picked: d.pickInventoryNo ?? '',
     })),
     totalBase: num(hd.totalBaseAmount),
     fee: num(hd.feeAmount),
-    slip: hd.slipFileName ?? "",
-    approveRemark: hd.approveRemark ?? "",
+    slip: hd.slipFileName ?? '',
+    approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(r.salesFirst, r.salesLast),
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     version: hd.rowVersion,
@@ -225,7 +238,7 @@ export type SaleOrderInput = {
   no?: string;
   customerCode: string;
   salesId?: number | string; // app_user id of the salesperson (document_create_by)
-  lines: { code: string; qty: number; price?: number | string; name?: string; type?: "SparePart" | "Service" }[];
+  lines: { code: string; qty: number; price?: number | string; name?: string; type?: 'SparePart' | 'Service' }[];
   paymentType?: string;
   paymentAmount?: number | string;
   /** ignored: the slip path is written only by /api/upload (a client-sent path could point at any file) */
@@ -242,7 +255,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
   // same rules as the form (lib/validation/sale-order)
   assertValid(saleOrderSchema, i);
   const cust = await getCustomerByCode(str(i.customerCode));
-  if (!cust) throw new HttpError(400, "ต้องเลือกลูกค้า", { fields: { customerCode: "ไม่พบลูกค้ารายนี้" } });
+  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   const codes = i.lines.map((l) => str(l.code)).filter(Boolean);
   const prods = await db
     .select({
@@ -257,17 +270,26 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     .from(product)
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .where(inArray(product.productCode, codes));
-  const byCode = new Map(prods.map((p) => [p.code ?? "", p]));
+  const byCode = new Map(prods.map((p) => [p.code ?? '', p]));
 
   const lines = i.lines
     .filter((l) => str(l.code))
     .map((l, idx) => {
       const p = byCode.get(str(l.code));
-      const isService = l.type === "Service" || (!p && !!l.name);
+      const isService = l.type === 'Service' || (!p && !!l.name);
       if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
       const qty = Math.max(1, Math.trunc(num(l.qty) || 1));
-      const price = l.price !== undefined && l.price !== "" ? num(l.price) : num(p?.retail);
-      return { listNo: idx + 1, p, isService, code: str(l.code), name: str(l.name) || p?.name || "", qty, price, amount: Math.round(qty * price * 100) / 100 };
+      const price = l.price !== undefined && l.price !== '' ? num(l.price) : num(p?.retail);
+      return {
+        listNo: idx + 1,
+        p,
+        isService,
+        code: str(l.code),
+        name: str(l.name) || p?.name || '',
+        qty,
+        price,
+        amount: Math.round(qty * price * 100) / 100,
+      };
     });
   const totalBase = lines.reduce((s, l) => s + l.amount, 0);
   const fee = num(i.fee);
@@ -283,44 +305,48 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       customerName: cust.name,
       customerAddress: cust.address.slice(0, 500),
       customerPhoneNumber: cust.phone,
-      customerFaxNumber: "",
+      customerFaxNumber: '',
       totalBaseAmount: money(totalBase),
-      vatRat: "0.00",
-      vatAmount: "0.00",
+      vatRat: '0.00',
+      vatAmount: '0.00',
       totalAmount: money(totalBase),
-      roundingAmount: "0.00",
+      roundingAmount: '0.00',
       feeAmount: money(fee),
       netAmount: money(net),
       remarkHd: str(i.remark).slice(0, 100),
-      paymentType: str(i.paymentType) || "โอนเงิน",
-      paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== "" ? num(i.paymentAmount) : net),
+      paymentType: str(i.paymentType) || 'โอนเงิน',
+      paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== '' ? num(i.paymentAmount) : net),
       deliveryTrackingNo: str(i.tracking).slice(0, 50),
     };
     let no = i.no;
     if (no) {
       // lock: an approval running now must finish first, so the APPROVED check below sees it
-      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for("update");
-      if (!prev) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
+      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
+      if (!prev) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
       assertVersion(i.version, prev.rowVersion);
-      if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, "ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้");
-      const upd = { ...hdValues, approveStatusId: approveId, ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}) };
+      if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
+      const upd = {
+        ...hdValues,
+        approveStatusId: approveId,
+        ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}),
+      };
       await tx.update(saleOutHd).set(upd).where(eq(saleOutHd.saleOutHdNo, no));
       await tx.delete(saleOutDt).where(eq(saleOutDt.saleOutHdNo, no));
       await audit(tx, byUserId, {
-        action: "UPDATE",
-        module: "Sale Order",
-        entity: "sale_out_hd",
+        action: 'UPDATE',
+        module: 'Sale Order',
+        entity: 'sale_out_hd',
         key: no,
         summary: `แก้ไขใบสั่งขาย · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
         changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>),
       });
     } else {
       const profile = await issuingProfile(i.documentProfileId);
-      no = await nextRunningNo(tx, "SaleOrder");
+      no = await nextRunningNo(tx, 'SaleOrder');
       await audit(tx, byUserId, {
-        action: "CREATE",
-        module: "Sale Order",
-        entity: "sale_out_hd",
+        action: 'CREATE',
+        module: 'Sale Order',
+        entity: 'sale_out_hd',
         key: no,
         summary: `สร้างใบสั่งขาย · ${cust.code} ${cust.name} · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
       });
@@ -328,22 +354,22 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         ...hdValues,
         documentProfileId: profile.id,
         saleOutHdNo: no,
-        documentType: "SaleOrder",
+        documentType: 'SaleOrder',
         documentCreateDate: now,
         documentCreateBy: i.salesId ? Number(i.salesId) : byUserId,
         documentStatus: true,
-        documentCreditNoteNo: "",
+        documentCreditNoteNo: '',
         documentCancelDate: SENTINEL_TS,
         documentCancelBy: -1,
-        documentCancelRemark: "",
+        documentCancelRemark: '',
         isSaleOut: true,
         saleOutDate: now,
         saleOutBy: byUserId,
-        referenceNo: "",
+        referenceNo: '',
         approveStatusId: approveId,
         approveDate: SENTINEL_TS,
         approveBy: -1,
-        approveRemark: "",
+        approveRemark: '',
         deliveryDate: SENTINEL_TS,
       });
     }
@@ -354,21 +380,21 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         productId: l.p?.id ?? null,
         storeLocationId: 1,
         conditionId: 1,
-        serialNo: "",
+        serialNo: '',
         capitalPrice: money(num(l.p?.capital)),
         wholesalePrice: money(num(l.p?.wholesale)),
         retailPrice: money(num(l.p?.retail)),
         saleOutPrice: money(l.price),
         saleOutQuantity: l.qty,
         amountDt: money(l.amount),
-        remarkDt: l.isService ? l.name.slice(0, 100) : "",
+        remarkDt: l.isService ? l.name.slice(0, 100) : '',
         onhandItemId: l.p?.itemId ?? null,
-        productType: l.isService ? "Service" : "SparePart",
-        documentCreditNoteNo: "",
+        productType: l.isService ? 'Service' : 'SparePart',
+        documentCreditNoteNo: '',
         productCode: l.code.slice(0, 50),
-        pickInventoryNo: "",
-        returnInventoryNo: "",
-      }))
+        pickInventoryNo: '',
+        returnInventoryNo: '',
+      })),
     );
     return no!;
   });
@@ -379,33 +405,49 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
  * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy
  * data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล just stamp the decision.
  */
-export async function approveSaleOrder(no: string, decision: "approve" | "deny" | "reject", remark: string, byUserId: number): Promise<SaleOrderDetail> {
-  const statusId = decision === "approve" ? AS.APPROVED : decision === "deny" ? AS.DENIED : AS.REJECT;
+export async function approveSaleOrder(
+  no: string,
+  decision: 'approve' | 'deny' | 'reject',
+  remark: string,
+  byUserId: number,
+): Promise<SaleOrderDetail> {
+  const statusId = decision === 'approve' ? AS.APPROVED : decision === 'deny' ? AS.DENIED : AS.REJECT;
   await db.transaction(async (tx) => {
-    const [hd] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for("update");
-    if (!hd) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
-    if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, "อนุมัติไปแล้ว");
+    const [hd] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
+    if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, 'อนุมัติไปแล้ว');
     await tx
       .update(saleOutHd)
-      .set({ approveStatusId: statusId, approveDate: nowThai(), approveBy: byUserId, approveRemark: str(remark).slice(0, 100) })
+      .set({
+        approveStatusId: statusId,
+        approveDate: nowThai(),
+        approveBy: byUserId,
+        approveRemark: str(remark).slice(0, 100),
+      })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
-      action: "APPROVE",
-      module: "Sale Order",
-      entity: "sale_out_hd",
+      action: 'APPROVE',
+      module: 'Sale Order',
+      entity: 'sale_out_hd',
       key: no,
-      summary: decision === "approve" ? "อนุมัติใบสั่งขาย (ตัดสต๊อก)" : decision === "deny" ? `ปฏิเสธใบสั่งขาย${remark ? ` · ${remark}` : ""}` : `ส่งกลับแก้ไข${remark ? ` · ${remark}` : ""}`,
+      summary:
+        decision === 'approve'
+          ? 'อนุมัติใบสั่งขาย (ตัดสต๊อก)'
+          : decision === 'deny'
+            ? `ปฏิเสธใบสั่งขาย${remark ? ` · ${remark}` : ''}`
+            : `ส่งกลับแก้ไข${remark ? ` · ${remark}` : ''}`,
       changes: { approveStatusId: [hd.approveStatusId, statusId] },
     });
-    if (decision === "approve") {
+    if (decision === 'approve') {
       const hasGoods = await tx
         .select({ n: count() })
         .from(saleOutDt)
-        .where(and(eq(saleOutDt.saleOutHdNo, no), ne(saleOutDt.productType, "Service")));
-      if (Number(hasGoods[0]?.n ?? 0) > 0) await issueForSaleOrder({ soNo: no, payTo: hd.customerName ?? "" }, byUserId, tx);
+        .where(and(eq(saleOutDt.saleOutHdNo, no), ne(saleOutDt.productType, 'Service')));
+      if (Number(hasGoods[0]?.n ?? 0) > 0)
+        await issueForSaleOrder({ soNo: no, payTo: hd.customerName ?? '' }, byUserId, tx);
     }
   });
-  if (decision === "approve") productsChanged(); // stock went out in our tx — now committed
+  if (decision === 'approve') productsChanged(); // stock went out in our tx — now committed
   return (await getSaleOrder(no))!;
 }
 
@@ -416,8 +458,15 @@ export async function setTracking(no: string, tracking: string, byUserId: number
       .set({ deliveryTrackingNo: str(tracking).slice(0, 50), deliveryDate: nowThai() })
       .where(eq(saleOutHd.saleOutHdNo, no))
       .returning({ no: saleOutHd.saleOutHdNo });
-    if (!r[0]) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
-    await audit(tx, byUserId, { action: "UPDATE", module: "Sale Order", entity: "sale_out_hd", key: no, summary: `บันทึกเลขพัสดุ ${str(tracking)}`, changes: { deliveryTrackingNo: [null, str(tracking)] } });
+    if (!r[0]) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    await audit(tx, byUserId, {
+      action: 'UPDATE',
+      module: 'Sale Order',
+      entity: 'sale_out_hd',
+      key: no,
+      summary: `บันทึกเลขพัสดุ ${str(tracking)}`,
+      changes: { deliveryTrackingNo: [null, str(tracking)] },
+    });
   });
   return (await getSaleOrder(no))!;
 }

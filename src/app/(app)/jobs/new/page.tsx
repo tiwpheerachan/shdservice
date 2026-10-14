@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/shared/page-header";
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import { PageHeader } from '@/components/shared/page-header';
 import {
   CustomerSection,
   JobOpenSection,
@@ -14,14 +14,14 @@ import {
   useJobForm,
   toJobInput,
   type AttachmentsHandle,
-} from "@/components/shared/job-form";
-import { useToast } from "@/components/ui/toast";
-import { Modal } from "@/components/ui/modal";
-import { Button } from "@/components/ui/button";
-import { TrackLink } from "@/components/shared/track-link";
-import { postJson, errMsg } from "@/lib/api";
-import { useAccess } from "@/lib/use-access";
-import type { JobDetail } from "@/lib/use-job";
+} from '@/components/shared/job-form';
+import { useToast } from '@/components/ui/toast';
+import { Modal } from '@/components/ui/modal';
+import { Button } from '@/components/ui/button';
+import { TrackLink } from '@/components/shared/track-link';
+import { postJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import type { JobDetail } from '@/lib/use-job';
 
 function NewJobForm() {
   const { push } = useToast();
@@ -40,13 +40,13 @@ function NewJobForm() {
     if (report(validate())) return;
     setSaving(true);
     try {
-      const d = await postJson<{ job: JobDetail }>("/api/jobs", toJobInput(s));
+      const d = await postJson<{ job: JobDetail }>('/api/jobs', toJobInput(s));
       await attach.current?.uploadPending(d.job.no);
-      push({ kind: "success", title: "เปิดงานใหม่เรียบร้อย", desc: `หมายเลขงาน ${d.job.no}` });
+      push({ kind: 'success', title: 'เปิดงานใหม่เรียบร้อย', desc: `หมายเลขงาน ${d.job.no}` });
       reset();
       setOpened(d.job.no);
     } catch (e) {
-      if (!fromApi(e)) push({ kind: "error", title: "เปิดงานไม่สำเร็จ", desc: errMsg(e) });
+      if (!fromApi(e)) push({ kind: 'error', title: 'เปิดงานไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -63,19 +63,25 @@ function NewJobForm() {
       <ProductSection variant="open" />
       <OtherInfoSection directory={false} />
       <AttachmentSection ref={attach} />
-      <FormActions saveLabel="บันทึกเปิดงาน" onSave={save} saving={saving} cancelHref="/jobs/list" denied={can("Job Management", "add") ? undefined : "ไม่มีสิทธิ์เปิดงานใหม่ — ติดต่อผู้ดูแลระบบ"} />
+      <FormActions
+        saveLabel="บันทึกเปิดงาน"
+        onSave={save}
+        saving={saving}
+        cancelHref="/jobs/list"
+        denied={can('Job Management', 'add') ? undefined : 'ไม่มีสิทธิ์เปิดงานใหม่ — ติดต่อผู้ดูแลระบบ'}
+      />
 
       <Modal
         open={!!opened}
         onClose={() => setOpened(null)}
-        title={`เปิดงานเรียบร้อย · ${opened ?? ""}`}
+        title={`เปิดงานเรียบร้อย · ${opened ?? ''}`}
         description="ส่งลิงก์ติดตามให้ลูกค้าได้เลย หรือพิมพ์ใบรับงานก่อน"
         footer={
           <>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => opened && window.open(`/print/job/${encodeURIComponent(opened)}`, "_blank")}
+              onClick={() => opened && window.open(`/print/job/${encodeURIComponent(opened)}`, '_blank')}
             >
               พิมพ์ใบรับงาน
             </Button>

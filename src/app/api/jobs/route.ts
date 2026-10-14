@@ -1,14 +1,14 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireCan, readJson } from "@/server/auth";
-import { idempotent } from "@/server/idempotency";
-import { createJob, type JobInput } from "@/server/services/jobs";
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, requireCan, readJson } from '@/server/auth';
+import { idempotent } from '@/server/idempotency';
+import { createJob, type JobInput } from '@/server/services/jobs';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /** เปิดงานใหม่ */
 export const POST = handle(async (req: NextRequest) => {
-  const user = await requireCan(req, "Job Management", "add");
+  const user = await requireCan(req, 'Job Management', 'add');
   return idempotent(req, user.userId, async () => {
     const body = await readJson<JobInput>(req);
     const job = await createJob(body, user.userId);

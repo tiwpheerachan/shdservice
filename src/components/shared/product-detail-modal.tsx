@@ -1,30 +1,34 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { ImageIcon, Upload } from "lucide-react";
-import { Modal } from "@/components/ui/modal";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Textarea, Checkbox, Radio } from "@/components/ui/input";
-import { SearchSelect, withCurrent } from "./search-select";
-import { useToast } from "@/components/ui/toast";
-import {
-  useApi,
-  useModels,
-  useColors,
-  useCategories,
-  useManufacturers,
-} from "@/data/db";
-import type { Product } from "@/data/mock";
-import { int } from "@/lib/utils";
-import { postJson, errMsg, uploadFile, fileUrl } from "@/lib/api";
-import { useFormErrors, useClearOnChange } from "@/lib/use-form-errors";
-import { productSchema } from "@/lib/validation/admin";
+import * as React from 'react';
+import { ImageIcon, Upload } from 'lucide-react';
+import { Modal } from '@/components/ui/modal';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field, FieldGrid } from '@/components/ui/field';
+import { Input, Textarea, Checkbox, Radio } from '@/components/ui/input';
+import { SearchSelect, withCurrent } from './search-select';
+import { useToast } from '@/components/ui/toast';
+import { useApi, useModels, useColors, useCategories, useManufacturers } from '@/data/db';
+import type { Product } from '@/data/mock';
+import { int } from '@/lib/utils';
+import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
+import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { productSchema } from '@/lib/validation/admin';
 
-export type ProductMode = "view" | "edit" | "add";
+export type ProductMode = 'view' | 'edit' | 'add';
 
-type Card = { no: string; date: string; type: string; before: number; income: number; outcome: number; after: number; ref: string; remark: string };
+type Card = {
+  no: string;
+  date: string;
+  type: string;
+  before: number;
+  income: number;
+  outcome: number;
+  after: number;
+  ref: string;
+  remark: string;
+};
 type Detail = Product & { models: string[] };
 
 type Form = {
@@ -44,30 +48,30 @@ type Form = {
 };
 
 const EMPTY_FORM: Form = {
-  mfgCode: "",
-  name: "",
-  nameEn: "",
-  nameCn: "",
-  description: "",
-  category: "",
-  brand: "",
-  capitalPrice: "",
-  wholesalePrice: "",
-  price: "",
-  forModelColor: "",
-  status: "Active",
+  mfgCode: '',
+  name: '',
+  nameEn: '',
+  nameCn: '',
+  description: '',
+  category: '',
+  brand: '',
+  capitalPrice: '',
+  wholesalePrice: '',
+  price: '',
+  forModelColor: '',
+  status: 'Active',
   models: [],
 };
 
 const NEW_PRODUCT: Product = {
-  sysCode: "",
-  mfgCode: "",
-  name: "",
-  category: "",
-  brand: "",
+  sysCode: '',
+  mfgCode: '',
+  name: '',
+  category: '',
+  brand: '',
   onhand: 0,
   price: 0,
-  status: "Active",
+  status: 'Active',
 };
 
 export function ProductDetailModal({
@@ -89,20 +93,20 @@ export function ProductDetailModal({
   const { data: CATEGORIES } = useCategories();
   const { data: MANUFACTURERS } = useManufacturers();
 
-  const ro = mode === "view";
-  const code = product?.sysCode ?? "";
+  const ro = mode === 'view';
+  const code = product?.sysCode ?? '';
 
   // full detail + stock card from the DB (product / product_none_serial / inventory_*)
-  const detailKey = open && mode !== "add" && code ? `/api/products/${encodeURIComponent(code)}` : null;
+  const detailKey = open && mode !== 'add' && code ? `/api/products/${encodeURIComponent(code)}` : null;
   const loaded = useApi<{ product: Detail; card: Card[] }>(detailKey, {
     fresh: true,
-    onError: (msg) => push({ kind: "error", title: "โหลดข้อมูลอะไหล่ไม่สำเร็จ", desc: msg }),
+    onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลอะไหล่ไม่สำเร็จ', desc: msg }),
   });
-  const detail = detailKey ? loaded.data?.product ?? null : null;
-  const stockCard = React.useMemo(() => (detailKey ? loaded.data?.card ?? [] : []), [detailKey, loaded.data]);
+  const detail = detailKey ? (loaded.data?.product ?? null) : null;
+  const stockCard = React.useMemo(() => (detailKey ? (loaded.data?.card ?? []) : []), [detailKey, loaded.data]);
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
-  const [image, setImage] = React.useState("");
+  const [image, setImage] = React.useState('');
   const [uploading, setUploading] = React.useState(false);
 
   // รูปอะไหล่ → bucket oneservice/products/{code}/… แล้วเก็บชื่อไฟล์ใน product.pictrue_file_name
@@ -110,11 +114,11 @@ export function ProductDetailModal({
     if (!f || !code) return;
     setUploading(true);
     try {
-      const d = await uploadFile("product-image", code, f);
+      const d = await uploadFile('product-image', code, f);
       setImage(d.path);
-      push({ kind: "success", title: "อัปโหลดรูปแล้ว", desc: f.name });
+      push({ kind: 'success', title: 'อัปโหลดรูปแล้ว', desc: f.name });
     } catch (e) {
-      push({ kind: "error", title: "อัปโหลดรูปไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'อัปโหลดรูปไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setUploading(false);
     }
@@ -128,66 +132,70 @@ export function ProductDetailModal({
   //  - the edit form is filled ONCE per session, from a fresh answer (not a cached one still being
   //    re-read) — a late answer never overwrites what the user has started typing
   const session = `${open ? 1 : 0}|${mode}|${code}`;
-  const [seenSession, setSeenSession] = React.useState("");
-  const [filledFor, setFilledFor] = React.useState("");
+  const [seenSession, setSeenSession] = React.useState('');
+  const [filledFor, setFilledFor] = React.useState('');
   if (open && seenSession !== session) {
     setSeenSession(session);
     fe.setErrors({});
-    if (mode === "add" || !code) {
-      setImage("");
-      setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? "", brand: MANUFACTURERS[0]?.name ?? "" });
+    if (mode === 'add' || !code) {
+      setImage('');
+      setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? '', brand: MANUFACTURERS[0]?.name ?? '' });
     }
   }
   if (detailKey && loaded.data && !loaded.validating && filledFor !== session) {
     const d = loaded.data;
     setFilledFor(session);
-    setImage(d.product.image ?? "");
+    setImage(d.product.image ?? '');
     setForm({
       mfgCode: d.product.mfgCode,
       name: d.product.name,
-      nameEn: d.product.nameEn ?? "",
-      nameCn: d.product.nameCn ?? "",
-      description: d.product.description ?? "",
+      nameEn: d.product.nameEn ?? '',
+      nameCn: d.product.nameCn ?? '',
+      description: d.product.description ?? '',
       category: d.product.category,
       brand: d.product.brand,
-      capitalPrice: d.product.capitalPrice ? String(d.product.capitalPrice) : "",
-      wholesalePrice: d.product.wholesalePrice ? String(d.product.wholesalePrice) : "",
-      price: d.product.price ? String(d.product.price) : "",
-      forModelColor: d.product.forModelColor ?? "",
+      capitalPrice: d.product.capitalPrice ? String(d.product.capitalPrice) : '',
+      wholesalePrice: d.product.wholesalePrice ? String(d.product.wholesalePrice) : '',
+      price: d.product.price ? String(d.product.price) : '',
+      forModelColor: d.product.forModelColor ?? '',
       status: d.product.status,
       models: d.product.models ?? [],
     });
   }
   if (!open && (filledFor || seenSession)) {
     // closed → the next open (even of the same product) starts a new session
-    setFilledFor("");
-    setSeenSession("");
+    setFilledFor('');
+    setSeenSession('');
   }
 
   const save = async () => {
     if (fe.report(fe.run(productSchema, form))) return; // the API checks the same
     setSaving(true);
     try {
-      const d = await postJson<{ row: Product }>("/api/products", { ...form, sysCode: code || undefined });
-      push({ kind: "success", title: mode === "add" ? "เพิ่มอะไหล่แล้ว" : "บันทึกการแก้ไขอะไหล่แล้ว", desc: d.row.sysCode });
+      const d = await postJson<{ row: Product }>('/api/products', { ...form, sysCode: code || undefined });
+      push({
+        kind: 'success',
+        title: mode === 'add' ? 'เพิ่มอะไหล่แล้ว' : 'บันทึกการแก้ไขอะไหล่แล้ว',
+        desc: d.row.sysCode,
+      });
       onSave?.(d.row);
       onClose();
     } catch (e) {
-      if (!fe.fromApi(e)) push({ kind: "error", title: "บันทึกไม่สำเร็จ", desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
   };
 
-  if (!product && mode !== "add") return null;
+  if (!product && mode !== 'add') return null;
   const p: Product = detail ?? product ?? NEW_PRODUCT;
 
   // stock on-hand row (single warehouse / condition in the legacy system)
   const onhandRows = [
     {
-      sn: "-",
-      loc: "คลังสินค้าดี",
-      cond: "สินค้าใหม่",
+      sn: '-',
+      loc: 'คลังสินค้าดี',
+      cond: 'สินค้าใหม่',
       income: p.received ?? p.onhand,
       outcome: p.issued ?? 0,
       reserve: p.reserved ?? 0,
@@ -201,20 +209,20 @@ export function ProductDetailModal({
       open={open}
       onClose={onClose}
       size="xl"
-      title={mode === "view" ? "รายละเอียดอะไหล่" : mode === "add" ? "เพิ่มอะไหล่ใหม่" : "แก้ไขข้อมูลอะไหล่"}
+      title={mode === 'view' ? 'รายละเอียดอะไหล่' : mode === 'add' ? 'เพิ่มอะไหล่ใหม่' : 'แก้ไขข้อมูลอะไหล่'}
       description={
-        mode === "add"
-          ? "Mode: Add New · รหัสอะไหล่จะถูกสร้างอัตโนมัติ"
-          : `Mode: ${mode === "view" ? "View" : "Edit"} Data · Product ${p.sysCode}`
+        mode === 'add'
+          ? 'Mode: Add New · รหัสอะไหล่จะถูกสร้างอัตโนมัติ'
+          : `Mode: ${mode === 'view' ? 'View' : 'Edit'} Data · Product ${p.sysCode}`
       }
       footer={
         <>
           <Button variant="outline" size="sm" onClick={onClose}>
-            {mode === "view" ? "ปิด" : "ยกเลิก"}
+            {mode === 'view' ? 'ปิด' : 'ยกเลิก'}
           </Button>
-          {mode !== "view" && (
+          {mode !== 'view' && (
             <Button size="sm" onClick={save} disabled={saving}>
-              {mode === "add" ? "บันทึกอะไหล่" : "ยืนยันการแก้ไข"}
+              {mode === 'add' ? 'บันทึกอะไหล่' : 'ยืนยันการแก้ไข'}
             </Button>
           )}
         </>
@@ -239,9 +247,9 @@ export function ProductDetailModal({
             {!ro && (
               <label
                 className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
-                title={code ? "อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)" : "บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป"}
+                title={code ? 'อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)' : 'บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป'}
               >
-                <Upload className="h-3.5 w-3.5" /> {uploading ? "กำลังอัปโหลด…" : "เลือกไฟล์"}
+                <Upload className="h-3.5 w-3.5" /> {uploading ? 'กำลังอัปโหลด…' : 'เลือกไฟล์'}
                 <input
                   type="file"
                   className="hidden"
@@ -256,25 +264,30 @@ export function ProductDetailModal({
           {/* fields */}
           <FieldGrid cols={2}>
             <Field label="รหัสอะไหล่ (ระบบ)">
-              <Input value={p.sysCode || "Generate Auto"} readOnly className="num" />
+              <Input value={p.sysCode || 'Generate Auto'} readOnly className="num" />
             </Field>
             <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-              <Input value={form.mfgCode} onChange={(e) => set("mfgCode", e.target.value)} readOnly={ro} className="num" />
+              <Input
+                value={form.mfgCode}
+                onChange={(e) => set('mfgCode', e.target.value)}
+                readOnly={ro}
+                className="num"
+              />
             </Field>
 
             <Field label="ชื่ออะไหล่ (TH)" required wide error={fe.errors.name}>
-              <Input value={form.name} onChange={(e) => set("name", e.target.value)} readOnly={ro} />
+              <Input value={form.name} onChange={(e) => set('name', e.target.value)} readOnly={ro} />
             </Field>
             <Field label="ชื่ออะไหล่ (EN)" wide>
-              <Input value={form.nameEn} onChange={(e) => set("nameEn", e.target.value)} readOnly={ro} />
+              <Input value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} readOnly={ro} />
             </Field>
             <Field label="ชื่ออะไหล่ (CN)" wide>
-              <Input value={form.nameCn} onChange={(e) => set("nameCn", e.target.value)} readOnly={ro} />
+              <Input value={form.nameCn} onChange={(e) => set('nameCn', e.target.value)} readOnly={ro} />
             </Field>
             <Field label="รายละเอียด" wide>
               <Input
                 value={form.description}
-                onChange={(e) => set("description", e.target.value)}
+                onChange={(e) => set('description', e.target.value)}
                 placeholder="รายละเอียดเพิ่มเติม"
                 readOnly={ro}
               />
@@ -283,8 +296,11 @@ export function ProductDetailModal({
             <Field label="หมวดหมู่">
               <SearchSelect
                 value={form.category}
-                onChange={(v) => set("category", v)}
-                options={withCurrent(CATEGORIES.map((c) => ({ value: c.name, label: c.name })), form.category)}
+                onChange={(v) => set('category', v)}
+                options={withCurrent(
+                  CATEGORIES.map((c) => ({ value: c.name, label: c.name })),
+                  form.category,
+                )}
                 disabled={ro}
                 searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
               />
@@ -308,7 +324,7 @@ export function ProductDetailModal({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.capitalPrice}
-                onChange={(e) => set("capitalPrice", e.target.value)}
+                onChange={(e) => set('capitalPrice', e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}
                 readOnly={ro}
                 className="num text-right"
@@ -322,7 +338,7 @@ export function ProductDetailModal({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.wholesalePrice}
-                onChange={(e) => set("wholesalePrice", e.target.value)}
+                onChange={(e) => set('wholesalePrice', e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}
                 readOnly={ro}
                 className="num text-right"
@@ -336,7 +352,7 @@ export function ProductDetailModal({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.price}
-                onChange={(e) => set("price", e.target.value)}
+                onChange={(e) => set('price', e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}
                 readOnly={ro}
                 className="num text-right"
@@ -349,8 +365,11 @@ export function ProductDetailModal({
             <Field label="ยี่ห้อ (ผู้ผลิต)" wide>
               <SearchSelect
                 value={form.brand}
-                onChange={(v) => set("brand", v)}
-                options={withCurrent(MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })), form.brand)}
+                onChange={(v) => set('brand', v)}
+                options={withCurrent(
+                  MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })),
+                  form.brand,
+                )}
                 disabled={ro}
                 searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
               />
@@ -363,27 +382,21 @@ export function ProductDetailModal({
           <p className="mb-2 text-sm font-medium">ใช้สำหรับ รุ่นสินค้า</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-3 lg:grid-cols-4">
             {MODELS.map((m) => (
-              <label
-                key={m.code}
-                className="flex cursor-pointer items-center gap-2 text-xs"
-                title={m.name}
-              >
+              <label key={m.code} className="flex cursor-pointer items-center gap-2 text-xs" title={m.name}>
                 <Checkbox
                   disabled={ro}
                   checked={form.models.includes(m.code)}
                   onChange={() =>
                     set(
-                      "models",
-                      form.models.includes(m.code) ? form.models.filter((c) => c !== m.code) : [...form.models, m.code]
+                      'models',
+                      form.models.includes(m.code) ? form.models.filter((c) => c !== m.code) : [...form.models, m.code],
                     )
                   }
-                />{" "}
+                />{' '}
                 {m.code}
               </label>
             ))}
-            {MODELS.length === 0 && (
-              <span className="text-xs text-muted-foreground">ไม่มีข้อมูลรุ่นสินค้า</span>
-            )}
+            {MODELS.length === 0 && <span className="text-xs text-muted-foreground">ไม่มีข้อมูลรุ่นสินค้า</span>}
           </div>
         </div>
 
@@ -391,8 +404,11 @@ export function ProductDetailModal({
           <Field label="ใช้สำหรับ สีสินค้า">
             <SearchSelect
               value={form.forModelColor}
-              onChange={(v) => set("forModelColor", v)}
-              options={withCurrent(COLORS.map((c) => ({ value: c.name, label: c.name })), form.forModelColor)}
+              onChange={(v) => set('forModelColor', v)}
+              options={withCurrent(
+                COLORS.map((c) => ({ value: c.name, label: c.name })),
+                form.forModelColor,
+              )}
               disabled={ro}
               emptyLabel="- - Please Select - -"
               searchPlaceholder="พิมพ์ชื่อสี…"
@@ -403,33 +419,33 @@ export function ProductDetailModal({
               <label className="flex cursor-pointer items-center gap-1.5 text-sm">
                 <Radio
                   name={`status-${p.sysCode}`}
-                  checked={form.status === "Active"}
-                  onChange={() => set("status", "Active")}
+                  checked={form.status === 'Active'}
+                  onChange={() => set('status', 'Active')}
                   disabled={ro}
-                />{" "}
+                />{' '}
                 Active
               </label>
               <label className="flex cursor-pointer items-center gap-1.5 text-sm">
                 <Radio
                   name={`status-${p.sysCode}`}
-                  checked={form.status !== "Active"}
-                  onChange={() => set("status", "Inactive")}
+                  checked={form.status !== 'Active'}
+                  onChange={() => set('status', 'Inactive')}
                   disabled={ro}
-                />{" "}
+                />{' '}
                 Inactive
               </label>
             </div>
           </Field>
         </FieldGrid>
 
-        {mode !== "add" && (
+        {mode !== 'add' && (
           <p className="text-2xs text-muted-foreground">
-            วันที่สร้าง: {p.createdDate || "—"} · สร้างโดย: {p.createdBy || "—"}
+            วันที่สร้าง: {p.createdDate || '—'} · สร้างโดย: {p.createdBy || '—'}
           </p>
         )}
 
         {/* legacy read-only notes: stock-adjustment log (product_none_serial.remark) + cancel reason */}
-        {mode !== "add" && (detail?.stockRemark || detail?.cancelRemark || detail?.cancelDate) && (
+        {mode !== 'add' && (detail?.stockRemark || detail?.cancelRemark || detail?.cancelDate) && (
           <FieldGrid cols={2}>
             {detail?.stockRemark && (
               <Field label="หมายเหตุสต๊อก (จากระบบเดิม)" wide>
@@ -441,7 +457,14 @@ export function ProductDetailModal({
                 <Textarea
                   rows={2}
                   readOnly
-                  value={[detail?.cancelRemark, detail?.cancelDate ? `${detail.cancelDate}${detail.cancelBy ? ` · โดย ${detail.cancelBy}` : ""}` : ""].filter(Boolean).join("\n")}
+                  value={[
+                    detail?.cancelRemark,
+                    detail?.cancelDate
+                      ? `${detail.cancelDate}${detail.cancelBy ? ` · โดย ${detail.cancelBy}` : ''}`
+                      : '',
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
                 />
               </Field>
             )}
@@ -449,7 +472,7 @@ export function ProductDetailModal({
         )}
 
         {/* view-only stock tables */}
-        {mode === "view" && (
+        {mode === 'view' && (
           <div className="space-y-4 border-t border-border pt-4">
             <div>
               <p className="mb-2 text-sm font-semibold">สินค้าคงเหลือ (Stock Onhand)</p>
@@ -480,7 +503,7 @@ export function ProductDetailModal({
                         <td className="num px-3 py-2 text-right">{int(r.reserve)}</td>
                         <td className="num px-3 py-2 text-right font-semibold">{int(r.avail)}</td>
                         <td className="px-3 py-2">
-                          <Badge tone={r.status === "Active" ? "success" : "neutral"} dot>
+                          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
                             {r.status}
                           </Badge>
                         </td>
@@ -526,9 +549,7 @@ export function ProductDetailModal({
                           <td className="num px-3 py-2 text-right text-success">{int(m.income)}</td>
                           <td className="num px-3 py-2 text-right text-danger">{int(m.outcome)}</td>
                           <td className="num px-3 py-2 text-right font-semibold">{int(m.after)}</td>
-                          <td className="num px-3 py-2 text-xs text-muted-foreground">
-                            {m.ref || "—"}
-                          </td>
+                          <td className="num px-3 py-2 text-xs text-muted-foreground">{m.ref || '—'}</td>
                         </tr>
                       ))
                     )}

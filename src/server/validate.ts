@@ -1,7 +1,7 @@
-import "server-only";
-import type { z } from "zod";
-import { HttpError } from "@/server/auth";
-import { summary, validate } from "@/lib/validation";
+import 'server-only';
+import type { z } from 'zod';
+import { HttpError } from '@/server/auth';
+import { summary, validate } from '@/lib/validation';
 
 /**
  * Run a form schema from src/lib/validation on an API payload (the same rules the page ran).

@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Download, type LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
-import { errMsg } from "@/lib/api";
+import * as React from 'react';
+import { Download, type LucideIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { errMsg } from '@/lib/api';
 
 /**
  * The "ส่งออก Excel" button of every list / report: `run` is the download (exportXlsx(...)).
@@ -13,7 +13,7 @@ import { errMsg } from "@/lib/api";
  */
 export function ExportButton({
   run,
-  label = "ส่งออก Excel",
+  label = 'ส่งออก Excel',
   icon: Icon = Download,
 }: {
   run: () => Promise<unknown>;
@@ -27,7 +27,7 @@ export function ExportButton({
     try {
       await run();
     } catch (e) {
-      push({ kind: "error", title: "ส่งออกไม่สำเร็จ", desc: errMsg(e) });
+      push({ kind: 'error', title: 'ส่งออกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setBusy(false);
     }
