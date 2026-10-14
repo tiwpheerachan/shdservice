@@ -12,3 +12,5 @@ tsconfig.tsbuildinfo
 public
 # Markdown docs keep their author's layout (Thai prose, tables)
 *.md
+# Next.js rewrites it (adds .next-*/types to include) in its own layout on every build
+tsconfig.json
