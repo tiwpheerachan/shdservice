@@ -33,6 +33,34 @@ export function resolvePath(stored: string, fallback: (file: string) => string):
 export const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+/** extension stored for each accepted type — never the one in the user's file name */
+const EXT: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf" };
+
+/** first bytes of each accepted type (OneLink lib/api/validate.ts) */
+const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
+  "image/png": (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  "image/webp": (b) => ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP",
+  "application/pdf": (b) => ascii(b, 0, 5) === "%PDF-",
+};
+
+/**
+ * An uploaded file is there, not empty, within the size, one of `types` — and its
+ * bytes say so. The declared type alone is the browser's guess from the name: an SVG
+ * or HTML file renamed .png would otherwise reach sharp/librsvg or be served to staff.
+ * Returns an error message (Thai) or null.
+ */
+export async function fileProblem(file: File, types: ReadonlySet<string> = ALLOWED_TYPES): Promise<string | null> {
+  if (file.size === 0) return "ไฟล์ว่างเปล่า";
+  if (file.size > MAX_FILE_BYTES) return "ไฟล์ใหญ่เกิน 10MB";
+  const label = [...types].map((t) => EXT[t]?.slice(1).toUpperCase()).join(", ");
+  if (!types.has(file.type)) return `รองรับเฉพาะ ${label}`;
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if (!SIGNATURES[file.type]?.(head)) return `ไฟล์ไม่ใช่ ${EXT[file.type]?.slice(1).toUpperCase()} จริง — รองรับเฉพาะ ${label}`;
+  return null;
+}
+
 /** Longest edge kept for uploaded photos (product images / payment slips). */
 export const IMAGE_MAX_EDGE = 1600;
 
@@ -98,8 +126,9 @@ function storage() {
   return client.storage;
 }
 
-export function systemFileName(original: string): string {
-  const ext = (original.match(/\.[A-Za-z0-9]{1,5}$/)?.[0] ?? "").toLowerCase();
+/** Stored name: Bangkok timestamp + random + the extension of the file's (checked) type. */
+export function systemFileName(type: string): string {
+  const ext = EXT[type] ?? "";
   const stamp = isoDateTime(new Date(), { seconds: true }).replace(/\D/g, ""); // Bangkok, whatever the server TZ
   return `${stamp}${Math.random().toString(36).slice(2, 6)}${ext}`;
 }

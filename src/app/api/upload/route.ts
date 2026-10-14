@@ -6,7 +6,9 @@ import { handle, requireUser, requireCan, requireAdmin, HttpError } from "@/serv
 import { rateLimit } from "@/server/rate-limit";
 import { getDocumentProfile, setDocumentProfileLogo } from "@/server/services/document-profiles";
 import { getShippingProfile, setShippingProfileLogo } from "@/server/services/shipping-profiles";
-import { systemFileName, uploadFile, removeFile, filePath, resolvePath, optimizeImage, ImageTooLargeError, ALLOWED_TYPES, MAX_FILE_BYTES } from "@/server/storage";
+import { systemFileName, uploadFile, removeFile, filePath, resolvePath, optimizeImage, ImageTooLargeError, fileProblem, MAX_FILE_BYTES } from "@/server/storage";
+
+const IMAGE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,9 +37,9 @@ export const POST = handle(async (req: NextRequest) => {
   const file = form.get("file");
   if (!(file instanceof File)) throw new HttpError(400, "file required");
   if (!id) throw new HttpError(400, "id required");
-  if (file.size > MAX_FILE_BYTES) throw new HttpError(413, "ไฟล์ใหญ่เกิน 10MB");
-  if (file.type && !ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "รองรับเฉพาะ JPG, PNG, WEBP, PDF");
-  if ((kind === "product-image" || kind === "profile-logo" || kind === "shipper-logo") && file.type === "application/pdf") throw new HttpError(415, kind === "profile-logo" ? "โลโก้ต้องเป็นไฟล์ภาพ" : "รูปอะไหล่ต้องเป็นไฟล์ภาพ");
+  // images only for pictures/logos; slips may also be PDF. Checked against the bytes BEFORE sharp sees them.
+  const problem = await fileProblem(file, kind === "product-image" || kind === "profile-logo" || kind === "shipper-logo" ? IMAGE_TYPES : undefined);
+  if (problem) throw new HttpError(problem.startsWith("ไฟล์ใหญ่") ? 413 : 415, problem);
 
   // the permission for this kind BEFORE any image processing
   const me =
@@ -60,7 +62,7 @@ export const POST = handle(async (req: NextRequest) => {
     if (e instanceof ImageTooLargeError) throw new HttpError(413, "รูปมีความละเอียดสูงเกินไป (เกิน 40 ล้านพิกเซล)");
     throw e;
   }
-  const sys = systemFileName(body.name); // after optimizeImage: a photo-PNG may now be .jpg
+  const sys = systemFileName(body.type); // after optimizeImage: a photo-PNG may now be a JPEG
   switch (kind) {
     case "profile-logo": {
       // ออกเอกสารในนาม — logo printed on quotations / labels / return notes (System Admin)
