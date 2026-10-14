@@ -18,12 +18,14 @@
     "test:running-no": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-running-no.mts",
     "test:track": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts",
     "test": "npm run -s test:schemas && npm run -s test:auth",
-    "test:db": "npm run -s test:running-no && npm run -s test:track",
+    "test:db": "npm run -s test:running-no && npm run -s test:track && npm run -s test:domain",
+    "e2e": "playwright test",
     "db:test:up": "docker compose -f tests/docker-compose.yml -p oneservice-test up -d --wait",
     "db:test:down": "docker compose -f tests/docker-compose.yml -p oneservice-test down",
     "db:test:prepare": "tsx tests/prepare-db.mts",
     "db:dev:up": "docker compose -f docker-compose.yml -p oneservice-dev up -d --wait",
-    "db:dev:load": "tsx scripts/dev-db.mts"
+    "db:dev:load": "tsx scripts/dev-db.mts",
+    "test:domain": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-domain.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",
@@ -48,6 +50,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.19.0",
     "@types/pg": "8.23.1",

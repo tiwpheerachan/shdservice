@@ -27,6 +27,8 @@ export function envProblems(): { required: string[]; optional: string[] } {
   const mode = (env.ORIGIN_AUTH_MODE ?? "").trim().toLowerCase();
   if (mode && !["off", "log", "enforce"].includes(mode)) required.push(`ORIGIN_AUTH_MODE "${mode}" is not off|log|enforce`);
   if (mode !== "off" && !has("ORIGIN_AUTH_SECRET")) required.push("ORIGIN_AUTH_SECRET missing — enforce answers 503 to everything");
+  // the client secret is POSTed there on every sign-in — never over plain http in production
+  if (has("SSO_ORIGIN") && !/^https:\/\//.test((env.SSO_ORIGIN ?? "").trim())) required.push("SSO_ORIGIN must be https — the SSO client secret is sent there");
   if ((env.TZ ?? "") !== "Asia/Bangkok") required.push("TZ is not Asia/Bangkok — file names and local times are off by 7 h");
 
   want("NEXT_PUBLIC_SUPABASE_URL", "uploads and attachments fail");

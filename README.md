@@ -39,10 +39,11 @@ npm run dev                                          # http://localhost:3000
 | `npm test` | test ที่ไม่ใช้ DB: validation (`test:schemas`), redirect หลัง login (`test:auth`) |
 | `npm run db:test:up` | เปิด Postgres ทิ้งได้ใน Docker (`tests/docker-compose.yml`, port 55442, tmpfs) |
 | `npm run db:test:prepare` | ทำให้เหมือน Supabase เปล่า (pgcrypto) + รัน migration ทั้งหมด |
-| `npm run test:db` | test ที่ใช้ DB: เลขเอกสารไม่ซ้ำเมื่อยิงพร้อมกัน (`test:running-no`), ความปลอดภัย /track (`test:track`, seed จาก `tests/seed.mts`) |
+| `npm run test:db` | test ที่ใช้ DB: เลขเอกสารไม่ซ้ำเมื่อยิงพร้อมกัน (`test:running-no`), ความปลอดภัย /track (`test:track`), สิทธิ์ตาม role / สต็อกห้ามติดลบ / SO อนุมัติซ้ำ / deadlock / job race (`test:domain`) |
+| `npm run e2e` | Playwright บน production build + fake SSO (`tests/e2e`) — login, /pending, สิทธิ์ตาม role, เปิดงาน, open redirect, ไม่มี CSP violation · ครั้งแรก `npx playwright install chromium` |
 
-test ที่ใช้ DB **ปฏิเสธทุก DB ที่ไม่ใช่ localhost** (`tests/db-url.mts`) — ไม่อ่าน `.env` เลย
-CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `yuu`: lint → tsc → `npm test` → migrate 2 รอบ (ต้องรันซ้ำได้) → `test:db` → `npm audit` (high) → build + gitleaks
+test ที่ใช้ DB / e2e **ปฏิเสธทุก DB ที่ไม่ใช่ localhost `*_test`** (`tests/db-url.mts`) — ไม่อ่าน `.env` เลย · test:db กับ e2e ใช้ DB เดียวกัน รันทีละอย่าง
+CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `yuu`: lint → tsc → `npm test` → migrate + รันซ้ำทั้งหมด (`--reset`) → `test:db` → `npm audit` (high) → build · job `e2e` (Playwright) · gitleaks
 
 ## ฐานข้อมูล (drizzle + migrations)
 

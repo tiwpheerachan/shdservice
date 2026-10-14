@@ -9,7 +9,9 @@
 //   Person = { union_id, name, en_name, email, job_title, departments[], city, country,
 //              manager, manager_union_id, avatar_url, status }
 
-const CENTRAL = "https://sso.shd-technology.co.th/api/v1";
+import { SSO_ORIGIN } from "@/lib/sso";
+
+const CENTRAL = `${SSO_ORIGIN}/api/v1`;
 
 export type DirectoryProfile = {
   /** Lark union_id — stable across email changes; stored in app_user.lark_id */
