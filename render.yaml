@@ -5,6 +5,8 @@ services:
     region: singapore
     plan: starter
     branch: yuu
+    # deploy only commits whose GitHub Actions run (.github/workflows/ci.yml) passed
+    autoDeployTrigger: checksPass
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
     buildCommand: npm ci --include=dev && npm run build
     # migrations run only AFTER a successful build (a failed build leaves the schema untouched),
@@ -82,7 +84,7 @@ services:
       # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
       - key: TZ
         value: Asia/Bangkok
-      # startup env check (src/server/env.ts) logs what is missing; set ENV_STRICT=1 once those
-      # warnings are gone and a deploy with missing config then fails instead of going live
+      # startup env check (src/server/env.ts): with 1, a deploy missing required config refuses to
+      # start (the old version keeps serving) — the log line "env check failed" lists what to add
       - key: ENV_STRICT
-        value: "0"
+        value: "1"
