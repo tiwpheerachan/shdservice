@@ -1,0 +1,178 @@
+# OneService → Production-ready (เทียบ OneLink)
+
+ที่มา: agent 5 ตัววิเคราะห์เทียบ OneLink (`../shd_onelink`) กับ OneService เมื่อ 2026-10-14 (branch `yuu`)
+ทุกข้อตรวจกับโค้ดจริงแล้ว · path อ้างอิงจาก `shdservice/` · OL = `shd_onelink/shortlink_shd_io/`
+
+สถานะ: `[ ]` ยังไม่ทำ · `[x]` เสร็จ · `[~]` ทำบางส่วน/รอ verify
+Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
+
+> กฎ: ทำทีละข้อ, typecheck + lint ผ่านก่อน, อัปเดต checkbox ในไฟล์นี้ทันทีที่เสร็จ
+> ห้ามรัน `setupdata/load_supabase.sh`, `db:migrate:reset`, `test:track` กับ DB production
+
+---
+
+## สถานะปัจจุบัน (วัดจริง)
+
+| เรื่อง | ค่า |
+|---|---|
+| `tsc --noEmit` | ผ่าน 0 error (strict) · ถ้าเปิด `noUncheckedIndexedAccess` = 157 error |
+| `eslint .` | 0 error / 0 warning (263 ไฟล์) |
+| tests | `test:schemas` 33 ผ่าน · `test:track` 72 เคส แต่ยิง DB จริง · ไม่มี `npm test` |
+| `npm audit --omit=dev` | 3 high / 2 moderate (next 16.3.6, sharp 0.35.4, source-map-js, uuid) |
+| CI | ไม่มี `.github/` |
+| E2E | ไม่มี |
+
+---
+
+## P0 — ช่องโหว่ / prod พัง / ข้อมูลเสีย (ทำก่อน)
+
+- [x] **P0-1 Open redirect หลัง login** · S
+  `safeNext` (`src/lib/sso.ts:21-25`) เช็กแค่ string → `/%09/evil.example` (tab) ผ่าน แล้ว `new URL()` พาออกไป `https://evil.example`
+  ใช้ได้ทั้ง `/api/sso/login?next=` และ `continueIfSignedIn` ใน callback (ไม่ต้องมี code)
+  ✅ 2026-10-14: `safeNext` parse ด้วย URL parser · `npm run test:auth` (13 เคส)
+
+- [~] **P0-2 API อ่านข้อมูลไม่เช็กสิทธิ์ view ตาม role** · M
+  `readResource` (`src/server/resources.ts:45`) ใช้แค่ `requireUser` → user ที่ approve แล้วทุก role ดึง `customers?limit=5000`, `quotations`, `sale_orders`, report summary ได้หมด
+  detail GET ก็เหมือนกัน: `jobs/[no]`, `quotations/[no]`, `sale-orders/[no]`, `products/[code]`, `stock/movements/[no]`, `stock/pick-lines`, `customers/lookup`, `jobs/[no]/calls`, `attachments/[id]`, print pages (`src/app/print/layout.tsx`)
+  แต่ export (`src/server/export.ts:278`) เช็ก `requireCan(module,"view")` ถูกแล้ว → JSON กับ xlsx ไม่ตรงกัน
+  แก้: map `resource → module | "any" | null` (ใช้ `SPECS[*].module` ของ export), `requireCan` สำหรับ resource ที่มีข้อมูลลูกค้า/เอกสาร, `requireAdmin` สำหรับ `*_summary`, lookup (status/province/staff/model/symptom) คง `requireUser`
+  ✅ 2026-10-14: `READ_ACCESS` ใน `resources.ts` + `requireView`/`canViewAny`/`JOB_MODULES` ใน `auth.ts` · detail GET 8 route · print 3 หน้า
+  ⏳ ยังต้องทดสอบมือ: login ด้วย role ที่ไม่ใช่ admin (เช่น ช่าง/คลัง) เปิดทุกหน้าที่ role นั้นมีสิทธิ์ ต้องไม่เจอ 403 · products/staff/masters ยังเปิดให้ทุก user (catalog ไม่มี PII)
+
+- [x] **P0-3 dependency มี advisory ระดับ high** · S
+  `next@16.3.6` (SSRF image optimizer, cache poisoning) → 16.3.8 · `sharp@0.35.4` (librsvg CVE — SVG ที่ส่งมาเป็น `image/png` ไปถึง librsvg ผ่าน `/api/upload`) → 0.35.5
+  `next.config.mjs`: `poweredByHeader: false`, `images: { unoptimized: true }` (ไม่มีใครใช้ `next/image`)
+  ✅ 2026-10-14: next/eslint-config-next 16.3.8, sharp 0.35.5, source-map-js fix · เหลือ 2 moderate (uuid ผ่าน exceljs — ต้อง override, ดู P2) · `next build` ผ่าน
+
+- [x] **P0-4 แก้ SO ระหว่างอนุมัติ → ตัดสต็อกซ้ำ** · S
+  `sale-orders.ts:293` อ่าน `prev` ใน tx โดยไม่ lock → edit ทับ approval, ลบ line ที่ stamp `pickInventoryNo` แล้ว → อนุมัติใหม่ตัดสต็อกอีกรอบ
+  แก้: `.for("update")` ที่ `sale-orders.ts:293` และ `quotations.ts:349`
+  ✅ 2026-10-14
+
+- [x] **P0-5 เลขเอกสารซ้ำตอนขึ้นปีใหม่ (1 ม.ค. 2570)** · S
+  `running-no.ts:62-101` แถวของปีใหม่ยังไม่มี → `FOR UPDATE` ไม่ล็อกอะไร → 2 tx insert แถวใหม่ทั้งคู่ ได้ `…00001` ซ้ำ
+  `running_no` ไม่มี unique · `quotation_no`, `sale_out_hd_no`, `inventory_no` ไม่ unique → บันทึกเลขซ้ำเงียบ
+  ✅ 2026-10-14: ใช้ `pg_advisory_xact_lock(hashtext(type:year))` ก่อน select (ไม่ต้อง migration) · `npm run test:running-no` (ต้องมี Postgres local) — โค้ดเก่าได้ WHI2600001 ซ้ำ 20/20, โค้ดใหม่ unique 20/20
+  หมายเหตุ: `pyear` เก็บปี ค.ศ. (2026) ไม่ใช่ พ.ศ. · unique index บนเลขเอกสาร ย้ายไป P1-DATA-5
+
+- [x] **P0-6 DB pool: connection หลุดทำ process ตาย / request ค้างไม่มีกำหนด** · S
+  `src/db/client.ts:19-30` ไม่มี `pool.on("error")` (idle socket หลุด = uncaught exception), ไม่มี `connectionTimeoutMillis` (default รอตลอดไป), ไม่มี `statement_timeout`, `max: 5`
+  ✅ 2026-10-14: error listener, connection timeout 10s, idle 30s, statement_timeout 30s · `DB_POOL_MAX` ยังเป็น 5 — ปรับใน Render หลังเช็ก pool size ของ Supabase
+
+- [x] **P0-7 Deploy pipeline** · S (+ ต้องเช็ก Render dashboard)
+  `render.yaml:10` รัน `db:migrate` ใน `buildCommand` ก่อน `next build` → build พังแต่ schema เปลี่ยนไปแล้ว
+  `render.yaml:7` เขียน `main` แต่ prod deploy จาก `yuu` จริง (`main` ตามหลัง 95 commits)
+  แก้: `buildCommand: npm ci --include=dev && npm run build`, `preDeployCommand: npm run db:migrate`, `startCommand: node node_modules/next/dist/bin/next start` (SIGTERM ถึง Next), `TZ: Asia/Bangkok`
+  `healthCheckPath` ใส่หลัง P1-OPS-3 (health ต้องตอบ 200 เสมอ ไม่งั้น Supabase สะดุดแล้ว Render restart instance)
+  ✅ 2026-10-14: buildCommand ไม่มี migrate, `preDeployCommand: npm run db:migrate`, start Next ตรง, `TZ=Asia/Bangkok`
+  ✅ prod deploy จาก `yuu` (ยืนยันแล้ว) → `render.yaml` แก้ `branch: yuu` ให้ตรง · ถ้า service ไม่ได้ sync กับ blueprint ต้องตั้ง preDeploy/start/TZ ใน dashboard เอง
+
+- [x] **P0-8 กันสคริปต์ลบ DB production** · S
+  `setupdata/load_supabase.sh` รัน `DROP TABLE … CASCADE` 52 ตาราง ไม่มีถาม · README บอกให้รันซ้ำได้
+  `scripts/migrate.ts:46-64` reset journal เองอัตโนมัติถ้าไม่เจอ `app_user.lark_id`
+  dev ใช้ `.env` ที่ชี้ Supabase pooler — `next dev`/`db:migrate:reset`/`test:track` ยิง DB จริงได้ทันที
+  ✅ 2026-10-14: `load_supabase.sh` ปฏิเสธ project prod (`izypdf…`) เว้นแต่ `I_UNDERSTAND_THIS_DROPS_PRODUCTION=1` + ต้องพิมพ์ DROP ยืนยันทุกครั้ง · `migrate.ts --reset` กับ prod ต้อง `ALLOW_PROD_DB=1`, บน Render ไม่ reset journal เอง · `next dev` กับ DB prod ต้อง `ALLOW_PROD_DB=1` (dev ใช้ project `bnntps…` อยู่แล้ว ไม่กระทบ) · README เตือนแล้ว
+
+---
+
+## P1 — ต้องมีก่อนเรียกว่า production-ready
+
+### Auth / Session
+- [ ] **P1-AUTH-1 ระบุตัวผู้ใช้ด้วย `sub` แทนอีเมล** · M–L
+  ปัจจุบัน key ด้วยอีเมล → บัญชี Lark ไม่มีอีเมล login ไม่ได้, เปลี่ยนอีเมล = ได้ user ใหม่ (pending) role เก่าค้าง, อีเมลถูก reuse = คนใหม่ได้ role เดิม
+  แก้: migration `app_user.sso_sub` + unique partial index · callback ต้องมี `sub` · หา `sso_sub` → fallback อีเมลแล้ว stamp sub → insert ใหม่ (อีเมล NULL ได้) · `SessionUser.sub`, `resolveUser`/cache key ด้วย sub (fallback อีเมลสำหรับ cookie เก่า)
+  ก่อนทำ: เปิด shape debug (P1-AUTH-7) ดู verify response จริง 1 ครั้ง
+- [ ] **P1-AUTH-2 DB สะดุดแล้ว user โดนเด้ง logout** · S
+  `api/sso/me/route.ts:12`, `api/sso/refresh/route.ts:27-31` กลืน `HttpError(503)` เป็น 401 + ลบ cookie → ตอบ 503 ไม่แตะ cookie
+- [ ] **P1-AUTH-3 timeout ขาออก SSO/directory** · S
+  verify (`callback/route.ts:77`) 10s · `searchDirectory` 10s · `lookupByEmail` 3–5s (คืน null อยู่แล้ว)
+- [ ] **P1-AUTH-4 CSRF origin check** · S
+  copy `isCrossSite` (OL `lib/api/same-origin.ts`) → `src/proxy.ts` ตอบ 403 ให้ non-GET `/api/*` ที่ cross-site · `readJson` บังคับ `application/json`
+- [ ] **P1-AUTH-5 first login ชน unique index → "DB unavailable"** · S
+  `ix_username_and_password (username,password)` + username = local part ของอีเมล, password `''` → `somchai@a` ชน `somchai@b` · 2 tab login พร้อมกันชน `ux_app_user_email`
+  แก้: จับ `23505` ใน `provisionSsoUser` — email ชน → re-read, username ชน → เติม suffix
+- [ ] **P1-AUTH-6 owner hard-code ลบไม่ได้** · S
+  `DEFAULT_OWNERS` ใน `src/lib/access.ts:13-25` ถูก force เป็น admin + ACTIVE + undelete ทุก login → prod ใช้ `OWNER_EMAILS` อย่างเดียว, ไม่ force ACTIVE ถ้า admin ปิดไว้
+- [ ] **P1-AUTH-7 PII ใน log ของ SSO + shape debug** · S
+  `callback/route.ts:91` log body 300 ตัวอักษร (มีอีเมล) → regex redact แบบ OL · copy `sso-debug.ts` (`SSO_DEBUG=shape`)
+- [ ] **P1-AUTH-8 เช็ก session กลาง (`/sso/session`)** · M (หลัง AUTH-1)
+  คนลาออก/ถูกปิดที่ SSO ยังใช้ได้ถึง 12 ชม. → ใน `/api/sso/refresh` เช็กทุก 5 นาที (copy OneBridge `lib/auth/sso.ts:76-98`, grace 30 นาทีถ้า unavailable) · ลบ `sid` ที่ไม่มีใครใช้
+
+### Security
+- [ ] **P1-SEC-1 Origin auth ยังเป็น `log`** · S — `render.yaml:58` → ดู log `origin_auth_failed` แล้วเปลี่ยนเป็น `enforce` (ตอนนี้ยิงตรง `onrender.com` ข้าม WAF + ปลอม `X-Forwarded-For` reset rate limit ได้)
+- [ ] **P1-SEC-2 ตรวจไฟล์อัปโหลด** · M — type ว่างผ่าน, นามสกุลจากชื่อไฟล์ user, ไม่เช็ก magic bytes, `/api/attachments` ไม่มี rate limit/Content-Length/เช็ก jobNo → `assertFile()` ใน `storage.ts` (copy `SIGNATURES` จาก OL `validate.ts:302-343`), นามสกุลจาก MIME
+- [ ] **P1-SEC-3 Route เขียนข้อมูลที่ไม่มี schema** · M — `stock/issue`, `stock/receive`, `jobs/assign`, `sale-orders/[no]/approve|tracking`, `jobs/[no]/calls`, `admin/permissions` · `qty` ทศนิยม/ใหญ่ผ่าน → zod `int().positive().max()`, `.max()` ให้ text ตาม varchar
+- [ ] **P1-SEC-4 OTP เดาได้** · S — 4 หลัก × 5 ครั้ง × 3 code/ชม. ไม่มี cap รายวัน → `otp_phone_day` 10/วัน, ล็อก phone 24 ชม. หลังผิด 15 ครั้ง, cap SMS รวมต่อชั่วโมง, ขอ OTP 6 หลัก
+- [ ] **P1-SEC-5 CSP หน้า staff + API** · S — มีแค่ `/track` · เพิ่ม `PAGE_CSP` (OL `lib/security-headers.ts`) ให้ `/:path((?!api/|track).*)` + `API_CSP` ให้ `/api` · ทดสอบกับ production build
+
+### Ops / Observability
+- [ ] **P1-OPS-1 `src/lib/log.ts` + scrub PII** · M — 31 `console.*` กระจาย · drizzle error มี `params:` (ชื่อ/เบอร์/ที่อยู่ลูกค้า, track token) → `logError(err, msg, fields, req?)` JSON บรรทัดเดียว, reqId จาก `cf-ray`/`rndr-id`, scrub `\nparams:`, log stack · ใช้ reqId เป็น ref ใน `handle()`
+- [ ] **P1-OPS-2 `src/instrumentation.ts` + env check ตอน boot** · S–M — zod schema ใน `src/server/env.ts`, required ใน prod (DATABASE_URL, SESSION_SECRET≥32, SSO_*, CENTRAL_API_KEY, SUPABASE_*, APP_BASE_URL, TURNSTILE_*, ORIGIN_AUTH_SECRET, TRACK_LOG_SECRET, TZ) · `ORIGIN_AUTH_MODE=enforce`, `SMS_PROVIDER≠log` · `process.exit(1)` · export `onRequestError` → `logError`
+- [ ] **P1-OPS-3 Health endpoint** · S — anonymous ตอบ 200 `{ok:false}` แทน 503 · log ใน catch · admin เห็น TZ ของ DB/process + clock skew · แล้วใส่ `healthCheckPath` ใน render.yaml
+- [ ] **P1-OPS-4 timeout Storage** · S — `storage.ts:90` ใส่ fetch timeout 15s ให้ supabase client · `createBucket` ทุก upload → ครั้งเดียวต่อ process
+- [ ] **P1-OPS-5 TZ ของ process** · S — `storage.ts:96-98` ใช้ `getHours()` (UTC บน Render) → ใช้ `@/lib/dates`
+- [ ] **P1-OPS-6 Error boundaries** · S — `src/app/(app)/error.tsx` (ข้อความไทย + digest + ปุ่มลองใหม่), `src/app/global-error.tsx`, (ออปชัน) `src/app/track/(site)/error.tsx` · `(app)/layout.tsx:38-43` grants โหลดพลาด → ไม่ใช่ส่งไป `/pending`
+- [ ] **P1-OPS-7 Uptime monitor + error tracking** · S — UptimeRobot/Better Stack เช็ก `/api/health` body `"ok":true` · (ออปชัน) Sentry ผ่าน `onRequestError`
+- [ ] **P1-OPS-8 `ops/runbook.md` + `ops/risks.md`** · M — deploy, rollback (forward-only, expand/contract), หมุน `SESSION_SECRET`, SSO/DB/SMS/Turnstile ล่ม, restore backup, ห้ามรัน `load_supabase.sh` · เช็ก backup/PITR ของ Supabase + bucket ไฟล์ไม่อยู่ใน backup
+
+### Data / API
+- [ ] **P1-DATA-1 Job ไม่ lock แถว** · S–M — `jobs.ts` updateJob/saveRepair/saveOutsource/swap/closeJob อ่าน status นอก tx → `lockJob(tx,no)` `FOR UPDATE` ทุก tx แล้วส่ง status ให้ `setStatus`
+- [ ] **P1-DATA-2 Export ตัดแถวเงียบ + OOM** · M — customers cap 5,000 (มี 43k) · in-memory workbook บน 512MB → cap ชัด + แจ้ง "ตัดที่ N แถว" หรือ stream writer
+- [ ] **P1-DATA-3 แปลง Postgres error** · S — `handle()` 23505 → 409 "ข้อมูลซ้ำ", 57014 → 503 · `resources.ts:151` ใช้ `HttpError(404)`
+- [ ] **P1-DATA-5 Unique index เลขเอกสาร** · S — เช็กเลขซ้ำใน prod (`quotation_no`, `sale_out_hd_no`, `inventory_no`, `running_no(type,company,pyear)`) แล้วสร้าง unique (partial ถ้า legacy ซ้ำ) เป็นตาข่ายชั้นสุดท้าย
+- [ ] **P1-DATA-4 list โหลดพลาดแสดง "ไม่พบข้อมูล"** · S — `DataTable` รับ `error` + `onRetry` แล้วส่งจาก 14 หน้า list
+
+### Testing / CI
+- [ ] **P1-CI-1 test DB local + guard** · M — `tests/docker-compose.yml` (postgres:17, tmpfs), guard host localhost, seed ขั้นต่ำ, ย้าย `test-track` มาใช้ seed
+- [ ] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
+- [ ] **P1-CI-3 Test สำคัญที่ต้องมี DB** · M — running-no (20 tx พร้อมกัน, ข้ามปี), api-guard (ทุก route เรียก require*), auth/permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
+- [ ] **P1-CI-4 GitHub Actions** · M — postgres service, `npm ci` → lint → tsc → migrate ×2 (idempotent) → test → build → `npm audit --audit-level=high` → gitleaks · pin action ด้วย SHA (copy OL `.github/workflows/ci.yml`) · แล้วใส่ `autoDeployTrigger: checksPass`
+- [ ] **P1-CI-5 Branch flow** · S — ตัดสินใจ flow (`yuu`→PR→`main` หรือ `develop`→`release` แบบ OL), เขียน `CONTRIBUTING.md`, protect branch
+- [ ] **P1-CI-6 Dependabot + CODEOWNERS + gitleaks config** · S
+- [ ] **P1-CI-7 `.nvmrc` 24 + `engines`, README อัปเดต (Next 16, Node 24)** · S
+
+---
+
+## P2 — ดีถ้ามี
+
+- [ ] E2E Playwright + fake SSO (ต้องทำ `SSO_ORIGIN` env ก่อน — ตอนนี้ hard-code ใน `sso.ts:5-7`, `directory.ts:12`) · L
+- [ ] `noUncheckedIndexedAccess` ทีละโฟลเดอร์ (เริ่ม `src/db`, `src/server`) · M
+- [ ] Prettier + `.git-blame-ignore-revs` · S
+- [ ] ADR (`adr/`) ย้ายการตัดสินใจจาก `backend-rebase-plan.md`: timestamp ไทยไม่มี TZ, soft delete `record_status`, single instance cache, track fail-closed · M
+- [ ] Logout เป็น POST + cross-site check · S
+- [ ] ข้อความ login error แยกตาม `verify_400/401/403/unreachable` + แก้ข้อความ `server_not_configured` · S
+- [ ] บัญชีถูกปิด/ลบแสดง "บัญชีถูกปิด" แทน "รออนุมัติ" · S
+- [ ] N+1: `assignJobs`, `savePermissions`, `productsByCode` ใน loop · S
+- [ ] Stock lock เรียงตาม productId กัน deadlock · S
+- [ ] `listProductsLite` cache + index (`job_call_log.job_no`, `job.product_model_id`, partial spare part) · S
+- [ ] clamp `limit` query (NaN → 500) · `Object.hasOwn` ใน sort · validate date · S
+- [ ] cache `jobStats`, `Promise.all` ใน `computeDashboard` · S
+- [ ] proxy matcher ไม่รันกับ `_next/static`, cache logo, ลด font (Inter ซ้ำกับ Noto) · S
+- [ ] Rate limiter: cap ขนาด map + IPv6 /64 · S
+- [ ] `proxyClientMaxBodySize: "11mb"` (ตอนนี้ไฟล์ ~10MB ถูกตัดเงียบ) + cap JSON 1MB · S
+- [ ] DB TLS verify cert (`rejectUnauthorized: false`) · S
+- [ ] hash `track_token` ใน DB · rate limit `/api/files` public · M
+- [ ] Idempotency-Key สำหรับ create (เริ่ม stock receive/issue) · optimistic locking (updated_at) · M
+- [ ] aria-sort, ข้อความ error ภาษาไทยทั้งหมด, create ตอบ 201 · S
+
+---
+
+## จุดแข็งที่มีอยู่แล้ว (ห้าม regress)
+
+- Session: HMAC cookie, idle 30 นาที + absolute 12 ชม., `session_version` logout ทุกเครื่อง, role/status อ่านจาก DB ทุก request (DB ล่ม = 503 ไม่ trust cookie)
+- Authz fail-closed เมื่อไม่ได้ตั้งค่า (OL ให้สิทธิ์เต็ม — อย่า copy)
+- `/track` public: Turnstile fail-closed, ticket ใช้ครั้งเดียว, rate limit ใน Postgres, HMAC IP, CSP nonce + strict-dynamic — ดีกว่า OL
+- ไม่ auto-redirect anonymous ไป SSO (บทเรียน Google Web Risk)
+- `handle()` ตอบ 500 แค่ ref id · audit log append-only (trigger) · export เขียน string เป็น text
+- pg_trgm index, server paging, sort whitelist, LRU cache + single-flight, SWR invalidation
+- dates ใน Bangkok + ESLint rule ห้าม `toISOString().slice`
+- migrations idempotent, dependency pin exact, lint/tsc สะอาด
+
+---
+
+## ลำดับที่แนะนำ
+
+1. P0-1 → P0-3 → P0-4 → P0-6 → P0-8 → P0-7 → P0-5 → P0-2
+2. P1-OPS-1 + OPS-2 (log + instrumentation ครอบหลายข้อ) → AUTH-2/3/4/5 → SEC-1/4/5 → OPS-3/4/5/6
+3. CI-1 → CI-2 → CI-4 (CI ก่อนงานใหญ่) → DATA-1/3/4 → SEC-2/3 → AUTH-1 → AUTH-8
+4. ops runbook, P2
