@@ -85,7 +85,7 @@ export async function listCustomers(opts: {
     .from(customer)
     .where(customerWhere(q, deleted, filters))
     .orderBy(desc(customer.customerId))
-    .limit(Math.min(limit, 5000));
+    .limit(Math.min(limit, 20000)); // 20k = the Excel export cap (src/server/export.ts)
   return rows.map((r) => toCustomer(r));
 }
 

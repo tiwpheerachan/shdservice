@@ -155,6 +155,13 @@
       "when": 1757900021000,
       "tag": "0021_track_otp_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1757900022000,
+      "tag": "0022_unique_document_numbers",
+      "breakpoints": true
     }
   ]
 }

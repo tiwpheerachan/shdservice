@@ -134,6 +134,18 @@ export async function logStatus(tx: Tx, jobNo: string, statusId: number, byUserI
   await tx.insert(jobLog).values({ jobNo, jobStatusId: statusId, jobLogDate: nowThai(), jobActionBy: byUserId });
 }
 
+/**
+ * Lock the job row for this transaction and return its CURRENT status. Every job write
+ * calls it first: two people saving/closing the same job then run one after the other,
+ * and setStatus compares against the status as it is now — not a read from before the
+ * other save committed (duplicate job_log rows, lost parts totals).
+ */
+async function lockJob(tx: Tx, jobNo: string): Promise<number | null> {
+  const [r] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for("update");
+  if (!r) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
+  return r.status;
+}
+
 /** Change status + log (no-op when unchanged). Returns true if changed. */
 async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: number, current?: number | null) {
   if (current === statusId) return false;
@@ -1030,7 +1042,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
   const engineerId = i.engineerId !== undefined || i.engineerEmail ? await resolveEngineer(i) : undefined;
 
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
+    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for("update");
     const parts = num(existing?.sparePartTotalCost);
     const values = {
         ...(cust ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) } : {}),
@@ -1084,7 +1096,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
       changes: diff(existing as Record<string, unknown>, values as Record<string, unknown>),
     });
     if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) await writeSymptoms(tx, jobNo, lk.symIds);
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
+    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing?.jobStatusId ?? null);
   });
   return (await getJob(jobNo))!;
 }
@@ -1097,7 +1109,7 @@ export async function assignJobs(jobNos: string[], engineerId: number, byUserId:
   if (!engineerId) throw new HttpError(400, "ต้องเลือกช่าง");
   let n = 0;
   await db.transaction(async (tx) => {
-    const rows = await tx.select({ no: job.jobNo, status: job.jobStatusId }).from(job).where(inArray(job.jobNo, jobNos));
+    const rows = await tx.select({ no: job.jobNo, status: job.jobStatusId }).from(job).where(inArray(job.jobNo, jobNos)).orderBy(job.jobNo).for("update");
     for (const r of rows) {
       await tx.update(job).set({ engineerId }).where(eq(job.jobNo, r.no));
       await audit(tx, byUserId, {
@@ -1157,6 +1169,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
   let newRequests = false;
 
   await db.transaction(async (tx) => {
+    const status = await lockJob(tx, jobNo);
     let partsTotal = 0;
     if (i.parts) {
       const existing = await tx.select().from(jobOrderSparePartLog).where(eq(jobOrderSparePartLog.jobNo, jobNo)).for("update");
@@ -1272,8 +1285,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 
     // ---- status: explicit choice wins; new stock requests move a new/in-progress job to 11 ----
     let target = newStatus;
-    if (target === undefined && newRequests && (cur.status === JS.NEW || cur.status === JS.IN_PROGRESS)) target = JS.PARTS_REQUESTED;
-    if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, cur.status);
+    if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS)) target = JS.PARTS_REQUESTED;
+    if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
   return (await getJob(jobNo))!;
 }
@@ -1281,7 +1294,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 /** Called by stock after issuing all pending requests of a job. */
 export async function markPartsIssued(jobNo: string, byUserId: number) {
   await db.transaction(async (tx) => {
-    const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
+    const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for("update");
     if (cur && cur.status === JS.PARTS_REQUESTED) await setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, cur.status);
   });
 }
@@ -1333,6 +1346,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   const receiveBy = await staffOrKeep(i.receive?.by, openRow?.receiveBy, "receive.by", byUserId);
 
   await db.transaction(async (tx) => {
+    const status = await lockJob(tx, jobNo);
     const fields = {
       ...(es ? { engineerSymptomId: es.id } : {}),
       ...(i.symptomOther !== undefined ? { productSymptomOther: str(i.symptomOther).slice(0, 200) } : {}),
@@ -1388,7 +1402,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       }
       target ??= JS.OUTSOURCE_SENT;
     }
-    if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, cur.status);
+    if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
   return (await getJob(jobNo))!;
 }
@@ -1485,7 +1499,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i.detail ? `รายละเอียด: ${str(i.detail)}` : "",
   ].filter(Boolean);
   await db.transaction(async (tx) => {
-    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
+    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for("update");
     const swapValues = {
         ...(i.inspection !== undefined ? { engineerRepairDetail: str(i.inspection).slice(0, 200) } : {}),
         swapRefundDetail: lines.join("\n"),
@@ -1509,7 +1523,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
       summary: num(i.refundAmount) > 0 ? `บันทึก Refund ${num(i.refundAmount).toFixed(2)} บาท` : "บันทึก Swap / เปลี่ยนเครื่อง",
       changes: diff(before as Record<string, unknown>, swapValues as Record<string, unknown>),
     });
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
+    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before?.jobStatusId ?? null);
   });
   return (await getJob(jobNo))!;
 }
@@ -1530,6 +1544,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
   if (!cur) throw new HttpError(404, "ไม่พบหมายเลขงาน " + jobNo);
   const newStatus = await statusIdByName(i.status);
   await db.transaction(async (tx) => {
+    const status = await lockJob(tx, jobNo);
     const pay = i.payment ?? {};
     const ret = i.return ?? {};
     const fields = {
@@ -1564,7 +1579,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
       summary: "บันทึกปิดงาน / ส่งคืนสินค้า",
       changes: diff(before as Record<string, unknown>, fields as Record<string, unknown>),
     });
-    await setStatus(tx, jobNo, newStatus, byUserId, cur.status);
+    await setStatus(tx, jobNo, newStatus, byUserId, status);
   });
   return (await getJob(jobNo))!;
 }

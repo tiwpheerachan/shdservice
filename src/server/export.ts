@@ -18,9 +18,12 @@ import { today } from "@/lib/dates";
 /**
  * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
  * uses — the URL query is the one the page's hooks send to /api/data/<resource>.
- * Runs on the server, capped at MAX_ROWS so a runaway range cannot exhaust memory.
+ * Runs on the server, capped at MAX_ROWS so a runaway range cannot exhaust memory
+ * (the workbook is built in memory on a 512 MB instance). Every list function caps
+ * at the same 20k, so a capped file is detectable — and it says so: a note row at
+ * the end and "-partial" in the file name, never a silently short file.
  */
-const MAX_ROWS = 50_000;
+const MAX_ROWS = 20_000;
 
 type Col = { key: string; header: string; width?: number; num?: boolean; money?: boolean };
 type Row = Record<string, unknown>;
@@ -287,6 +290,7 @@ export async function exportXlsx(req: NextRequest, resource: string): Promise<{ 
   ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EEF9" } };
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: spec.cols.length } };
 
+  const truncated = rows.length >= MAX_ROWS;
   for (const r of rows.slice(0, MAX_ROWS)) {
     const out: Row = {};
     for (const c of spec.cols) {
@@ -299,7 +303,11 @@ export async function exportXlsx(req: NextRequest, resource: string): Promise<{ 
     if (c.money) ws.getColumn(c.key).numFmt = "#,##0.00";
     else if (c.num) ws.getColumn(c.key).numFmt = "#,##0";
   }
+  if (truncated) {
+    const note = ws.addRow([`⚠ แสดง ${MAX_ROWS.toLocaleString("en-US")} แถวแรกเท่านั้น — กรองช่วงวันที่/เงื่อนไขให้แคบลงเพื่อได้ข้อมูลครบ`]);
+    note.font = { bold: true, color: { argb: "FFB45309" } };
+  }
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
   const stamp = today(); // Thai calendar date in the file name
-  return { buffer, filename: `${resource}-${stamp}.xlsx` };
+  return { buffer, filename: `${resource}-${stamp}${truncated ? "-partial" : ""}.xlsx` };
 }

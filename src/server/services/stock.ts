@@ -734,7 +734,7 @@ export async function listMovements(opts: { limit?: number; q?: string; from?: s
       )
     )
     .orderBy(desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId))
-    .limit(Math.min(limit, 5000));
+    .limit(Math.min(limit, 20000)); // 20k = the Excel export cap (src/server/export.ts)
   return rows.map((r) => {
     const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
     const wh = r.loc ?? "คลังสินค้าดี";
