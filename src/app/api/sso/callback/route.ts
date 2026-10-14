@@ -108,10 +108,12 @@ export async function GET(request: NextRequest) {
     (identity.data as Record<string, unknown>) ??
     identity;
 
-  const email = str(u.email);
+  // top-level email first (what /sso/verify documents and OneLink reads); a nested
+  // `user`/`profile` object can exist without one (e.g. phone-only Lark accounts)
+  const email = str(identity.email).trim() || str(u.email).trim();
   if (!email) {
-     
-    console.error("[sso] no email in verify response; top-level keys:", Object.keys(identity), "user keys:", Object.keys(u ?? {}));
+
+    console.error(`[sso] no email in verify response; top-level keys: ${JSON.stringify(Object.keys(identity))} user keys: ${JSON.stringify(Object.keys(u ?? {}))}`);
     return fail(request, "no_email");
   }
 
@@ -119,7 +121,7 @@ export async function GET(request: NextRequest) {
   const prof = await lookupByEmail(email);
 
   const name =
-    str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
+    str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
   // Auto-provision into the users table and get the effective role/status.
