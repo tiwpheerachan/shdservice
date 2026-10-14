@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { trackBlock, trackDocTicket, trackEvent, trackRate, trackTicket } from "@/db/schema";
+import { logError } from "@/lib/log";
 
 /**
  * Security plumbing for the public tracking flow (drizzle/0014):
@@ -234,6 +235,8 @@ export type TrackEvent =
   | "otp_send_failed"
   | "otp_check_failed"
   | "otp_unknown_phone"
+  | "otp_sms_global_cap"
+  | "otp_phone_locked"
   | "otp_verified"
   | "otp_invalid"
   | "customer_session_invalid"
@@ -254,7 +257,7 @@ export function logEvent(
     .insert(trackEvent)
     .values({ event, result: f.result ?? "", ipHash: f.ipHash ?? null, linkHash: f.linkHash ?? null, jobNo: f.jobNo ?? null, requestId: f.requestId ?? null })
     .then(() => undefined)
-    .catch((e) => console.error("[track_event]", e instanceof Error ? e.message : e));
+    .catch((e) => logError(e, "track_event"));
   // ~1 in 200 writes also trims old rows (counters > 2 h, blocks ended, events > 30 days)
   if (Math.random() < 0.005) void housekeeping();
 }
@@ -265,6 +268,6 @@ async function housekeeping() {
     await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
     await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));
   } catch (e) {
-    console.error("[track_housekeeping]", e instanceof Error ? e.message : e);
+    logError(e, "track_housekeeping");
   }
 }

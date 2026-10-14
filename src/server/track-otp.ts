@@ -5,8 +5,9 @@ import { db } from "@/db/client";
 import { customer, trackOtp, trackSession } from "@/db/schema";
 import { RS } from "@/server/record-status";
 import { OTP_LENGTH, OTP_PATTERN } from "@/lib/track-public";
-import { hmac, sha256, normalizeUa, logEvent, hit, dbNow, dbNowPlus } from "./track-guard";
+import { hmac, sha256, normalizeUa, logEvent, hit, block, isBlocked, dbNow, dbNowPlus } from "./track-guard";
 import { checkOtpSms, printDevOtp, requestOtpSms, smsProvider } from "./sms";
+import { logError } from "@/lib/log";
 
 /**
  * /track by phone number + SMS OTP (drizzle/0017).
@@ -27,6 +28,12 @@ export const OTP_TTL_SEC = 300;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_SEC = 60;
 export const OTP_PER_PHONE_HOUR = 3;
+/** a 4-digit code: 15 guesses/h was 360/day per target → cap the day and lock the number after many misses */
+export const OTP_PER_PHONE_DAY = 8;
+export const OTP_FAILS_PER_PHONE_DAY = 15;
+export const OTP_PHONE_LOCK_MIN = 24 * 60;
+/** company-wide SMS spend cap (SMS pumping / a list of customer numbers) — real sends only */
+export const OTP_SMS_PER_HOUR = 200;
 export const SESSION_START_MIN = 15;
 export const SESSION_EXTEND_MIN = 5;
 export const SESSION_MAX_MIN = 60;
@@ -89,14 +96,18 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   // both counters always count (no short-circuit), exactly like the two separate upserts before
   const coolOk = await hit("otp_phone_min", key, 1, OTP_RESEND_SEC);
   const hourOk = await hit("otp_phone_hour", key, OTP_PER_PHONE_HOUR, 3600);
-  if (!coolOk || !hourOk) {
+  const dayOk = await hit("otp_phone_day", key, OTP_PER_PHONE_DAY, 86400);
+  if (!coolOk || !hourOk || !dayOk || (await isBlocked(`phone:${key}`))) {
     logEvent("otp_rate_limited", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
     return { ok: false, reason: "rate" };
   }
 
   const requestId = randomBytes(32).toString("base64url");
   const ids = await customerIdsForPhone(phone);
-  if (ids.length) {
+  // over the company-wide cap: answer exactly as usual, just don't send (and say so in the log)
+  if (ids.length && !(await hit("otp_sms_global_hour", "all", OTP_SMS_PER_HOUR, 3600))) {
+    logEvent("otp_sms_global_cap", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
+  } else if (ids.length) {
     const rh = sha256(requestId);
     // development `log` mode makes its own code; ThaiBulkSMS makes the real one
     const own = smsProvider() === "log" ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, "0") : null;
@@ -120,7 +131,7 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
           .update(trackOtp)
           .set({ providerToken: token })
           .where(eq(trackOtp.requestHash, rh))
-          .catch((e) => console.error("[track_otp] token not saved", e instanceof Error ? e.message.split("\n")[0] : e));
+          .catch((e) => logError(e, "track_otp token not saved"));
       });
   } else {
     logEvent("otp_unknown_phone", { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
@@ -148,15 +159,24 @@ export async function verifyOtp(requestId: unknown, code: unknown, ip: string, u
         lt(trackOtp.attempts, OTP_MAX_ATTEMPTS)
       )
     )
-    .returning({ codeHash: trackOtp.codeHash, providerToken: trackOtp.providerToken });
+    .returning({ codeHash: trackOtp.codeHash, providerToken: trackOtp.providerToken, phoneHash: trackOtp.phoneHash });
   if (!tried) return null;
+  // a wrong code counts against the NUMBER for the day; too many → the number is locked for 24 h
+  const wrong = async () => {
+    if (!(await hit("otp_fail_phone_day", tried.phoneHash, OTP_FAILS_PER_PHONE_DAY, 86400))) {
+      await block(`phone:${tried.phoneHash}`, OTP_PHONE_LOCK_MIN);
+      logEvent("otp_phone_locked", { ipHash: hmac(`ip:${ip}`) });
+    }
+    return null;
+  };
   if (tried.providerToken) {
     const answer = await checkOtpSms(tried.providerToken, code);
     if (answer === "error") logEvent("otp_check_failed", { ipHash: hmac(`ip:${ip}`) });
+    if (answer === "wrong") return wrong();
     if (answer !== "ok") return null;
   } else if (tried.codeHash) {
     const given = codeHash(requestId, code);
-    if (tried.codeHash.length !== given.length || !timingSafeEqual(tried.codeHash, given)) return null;
+    if (tried.codeHash.length !== given.length || !timingSafeEqual(tried.codeHash, given)) return wrong();
   } else return null; // the SMS never went out
 
   const [row] = await db
