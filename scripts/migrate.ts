@@ -34,6 +34,9 @@ async function main() {
     ssl: /supabase\.co|supabase\.com|pooler/.test(url) ? { rejectUnauthorized: false } : undefined,
     options: "-c TimeZone=Asia/Bangkok",
   });
+  // RAISE NOTICE from a migration (e.g. 0022 "duplicate …, unique index NOT created") must reach
+  // the deploy log — node-postgres drops notices nobody listens for
+  pool.on("connect", (c) => c.on("notice", (n) => console.warn(`NOTICE: ${n.message}`)));
   const db = drizzle(pool);
 
   const force = process.argv.includes("--reset");

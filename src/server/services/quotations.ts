@@ -7,7 +7,7 @@ import type { Quotation } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
@@ -109,6 +109,7 @@ export type QuotationFilters = { status?: string; from?: string; to?: string; de
 
 export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
+  const from = ymd(f.from), to = ymd(f.to);
   return and(
     statusFilter(quotationHd.recordStatus, f.deleted ?? "exclude"),
     term
@@ -121,8 +122,8 @@ export function quotationWhere(q: string, f: QuotationFilters) {
         )
       : undefined,
     f.status ? eq(quotationStatus.quotationStatusName, f.status) : undefined,
-    f.from ? gte(quotationHd.createDate, `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(quotationHd.createDate, `${f.to} 23:59:59`) : undefined,
+    from ? gte(quotationHd.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(quotationHd.createDate, `${to} 23:59:59`) : undefined,
     f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
     f.type ? eq(quotationHd.quotationType, f.type.includes("VIP") ? "VIP" : f.type.includes("Normal") ? "Normal" : f.type) : undefined,
     // ข้อมูลเครื่องมาจากงานที่อ้างถึง (job) — กรองที่ server ให้ครบทุกหน้า ไม่ใช่เฉพาะหน้าที่โหลด

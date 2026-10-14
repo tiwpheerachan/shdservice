@@ -5,8 +5,9 @@
 -- being saved silently. job.job_no is already the primary key.
 --
 -- Legacy data might hold duplicates (none in the dev copy, 2026-10-14). Each index is
--- created only when its column has none; otherwise a NOTICE names it and the deploy
--- goes on — clean the duplicates, then re-run db:migrate (or this file) to add it.
+-- created only when its column has none; otherwise a NOTICE names it in the deploy log
+-- (scripts/migrate.ts prints notices) and the deploy goes on. db:migrate will NOT run this
+-- file again (it is journaled): clean the duplicates, then run it by hand with `psql -f`.
 -- Idempotent (the legacy tables can be reloaded and every migration re-run).
 
 DO $$

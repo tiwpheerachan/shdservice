@@ -7,11 +7,11 @@ import type { SaleOrder } from "@/data/mock";
 import { HttpError, fullName } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
-import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/mappers/format";
 import { getCustomerByCode, addressNames } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
-import { issueForSaleOrder } from "./stock";
+import { issueForSaleOrder, productsChanged } from "./stock";
 import { RS, statusFilter, type StatusMode } from "@/server/record-status";
 import { saleOrderSchema } from "@/lib/validation/sale-order";
 import { assertValid } from "@/server/validate";
@@ -90,6 +90,7 @@ export type SaleOrderFilters = { approve?: string; from?: string; to?: string; s
 
 export function saleOrderWhere(q: string, f: SaleOrderFilters) {
   const term = q.trim();
+  const from = ymd(f.from), to = ymd(f.to);
   return and(
     statusFilter(saleOutHd.recordStatus, f.deleted ?? "exclude"),
     term
@@ -102,8 +103,8 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
         )
       : undefined,
     f.approve ? eq(approveStatus.approveNameTh, f.approve) : undefined,
-    f.from ? gte(saleOutHd.documentCreateDate, `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(saleOutHd.documentCreateDate, `${f.to} 23:59:59`) : undefined,
+    from ? gte(saleOutHd.documentCreateDate, `${from} 00:00:00`) : undefined,
+    to ? lte(saleOutHd.documentCreateDate, `${to} 23:59:59`) : undefined,
     f.sales ? (/^\d+$/.test(f.sales) ? eq(saleOutHd.documentCreateBy, Number(f.sales)) : ilike(creator.firstName, `%${f.sales}%`)) : undefined
   );
 }
@@ -396,6 +397,7 @@ export async function approveSaleOrder(no: string, decision: "approve" | "deny" 
       if (Number(hasGoods[0]?.n ?? 0) > 0) await issueForSaleOrder({ soNo: no, payTo: hd.customerName ?? "" }, byUserId, tx);
     }
   });
+  if (decision === "approve") productsChanged(); // stock went out in our tx — now committed
   return (await getSaleOrder(no))!;
 }
 

@@ -9,6 +9,7 @@ import { audit } from "@/server/audit";
 import { nowThai, SENTINEL_TS } from "@/server/mappers/format";
 import { RS, statusStamp, type RecordStatus } from "@/server/record-status";
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from "./masters";
+import { productsChanged } from "./stock";
 
 export type RecordTable =
   | "users"
@@ -101,6 +102,7 @@ export async function setRecordStatus(
             : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: "" }
         )
         .where(eq(product.productCode, String(id)));
+      productsChanged();
       await log();
       return;
     case "customers":

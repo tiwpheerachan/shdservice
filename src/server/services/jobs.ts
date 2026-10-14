@@ -22,7 +22,7 @@ import type { Job } from "@/data/mock";
 import { HttpError, fullName, findAppUserByEmail } from "@/server/auth";
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff, auditFor, type AuditRow } from "@/server/audit";
-import { orderBy, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import {
   dateOrNull,
   dateOrSentinel,
@@ -38,7 +38,7 @@ import {
 } from "@/server/mappers/format";
 import { getCustomerByCode, getCustomerById } from "./customers";
 import { issuingProfile, SHD_PROFILE_ID } from "./document-profiles";
-import { adjustQty, listPartRequests, PART, productsByCode } from "./stock";
+import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from "./stock";
 import { RS, statusStamp } from "@/server/record-status";
 import { addDays } from "@/lib/dates";
 import {
@@ -367,6 +367,7 @@ export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
+  const from = ymd(f.from), to = ymd(f.to), closedFrom = ymd(f.closedFrom), closedTo = ymd(f.closedTo);
   return and(
     // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for
     f.includeCancelled ? undefined : ne(job.recordStatus, RS.DELETED),
@@ -392,12 +393,12 @@ export function jobWhere(q: string, f: JobFilters) {
         : sql`trim(coalesce(${eng.firstName},'') || ' ' || coalesce(${eng.lastName},'')) = ${f.engineer}`
       : undefined,
     f.channel ? eq(job.productSaleOutChannel, f.channel) : undefined,
-    f.from ? gte(dateCol(f.dateBy), dayStart(f.dateBy, f.from)) : undefined,
-    f.to ? lte(dateCol(f.dateBy), dayEnd(f.dateBy, f.to)) : undefined,
+    from ? gte(dateCol(f.dateBy), dayStart(f.dateBy, from)) : undefined,
+    to ? lte(dateCol(f.dateBy), dayEnd(f.dateBy, to)) : undefined,
     f.symptom ? or(eq(symptom.symptomName, f.symptom), sql`exists (select 1 from job_symptom js join symptom s2 on s2.symptom_id = js.symptom_id where js.job_no = ${job.jobNo} and s2.symptom_name = ${f.symptom})`) : undefined,
     f.returnType ? eq(job.returnCustomerType, f.returnType) : undefined,
-    f.closedFrom ? gte(job.jobClosedDate, `${f.closedFrom} 00:00:00`) : undefined,
-    f.closedTo ? lte(job.jobClosedDate, `${f.closedTo} 23:59:59`) : undefined,
+    closedFrom ? gte(job.jobClosedDate, `${closedFrom} 00:00:00`) : undefined,
+    closedTo ? lte(job.jobClosedDate, `${closedTo} 23:59:59`) : undefined,
     f.customerCode ? sql`${job.customerDetail} like ${f.customerCode + " %"}` : undefined,
     f.unassigned
       ? and(
@@ -430,7 +431,7 @@ export function jobWhere(q: string, f: JobFilters) {
 export function filtersFromQuery(f: Record<string, string>): JobFilters {
   return {
     status: f.status,
-    statusId: f.statusId ? Number(f.statusId) : undefined,
+    statusId: /^\d+$/.test(f.statusId ?? "") ? Number(f.statusId) : undefined, // junk → NaN would 500
     statusGroup: f.statusGroup,
     open: f.open === "1",
     type: f.type,
@@ -1110,19 +1111,23 @@ export async function assignJobs(jobNos: string[], engineerId: number, byUserId:
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx.select({ no: job.jobNo, status: job.jobStatusId }).from(job).where(inArray(job.jobNo, jobNos)).orderBy(job.jobNo).for("update");
-    for (const r of rows) {
-      await tx.update(job).set({ engineerId }).where(eq(job.jobNo, r.no));
-      await audit(tx, byUserId, {
-        action: "ASSIGN",
+    if (!rows.length) return;
+    // one UPDATE + one audit INSERT for the whole batch; only NEW jobs also change status
+    await tx.update(job).set({ engineerId }).where(inArray(job.jobNo, rows.map((r) => r.no)));
+    await audit(
+      tx,
+      byUserId,
+      rows.map((r) => ({
+        action: "ASSIGN" as const,
         module: "Job Assign",
         entity: "job",
         key: r.no,
         summary: `มอบหมายงานให้ช่าง #${engineerId}`,
         changes: { engineerId: [null, engineerId] },
-      });
-      if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
-      n++;
-    }
+      }))
+    );
+    for (const r of rows) if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
+    n = rows.length;
   });
   return n;
 }
@@ -1175,14 +1180,16 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       const existing = await tx.select().from(jobOrderSparePartLog).where(eq(jobOrderSparePartLog.jobNo, jobNo)).for("update");
       const keep = new Set(i.parts.map((p) => p.logId).filter((x): x is number => !!x));
       const codes = i.parts.map((p) => str(p.code)).filter(Boolean);
-      const map = await productsByCode(tx, codes);
+      // still-pending rows are the only existing ones whose booking can move (cancel / re-book)
+      const pending = existing.filter((e) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0);
+      const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? "")]);
+      await lockStock(tx, [...map.values()].map((p) => p.id));
 
       // rows removed in the UI: cancel while still pending (nothing issued yet)
-      for (const e of existing) {
-        if (e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0 && !keep.has(e.jobOrderLogId)) {
+      for (const e of pending) {
+        if (!keep.has(e.jobOrderLogId)) {
           await tx.update(jobOrderSparePartLog).set({ orderStatusId: PART.CANCELLED }).where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
-          const pm = await productsByCode(tx, [e.sparePartCode ?? ""]);
-          const prod = pm.get(e.sparePartCode ?? "");
+          const prod = map.get(e.sparePartCode ?? "");
           if (prod && e.isSpecial) await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
         }
       }
@@ -1295,7 +1302,19 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 export async function markPartsIssued(jobNo: string, byUserId: number) {
   await db.transaction(async (tx) => {
     const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for("update");
-    if (cur && cur.status === JS.PARTS_REQUESTED) await setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, cur.status);
+    if (!cur || cur.status !== JS.PARTS_REQUESTED) return;
+    // recount under the job lock: a repair saved since the issue may have requested more parts
+    const [waiting] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(jobOrderSparePartLog)
+      .where(
+        and(
+          eq(jobOrderSparePartLog.jobNo, jobNo),
+          eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+          sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`
+        )
+      );
+    if ((waiting?.n ?? 0) === 0) await setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, cur.status);
   });
 }
 
@@ -1622,8 +1641,8 @@ export type DashRange = { from?: string; to?: string; type?: string };
 // 30 s memo per date range (the dashboard is opened constantly). cached() gives parallel callers the
 // same in-flight computation, so the page's panels never compute it more than once.
 export function dashboard(range: DashRange = {}) {
-  const from = /^\d{4}-\d{2}-\d{2}$/.test(range.from ?? "") ? range.from! : "";
-  const to = /^\d{4}-\d{2}-\d{2}$/.test(range.to ?? "") ? range.to! : "";
+  const from = ymd(range.from) ?? "";
+  const to = ymd(range.to) ?? "";
   const type = (range.type ?? "").trim();
   return cached(`dashboard:${from}|${to}|${type}`, 30_000, () => computeDashboard(from, to, type));
 }
@@ -1663,12 +1682,73 @@ async function computeDashboard(from: string, to: string, type = "") {
     from ? gte(job.jobCreateDate, `${from} 00:00:00`) : undefined,
     to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined
   );
-  const groups = await db
-    .select({ group: jobStatus.jobStatusGroup, n: count() })
-    .from(job)
-    .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .where(createdIn)
-    .groupBy(jobStatus.jobStatusGroup);
+  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound.
+  // "today" is the Thai calendar day (job dates are stored as Thai wall-clock), so each bucket maps
+  // exactly onto a create-date range in the job list (dashboard cells deep-link there).
+  const age = sql`GREATEST(1, ((now() AT TIME ZONE 'Asia/Bangkok')::date - ${job.jobCreateDate}::date))`;
+  const bucket = (cond: SQL) => sql<string>`count(*) filter (where ${cond})`;
+  // open / close trend: daily when the range is ≤ 62 days, otherwise monthly (all time = from the first job).
+  // Counts come grouped from Postgres; the empty days / months in between are filled in here.
+  const spanDays = from && to ? Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 : Infinity;
+  const daily = spanDays <= 62;
+  const trendQ = async () => {
+    const [bounds] =
+      from && to
+        ? [{ first: from, today: to }]
+        : await db
+            .select({
+              first: sql<string>`to_char(coalesce(min(${job.jobCreateDate})::date, current_date), 'YYYY-MM-DD')`,
+              today: sql<string>`to_char(current_date, 'YYYY-MM-DD')`,
+            })
+            .from(job);
+    const lo = daily ? from || bounds.first : `${(from || bounds.first).slice(0, 7)}-01`;
+    const hi = to || bounds.today;
+    const perPeriod = async (col: typeof job.jobCreateDate | typeof job.jobClosedDate) => {
+      // the format is literal SQL (not a bound parameter) so SELECT and GROUP BY are the same expression
+      const k = daily ? sql<string>`to_char(${col}, 'YYYY-MM-DD')` : sql<string>`to_char(${col}, 'YYYY-MM')`;
+      const rows = await db
+        .select({ k, n: count() })
+        .from(job)
+        .where(and(ne(job.recordStatus, RS.DELETED), ofType, gte(col, `${lo} 00:00:00`), lt(col, `${addDays(hi, 1)} 00:00:00`)))
+        .groupBy(k);
+      return new Map(rows.map((r) => [r.k, Number(r.n)]));
+    };
+    const [opened, closed] = await Promise.all([perPeriod(job.jobCreateDate), perPeriod(job.jobClosedDate)]);
+    return periodKeys(lo, hi, daily).map((k) => ({ k, open: opened.get(k) ?? 0, close: closed.get(k) ?? 0 }));
+  };
+  // the four panels are independent: run them side by side (the page waits for the slowest, not the sum)
+  const [groups, tat, trend, top] = await Promise.all([
+    db
+      .select({ group: jobStatus.jobStatusGroup, n: count() })
+      .from(job)
+      .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+      .where(createdIn)
+      .groupBy(jobStatus.jobStatusGroup),
+    db
+      .select({
+        statusId: jobStatus.jobStatusId,
+        status: jobStatus.jobStatusName,
+        d13: bucket(sql`${age} <= 3`),
+        d47: bucket(sql`${age} between 4 and 7`),
+        d814: bucket(sql`${age} between 8 and 14`),
+        d1530: bucket(sql`${age} between 15 and 30`),
+        over30: bucket(sql`${age} > 30`),
+      })
+      .from(job)
+      .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+      .where(and(ne(job.recordStatus, RS.DELETED), ofType, isOpenJob))
+      .groupBy(jobStatus.jobStatusId, jobStatus.jobStatusName, jobStatus.displayOrder)
+      .orderBy(asc(jobStatus.displayOrder)),
+    trendQ(),
+    db
+      .select({ name: symptom.symptomName, n: count() })
+      .from(job)
+      .innerJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
+      .where(createdIn)
+      .groupBy(symptom.symptomName)
+      .orderBy(desc(count()))
+      .limit(8),
+  ]);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
   const G: Record<string, { key: string; label: string; sub: string; tone: "primary" | "warning" | "info" | "success" | "danger"; ord: number }> = {
     Pending: { key: "pending", label: "งานระหว่างดำเนินการ", sub: "Pending", tone: "warning", ord: 1 },
@@ -1683,26 +1763,6 @@ async function computeDashboard(from: string, to: string, type = "") {
     })
     .sort((a, b) => a.ord - b.ord);
 
-  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound.
-  // "today" is the Thai calendar day (job dates are stored as Thai wall-clock), so each bucket maps
-  // exactly onto a create-date range in the job list (dashboard cells deep-link there).
-  const age = sql`GREATEST(1, ((now() AT TIME ZONE 'Asia/Bangkok')::date - ${job.jobCreateDate}::date))`;
-  const bucket = (cond: SQL) => sql<string>`count(*) filter (where ${cond})`;
-  const tat = await db
-    .select({
-      statusId: jobStatus.jobStatusId,
-      status: jobStatus.jobStatusName,
-      d13: bucket(sql`${age} <= 3`),
-      d47: bucket(sql`${age} between 4 and 7`),
-      d814: bucket(sql`${age} between 8 and 14`),
-      d1530: bucket(sql`${age} between 15 and 30`),
-      over30: bucket(sql`${age} > 30`),
-    })
-    .from(job)
-    .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .where(and(ne(job.recordStatus, RS.DELETED), ofType, isOpenJob))
-    .groupBy(jobStatus.jobStatusId, jobStatus.jobStatusName, jobStatus.displayOrder)
-    .orderBy(asc(jobStatus.displayOrder));
   const tatRows = tat.map((r) => ({
     statusId: Number(r.statusId),
     status: String(r.status ?? "").trim(),
@@ -1713,47 +1773,12 @@ async function computeDashboard(from: string, to: string, type = "") {
     over30: Number(r.over30),
   }));
 
-  // open / close trend: daily when the range is ≤ 62 days, otherwise monthly (all time = from the first job).
-  // Counts come grouped from Postgres; the empty days / months in between are filled in here.
-  const spanDays = from && to ? Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 : Infinity;
-  const daily = spanDays <= 62;
-  const [bounds] =
-    from && to
-      ? [{ first: from, today: to }]
-      : await db
-          .select({
-            first: sql<string>`to_char(coalesce(min(${job.jobCreateDate})::date, current_date), 'YYYY-MM-DD')`,
-            today: sql<string>`to_char(current_date, 'YYYY-MM-DD')`,
-          })
-          .from(job);
-  const lo = daily ? from || bounds.first : `${(from || bounds.first).slice(0, 7)}-01`;
-  const hi = to || bounds.today;
-  const perPeriod = async (col: typeof job.jobCreateDate | typeof job.jobClosedDate) => {
-    // the format is literal SQL (not a bound parameter) so SELECT and GROUP BY are the same expression
-    const k = daily ? sql<string>`to_char(${col}, 'YYYY-MM-DD')` : sql<string>`to_char(${col}, 'YYYY-MM')`;
-    const rows = await db
-      .select({ k, n: count() })
-      .from(job)
-      .where(and(ne(job.recordStatus, RS.DELETED), ofType, gte(col, `${lo} 00:00:00`), lt(col, `${addDays(hi, 1)} 00:00:00`)))
-      .groupBy(k);
-    return new Map(rows.map((r) => [r.k, Number(r.n)]));
-  };
-  const [opened, closed] = await Promise.all([perPeriod(job.jobCreateDate), perPeriod(job.jobClosedDate)]);
-  const trend = periodKeys(lo, hi, daily).map((k) => ({ k, open: opened.get(k) ?? 0, close: closed.get(k) ?? 0 }));
   const monthlyRows = trend.map((r) => {
     const [y, mo, d] = r.k.split("-");
     const label = daily ? `${Number(d)} ${TH_MONTH[Number(mo) - 1]}` : `${TH_MONTH[Number(mo) - 1]} ${String(Number(y) + 543).slice(-2)}`;
     return { m: label, open: Number(r.open), close: Number(r.close) };
   });
 
-  const top = await db
-    .select({ name: symptom.symptomName, n: count() })
-    .from(job)
-    .innerJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-    .where(createdIn)
-    .groupBy(symptom.symptomName)
-    .orderBy(desc(count()))
-    .limit(8);
   const topSymptoms = top.map((t) => ({ name: t.name ?? "", count: Number(t.n) }));
 
   return { groups: dashGroups, tat: tatRows, monthly: monthlyRows, granularity: daily ? ("day" as const) : ("month" as const), topSymptoms };
@@ -1840,8 +1865,12 @@ export async function addCallLog(jobNo: string, detail: string, byUserId: number
   return listCallLogs(jobNo);
 }
 
-/** Header chips of the job list — counts over the whole table. */
-export async function jobStats() {
+/** Header chips of the job list — counts over the whole table (a GROUP BY over every job, so 30 s memo
+ *  like the dashboard; job writes have no cache invalidation, the chips may lag by up to 30 s). */
+export function jobStats() {
+  return cached("jobs:stats", 30_000, loadJobStats);
+}
+async function loadJobStats() {
   const rows = await db
     .select({ id: job.jobStatusId, group: jobStatus.jobStatusGroup, n: count() })
     .from(job)

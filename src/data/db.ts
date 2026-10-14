@@ -147,7 +147,9 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
     void revalidate();
   }, [revalidate]);
 
-  return { rows: data?.rows ?? EMPTY, total: data?.total ?? 0, loading: isLoading, error: error ? errMsg(error) : null, refetch };
+  // on error drop the rows keepPreviousData kept from the PREVIOUS page/filter — otherwise the
+  // table shows last filter's results under the new one and the error row never appears
+  return { rows: error ? EMPTY : (data?.rows ?? EMPTY), total: error ? 0 : (data?.total ?? 0), loading: isLoading, error: error ? errMsg(error) : null, refetch };
 }
 
 /* ------------------------------------------------------------------ *

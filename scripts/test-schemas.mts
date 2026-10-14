@@ -20,6 +20,8 @@ import { saleOrderSchema } from "../src/lib/validation/sale-order.ts";
 import { masterSchema, modelSchema, userSchema, productSchema } from "../src/lib/validation/admin.ts";
 import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from "../src/lib/validation/stock.ts";
 import { fileProblem } from "../src/server/storage.ts";
+import { clampInt, orderBy, ymd } from "../src/server/paging.ts";
+import { sql } from "drizzle-orm";
 
 let passed = 0;
 const failures: string[] = [];
@@ -254,6 +256,27 @@ for (const [name, file, accepted] of fileChecks) {
 }
 const pdfAsImage = await fileProblem(new File([PDF], "a.pdf", { type: "application/pdf" }), new Set(["image/png"]));
 test("images-only kinds refuse a real PDF", () => assert.ok(pdfAsImage));
+
+console.log("\nQuery params cannot crash a list (src/server/paging.ts)");
+test("limit: junk / NaN → default, else clamped to 1..max", () => {
+  assert.equal(clampInt(null, 300, 1000), 300);
+  assert.equal(clampInt("abc", 300, 1000), 300);
+  assert.equal(clampInt("NaN", 50, 1000), 50);
+  assert.equal(clampInt("99999999", 50, 1000), 1000);
+  assert.equal(clampInt("-5", 50, 1000), 1);
+  assert.equal(clampInt("40", 50, 1000), 40);
+});
+test("sort key must be an own key of the column map", () => {
+  const fallback = [sql`1`];
+  const map = { name: sql`name` };
+  for (const key of ["__proto__", "constructor", "toString", "hasOwnProperty"]) assert.equal(orderBy({ key, dir: "asc" }, map, fallback), fallback);
+  assert.equal(orderBy({ key: "name", dir: "desc" }, map, fallback).length, 2);
+});
+test("dates: only real YYYY-MM-DD pass, anything else = no filter", () => {
+  assert.equal(ymd("2026-10-14"), "2026-10-14");
+  assert.equal(ymd("2024-02-29"), "2024-02-29");
+  for (const bad of [undefined, "", "2026-02-30", "2026-13-01", "0000-01-01", "2026-1-5", "2026-10-14'; --", "yesterday"]) assert.equal(ymd(bad), undefined, String(bad));
+});
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

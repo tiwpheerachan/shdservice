@@ -162,6 +162,13 @@
       "when": 1757900022000,
       "tag": "0022_unique_document_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1757900023000,
+      "tag": "0023_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

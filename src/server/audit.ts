@@ -4,7 +4,7 @@ import { db, type Tx } from "@/db/client";
 import { appUser, auditLog } from "@/db/schema";
 import { fullName } from "@/server/auth";
 import { nowThai, fmtDateTime } from "@/server/mappers/format";
-import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy as orderByCols, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
 
 /**
  * Audit trail — every write the app performs records WHO did WHAT to WHICH
@@ -45,19 +45,26 @@ export async function actorName(userId: number, w: Writer = db): Promise<string>
   return name;
 }
 
-export async function audit(w: Writer, userId: number, e: AuditEntry): Promise<void> {
-  await w.insert(auditLog).values({
-    at: nowThai(),
-    userId: userId > 0 ? userId : 0,
-    userName: (await actorName(userId, w)).slice(0, 100),
-    action: e.action,
-    module: e.module.slice(0, 50),
-    entity: e.entity.slice(0, 50),
-    entityKey: String(e.key ?? "").slice(0, 100),
-    summary: e.summary.slice(0, 200),
-    changes: e.changes && Object.keys(e.changes).length ? e.changes : null,
-    meta: e.meta ?? null,
-  });
+/** One entry, or several (a bulk action) written in a single INSERT. */
+export async function audit(w: Writer, userId: number, entries: AuditEntry | AuditEntry[]): Promise<void> {
+  const list = Array.isArray(entries) ? entries : [entries];
+  if (!list.length) return;
+  const at = nowThai();
+  const userName = (await actorName(userId, w)).slice(0, 100);
+  await w.insert(auditLog).values(
+    list.map((e) => ({
+      at,
+      userId: userId > 0 ? userId : 0,
+      userName,
+      action: e.action,
+      module: e.module.slice(0, 50),
+      entity: e.entity.slice(0, 50),
+      entityKey: String(e.key ?? "").slice(0, 100),
+      summary: e.summary.slice(0, 200),
+      changes: e.changes && Object.keys(e.changes).length ? e.changes : null,
+      meta: e.meta ?? null,
+    }))
+  );
 }
 
 const norm = (v: unknown): unknown => {
@@ -126,8 +133,8 @@ function auditWhere(q: string, f: AuditFilters) {
   const term = q.trim();
   return and(
     term ? or(ilike(auditLog.entityKey, `%${term}%`), ilike(auditLog.summary, `%${term}%`), ilike(auditLog.userName, `%${term}%`)) : undefined,
-    f.from ? gte(auditLog.at, `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(auditLog.at, `${f.to} 23:59:59`) : undefined,
+    ymd(f.from) ? gte(auditLog.at, `${ymd(f.from)} 00:00:00`) : undefined, // junk date = no filter, not a 500
+    ymd(f.to) ? lte(auditLog.at, `${ymd(f.to)} 23:59:59`) : undefined,
     f.user ? (/^\d+$/.test(f.user) ? eq(auditLog.userId, Number(f.user)) : ilike(auditLog.userName, `%${f.user}%`)) : undefined,
     f.module ? eq(auditLog.module, f.module) : undefined,
     f.entity ? eq(auditLog.entity, f.entity) : undefined,

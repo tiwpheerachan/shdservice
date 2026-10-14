@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { requireAdmin, requireUser, requireView, JOB_MODULES, HttpError } from "@/server/auth";
 import type { Module } from "@/lib/modules";
 import { pageAudit, listAudit, auditModules } from "@/server/audit";
-import { parsePageQuery, type Page } from "@/server/paging";
+import { clampInt, parsePageQuery, type Page } from "@/server/paging";
 import { parseStatusMode } from "@/server/record-status";
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from "@/server/services/masters";
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from "@/server/services/users";
@@ -55,7 +55,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     await requireAdmin(req);
     if (resource === "audit_modules") return auditModules();
     const f = { from: p.f.from, to: p.f.to, user: p.f.user, module: p.f.module, entity: p.f.entity, key: p.f.key, action: p.f.action };
-    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit: Number(sp.get("limit") ?? 500) });
+    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit: clampInt(sp.get("limit"), 500, 20000) });
   }
   if (resource === "users" || resource === "permissions" || resource === "roles" || resource === "modules") {
     await requireAdmin(req);
@@ -102,9 +102,9 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return listShippingProfiles(true);
     case "job_nos": {
       const mode = sp.get("mode");
-      if (mode === "pending_parts") return jobsWithPendingParts(Number(sp.get("limit") ?? 300));
-      if (mode === "returnable") return jobsWithReturnableParts(Number(sp.get("limit") ?? 300));
-      return recentJobNos(Number(sp.get("limit") ?? 50));
+      if (mode === "pending_parts") return jobsWithPendingParts(clampInt(sp.get("limit"), 300, 1000));
+      if (mode === "returnable") return jobsWithReturnableParts(clampInt(sp.get("limit"), 300, 1000));
+      return recentJobNos(clampInt(sp.get("limit"), 50, 1000));
     }
     case "products": {
       if (sp.get("fields") === "lite") return listProductsLite(p.q);
@@ -142,17 +142,17 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     case "customers":
       return paged
         ? pageCustomers(p, deleted, customerFiltersFromQuery(p.f))
-        : listCustomers({ q: p.q, deleted, limit: Number(sp.get("limit") ?? 500), filters: customerFiltersFromQuery(p.f) });
+        : listCustomers({ q: p.q, deleted, limit: clampInt(sp.get("limit"), 500, 5000), filters: customerFiltersFromQuery(p.f) });
     case "issued_lines":
       return paged
         ? pageIssuedLines(p, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })
-        : listIssuedLines({ from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code || p.q, limit: Number(sp.get("limit") ?? 5000) });
+        : listIssuedLines({ from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code || p.q, limit: clampInt(sp.get("limit"), 5000, 20000) });
     case "issued_stats":
       return [await issuedStats(p.q, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })];
     case "movements":
       return paged
         ? pageMovements(p, { from: p.f.from, to: p.f.to, type: p.f.type, code: p.f.code, doc: p.f.doc, ref: p.f.ref })
-        : listMovements({ q: p.q, from: p.f.from, to: p.f.to, type: p.f.type, limit: Number(sp.get("limit") ?? 1000) });
+        : listMovements({ q: p.q, from: p.f.from, to: p.f.to, type: p.f.type, limit: clampInt(sp.get("limit"), 1000, 5000) }); // JSON stays 5k — 20k is for the Excel export
     case "job_summary":
       return [await jobReportSummary(filtersFromQuery(p.f), p.q)];
     case "quotation_summary":
@@ -160,15 +160,15 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     case "sale_order_summary":
       return [await saleOrderReportSummary({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted }, p.q)];
     case "jobs":
-      return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: Number(sp.get("limit") ?? 5000) });
+      return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: clampInt(sp.get("limit"), 5000, 20000) });
     case "quotations":
       return paged
         ? pageQuotations(p, { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type, warranty: p.f.warranty, brand: p.f.brand })
-        : listQuotations({ status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
+        : listQuotations({ status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, q: p.q, limit: clampInt(sp.get("limit"), 5000, 20000) });
     case "sale_orders":
       return paged
         ? pageSaleOrders(p, { approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted })
-        : listSaleOrders({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted, q: p.q, limit: Number(sp.get("limit") ?? 5000) });
+        : listSaleOrders({ approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted, q: p.q, limit: clampInt(sp.get("limit"), 5000, 20000) });
     case "dashboard":
       return [await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })];
     case "job_stats":

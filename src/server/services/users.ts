@@ -1,7 +1,7 @@
 import { audit, diff } from "@/server/audit";
 import "server-only";
 import { cached, invalidate, TTL_MASTER } from "@/server/cache";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appConfig, appUser } from "@/db/schema";
 import { isOwner, PENDING_ROLE } from "@/lib/access";
@@ -341,18 +341,20 @@ export async function savePermissions(
     const beforeRows = await tx.select().from(appConfig);
     const beforeMap = new Map(beforeRows.map((r) => [`${r.userType?.trim()}::${r.moduleName?.trim()}`, r]));
     const changed: Record<string, [unknown, unknown]> = {};
+    // one upsert on ix_user_type_and_module_name (unique (user_type, module_name)) instead of a
+    // SELECT + UPDATE/INSERT per row; a pair sent twice keeps its last value (as the loop did)
+    const rows = new Map(items.map((it) => [`${it.role}\0${it.menu}`, { userType: it.role, moduleName: it.menu, canInsert: it.add, canEdit: it.edit, canDelete: it.del, canView: it.view }]));
+    if (rows.size) {
+      await tx
+        .insert(appConfig)
+        .values([...rows.values()])
+        .onConflictDoUpdate({
+          target: [appConfig.userType, appConfig.moduleName],
+          set: { canInsert: sql`excluded.can_insert`, canEdit: sql`excluded.can_edit`, canDelete: sql`excluded.can_delete`, canView: sql`excluded.can_view` },
+        });
+    }
     for (const it of items) {
-      const existing = await tx
-        .select({ id: appConfig.configId })
-        .from(appConfig)
-        .where(and(eq(appConfig.userType, it.role), eq(appConfig.moduleName, it.menu)))
-        .limit(1);
       const values = { canInsert: it.add, canEdit: it.edit, canDelete: it.del, canView: it.view };
-      if (existing[0]) {
-        await tx.update(appConfig).set(values).where(eq(appConfig.configId, existing[0].id));
-      } else {
-        await tx.insert(appConfig).values({ userType: it.role, moduleName: it.menu, ...values });
-      }
       const b = beforeMap.get(`${it.role}::${it.menu}`);
       const pack = (g: { canInsert?: boolean | null; canEdit?: boolean | null; canDelete?: boolean | null; canView?: boolean | null } | undefined) =>
         g ? `${g.canView ? "V" : "-"}${g.canInsert ? "A" : "-"}${g.canEdit ? "E" : "-"}${g.canDelete ? "D" : "-"}` : null;

@@ -23,6 +23,7 @@ import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from "@/server/map
 import { nextRunningNo } from "@/db/running-no";
 import { audit, diff } from "@/server/audit";
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from "@/server/record-status";
+import { cached, invalidate, TTL_MASTER } from "@/server/cache";
 
 export type DeletedMode = StatusMode;
 
@@ -42,6 +43,8 @@ export const INV = {
 
 /** job_order_spare_part_log.order_status_id */
 export const PART = { REQUESTED: 1, RETURN_REQUESTED: 2, GRANTED: 3, CANCELLED: 4, RETURNED: 5 } as const;
+/** sale_out_hd.approve_status_id "อนุมัติ" (sale-orders.ts AS.APPROVED — not imported: that module imports this one) */
+const SO_APPROVED = 4;
 
 /* ------------------------------------------------------------------ *
  * Products
@@ -256,6 +259,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
     if (!i.sysCode) await audit(tx, byUserId, { action: "CREATE", module: "Product", entity: "product", key: code!, summary: `เพิ่มอะไหล่ ${name}` });
     return code!;
   });
+  productsChanged();
   return (await getProduct(code))!;
 }
 
@@ -297,6 +301,25 @@ async function productsByCode(tx: Tx, codes: string[]) {
     .where(inArray(product.productCode, codes));
   return new Map(rows.map((r) => [r.code ?? "", { id: r.id, name: r.name ?? "" }]));
 }
+
+/**
+ * Lock the stock rows a write is about to change, all at once in product_id order, before any
+ * adjustQty (which then re-locks rows this tx already holds). Locking line by line in request
+ * order let two movements touching the same parts in opposite order deadlock (→ 500).
+ */
+async function lockStock(tx: Tx, productIds: number[]) {
+  if (!productIds.length) return;
+  await tx
+    .select({ id: productNoneSerial.itemId })
+    .from(productNoneSerial)
+    .where(inArray(productNoneSerial.productId, productIds))
+    .orderBy(asc(productNoneSerial.productId), asc(productNoneSerial.itemId))
+    .for("update");
+}
+
+/** The picker list (listProductsLite) shows names + on-hand: drop it after a product / stock write
+ *  has COMMITTED — dropped earlier, a request in between would cache the old numbers again. */
+export const productsChanged = () => invalidate("master:products:lite");
 
 async function insertMovement(
   tx: Tx,
@@ -343,6 +366,7 @@ export async function receiveStock(
   if (!lines.length) throw new HttpError(400, "ยังไม่ได้ระบุจำนวนรับเข้า");
   return db.transaction(async (tx) => {
     const map = await productsByCode(tx, lines.map((l) => l.code));
+    await lockStock(tx, [...map.values()].map((p) => p.id));
     for (const l of lines) {
       const p = map.get(l.code);
       if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
@@ -353,7 +377,7 @@ export async function receiveStock(
     const total = lines.reduce((s, l) => s + l.qty, 0);
     await audit(tx, byUserId, { action: "RECEIVE", module: "Product Receive Stock", entity: "inventory_hd", key: no, summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${str(i.poRef)}` : ""}`, changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] } });
     return { no, total };
-  });
+  }).finally(productsChanged);
 }
 
 /** จ่ายออกอื่นๆ → WHO (type 5). */
@@ -365,6 +389,7 @@ export async function issueOther(
   if (!lines.length) throw new HttpError(400, "ยังไม่ได้ระบุจำนวนจ่ายออก");
   return db.transaction(async (tx) => {
     const map = await productsByCode(tx, lines.map((l) => l.code));
+    await lockStock(tx, [...map.values()].map((p) => p.id));
     for (const l of lines) {
       const p = map.get(l.code);
       if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
@@ -374,7 +399,7 @@ export async function issueOther(
     const total = lines.reduce((s, l) => s + l.qty, 0);
     await audit(tx, byUserId, { action: "ISSUE", module: "Product Pick Stock", entity: "inventory_hd", key: no, summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`, changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] } });
     return { no, total };
-  });
+  }).finally(productsChanged);
 }
 
 /* ---- job spare-part requests (ใบเบิก) ---- */
@@ -478,6 +503,8 @@ export async function issueForJob(
       .where(and(eq(jobOrderSparePartLog.jobNo, i.jobNo), inArray(jobOrderSparePartLog.jobOrderLogId, lines.map((l) => l.logId))))
       .for("update");
     const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+    const map = await productsByCode(tx, reqs.map((r) => r.sparePartCode ?? ""));
+    await lockStock(tx, [...map.values()].map((p) => p.id));
     const mvLines: StockLine[] = [];
     const now = nowThai();
     for (const l of lines) {
@@ -485,7 +512,6 @@ export async function issueForJob(
       if (!r || r.orderStatusId !== PART.REQUESTED) throw new HttpError(400, `รายการเบิก #${l.logId} ไม่อยู่ในสถานะรอเบิก`);
       const need = (r.requestQty ?? 0) - (r.grantQty ?? 0);
       if (l.qty > need) throw new HttpError(400, `จ่ายเกินจำนวนที่ขอ (${r.sparePartCode})`);
-      const map = await productsByCode(tx, [r.sparePartCode ?? ""]);
       const p = map.get(r.sparePartCode ?? "");
       if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
       await adjustQty(tx, p.id, { used: l.qty, booking: -l.qty });
@@ -514,7 +540,7 @@ export async function issueForJob(
         )
       );
     return { no, total: mvLines.reduce((s, l) => s + l.qty, 0), allGranted: (pending?.n ?? 0) === 0 };
-  });
+  }).finally(productsChanged);
 }
 
 /* ---- job lists for the pick page reference dropdown ---- */
@@ -598,6 +624,8 @@ export async function returnFromJob(
       .where(and(eq(jobOrderSparePartLog.jobNo, i.jobNo), inArray(jobOrderSparePartLog.jobOrderLogId, lines.map((l) => l.logId))))
       .for("update");
     const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+    const map = await productsByCode(tx, reqs.map((r) => r.sparePartCode ?? ""));
+    await lockStock(tx, [...map.values()].map((p) => p.id));
     const mvLines: StockLine[] = [];
     const now = nowThai();
     for (const l of lines) {
@@ -606,7 +634,6 @@ export async function returnFromJob(
         throw new HttpError(400, `รายการ #${l.logId} ไม่อยู่ในสถานะที่รับคืนได้`);
       const returnable = (r.grantQty ?? 0) - (r.returnQty ?? 0);
       if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
-      const map = await productsByCode(tx, [r.sparePartCode ?? ""]);
       const p = map.get(r.sparePartCode ?? "");
       if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
       await adjustQty(tx, p.id, { used: -l.qty });
@@ -626,7 +653,7 @@ export async function returnFromJob(
     const no = await insertMovement(tx, { typeId: INV.RETURN_FROM_JOB, ref: i.jobNo, outTo: i.from, remark: i.remark }, mvLines, byUserId);
     await audit(tx, byUserId, { action: "RETURN", module: "Job ReturnStock", entity: "job", key: i.jobNo, summary: `รับคืนอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`, changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)] } });
     return { no, total: mvLines.reduce((s, l) => s + l.qty, 0) };
-  });
+  }).finally(productsChanged);
 }
 
 /* ---- sale order picking ---- */
@@ -665,12 +692,19 @@ export async function issueForSaleOrder(
   tx?: Tx
 ): Promise<{ no: string; total: number }> {
   const run = async (t: Tx) => {
+    // header first — the same lock order as saveSaleOrder / approveSaleOrder (no deadlock);
+    // only an APPROVED order may take stock out (the UI filters, the API must too: a pick on a
+    // waiting order, then an edit + approve, used to take the stock out twice)
+    const [hd] = await t.select({ approve: saleOutHd.approveStatusId }).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, i.soNo)).for("update");
+    if (!hd) throw new HttpError(404, "ไม่พบใบสั่งขาย " + i.soNo);
+    if (hd.approve !== SO_APPROVED) throw new HttpError(409, "ใบสั่งขายยังไม่ได้รับอนุมัติ จ่ายสินค้าไม่ได้");
     const dts = await t
       .select()
       .from(saleOutDt)
       .where(and(eq(saleOutDt.saleOutHdNo, i.soNo), ne(saleOutDt.productType, "Service")))
       .for("update");
     const want = i.lines ? new Map(i.lines.map((l) => [l.dtId, l.qty])) : null;
+    await lockStock(t, dts.flatMap((d) => (!d.pickInventoryNo && d.productId ? [d.productId] : [])));
     const mv: StockLine[] = [];
     const picked: number[] = [];
     for (const d of dts) {
@@ -690,14 +724,16 @@ export async function issueForSaleOrder(
     await t.update(saleOutHd).set({ referenceNo: no }).where(eq(saleOutHd.saleOutHdNo, i.soNo));
     return { no, total: mv.reduce((s, l) => s + l.qty, 0) };
   };
-  return tx ? run(tx) : db.transaction(run);
+  // with the caller's tx, the caller calls productsChanged() after its commit
+  return tx ? run(tx) : db.transaction(run).finally(productsChanged);
 }
 
 /* ------------------------------------------------------------------ *
  * Movements (ประวัติการเคลื่อนไหว) — inventory_hd + summarised lines
  * ------------------------------------------------------------------ */
 export async function listMovements(opts: { limit?: number; q?: string; from?: string; to?: string; type?: string } = {}): Promise<Movement[]> {
-  const { limit = 1000, q = "", from, to, type } = opts;
+  const { limit = 1000, q = "", type } = opts;
+  const from = ymd(opts.from), to = ymd(opts.to);
   const term = q.trim();
   const rows = await db
     .select({
@@ -781,7 +817,7 @@ export async function productStockCard(code: string) {
   }).reverse();
 }
 
-export { adjustQty, insertMovement, productsByCode };
+export { adjustQty, insertMovement, lockStock, productsByCode };
 
 /** Line items of one movement document (inventory_dt joined to product). */
 export async function movementLines(no: string) {
@@ -811,6 +847,7 @@ export async function movementLines(no: string) {
 
 /** รายงานการเบิกจ่ายอะไหล่ — every issued line (WHO types 3/4/5) in a date range. */
 export async function listIssuedLines(opts: { from?: string; to?: string; category?: string; code?: string; limit?: number } = {}) {
+  const from = ymd(opts.from), to = ymd(opts.to);
   const rows = await db
     .select({
       doc: inventoryHd.inventoryNo,
@@ -836,8 +873,8 @@ export async function listIssuedLines(opts: { from?: string; to?: string; catego
       and(
         inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER]),
         ne(inventoryHd.isActive, false),
-        opts.from ? gte(inventoryHd.createDate, `${opts.from} 00:00:00`) : undefined,
-        opts.to ? lte(inventoryHd.createDate, `${opts.to} 23:59:59`) : undefined,
+        from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
+        to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
         opts.category ? eq(category.categoryName, opts.category) : undefined,
         opts.code ? or(ilike(inventoryDt.itemCode, `%${opts.code}%`), ilike(product.productName, `%${opts.code}%`)) : undefined
       )
@@ -869,7 +906,7 @@ export async function listIssuedLines(opts: { from?: string; to?: string; catego
  * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
  * ------------------------------------------------------------------ */
 import { count as countFn } from "drizzle-orm";
-import { orderBy as orderByCols, offsetOf, type Page, type PageQuery } from "@/server/paging";
+import { orderBy as orderByCols, offsetOf, ymd, type Page, type PageQuery } from "@/server/paging";
 import { assertValid } from "@/server/validate";
 import { productSchema } from "@/lib/validation/admin";
 
@@ -903,7 +940,7 @@ function productWhere(q: string, f: ProductFilters) {
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
     f.creator ? sql`trim(coalesce(${creatorUser.firstName},'') || ' ' || coalesce(${creatorUser.lastName},'')) ilike ${"%" + f.creator + "%"}` : undefined,
-    f.date ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
+    ymd(f.date) ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
     f.model ? sql`exists (select 1 from product_model pm where pm.product_id = ${product.productId} and pm.model_code = ${f.model})` : undefined,
     f.stock === "in" ? sql`coalesce(${productNoneSerial.quantityRemain},0) > 3` : undefined,
     f.stock === "low" ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3` : undefined,
@@ -982,8 +1019,12 @@ export async function productStats(q: string, f: ProductFilters) {
 
 /** Lite rows for dropdowns / pickers — 5 fields instead of ~25 (1.2 MB → ~150 KB). */
 export type ProductLite = Pick<Product, "sysCode" | "mfgCode" | "name" | "onhand" | "price" | "status" | "category" | "brand">;
-export async function listProductsLite(q = ""): Promise<ProductLite[]> {
+export function listProductsLite(q = ""): Promise<ProductLite[]> {
+  // every form with a part picker loads the whole catalog — memo it; productsChanged() drops it
   const term = q.trim();
+  return cached(`master:products:lite:${term}`, TTL_MASTER, () => loadProductsLite(term));
+}
+async function loadProductsLite(term: string): Promise<ProductLite[]> {
   const rows = await db
     .select({
       sysCode: product.productCode,
@@ -1024,6 +1065,7 @@ export type MovementFilters = { q?: string; from?: string; to?: string; type?: s
 
 function movementWhere(f: MovementFilters) {
   const term = (f.q ?? "").trim();
+  const from = ymd(f.from), to = ymd(f.to);
   return and(
     ne(inventoryHd.isActive, false),
     term
@@ -1036,8 +1078,8 @@ function movementWhere(f: MovementFilters) {
     f.doc ? ilike(inventoryHd.inventoryNo, `%${f.doc}%`) : undefined,
     f.ref ? ilike(inventoryHd.referenceDocumentNo, `%${f.ref}%`) : undefined,
     f.code ? sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${"%" + f.code + "%"})` : undefined,
-    f.from ? gte(inventoryHd.createDate, `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(inventoryHd.createDate, `${f.to} 23:59:59`) : undefined,
+    from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
     f.type ? eq(inventoryType.inventoryTypeName, f.type) : undefined
   );
 }
@@ -1108,11 +1150,12 @@ export type IssuedFilters = { from?: string; to?: string; category?: string; cod
 
 function issuedWhere(q: string, f: IssuedFilters) {
   const code = (f.code || q).trim();
+  const from = ymd(f.from), to = ymd(f.to);
   return and(
     inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER]),
     ne(inventoryHd.isActive, false),
-    f.from ? gte(inventoryHd.createDate, `${f.from} 00:00:00`) : undefined,
-    f.to ? lte(inventoryHd.createDate, `${f.to} 23:59:59`) : undefined,
+    from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
     code ? or(ilike(inventoryDt.itemCode, `%${code}%`), ilike(product.productName, `%${code}%`), ilike(inventoryHd.inventoryNo, `%${code}%`)) : undefined
   );
