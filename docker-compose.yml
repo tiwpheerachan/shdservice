@@ -21,7 +21,7 @@ services:
     environment:
       POSTGRES_USER: ${DEV_DB_USER:-root}
       POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-dev_pass}
-      POSTGRES_DB: ${DEV_DB_NAME:-oneservice_dev_db}
+      POSTGRES_DB: ${DEV_DB_NAME:-shd_oneservice_dev_db}
       LANG: en_US.utf8
       POSTGRES_INITDB_ARGS: '--locale=en_US.UTF-8 --encoding=UTF8'
       TZ: Asia/Bangkok
@@ -32,7 +32,7 @@ services:
     volumes:
       - devdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DEV_DB_USER:-root} -d ${DEV_DB_NAME:-oneservice_dev_db}']
+      test: ['CMD-SHELL', 'pg_isready -U ${DEV_DB_USER:-root} -d ${DEV_DB_NAME:-shd_oneservice_dev_db}']
       interval: 1s
       retries: 30
 

@@ -4,7 +4,7 @@ export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || "postgresql://
 /**
  * Parsed, not pattern-matched: "…@localhost/x?host=db.<ref>.supabase.co" or a password holding
  * "@127.0.0.1:1/" would pass a regex. Only a *_test database — the seed TRUNCATEs tables, so
- * the dev DB (oneservice_dev_db) is refused too.
+ * the dev DB (shd_oneservice_dev_db) is refused too.
  */
 export function assertLocal(url: string): void {
   let ok = false;
