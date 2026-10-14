@@ -53,7 +53,7 @@ export function SessionTimer() {
 
   const left = exp ? Math.max(0, Math.floor((exp - now) / 1000)) : null;
 
-  // expired → back through SSO
+  // expired → /login
   React.useEffect(() => {
     if (left === 0) toLogin();
   }, [left]);

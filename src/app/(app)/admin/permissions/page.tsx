@@ -72,7 +72,6 @@ export default function PermissionsPage() {
   const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] ?? draftPick.role };
   const [saving, setSaving] = React.useState(false);
 
-
   const cellOf = (r: string, menu: string): Cell =>
     map[keyOf(r, menu)] ?? { add: false, edit: false, del: false, view: false };
 

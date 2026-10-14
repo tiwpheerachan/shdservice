@@ -22,7 +22,6 @@ export default async function AppLayout({
 }) {
   const user = await userFromCookies();
   if (!user) {
-    // soft navigation / prefetch → our /login page; real navigation → SSO directly
     // always our own /login page — never auto-forward to the external SSO
     // (see src/proxy.ts: Google Web Risk flags sites that do that)
     const h = await headers();

@@ -80,8 +80,6 @@ export default function ReceivePage() {
   const [remark, setRemark] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
-
-
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
   useClearOnChange(fe.clear, { lines: typedQty }); // typing a quantity takes the error away
 

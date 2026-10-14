@@ -21,7 +21,7 @@ export function envProblems(): { required: string[]; optional: string[] } {
   need("DATABASE_URL", "nothing works");
   need("SESSION_SECRET", "nobody can sign in");
   need("SSO_CLIENT_SECRET", "sign-in fails (server_not_configured)");
-  need("APP_BASE_URL", "wrong links in QR codes / tracking links");
+  need("APP_BASE_URL", "wrong customer tracking links");
   if (has("SESSION_SECRET") && (env.SESSION_SECRET ?? "").trim().length < 32) required.push("SESSION_SECRET shorter than 32 characters — sign-in refused");
   if (has("APP_BASE_URL") && !/^https:\/\/[^/]+\/?$/.test((env.APP_BASE_URL ?? "").trim())) required.push("APP_BASE_URL must be an https origin only (no path)");
   const mode = (env.ORIGIN_AUTH_MODE ?? "").trim().toLowerCase();

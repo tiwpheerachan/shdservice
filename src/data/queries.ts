@@ -18,7 +18,6 @@ async function safe<T>(fn: () => Promise<T[]>): Promise<T[]> {
   try {
     return await fn();
   } catch (e) {
-     
     logError(e, "DB fetch failed");
     return [];
   }

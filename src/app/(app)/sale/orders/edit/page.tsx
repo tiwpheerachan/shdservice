@@ -14,7 +14,6 @@ import { postJson, errMsg } from "@/lib/api";
 import { useRecord } from "@/lib/use-record";
 import { useAccess } from "@/lib/use-access";
 
-
 function EditSaleOrder() {
   const { push } = useToast();
   const confirm = useConfirm();

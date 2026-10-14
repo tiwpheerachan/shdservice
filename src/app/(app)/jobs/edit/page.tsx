@@ -37,7 +37,7 @@ function EditJobForm() {
   const [saving, setSaving] = React.useState(false);
   const { can } = useAccess();
 
-  // prefill the form whenever a job is loaded (from ?job= or the GO button)
+  // prefill the form whenever a job is loaded (from ?job=, the search bar or a save)
   function prefill(job: JobDetail) {
     reset(fromJob(job));
   }

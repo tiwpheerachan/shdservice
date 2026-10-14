@@ -90,7 +90,6 @@ export function TrackClient(props: Props) {
   /** a caller waiting for a background token */
   const waiter = React.useRef<((t: string | null) => void) | null>(null);
 
-
   /* ---------- link mode: session → ticket → data ---------- */
   const linkToken = props.mode === "link" ? props.linkToken : "";
   const runLink = React.useCallback(async (turnstileToken: string) => {

@@ -76,7 +76,6 @@ function RepairForm() {
   const [saved, setSaved] = React.useState<{ detail: typeof detail; lines: Line[] } | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify({ detail, lines }) !== JSON.stringify(saved));
 
-
   // prefill form, repair details and spare-part requests from the loaded job
   function prefill(job: JobDetail) {
     reset(fromJob(job));

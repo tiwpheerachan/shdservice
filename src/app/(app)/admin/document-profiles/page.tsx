@@ -57,8 +57,8 @@ const EMPTY: FormValues = {
 
 /**
  * โปรไฟล์ผู้ออกเอกสาร ("ออกเอกสารในนาม") — company/brand printed on quotations,
- * shipping labels, intake slips and return notes, each with its own document-number
- * prefixes. System Admin only (route is under /admin).
+ * shipping labels, intake slips and return notes (letterhead only — document numbers are one
+ * series for every profile). System Admin only (route is under /admin).
  */
 export default function DocumentProfilesPage() {
   const { push } = useToast();

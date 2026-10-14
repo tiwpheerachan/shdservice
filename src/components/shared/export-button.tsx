@@ -8,7 +8,7 @@ import { errMsg } from "@/lib/api";
 
 /**
  * The "ส่งออก Excel" button of every list / report: `run` is the download (exportXlsx(...)).
- * Busy while the file is built (up to 50k rows takes a few seconds), and a refusal — too many
+ * Busy while the file is built (up to 20k rows takes a few seconds), and a refusal — too many
  * exports a minute, no permission, a server error — is a toast; the page stays as it is.
  */
 export function ExportButton({

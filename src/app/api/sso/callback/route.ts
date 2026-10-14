@@ -40,7 +40,6 @@ async function provision(opts: {
     const r = await provisionSsoUser(opts);
     return { role: r.userType ?? PENDING_ROLE, status: r.isActive ? "Active" : "Inactive", userId: r.userId, sessionVersion: r.sessionVersion };
   } catch (e) {
-     
     logError(e, "sso provision failed");
     return null;
   }
@@ -101,7 +100,6 @@ export async function GET(request: NextRequest) {
     if (!res.ok) {
       // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
       const body = await res.text().catch(() => "");
-       
       // the central service names the account in its 403 text ("account x@… is inactive") — scrubbed
       log.warn("sso verify failed", { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
       // a code that was already exchanged (page reload) while a session exists → just continue
@@ -138,7 +136,6 @@ export async function GET(request: NextRequest) {
     str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split("@")[0] ?? email);
   const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
 
-  // Auto-provision into the users table and get the effective role/status.
   const provisioned = await provision({
     email,
     name,
@@ -162,7 +159,6 @@ export async function GET(request: NextRequest) {
       meta: { ip: clientIp(request.headers), ua: request.headers.get("user-agent")?.slice(0, 200) ?? null },
     });
   } catch (e) {
-     
     logError(e, "sso audit login failed");
   }
 

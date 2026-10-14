@@ -16,8 +16,8 @@
  * Lives in shdservice/scripts (needs the app's node_modules + .env); the wrapper
  * setupdata/upload_files.sh runs it from anywhere:
  *   cd shdservice
- *   ./setupdata/upload_files.sh validate
- *   ./setupdata/upload_files.sh upload [images|attachments|slips|all] [--images DIR] [--files DIR] [--dry] [--force]
+ *   ../setupdata/upload_files.sh validate
+ *   ../setupdata/upload_files.sh upload [images|attachments|slips|all] [--images DIR] [--files DIR] [--dry] [--force]
  * Source folders default to setupdata/ImagesProduct and setupdata/FileUpload.
  *
  * Env (from shdservice/.env): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)

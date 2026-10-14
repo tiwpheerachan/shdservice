@@ -7,7 +7,7 @@ import type { z } from "zod";
  *
  * Errors travel as { field: message } — field names are the API payload's keys. The API returns
  * them as HttpError(400, "กรอกข้อมูลไม่ครบ N ช่อง", { fields }) and the page shows each one under
- * its field (see src/lib/form-errors.ts).
+ * its field (see src/lib/use-form-errors.ts).
  */
 export type FieldErrors = Record<string, string>;
 

@@ -8,8 +8,6 @@
 import { pgTable, integer, varchar, timestamp, boolean, numeric, foreignKey, uniqueIndex, text, date, bigint, index, doublePrecision, pgView, primaryKey, jsonb, bigserial, serial } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
-
-
 export const inventoryHd = pgTable("inventory_hd", {
 	inventoryHdId: integer("inventory_hd_id").primaryKey().generatedByDefaultAsIdentity(),
 	inventoryNo: varchar("inventory_no", { length: 50 }),
@@ -420,7 +418,6 @@ export const jobCreateTemp = pgTable("job_create_temp", {
 });
 
 export const jobLog = pgTable("job_log", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	jobLogId: bigint("job_log_id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
 	jobNo: varchar("job_no", { length: 50 }),
 	jobStatusId: integer("job_status_id"),

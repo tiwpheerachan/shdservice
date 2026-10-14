@@ -1,0 +1,14 @@
+# Generated, vendored or not ours to restyle (same idea as OneLink's).
+.next
+.next-*
+node_modules
+coverage
+playwright-report
+test-results
+drizzle
+package-lock.json
+next-env.d.ts
+tsconfig.tsbuildinfo
+public
+# Markdown docs keep their author's layout (Thai prose, tables)
+*.md

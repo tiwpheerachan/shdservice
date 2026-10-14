@@ -186,8 +186,6 @@ export const QuotationForm = React.forwardRef<
     onError: (msg) => push({ kind: "error", title: "ไม่พบหมายเลขงาน", desc: msg }),
   });
 
-
-
   const add = () =>
     setLines((s) => [...s, { id: ++idRef.current + 100, code: "", name: "", qty: 1, price: 0, itemType: "SparePart" }]);
 
@@ -201,7 +199,6 @@ export const QuotationForm = React.forwardRef<
   const beforeVat = subtotal - discountAmt;
   const vat = (beforeVat * vatRate) / 100;
   const net = beforeVat + vat;
-
 
   // a value that changes — typed or filled in from the job — takes its error away
   const { clear } = fe;

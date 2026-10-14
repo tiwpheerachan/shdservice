@@ -14,7 +14,7 @@ export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Long-lived marker that a session once existed on this browser — lets the
 // proxy tell "session expired" (→ /login with a message) apart from a
-// first visit (→ straight to SSO). Set by /api/sso/me + /refresh (JSON responses,
+// first visit (→ /login without it). Set by /api/sso/me + /refresh (JSON responses,
 // never on the callback redirect — see the single-Set-Cookie note there).
 export const SEEN_COOKIE = "os_seen";
 export const SEEN_TTL_S = 30 * 24 * 60 * 60;

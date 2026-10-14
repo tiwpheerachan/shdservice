@@ -16,7 +16,6 @@ import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutso
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
-
 /**
  * Resources holding customer / document data: which screens may read them ("view"
  * on any one of the modules). Lists the screens that actually call each one, so a

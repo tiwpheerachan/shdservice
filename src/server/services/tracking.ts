@@ -174,7 +174,6 @@ export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promi
   });
 }
 
-
 /** does this job have a quotation the customer could be holding? */
 async function hasQuotation(jobNo: string) {
   const [row] = await db
@@ -243,7 +242,6 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
     return await fn();
   } catch (e) {
-     
     logError(e, "track");
     return null;
   }
@@ -359,7 +357,7 @@ export async function linkStatus(jobNo: string): Promise<LinkStatus> {
 export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
   return quiet(async () => {
     const [row] = await base(eq(job.jobNo, jobNo));
-    // the ticket was issued under the rules of its path (link lifetime / 90-day form rule);
+    // the ticket was issued under the link's lifetime rules (jobNoForLink);
     // here only a job deleted in the meantime is refused
     if (!row || row.recordStatus === RS.DELETED) return null;
     return toPublic(row);

@@ -298,7 +298,7 @@ export type JobFilters = {
   statusId?: number;
   statusGroup?: string; // Pending | Repaired | Finished | Cancel
   open?: boolean; // not Finished/Cancel
-  overdue?: boolean; // still open and past customer_due_date (the notification bell)
+  overdue?: boolean; // still open and past its real due date — overdueWhere (the notification bell)
   type?: string; // job type name
   engineer?: string; // engineer full name or id
   channel?: string;
@@ -355,7 +355,6 @@ export const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .select({ id: jobStatus.jobStatusId })
   .from(jobStatus)
   .where(notInArray(jobStatus.jobStatusGroup, ["Finished", "Cancel"]))}))`;
-
 
 /**
  * Overdue = still open, and its real due date (effectiveDue) is before today. isOpenJob narrows to

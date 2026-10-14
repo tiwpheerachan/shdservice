@@ -16,7 +16,7 @@ services:
     # just before the new version takes traffic. db:migrate is idempotent (scripts/migrate.ts).
     preDeployCommand: npm run db:migrate
     # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains
-    startCommand: node node_modules/next/dist/bin/next start
+    startCommand: node node_modules/next/dist/bin/next start -H 0.0.0.0
     # a deploy that boots but can't answer is not switched in. /api/health always answers 200
     # (verdict in the body) so a Supabase blip never makes Render cycle the only instance.
     healthCheckPath: /api/health

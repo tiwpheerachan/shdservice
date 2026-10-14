@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import prettier from "eslint-config-prettier/flat";
 
 /**
  * `npm run lint` — Next.js recommended rules (core-web-vitals + TypeScript) plus project rules.
@@ -28,4 +29,6 @@ export default defineConfig([
   },
   // the one place allowed to do date arithmetic
   { files: ["src/lib/dates.ts"], rules: { "no-restricted-syntax": "off" } },
+  // last: formatting belongs to Prettier (npm run format) — turn off ESLint's style rules
+  prettier,
 ]);

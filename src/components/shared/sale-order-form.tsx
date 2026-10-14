@@ -126,7 +126,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [saved, setSaved] = React.useState(now);
     useUnsavedChanges(JSON.stringify(now) !== JSON.stringify(saved));
 
-
     const add = () => {
       const p = PRODUCTS.find((x) => x.sysCode === code);
       if (!p) return;
@@ -136,7 +135,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     };
 
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
-
 
     // a value that changes takes its error away
     const { clear } = fe;

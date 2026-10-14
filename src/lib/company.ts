@@ -1,6 +1,6 @@
 /**
  * Company block printed on documents (ใบรับงาน / ใบส่งคืน / ใบเสนอราคา / ใบสั่งขาย).
- * Fill in the real address / tax id when available — one place to edit.
+ * Fill in the real tax id when available — one place to edit.
  */
 export const COMPANY = {
   nameTh: "บริษัท เอสเอชดี เทคโนโลยี จำกัด",

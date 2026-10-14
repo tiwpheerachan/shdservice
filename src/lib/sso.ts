@@ -94,10 +94,9 @@ export function isRouterFetch(request: Request): boolean {
   return !!(request.headers.get("rsc") || request.headers.get("next-router-prefetch"));
 }
 
-
 /**
- * Absolute base URL for links we EMBED in documents (QR codes, emails) where no
- * request object is at hand. APP_BASE_URL is the one that matters in production
+ * Absolute base URL for links that leave the app (the customer tracking link staff send).
+ * APP_BASE_URL is the one that matters in production
  * — behind Cloudflare/Render the request host is not reliable.
  */
 export function appBaseUrl(headerHost?: string | null): string {

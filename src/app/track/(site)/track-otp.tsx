@@ -178,7 +178,7 @@ export function TrackOtp({
     setStep("list");
   };
 
-  /** called by the boxes as soon as the 6th digit is in — no confirm button */
+  /** called by the boxes as soon as the last digit is in — no confirm button */
   const verify = async (value: string) => {
     if (busy || !OTP_PATTERN.test(value)) return;
     setBusy(true);
@@ -518,9 +518,9 @@ export function TrackOtp({
 }
 
 /**
- * 6 one-digit boxes: a digit moves to the next box, Backspace on an empty box goes back,
+ * OTP_LENGTH one-digit boxes: a digit moves to the next box, Backspace on an empty box goes back,
  * ← / → move, and a pasted or SMS-autofilled code (iOS / Android "one-time-code") spreads
- * over the boxes. The 6th digit calls onComplete — there is no confirm button.
+ * over the boxes. The last digit calls onComplete — there is no confirm button.
  */
 function OtpBoxes({
   value,

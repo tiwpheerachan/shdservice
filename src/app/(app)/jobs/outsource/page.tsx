@@ -83,7 +83,6 @@ function OutsourceForm() {
   const [saved, setSaved] = React.useState<typeof d | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
 
-
   // prefill from the job + its latest job_send_forward_dt row
   // the vendor list can arrive after the job: a saved "ส่งไปยัง" that turns out to be a known
   // vendor moves from "อื่นๆ" into the list (adjusted while rendering, once — then it matches)
