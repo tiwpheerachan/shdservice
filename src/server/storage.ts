@@ -2,6 +2,7 @@ import "server-only";
 import sharp from "sharp";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isoDateTime } from "@/lib/dates";
+import { HttpError } from "@/server/http-error";
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -116,7 +117,7 @@ let bucketReady: Promise<void> | null = null;
 function storage() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase Storage is not configured (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY)");
+  if (!url || !key) throw new HttpError(503, "ระบบจัดเก็บไฟล์ยังไม่ได้ตั้งค่า (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY) — แนบไฟล์ไม่ได้ชั่วคราว");
   if (!client)
     client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },

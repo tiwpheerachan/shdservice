@@ -130,8 +130,17 @@ test("name and phone required for a new customer", () => {
 });
 test("an old customer without a phone may stay without one", () => assert.deepEqual(errorsOf(customerSchema(false), { name: "สมชาย", phone: "" }), {}));
 test("email must be a real address when given", () => {
-  assert.ok(errorsOf(customerSchema(), { name: "a", phone: "1", email: "abc" }).email);
-  assert.deepEqual(errorsOf(customerSchema(), { name: "a", phone: "1", email: "a@b.co" }), {});
+  assert.ok(errorsOf(customerSchema(), { name: "a", phone: "0812345678", email: "abc" }).email);
+  assert.deepEqual(errorsOf(customerSchema(), { name: "a", phone: "0812345678", email: "a@b.co" }), {});
+});
+test("phone / postcode / tax ID: digits, not letters (legacy formats with dashes and two numbers still pass)", () => {
+  const e = (x: Record<string, string>) => errorsOf(customerSchema(), { name: "a", ...x });
+  for (const ok of ["0812345678", "081-234-5678", "081 234 5678", "+66 81 234 5678", "02-123-4567 / 081-234-5678"]) assert.deepEqual(e({ phone: ok }), {}, ok);
+  for (const bad of ["abcdefg", "0812", "081-ABC-5678"]) assert.ok(e({ phone: bad }).phone, bad);
+  assert.ok(e({ phone: "0812345678", postalCode: "abc" }).postalCode);
+  assert.deepEqual(e({ phone: "0812345678", postalCode: "10110" }), {});
+  assert.ok(e({ phone: "0812345678", taxId: "12345" }).taxId);
+  assert.deepEqual(e({ phone: "0812345678", taxId: "1-2345-67890-12-3" }), {});
 });
 test("a 409 clash becomes a message under the clashing field", () => {
   const e = conflictErrors([{ field: "phone", code: "C00001", name: "สมชาย" }]);

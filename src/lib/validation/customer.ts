@@ -8,6 +8,8 @@ import { isFilled } from "./job";
  *  - phone: a new customer needs one; an existing customer that has one must keep one
  *    ("never worse" — some legacy customers have none)
  *  - email: optional, but a real address when given
+ *  - phone (when given): digits / spaces / dashes / "/" between two numbers, ≥ 9 digits — it is the
+ *    /track OTP key; postal code 5 digits; tax ID 13 digits (dogfood 2026-10-14: "abcdefg" was saved)
  */
 export function customerSchema(phoneRequired = true) {
   return z
@@ -20,6 +22,13 @@ export function customerSchema(phoneRequired = true) {
     .superRefine((v, ctx) => {
       if (!isFilled(v.name)) ctx.addIssue({ code: "custom", path: ["name"], message: "ต้องระบุชื่อลูกค้า" });
       if (phoneRequired && !isFilled(v.phone)) ctx.addIssue({ code: "custom", path: ["phone"], message: "ต้องระบุเบอร์โทรศัพท์" });
+      const phone = String(v.phone ?? "").trim();
+      if (phone && (!/^[\d\s+\-/(),.]+$/.test(phone) || phone.replace(/\D/g, "").length < 9))
+        ctx.addIssue({ code: "custom", path: ["phone"], message: "เบอร์โทรศัพท์ไม่ถูกต้อง (ตัวเลขอย่างน้อย 9 หลัก)" });
+      const postal = String(v.postalCode ?? "").trim();
+      if (postal && !/^\d{5}$/.test(postal)) ctx.addIssue({ code: "custom", path: ["postalCode"], message: "รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก" });
+      const taxId = String(v.taxId ?? "").replace(/[\s-]/g, "");
+      if (taxId && !/^\d{13}$/.test(taxId)) ctx.addIssue({ code: "custom", path: ["taxId"], message: "เลขบัตร / ผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก" });
     });
 }
 

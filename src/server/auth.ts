@@ -33,12 +33,8 @@ export type CurrentUser = {
   session: SessionUser;
 };
 
-export class HttpError extends Error {
-  /** `details` is passed through to the JSON body (e.g. 409 conflicts the UI can act on) */
-  constructor(public status: number, message: string, public details?: unknown) {
-    super(message);
-  }
-}
+import { HttpError } from "./http-error";
+export { HttpError };
 
 export const fullName = (first?: string | null, last?: string | null) =>
   [first ?? "", last ?? ""].map((s) => s.trim()).filter(Boolean).join(" ");
@@ -189,7 +185,7 @@ export async function can(user: CurrentUser, module: Module | null, action: Acti
 export async function requireUser(req: NextRequest): Promise<CurrentUser> {
   const u = await userFromRequest(req);
   if (!u) throw new HttpError(401, "unauthorized");
-  if (!u.approved) throw new HttpError(403, "รอการอนุมัติสิทธิ์การใช้งาน");
+  if (!u.approved) throw new HttpError(403, u.userType && !u.isActive ? "บัญชีนี้ถูกปิดการใช้งาน" : "รอการอนุมัติสิทธิ์การใช้งาน");
   return u;
 }
 

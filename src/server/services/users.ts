@@ -244,7 +244,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
     if (!row) throw new HttpError(404, "user not found");
     userChanged(row.emailAddress);
-    await audit(db, actorId, { action: "UPDATE", module: "Admin", entity: "app_user", key: targetId, summary: `แก้ไขผู้ใช้ ${fullName(first, last)} · สิทธิ์ ${userType ?? PENDING_ROLE}`, changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, { skip: ["deleted", "isActive", "recordStatus"] }) });
+    await audit(db, actorId, { action: "UPDATE", module: "Admin", entity: "app_user", key: targetId, summary: `แก้ไขผู้ใช้ ${fullName(first, last)} · สิทธิ์ ${userType ?? PENDING_ROLE}`, changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, { skip: ["deleted", "isActive"] }) }); // recordStatus stays: disable / re-enable is what an audit must show
     return { user: toUser(row), created: false };
   }
 

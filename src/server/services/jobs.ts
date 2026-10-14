@@ -418,7 +418,10 @@ export function jobWhere(q: string, f: JobFilters) {
     f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
     f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
     f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
-    f.phone && f.phone.replace(/\D/g, "") ? ilike(job.customerDetail, `%${f.phone.replace(/\D/g, "")}%`) : undefined,
+    // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
+    f.phone && f.phone.replace(/\D/g, "")
+      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\D', '', 'g') LIKE ${"%" + f.phone.replace(/\D/g, "") + "%"}`
+      : undefined,
     f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
     f.imei ? or(ilike(job.productImeiNo, `%${f.imei.trim()}%`), ilike(job.productSerial, `%${f.imei.trim()}%`)) : undefined,
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,

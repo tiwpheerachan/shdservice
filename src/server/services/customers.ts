@@ -98,14 +98,24 @@ const SORT = {
   address: customer.customerAddress,
 };
 
+/**
+ * Phone match on DIGITS only, both sides: ~30% of legacy numbers are stored "081-4969925" /
+ * "081 496 9925", so "0814969925" never matched an ilike (dogfood 2026-10-14). Same rule as
+ * /track; backed by the trigram expression index in drizzle/0024.
+ */
+const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\D', '', 'g')`;
+const phoneHas = (digits: string) => sql`${phoneDigits} LIKE ${"%" + digits + "%"}`;
+
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
+  const termDigits = term.replace(/\D/g, "");
   const search = term
     ? or(
         ilike(customer.customerCode, `%${term}%`),
         ilike(customer.customerName, `%${term}%`),
         ilike(customer.phoneNumber, `%${term}%`),
+        termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
         ilike(customer.email, `%${term}%`),
         ilike(customer.customerCardId, `%${term}%`)
       )
@@ -117,7 +127,7 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
     search,
     like(f.code) ? ilike(customer.customerCode, like(f.code)!) : undefined,
     like(f.name) ? ilike(customer.customerName, like(f.name)!) : undefined,
-    phone ? ilike(customer.phoneNumber, `%${phone}%`) : undefined,
+    phone ? phoneHas(phone) : undefined,
     like(f.email) ? ilike(customer.email, like(f.email)!) : undefined,
     like(f.taxId) ? ilike(customer.customerCardId, like(f.taxId)!) : undefined,
     f.type ? eq(customer.customerType, f.type) : undefined,

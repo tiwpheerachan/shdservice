@@ -154,7 +154,8 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   ✅ 2026-10-14: `tests/docker-compose.yml` (port 55442), `tests/prepare-db.mts` (pgcrypto + migrate), `tests/db-url.mts` guard localhost, `tests/seed.mts` · `test-track` ไม่อ่าน `.env` แล้ว — 81/81 ผ่าน
 - [x] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
   ✅ 2026-10-14: `npm test` (schemas + auth) · `npm run test:db` (running-no + track)
-- [~] **P1-CI-3 Test สำคัญที่ต้องมี DB** · M — running-no (20 tx พร้อมกัน, ข้ามปี), api-guard (ทุก route เรียก require*), auth/permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
+- [x] **P1-CI-3 Test สำคัญที่ต้องมี DB** · M — running-no (20 tx พร้อมกัน, ข้ามปี), api-guard (ทุก route เรียก require*), auth/permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
+  ✅ 2026-10-14: `scripts/test-domain.mts` 25 เคส: permission matrix (can/canViewAny/requireView + `/api/data` ตาม role, pending, INACTIVE, session_version), สต็อกห้ามติดลบ (409, rollback ทั้งเอกสาร), SO อนุมัติซ้ำ/เบิกก่อนอนุมัติ/แก้หลังอนุมัติ = 409, deadlock 20 movement, job race (1 job_log) · พิสูจน์ว่า test ล้มจริงเมื่อถอด lockStock/lockJob/เช็ก
   ✅ 2026-10-14: บางส่วน: api-guard (static, ทุก handler ใน `test:auth`), running-no, track 81 เคส · ยังขาด: permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
 - [x] **P1-CI-4 GitHub Actions** · M — postgres service, `npm ci` → lint → tsc → migrate ×2 (idempotent) → test → build → `npm audit --audit-level=high` → gitleaks · pin action ด้วย SHA (copy OL `.github/workflows/ci.yml`) · แล้วใส่ `autoDeployTrigger: checksPass`
   ✅ 2026-10-14: `.github/workflows/ci.yml` (lint, tsc, test, migrate ×2, test:db, audit high, build, gitleaks — action pin SHA) · gitleaks ทั้ง 133 commit สะอาด · `autoDeployTrigger: checksPass` อยู่ใน render.yaml — **ต้องตั้งใน dashboard** (Auto-Deploy → After CI Checks Pass) เพราะ blueprint ไม่ sync · migrate รอบสองใช้ `--reset` (รันซ้ำทุกไฟล์จริง)
@@ -168,7 +169,8 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 
 ## P2 — ดีถ้ามี
 
-- [ ] E2E Playwright + fake SSO (ต้องทำ `SSO_ORIGIN` env ก่อน — ตอนนี้ hard-code ใน `sso.ts:5-7`, `directory.ts:12`) · L
+- [x] E2E Playwright + fake SSO (ต้องทำ `SSO_ORIGIN` env ก่อน — ตอนนี้ hard-code ใน `sso.ts:5-7`, `directory.ts:12`) · L
+  ✅ 2026-10-14: `SSO_ORIGIN` env (prod ต้อง https — env check) · fake SSO (`tests/e2e/support/fake-sso.ts`) · 5 spec: owner login→dashboard, unknown→/pending, role ไม่มี Customer view → เมนูซ่อน + API 403, เปิดงานได้เลข, open redirect · ทุก spec ล้มถ้ามี CSP violation · CI job `e2e` · `/track` ข้าม (production ปฏิเสธ Turnstile test key + SMS log)
 - [ ] `noUncheckedIndexedAccess` ทีละโฟลเดอร์ (เริ่ม `src/db`, `src/server`) · M
 - [ ] Prettier + `.git-blame-ignore-revs` · S
 - [ ] ADR (`adr/`) ย้ายการตัดสินใจจาก `backend-rebase-plan.md`: timestamp ไทยไม่มี TZ, soft delete `record_status`, single instance cache, track fail-closed · M
@@ -198,6 +200,21 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [ ] aria-sort, ข้อความ error ภาษาไทยทั้งหมด, create ตอบ 201 · S
 
 ---
+
+## Dogfood QA (2026-10-14 — agent-browser บน dev + fake SSO, ~60 หน้า, ไม่มี Critical)
+
+ไม่มี crash / CSP violation / 403 ผิดที่ · ปัญหาทั้งหมดมีมาก่อนงานวันนี้ · หลักฐาน: screenshot 136 ไฟล์ใน scratchpad ของ session
+
+- [x] **DF-002 (High) ค้นเบอร์โทรไม่เจอเมื่อเก็บแบบมีขีด** (~30% ลูกค้า) — เทียบเฉพาะตัวเลขทั้งสองฝั่ง + `drizzle/0024` trigram index บน expression (0.1 ms)
+- [x] **DF-005 ฟอร์มลูกค้ารับตัวอักษรในเบอร์/รหัสไปรษณีย์/เลขภาษี** — เบอร์ ≥9 หลัก (รูปแบบเดิมที่มีขีด/สองเบอร์ยังผ่าน), รหัสไปรษณีย์ 5 หลัก, เลขภาษี 13 หลัก · ⚠️ ลูกค้าเก่าที่ข้อมูลผิดรูปแบบต้องแก้ช่องนั้นก่อนบันทึก
+- [x] **DF-007 อัปโหลดตอน Storage ไม่ได้ตั้งค่า = 500** → 503 ข้อความไทย (`HttpError` แยกเป็น `src/server/http-error.ts`)
+- [x] **DF-008 audit ไม่บันทึกการปิด/เปิดบัญชี** → `recordStatus` อยู่ใน diff แล้ว
+- [x] บัญชีถูกปิดเรียก API ได้ "รอการอนุมัติ" → "บัญชีนี้ถูกปิดการใช้งาน"
+- [ ] **DF-001 (High) ปุ่ม "อนุมัติ" ให้ role Customer Service (สิทธิ์ 10 โมดูล) ทันที ไม่มีให้เลือก role / ยืนยัน** — รอตัดสินใจ
+- [ ] **DF-003 role ที่ดูได้อย่างเดียวเปิดงานจากรายการไม่ได้** (ลิงก์ไป /jobs/repair ที่ต้องใช้สิทธิ์ Job Repair) — รอตัดสินใจ
+- [ ] **DF-004 role ดูอย่างเดียวเห็นเมนู/ปุ่มบันทึกของหน้าสร้าง-แก้ไข** (server ปฏิเสธถูกแล้ว แต่ผู้ใช้กรอกเสียเปล่า + ข้อความปนอังกฤษ)
+- [ ] **DF-006 การ์ด KPI บน dashboard ลิงก์ไปรายการไม่กรอง**
+- [ ] DF-009 toast บังปุ่มบันทึก + ไม่บอกช่องที่ผิด · DF-010/015 ตาราง users/หัวเพจล้นที่ 1280px · DF-011 หน้าไม่มีสิทธิ์เด้งไป /admin/guide เงียบ ๆ · DF-012 print 404 console error · DF-013 ป้ายพัสดุพิมพ์ "ต. อ. จ." ว่าง · DF-014 ใบเสนอราคาพิมพ์ "xxxxxxxx" แทนเลขภาษี/บัญชีที่ไม่มี
 
 ## จุดแข็งที่มีอยู่แล้ว (ห้าม regress)
 
