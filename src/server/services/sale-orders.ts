@@ -290,7 +290,8 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     };
     let no = i.no;
     if (no) {
-      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no));
+      // lock: an approval running now must finish first, so the APPROVED check below sees it
+      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for("update");
       if (!prev) throw new HttpError(404, "ไม่พบใบสั่งขาย " + no);
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, "ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้");
       const upd = { ...hdValues, approveStatusId: approveId, ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}) };

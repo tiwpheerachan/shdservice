@@ -346,7 +346,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     };
     let no = i.no;
     if (no) {
-      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no));
+      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for("update");
       if (!prev) throw new HttpError(404, "ไม่พบใบเสนอราคา " + no);
       const upd = {
         ...values,

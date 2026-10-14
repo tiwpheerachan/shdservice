@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { runningNo } from "./schema";
 import type { Tx } from "./client";
 import { thaiYear } from "@/server/mappers/format";
@@ -10,7 +10,7 @@ import { thaiYear } from "@/server/mappers/format";
  * Yearly types (Job, Quotation, SaleOrder, Inventory-In, Inventory-Out) keep a
  * row per pyear; the others (Customer, Product, Model) use pyear = 0.
  * Must be called inside the same transaction as the insert that uses the number
- * (the row is locked with FOR UPDATE so concurrent callers never share a value).
+ * (an advisory lock per series + FOR UPDATE on the row, so concurrent callers never share a value).
  *
  * Job / Quotation / SaleOrder run one series per issuing profile ("ออกเอกสารในนาม",
  * drizzle/0007): `company_id` = document_profile.id and the prefix comes from the
@@ -49,6 +49,11 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   const year = def.yearly ? thaiYear() : 0;
   const companyId = COMPANY_ROWS.has(type) ? 1 : null;
   const prefixForNew = def.prefix;
+
+  // Serialise the series first: FOR UPDATE below locks nothing when this year's row
+  // doesn't exist yet (first document after New Year), so two callers would each
+  // insert a fresh row and both hand out …00001. Released at commit/rollback.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`running_no:${type}:${year}`}))`);
 
   // lock the row for this type(+profile)+year (or the type's single row for non-yearly)
   const sameSeries = and(eq(runningNo.runningType, type), companyId === null ? undefined : eq(runningNo.companyId, companyId));
