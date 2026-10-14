@@ -4,6 +4,7 @@ node_modules
 out
 .env*
 !.env.example
+!.env.development.example
 *.log
 .DS_Store
 next-env.d.ts

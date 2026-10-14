@@ -1,0 +1,24 @@
+# Weekly update PRs, grouped so they arrive as one PR per ecosystem, opened against yuu
+# (the branch CI gates and Render deploys). GitHub reads this file from the DEFAULT branch
+# only — it takes effect once this file is on the default branch (or yuu becomes the default).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: yuu
+    schedule:
+      interval: weekly
+      timezone: Asia/Bangkok
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: yuu
+    schedule:
+      interval: weekly
+      timezone: Asia/Bangkok
+    groups:
+      actions:
+        patterns: ["*"]

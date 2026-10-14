@@ -9,17 +9,13 @@
 
 ```bash
 npm install
-cp .env.example .env      # ใส่ DATABASE_URL (Supabase Session pooler :5432), SSO และ Supabase Storage key
-npm run db:migrate        # สร้าง/อัปเดต schema (รันซ้ำได้ ไม่ทำลายข้อมูล)
-npm run dev               # http://localhost:3000
+cp .env.development.example .env.development.local   # dev DB ใน Docker, ไม่มี Storage, Turnstile test keys
+npm run db:dev:up && npm run db:dev:load             # Postgres ใน Docker + ข้อมูลจาก dump ระบบเดิม
+npm run dev                                          # http://localhost:3000
 ```
 
-Build production:
-
-```bash
-npm run build
-npm start
-```
+`.env` = ค่าของ **production** (SSO, CENTRAL_API_KEY ฯลฯ) — `npm run dev` อ่านมันด้วย แต่ `.env.development.local` ทับ DB/Storage/Turnstile/SMS
+⚠️ `npm run build && npm start` ในเครื่อง = NODE_ENV=production อ่าน `.env` → **ต่อ DB production จริง** (ไม่มีตัวกัน) — production migrate เองตอน deploy, ไม่ต้องรัน `db:migrate` จากเครื่อง
 
 > ต้องใช้ Node.js 24 LTS (`.nvmrc`) — Render ใช้ 24
 

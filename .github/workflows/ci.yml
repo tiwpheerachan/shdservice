@@ -1,6 +1,6 @@
 # Every pull request and every push to yuu (the branch Render deploys): the checks
-# on a clean machine. Nothing here deploys. Once this has run green, render.yaml
-# gets `autoDeployTrigger: checksPass` so a red commit never reaches production.
+# on a clean machine. Nothing here deploys. Render waits for this run only when its
+# dashboard has Auto-Deploy = "After CI Checks Pass" (render.yaml is not synced).
 #
 # The database is a throwaway postgres:17 (same as tests/docker-compose.yml). CI has
 # no secrets and needs none: the tests refuse anything but a local database, and the
@@ -66,9 +66,10 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # twice: every migration must be re-runnable (README — legacy reloads re-run them all)
-      - name: Migrations (empty database, then again)
-        run: npm run db:test:prepare && npm run db:test:prepare
+      # then every migration AGAIN on the filled database (--reset clears the journal): they must
+      # be re-runnable — a legacy reload re-runs them all (README)
+      - name: Migrations (empty database, then re-run all)
+        run: npm run db:test:prepare && npm run db:test:prepare -- --reset
 
       - name: Database tests
         run: npm run test:db

@@ -1,3 +1,6 @@
+# NOT synced to the Render service — the Render DASHBOARD is authoritative (checked 2026-10-14:
+# env vars and settings here were never applied). Keep this file as the documented intent and
+# mirror every change by hand in the dashboard (Settings + Environment).
 services:
   - type: web
     name: shdservice
@@ -62,8 +65,14 @@ services:
       # same value as the Cloudflare Transform Rule "X-Origin-Auth" (openssl rand -hex 32)
       - key: ORIGIN_AUTH_SECRET
         sync: false
-      # off | log | enforce — roll out with "log", switch to "enforce" once no legit request misses the header
+      # off | log | enforce — production runs enforce: the dashboard has no ORIGIN_AUTH_MODE, so the
+      # code's production default applies (checked 2026-10-14: users via Cloudflare are fine)
       - key: ORIGIN_AUTH_MODE
+        value: enforce
+      # central single-logout check at session renewal (src/app/api/sso/refresh): off | log | enforce.
+      # log = ask SSO and log the answer, sign nobody out; switch to enforce once the log shows
+      # "sso central session active" for real users
+      - key: SSO_SESSION_CHECK
         value: log
       # HMAC key for IPs / links in the security log + rate-limit keys (openssl rand -hex 32)
       - key: TRACK_LOG_SECRET
@@ -84,7 +93,8 @@ services:
       # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
       - key: TZ
         value: Asia/Bangkok
-      # startup env check (src/server/env.ts): with 1, a deploy missing required config refuses to
-      # start (the old version keeps serving) — the log line "env check failed" lists what to add
+      # env check (src/server/env.ts) on the first request after start: with 1, missing REQUIRED
+      # config exits the process → the health check fails → Render keeps the old version (pre-deploy
+      # migrations have run by then). Optional features only warn. Log line "env check …" lists them.
       - key: ENV_STRICT
         value: "1"
