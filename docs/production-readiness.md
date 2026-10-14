@@ -82,46 +82,61 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   ปัจจุบัน key ด้วยอีเมล → บัญชี Lark ไม่มีอีเมล login ไม่ได้, เปลี่ยนอีเมล = ได้ user ใหม่ (pending) role เก่าค้าง, อีเมลถูก reuse = คนใหม่ได้ role เดิม
   แก้: migration `app_user.sso_sub` + unique partial index · callback ต้องมี `sub` · หา `sso_sub` → fallback อีเมลแล้ว stamp sub → insert ใหม่ (อีเมล NULL ได้) · `SessionUser.sub`, `resolveUser`/cache key ด้วย sub (fallback อีเมลสำหรับ cookie เก่า)
   ก่อนทำ: เปิด shape debug (P1-AUTH-7) ดู verify response จริง 1 ครั้ง
-- [ ] **P1-AUTH-2 DB สะดุดแล้ว user โดนเด้ง logout** · S
+- [x] **P1-AUTH-2 DB สะดุดแล้ว user โดนเด้ง logout** · S
   `api/sso/me/route.ts:12`, `api/sso/refresh/route.ts:27-31` กลืน `HttpError(503)` เป็น 401 + ลบ cookie → ตอบ 503 ไม่แตะ cookie
-- [ ] **P1-AUTH-3 timeout ขาออก SSO/directory** · S
+  ✅ 2026-10-14: 503 ไม่ลบ cookie (client ถือว่า non-401 = ชั่วคราวอยู่แล้ว)
+- [x] **P1-AUTH-3 timeout ขาออก SSO/directory** · S
   verify (`callback/route.ts:77`) 10s · `searchDirectory` 10s · `lookupByEmail` 3–5s (คืน null อยู่แล้ว)
-- [ ] **P1-AUTH-4 CSRF origin check** · S
+  ✅ 2026-10-14: verify 10s, search 10s, lookupByEmail 4s
+- [x] **P1-AUTH-4 CSRF origin check** · S
   copy `isCrossSite` (OL `lib/api/same-origin.ts`) → `src/proxy.ts` ตอบ 403 ให้ non-GET `/api/*` ที่ cross-site · `readJson` บังคับ `application/json`
-- [ ] **P1-AUTH-5 first login ชน unique index → "DB unavailable"** · S
+  ✅ 2026-10-14: proxy ตอบ 403 `cross_site_write_refused` + `readJson` บังคับ `application/json` (415) และ cap 1MB (413) — ทดสอบ curl แล้ว
+- [x] **P1-AUTH-5 first login ชน unique index → "DB unavailable"** · S
   `ix_username_and_password (username,password)` + username = local part ของอีเมล, password `''` → `somchai@a` ชน `somchai@b` · 2 tab login พร้อมกันชน `ux_app_user_email`
   แก้: จับ `23505` ใน `provisionSsoUser` — email ชน → re-read, username ชน → เติม suffix
-- [ ] **P1-AUTH-6 owner hard-code ลบไม่ได้** · S
+  ✅ 2026-10-14: จับ 23505: `ux_app_user_email` → อ่านแถวเดิม, `ix_username_and_password` → เติม suffix
+- [x] **P1-AUTH-6 owner hard-code ลบไม่ได้** · S
   `DEFAULT_OWNERS` ใน `src/lib/access.ts:13-25` ถูก force เป็น admin + ACTIVE + undelete ทุก login → prod ใช้ `OWNER_EMAILS` อย่างเดียว, ไม่ force ACTIVE ถ้า admin ปิดไว้
-- [ ] **P1-AUTH-7 PII ใน log ของ SSO + shape debug** · S
+  ✅ 2026-10-14: production ใช้ `OWNER_EMAILS` อย่างเดียว · owner = bootstrap เฉพาะแถวที่ยังไม่มี role · admin เปลี่ยน role/ปิดได้
+- [~] **P1-AUTH-7 PII ใน log ของ SSO + shape debug** · S (redact อีเมลแล้ว ✅ · shape debug ยังไม่ทำ)
   `callback/route.ts:91` log body 300 ตัวอักษร (มีอีเมล) → regex redact แบบ OL · copy `sso-debug.ts` (`SSO_DEBUG=shape`)
 - [ ] **P1-AUTH-8 เช็ก session กลาง (`/sso/session`)** · M (หลัง AUTH-1)
   คนลาออก/ถูกปิดที่ SSO ยังใช้ได้ถึง 12 ชม. → ใน `/api/sso/refresh` เช็กทุก 5 นาที (copy OneBridge `lib/auth/sso.ts:76-98`, grace 30 นาทีถ้า unavailable) · ลบ `sid` ที่ไม่มีใครใช้
 
 ### Security
-- [ ] **P1-SEC-1 Origin auth ยังเป็น `log`** · S — `render.yaml:58` → ดู log `origin_auth_failed` แล้วเปลี่ยนเป็น `enforce` (ตอนนี้ยิงตรง `onrender.com` ข้าม WAF + ปลอม `X-Forwarded-For` reset rate limit ได้)
+- [ ] **P1-SEC-1 Origin auth ยังเป็น `log`** · S · 👤 งานของคุณ: ดู log `origin_auth_failed` แล้วสลับใน dashboard (ตอนนี้ env check log เตือนทุกครั้งที่ start) — `render.yaml:58` → ดู log `origin_auth_failed` แล้วเปลี่ยนเป็น `enforce` (ตอนนี้ยิงตรง `onrender.com` ข้าม WAF + ปลอม `X-Forwarded-For` reset rate limit ได้)
 - [ ] **P1-SEC-2 ตรวจไฟล์อัปโหลด** · M — type ว่างผ่าน, นามสกุลจากชื่อไฟล์ user, ไม่เช็ก magic bytes, `/api/attachments` ไม่มี rate limit/Content-Length/เช็ก jobNo → `assertFile()` ใน `storage.ts` (copy `SIGNATURES` จาก OL `validate.ts:302-343`), นามสกุลจาก MIME
 - [ ] **P1-SEC-3 Route เขียนข้อมูลที่ไม่มี schema** · M — `stock/issue`, `stock/receive`, `jobs/assign`, `sale-orders/[no]/approve|tracking`, `jobs/[no]/calls`, `admin/permissions` · `qty` ทศนิยม/ใหญ่ผ่าน → zod `int().positive().max()`, `.max()` ให้ text ตาม varchar
-- [ ] **P1-SEC-4 OTP เดาได้** · S — 4 หลัก × 5 ครั้ง × 3 code/ชม. ไม่มี cap รายวัน → `otp_phone_day` 10/วัน, ล็อก phone 24 ชม. หลังผิด 15 ครั้ง, cap SMS รวมต่อชั่วโมง, ขอ OTP 6 หลัก
-- [ ] **P1-SEC-5 CSP หน้า staff + API** · S — มีแค่ `/track` · เพิ่ม `PAGE_CSP` (OL `lib/security-headers.ts`) ให้ `/:path((?!api/|track).*)` + `API_CSP` ให้ `/api` · ทดสอบกับ production build
+- [x] **P1-SEC-4 OTP เดาได้** · S — 4 หลัก × 5 ครั้ง × 3 code/ชม. ไม่มี cap รายวัน → `otp_phone_day` 10/วัน, ล็อก phone 24 ชม. หลังผิด 15 ครั้ง, cap SMS รวมต่อชั่วโมง, ขอ OTP 6 หลัก
+  ✅ 2026-10-14: cap 8 ครั้ง/วัน/เบอร์, ผิด 15 ครั้ง/วัน → ล็อกเบอร์ 24 ชม., cap SMS รวม 200/ชม. (เกินแล้วตอบเหมือนเดิมแต่ไม่ส่ง) · OTP 6 หลักยังไม่ทำ (ต้องตั้งที่ ThaiBulkSMS)
+- [x] **P1-SEC-5 CSP หน้า staff + API** · S — มีแค่ `/track` · เพิ่ม `PAGE_CSP` (OL `lib/security-headers.ts`) ให้ `/:path((?!api/|track).*)` + `API_CSP` ให้ `/api` · ทดสอบกับ production build
 
+  ✅ 2026-10-14: `PAGE_CSP` ทุกหน้ายกเว้น `/track` + `API_CSP` · เช็กแล้ว `/track` มี CSP เดียว
 ### Ops / Observability
-- [ ] **P1-OPS-1 `src/lib/log.ts` + scrub PII** · M — 31 `console.*` กระจาย · drizzle error มี `params:` (ชื่อ/เบอร์/ที่อยู่ลูกค้า, track token) → `logError(err, msg, fields, req?)` JSON บรรทัดเดียว, reqId จาก `cf-ray`/`rndr-id`, scrub `\nparams:`, log stack · ใช้ reqId เป็น ref ใน `handle()`
-- [ ] **P1-OPS-2 `src/instrumentation.ts` + env check ตอน boot** · S–M — zod schema ใน `src/server/env.ts`, required ใน prod (DATABASE_URL, SESSION_SECRET≥32, SSO_*, CENTRAL_API_KEY, SUPABASE_*, APP_BASE_URL, TURNSTILE_*, ORIGIN_AUTH_SECRET, TRACK_LOG_SECRET, TZ) · `ORIGIN_AUTH_MODE=enforce`, `SMS_PROVIDER≠log` · `process.exit(1)` · export `onRequestError` → `logError`
-- [ ] **P1-OPS-3 Health endpoint** · S — anonymous ตอบ 200 `{ok:false}` แทน 503 · log ใน catch · admin เห็น TZ ของ DB/process + clock skew · แล้วใส่ `healthCheckPath` ใน render.yaml
-- [ ] **P1-OPS-4 timeout Storage** · S — `storage.ts:90` ใส่ fetch timeout 15s ให้ supabase client · `createBucket` ทุก upload → ครั้งเดียวต่อ process
-- [ ] **P1-OPS-5 TZ ของ process** · S — `storage.ts:96-98` ใช้ `getHours()` (UTC บน Render) → ใช้ `@/lib/dates`
-- [ ] **P1-OPS-6 Error boundaries** · S — `src/app/(app)/error.tsx` (ข้อความไทย + digest + ปุ่มลองใหม่), `src/app/global-error.tsx`, (ออปชัน) `src/app/track/(site)/error.tsx` · `(app)/layout.tsx:38-43` grants โหลดพลาด → ไม่ใช่ส่งไป `/pending`
-- [ ] **P1-OPS-7 Uptime monitor + error tracking** · S — UptimeRobot/Better Stack เช็ก `/api/health` body `"ok":true` · (ออปชัน) Sentry ผ่าน `onRequestError`
+- [x] **P1-OPS-1 `src/lib/log.ts` + scrub PII** · M — 31 `console.*` กระจาย · drizzle error มี `params:` (ชื่อ/เบอร์/ที่อยู่ลูกค้า, track token) → `logError(err, msg, fields, req?)` JSON บรรทัดเดียว, reqId จาก `cf-ray`/`rndr-id`, scrub `\nparams:`, log stack · ใช้ reqId เป็น ref ใน `handle()`
+  ✅ 2026-10-14: `src/lib/log.ts` (JSON/บรรทัด, reqId = cf-ray, scrub `params:` + อีเมล) · `handle()` ใช้ reqId เป็นรหัสอ้างอิง + log stack · แทน console.* ทั้งหมดที่มี PII
+- [x] **P1-OPS-2 `src/instrumentation.ts` + env check ตอน boot** · S–M — zod schema ใน `src/server/env.ts`, required ใน prod (DATABASE_URL, SESSION_SECRET≥32, SSO_*, CENTRAL_API_KEY, SUPABASE_*, APP_BASE_URL, TURNSTILE_*, ORIGIN_AUTH_SECRET, TRACK_LOG_SECRET, TZ) · `ORIGIN_AUTH_MODE=enforce`, `SMS_PROVIDER≠log` · `process.exit(1)` · export `onRequestError` → `logError`
+  ✅ 2026-10-14: `src/instrumentation.ts` + `src/server/env.ts` · production log รายการที่ขาด (ไม่ล้ม) · `ENV_STRICT=1` = ไม่ start · `onRequestError` → `logError`
+- [x] **P1-OPS-3 Health endpoint** · S — anonymous ตอบ 200 `{ok:false}` แทน 503 · log ใน catch · admin เห็น TZ ของ DB/process + clock skew · แล้วใส่ `healthCheckPath` ใน render.yaml
+  ✅ 2026-10-14: ตอบ 200 เสมอ (`{ok:false}`), log ใน catch, admin เห็น TZ ของ DB/process + clock skew · `healthCheckPath: /api/health` ใน render.yaml
+- [x] **P1-OPS-4 timeout Storage** · S — `storage.ts:90` ใส่ fetch timeout 15s ให้ supabase client · `createBucket` ทุก upload → ครั้งเดียวต่อ process
+  ✅ 2026-10-14: fetch timeout 15s ให้ supabase client · `createBucket` ครั้งเดียวต่อ process
+- [x] **P1-OPS-5 TZ ของ process** · S — `storage.ts:96-98` ใช้ `getHours()` (UTC บน Render) → ใช้ `@/lib/dates`
+  ✅ 2026-10-14: ชื่อไฟล์ใช้ `isoDateTime` (Bangkok)
+- [x] **P1-OPS-6 Error boundaries** · S — `src/app/(app)/error.tsx` (ข้อความไทย + digest + ปุ่มลองใหม่), `src/app/global-error.tsx`, (ออปชัน) `src/app/track/(site)/error.tsx` · `(app)/layout.tsx:38-43` grants โหลดพลาด → ไม่ใช่ส่งไป `/pending`
+  ✅ 2026-10-14: `(app)/error.tsx`, `app/error.tsx` (error จาก layout), `global-error.tsx` · grants โหลดพลาด → error page แทน `/pending`
+- [ ] **P1-OPS-7 Uptime monitor + error tracking** · S · 👤 สมัคร UptimeRobot/Better Stack ชี้ `/api/health` เช็ก body `"ok":true` — UptimeRobot/Better Stack เช็ก `/api/health` body `"ok":true` · (ออปชัน) Sentry ผ่าน `onRequestError`
 - [ ] **P1-OPS-8 `ops/runbook.md` + `ops/risks.md`** · M — deploy, rollback (forward-only, expand/contract), หมุน `SESSION_SECRET`, SSO/DB/SMS/Turnstile ล่ม, restore backup, ห้ามรัน `load_supabase.sh` · เช็ก backup/PITR ของ Supabase + bucket ไฟล์ไม่อยู่ใน backup
 
 ### Data / API
 - [ ] **P1-DATA-1 Job ไม่ lock แถว** · S–M — `jobs.ts` updateJob/saveRepair/saveOutsource/swap/closeJob อ่าน status นอก tx → `lockJob(tx,no)` `FOR UPDATE` ทุก tx แล้วส่ง status ให้ `setStatus`
 - [ ] **P1-DATA-2 Export ตัดแถวเงียบ + OOM** · M — customers cap 5,000 (มี 43k) · in-memory workbook บน 512MB → cap ชัด + แจ้ง "ตัดที่ N แถว" หรือ stream writer
-- [ ] **P1-DATA-3 แปลง Postgres error** · S — `handle()` 23505 → 409 "ข้อมูลซ้ำ", 57014 → 503 · `resources.ts:151` ใช้ `HttpError(404)`
+- [x] **P1-DATA-3 แปลง Postgres error** · S — `handle()` 23505 → 409 "ข้อมูลซ้ำ", 57014 → 503 · `resources.ts:151` ใช้ `HttpError(404)`
+  ✅ 2026-10-14: `handle()`: 23505 → 409, 57014 → 503, 08006/57P01 → 503 · unknown resource → 404
 - [ ] **P1-DATA-5 Unique index เลขเอกสาร** · S — เช็กเลขซ้ำใน prod (`quotation_no`, `sale_out_hd_no`, `inventory_no`, `running_no(type,company,pyear)`) แล้วสร้าง unique (partial ถ้า legacy ซ้ำ) เป็นตาข่ายชั้นสุดท้าย
-- [ ] **P1-DATA-4 list โหลดพลาดแสดง "ไม่พบข้อมูล"** · S — `DataTable` รับ `error` + `onRetry` แล้วส่งจาก 14 หน้า list
+- [x] **P1-DATA-4 list โหลดพลาดแสดง "ไม่พบข้อมูล"** · S — `DataTable` รับ `error` + `onRetry` แล้วส่งจาก 14 หน้า list
 
+  ✅ 2026-10-14: `DataTable`/`ReportView` รับ `error` + `onRetry` · ต่อครบ 16 หน้า list/report
 ### Testing / CI
 - [ ] **P1-CI-1 test DB local + guard** · M — `tests/docker-compose.yml` (postgres:17, tmpfs), guard host localhost, seed ขั้นต่ำ, ย้าย `test-track` มาใช้ seed
 - [ ] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
