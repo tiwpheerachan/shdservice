@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireUser, HttpError } from "@/server/auth";
+import { handle, HttpError, requireView } from "@/server/auth";
 import { listPartRequests, listSaleOrderPickLines, listReturnableLines } from "@/server/services/stock";
 
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** Lines to issue/return for a reference document: ?type=job|sale|return&ref=J26…/SO26… */
 export const GET = handle(async (req: NextRequest) => {
-  await requireUser(req);
+  await requireView(req, ["Product Pick Stock"]);
   const sp = new URL(req.url).searchParams;
   const type = sp.get("type");
   const ref = (sp.get("ref") ?? "").trim();

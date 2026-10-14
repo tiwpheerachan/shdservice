@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { documentAttach } from "@/db/schema";
-import { handle, requireCan, requireUser, HttpError } from "@/server/auth";
+import { handle, requireCan, HttpError, requireView, JOB_MODULES } from "@/server/auth";
 import { removeAttachment } from "@/server/services/jobs";
 import { removeFile, signedUrl, filePath, resolvePath } from "@/server/storage";
 
@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /** Redirect to a short-lived signed URL for the stored file. */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
-  await requireUser(req);
+  await requireView(req, JOB_MODULES);
   const { id } = await ctx.params;
   const [row] = await db.select().from(documentAttach).where(eq(documentAttach.documentAttachId, Number(id)));
   if (!row) throw new HttpError(404, "not found");

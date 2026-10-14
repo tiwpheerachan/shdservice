@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireCan, requireUser, readJson } from "@/server/auth";
+import { handle, requireCan, readJson, requireView, JOB_MODULES } from "@/server/auth";
 import { addCallLog, listCallLogs } from "@/server/services/jobs";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ no: string }> };
 
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
-  await requireUser(req);
+  await requireView(req, JOB_MODULES);
   const { no } = await ctx.params;
   return NextResponse.json({ rows: await listCallLogs(decodeURIComponent(no)) });
 });

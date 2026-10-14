@@ -1,6 +1,7 @@
 import "server-only";
 import type { NextRequest } from "next/server";
-import { requireAdmin, requireUser } from "@/server/auth";
+import { requireAdmin, requireUser, requireView, JOB_MODULES } from "@/server/auth";
+import type { Module } from "@/lib/modules";
 import { pageAudit, listAudit, auditModules } from "@/server/audit";
 import { parsePageQuery, type Page } from "@/server/paging";
 import { parseStatusMode } from "@/server/record-status";
@@ -15,6 +16,28 @@ import { pageJobs, listJobs, filtersFromQuery, dashboard, jobStatuses, listOutso
 import { pageQuotations, listQuotations, quotationStatuses } from "@/server/services/quotations";
 import { pageSaleOrders, listSaleOrders } from "@/server/services/sale-orders";
 
+
+/**
+ * Resources holding customer / document data: which screens may read them ("view"
+ * on any one of the modules). Lists the screens that actually call each one, so a
+ * form that reads across modules (e.g. stock pick → sale orders) keeps working.
+ * "admin" = only the System-Admin report pages use it. Anything not listed is a
+ * lookup (statuses, masters, staff names, product catalog) open to every approved user.
+ */
+const READ_ACCESS: Record<string, readonly Module[] | "admin"> = {
+  customers: ["Customer"],
+  jobs: JOB_MODULES,
+  job_stats: ["Job Management"],
+  dashboard: ["Job Management"],
+  quotations: ["Quotation"],
+  sale_orders: ["Sale Order", "Product Pick Stock"],
+  movements: ["Product Onhand", "Product Receive Stock", "Product Pick Stock"],
+  issued_lines: "admin",
+  issued_stats: "admin",
+  job_summary: "admin",
+  quotation_summary: "admin",
+  sale_order_summary: "admin",
+};
 
 /**
  * Read side for the UI hooks in src/data/db.ts. One endpoint per table name the
@@ -42,7 +65,10 @@ export async function readResource(req: NextRequest, resource: string): Promise<
     return listModules();
   }
 
-  await requireUser(req);
+  const access = Object.hasOwn(READ_ACCESS, resource) ? READ_ACCESS[resource] : undefined;
+  if (access === "admin") await requireAdmin(req);
+  else if (access) await requireView(req, access);
+  else await requireUser(req);
 
   if (isSimpleKind(resource)) return listSimple(resource, deleted);
   switch (resource) {

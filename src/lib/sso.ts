@@ -17,11 +17,19 @@ export const DEFAULT_AFTER_LOGIN = "/jobs/dashboard";
  * Only ever bounce to a path inside this app. `next` comes from the URL, so an
  * absolute URL ("https://evil…"), a protocol-relative one ("//evil…") or a
  * backslash trick would turn the login flow into an open redirect for phishing.
+ * Parsed with the same URL parser the redirect uses (it drops tabs/newlines and
+ * reads "\" as "/"), so "/<tab>/evil" can't pass a string check and then leave.
  */
 export function safeNext(v: string | null | undefined): string {
   const s = (v ?? "").trim();
-  if (!s.startsWith("/") || s.startsWith("//") || s.startsWith("/\\") || /[\r\n]/.test(s)) return DEFAULT_AFTER_LOGIN;
-  return s;
+  if (!s.startsWith("/")) return DEFAULT_AFTER_LOGIN;
+  try {
+    const base = "http://next.invalid";
+    const url = new URL(s, base);
+    return url.origin === base ? url.pathname + url.search + url.hash : DEFAULT_AFTER_LOGIN;
+  } catch {
+    return DEFAULT_AFTER_LOGIN;
+  }
 }
 
 /**

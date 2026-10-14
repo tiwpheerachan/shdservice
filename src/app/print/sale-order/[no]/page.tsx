@@ -1,3 +1,4 @@
+import { userFromCookies, canViewAny } from "@/server/auth";
 import { notFound } from "next/navigation";
 import { getSaleOrder } from "@/server/services/sale-orders";
 import { ShippingLabel } from "@/components/print/shipping-label";
@@ -8,6 +9,9 @@ export const dynamic = "force-dynamic";
 /** พิมพ์ใบสั่งขาย = ใบปะหน้าพัสดุ A5 (what the legacy app printed for a sale order). */
 export default async function Page({ params }: { params: Promise<{ no: string }> }) {
   const { no } = await params;
+  // same rule as the API: the layout only checks sign-in, the role must be able to view this document
+  const user = await userFromCookies();
+  if (!user || !(await canViewAny(user, ["Sale Order", "Product Pick Stock"]))) notFound();
   const o = await getSaleOrder(decodeURIComponent(no).toUpperCase());
   if (!o) notFound();
   const c = o.customerDetail;

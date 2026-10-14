@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireUser } from "@/server/auth";
+import { handle, requireView } from "@/server/auth";
 import { movementLines } from "@/server/services/stock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ no: string }> }) => {
-  await requireUser(req);
+  await requireView(req, ["Product Onhand", "Product Receive Stock", "Product Pick Stock"]);
   const { no } = await ctx.params;
   return NextResponse.json({ rows: await movementLines(decodeURIComponent(no)) });
 });

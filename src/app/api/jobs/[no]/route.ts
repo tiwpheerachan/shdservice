@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { handle, requireCan, requireUser, readJson, HttpError } from "@/server/auth";
+import { handle, requireCan, readJson, HttpError, requireView, JOB_MODULES } from "@/server/auth";
 import { getJob, updateJob, type JobInput } from "@/server/services/jobs";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ no: string }> };
 
 /** Job detail for every job screen. */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
-  await requireUser(req);
+  await requireView(req, [...JOB_MODULES, "Quotation"]);
   const { no } = await ctx.params;
   const job = await getJob(decodeURIComponent(no).trim().toUpperCase());
   if (!job) throw new HttpError(404, "ไม่พบหมายเลขงาน " + no);

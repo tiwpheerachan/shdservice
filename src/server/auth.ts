@@ -203,6 +203,23 @@ export async function requireCan(
   return u;
 }
 
+/** Every job screen — a job (and its calls/attachments) is readable from any of them. */
+export const JOB_MODULES: readonly Module[] = ["Job Management", "Job Assign", "Job Repair", "Job Closing"];
+
+/** True when the user may view at least one of `modules` (screens that legitimately read the data). */
+export async function canViewAny(user: CurrentUser, modules: readonly Module[]) {
+  if (user.isAdmin) return true;
+  const grants = await grantsForUserType(user.userType);
+  return modules.some((m) => checkGrant(false, grants, m, "view"));
+}
+
+/** Read guard: signed in + approved + "view" on any one of `modules`. */
+export async function requireView(req: NextRequest, modules: readonly Module[]): Promise<CurrentUser> {
+  const u = await requireUser(req);
+  if (!(await canViewAny(u, modules))) throw new HttpError(403, "ไม่มีสิทธิ์ดูข้อมูลส่วนนี้");
+  return u;
+}
+
 export async function requireAdmin(req: NextRequest): Promise<CurrentUser> {
   const u = await requireUser(req);
   if (!u.isAdmin) throw new HttpError(403, "เฉพาะ System Admin");
