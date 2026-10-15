@@ -341,7 +341,7 @@ export async function saveModel(
   const brand = await db
     .select({ id: manufacturer.manufacturerId })
     .from(manufacturer)
-    .where(eq(manufacturer.manufacturerName, str(input.brand)))
+    .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${str(input.brand)}`) // legacy names carry trailing spaces
     .limit(1);
   if (!brand[0]) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + str(input.brand));
   const values = {

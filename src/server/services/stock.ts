@@ -193,14 +193,14 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
     ? await db
         .select({ id: category.categoryId })
         .from(category)
-        .where(eq(category.categoryName, str(i.category)))
+        .where(sql`btrim(${category.categoryName}, E' \t\r\n') = ${str(i.category)}`)
         .limit(1)
     : [];
   const [mfg] = i.brand
     ? await db
         .select({ id: manufacturer.manufacturerId })
         .from(manufacturer)
-        .where(eq(manufacturer.manufacturerName, str(i.brand)))
+        .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${str(i.brand)}`) // legacy names carry trailing spaces
         .limit(1)
     : [];
 

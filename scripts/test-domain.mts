@@ -758,7 +758,8 @@ try {
     try {
       await p;
     } catch (e) {
-      if (e instanceof HttpError) return { status: e.status, fields: (e.details as { fields?: object })?.fields };
+      if (e instanceof HttpError)
+        return { status: e.status, fields: (e.details as { fields?: object })?.fields, message: e.message };
       throw e;
     }
     return { status: 200, fields: undefined };
@@ -791,6 +792,42 @@ try {
       )
     ).rows;
     assert.equal(c.n, 0);
+  });
+  await test('legacy master names with a trailing space / newline still match (brand "X ", symptom "Y\\n")', async () => {
+    // 10 legacy symptoms end in " " or "\n" and 10 brands in " " — the form sends them trimmed
+    await db.execute(sql`DELETE FROM manufacturer WHERE manufacturer_name LIKE 'TD Trail Brand%'`);
+    await db.execute(sql`DELETE FROM symptom WHERE symptom_name LIKE 'TD trail sym%'`);
+    await db.execute(sql`INSERT INTO manufacturer (manufacturer_id, manufacturer_name)
+      VALUES ((SELECT coalesce(max(manufacturer_id), 0) + 1 FROM manufacturer), 'TD Trail Brand ')`);
+    await db.execute(sql`INSERT INTO symptom (symptom_id, symptom_name)
+      VALUES ((SELECT coalesce(max(symptom_id), 0) + 1 FROM symptom), ${'TD trail sym\n'})`);
+    // a NEW job (the shared JOB_EDIT fixture must keep its empty brand for the tests below)
+    const [m] = (await db.execute<{ c: string }>(sql`SELECT model_code AS c FROM model LIMIT 1`)).rows;
+    const [jt] = (await db.execute<{ n: string }>(sql`SELECT job_type_name AS n FROM job_type LIMIT 1`)).rows;
+    const r = await fieldsOf(
+      createJob(
+        {
+          customerCode: CUSTOMER,
+          jobType: jt!.n,
+          so: 'TD-SO-TRAIL',
+          channel: 'Online',
+          saleOrderDate: '2026-10-01',
+          warrantyMonth: 12,
+          expireDate: '2027-10-01',
+          serial: 'TD-TRAILING-NAMES',
+          brand: 'TD Trail Brand',
+          modelCode: m!.c,
+          symptoms: ['TD trail sym'],
+          dueDate: '2026-10-20',
+        },
+        U.admin.id,
+      ),
+    );
+    assert.equal(
+      r.status,
+      200,
+      `status ${r.status} ${JSON.stringify(r.fields ?? null)} ${(r as { message?: string }).message ?? ''}`,
+    );
   });
   await test('job edit: an unknown brand that was sent → 400 under brand, job unchanged; not sent → saves', async () => {
     const r = await fieldsOf(

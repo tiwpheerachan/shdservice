@@ -995,37 +995,45 @@ async function resolveEngineer(i: {
   return row.id;
 }
 
+/**
+ * Master names are compared trimmed on BOTH sides: legacy rows carry trailing spaces / "\n"
+ * ("ได้รับสินค้าไม่ครบ ", "POCO ") while the input is trimmed (str), so a plain = never matched —
+ * which, once unknown names became a 400, blocked saving every job that used them.
+ */
+const trimmed = (col: Parameters<typeof eq>[0]) => sql`btrim(${col}, E' \t\r\n')`;
+const nameIs = (col: Parameters<typeof eq>[0], v: string) => sql`${trimmed(col)} = ${v.trim()}`;
+
 async function lookups(i: JobInput) {
   const [jt] = i.jobType
-    ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(eq(jobType.jobTypeName, i.jobType)).limit(1)
+    ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(nameIs(jobType.jobTypeName, i.jobType)).limit(1)
     : [];
   const [pt] = i.productType
     ? await db
         .select({ id: productType.productTypeId })
         .from(productType)
-        .where(eq(productType.productTypeName, i.productType))
+        .where(nameIs(productType.productTypeName, i.productType))
         .limit(1)
     : [];
   const [mf] = i.brand
     ? await db
         .select({ id: manufacturer.manufacturerId })
         .from(manufacturer)
-        .where(eq(manufacturer.manufacturerName, i.brand))
+        .where(nameIs(manufacturer.manufacturerName, i.brand))
         .limit(1)
     : [];
   const [md] = i.modelCode
     ? await db
         .select({ id: model.modelId, name: model.modelName, mfg: model.manufacturerId })
         .from(model)
-        .where(eq(model.modelCode, i.modelCode))
+        .where(nameIs(model.modelCode, i.modelCode))
         .limit(1)
     : [];
   const names = (i.symptoms ?? []).map((s) => str(s)).filter(Boolean);
   const syms = names.length
     ? await db
-        .select({ id: symptom.symptomId, name: symptom.symptomName })
+        .select({ id: symptom.symptomId, name: sql<string>`${trimmed(symptom.symptomName)}` })
         .from(symptom)
-        .where(inArray(symptom.symptomName, names))
+        .where(inArray(trimmed(symptom.symptomName), names))
     : [];
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
   // a name that was sent but is not in the list used to be saved as id 0 — refuse it under its field
