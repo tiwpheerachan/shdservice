@@ -37,8 +37,14 @@ const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
 /** the column as masterNameKey() sees a name (no spaces, lower case) */
 const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
   sql`lower(regexp_replace(coalesce(${col}, ''), '[[:space:]]', '', 'g'))`;
-/** 409 under the name field: the same name ignoring case and spaces exists (the unique index used to answer 500) */
-const duplicate = () => new HttpError(409, DUPLICATE_NAME, { fields: { name: DUPLICATE_NAME } });
+/** 409 under the name field: the same name ignoring case and spaces exists (the unique index used to answer 500).
+ *  The message names the row that has it (the toast: one line) — it may be Inactive or deleted, i.e. not in the list. */
+const duplicate = (dup: { name: string | null; ref: string | number; rs?: string | null }) =>
+  new HttpError(
+    409,
+    `${DUPLICATE_NAME}: "${clean(dup.name)}" (รหัส ${dup.ref}${dup.rs === RS.DELETED ? ' · อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? ' · Inactive' : ''})`,
+    { fields: { name: DUPLICATE_NAME } },
+  );
 
 /* ------------------------------------------------------------------ *
  * Simple id/name/detail/is_active masters
@@ -177,11 +183,11 @@ export async function saveSimple(
   const oldName = before ? (before as Record<string, unknown>)[d.keys.name] : undefined;
   if (!before || masterNameKey(oldName) !== masterNameKey(name)) {
     const dup = await db
-      .select({ id: d.id })
+      .select({ id: d.id, name: d.name, rs: d.active })
       .from(d.table)
       .where(and(sql`${nameKeyOf(d.name)} = ${masterNameKey(name)}`, input.id ? ne(d.id, Number(input.id)) : undefined))
       .limit(1);
-    if (dup[0]) throw duplicate();
+    if (dup[0]) throw duplicate({ name: dup[0].name, ref: dup[0].id, rs: dup[0].rs });
   }
 
   if (input.id && before) {
@@ -285,7 +291,7 @@ export async function saveSymptom(
     : [];
   if (!before || masterNameKey(before.symptomName) !== masterNameKey(name)) {
     const [dup] = await db
-      .select({ id: symptom.symptomId })
+      .select({ id: symptom.symptomId, name: symptom.symptomName, rs: symptom.recordStatus })
       .from(symptom)
       .where(
         and(
@@ -294,7 +300,7 @@ export async function saveSymptom(
         ),
       )
       .limit(1);
-    if (dup) throw duplicate();
+    if (dup) throw duplicate({ name: dup.name, ref: dup.id, rs: dup.rs });
   }
   let id: number;
   if (input.id) {
@@ -397,7 +403,7 @@ export async function saveModel(
     : [];
   if (!before || before.mfg !== brand[0].id || masterNameKey(before.name) !== masterNameKey(name)) {
     const [dup] = await db
-      .select({ id: model.modelId })
+      .select({ code: model.modelCode, name: model.modelName, rs: model.recordStatus })
       .from(model)
       .where(
         and(
@@ -408,7 +414,7 @@ export async function saveModel(
         ),
       )
       .limit(1);
-    if (dup) throw duplicate();
+    if (dup) throw duplicate({ name: dup.name, ref: dup.code ?? '', rs: dup.rs });
   }
   const values = {
     modelName: name,

@@ -28,7 +28,9 @@ const push = (t: ToastInput) => {
         : t.kind === 'warning'
           ? toast.warning
           : toast.info;
-  fn(t.title, { description: t.desc, id: t.id, ...(t.action && { action: t.action, duration: Infinity }) });
+  // a body that only repeats the title (an API message + the same field error) is not shown twice
+  const desc = t.desc && !t.title.includes(t.desc) ? t.desc : undefined;
+  fn(t.title, { description: desc, id: t.id, ...(t.action && { action: t.action, duration: Infinity }) });
 };
 
 const Ctx = React.createContext<{ push: (t: ToastInput) => void }>({ push });

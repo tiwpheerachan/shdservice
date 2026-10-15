@@ -1,11 +1,15 @@
 import 'server-only';
 import { randomBytes } from 'node:crypto';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { customer, job, jobLog, jobStatus, manufacturer, quotationHd } from '@/db/schema';
+import { customer, job, jobLog, jobStatus, manufacturer, quotationHd, trackDocTicket, trackSession } from '@/db/schema';
 import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
-import { JS, effectiveDueText } from './jobs';
+import { addDays, today } from '@/lib/dates';
+import { QUOTATION_VALIDITY } from '@/lib/company';
+import type { Customer } from '@/data/mock';
+import { JS, effectiveDueText, type JobDetail } from './jobs';
+import type { QuotationDetail } from './quotations';
 import { getShippingProfile, trackUrlFor } from './shipping-profiles';
 import {
   TRACK_STEPS,
@@ -79,15 +83,96 @@ function stepOf(statusId: number, group: string): TrackStepKey | null {
   return 'diagnosing';
 }
 
-const maskName = (full: string) => {
-  const name = full.trim().replace(/^[A-Z]\d+\s+/i, ''); // customer_detail = "C43600 ชื่อ เบอร์"
+/** the current status in words the customer can act on — the 5 steps merge some of them */
+function statusLabel(statusId: number, step: TrackStepKey | null): string {
+  if (!step) return 'ยกเลิกรายการ';
+  if (statusId === JS.QUOTED) return 'รอคำตอบจากคุณ (ใบเสนอราคา)';
+  if (statusId === JS.WAIT_QUOTE) return 'ศูนย์กำลังจัดทำใบเสนอราคา';
+  if (statusId === JS.QUOTE_EXPIRED) return `ใบเสนอราคา${QUOTE_EXPIRED_TEXT}`;
+  if (statusId === JS.WAIT_PARTS) return 'รออะไหล่';
+  if (statusId === JS.CLOSED_WAIT_PICKUP) return 'พร้อมให้มารับที่ศูนย์';
+  if (statusId === JS.CLOSED_WAIT_TRACKING) return 'กำลังจัดส่งคืนทางพัสดุ';
+  if (statusId === JS.CLOSED_TRACKED) return 'ส่งคืนแล้ว (พัสดุ)';
+  if (step === 'returned') return 'ส่งคืนแล้ว';
+  return TRACK_STEPS.find((s) => s.key === step)!.label;
+}
+const QUOTE_EXPIRED_TEXT = 'หมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่';
+const DUE_PASSED_TEXT = 'เลยกำหนดเดิม — ศูนย์จะแจ้งวันใหม่';
+/** "7 Days" → 7: the validity printed on the quotation */
+const QUOTE_VALID_DAYS = parseInt(QUOTATION_VALIDITY, 10) || 7;
+
+/** วันที่รับเครื่อง — ONE source for the header, the timeline and the receipt's date (a legacy 1900 → opened) */
+const receivedOf = (r: { receivedDate: string | null; createDate: string | null }) =>
+  fmtDate(isSentinelDate(r.receivedDate) ? r.createDate : r.receivedDate);
+
+/* masking — what /track and the documents opened from it show instead of the real value */
+const TITLE = /^(?:คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.|(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))\s*/i;
+/** "C43600 คุณสมชาย ใจดี 081…" → "คุณ สมช…" (one title, never "คุณ คุณ…") */
+export const maskName = (full: string) => {
+  let name = (full ?? '').trim().replace(/^[A-Z]\d+\s+/i, ''); // customer_detail = "C43600 ชื่อ เบอร์"
+  while (TITLE.test(name)) name = name.replace(TITLE, '');
   const first = name.split(/\s+/)[0] ?? '';
   return first ? `คุณ ${first.slice(0, 3)}…` : 'ลูกค้า';
 };
-const maskRef = (v: string) => {
-  const s = (v ?? '').trim();
-  return s.length > 4 ? `••••${s.slice(-4)}` : s ? '••••' : '';
+/** serial / IMEI → "••••" + last 4; a note typed into the field ("SN เสียหาย", "รอ SN จากลูกค้า", "-") → "" */
+export const maskRef = (v: string) => {
+  const s = (v ?? '').replace(/[^A-Za-z0-9]/g, '');
+  return s.length > 4 && /\d/.test(s) ? `••••${s.slice(-4)}` : '';
 };
+export const maskPhone = (v: string) => {
+  const d = (v ?? '').replace(/\D/g, '');
+  return d.length >= 4 ? `•••-•••-${d.slice(-4)}` : '';
+};
+/** no house number / street: from the ตำบล (แขวง / อำเภอ / เขต / จังหวัด) on, else the postcode alone */
+export const maskAddress = (v: string) => {
+  const s = (v ?? '').trim();
+  const i = s.search(/(?:^|\s)(?:ต\.|ตำบล|แขวง|อ\.|อำเภอ|เขต|จ\.|จังหวัด)/);
+  return i >= 0 ? s.slice(i).trim() : (/(\d{5})\s*$/.exec(s)?.[1] ?? '');
+};
+const maskCustomer = <C extends { name: string; address: string; phone: string }>(c: C) => ({
+  name: maskName(c.name),
+  address: maskAddress(c.address),
+  phone: maskPhone(c.phone),
+  code: '',
+  taxId: '',
+  email: '',
+  line: '',
+});
+
+/**
+ * A job as a document opened from /track (app/track/doc) shows it: no more than the tracking
+ * page — masked name / phone / address / serial / IMEI, no technician, no contact details.
+ * Prices stay (the customer decides on the quotation with them). Staff print views never call this.
+ */
+export function maskJobForCustomer(j: JobDetail): JobDetail {
+  return {
+    ...j,
+    customer: j.customer && { ...maskCustomer(j.customer), id: 0 },
+    customerDetail: maskName(j.customerDetail),
+    imei: maskRef(j.imei),
+    serial: maskRef(j.serial),
+    engineerId: 0,
+    engineer: '',
+    logs: [],
+    history: [],
+    attachments: [],
+  };
+}
+
+export function maskQuotationForCustomer(q: QuotationDetail): QuotationDetail {
+  const c: Customer | null = q.customerDetail && { ...maskCustomer(q.customerDetail), status: q.customerDetail.status };
+  return {
+    ...q,
+    customer: maskName(q.customer),
+    customerCode: '',
+    contactName: '',
+    imei: maskRef(q.imei),
+    customerDetail: c,
+    job: q.job && maskJobForCustomer(q.job),
+    createdByPhone: '',
+    createdByEmail: '',
+  };
+}
 
 export function newToken() {
   return randomBytes(32).toString('base64url');
@@ -145,6 +230,7 @@ const CUSTOMER_QUOTATION_STATUSES = [2, 3, 4, 6, 8, 9];
  */
 async function docsFor(row: {
   no: string;
+  statusId: number | null;
   group: string | null;
   closedDate: string | null;
   receivedDate: string | null;
@@ -155,12 +241,12 @@ async function docsFor(row: {
       kind: 'job',
       ref: row.no,
       label: 'ใบรับงานซ่อม',
-      date: fmtDate(row.receivedDate ?? row.createDate),
+      date: receivedOf(row),
       step: 'received',
     },
   ];
   const qs = await db
-    .select({ no: quotationHd.quotationNo, at: quotationHd.createDate })
+    .select({ no: quotationHd.quotationNo, at: quotationHd.createDate, st: quotationHd.quotationStatusId })
     .from(quotationHd)
     .where(
       and(
@@ -171,9 +257,13 @@ async function docsFor(row: {
     )
     .orderBy(asc(quotationHd.createDate))
     .limit(10);
+  const lapsedBefore = addDays(today(), -QUOTE_VALID_DAYS);
   for (const q of qs) {
     const no = (q.no ?? '').trim();
-    if (no) docs.push({ kind: 'quotation', ref: no, label: `ใบเสนอราคา ${no}`, date: fmtDate(q.at), step: 'waiting' });
+    // พ้นกำหนดเสนอราคา (8), or sent (2) and past its validity / the job says so — never shown as current
+    const expired = q.st === 8 || (q.st === 2 && (fmtDate(q.at) < lapsedBefore || row.statusId === JS.QUOTE_EXPIRED));
+    const label = `ใบเสนอราคา ${no}${expired ? ` · ${QUOTE_EXPIRED_TEXT}` : ''}`;
+    if (no) docs.push({ kind: 'quotation', ref: no, label, date: fmtDate(q.at), step: 'waiting' });
   }
   if (row.group?.trim() === 'Finished' && !isSentinelDate(row.closedDate)) {
     docs.push({
@@ -205,6 +295,67 @@ export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promi
   });
 }
 
+/**
+ * Document links (drizzle/0019, relaxed in round 2 — see drizzle/0028): the URL /track/doc/<ticket>
+ * works for DOC_LINK_MINUTES, any number of times and from any browser, but only while the
+ * tracking session (phone + OTP) or the /track/<token> link that asked for it is still live.
+ * LINE's in-app browser loads the page, then "open in Safari" loads it again from another
+ * browser (and often another IP): the old 60-second, single-use, IP + User-Agent bound ticket
+ * failed exactly there. 256 random bits, only sha256 stored — unguessable, never permanent.
+ * track_doc_ticket.ua_hash holds sha256(session token | link token): the authorisation it is bound to.
+ */
+export const DOC_LINK_MINUTES = 10;
+
+export async function issueDocLink(
+  d: { jobNo: string; kind: string; ref: string },
+  auth: string,
+  ip: string,
+): Promise<string> {
+  await db.delete(trackDocTicket).where(lt(trackDocTicket.expiresAt, sql`now()`));
+  const raw = newToken();
+  await db.insert(trackDocTicket).values({
+    tokenHash: sha256(raw),
+    jobNo: d.jobNo,
+    kind: d.kind,
+    ref: d.ref,
+    issuedIp: ip,
+    uaHash: sha256(auth),
+    expiresAt: sql`now() + make_interval(mins => ${DOC_LINK_MINUTES})`,
+  });
+  return raw;
+}
+
+/** the document a link names, or null: bad shape / unknown / expired / its session or link no longer live */
+export async function docForLink(raw: unknown): Promise<{ jobNo: string; kind: string; ref: string } | null> {
+  return quiet(async () => {
+    if (typeof raw !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw)) return null;
+    const [t] = await db
+      .select({
+        jobNo: trackDocTicket.jobNo,
+        kind: trackDocTicket.kind,
+        ref: trackDocTicket.ref,
+        auth: trackDocTicket.uaHash,
+      })
+      .from(trackDocTicket)
+      .where(and(eq(trackDocTicket.tokenHash, sha256(raw)), gt(trackDocTicket.expiresAt, sql`now()`)))
+      .limit(1);
+    if (!t) return null;
+    const [session] = await db
+      .select({ n: sql<number>`1` })
+      .from(trackSession)
+      .where(and(eq(trackSession.tokenHash, t.auth), gt(trackSession.expiresAt, sql`now()`)))
+      .limit(1);
+    const [link] = session
+      ? [session]
+      : await db
+          .select({ n: sql<number>`1` })
+          .from(job)
+          .where(and(eq(job.jobNo, t.jobNo), eq(job.trackTokenHash, t.auth.toString('hex')), linkLive))
+          .limit(1);
+    return link ? { jobNo: t.jobNo, kind: t.kind, ref: t.ref } : null;
+  });
+}
+
 /** does this job have a quotation the customer could be holding? */
 async function hasQuotation(jobNo: string) {
   const [row] = await db
@@ -223,8 +374,8 @@ async function toPublic(row: Row): Promise<PublicJob> {
     .where(eq(jobLog.jobNo, row.no))
     .orderBy(asc(jobLog.jobLogDate), asc(jobLog.jobLogId));
 
-  // first time each step was reached
-  const seen = new Map<TrackStepKey, string>();
+  // first time each step was reached; "received" = the header's วันที่รับเครื่อง, not the job's first log
+  const seen = new Map<TrackStepKey, string>([['received', receivedOf(row)]]);
   for (const l of logs) {
     const k = stepOf(l.statusId ?? -1, l.group?.trim() ?? '');
     if (k && !seen.has(k)) seen.set(k, fmtDate(l.at));
@@ -234,11 +385,15 @@ async function toPublic(row: Row): Promise<PublicJob> {
 
   // courier of the return leg (jobs closed before drizzle/0013 have none → plain tracking number)
   const trackingNo = (row.trackingNo ?? '').trim();
+  // a profile deleted since (soft delete) still names the courier of a parcel already shipped with it
   const profile = row.shipperId ? await getShippingProfile(row.shipperId) : null;
-  const courier =
-    profile && !profile.isDeleted
-      ? { name: profile.nameTh, logoUrl: profile.logoUrl, trackUrl: trackUrlFor(profile, trackingNo) }
-      : null;
+  const courier = profile
+    ? { name: profile.nameTh, logoUrl: profile.logoUrl, trackUrl: trackUrlFor(profile, trackingNo) }
+    : null;
+  // a past "expected" date while the job is still before ซ่อมเสร็จ: say so instead of a stale date
+  const due = fmtDate(row.dueDate);
+  const beforeRepaired = step === 'received' || step === 'diagnosing' || step === 'waiting';
+  const dueDate = !due || due >= today() ? due : beforeRepaired ? DUE_PASSED_TEXT : '';
 
   const order = TRACK_STEPS.map((s) => s.key);
   const history = [...seen.entries()]
@@ -249,11 +404,11 @@ async function toPublic(row: Row): Promise<PublicJob> {
     no: row.no,
     customerMasked: maskName(row.customerName ?? row.customerDetail ?? ''),
     brandModel: [row.brand, row.model].filter(Boolean).join(' ').trim(),
-    deviceRef: maskRef(row.serial || row.imei || ''),
-    receivedDate: fmtDate(row.receivedDate ?? row.createDate),
-    dueDate: fmtDate(row.dueDate),
+    deviceRef: maskRef(row.serial ?? '') || maskRef(row.imei ?? ''),
+    receivedDate: receivedOf(row),
+    dueDate,
     step,
-    stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : 'ยกเลิกรายการ',
+    stepLabel: statusLabel(row.statusId ?? -1, step),
     cancelled: step === null,
     history,
     shipper: (row.shipper ?? '').trim(),
@@ -453,11 +608,11 @@ export async function listJobsForCustomers(
     const item: PublicJobSummary = {
       no: r.no,
       brandModel: [r.brand, r.model].filter(Boolean).join(' ').trim(),
-      deviceRef: maskRef(r.serial || r.imei || ''),
-      receivedDate: fmtDate(r.receivedDate ?? r.createDate),
+      deviceRef: maskRef(r.serial ?? '') || maskRef(r.imei ?? ''),
+      receivedDate: receivedOf(r),
       closedDate: isSentinelDate(r.closedDate) ? '' : fmtDate(r.closedDate),
       step,
-      stepLabel: step ? TRACK_STEPS.find((s) => s.key === step)!.label : 'ยกเลิกรายการ',
+      stepLabel: statusLabel(r.statusId ?? -1, step),
       cancelled: step === null,
     };
     (done ? history : active).push(item);

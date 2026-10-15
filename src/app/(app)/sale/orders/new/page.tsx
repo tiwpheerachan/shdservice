@@ -35,7 +35,7 @@ export default function NewSaleOrderPage() {
 
   return (
     <>
-      <PageHeader title="สร้างใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Add New Sale Order" />
+      <PageHeader title="สร้างใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย" />
       <SaleOrderForm ref={form} />
       <FormActions
         saveLabel="บันทึกใบสั่งขาย"

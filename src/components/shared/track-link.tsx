@@ -8,7 +8,6 @@ import { useConfirm } from '@/components/ui/confirm';
 import { postJson, errMsg } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useAccess } from '@/lib/use-access';
-import { LINK_RULE_TEXT } from '@/lib/track-public';
 import { cn } from '@/lib/utils';
 
 /**
@@ -16,7 +15,8 @@ import { cn } from '@/lib/utils';
  * more). Opening it shows nothing until the customer passes Turnstile — see app/api/track/*.
  *
  * Lifetime (services/tracking.ts, drizzle/0016): 1 day from issue while unopened, then
- * 15 minutes from the customer's first open. The hint below the link says which state it
+ * 15 minutes from the customer's first open, kept alive while the page is in use (≤ 60 minutes
+ * from that open). The text below says exactly that (LINK_TEXT). The hint below the link says which state it
  * is in; an expired link cannot be copied — issue a new one. "ดูหน้าที่ลูกค้าเห็น" by a
  * signed-in staff member does not count as the customer's open.
  *
@@ -34,6 +34,12 @@ type LinkResponse = { url: string; ready?: boolean; status: LinkStatus };
 
 /** characters of the link that always stay visible at its end (the token's tail) */
 const URL_TAIL = 8;
+
+/** what really happens (services/tracking.ts LINK_* + app/api/track/session) — testers saw "24 ชม." because a staff open is not counted */
+const LINK_TEXT =
+  'ลูกค้ากดยืนยันว่าไม่ใช่บอท (captcha) แล้วเห็นสถานะงาน และเปิดเอกสารของงานนี้ได้ (ใบรับงาน · ใบเสนอราคาพร้อมราคา · ใบส่งคืน) — ' +
+  'ลิงก์ใช้ได้ 1 วันถ้ายังไม่มีใครเปิด เมื่อลูกค้าเปิดครั้งแรกจะใช้ต่อได้อีก 15 นาที (ต่อเวลาอัตโนมัติขณะเปิดหน้าอยู่ รวมไม่เกิน 60 นาที) ' +
+  'แล้วหมดอายุ · การกด “ดูหน้าที่ลูกค้าเห็น” ขณะล็อกอินอยู่ไม่นับเป็นการเปิดของลูกค้า';
 
 const fmt = (iso: string | null) =>
   iso
@@ -110,7 +116,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
       push({
         kind: 'success',
         title: 'สร้างลิงก์ใหม่แล้ว',
-        desc: 'คัดลอกส่งลูกค้าได้เลย (แสดงจนกว่าจะออกจากหน้านี้) · ใช้ได้ 1 วัน · ลิงก์เดิมใช้ไม่ได้แล้ว',
+        desc: 'คัดลอกส่งลูกค้าได้เลย (แสดงจนกว่าจะออกจากหน้านี้) · ใช้ได้ 1 วันจนกว่าลูกค้าจะเปิด · ลิงก์เดิมใช้ไม่ได้แล้ว',
       });
     } catch (e) {
       push({ kind: 'error', title: 'สร้างลิงก์ใหม่ไม่สำเร็จ', desc: errMsg(e) });
@@ -141,7 +147,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
   ) : (
     <span className="inline-flex flex-wrap items-center gap-1.5 font-medium text-warning">
       <Clock className="h-3.5 w-3.5 shrink-0" />
-      ยังไม่มีการเปิดใช้ · หมดอายุ {fmt(status?.expiresAt ?? null)} ({left(expiresMs)})
+      ลูกค้ายังไม่เปิดลิงก์ · หมดอายุ {fmt(status?.expiresAt ?? null)} ({left(expiresMs)})
     </span>
   );
 
@@ -151,9 +157,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
         <Link2 className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold">ลิงก์ติดตามสำหรับลูกค้า</h3>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        ส่งให้ลูกค้าทาง LINE — ลูกค้ากดยืนยันตัวตน (captcha) ก่อนแล้วจึงเห็นสถานะงาน ไม่เห็นราคา · {LINK_RULE_TEXT}
-      </p>
+      <p className="mt-1 text-xs text-muted-foreground">ส่งให้ลูกค้าทาง LINE — {LINK_TEXT}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {/* middle ellipsis: the start shrinks with "…", the token's last characters always show —

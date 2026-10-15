@@ -9,7 +9,7 @@ import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, NumberInput } from '@/components/ui/input';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
-import { useProducts, useJobNos, useSaleOrders, useStaff } from '@/data/db';
+import { useApi, useProducts, useJobNos, useStaff } from '@/data/db';
 import { STOCK_PICK_TYPES } from '@/data/mock';
 import { int, cn } from '@/lib/utils';
 import { api, postJson, errMsg, qs } from '@/lib/api';
@@ -41,7 +41,15 @@ type PartLine = {
   need: number;
   status: string;
 };
-type SoLine = { dtId: number; code: string; name: string; onhand: number; need: number; picked: boolean };
+type SoLine = {
+  dtId: number;
+  code: string;
+  name: string;
+  onhand: number;
+  need: number;
+  picked: boolean;
+  pickNo: string;
+};
 type ReturnLine = {
   logId: number;
   jobNo: string;
@@ -61,7 +69,9 @@ export default function PickPage() {
   // งานที่ยังไม่ปิด/ไม่ยกเลิกที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (รับคืนได้ทุกสถานะงาน)
   const { data: PENDING_JOB_NOS } = useJobNos(300, 'pending_parts');
   const { data: RETURNABLE_JOB_NOS } = useJobNos(300, 'returnable');
-  const { data: SALE_ORDERS } = useSaleOrders({ approve: 'อนุมัติแล้ว', limit: 100 });
+  // ใบสั่งขายที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย (อนุมัติ = ตัดสต๊อกให้แล้ว จึงมักว่าง)
+  const pickOrders = useApi<{ rows: string[] }>('/api/stock/pick-orders', { fresh: true });
+  const SALE_ORDERS = pickOrders.data?.rows ?? [];
   const { data: STAFF } = useStaff();
   const [saving, setSaving] = React.useState(false);
 
@@ -69,6 +79,7 @@ export default function PickPage() {
   const [ref, setRef] = React.useState('');
   const [lines, setLines] = React.useState<Line[]>([]);
   const [loaded, setLoaded] = React.useState(false);
+  const [find, setFind] = React.useState(''); // จ่ายออกอื่นๆ: narrows the shown lines (typed quantities stay)
   const [payTo, setPayTo] = React.useState('');
   const [remark, setRemark] = React.useState('');
   // document date preview: when the screen opened, Thai time (browser only — no hydration mismatch)
@@ -85,13 +96,7 @@ export default function PickPage() {
           : 'other';
   // อ้างอิง: งานที่ค้างเบิก / งานที่รับคืนได้ / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
   const refOptions =
-    kind === 'job'
-      ? PENDING_JOB_NOS
-      : kind === 'return'
-        ? RETURNABLE_JOB_NOS
-        : kind === 'sale'
-          ? SALE_ORDERS.map((s) => s.no)
-          : [];
+    kind === 'job' ? PENDING_JOB_NOS : kind === 'return' ? RETURNABLE_JOB_NOS : kind === 'sale' ? SALE_ORDERS : [];
   const isReturn = kind === 'return';
   const RECIPIENTS = React.useMemo(() => ['คลังสินค้าดี', ...STAFF.map((s) => s.name)], [STAFF]);
 
@@ -101,6 +106,7 @@ export default function PickPage() {
     setRef('');
     setLines([]);
     setLoaded(false);
+    setFind('');
     fe.setErrors({}); // another document → the old one's errors no longer apply
   };
 
@@ -164,6 +170,7 @@ export default function PickPage() {
       } else {
         const d = await api<{ rows: SoLine[] }>(`/api/stock/pick-lines${qs({ type: 'sale', ref })}`);
         const rows = d.rows.filter((r) => !r.picked);
+        const done = [...new Set(d.rows.map((r) => r.pickNo).filter(Boolean))];
         setLines(
           rows.map((r) => ({
             docNo: ref,
@@ -177,7 +184,15 @@ export default function PickPage() {
           })),
         );
         setLoaded(true);
-        push({ kind: 'success', title: 'ดึงรายการแล้ว', desc: `${ref} — ${rows.length} รายการ` });
+        // 0 lines: say why instead of a green "done" — approving the order already issued its stock
+        if (rows.length) push({ kind: 'success', title: 'ดึงรายการแล้ว', desc: `${ref} — ${rows.length} รายการ` });
+        else if (done.length)
+          push({
+            kind: 'info',
+            title: 'ไม่มีรายการค้างจ่าย',
+            desc: `ใบสั่งขายนี้ตัดสต๊อกตอนอนุมัติแล้ว (${done.join(', ')})`,
+          });
+        else push({ kind: 'info', title: 'ไม่มีรายการค้างจ่าย', desc: `${ref} ไม่มีรายการสินค้า (มีแต่ค่าบริการ)` });
       }
     } catch (e) {
       push({ kind: 'error', title: 'ดึงรายการไม่สำเร็จ', desc: errMsg(e) });
@@ -194,6 +209,10 @@ export default function PickPage() {
     );
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
+  const term = find.trim().toLowerCase();
+  const shown = term
+    ? lines.filter((l) => l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
+    : lines;
   useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 
   // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
@@ -226,6 +245,7 @@ export default function PickPage() {
       setRef('');
       setRemark('');
       refetchProducts();
+      if (kind === 'sale') pickOrders.mutate();
     } catch (e) {
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
@@ -290,7 +310,13 @@ export default function PickPage() {
                     onChange={setRef}
                     options={strOptions(refOptions)}
                     disabled={kind === 'other'}
-                    placeholder={kind === 'other' ? '- - ไม่ต้องอ้างอิง - -' : '- - Please Select - -'}
+                    placeholder={
+                      kind === 'other'
+                        ? '- - ไม่ต้องอ้างอิง - -'
+                        : refOptions.length || pickOrders.loading
+                          ? '- - เลือกใบสั่งขาย - -'
+                          : 'ไม่มีใบสั่งขายที่ค้างจ่าย'
+                    }
                     searchPlaceholder="พิมพ์เลขเอกสาร…"
                   />
                 </div>
@@ -301,11 +327,32 @@ export default function PickPage() {
               </Button>
             </div>
           </Field>
+          {kind === 'sale' && (
+            <p className="col-span-full text-2xs text-muted-foreground">
+              อนุมัติใบสั่งขายแล้วระบบตัดสต๊อกให้ทันที — ที่นี่จึงแสดงเฉพาะใบที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย
+            </p>
+          )}
         </FieldGrid>
       </div>
 
       {/* items table */}
       <div className="surface overflow-hidden">
+        {kind === 'other' && lines.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <Input
+              type="search"
+              aria-label="ค้นหาอะไหล่ (รหัส หรือชื่อ)"
+              placeholder="ค้นหารหัส หรือชื่ออะไหล่…"
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              className="h-8 max-w-sm"
+            />
+            <span className="num text-2xs text-muted-foreground">
+              {term ? `${shown.length} / ${lines.length}` : lines.length} รายการ
+            </span>
+          </div>
+        )}
         {fe.errors.lines && (
           <p role="alert" className="border-b border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
             {fe.errors.lines}
@@ -326,14 +373,24 @@ export default function PickPage() {
               </tr>
             </thead>
             <tbody>
-              {lines.length === 0 ? (
+              {shown.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-sm text-danger/80">
-                    {loaded ? 'ไม่มีรายการข้อมูล' : 'เลือกเอกสารอ้างอิงแล้วกด Get Data เพื่อดึงรายการ'}
+                  <td colSpan={8} className="px-3 py-10 text-center text-sm text-muted-foreground">
+                    {lines.length
+                      ? `ไม่พบอะไหล่ที่ตรงกับ "${find.trim()}"`
+                      : loaded
+                        ? kind === 'other'
+                          ? 'ไม่มีอะไหล่ที่มีของในสต๊อก'
+                          : 'ไม่มีรายการค้างจ่าย'
+                        : kind === 'other'
+                          ? 'กด Get Data เพื่อดึงรายการอะไหล่ที่มีของในสต๊อก'
+                          : kind === 'sale'
+                            ? 'เลือกใบสั่งขายแล้วกด Get Data เพื่อดึงรายการ'
+                            : 'เลือกหรือพิมพ์เลขงานแล้วกด Get Data เพื่อดึงรายการ'}
                   </td>
                 </tr>
               ) : (
-                lines.map((l, i) => (
+                shown.map((l, i) => (
                   <tr
                     key={l.logId ?? l.dtId ?? l.code}
                     className="border-b border-border/70 last:border-0 hover:bg-accent/50"
@@ -360,6 +417,7 @@ export default function PickPage() {
                     <td className="num px-3 py-2 text-right">{int(l.need)}</td>
                     <td className="px-3 py-2">
                       <NumberInput
+                        aria-label={`${isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก'} ${l.code}`}
                         min={0}
                         max={isReturn ? l.need : Math.min(l.need, l.onhand)}
                         placeholder="0"
@@ -394,7 +452,7 @@ export default function PickPage() {
               searchPlaceholder="พิมพ์ชื่อ…"
             />
           </Field>
-          <Field label="หมายเหตุ" wide error={fe.errors.remark}>
+          <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
             <Input
               maxLength={100}
               value={remark}

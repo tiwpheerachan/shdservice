@@ -202,7 +202,7 @@ export default function DashboardPage() {
           <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Service Operations</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">ภาพรวมงานบริการ</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            สถานะงานซ่อมและระยะเวลาดำเนินงาน (TAT) · ช่วง {rangeText}
+            การ์ดสรุปและกราฟ: งานที่เปิดในช่วง {rangeText} · ตาราง TAT: งานค้างทั้งหมด ณ ตอนนี้
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -270,37 +270,47 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KPI band — hairline-separated cells, no gradient fills */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
-        {DASH_GROUPS.map((g) => (
-          <Link
-            key={g.key}
-            href={kpiHref(g, from, to, type)}
-            className="group bg-card p-5 transition-colors hover:bg-accent/40"
-          >
-            <div className="flex items-center gap-2">
-              <span className={cn('h-1.5 w-1.5 rounded-full', TONE[g.key])} />
-              <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">{g.label}</span>
-            </div>
-            <p className="num mt-3 text-[30px] font-semibold leading-none tracking-tight tabular-nums">{int(g.jobs)}</p>
-            <div className="mt-3.5 flex items-center gap-2.5">
-              <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-muted">
-                <span
-                  className={cn('block h-full rounded-full', TONE[g.key])}
-                  style={{ width: `${Math.min(100, g.percent)}%` }}
-                />
-              </span>
-              <span className="num text-2xs tabular-nums text-muted-foreground">{g.percent.toFixed(2)}%</span>
-            </div>
-            <p className="mt-2 text-2xs text-muted-foreground">{g.sub}</p>
-          </Link>
-        ))}
-      </div>
+      {/* KPI band — hairline-separated cells, no gradient fills. Its scope said out loud: the TAT table
+          below and the bell count every open job now, so the numbers differ on purpose */}
+      <section className="space-y-2" aria-label="สรุปงานที่เปิดในช่วงวันที่เลือก">
+        <p className="text-xs text-muted-foreground">งานที่เปิดในช่วงวันที่เลือก ({rangeText})</p>
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+          {DASH_GROUPS.map((g) => (
+            <Link
+              key={g.key}
+              href={kpiHref(g, from, to, type)}
+              className="group bg-card p-5 transition-colors hover:bg-accent/40"
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn('h-1.5 w-1.5 rounded-full', TONE[g.key])} />
+                <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">{g.label}</span>
+              </div>
+              <p className="num mt-3 text-[30px] font-semibold leading-none tracking-tight tabular-nums">
+                {int(g.jobs)}
+              </p>
+              <div className="mt-3.5 flex items-center gap-2.5">
+                <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className={cn('block h-full rounded-full', TONE[g.key])}
+                    style={{ width: `${Math.min(100, g.percent)}%` }}
+                  />
+                </span>
+                <span className="num text-2xs tabular-nums text-muted-foreground">{g.percent.toFixed(2)}%</span>
+              </div>
+              <p className="mt-2 text-2xs text-muted-foreground">{g.sub}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       {/* TAT matrix */}
       <Panel
         title="TAT — ระยะเวลาตั้งแต่วันเปิดงานถึงวันส่งคืน"
-        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน · งานที่ยังไม่ปิด ณ ปัจจุบัน{type ? ` · ${type}` : ''}</span>}
+        meta={
+          <span>
+            งานค้างทั้งหมด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) · จำแนกตามสถานะงานและช่วงจำนวนวัน{type ? ` · ${type}` : ''}
+          </span>
+        }
         bodyClass="p-0"
       >
         <div className="table-scroll">

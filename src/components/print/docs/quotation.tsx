@@ -5,6 +5,7 @@ import { money } from '@/components/print/print-frame';
 import { QUOTATION_VALIDITY } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
+import { maskQuotationForCustomer } from '@/server/services/tracking';
 
 const dmy = (s: string) => {
   // "2026-09-17 16:37" / "2026-09-17" → "17-09-2026" (legacy prints dd-mm-yyyy)
@@ -22,23 +23,21 @@ const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : das
  * ใบเสนอราคา — laid out to match the legacy form (setupdata/receipt/Q2600468_163754.pdf):
  * logomark + company text · bilingual boxed header · full-height item table ·
  * bank details + totals with the amount in Thai words · two signature boxes.
+ * `forCustomer` = opened from /track: masked like the tracking page, no technician, prices kept.
  */
-export async function QuotationDoc({ no }: { no: string }) {
-  const q = await getQuotation(no);
-  if (!q) notFound();
+export async function QuotationDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
+  const found = await getQuotation(no);
+  if (!found) notFound();
+  const q = forCustomer ? maskQuotationForCustomer(found) : found;
   const co = await profileForDocument(q.documentProfileId); // ออกเอกสารในนาม
   const c = q.customerDetail;
   const j = q.job;
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);
   const hasDiscount = (q.discountAmount ?? 0) > 0;
-  const contactLine = [
-    q.createdByPhone && `Tel. : ${q.createdByPhone}`,
-    q.createdByEmail && `Email : ${q.createdByEmail}`,
-  ]
-    .filter(Boolean)
-    .join('  ');
-  const engineer = j?.engineer?.trim() || q.createdBy;
+  // ติดต่อสอบถาม… = the issuing company (document profile); nothing set → the line is left out
+  const contactLine = [co.phone && `Tel. : ${co.phone}`, co.email && `Email : ${co.email}`].filter(Boolean).join('  ');
+  const engineer = forCustomer ? '' : j?.engineer?.trim() || q.createdBy;
   const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
   const lbl = 'text-neutral-700';
 
@@ -80,7 +79,7 @@ export async function QuotationDoc({ no }: { no: string }) {
           <p>{co.address}</p>
           <p>
             {/* a profile without a tax id / bank account prints nothing there, not a placeholder that looks real */}
-            โทรศัพท์ {co.phone}
+            {co.phone && <>โทรศัพท์ {co.phone}</>}
             {co.taxId && (
               <>
                 &nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span>
@@ -134,10 +133,12 @@ export async function QuotationDoc({ no }: { no: string }) {
                     <td className="k">IMEI No. :</td>
                     <td className="num">{or(j ? [j.imei, j.serial].filter(Boolean).join(' / ') : q.imei)}</td>
                   </tr>
-                  <tr>
-                    <td className="k gap">ช่าง :</td>
-                    <td className="gap">{or(engineer)}</td>
-                  </tr>
+                  {!forCustomer && (
+                    <tr>
+                      <td className="k gap">ช่าง :</td>
+                      <td className="gap">{or(engineer)}</td>
+                    </tr>
+                  )}
                   <tr>
                     <td className="k gap">หมายเหตุ :</td>
                     <td className="gap whitespace-pre-line">{or(q.remark)}</td>
@@ -174,7 +175,7 @@ export async function QuotationDoc({ no }: { no: string }) {
       </table>
 
       <p className="mt-1.5 text-center text-[10px]">
-        บริษัทฯ ขอเรียนแจ้งเสนอราคาและเงื่อนไขสำหรับท่านดังนี้ / We are please to submit you the following described
+        บริษัทฯ ขอเรียนแจ้งเสนอราคาและเงื่อนไขสำหรับท่านดังนี้ / We are pleased to submit you the following described
         here in at price, items and terms stated.
       </p>
 
@@ -282,18 +283,22 @@ export async function QuotationDoc({ no }: { no: string }) {
         </tbody>
       </table>
 
-      <p className="mt-1.5 flex justify-between gap-4 text-[10.5px]">
-        <span>ท่านสามารถติดต่อสอบถามข้อมูลเพิ่มเติมเกี่ยวกับใบเสนอราคานี้ได้ที่</span>
-        <span className="num">{contactLine}</span>
-      </p>
+      {contactLine && (
+        <p className="mt-1.5 flex justify-between gap-4 text-[10.5px]">
+          <span>ท่านสามารถติดต่อสอบถามข้อมูลเพิ่มเติมเกี่ยวกับใบเสนอราคานี้ได้ที่</span>
+          <span className="num">{contactLine}</span>
+        </p>
+      )}
 
       {/* ── signatures ── */}
       <table className="grid-b mt-1.5">
         <tbody>
           <tr>
             <td className="w-[58%] br sig text-center">
-              <p className="text-[10.5px]">กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้มาที่</p>
-              <p className="mt-1">Email : {q.createdByEmail || co.email || '—'}</p>
+              <p className="text-[10.5px]">
+                กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้{co.email ? 'มาที่' : 'กลับมาที่ศูนย์บริการ'}
+              </p>
+              {co.email && <p className="mt-1">Email : {co.email}</p>}
               <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
               <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
                 <span>(</span>

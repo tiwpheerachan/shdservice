@@ -236,6 +236,8 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
         throw new HttpError(409, msg, { fields: { code: msg } });
       }
     }
+    // a new profile with no order of its own goes last, not first (0)
+    if (!i.id && !values.sortOrder) values.sortOrder = Math.max(0, ...others.map((o) => o.sortOrder)) + 1;
 
     let before: Row | undefined;
     if (i.id) {

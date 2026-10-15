@@ -223,7 +223,8 @@ export default function ReceivePage() {
               <option>คลังสินค้าดี</option>
             </Select>
           </Field>
-          <Field label="ผู้จัดส่ง / Supplier" error={fe.errors.supplier}>
+          {/* supplier + remark share one 100-char column — the counters show the room left (nothing is cut) */}
+          <Field label="ผู้จัดส่ง / Supplier" error={fe.errors.supplier} hint={`${supplier.length}/40 ตัวอักษร`}>
             <Input
               placeholder="ชื่อผู้จัดส่ง"
               maxLength={40}
@@ -237,7 +238,7 @@ export default function ReceivePage() {
           <Field label="รับเข้าโดย">
             <Input readOnly value={me || '—'} />
           </Field>
-          <Field label="หมายเหตุ" wide error={fe.errors.remark}>
+          <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/47 ตัวอักษร`}>
             <Textarea
               rows={2}
               maxLength={47}

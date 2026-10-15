@@ -142,7 +142,8 @@ export function quotationWhere(q: string, f: QuotationFilters) {
           ilike(job.productImeiNo, `%${term}%`),
         )
       : undefined,
-    f.status ? eq(quotationStatus.quotationStatusName, f.status) : undefined,
+    // trimmed: the table pads some names ("รอเสนอราคา" + 24 spaces) — an exact match never found them
+    f.status ? sql`trim(${quotationStatus.quotationStatusName}) = ${f.status.trim()}` : undefined,
     from ? gte(quotationHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(quotationHd.createDate, `${to} 23:59:59`) : undefined,
     f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,

@@ -1,9 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { FileSearch, SearchX } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { FileSearch, Lock, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAccess } from '@/lib/use-access';
+
+/** stays usable on a view-only page: the save bar (ยกเลิก / พิมพ์), tabs, and anything marked data-readonly-keep */
+const KEEP = '[data-sticky-actions], [role="tab"], [data-readonly-keep]';
+/** inputs that honour readOnly (the value can still be selected / copied) — the rest get disabled */
+const NO_READONLY = ['checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'image', 'color', 'range'];
 
 /**
  * The edit / workflow screens that start with "ระบุหมายเลข…": until a record is loaded the form and
@@ -13,6 +21,12 @@ import { Skeleton } from '@/components/ui/skeleton';
  *  - lookup failed → the error, with a button to search again
  *
  * The form stays mounted (only hidden) so its state and effects behave exactly as when visible.
+ *
+ * A role without `edit` on the page's module (lib/modules: the route → module) sees the record
+ * read-only: every input / select / textarea / button inside is locked (the page's own controls,
+ * the pickers, + / ลบ rows), except the save bar (ยกเลิก, พิมพ์), tabs and `data-readonly-keep`.
+ * Done on the DOM, not per component, so no form can forget a control; the observer re-locks rows
+ * added later and a `disabled` React turns back off. The API refuses the write regardless.
  */
 export function RecordGate({
   ready,
@@ -32,6 +46,27 @@ export function RecordGate({
   searchId: string;
   children: React.ReactNode;
 }) {
+  const readOnly = !useAccess().forPath(usePathname()).edit;
+  const box = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const el = box.current;
+    if (!readOnly || !el) return;
+    const lock = () => {
+      for (const c of el.querySelectorAll<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement
+      >('input, textarea, select, button')) {
+        if (c.closest(KEEP)) continue;
+        const ro = c instanceof HTMLTextAreaElement || (c instanceof HTMLInputElement && !NO_READONLY.includes(c.type));
+        if (ro) (c as HTMLInputElement).readOnly ||= true;
+        else c.disabled ||= true;
+      }
+    };
+    lock();
+    const mo = new MutationObserver(lock);
+    mo.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'readonly'] });
+    return () => mo.disconnect();
+  }, [readOnly]);
+
   const focusSearch = () => {
     const el = document.getElementById(searchId);
     if (!el) return;
@@ -81,7 +116,13 @@ export function RecordGate({
             </Button>
           </div>
         ))}
-      <div hidden={!ready} className="space-y-4">
+      <div ref={box} hidden={!ready} className="space-y-4">
+        {readOnly && (
+          <Badge tone="warning" className="text-xs">
+            <Lock className="h-3 w-3" aria-hidden />
+            ดูอย่างเดียว — บัญชีนี้ไม่มีสิทธิ์แก้ไขหน้านี้
+          </Badge>
+        )}
         {children}
       </div>
     </>

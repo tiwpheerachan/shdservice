@@ -4,7 +4,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
 import type { SaleOrder } from '@/data/mock';
-import { HttpError, fullName } from '@/server/auth';
+import { HttpError, fullName, type CurrentUser } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
@@ -179,6 +179,8 @@ export type SaleOrderDetail = SaleOrder & {
   slip: string;
   approveRemark: string;
   createdBy: string;
+  /** document_create_by + sale_out_by — neither may decide on the order (System Admin may) */
+  creatorIds: number[];
   /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
   documentProfileId: number;
   /** sale_out_hd.row_version (drizzle/0026) — the edit page sends it back with its save */
@@ -230,6 +232,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     slip: hd.slipFileName ?? '',
     approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(r.salesFirst, r.salesLast),
+    creatorIds: [hd.documentCreateBy, hd.saleOutBy].filter((x): x is number => (x ?? 0) > 0),
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     version: hd.rowVersion,
   };
@@ -419,17 +422,25 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
   return (await getSaleOrder(no))!;
 }
 
+export const SELF_APPROVE = 'ผู้สร้างใบสั่งขายอนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
+export const REASON_REQUIRED = 'ต้องระบุเหตุผล';
+
 /**
  * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy
- * data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล just stamp the decision.
+ * data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล just stamp the decision (with a required reason).
+ * Only a waiting (2) order can be decided, and not by its creator (owner decision 2026-10-15; System Admin may).
  */
 export async function approveSaleOrder(
   no: string,
   decision: 'approve' | 'deny' | 'reject',
   remark: string,
-  byUserId: number,
+  by: Pick<CurrentUser, 'userId' | 'isAdmin'>,
 ): Promise<SaleOrderDetail> {
+  const byUserId = by.userId;
   const statusId = decision === 'approve' ? AS.APPROVED : decision === 'deny' ? AS.DENIED : AS.REJECT;
+  const reason = clean(remark);
+  if (decision !== 'approve' && !reason)
+    throw new HttpError(400, REASON_REQUIRED, { fields: { remark: REASON_REQUIRED } });
   await db.transaction(async (tx) => {
     const [hd] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
     if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
@@ -437,13 +448,16 @@ export async function approveSaleOrder(
     if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, 'อนุมัติไปแล้ว');
     if (hd.approveStatusId === AS.DENIED)
       throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว อนุมัติหรือเปลี่ยนสถานะไม่ได้');
+    if (hd.approveStatusId !== AS.WAIT)
+      throw new HttpError(409, 'ใบสั่งขายยังไม่ได้ส่งขออนุมัติ — ผู้สร้างต้องบันทึกแบบ "ส่งขออนุมัติ" ก่อน');
+    if (!by.isAdmin && [hd.documentCreateBy, hd.saleOutBy].includes(byUserId)) throw new HttpError(403, SELF_APPROVE);
     await tx
       .update(saleOutHd)
       .set({
         approveStatusId: statusId,
         approveDate: nowThai(),
         approveBy: byUserId,
-        approveRemark: clean(remark), // approveSchema: ≤ 100 (the column)
+        approveRemark: reason, // approveSchema: ≤ 100 (the column)
       })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
@@ -455,8 +469,8 @@ export async function approveSaleOrder(
         decision === 'approve'
           ? 'อนุมัติใบสั่งขาย (ตัดสต๊อก)'
           : decision === 'deny'
-            ? `ปฏิเสธใบสั่งขาย${remark ? ` · ${remark}` : ''}`
-            : `ส่งกลับแก้ไข${remark ? ` · ${remark}` : ''}`,
+            ? `ปฏิเสธใบสั่งขาย · ${reason}`
+            : `ส่งกลับแก้ไข · ${reason}`,
       changes: { approveStatusId: [hd.approveStatusId, statusId] },
     });
     if (decision === 'approve') {
@@ -465,7 +479,12 @@ export async function approveSaleOrder(
         .from(saleOutDt)
         .where(and(eq(saleOutDt.saleOutHdNo, no), ne(saleOutDt.productType, 'Service')));
       if (Number(hasGoods[0]?.n ?? 0) > 0)
-        await issueForSaleOrder({ soNo: no, payTo: hd.customerName ?? '' }, byUserId, tx);
+        await issueForSaleOrder({ soNo: no, payTo: hd.customerName ?? '' }, byUserId, tx).catch((e) => {
+          // adjustQty's "สต๊อก X ไม่พอ (คงเหลือ N)" — say what to do about it
+          if (e instanceof HttpError && e.status === 409 && e.message.includes('ไม่พอ'))
+            throw new HttpError(409, `${e.message} — รับเข้าอะไหล่ที่ เมนูรับเข้า ก่อนอนุมัติ`, e.details);
+          throw e;
+        });
     }
   });
   if (decision === 'approve') productsChanged(); // stock went out in our tx — now committed
@@ -475,11 +494,12 @@ export async function approveSaleOrder(
 export async function setTracking(no: string, tracking: string, byUserId: number): Promise<SaleOrderDetail> {
   await db.transaction(async (tx) => {
     const [before] = await tx
-      .select({ tracking: saleOutHd.deliveryTrackingNo })
+      .select({ tracking: saleOutHd.deliveryTrackingNo, approve: saleOutHd.approveStatusId })
       .from(saleOutHd)
       .where(eq(saleOutHd.saleOutHdNo, no))
       .for('update');
     if (!before) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    if (before.approve !== AS.APPROVED) throw new HttpError(409, 'ใส่เลขพัสดุได้เมื่อใบสั่งขายอนุมัติแล้วเท่านั้น');
     assertValid(trackingSchema(before.tracking), { tracking });
     await tx
       .update(saleOutHd)

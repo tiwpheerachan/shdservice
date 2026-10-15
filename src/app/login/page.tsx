@@ -23,6 +23,7 @@ const ERRORS: Record<string, string> = {
   verify_502: 'ระบบกลางขัดข้องชั่วคราว ลองใหม่อีกครั้ง',
   verify_503: 'ระบบกลางขัดข้องชั่วคราว ลองใหม่อีกครั้ง',
   db_unavailable: 'ระบบฐานข้อมูลไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง',
+  user_conflict: 'สร้างบัญชีไม่สำเร็จ — แจ้งผู้ดูแลระบบ (รหัส user_conflict)',
 };
 
 export default async function LoginPage({

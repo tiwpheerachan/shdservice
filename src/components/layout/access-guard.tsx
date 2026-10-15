@@ -5,7 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAccess } from '@/lib/use-access';
 import { ALL_LINKS, findBreadcrumb } from '@/lib/nav';
 import { useToast } from '@/components/ui/toast';
-import { hardNavigate, toLogin } from '@/lib/navigation';
+import { Modal } from '@/components/ui/modal';
+import { Button } from '@/components/ui/button';
+import { hardNavigate, toLogin, SESSION_EXPIRED_EVENT } from '@/lib/navigation';
 import { useMe } from '@/lib/use-me';
 
 /**
@@ -53,5 +55,42 @@ export function AccessGuard() {
     else if (me.approved === false) hardNavigate('/pending'); // approval revoked → reload into the pending page
   }, [me.unauthorized, me.approved]);
 
-  return null;
+  // a save refused for an expired session / a form with typed data when the session ran out
+  // (lib/navigation sessionExpired): the page stays as it is — sign in again in another tab
+  // (same cookie), come back, save again
+  const [expired, setExpired] = React.useState(false);
+  React.useEffect(() => {
+    const on = () => setExpired(true);
+    window.addEventListener(SESSION_EXPIRED_EVENT, on);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, on);
+  }, []);
+  const close = () => {
+    setExpired(false);
+    void refresh(); // signed in again meanwhile → the countdown / guard pick up the new session
+  };
+
+  return (
+    <Modal
+      open={expired}
+      onClose={close}
+      title="เซสชันหมดอายุ"
+      size="sm"
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={close}>
+            ปิด
+          </Button>
+          <Button asChild size="sm">
+            <a href="/login" target="_blank" rel="noopener" onClick={close}>
+              เข้าสู่ระบบใหม่ (แท็บใหม่)
+            </a>
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm">
+        เซสชันหมดอายุ — ข้อมูลที่กรอกยังอยู่ กดเข้าสู่ระบบใหม่ (เปิดแท็บใหม่) แล้วกลับมากดบันทึกอีกครั้ง
+      </p>
+    </Modal>
+  );
 }

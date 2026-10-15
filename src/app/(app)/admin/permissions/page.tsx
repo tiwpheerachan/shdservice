@@ -65,8 +65,9 @@ export default function PermissionsPage() {
   const inRoles = (r: string) => !dbRoles.length || dbRoles.includes(r);
   const [pickedRole, setRole] = React.useState<string>(firstRole);
   const role = inRoles(pickedRole) ? pickedRole : (dbRoles[0] ?? pickedRole); // not in roles ⇒ dbRoles is non-empty
-  // filter bar: ประเภทผู้ใช้งาน picks the role being edited (applied on ค้นหา); เมนูงาน narrows
-  // the rows shown — edits live in `map` for every menu, so hidden rows are still saved
+  // filter bar: ประเภทผู้ใช้งาน picks the role being edited (at once — the table never shows another
+  // role than the one picked); เมนูงาน narrows the rows shown (on ค้นหา) — edits live in `map` for
+  // every menu, so hidden rows are still saved
   const [menuFilter, setMenuFilter] = React.useState('');
   const [draftPick, setDraft] = React.useState({ role: firstRole, menu: '' });
   const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] ?? draftPick.role };
@@ -93,7 +94,13 @@ export default function PermissionsPage() {
     try {
       const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
       await postJson('/api/admin/permissions', { items }); // 401 → refresh + retry → /login (api.ts)
-      push({ kind: 'success', title: 'บันทึกสิทธิ์แล้ว', desc: `บทบาท: ${role}` });
+      // the API checks the new grants on the very next request (cache dropped on save); menus and
+      // buttons of someone already signed in follow on their next page load (the grants ride the layout)
+      push({
+        kind: 'success',
+        title: `บันทึกสิทธิ์บทบาท ${role} แล้ว`,
+        desc: 'มีผลทันทีกับการบันทึกข้อมูล — ผู้ใช้ที่เปิดระบบค้างไว้จะเห็นเมนูและปุ่มตามสิทธิ์ใหม่เมื่อรีเฟรชหน้า (F5)',
+      });
       refetch();
     } catch (e) {
       push({
@@ -164,7 +171,10 @@ export default function PermissionsPage() {
         <Field label="ประเภทผู้ใช้งาน" required>
           <SearchSelect
             value={draft.role}
-            onChange={(v) => setDraft((d) => ({ ...d, role: v }))}
+            onChange={(v) => {
+              setDraft((d) => ({ ...d, role: v }));
+              setRole(v);
+            }}
             options={strOptions(ASSIGNABLE_ROLES)}
           />
         </Field>

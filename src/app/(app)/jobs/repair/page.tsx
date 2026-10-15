@@ -18,6 +18,7 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
+  useMoneyLock,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { Badge } from '@/components/ui/badge';
@@ -72,6 +73,7 @@ function RepairForm() {
   const act = useWorkflowErrors();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
   const { can } = useAccess();
+  const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (System Admin may change them)
   const [lines, setLines] = React.useState<Line[]>([]);
   const [detail, setDetail] = React.useState({
     engineerSymptom: '',
@@ -246,18 +248,20 @@ function RepairForm() {
         <Section
           title="การใช้อะไหล่ และการเสนอราคา"
           icon={Stethoscope}
-          description="เสนอราคาแบบ A (Normal) และแบบ B (VIP)"
+          description={lock ?? 'เสนอราคาแบบ A (Normal) และแบบ B (VIP)'}
           bodyClassName="p-0"
         >
-          <div className="flex items-center gap-2 border-b border-border p-3">
-            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <ProductPicker
-              products={PRODUCTS}
-              onPick={(p) => p && addPart(p.code)}
-              placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
-              className="sm:max-w-xl"
-            />
-          </div>
+          {!lock && (
+            <div className="flex items-center gap-2 border-b border-border p-3">
+              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <ProductPicker
+                products={PRODUCTS}
+                onPick={(p) => p && addPart(p.code)}
+                placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
+                className="sm:max-w-xl"
+              />
+            </div>
+          )}
           <div className="table-scroll rounded-none">
             <table className="w-full min-w-[1080px] text-sm">
               <thead>
@@ -319,7 +323,7 @@ function RepairForm() {
                         <Checkbox
                           aria-label={`เบิก แบบ A ${l.code}`}
                           checked={l.aPick}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           onChange={() => upd(l.id, { aPick: !l.aPick })}
                         />
                       </td>
@@ -327,7 +331,7 @@ function RepairForm() {
                         <Checkbox
                           aria-label={`เสนอ แบบ A ${l.code}`}
                           checked={l.aQuote}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           onChange={() => upd(l.id, { aQuote: !l.aQuote })}
                         />
                       </td>
@@ -338,7 +342,7 @@ function RepairForm() {
                           placeholder="0"
                           aria-label={`จำนวน แบบ A ${l.code}`}
                           value={l.aQty}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           aria-invalid={!!act.errors[`parts.${i}.a.qty`] || undefined}
                           onChange={(n) => {
                             upd(l.id, { aQty: n });
@@ -353,7 +357,7 @@ function RepairForm() {
                         <Checkbox
                           aria-label={`เบิก แบบ B ${l.code}`}
                           checked={l.bPick}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           onChange={() => upd(l.id, { bPick: !l.bPick })}
                         />
                       </td>
@@ -361,7 +365,7 @@ function RepairForm() {
                         <Checkbox
                           aria-label={`เสนอ แบบ B ${l.code}`}
                           checked={l.bQuote}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           onChange={() => upd(l.id, { bQuote: !l.bQuote })}
                         />
                       </td>
@@ -372,7 +376,7 @@ function RepairForm() {
                           placeholder="0"
                           aria-label={`จำนวน แบบ B ${l.code}`}
                           value={l.bQty}
-                          disabled={l.locked}
+                          disabled={l.locked || !!lock}
                           aria-invalid={!!act.errors[`parts.${i}.b.qty`] || undefined}
                           onChange={(n) => {
                             upd(l.id, { bQty: n });
@@ -398,7 +402,7 @@ function RepairForm() {
                         </Badge>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        {!l.locked && (
+                        {!l.locked && !lock && (
                           <button
                             onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
@@ -442,7 +446,7 @@ function RepairForm() {
 
         <Section title="รายละเอียดการซ่อม" icon={Wrench}>
           <FieldGrid>
-            <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ (engineer_symptom_id)">
+            <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ">
               <SymptomPicker
                 multiple={false}
                 value={detail.engineerSymptom ? [detail.engineerSymptom] : []}

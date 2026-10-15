@@ -62,7 +62,20 @@ export function SearchSelect({
         (a, b) => Number(!a.label.toLowerCase().startsWith(full)) - Number(!b.label.toLowerCase().startsWith(full)),
       );
   }, [options, q]);
-  const rows = matches.length > MAX_ROWS ? matches.slice(0, MAX_ROWS) : matches;
+  const capped = matches.length > MAX_ROWS ? matches.slice(0, MAX_ROWS) : matches;
+  // the current choice is always a row (opening the list shows it highlighted, even past the cap)
+  const rows = selected && !q && !capped.includes(selected) ? [selected, ...capped] : capped;
+  // open on the current choice, not the first row: cmdk highlights it (values are trimmed there)…
+  const current = selected ? selected.value.trim() : !value && emptyLabel ? '__empty__' : undefined;
+  const listRef = React.useRef<HTMLDivElement>(null);
+  // …and it is scrolled into view once the list has rendered
+  React.useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() =>
+      listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [open]);
 
   const pick = (v: string) => {
     onChange(v);
@@ -111,6 +124,7 @@ export function SearchSelect({
       >
         <CommandPrimitive
           shouldFilter={false}
+          defaultValue={current}
           loop
           className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
         >
@@ -134,7 +148,7 @@ export function SearchSelect({
               </button>
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
+          <CommandPrimitive.List ref={listRef} id={listId} className="max-h-72 overflow-y-auto p-1.5">
             {emptyLabel && !q.trim() && (
               <CommandPrimitive.Item
                 value="__empty__"

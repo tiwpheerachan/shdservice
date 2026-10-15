@@ -183,7 +183,7 @@ export const documentProfileSchema = z
     if (taxId && !isThaiTaxId(taxId)) issue(ctx, 'taxId', 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลักที่ถูกต้อง');
     const phone = clean(v.phone);
     if (phone && (!phoneFormatOk(phone) || phone.length > 50))
-      issue(ctx, 'phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ตัวเลขอย่างน้อย 9 หลัก)');
+      issue(ctx, 'phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (เบอร์ละ 9–10 หลัก หลายเบอร์คั่นด้วย /)');
     const account = clean(v.bankAccountNo);
     if (account && !/^[0-9-]{10,20}$/.test(account))
       issue(ctx, 'bankAccountNo', 'เลขที่บัญชีใช้ได้เฉพาะตัวเลขและ - (10–20 ตัว)');

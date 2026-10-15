@@ -1,11 +1,13 @@
 'use client';
 
-import { toLogin } from '@/lib/navigation';
+import { sessionExpired, toLogin } from '@/lib/navigation';
 
 /**
  * Tiny fetch wrapper for the app's own API routes.
  *  - JSON in / JSON out, throws ApiError { status, message, details } on !ok
- *  - 401 → try to refresh the session once, then our /login page (never straight to SSO)
+ *  - 401 → try to refresh the session once; then a read goes to our /login page (never straight to
+ *    SSO), a write (save / upload) stays on the page with the "sign in again in a new tab" dialog —
+ *    what the user typed is still there to save again
  *  - 403 → surfaces the server's Thai permission message
  * Every call to the app's API goes through here (or exportXlsx) — no hand-rolled fetch + 401 logic.
  */
@@ -39,13 +41,15 @@ export function onApiWrite(fn: () => void) {
   return () => writeListeners.delete(fn);
 }
 
-/** fetch under the session rules: 401 → refresh once and retry; still 401 → /login (throws) */
+/** fetch under the session rules: 401 → refresh once and retry; still 401 → /login, or for a write the
+ *  session-expired dialog (throws either way) */
 async function authedFetch(url: string, init: RequestInit): Promise<Response> {
   let res = await fetch(url, { cache: 'no-store', ...init });
   if (res.status === 401 && (await tryRefresh())) res = await fetch(url, { cache: 'no-store', ...init });
   if (res.status === 401) {
-    toLogin();
-    throw new ApiError(401, 'กรุณาเข้าสู่ระบบใหม่');
+    if ((init.method ?? 'GET').toUpperCase() === 'GET') toLogin();
+    else sessionExpired();
+    throw new ApiError(401, 'เซสชันหมดอายุ — เข้าสู่ระบบใหม่ในแท็บใหม่ แล้วกดบันทึกอีกครั้ง');
   }
   return res;
 }

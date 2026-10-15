@@ -18,7 +18,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
   const docs = onOpenDoc ? j.docs : [];
   const [busy, setBusy] = React.useState('');
   const [docError, setDocError] = React.useState('');
-  /** pop-up blocked: a plain link the customer taps (the ticket lives 60 s) */
+  /** pop-up blocked: a plain link the customer taps (the document link lives 10 minutes) */
   const [fallback, setFallback] = React.useState<{ label: string; url: string } | null>(null);
 
   const openDoc = async (d: PublicDoc) => {
@@ -85,7 +85,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
           >
             แตะเพื่อเปิด {fallback.label}
           </a>{' '}
-          <span className="text-muted-foreground">(ใช้ได้ภายใน 1 นาที)</span>
+          <span className="text-muted-foreground">(ใช้ได้ภายใน 10 นาที)</span>
         </p>
       )}
       <p className="text-muted-foreground">
@@ -134,6 +134,9 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               const done = i < currentIndex;
               const now = i === currentIndex;
               const at = reached.get(s.key);
+              // the current step says what it really is ("รออะไหล่", "พร้อมให้มารับที่ศูนย์") — the
+              // step's own label / hint merge two meanings, so they show only for the other steps
+              const label = now ? j.stepLabel : s.label;
               return (
                 <li key={s.key} className="flex gap-3">
                   <div className="flex flex-col items-center">
@@ -149,8 +152,8 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                     )}
                   </div>
                   <div className={cn('pb-5', !done && !now && 'opacity-55')}>
-                    <p className={cn('text-sm font-medium', now && 'text-primary')}>{s.label}</p>
-                    <p className="text-xs text-muted-foreground">{s.hint}</p>
+                    <p className={cn('text-sm font-medium', now && 'text-primary')}>{label}</p>
+                    {label === s.label && <p className="text-xs text-muted-foreground">{s.hint}</p>}
                     {at && <p className="num mt-0.5 text-2xs text-muted-foreground">{at}</p>}
                     {docButtons(docs.filter((d) => d.step === s.key))}
                   </div>
@@ -205,7 +208,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               {j.dueDate && !j.closedDate && (
                 <div>
                   <dt className="text-2xs text-muted-foreground">วันที่คาดว่าจะเสร็จ</dt>
-                  <dd className="num font-medium">{j.dueDate}</dd>
+                  <dd className={cn('font-medium', /^\d/.test(j.dueDate) && 'num')}>{j.dueDate}</dd>
                 </div>
               )}
               {j.closedDate && (

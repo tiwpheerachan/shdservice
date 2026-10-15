@@ -1,8 +1,8 @@
 import type { NextRequest } from 'next/server';
-import { hit, hmac, isBlocked, issueDocTicket, logEvent } from '@/server/track-guard';
+import { hit, hmac, isBlocked, logEvent } from '@/server/track-guard';
 import { trackJson, trackCtx, readSmallJson, str, TRACK_SESSION_HEADER } from '@/server/track-http';
 import { touchSession } from '@/server/track-otp';
-import { findDoc, jobNoForCustomers, jobNoForLink } from '@/server/services/tracking';
+import { findDoc, issueDocLink, jobNoForCustomers, jobNoForLink } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
 
@@ -15,8 +15,9 @@ export const dynamic = 'force-dynamic';
  * The job comes from an authorisation the server issued, never from the body alone:
  *   x-track-session header (phone + OTP) → the job must belong to that customer
  *   linkToken (/track/<token>)          → the job of that live link (any jobNo in the body is ignored)
- * The document must be one `findDoc` lists for that job. The answer is a 60-second, single-use
- * ticket bound to this IP + browser — the URL carries no job number, quotation number or token.
+ * The document must be one `findDoc` lists for that job. The answer is a 10-minute document link
+ * bound to that session / link (issueDocLink) — not to this browser, so LINE → Safari still opens it.
+ * The URL carries no job number, quotation number or token.
  * Not yours / does not exist / not issued to customers → the same 404.
  */
 export async function POST(req: NextRequest) {
@@ -34,11 +35,13 @@ export async function POST(req: NextRequest) {
     const body = await readSmallJson(req);
 
     let jobNo: string | null;
+    let auth: string; // the session / link the document link is bound to
     const sessionToken = req.headers.get(TRACK_SESSION_HEADER);
     if (sessionToken) {
       const s = await touchSession(sessionToken, c.ip, c.ua, true);
       if (!s) return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: 'session' }, 401);
       jobNo = await jobNoForCustomers(str(body.jobNo, 50), s.customerIds);
+      auth = sessionToken;
     } else {
       const linkToken = str(body.linkToken, 128).trim();
       if (!(await hit('doc_link_min', hmac(`link:${linkToken}`), 10, 60))) {
@@ -46,13 +49,14 @@ export async function POST(req: NextRequest) {
         return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
       }
       jobNo = await jobNoForLink(linkToken);
+      auth = linkToken;
       if (!jobNo) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 410);
     }
     if (!jobNo) return notFound();
 
     const doc = await findDoc(jobNo, body.kind, body.ref);
     if (!doc) return notFound();
-    const ticket = await issueDocTicket({ jobNo, kind: doc.kind, ref: doc.ref }, c.ip, c.ua);
+    const ticket = await issueDocLink({ jobNo, kind: doc.kind, ref: doc.ref }, auth, c.ip);
     logEvent('doc_ticket_issued', { ipHash: c.ipKey, jobNo, result: doc.kind, requestId: c.requestId });
     return trackJson({ ok: true, url: `/track/doc/${ticket}` });
   } catch (e) {

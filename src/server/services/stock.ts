@@ -22,7 +22,7 @@ import {
   storeLocation,
 } from '@/db/schema';
 import type { Movement, Product } from '@/data/mock';
-import { HttpError, fullName } from '@/server/auth';
+import { HttpError, can, fullName, type CurrentUser } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
@@ -126,6 +126,11 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
   };
 }
 
+/** ราคาทุน: System Admin and roles that may edit products only (owner 2026-10-15). The product API and
+ *  the Excel export leave it out for everyone else — the screens only mirror that. */
+export const canSeeCost = (u: CurrentUser) => can(u, 'Product', 'edit');
+export const withoutCost = <T extends Product>(p: T): T => ({ ...p, capitalPrice: undefined });
+
 const productQuery = (x: Tx | typeof db = db) =>
   x
     .select(productSelect)
@@ -151,7 +156,7 @@ export async function listProducts(opts: { deleted?: DeletedMode; q?: string } =
   const term = q.trim();
   const search = term ? productSearch(term) : undefined;
   const rows = await productQuery().where(and(active, search)).orderBy(asc(product.productCode));
-  return rows.map((r) => toProduct(r));
+  return rows.map((r) => withoutCost(toProduct(r))); // list screens never show the cost
 }
 
 const modelsOf = async (x: Tx | typeof db, productId: number) =>
@@ -668,8 +673,9 @@ export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
 }
 
 /** job_status ids of a closed or cancelled job (jobs.ts JS — not imported: that module imports this one):
- *  0 ยกเลิกข้อมูล · 6 ยกเลิกซ่อม · 7 / 8 / 20 / 21 / 23 / 24 ปิดงาน */
-export const JOB_CLOSED_STATUSES = [0, 6, 7, 8, 20, 21, 23, 24];
+ *  0 ยกเลิกข้อมูล · 6 ยกเลิกซ่อม · 7 / 8 / 20 / 21 / 23 / 24 ปิดงาน ·
+ *  22 ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out (owner 2026-10-15) */
+export const JOB_CLOSED_STATUSES = [0, 6, 7, 8, 20, 21, 22, 23, 24];
 
 /** No part goes out to a closed / cancelled job (returns from it stay allowed). In a transaction the
  *  job row is share-locked first (job → request rows → stock, the order the repair save locks in). */
@@ -683,7 +689,7 @@ export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = d
   if (j?.id != null && JOB_CLOSED_STATUSES.includes(j.id))
     throw new HttpError(
       409,
-      `งาน ${jobNo} ปิดงานหรือยกเลิกแล้ว (${clean(j.name) || `สถานะ ${j.id}`}) — ตัดจ่ายอะไหล่ให้งานนี้ไม่ได้`,
+      `งาน ${jobNo} อยู่ในสถานะ "${clean(j.name) || j.id}" (ปิดงาน ยกเลิก หรือไม่พบอาการเสีย) — ตัดจ่ายอะไหล่ให้งานนี้ไม่ได้`,
     );
 }
 
@@ -950,7 +956,34 @@ export async function returnFromJob(
 }
 
 /* ---- sale order picking ---- */
-export type SoPickLine = { dtId: number; code: string; name: string; onhand: number; need: number; picked: boolean };
+/** `pickNo`: the WHO that already issued the line ('' = still to issue) */
+export type SoPickLine = {
+  dtId: number;
+  code: string;
+  name: string;
+  onhand: number;
+  need: number;
+  picked: boolean;
+  pickNo: string;
+};
+
+/** a product line no WHO has issued yet (legacy rows carry '' as well as null) */
+const soLineToPick = and(ne(saleOutDt.productType, 'Service'), sql`coalesce(${saleOutDt.pickInventoryNo}, '') = ''`);
+
+/** จ่ายออกตามใบสั่งขาย's list: approved orders with a product line still to issue. Approving an order
+ *  issues its stock (approveSaleOrder), so this is what approval left behind — usually nothing. */
+export async function saleOrdersToPick(limit = 300): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ no: saleOutHd.saleOutHdNo })
+    .from(saleOutHd)
+    .innerJoin(saleOutDt, eq(saleOutDt.saleOutHdNo, saleOutHd.saleOutHdNo))
+    .where(
+      and(eq(saleOutHd.approveStatusId, SO_APPROVED), statusFilter(saleOutHd.recordStatus, 'exclude'), soLineToPick),
+    )
+    .orderBy(desc(saleOutHd.saleOutHdNo))
+    .limit(limit);
+  return rows.flatMap((r) => (r.no ? [r.no] : []));
+}
 
 export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]> {
   const rows = await db
@@ -975,6 +1008,7 @@ export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]
     onhand: r.onhand ?? 0,
     need: r.qty,
     picked: !!r.pick,
+    pickNo: r.pick ?? '',
   }));
 }
 
@@ -1017,7 +1051,16 @@ export async function issueForSaleOrder(
       mv.push({ code: d.productCode ?? '', qty });
       picked.push(d.saleOutDtId);
     }
-    if (!mv.length) throw new HttpError(400, 'ไม่มีรายการที่ต้องจ่ายออก');
+    if (!mv.length) {
+      // approving the order issued it already — say so instead of a bare "nothing to issue"
+      const done = [...new Set(dts.map((d) => d.pickInventoryNo).filter(Boolean))];
+      if (dts.length && done.length && dts.every((d) => d.pickInventoryNo))
+        throw new HttpError(
+          409,
+          `ใบสั่งขาย ${i.soNo} ตัดสต๊อกครบแล้ว (${done.join(', ')}) — ไม่มีรายการที่ต้องจ่ายออก`,
+        );
+      throw new HttpError(400, 'ไม่มีรายการที่ต้องจ่ายออก');
+    }
     const no = await insertMovement(
       t,
       { typeId: INV.OUT_SALE, ref: i.soNo, outTo: i.payTo, remark: i.remark },
@@ -1272,7 +1315,12 @@ const PRODUCT_SORT = {
   value: sql`coalesce(${productNoneSerial.quantityRemain},0) * coalesce(${productNoneSerial.retailPrice},0)`,
 };
 
-export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Page<Product & { value: number }>> {
+/** `cost`: keep ราคาทุน (the export, for a user who may see it — canSeeCost); the list screens never show it */
+export async function pageProducts(
+  p: PageQuery,
+  f: ProductFilters,
+  cost = false,
+): Promise<Page<Product & { value: number }>> {
   const w = productWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
@@ -1293,7 +1341,7 @@ export async function pageProducts(p: PageQuery, f: ProductFilters): Promise<Pag
   return {
     rows: rows.map((r) => {
       const pr = toProduct(r, fullName(r.creatorFirst, r.creatorLast));
-      return { ...pr, value: Math.max(0, pr.onhand) * pr.price };
+      return { ...(cost ? pr : withoutCost(pr)), value: Math.max(0, pr.onhand) * pr.price };
     }),
     total: totalOf(counted),
     page: p.page,

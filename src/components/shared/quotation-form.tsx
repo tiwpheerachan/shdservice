@@ -19,7 +19,7 @@ import { api, errMsg, qs } from '@/lib/api';
 import type { JobDetail } from '@/lib/use-job';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { computeTotals, parseDiscount, quotationSchema } from '@/lib/validation/quotation';
+import { computeTotals, parseDiscount, quotationSchema, quotedParts } from '@/lib/validation/quotation';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 
@@ -167,26 +167,19 @@ export const QuotationForm = React.forwardRef<
   // a new quotation's date preview: when the screen opened, Thai time (a loaded one shows its own)
   const openedAt = useMountTime();
 
-  // a job → customer + device info (+ parts flagged "เสนอ" in the repair screen become lines)
+  // the job's parts flagged "เสนอ" in the repair screen, from set A or set B (= the quotation type)
+  const fillQuoted = (j: JobDetail, t: 'A' | 'B') => {
+    const quoted = quotedParts(j.parts, t);
+    if (quoted.length) setLines(quoted.map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
+  };
+  // a job → customer + device info (+ its quoted parts become lines)
   const applyJob = React.useCallback(
     async (j: JobDetail, withParts: boolean) => {
       setJob(j);
       if (mode === 'new') setProfileId(j.documentProfileId || 0);
       setJobRef(j.no);
       if (withParts) {
-        const quoted = j.parts.filter((p) => p.isQuotation && p.requested > 0);
-        if (quoted.length) {
-          setLines(
-            quoted.map((p) => ({
-              id: ++idRef.current,
-              code: p.code,
-              name: p.name,
-              qty: p.requested,
-              price: p.unitPrice,
-              itemType: 'SparePart' as const,
-            })),
-          );
-        }
+        fillQuoted(j, type);
         if (j.serviceCost) setService(j.serviceCost);
       }
       if (j.customer) {
@@ -194,7 +187,7 @@ export const QuotationForm = React.forwardRef<
         setCustomer(c.rows[0] ?? null);
       }
     },
-    [mode],
+    [mode, type],
   );
 
   // the job number typed in the form (Enter / leaving the box)
@@ -304,7 +297,11 @@ export const QuotationForm = React.forwardRef<
           {(['A', 'B'] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setType(t)}
+              onClick={() => {
+                setType(t);
+                // a new quotation from a job: switching A ↔ B quotes that set's parts instead
+                if (mode === 'new' && job && t !== type) fillQuoted(job, t);
+              }}
               className={
                 'flex-1 rounded-lg border px-4 py-3 text-left transition-colors ' +
                 (type === t ? 'border-primary bg-primary-soft' : 'border-border bg-card hover:border-input')

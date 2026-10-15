@@ -22,10 +22,22 @@ export function isThaiTaxId(v: string): boolean {
 /** a tax id as typed → what is stored: spaces / dashes dropped */
 export const taxIdDigits = (v: unknown) => String(v ?? '').replace(/[\s-]/g, '');
 const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
-/** one or more phone numbers: digits / spaces / dashes / "/" between numbers, at least 9 digits */
+/**
+ * one or more phone numbers: digits / spaces / dashes / "/" between numbers, each number 9–11 digits
+ * (02-123-4567, 081-234-5678, +66 81 234 5678). The digit groups are read left to right into numbers;
+ * "086-417-29530611474570" (one 20-digit run) used to pass because only the total (≥ 9) was checked.
+ */
 export const phoneFormatOk = (v: unknown) => {
   const p = normalizePhone(v);
-  return /^[\d\s+\-/(),.]+$/.test(p) && digits(p).length >= 9;
+  if (!/^[\d\s+\-/(),.]+$/.test(p)) return false;
+  let n = 0; // digits of the number being read
+  // ponytail: greedy — a number ends once it has 9+ digits; a 9-digit landline glued to a short group may misread
+  for (const g of p.match(/\d+/g) ?? []) {
+    n += g.length;
+    if (n > 11) return false;
+    if (n >= 9) n = 0;
+  }
+  return n === 0 && /\d/.test(p);
 };
 /** a Thai mobile somewhere in the phone field (the /track OTP goes to it) — separators ignored */
 export const hasThaiMobile = (v: unknown) =>
@@ -47,6 +59,9 @@ export function withPrefix(prefix: string, name: string): string {
   return !prefix || own.some((p) => n.startsWith(p)) ? n : prefix + n;
 }
 
+/** ลูกค้าบุคคล (not นิติบุคคล / ตัวแทน) — only they must give a mobile: a company may give its office line */
+export const isIndividual = (type: unknown) => !clean(type) || clean(type) === 'Normal';
+
 /** the stored values the form opened with — an UNCHANGED legacy value still passes ("never worse") */
 export type CustomerPrev = Partial<
   Record<'name' | 'phone' | 'taxId' | 'email' | 'line' | 'type' | 'priceGroup' | 'postalCode', string>
@@ -56,8 +71,9 @@ export type CustomerPrev = Partial<
  * Customer form rules (ข้อมูลลูกค้า page + the quick add inside CustomerSelect) — payload = CustomerInput.
  * `prev` = the customer being edited (null / left out = a new customer).
  *  - name: 1–200 characters, not only digits
- *  - phone: a new customer needs one with a Thai mobile in it (the /track OTP key); an existing
- *    customer that has one must keep one; checked only when it changed (legacy phones stay savable)
+ *  - phone: a new customer needs one — an individual (type Normal) with a Thai mobile in it (the /track
+ *    OTP key), a Corporate / Dealer one may give a landline; an existing customer that has one must keep
+ *    one; the format is checked whenever it changed, on an edit too (an unchanged legacy phone stays savable)
  *  - tax ID 13 digits + check digit; postal code 5 digits; email ≤ 50; Line ID; lists for type / price group
  *  - text no longer than its column (address 100 each) — nothing is cut off silently
  */
@@ -86,10 +102,13 @@ export function customerSchema(prev?: CustomerPrev | null) {
         const phone = normalizePhone(v.phone);
         if (phoneRequired && !phone) bad('phone', 'ต้องระบุเบอร์โทรศัพท์');
         else if (phone && !same('phone', v.phone, digits)) {
-          if (!phoneFormatOk(phone)) bad('phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ตัวเลขอย่างน้อย 9 หลัก)');
+          if (!phoneFormatOk(phone)) bad('phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (เบอร์ละ 9–10 หลัก หลายเบอร์คั่นด้วย /)');
           else if (phone.length > 50) bad('phone', 'เบอร์โทรศัพท์ยาวเกิน 50 ตัวอักษร');
-          else if (!prev && !hasThaiMobile(phone))
-            bad('phone', 'ลูกค้าใหม่ต้องมีเบอร์มือถือ (06 / 08 / 09 + 8 หลัก) — ใช้รับรหัส OTP ติดตามงาน');
+          else if (!prev && isIndividual(v.type) && !hasThaiMobile(phone))
+            bad(
+              'phone',
+              'ลูกค้าบุคคลต้องมีเบอร์มือถือ (06 / 08 / 09 + 8 หลัก) — ใช้รับรหัส OTP ติดตามงาน (นิติบุคคลใช้เบอร์สำนักงานได้)',
+            );
         }
 
         const postal = clean(v.postalCode);

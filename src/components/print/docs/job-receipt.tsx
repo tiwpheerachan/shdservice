@@ -3,11 +3,13 @@ import { getJob } from '@/server/services/jobs';
 import { PrintFrame, Box, KV, Signatures, money } from '@/components/print/print-frame';
 import { REPAIR_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
+import { maskJobForCustomer } from '@/server/services/tracking';
 
-/** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. */
-export async function JobReceiptDoc({ no }: { no: string }) {
-  const j = await getJob(no);
-  if (!j) notFound();
+/** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track (masked). */
+export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
+  const found = await getJob(no);
+  if (!found) notFound();
+  const j = forCustomer ? maskJobForCustomer(found) : found;
   const c = j.customer;
   const co = await profileForDocument(j.documentProfileId);
   return (

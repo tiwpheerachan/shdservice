@@ -3,7 +3,7 @@ import { clientIp } from '@/lib/client-ip';
 import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
 import { signSession, verifySession, SESSION_COOKIE, SESSION_TTL_MS, type SessionUser } from '@/lib/session';
 import { lookupByEmail } from '@/lib/directory';
-import { provisionSsoUser } from '@/server/services/users';
+import { provisionFailure, provisionSsoUser } from '@/server/services/users';
 import { audit } from '@/server/audit';
 import { db } from '@/db/client';
 import { PENDING_ROLE, isApproved } from '@/lib/access';
@@ -18,7 +18,8 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
  * Auto-provision the signed-in employee into `app_user` (the single user table)
  * and return their effective role/status. New users start pending (user_type
  * NULL) until an admin assigns a role; owner emails are always System Admin.
- * null = the DB is unavailable: NO cookie is issued (a session always needs its
+ * A failure returns the sign-in error code — user_conflict (a unique clash on app_user: an admin must
+ * look, retrying will not help) or db_unavailable — and NO cookie is issued (a session always needs its
  * app_user row — the server never trusts a role baked into the cookie).
  */
 async function provision(opts: {
@@ -29,7 +30,9 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}): Promise<{ role: string; status: string; userId: number; sessionVersion: number } | null> {
+}): Promise<
+  { role: string; status: string; userId: number; sessionVersion: number } | 'user_conflict' | 'db_unavailable'
+> {
   try {
     const r = await provisionSsoUser(opts);
     return {
@@ -39,8 +42,9 @@ async function provision(opts: {
       sessionVersion: r.sessionVersion,
     };
   } catch (e) {
-    logError(e, 'sso provision failed');
-    return null;
+    const { reason, constraint } = provisionFailure(e);
+    logError(e, `sso provision failed (${reason})`, constraint ? { constraint } : {});
+    return reason;
   }
 }
 
@@ -144,7 +148,7 @@ export async function GET(request: NextRequest) {
     avatar,
     title: prof?.title ?? '',
   });
-  if (!provisioned) return fail(request, 'db_unavailable');
+  if (typeof provisioned === 'string') return fail(request, provisioned);
   const { role, status, userId, sessionVersion } = provisioned;
 
   // audit: LOGIN (best-effort — never blocks sign-in)

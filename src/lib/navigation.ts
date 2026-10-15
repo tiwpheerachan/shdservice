@@ -1,4 +1,4 @@
-import { allowUnload } from '@/lib/use-unsaved-changes';
+import { allowUnload, hasUnsavedChanges } from '@/lib/use-unsaved-changes';
 
 /**
  * Full page loads — for the few moments the app must start clean instead of routing client-side
@@ -16,9 +16,20 @@ export function hardNavigate(path: string) {
   window.location.assign(new URL(path, window.location.origin).href);
 }
 
-/** session expired → our /login with the "expired" note, back to this exact page (filters included) after */
+/** AccessGuard shows the "session expired — your data is still here" dialog on this window event */
+export const SESSION_EXPIRED_EVENT = 'shd:session-expired';
+
+/** the session is gone but this page must stay (a save failed, or a form holds typed data): ask the
+ *  user to sign in again in a NEW tab — the cookie is shared, so saving here works again after */
+export function sessionExpired() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+/** session expired → our /login with the "expired" note, back to this exact page (filters included) after.
+ *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired). */
 export function toLogin() {
   if (typeof window === 'undefined') return;
+  if (hasUnsavedChanges()) return sessionExpired();
   const here = window.location.pathname + window.location.search;
   hardNavigate(`/login?expired=1&next=${encodeURIComponent(here)}`);
 }

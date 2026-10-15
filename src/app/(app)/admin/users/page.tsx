@@ -338,11 +338,17 @@ export default function UsersPage() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
-      cell: (r) => (
-        <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
-          {r.status}
-        </Badge>
-      ),
+      // a pending sign-up (no role yet) is Active in the table but cannot use anything — say so
+      cell: (r) =>
+        r.role === 'รออนุมัติ' ? (
+          <Badge tone="warning" dot>
+            รออนุมัติ
+          </Badge>
+        ) : (
+          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
+            {r.status}
+          </Badge>
+        ),
     },
     {
       key: 'action',

@@ -8,7 +8,7 @@ import type { Module } from '@/lib/modules';
 import { listSimple, isSimpleKind, listSymptoms, listModels } from '@/server/services/masters';
 import { listSystemUsers } from '@/server/services/users';
 import { listCustomers, customerFiltersFromQuery } from '@/server/services/customers';
-import { pageProducts, listMovements, listIssuedLines, type ProductFilters } from '@/server/services/stock';
+import { canSeeCost, pageProducts, listMovements, listIssuedLines, type ProductFilters } from '@/server/services/stock';
 import { listAudit } from '@/server/audit';
 import { listJobs, filtersFromQuery } from '@/server/services/jobs';
 import { listQuotations } from '@/server/services/quotations';
@@ -214,7 +214,6 @@ for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'product_
 }
 
 async function loadRows(req: NextRequest, resource: string, user: CurrentUser): Promise<Row[]> {
-  void user;
   const sp = new URL(req.url).searchParams;
   const p = parsePageQuery(sp);
   const mode = parseStatusMode(sp.get('deleted'));
@@ -285,7 +284,8 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
         model: f.model,
         stock: f.stock === 'in' || f.stock === 'low' || f.stock === 'out' ? f.stock : undefined,
       };
-      return (await pageProducts({ ...p, page: 1, pageSize: MAX_ROWS }, pf)).rows as unknown as Row[];
+      return (await pageProducts({ ...p, page: 1, pageSize: MAX_ROWS }, pf, await canSeeCost(user)))
+        .rows as unknown as Row[];
     }
     case 'movements':
       return listMovements({
@@ -338,26 +338,31 @@ export async function exportXlsx(req: NextRequest, resource: string): Promise<{ 
         ? await requireUser(req)
         : await requireCan(req, spec.module, 'view');
   const rows = await loadRows(req, resource, user);
+  // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
+  const cols =
+    resource === 'products' && !(await canSeeCost(user))
+      ? spec.cols.filter((c) => c.key !== 'capitalPrice')
+      : spec.cols;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'OneService';
   wb.created = new Date();
   const ws = wb.addWorksheet(spec.title.slice(0, 31), { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws.columns = spec.cols.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 16 }));
+  ws.columns = cols.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 16 }));
   ws.getRow(1).font = { bold: true };
   ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF9' } };
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: spec.cols.length } };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
 
   const truncated = rows.length >= MAX_ROWS;
   for (const r of rows.slice(0, MAX_ROWS)) {
     const out: Row = {};
-    for (const c of spec.cols) {
+    for (const c of cols) {
       const v = r[c.key];
       out[c.key] = c.money || c.num ? Number(v ?? 0) : (v ?? '');
     }
     ws.addRow(out);
   }
-  for (const c of spec.cols) {
+  for (const c of cols) {
     if (c.money) ws.getColumn(c.key).numFmt = '#,##0.00';
     else if (c.num) ws.getColumn(c.key).numFmt = '#,##0';
   }

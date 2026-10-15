@@ -25,7 +25,7 @@ import {
   type CustomerFormValues,
   type CustomerConflict,
 } from '@/components/shared/customer-form';
-import { postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
+import { api, postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { customerSchema } from '@/lib/validation/customer';
@@ -184,7 +184,7 @@ function CustomersPageInner() {
     },
     {
       key: 'action',
-      header: 'Action',
+      header: 'จัดการ',
       width: '110px',
       align: 'center',
       sortable: false,
@@ -299,10 +299,10 @@ function CustomersPageInner() {
         title={viewOnly ? 'ข้อมูลลูกค้า' : editing ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
         description={
           viewOnly
-            ? `Mode: View · Customer Id #${editing?.code}`
+            ? `ดูข้อมูล · รหัสลูกค้า ${editing?.code}`
             : editing
-              ? `Mode: Edit Data · Customer Id #${editing.code}`
-              : 'Mode: Add New · รหัสลูกค้าจะถูกสร้างอัตโนมัติ'
+              ? `แก้ไขข้อมูล · รหัสลูกค้า ${editing.code}`
+              : 'รหัสลูกค้าจะถูกสร้างอัตโนมัติเมื่อบันทึก'
         }
         size="xl"
         footer={
@@ -342,9 +342,16 @@ function CustomersPageInner() {
             <div className="mt-4">
               <ConflictNotice
                 conflicts={conflicts}
-                onPick={(code) => {
-                  const hit = CUSTOMERS.find((c) => c.code === code);
-                  if (hit) openForm(hit);
+                pickLabel="เปิดลูกค้ารายนี้"
+                onPick={async (code) => {
+                  // the clashing customer is often not on this page of the list — look it up by its code
+                  const hit =
+                    CUSTOMERS.find((c) => c.code === code) ??
+                    (
+                      await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`).catch(() => null)
+                    )?.rows.find((c) => c.code === code);
+                  if (hit) openForm(hit, !canEdit);
+                  else push({ kind: 'error', title: 'เปิดข้อมูลลูกค้าไม่ได้', desc: code });
                 }}
               />
             </div>

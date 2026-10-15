@@ -22,6 +22,15 @@ import { saleOrderSchema } from '@/lib/validation/sale-order';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 
+// approve_status.approve_name_th → badge tone (list + edit page)
+export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
+  รออนุมัติ: 'warning',
+  อนุมัติแล้ว: 'success',
+  ปฏิเสธ: 'danger',
+  แก้ไขข้อมูล: 'danger',
+  กำลังดำเนินการจัดทำ: 'info',
+};
+
 type Line = { id: number; code: string; name: string; qty: number; price: number; type: 'SparePart' | 'Service' };
 
 /** GET /api/sale-orders/:no (subset the form uses) */
@@ -32,6 +41,12 @@ export type SaleOrderLoaded = {
   createdBy: string;
   approve: string;
   approveId?: number;
+  approveRemark?: string;
+  approvedBy?: string;
+  approveDate?: string;
+  tracking?: string;
+  /** who may not decide on it (the server refuses them; System Admin may) */
+  creatorIds?: number[];
   paymentType?: string;
   paymentAmount?: number;
   remark?: string;
@@ -125,7 +140,10 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [remark, setRemark] = React.useState(initial?.remark ?? '');
     const [slip, setSlip] = React.useState(initial?.slip ?? '');
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
-    const [submit, setSubmit] = React.useState((initial?.approveId ?? 0) >= 2);
+    // the radio shows the order's real state: only a waiting (2) order is "sent"; a sent-back (3) one starts unsent
+    const [submit, setSubmit] = React.useState(initial?.approveId === 2);
+    // 4 อนุมัติแล้ว / 5 ปฏิเสธ are final — the server refuses any edit, so the form is read-only
+    const readOnly = [4, 5].includes(initial?.approveId ?? 0);
 
     // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
     const onPickSlip = async (f: File | undefined) => {
@@ -216,9 +234,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     });
 
     return (
-      <>
+      <fieldset disabled={readOnly} className="contents">
         <Section
-          title="Customer Info"
+          title="ข้อมูลลูกค้า"
           icon={UserRound}
           description={
             customer ? 'ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)' : 'เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่'
@@ -229,11 +247,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           </Field>
         </Section>
 
-        <Section title="Sale Order Info" icon={FileText}>
+        <Section title="ข้อมูลใบสั่งขาย" icon={FileText}>
           <FieldGrid>
             <Field label="เลขใบสั่งขาย">
               <ReadOnly>
-                <span className="num">{soNo ?? initial?.no ?? 'Generate Auto'}</span>
+                <span className="num">{soNo ?? initial?.no ?? 'ออกเลขอัตโนมัติเมื่อบันทึก'}</span>
               </ReadOnly>
             </Field>
             <ProfileSelect
@@ -266,40 +284,42 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         </Section>
 
         <Section title="รายการสินค้า" icon={ShoppingCart} bodyClassName="p-0">
-          <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
-            <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1" error={fe.errors.lines}>
-              <ProductPicker
-                id="so-product"
-                products={PRODUCTS}
-                value={code}
-                clearable
-                onPick={(p) => setCode(p?.code ?? '')}
-                placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…"
-              />
-            </Field>
-            <Field label="จำนวน" className="sm:w-28">
-              <NumberInput min={1} max={1000} step={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
-            </Field>
-            <Field label="หน่วยนับ" className="sm:w-28">
-              <Input readOnly value="Pcs." />
-            </Field>
-            <Button size="md" onClick={add} disabled={!code}>
-              <Plus className="h-3.5 w-3.5" />
-              เพิ่มรายการ
-            </Button>
-          </div>
+          {!readOnly && (
+            <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
+              <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1" error={fe.errors.lines}>
+                <ProductPicker
+                  id="so-product"
+                  products={PRODUCTS}
+                  value={code}
+                  clearable
+                  onPick={(p) => setCode(p?.code ?? '')}
+                  placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…"
+                />
+              </Field>
+              <Field label="จำนวน" className="sm:w-28">
+                <NumberInput min={1} max={1000} step={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
+              </Field>
+              <Field label="หน่วยนับ" className="sm:w-28">
+                <Input readOnly value="Pcs." />
+              </Field>
+              <Button size="md" onClick={add} disabled={!code}>
+                <Plus className="h-3.5 w-3.5" />
+                เพิ่มรายการ
+              </Button>
+            </div>
+          )}
 
           <div className="table-scroll rounded-none">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
                   <th className="w-10 px-3 py-2 text-left">#</th>
-                  <th className="w-28 px-3 py-2 text-left">Item Code</th>
+                  <th className="w-28 px-3 py-2 text-left">รหัสสินค้า</th>
                   <th className="px-3 py-2 text-left">รายละเอียดสินค้า</th>
                   <th className="w-20 px-3 py-2 text-right">จำนวน</th>
                   <th className="w-28 px-3 py-2 text-right">ราคาขาย/หน่วย</th>
                   <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
-                  <th className="w-16 px-3 py-2 text-center">Action</th>
+                  <th className="w-16 px-3 py-2 text-center">ลบ</th>
                 </tr>
               </thead>
               <tbody>
@@ -310,53 +330,68 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                     </td>
                   </tr>
                 ) : (
-                  lines.map((l, i) => (
-                    <tr key={l.id} className="border-b border-border/70 last:border-0">
-                      <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
-                      <td className="num px-3 py-2 font-medium">{l.code}</td>
-                      <td className="px-3 py-2">
-                        <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <NumberInput
-                          aria-label={`จำนวน ${l.code}`}
-                          aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
-                          min={1}
-                          max={1000}
-                          step={1}
-                          inputMode="numeric"
-                          value={l.qty}
-                          onChange={(n) =>
-                            setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
-                          }
-                          className="ml-auto h-8 w-16 text-right text-xs"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <NumberInput
-                          aria-label={`ราคา ${l.code}`}
-                          aria-invalid={!!fe.errors[`lines.${i}.price`] || undefined}
-                          step="0.01"
-                          value={l.price}
-                          onChange={(n) => {
-                            setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));
-                            fe.clear(`lines.${i}.price`);
-                          }}
-                          className="ml-auto h-8 w-24 text-right text-xs"
-                        />
-                      </td>
-                      <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                          aria-label="ลบ"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  lines.map((l, i) => {
+                    // stock on hand now (the approval takes it out) — a warning only, the approval refuses for real
+                    const onhand = PRODUCTS.find((p) => p.sysCode === l.code)?.onhand;
+                    const short = !readOnly && l.type === 'SparePart' && onhand !== undefined && l.qty > onhand;
+                    return (
+                      <tr key={l.id} className="border-b border-border/70 last:border-0">
+                        <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
+                        <td className="num px-3 py-2 font-medium">{l.code}</td>
+                        <td className="px-3 py-2">
+                          <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
+                          {!readOnly && l.type === 'SparePart' && onhand !== undefined && (
+                            <span
+                              className={
+                                short ? 'block text-xs font-medium text-warning' : 'block text-xs text-muted-foreground'
+                              }
+                            >
+                              คงเหลือ {onhand}
+                              {short && ' — ไม่พออนุมัติ: รับเข้าอะไหล่ที่ เมนูรับเข้า ก่อน'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <NumberInput
+                            aria-label={`จำนวน ${l.code}`}
+                            aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
+                            min={1}
+                            max={1000}
+                            step={1}
+                            inputMode="numeric"
+                            value={l.qty}
+                            onChange={(n) =>
+                              setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
+                            }
+                            className="ml-auto h-8 w-16 text-right text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <NumberInput
+                            aria-label={`ราคา ${l.code}`}
+                            aria-invalid={!!fe.errors[`lines.${i}.price`] || undefined}
+                            step="0.01"
+                            value={l.price}
+                            onChange={(n) => {
+                              setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));
+                              fe.clear(`lines.${i}.price`);
+                            }}
+                            className="ml-auto h-8 w-24 text-right text-xs"
+                          />
+                        </td>
+                        <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                            aria-label="ลบ"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
               <tfoot>
@@ -430,22 +465,34 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             <Field label="หมายเหตุ" wide error={fe.errors.remark}>
               <Textarea rows={2} maxLength={100} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
-            <Field label="Action" required wide group="radiogroup">
-              <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
-                {[
-                  { k: false, l: 'กำลังดำเนินการจัดทำ (In Progress)' },
-                  { k: true, l: 'Send To Approve' },
-                ].map((a) => (
-                  <label key={a.l} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <Radio name="so-action" checked={submit === a.k} onChange={() => setSubmit(a.k)} />
-                    {a.l}
-                  </label>
-                ))}
-              </div>
-            </Field>
+            {!readOnly && (
+              <Field
+                label="บันทึกเป็น"
+                required
+                wide
+                group="radiogroup"
+                hint={
+                  initial?.approveId === 3
+                    ? 'ใบนี้ถูกส่งกลับแก้ไข — แก้แล้วเลือก "ส่งขออนุมัติ" เพื่อส่งให้อนุมัติอีกครั้ง'
+                    : undefined
+                }
+              >
+                <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+                  {[
+                    { k: false, l: 'กำลังจัดทำ (ยังไม่ส่งอนุมัติ)' },
+                    { k: true, l: 'ส่งขออนุมัติ' },
+                  ].map((a) => (
+                    <label key={a.l} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <Radio name="so-action" checked={submit === a.k} onChange={() => setSubmit(a.k)} />
+                      {a.l}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
           </FieldGrid>
         </Section>
-      </>
+      </fieldset>
     );
   },
 );

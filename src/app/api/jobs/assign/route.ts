@@ -7,10 +7,10 @@ import { assignSchema } from '@/lib/validation/stock';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** จนท.รับมอบหมายงาน — assign engineer to many jobs. */
+/** จนท.รับมอบหมายงาน — assign engineer to many jobs. A job someone else has → 409 unless `takeOver: true`. */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Job Assign', 'edit');
   const body = assertValid(assignSchema, await readJson(req));
-  const n = await assignJobs(body.jobNos, body.engineerId, user.userId);
+  const n = await assignJobs(body.jobNos, body.engineerId, user.userId, body.takeOver === true);
   return NextResponse.json({ ok: true, assigned: n });
 });

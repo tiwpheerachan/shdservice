@@ -139,6 +139,16 @@ function pgConstraint(e: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Why provisionSsoUser failed, for the sign-in error page: a unique clash on app_user that the
+ * retries above could not settle (a legacy row, an id sequence behind the data) is not an outage —
+ * retrying will not help, an admin has to look → user_conflict. Anything else → db_unavailable.
+ */
+export function provisionFailure(e: unknown): { reason: 'user_conflict' | 'db_unavailable'; constraint?: string } {
+  const constraint = pgConstraint(e);
+  return constraint ? { reason: 'user_conflict', constraint } : { reason: 'db_unavailable' };
+}
+
 /* ------------------------------------------------------------------ *
  * Mapping app_user → the UI's `User` type
  * ------------------------------------------------------------------ */
@@ -336,11 +346,14 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     if (!row) throw new HttpError(404, 'user not found');
     userChanged(row.emailAddress);
     await audit(db, actorId, {
-      action: 'UPDATE',
+      ...userAuditLine(
+        fullName(first, last),
+        { userType: before.userType?.trim() || null, rs: before.recordStatus },
+        { userType, rs },
+      ),
       module: 'Admin',
       entity: 'app_user',
       key: targetId,
-      summary: `แก้ไขผู้ใช้ ${fullName(first, last)} · สิทธิ์ ${userType ?? PENDING_ROLE}`,
       changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
         skip: ['deleted', 'isActive'],
       }),
@@ -377,6 +390,26 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   return { user: toUser(row), created: true };
 }
 
+/**
+ * The audit line of a user edit, by what it did — the users page's อนุมัติ / ถอนสิทธิ์ / คืนสิทธิ์
+ * all save through upsertUser, and every one of them used to read "แก้ไขผู้ใช้ …".
+ */
+export function userAuditLine(
+  name: string,
+  before: { userType: string | null; rs: string | null },
+  after: { userType: string | null; rs: string },
+): { action: 'APPROVE' | 'STATUS' | 'UPDATE'; summary: string } {
+  const role = after.userType ?? PENDING_ROLE;
+  if (!before.userType && after.userType) return { action: 'APPROVE', summary: `อนุมัติผู้ใช้ ${name} → ${role}` };
+  if (before.rs === RS.ACTIVE && after.rs !== RS.ACTIVE)
+    return { action: 'STATUS', summary: `ถอนสิทธิ์ผู้ใช้ ${name} (${role})` };
+  if (before.rs !== RS.ACTIVE && after.rs === RS.ACTIVE)
+    return { action: 'STATUS', summary: `คืนสิทธิ์ผู้ใช้ ${name} (${role})` };
+  if (before.userType !== after.userType)
+    return { action: 'UPDATE', summary: `เปลี่ยนสิทธิ์ผู้ใช้ ${name}: ${before.userType ?? PENDING_ROLE} → ${role}` };
+  return { action: 'UPDATE', summary: `แก้ไขข้อมูลผู้ใช้ ${name} · สิทธิ์ ${role}` };
+}
+
 /** One-click approve: first real role + Active. */
 export async function approveUser(userId: number, role?: string, actorId = 0): Promise<User> {
   const [old] = await db.select({ type: appUser.userType }).from(appUser).where(eq(appUser.userId, userId));
@@ -400,7 +433,11 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
 
 export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
   if (deleted) refuseSelf(userId, actorId);
-  const [old] = await db.select({ rs: appUser.recordStatus }).from(appUser).where(eq(appUser.userId, userId));
+  const [old] = await db
+    .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName })
+    .from(appUser)
+    .where(eq(appUser.userId, userId));
+  const who = fullName(old?.first, old?.last) || `#${userId}`;
   await db
     .update(appUser)
     .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
@@ -411,7 +448,7 @@ export async function setUserDeleted(userId: number, deleted: boolean, actorId =
     module: 'Admin',
     entity: 'app_user',
     key: userId,
-    summary: deleted ? `ลบผู้ใช้ #${userId}` : `กู้คืนผู้ใช้ #${userId}`,
+    summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who}`,
     changes: { recordStatus: [old?.rs ?? null, deleted ? RS.DELETED : RS.ACTIVE] },
   });
 }

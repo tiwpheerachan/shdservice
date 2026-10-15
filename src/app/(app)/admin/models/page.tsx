@@ -63,7 +63,7 @@ export default function ModelsPage() {
     setForm({
       code: m?.code ?? '',
       name: m?.name ?? '',
-      brand: m?.brand ?? MANUFACTURERS[0]?.name ?? '',
+      brand: m?.brand ?? '', // a new model starts with no brand: the admin must pick it (required)
       price: m?.price ? String(m.price) : '',
       status: m?.status ?? 'Active',
     });
@@ -249,7 +249,7 @@ export default function ModelsPage() {
             <Field label="Model Code">
               <Input value={form.code || 'Generate Auto'} readOnly />
             </Field>
-            <Field label="Model Name" required error={fe.errors.name}>
+            <Field label="Model Name" required error={fe.errors.name} hint={`${form.name.length}/50 ตัวอักษร`}>
               <Input value={form.name} maxLength={50} onChange={(e) => set('name', e.target.value)} />
             </Field>
             <Field label="ยี่ห้อ" required error={fe.errors.brand}>

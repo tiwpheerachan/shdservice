@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, Textarea, Radio, Checkbox } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { useConfirm } from '@/components/ui/confirm';
 import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS, type Customer } from '@/data/mock';
 import {
   useJobTypes,
@@ -38,15 +39,17 @@ import {
   jobSchema,
   filledRequired,
   missingRequired,
-  jobAmountDue,
+  isRequiredFor,
+  jobBalance,
   JOB_FIELD_LABEL,
+  MONEY_LOCKED,
   NO_SERIAL,
   type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
 import type { FieldErrors } from '@/lib/validation';
 import { useMountTime } from '@/lib/use-client';
-import { isoDateTime } from '@/lib/dates';
+import { isoDateTime, today } from '@/lib/dates';
 import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
 
 /* ------------------------------------------------------------------ *
@@ -60,6 +63,8 @@ export type JobFormState = {
   createDate: string;
   createByName: string;
   status: string;
+  /** Pending / Repaired / Finished / Cancel — Finished locks the money fields (useMoneyLock) */
+  statusGroup: string;
   jobType: string;
   jobTypeDetail: string;
   isBounce: boolean; // งานเด้ง (job.is_job_bounce)
@@ -71,6 +76,8 @@ export type JobFormState = {
   warrantyMonth: string;
   expireDate: string;
   warranty: string;
+  /** Warranty was filled in from the expire date (the user has not picked it) — it keeps following it */
+  warrantyAuto: boolean;
   productType: string;
   imei: string;
   serial: string;
@@ -96,6 +103,8 @@ export type JobFormState = {
   engineerId: number;
   engineerName: string;
   engineerEmail: string;
+  /** the user confirmed giving the job (it had an engineer) to someone else — sent as takeOver */
+  takeOver: boolean;
   dueDate: string;
   /** the due date shown is opened + the job type's SLA (nobody picked one yet) */
   dueDateAuto: boolean;
@@ -109,6 +118,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   createDate: '',
   createByName: '',
   status: 'งานใหม่',
+  statusGroup: '',
   jobType: '',
   jobTypeDetail: '',
   isBounce: false,
@@ -120,6 +130,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   warrantyMonth: '12',
   expireDate: '',
   warranty: '',
+  warrantyAuto: false,
   productType: '',
   imei: '',
   serial: '',
@@ -145,6 +156,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   engineerId: 0,
   engineerName: '',
   engineerEmail: '',
+  takeOver: false,
   dueDate: '',
   dueDateAuto: false,
   version: 0,
@@ -171,6 +183,7 @@ export function fromJob(j: JobDetail): JobFormState {
     createDate: j.createDate,
     createByName: j.createByName,
     status: j.status,
+    statusGroup: j.statusGroup,
     jobType: j.jobType,
     jobTypeDetail: j.jobTypeDetail,
     isBounce: j.isBounce,
@@ -252,6 +265,7 @@ export function toJobInput(s: JobFormState) {
     engineerId: s.engineerId || undefined,
     engineerEmail: s.engineerEmail || undefined,
     engineerName: s.engineerName || undefined,
+    takeOver: s.takeOver || undefined,
     dueDate: s.dueDate,
     version: s.version, // ignored by a create
   };
@@ -286,6 +300,8 @@ type Ctx = {
   adopt: (p: Partial<JobFormState>) => void;
   /** a job loaded / saved (or an empty form) — also what "unsaved edits" is measured against */
   reset: (next?: JobFormState) => void;
+  /** the form as last loaded / saved */
+  loaded: JobFormState;
   /** field errors by JobInput key (shown under the fields) */
   errors: FieldErrors;
   /**
@@ -342,13 +358,14 @@ export function JobFormProvider({ initial, children }: { initial?: JobFormState;
         setBaseline(baselineOf(f));
         setErrors({});
       },
+      loaded: saved,
       errors,
       validate: () => run(jobSchema(baseline?.keep, baseline?.check), toJobInput(s)),
       report,
       fromApi,
       incomplete: baseline ? missingRequired(toJobInput(s)).filter((k) => !baseline.keep.includes(k)) : null,
     }),
-    [s, errors, baseline, run, clear, report, fromApi, setErrors],
+    [s, saved, errors, baseline, run, clear, report, fromApi, setErrors],
   );
   return <FormCtx.Provider value={value}>{children}</FormCtx.Provider>;
 }
@@ -386,6 +403,13 @@ export function useJobForm(): Ctx {
   const ctx = React.useContext(FormCtx);
   if (!ctx) throw new Error('useJobForm must be used inside <JobFormProvider>');
   return ctx;
+}
+
+/** why the money fields are read-only: a closed job and the user is not System Admin (the API refuses a change) */
+export function useMoneyLock(): string | undefined {
+  const { s } = useJobForm();
+  const { isAdmin } = useAccess();
+  return s.statusGroup === 'Finished' && !isAdmin ? MONEY_LOCKED : undefined;
 }
 
 /* ---------------- lookup bar ---------------- */
@@ -535,7 +559,7 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
         <Field label="งานเด้ง" wide group="group">
           <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
             <Checkbox checked={s.isBounce} onChange={(e) => set('isBounce', e.target.checked)} />
-            สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ (is_job_bounce)
+            สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ
           </label>
         </Field>
       </FieldGrid>
@@ -607,6 +631,11 @@ export function ProductSection({
     return own.length ? own : MODELS;
   }, [MODELS, s.brand]);
 
+  // Warranty the user has not picked follows the expire date: today or later = IN, passed = OUT
+  const withExpire = (expireDate: string): Partial<JobFormState> =>
+    /^\d{4}-\d{2}-\d{2}$/.test(expireDate) && (!s.warranty || s.warrantyAuto)
+      ? { expireDate, warranty: expireDate >= today() ? 'IN' : 'OUT', warrantyAuto: true }
+      : { expireDate };
   // expire date = sale order date + warranty months
   const recalcExpire = (saleDate: string, months: string) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) return;
@@ -614,8 +643,10 @@ export function ProductSection({
     const d = new Date(saleDate + 'T00:00:00');
     d.setMonth(d.getMonth() + m);
     const p = (n: number) => String(n).padStart(2, '0');
-    patch({ expireDate: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` });
+    patch(withExpire(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`));
   };
+  // walk-in (หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty
+  const needed = (k: JobRequiredKey) => isRequiredFor(k, s.channel);
 
   const repair = variant === 'repair';
   const noSerial = s.serial.trim() === NO_SERIAL;
@@ -637,7 +668,7 @@ export function ProductSection({
   const { data: SHIPPING_PROFILES } = useShippingProfiles();
 
   const soField = (
-    <Field label="Sale Order No." required error={errors.so}>
+    <Field label="Sale Order No." required={needed('so')} error={errors.so}>
       <Input
         placeholder="SO2600760"
         className="num"
@@ -658,7 +689,7 @@ export function ProductSection({
     </Field>
   );
   const saleDateField = (
-    <Field label="Sale Order Date" required error={errors.saleOrderDate}>
+    <Field label="Sale Order Date" required={needed('saleOrderDate')} error={errors.saleOrderDate}>
       <Input
         type="date"
         value={s.saleOrderDate}
@@ -687,13 +718,13 @@ export function ProductSection({
     </Field>
   );
   const expireField = (
-    <Field label="Expire Date" required error={errors.expireDate}>
-      <Input type="date" value={s.expireDate} onChange={(e) => set('expireDate', e.target.value)} />
+    <Field label="Expire Date" required={needed('expireDate')} error={errors.expireDate}>
+      <Input type="date" value={s.expireDate} onChange={(e) => patch(withExpire(e.target.value))} />
     </Field>
   );
   const warrantyField = (
     <Field label="Warranty" error={errors.warranty}>
-      <Select value={s.warranty} onChange={(e) => set('warranty', e.target.value)}>
+      <Select value={s.warranty} onChange={(e) => patch({ warranty: e.target.value, warrantyAuto: false })}>
         <option value="">- - Please Select - -</option>
         {WARRANTY_OPTIONS.map((w) => (
           <option key={w}>{w}</option>
@@ -1027,9 +1058,11 @@ export function CostSummary({
   action?: { errors: FieldErrors; clear: (key: string) => void };
 }) {
   const { s, set, errors } = useJobForm();
+  const lock = useMoneyLock();
   const parts = partsTotal ?? s.partsCost;
   const net = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
   const deposit = Number(s.depositCost) || 0;
+  const bal = jobBalance(net, deposit, 0);
 
   return (
     <Section title="สรุปค่าใช้จ่าย" icon={Coins}>
@@ -1052,6 +1085,7 @@ export function CostSummary({
                   min={0}
                   inputMode="decimal"
                   value={s[f.key] === 0 ? '' : s[f.key]}
+                  disabled={!!lock}
                   placeholder="0.00"
                   aria-invalid={!!error || undefined}
                   aria-describedby={error ? `cost-${f.key}-error` : undefined}
@@ -1060,7 +1094,7 @@ export function CostSummary({
                     set(f.key, Number(e.target.value) || 0);
                     action?.clear(f.key);
                   }}
-                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
                 />
               </CostRow>
               {error && (
@@ -1085,10 +1119,17 @@ export function CostSummary({
             <CostRow label="หักเงินมัดจำ">
               <div className="num px-3 text-right text-sm">-{baht(deposit)}</div>
             </CostRow>
-            <CostRow label="ยอดที่ต้องชำระ" strong>
-              <div className="num px-3 text-right text-base font-semibold">{baht(jobAmountDue(net, deposit))}</div>
+            {/* a deposit larger than the total (not repaired) goes back to the customer */}
+            <CostRow label={bal.refund > 0 ? 'ต้องคืนเงินมัดจำ' : 'ยอดที่ต้องชำระ'} strong>
+              <div className="num px-3 text-right text-base font-semibold">{baht(bal.refund || bal.due)}</div>
             </CostRow>
           </>
+        )}
+        {lock && (
+          <p role="note" className="flex items-center justify-end gap-1.5 text-2xs text-muted-foreground">
+            <Lock className="h-3 w-3" aria-hidden />
+            {lock}
+          </p>
         )}
       </div>
     </Section>
@@ -1099,7 +1140,9 @@ export function CostSummary({
 
 /** `directory={false}` drops the Lark directory lookup under มอบหมายงานนี้ให้ (เปิดงานใหม่ / แก้ไขข้อมูลงาน). */
 export function OtherInfoSection({ showTech = true, directory = true }: { showTech?: boolean; directory?: boolean }) {
-  const { s, set, patch, errors } = useJobForm();
+  const { s, set, patch, errors, loaded } = useJobForm();
+  const lock = useMoneyLock();
+  const confirm = useConfirm();
   const { data: STAFF } = useStaff();
   // "มอบหมายงานนี้ให้" = job.engineer_id → a person in app_user. The directory
   // picker is kept for lookup; the assignment itself must map to app_user.
@@ -1115,12 +1158,27 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
       });
     return opts;
   }, [STAFF, s.engineerId, s.engineerName]);
-  const pick = (p: Person | null) => {
-    setAssignee(p);
-    if (!p) return;
+  // a job that already has someone on it goes to another person only when the user says so (the API asks too)
+  const assign = async (next: Pick<JobFormState, 'engineerId' | 'engineerName' | 'engineerEmail'>) => {
+    const had = loaded.engineerId;
+    const taking =
+      !!loaded.jobNo && had > 0 && (next.engineerId || -1) !== had && !!(next.engineerId || next.engineerEmail);
+    const ok =
+      !taking ||
+      s.takeOver ||
+      (await confirm({
+        title: `งานนี้มีผู้รับงานแล้ว (${loaded.engineerName || `#${had}`}) — มอบให้คนใหม่แทน?`,
+        confirmLabel: 'มอบให้คนใหม่',
+      }));
+    if (ok) patch({ ...next, takeOver: taking });
+    return ok;
+  };
+  const pick = async (p: Person | null) => {
+    if (!p) return setAssignee(null);
     const hit = STAFF.find((st) => st.name === p.name);
     // known staff → id; otherwise the server resolves/creates app_user by email
-    patch({ engineerId: hit?.id ?? 0, engineerName: p.name, engineerEmail: hit ? '' : p.email });
+    if (await assign({ engineerId: hit?.id ?? 0, engineerName: p.name, engineerEmail: hit ? '' : p.email }))
+      setAssignee(p);
   };
   return (
     <Section title="ข้อมูลอื่นๆ" icon={ClipboardList}>
@@ -1133,12 +1191,13 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
             inputMode="decimal"
             placeholder="0.00"
             value={s.estimateCost}
+            disabled={!!lock}
             onChange={(e) => set('estimateCost', e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"
           />
         </Field>
-        <Field label="ค่ามัดจำงานซ่อม (บาท)" error={errors.depositCost}>
+        <Field label="ค่ามัดจำงานซ่อม (บาท)" error={errors.depositCost} hint={lock}>
           <Input
             type="number"
             step="0.01"
@@ -1146,6 +1205,7 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
             inputMode="decimal"
             placeholder="0.00"
             value={s.depositCost}
+            disabled={!!lock}
             onChange={(e) => set('depositCost', e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"
@@ -1161,7 +1221,11 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
                 value={s.engineerId ? String(s.engineerId) : ''}
                 onChange={(v) => {
                   const id = Number(v) || 0;
-                  patch({ engineerId: id, engineerName: STAFF.find((st) => st.id === id)?.name ?? '' });
+                  void assign({
+                    engineerId: id,
+                    engineerName: STAFF.find((st) => st.id === id)?.name ?? '',
+                    engineerEmail: '',
+                  });
                 }}
                 options={staffOptions}
                 placeholder="- - ยังไม่ระบุ - -"

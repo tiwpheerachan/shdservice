@@ -60,6 +60,7 @@ import { staffOrKeep } from './users';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { adjustQty, listPartRequests, lockStock, PART, partsTotalOf, productsByCode } from './stock';
 import { RS, statusStamp } from '@/server/record-status';
+import { ADMIN_USER_TYPE } from '@/lib/modules';
 import { addDays } from '@/lib/dates';
 import {
   jobSchema,
@@ -68,7 +69,8 @@ import {
   outsourceActionSchema,
   swapRefundSchema,
   closeSchema,
-  jobAmountDue,
+  jobBalance,
+  moneyLockedMsg,
   cleanSerial,
   parseSwap,
   paymentDetailOf,
@@ -699,6 +701,10 @@ export type JobDetail = {
   totalCost: number;
   /** what the customer still pays: totalCost less the deposit (jobAmountDue) */
   amountDue: number;
+  /** the deposit to give back: it is more than totalCost (jobBalance) */
+  depositRefund: number;
+  /** ค้างชำระ: amountDue less the payment recorded (jobBalance) — closing short is allowed, never silent */
+  outstanding: number;
   /** the real due date (effectiveDue) */
   dueDate: string;
   /** true = no user picked it: opened + the job type's SLA (a legacy "+1 day" date is ignored) */
@@ -773,6 +779,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     .limit(1);
   if (!r) return null;
   const j = r.j;
+  const bal = jobBalance(num(j.jobTotalCost), num(j.depositCost), num(j.jobPaymentAmount));
 
   const [cust, syms, fwd, parts, atts, logs, history] = await Promise.all([
     j.customerId ? getCustomerById(j.customerId) : Promise.resolve(null),
@@ -894,7 +901,9 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     deliveryCost: num(j.deliveryCost),
     boxCost: num(j.cartonBoxCost),
     totalCost: num(j.jobTotalCost),
-    amountDue: jobAmountDue(num(j.jobTotalCost), num(j.depositCost)),
+    amountDue: bal.due,
+    depositRefund: bal.refund,
+    outstanding: bal.outstanding,
     dueDate: fmtDate(r.due),
     dueDateAuto: !j.dueDateSetByUser,
     engineerId: j.engineerId ?? 0,
@@ -1002,6 +1011,8 @@ export type JobInput = {
   dueDate?: string;
   /** row_version the form loaded (updateJob): another save since → 409; absent = no check */
   version?: number;
+  /** the user confirmed giving a job that has someone else on it to the new engineer (takeOverError) */
+  takeOver?: boolean;
 };
 
 /**
@@ -1114,6 +1125,67 @@ function costFields(i: JobInput) {
   const delivery = num(i.deliveryCost);
   const box = num(i.boxCost);
   return { service, tool, delivery, box };
+}
+
+type JobRow = typeof job.$inferSelect;
+/** the money a closed job keeps (owner 2026-10-15) → the name its 409 gives */
+const MONEY_COLS = {
+  estimateCost: 'ค่าประเมินงานซ่อม',
+  depositCost: 'ค่ามัดจำงานซ่อม',
+  serviceCost: 'ค่าบริการการซ่อม',
+  serviceToolCost: 'ค่าเครื่องมือพิเศษ',
+  deliveryCost: 'ค่าขนส่ง',
+  cartonBoxCost: 'ค่ากล่องพัสดุ',
+  jobPaymentType: 'วิธีการชำระเงิน',
+  jobPaymentNo: 'เลขที่ใบเสร็จ / อ้างอิง',
+  jobPaymentAmount: 'จำนวนเงินที่ชำระ / เงินคืน',
+  jobPaymentDetail: 'รายละเอียดการชำระเงิน',
+} as const satisfies Partial<Record<keyof JobRow, string>>;
+const MONEY_TEXT = new Set<string>(['jobPaymentType', 'jobPaymentNo', 'jobPaymentDetail']);
+
+/** closed (Finished) and the user is not System Admin → the job's money may not change */
+async function moneyLocked(statusId: number | null, byUserId: number): Promise<boolean> {
+  if ((await statusGroup(statusId ?? -1)) !== FINISHED_GROUP) return false;
+  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, byUserId)).limit(1);
+  return u?.t?.trim() !== ADMIN_USER_TYPE;
+}
+
+/**
+ * A money-locked job: a money column whose new value differs from the stored one → 409 naming it, an
+ * unchanged one passes. Returns `values` without the money columns and the totals summed from them, so
+ * a re-save never rewrites them (a legacy total that does not add up stays as it is).
+ */
+function keepMoney<T extends Partial<JobRow>>(row: JobRow, values: T): T {
+  const out: Partial<JobRow> = { ...values };
+  for (const [k, label] of Object.entries(MONEY_COLS) as [keyof typeof MONEY_COLS, string][]) {
+    if (!(k in values)) continue;
+    const v = (values as Partial<JobRow>)[k];
+    if (MONEY_TEXT.has(k) ? clean(row[k]) !== clean(v) : num(row[k]) !== num(v))
+      throw new HttpError(409, moneyLockedMsg(label));
+    delete out[k];
+  }
+  delete out.sparePartTotalCost;
+  delete out.jobTotalCost;
+  return out as T;
+}
+
+/** a job someone else already has: not taken silently (owner 2026-10-15) — the page asks, then sends takeOver */
+async function takeOverError(rows: { no: string; eng: number }[]) {
+  const users = await db
+    .select({ id: appUser.userId, f: appUser.firstName, l: appUser.lastName })
+    .from(appUser)
+    .where(
+      inArray(
+        appUser.userId,
+        rows.map((r) => r.eng),
+      ),
+    );
+  const who = rows.map((r) => {
+    const u = users.find((x) => x.id === r.eng);
+    const name = (u && fullName(u.f, u.l)) || `#${r.eng}`;
+    return rows.length > 1 ? `${r.no} ${name}` : name;
+  });
+  return new HttpError(409, `งานนี้มีผู้รับงานแล้ว (${who.join(', ')}) — มอบให้คนใหม่แทน?`, { takeOver: true });
 }
 
 async function writeSymptoms(tx: Tx, jobNo: string, ids: number[]) {
@@ -1299,6 +1371,10 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
     const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
     if (!existing) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
     assertVersion(i.version, existing.rowVersion);
+    // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
+    const prevEng = existing.engineerId ?? 0;
+    const assigning = engineerId !== undefined && engineerId > 0 && engineerId !== prevEng;
+    if (assigning && prevEng > 0 && !i.takeOver) throw await takeOverError([{ no: jobNo, eng: prevEng }]);
     const parts = num(existing?.sparePartTotalCost);
     const values = {
       ...(cust
@@ -1345,17 +1421,21 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
       productSaleOutShopName: clean(i.shopName),
       ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
     };
-    await tx.update(job).set(values).where(eq(job.jobNo, jobNo));
+    const toWrite = (await moneyLocked(existing.jobStatusId, byUserId)) ? keepMoney(existing, values) : values;
+    await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Management',
       entity: 'job',
       key: jobNo,
       summary: 'แก้ไขข้อมูลงาน',
-      changes: diff(existing as Record<string, unknown>, values as Record<string, unknown>),
+      changes: diff(existing as Record<string, unknown>, toWrite as Record<string, unknown>),
     });
     if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) await writeSymptoms(tx, jobNo, lk.symIds);
     if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing?.jobStatusId ?? null);
+    // assigned here = the same as /jobs/assign: a new job moves to อยู่ระหว่างดำเนินการ (+ job_log)
+    if (assigning && (newStatus ?? existing.jobStatusId) === JS.NEW)
+      await setStatus(tx, jobNo, JS.IN_PROGRESS, byUserId, JS.NEW);
   });
   return (await getJob(jobNo))!;
 }
@@ -1363,7 +1443,12 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
 /* ------------------------------------------------------------------ *
  * Assign (จนท.รับมอบหมายงาน)
  * ------------------------------------------------------------------ */
-export async function assignJobs(jobNos: string[], engineerId: number, byUserId: number): Promise<number> {
+export async function assignJobs(
+  jobNos: string[],
+  engineerId: number,
+  byUserId: number,
+  takeOver = false,
+): Promise<number> {
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
   if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
   await staffOrKeep(engineerId, undefined, 'engineerId', 0, 'ไม่พบช่างคนนี้ในรายชื่อปัจจุบัน'); // an active app_user
@@ -1376,6 +1461,8 @@ export async function assignJobs(jobNos: string[], engineerId: number, byUserId:
       .orderBy(job.jobNo)
       .for('update');
     if (!rows.length) return;
+    const taken = rows.filter((r) => (r.eng ?? 0) > 0 && r.eng !== engineerId);
+    if (taken.length && !takeOver) throw await takeOverError(taken.map((r) => ({ no: r.no, eng: r.eng ?? 0 })));
     // one UPDATE + one audit INSERT for the whole batch; only NEW jobs also change status
     await tx
       .update(job)
@@ -1470,6 +1557,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
+    const locked = await moneyLocked(status, byUserId);
+    const partsLocked = () => new HttpError(409, moneyLockedMsg('รายการ / ราคา / จำนวนอะไหล่'));
     let partsTotal = 0;
     if (i.parts) {
       const existing = await tx
@@ -1490,6 +1579,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       // rows removed in the UI: cancel while still pending (nothing issued yet)
       for (const e of pending) {
         if (!keep.has(e.jobOrderLogId)) {
+          if (locked) throw partsLocked();
           await tx
             .update(jobOrderSparePartLog)
             .set({ orderStatusId: PART.CANCELLED })
@@ -1524,7 +1614,17 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         if (p.logId) {
           const e = existing.find((x) => x.jobOrderLogId === p.logId);
           if (!e) continue;
-          if (e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0) {
+          // a closed job: the line as loaded passes untouched, anything else is a money change
+          const asLoaded =
+            price === num(e.sparePartUnitPrice) &&
+            !!p.a.pick === !!e.isSpecial &&
+            !!p.a.quote === !!e.isQuotation &&
+            qtyA === (e.requestQty ?? 0) &&
+            !!p.b.pick === !!e.isSpecialB &&
+            !!p.b.quote === !!e.isQuotationB &&
+            qtyB === (e.requestQtyB ?? 0);
+          if (locked && !asLoaded) throw partsLocked();
+          if (!locked && e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0) {
             // still editable: re-book the delta
             const before = e.isSpecial ? (e.requestQty ?? 0) : 0;
             const after = values.isSpecial ? values.requestQty : 0;
@@ -1538,6 +1638,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
           continue;
         }
         if (!useA && !useB) continue;
+        if (locked) throw partsLocked();
         if (!prod) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${p.code}`);
         if (values.isSpecial) await adjustQty(tx, prod.id, { booking: values.requestQty }, { allowNegative: true });
         await tx.insert(jobOrderSparePartLog).values({
@@ -1586,14 +1687,15 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       cartonBoxCost: money(box),
       jobTotalCost: money(partsTotal + service + tool + delivery + box),
     };
-    await tx.update(job).set(repairValues).where(eq(job.jobNo, jobNo));
+    const toWrite = locked ? keepMoney(j, repairValues) : repairValues;
+    await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Repair',
       entity: 'job',
       key: jobNo,
       summary: `บันทึกงานซ่อม${i.parts ? ` · อะไหล่ ${i.parts.length} รายการ` : ''}`,
-      changes: diff(j as unknown as Record<string, unknown>, repairValues as Record<string, unknown>),
+      changes: diff(j as unknown as Record<string, unknown>, toWrite as Record<string, unknown>),
     });
 
     // ---- status: explicit choice wins; new stock requests move a new/in-progress job to 11 ----
@@ -1877,11 +1979,12 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
   ].filter(Boolean);
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
+    if (!before) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
     const swapValues = {
       ...(i.inspection !== undefined ? { engineerRepairDetail: cleanText(i.inspection) } : {}),
       swapRefundDetail: lines.join('\n'),
       swapRefundDocumentNo: /^0{1,2}$/.test(cleanCode(i.docNo)) ? '' : cleanCode(i.docNo), // "0" / "00" = none
-      ...(newSerial ? { sparePartReplace: withNewSerial(before?.sparePartReplace ?? null, newSerial) } : {}),
+      ...(newSerial ? { sparePartReplace: withNewSerial(before.sparePartReplace, newSerial) } : {}),
       ...(num(i.refundAmount) > 0
         ? {
             jobPaymentType: clean(i.refundMethod).slice(0, 50), // a list value — safety net
@@ -1891,7 +1994,8 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
           }
         : {}),
     };
-    await tx.update(job).set(swapValues).where(eq(job.jobNo, jobNo));
+    const toWrite = (await moneyLocked(before.jobStatusId, byUserId)) ? keepMoney(before, swapValues) : swapValues;
+    await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Management',
@@ -1901,9 +2005,9 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
         num(i.refundAmount) > 0
           ? `บันทึก Refund ${num(i.refundAmount).toFixed(2)} บาท`
           : 'บันทึก Swap / เปลี่ยนเครื่อง',
-      changes: diff(before as Record<string, unknown>, swapValues as Record<string, unknown>),
+      changes: diff(before as Record<string, unknown>, toWrite as Record<string, unknown>),
     });
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before?.jobStatusId ?? null);
+    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before.jobStatusId ?? null);
   });
   return (await getJob(jobNo))!;
 }
@@ -1955,14 +2059,19 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
         : {}),
     };
     const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
-    if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
+    if (!before) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo); // locked by lockJob above
+    const toWrite = (await moneyLocked(status, byUserId)) ? keepMoney(before, fields) : fields;
+    if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
+    // paying less than due is allowed (owner 2026-10-15) — the close page confirms it, the log says it
+    const after = { ...before, ...toWrite };
+    const { outstanding } = jobBalance(num(after.jobTotalCost), num(after.depositCost), num(after.jobPaymentAmount));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Closing',
       entity: 'job',
       key: jobNo,
-      summary: 'บันทึกปิดงาน / ส่งคืนสินค้า',
-      changes: diff(before as Record<string, unknown>, fields as Record<string, unknown>),
+      summary: `บันทึกปิดงาน / ส่งคืนสินค้า${outstanding > 0 ? ` · ค้างชำระ ${outstanding.toFixed(2)} บาท` : ''}`,
+      changes: diff(before as Record<string, unknown>, toWrite as Record<string, unknown>),
     });
     await setStatus(tx, jobNo, newStatus, byUserId, status);
   });

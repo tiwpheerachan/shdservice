@@ -42,7 +42,19 @@ export function FilterBar({
       >
         <div className="overflow-hidden">
           <div className="space-y-3 p-4">
-            <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+            {/* Enter in a text / date box runs the search (not while a Thai IME is composing, and not in a
+                dropdown's own search box — there Enter picks the highlighted row) */}
+            <div
+              className="grid grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2 lg:grid-cols-4"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.defaultPrevented) return;
+                if (!(e.target instanceof HTMLInputElement) || e.target.closest('[cmdk-root]')) return;
+                e.preventDefault();
+                onSearch?.();
+              }}
+            >
+              {children}
+            </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
               <Button size="sm" onClick={onSearch}>
                 <Search className="h-3.5 w-3.5" />

@@ -121,3 +121,29 @@ export function computeTotals(i: {
   const rounding = Math.round((net - total) * 100) / 100;
   return { sumExclude, discount, afterDiscount, totalBase, vat, total, rounding, net };
 }
+
+/**
+ * The job's parts the technician ticked "เสนอ" in the repair screen → quotation lines, from the set
+ * the quotation is for: type A = set A (is_quotation / request_qty), type B = set B (is_quotation_b /
+ * request_qty_b). Type B used to take set A's lines, so a B quotation never counted the B lines.
+ */
+export function quotedParts(
+  parts: {
+    code: string;
+    name: string;
+    unitPrice: number;
+    isQuotation: boolean;
+    requested: number;
+    isQuotationB: boolean;
+    requestQtyB: number;
+  }[],
+  type: 'A' | 'B',
+) {
+  return parts
+    .map((p) =>
+      type === 'B'
+        ? { code: p.code, name: p.name, price: p.unitPrice, qty: p.isQuotationB ? p.requestQtyB : 0 }
+        : { code: p.code, name: p.name, price: p.unitPrice, qty: p.isQuotation ? p.requested : 0 },
+    )
+    .filter((l) => l.qty > 0);
+}

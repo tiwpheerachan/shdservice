@@ -161,14 +161,21 @@ export type JobCheck = {
   today?: string;
 };
 
+/** walk-in (ช่องทาง หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty (owner 2026-10-15) */
+export const WALK_IN_CHANNEL = 'หน้าร้าน';
+const WALK_IN_OPTIONAL = new Set<JobRequiredKey>(['so', 'saleOrderDate', 'expireDate']);
+/** is this field required for a job sold through `channel`? */
+export const isRequiredFor = (key: JobRequiredKey, channel: unknown) =>
+  !(clean(channel) === WALK_IN_CHANNEL && WALK_IN_OPTIONAL.has(key));
+
 /** the required fields that have a value (the "before" of an edit) */
 export function filledRequired(values: Partial<Record<JobRequiredKey, unknown>>): JobRequiredKey[] {
   return JOB_REQUIRED_KEYS.filter((k) => isRequiredFilled(k, values[k]));
 }
 
 /** required fields still empty — shown as the "ข้อมูลไม่ครบ" notice on an old job */
-export function missingRequired(values: Partial<Record<JobRequiredKey, unknown>>): JobRequiredKey[] {
-  return JOB_REQUIRED_KEYS.filter((k) => !isRequiredFilled(k, values[k]));
+export function missingRequired(values: Partial<Record<JobRequiredKey | 'channel', unknown>>): JobRequiredKey[] {
+  return JOB_REQUIRED_KEYS.filter((k) => isRequiredFor(k, values.channel) && !isRequiredFilled(k, values[k]));
 }
 
 /**
@@ -191,7 +198,8 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
     })
     .superRefine((v, ctx) => {
       const add = (k: string, message: string) => ctx.addIssue({ code: 'custom', path: [k], message });
-      for (const k of JOB_REQUIRED_KEYS) if (keep.has(k) && !isRequiredFilled(k, v[k])) add(k, JOB_REQUIRED[k]);
+      for (const k of JOB_REQUIRED_KEYS)
+        if (keep.has(k) && isRequiredFor(k, v.channel) && !isRequiredFilled(k, v[k])) add(k, JOB_REQUIRED[k]);
       const val = v as Record<string, unknown>;
       // a value given that differs from the stored one — only those must follow the rules below
       const changed = (k: string) => clean(val[k]) !== '' && (!prev || clean(val[k]) !== clean(prev[k]));
@@ -411,5 +419,21 @@ export function closeSchema(prev: { payNo?: string | null; tracking?: string | n
  * below 0. job_total_cost keeps its legacy meaning (no deposit) — this is for display and defaults.
  */
 export function jobAmountDue(total: number, deposit: number): number {
-  return Math.max(0, Math.round((total - deposit) * 100) / 100);
+  return jobBalance(total, deposit, 0).due;
 }
+
+/**
+ * The money at close (owner 2026-10-15), from stored values only: `due` = total − deposit (≥ 0),
+ * `refund` = the deposit to give back when it is more than the total (an unrepaired job),
+ * `outstanding` = ค้างชำระ, what is still unpaid after `paid` (a refund stored as a negative payment
+ * counts as nothing paid).
+ */
+export function jobBalance(total: number, deposit: number, paid: number) {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const net = r2(total - deposit);
+  return { due: Math.max(0, net), refund: Math.max(0, -net), outstanding: Math.max(0, r2(net - Math.max(0, paid))) };
+}
+
+/** a closed job (Finished) keeps its money fields — only System Admin may change them (owner 2026-10-15) */
+export const MONEY_LOCKED = 'งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะ System Admin';
+export const moneyLockedMsg = (label: string) => `งานปิดแล้ว — แก้${label}ไม่ได้ (เฉพาะ System Admin)`;

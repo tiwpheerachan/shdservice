@@ -65,7 +65,7 @@ export function OverdueBell() {
           <div>
             <p className="text-sm font-semibold">งานเกินกำหนดส่ง</p>
             <p className="text-2xs text-muted-foreground">
-              {mine ? 'งานที่คุณรับผิดชอบ' : 'ทุกงาน'} · ยังไม่ปิดงาน และเลยวันที่กำหนดส่งลูกค้าแล้ว
+              {mine ? 'งานที่คุณรับผิดชอบ' : 'งานค้างทั้งหมด ณ ตอนนี้'} · ยังไม่ปิดงาน และเลยวันที่กำหนดส่งลูกค้าแล้ว
             </p>
           </div>
           <span
@@ -139,7 +139,8 @@ export function OverdueBell() {
                           <span className="inline-flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px font-medium text-warning">
                             <UserX className="h-3 w-3" /> ยังไม่มอบหมายช่าง
                           </span>
-                          {j.openedBy && <span className="text-muted-foreground">ผู้รับงาน: {j.openedBy}</span>}
+                          {/* who opened the job — not an assignee ("ผู้รับงาน" next to "no engineer" read as a contradiction) */}
+                          {j.openedBy && <span className="text-muted-foreground">เปิดงานโดย: {j.openedBy}</span>}
                         </>
                       )}
                     </p>

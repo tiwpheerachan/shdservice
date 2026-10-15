@@ -18,6 +18,7 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
+  useMoneyLock,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { Tabs } from '@/components/ui/tabs';
@@ -45,6 +46,7 @@ function SwapRefundForm() {
   const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
+  const lock = useMoneyLock(); // a closed job: the refund stays as recorded (System Admin may change it)
   const [tab, setTab] = React.useState('product');
   const [mode, setMode] = React.useState('swap');
   const [saving, setSaving] = React.useState(false);
@@ -262,7 +264,7 @@ function SwapRefundForm() {
               </>
             ) : (
               <>
-                <Field label="ยอดเงินคืน (บาท)" required error={act.errors.refundAmount}>
+                <Field label="ยอดเงินคืน (บาท)" required error={act.errors.refundAmount} hint={lock}>
                   <Input
                     type="number"
                     step="0.01"
@@ -270,13 +272,18 @@ function SwapRefundForm() {
                     inputMode="decimal"
                     placeholder="0.00"
                     value={d.refundAmount}
+                    disabled={!!lock}
                     onChange={(e) => upd({ refundAmount: e.target.value })}
                     onFocus={(e) => e.currentTarget.select()}
                     className="num text-right"
                   />
                 </Field>
                 <Field label="วิธีการคืนเงิน" required error={act.errors.refundMethod}>
-                  <Select value={d.refundMethod} onChange={(e) => upd({ refundMethod: e.target.value })}>
+                  <Select
+                    value={d.refundMethod}
+                    disabled={!!lock}
+                    onChange={(e) => upd({ refundMethod: e.target.value })}
+                  >
                     <option>โอนเงินเข้าบัญชี</option>
                     <option>เงินสด</option>
                     <option>คืนผ่านช่องทางการขาย</option>
@@ -287,11 +294,17 @@ function SwapRefundForm() {
                     className="num"
                     maxLength={50}
                     value={d.refundRef}
+                    disabled={!!lock}
                     onChange={(e) => upd({ refundRef: e.target.value })}
                   />
                 </Field>
                 <Field label="วันที่คืนเงิน" error={act.errors.refundDate}>
-                  <Input type="date" value={d.refundDate} onChange={(e) => upd({ refundDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={d.refundDate}
+                    disabled={!!lock}
+                    onChange={(e) => upd({ refundDate: e.target.value })}
+                  />
                 </Field>
               </>
             )}

@@ -327,7 +327,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }
       >
         <FieldGrid cols={2}>
-          <Field label={config.nameLabel} required error={fe.errors.name}>
+          <Field label={config.nameLabel} required error={fe.errors.name} hint={`${form.name.length}/50 ตัวอักษร`}>
             <Input
               value={form.name}
               maxLength={50}

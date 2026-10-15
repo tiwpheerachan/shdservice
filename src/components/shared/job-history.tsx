@@ -36,6 +36,7 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
       actions={
         <button
           type="button"
+          data-readonly-keep
           onClick={() => setOpen((o) => !o)}
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
@@ -61,6 +62,7 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
                 {r.changes && (
                   <button
                     type="button"
+                    data-readonly-keep
                     onClick={() => setExpanded(expanded === r.id ? null : r.id)}
                     className="ml-auto text-xs text-primary hover:underline"
                   >

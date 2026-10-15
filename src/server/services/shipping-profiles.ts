@@ -104,6 +104,8 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
         const msg = `รหัส ${code} ถูกใช้แล้ว (${o.nameTh})`;
         throw new HttpError(409, msg, { fields: { code: msg } });
       }
+    // a new profile with no order of its own goes last, not first (0)
+    if (!i.id && !values.sortOrder) values.sortOrder = Math.max(0, ...others.map((o) => o.sortOrder)) + 1;
 
     let before: Row | undefined;
     if (i.id) {

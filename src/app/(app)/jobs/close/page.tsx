@@ -15,7 +15,9 @@ import {
   fromJob,
   saveCommonSections,
   useWorkflowErrors,
+  useMoneyLock,
 } from '@/components/shared/job-form';
+import { useConfirm } from '@/components/ui/confirm';
 import { useAccess } from '@/lib/use-access';
 import { Tabs } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +35,7 @@ import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import {
   closeSchema,
-  jobAmountDue,
+  jobBalance,
   OUTSOURCE_NOT_BACK,
   STATUS_CLOSED_TRACKED,
   STATUS_CLOSED_WAIT_TRACKING,
@@ -55,6 +57,8 @@ function CloseForm() {
   const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors();
   const { can } = useAccess();
+  const confirm = useConfirm();
+  const lock = useMoneyLock(); // a closed job: the payment stays as recorded (System Admin may change it)
   const [tab, setTab] = React.useState('product');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
@@ -118,6 +122,8 @@ function CloseForm() {
   // still at the out-source vendor → the server refuses the close; say so before the user fills the form
   const outsourceOut = !!job?.outsource.some((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
   const deposit = job?.depositCost ?? 0;
+  // paying less than due is allowed but never silent: shown here and confirmed at save
+  const bal = jobBalance(net, deposit, Number(d.payAmount || 0));
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -179,6 +185,16 @@ function CloseForm() {
       if (paid && !d.payType) setTab('payment'); // the method is asked on the payment tab
       return;
     }
+    if (
+      bal.outstanding > 0 &&
+      (job.statusGroup !== 'Finished' || paid) &&
+      !(await confirm({
+        title: `ลูกค้าค้างชำระ ${baht(bal.outstanding)} บาท — ยืนยันปิดงาน?`,
+        description: `ยอดที่ต้องชำระ ${baht(bal.due)} บาท · รับชำระ ${baht(Number(d.payAmount || 0))} บาท — ใบส่งคืนสินค้าจะพิมพ์บรรทัด "ค้างชำระ"`,
+        confirmLabel: 'ยืนยันปิดงาน',
+      }))
+    )
+      return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -311,17 +327,25 @@ function CloseForm() {
                         <span className="num">-{baht(deposit)}</span>
                       </li>
                       <li className="flex justify-between gap-3 text-base font-semibold">
-                        <span>ยอดที่ต้องชำระ</span>
-                        <span className="num text-primary">{baht(jobAmountDue(net, deposit))} ฿</span>
+                        {/* a deposit larger than the total (not repaired) goes back to the customer */}
+                        <span>{bal.refund > 0 ? 'ต้องคืนเงินมัดจำ' : 'ยอดที่ต้องชำระ'}</span>
+                        <span className="num text-primary">{baht(bal.refund || bal.due)} ฿</span>
                       </li>
                     </>
+                  )}
+                  {bal.outstanding > 0 && (
+                    <li role="status" className="flex justify-between gap-3 font-semibold text-warning">
+                      <span>ลูกค้าค้างชำระ</span>
+                      <span className="num">{baht(bal.outstanding)} ฿</span>
+                    </li>
                   )}
                 </ul>
               </div>
               <FieldGrid cols={2}>
-                <Field label="วิธีการชำระเงิน" required error={act.errors['payment.type']}>
+                <Field label="วิธีการชำระเงิน" required error={act.errors['payment.type']} hint={lock}>
                   <Select
                     value={d.payType}
+                    disabled={!!lock}
                     onChange={(e) => upd({ payType: e.target.value, payDate: d.payDate || thaiToday() })}
                   >
                     <option value="">- - เลือก - -</option>
@@ -339,19 +363,26 @@ function CloseForm() {
                     inputMode="decimal"
                     placeholder="0.00"
                     value={d.payAmount}
+                    disabled={!!lock}
                     onChange={(e) => upd({ payAmount: e.target.value })}
                     onFocus={(e) => e.currentTarget.select()}
                     className="num text-right"
                   />
                 </Field>
                 <Field label="วันที่ชำระเงิน" error={act.errors['payment.date']}>
-                  <Input type="date" value={d.payDate} onChange={(e) => upd({ payDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={d.payDate}
+                    disabled={!!lock}
+                    onChange={(e) => upd({ payDate: e.target.value })}
+                  />
                 </Field>
                 <Field label="เลขที่ใบเสร็จ" error={act.errors['payment.no']}>
                   <Input
                     className="num"
                     maxLength={50}
                     value={d.payNo}
+                    disabled={!!lock}
                     onChange={(e) => upd({ payNo: e.target.value })}
                   />
                 </Field>
@@ -381,6 +412,7 @@ function CloseForm() {
                     rows={2}
                     maxLength={100}
                     value={d.payDetail}
+                    disabled={!!lock}
                     onChange={(e) => upd({ payDetail: e.target.value })}
                   />
                 </Field>

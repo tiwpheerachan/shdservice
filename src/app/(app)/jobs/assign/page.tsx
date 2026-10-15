@@ -13,9 +13,10 @@ import { Button } from '@/components/ui/button';
 import { Checkbox, Input, Select } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 import { type Job } from '@/data/mock';
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from '@/data/db';
-import { api, postJson, errMsg, qs } from '@/lib/api';
+import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { apiFieldErrors } from '@/lib/use-form-errors';
 import { isFilterActive } from '@/lib/utils';
@@ -23,6 +24,7 @@ import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-colum
 
 export default function AssignPage() {
   const { push } = useToast();
+  const ask = useConfirm();
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
   const { name: CURRENT_TECH, userId, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
@@ -127,7 +129,15 @@ export default function AssignPage() {
     if (!list.length) return;
     setSaving(true);
     try {
-      const d = await postJson<{ assigned: number }>('/api/jobs/assign', { jobNos: list, engineerId: userId });
+      const send = (takeOver?: boolean) =>
+        postJson<{ assigned: number }>('/api/jobs/assign', { jobNos: list, engineerId: userId, takeOver });
+      // a job someone else already has: the API asks first (409 takeOver) — taken only when the user says so
+      const d = await send().catch(async (e) => {
+        const takeOver = e instanceof ApiError && (e.details as { takeOver?: boolean } | undefined)?.takeOver;
+        if (!takeOver) throw e;
+        return (await ask({ title: e.message, confirmLabel: 'มอบให้คนใหม่' })) ? send(true) : null;
+      });
+      if (!d) return;
       setRemoved((r) => new Set([...r, ...list]));
       setPicked(new Set());
       push({

@@ -2,7 +2,7 @@ import 'server-only';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { trackBlock, trackDocTicket, trackEvent, trackRate, trackTicket } from '@/db/schema';
+import { trackBlock, trackEvent, trackRate, trackTicket } from '@/db/schema';
 import { logError } from '@/lib/log';
 
 /**
@@ -183,48 +183,6 @@ export async function consumeTicket(raw: unknown, ip: string, ua: string): Promi
     )
     .returning({ jobNo: trackTicket.jobNo });
   return r?.jobNo ?? null;
-}
-
-/* ------------------------------------------------------------------ *
- * one-time document tickets (drizzle/0019)
- * ------------------------------------------------------------------ */
-
-/** a document ticket is used right away (the page opens it in a new tab) */
-export const DOC_TICKET_TTL_SEC = 60;
-
-export type DocTicket = { jobNo: string; kind: string; ref: string };
-
-/** issue a 60-second, single-use ticket for ONE document of one job, bound to IP + User-Agent */
-export async function issueDocTicket(d: DocTicket, ip: string, ua: string): Promise<string> {
-  await db.delete(trackDocTicket).where(lt(trackDocTicket.expiresAt, dbNow));
-  const raw = randomBytes(32).toString('base64url'); // 256 bits
-  await db.insert(trackDocTicket).values({
-    tokenHash: sha256(raw),
-    jobNo: d.jobNo,
-    kind: d.kind,
-    ref: d.ref,
-    issuedIp: ip,
-    uaHash: sha256(normalizeUa(ua)),
-    expiresAt: dbNowPlus(DOC_TICKET_TTL_SEC),
-  });
-  return raw;
-}
-
-/** consume a document ticket (one atomic DELETE) — null = invalid / used / expired / other IP / other UA */
-export async function consumeDocTicket(raw: unknown, ip: string, ua: string): Promise<DocTicket | null> {
-  if (typeof raw !== 'string' || !TICKET_SHAPE.test(raw)) return null;
-  const [r] = await db
-    .delete(trackDocTicket)
-    .where(
-      and(
-        eq(trackDocTicket.tokenHash, sha256(raw)),
-        gt(trackDocTicket.expiresAt, dbNow),
-        eq(trackDocTicket.issuedIp, ip),
-        eq(trackDocTicket.uaHash, sha256(normalizeUa(ua))),
-      ),
-    )
-    .returning({ jobNo: trackDocTicket.jobNo, kind: trackDocTicket.kind, ref: trackDocTicket.ref });
-  return r ?? null;
 }
 
 /* ------------------------------------------------------------------ *

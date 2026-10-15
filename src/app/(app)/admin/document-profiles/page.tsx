@@ -259,7 +259,7 @@ export default function DocumentProfilesPage() {
         open={open}
         onClose={() => setOpen(false)}
         title={editing ? `แก้ไขโปรไฟล์ ${editing.code}` : 'เพิ่มโปรไฟล์ผู้ออกเอกสาร'}
-        description={editing ? `Mode: Edit · #${editing.id}` : 'บันทึกก่อน แล้วค่อยอัปโหลดโลโก้'}
+        description={editing ? undefined : 'บันทึกก่อน แล้วค่อยอัปโหลดโลโก้'}
         size="xl"
         footer={
           <>

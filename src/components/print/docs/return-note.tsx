@@ -8,6 +8,7 @@ import { money } from '@/components/print/print-frame';
 import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
+import { maskJobForCustomer } from '@/server/services/tracking';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -25,11 +26,12 @@ const warrantyLabel = (w: string) => (w === 'IN' ? 'ในประกัน' : 
  * ใบส่งคืนสินค้า / RETURN & REPAIR NOTE — same form language as the quotation
  * (logomark header · boxed bilingual header · full-height table · totals with
  * the amount in words · two signature boxes) plus a repair-result block and the
- * return / payment details. Printed from the close-job screen.
+ * return / payment details. Printed from the close-job screen. `forCustomer` = opened from /track (masked).
  */
-export async function ReturnNoteDoc({ no }: { no: string }) {
-  const j = await getJob(no);
-  if (!j) notFound();
+export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
+  const found = await getJob(no);
+  if (!found) notFound();
+  const j = forCustomer ? maskJobForCustomer(found) : found;
   const co = await profileForDocument(j.documentProfileId); // ออกเอกสารในนาม
   const c = j.customer;
   // billed qty = issued less returned to stock (รับคืนจากการเบิก); a line returned in full is not printed
@@ -43,7 +45,9 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
           .where(eq(appUser.userId, j.engineerId))
           .limit(1)
       : [undefined];
-  const contactLine = [eng?.phone && `Tel. : ${eng.phone}`, eng?.email && `Email : ${eng.email}`]
+  // the technician's own contact on the staff copy; the customer's copy (no technician) gets the company's
+  const contact = forCustomer ? { phone: co.phone, email: co.email } : eng;
+  const contactLine = [contact?.phone && `Tel. : ${contact.phone}`, contact?.email && `Email : ${contact.email}`]
     .filter(Boolean)
     .join('  ');
   const shipping = j.deliveryCost + j.boxCost;
@@ -86,7 +90,7 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
           <p className="text-[14px] font-bold">{co.nameTh}</p>
           <p>{co.address}</p>
           <p>
-            โทรศัพท์ {co.phone}
+            {co.phone && <>โทรศัพท์ {co.phone}</>}
             {co.taxId && (
               <>
                 &nbsp;&nbsp;เลขประจำตัวผู้เสียภาษีอากร&nbsp;&nbsp;<span className="num">{co.taxId}</span>
@@ -140,10 +144,12 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
                     <td className="k">การรับประกัน :</td>
                     <td>{or(warrantyLabel(j.warranty))}</td>
                   </tr>
-                  <tr>
-                    <td className="k gap">ช่าง :</td>
-                    <td className="gap">{or(j.engineer)}</td>
-                  </tr>
+                  {!forCustomer && (
+                    <tr>
+                      <td className="k gap">ช่าง :</td>
+                      <td className="gap">{or(j.engineer)}</td>
+                    </tr>
+                  )}
                   <tr>
                     <td className="k">อ้างอิงใบเสนอราคา :</td>
                     <td className="num">{or(j.quotationNo)}</td>
@@ -279,7 +285,7 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
       <table className="sum">
         <tbody>
           <tr>
-            <td rowSpan={6} style={{ width: '58%' }}>
+            <td rowSpan={j.outstanding > 0 ? 8 : 6} style={{ width: '58%' }}>
               <table className="kv text-[11px]">
                 <tbody>
                   <tr>
@@ -333,13 +339,29 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
             <td className="text-right font-semibold">มัดจำ / Deposit :</td>
             <td className="num text-right">{j.depositCost ? `-${money(j.depositCost)}` : money(0)}</td>
           </tr>
+          {/* deposit more than the total (not repaired): what goes back to the customer, not 0.00 */}
           <tr>
-            <td className="text-right font-bold">รวมทั้งสิ้น / Grand Total :</td>
-            <td className="num text-right font-bold">{money(j.amountDue)}</td>
+            <td className="text-right font-bold">
+              {j.depositRefund > 0 ? 'ต้องคืนเงินมัดจำ / Refund :' : 'รวมทั้งสิ้น / Grand Total :'}
+            </td>
+            <td className="num text-right font-bold">{money(j.depositRefund || j.amountDue)}</td>
           </tr>
+          {/* paid short at close (allowed, never silent) */}
+          {j.outstanding > 0 && (
+            <>
+              <tr>
+                <td className="text-right font-semibold">ชำระแล้ว / Paid :</td>
+                <td className="num text-right">{money(Math.max(0, j.payment.amount))}</td>
+              </tr>
+              <tr>
+                <td className="text-right font-bold">ค้างชำระ / Outstanding :</td>
+                <td className="num text-right font-bold">{money(j.outstanding)}</td>
+              </tr>
+            </>
+          )}
           <tr>
             <td className="words text-center font-semibold" colSpan={3}>
-              ({bahtText(j.amountDue)})
+              ({bahtText(j.depositRefund || j.amountDue)})
             </td>
           </tr>
         </tbody>

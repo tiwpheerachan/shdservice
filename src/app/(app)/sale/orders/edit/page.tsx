@@ -2,11 +2,22 @@
 
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
+import { Truck } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
-import { SaleOrderForm, type SaleOrderFormHandle, type SaleOrderLoaded } from '@/components/shared/sale-order-form';
+import {
+  SaleOrderForm,
+  SO_TONE,
+  type SaleOrderFormHandle,
+  type SaleOrderLoaded,
+} from '@/components/shared/sale-order-form';
+import { Section } from '@/components/shared/section';
 import { PrintButton } from '@/components/shared/print-button';
 import { FormActions, JobLookupBar, VIEW_ONLY } from '@/components/shared/job-form';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Input, Textarea } from '@/components/ui/input';
+import { Modal } from '@/components/ui/modal';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -17,7 +28,7 @@ import { useAccess } from '@/lib/use-access';
 function EditSaleOrder() {
   const { push } = useToast();
   const confirm = useConfirm();
-  const { isAdmin, can } = useAccess();
+  const { isAdmin, can, userId } = useAccess();
   const sp = useSearchParams();
   const initialNo = sp.get('no') ?? '';
   const form = React.useRef<SaleOrderFormHandle>(null);
@@ -58,28 +69,32 @@ function EditSaleOrder() {
     }
   };
 
+  // ปฏิเสธ / ส่งกลับแก้ไข need a reason (the server refuses without one) — asked in this dialog
+  const [asking, setAsking] = React.useState<'deny' | 'reject' | null>(null);
+  const [reason, setReason] = React.useState('');
+  const LABEL = { approve: 'อนุมัติ', deny: 'ปฏิเสธ', reject: 'ส่งกลับแก้ไข' } as const;
+
   // อนุมัติ → ตัดสต๊อก (WHO type 4) ทันที ตามพฤติกรรมระบบเดิม
-  const decide = async (decision: 'approve' | 'deny' | 'reject') => {
+  const decide = async (decision: 'approve' | 'deny' | 'reject', remark = '') => {
     if (!no) return;
-    const label = decision === 'approve' ? 'อนุมัติ' : decision === 'deny' ? 'ปฏิเสธ' : 'ส่งกลับแก้ไข';
-    const ok = await confirm({
-      tone: decision === 'approve' ? 'default' : 'danger',
-      title: `${label}ใบสั่งขาย ${no}?`,
-      description:
-        decision === 'approve'
-          ? 'ระบบจะตัดสต๊อกตามรายการในใบทันที (สร้างเอกสารจ่ายออก WHO) และแก้ไขรายการไม่ได้อีก'
-          : decision === 'deny'
-            ? 'ใบนี้จะถูกปฏิเสธ ไม่ตัดสต๊อก และไม่สามารถอนุมัติภายหลังได้'
-            : 'ใบจะถูกส่งกลับให้ผู้สร้างแก้ไข แล้วบันทึกใหม่เพื่อขออนุมัติอีกครั้ง',
-      confirmLabel: decision === 'approve' ? 'อนุมัติ (ตัดสต๊อก)' : label,
-    });
-    if (!ok) return;
+    const label = LABEL[decision];
+    if (decision === 'approve') {
+      const ok = await confirm({
+        title: `อนุมัติใบสั่งขาย ${no}?`,
+        description: 'ระบบจะตัดสต๊อกตามรายการในใบทันที (สร้างเอกสารจ่ายออก WHO) และแก้ไขรายการไม่ได้อีก',
+        confirmLabel: 'อนุมัติ (ตัดสต๊อก)',
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/approve`, {
         decision,
+        remark,
       });
       setLoaded(d.order);
+      setAsking(null);
+      setReason('');
       push({ kind: 'success', title: `${label}แล้ว`, desc: `${d.order.no} · ${d.order.approve}` });
     } catch (e) {
       push({ kind: 'error', title: `${label}ไม่สำเร็จ`, desc: errMsg(e) });
@@ -88,29 +103,114 @@ function EditSaleOrder() {
     }
   };
 
+  // เลขพัสดุ — only on an approved order (POST /api/sale-orders/:no/tracking; the server checks the format)
+  const [tracking, setTracking] = React.useState('');
+  const [trackingOf, setTrackingOf] = React.useState<SaleOrderLoaded | null>(null);
+  if (loaded !== trackingOf) {
+    setTrackingOf(loaded);
+    setTracking(loaded?.tracking ?? '');
+  }
+  const saveTracking = async () => {
+    setSaving(true);
+    try {
+      const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/tracking`, {
+        tracking,
+      });
+      setLoaded(d.order);
+      push({ kind: 'success', title: 'บันทึกเลขพัสดุแล้ว', desc: d.order.tracking || no });
+    } catch (e) {
+      push({ kind: 'error', title: 'บันทึกเลขพัสดุไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // 4 อนุมัติแล้ว / 5 ปฏิเสธ are final — the server refuses any change, so no save or decision buttons
-  const closed = [4, 5].includes(loaded?.approveId ?? 0);
-  const canApprove = isAdmin || can('Sale Order', 'edit');
+  const approveId = loaded?.approveId ?? 0;
+  const closed = [4, 5].includes(approveId);
+  // only a waiting order is decided, and not by its creator (System Admin may) — the server checks the same
+  const isCreator = !isAdmin && !!userId && (loaded?.creatorIds ?? []).includes(userId);
+  const canApprove = (isAdmin || can('Sale Order', 'edit')) && !isCreator;
+  const decided = approveId === 3 || approveId === 5; // the reason banner
+  const canEditTracking = isAdmin || can('Sale Order', 'edit');
 
   return (
     <>
-      <PageHeader title="แก้ไขใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย (Sale Order) — Mode: Edit" />
+      <PageHeader title="แก้ไขใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย" />
       <JobLookupBar
         id="so-no"
         label="ระบุ เลขใบสั่งขาย (SO)"
         placeholder="SO2600760"
         initial={initialNo}
         onFind={(v) => load(v)}
-        note={loaded ? `สถานะ: ${loaded.approve}` : undefined}
       />
       <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบสั่งขาย" searchId="so-no">
+        {loaded && (
+          <div className="surface flex flex-col gap-2 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">สถานะ</span>
+              <Badge tone={SO_TONE[loaded.approve] ?? 'neutral'} dot className="px-3 py-1 text-sm">
+                {loaded.approve}
+              </Badge>
+              {approveId === 2 && !canApprove && (
+                <span className="text-muted-foreground">
+                  รอผู้มีสิทธิ์อนุมัติ (Sale Order: แก้ไข)
+                  {isCreator && ' — ผู้สร้างใบสั่งขายอนุมัติเองไม่ได้'}
+                </span>
+              )}
+              {approveId === 4 && loaded.approvedBy && (
+                <span className="text-muted-foreground">
+                  โดย {loaded.approvedBy} วันที่ {loaded.approveDate}
+                </span>
+              )}
+            </div>
+            {decided && (
+              <p role="note" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+                {approveId === 3 ? 'ส่งกลับแก้ไข' : 'ปฏิเสธ'}: {loaded.approveRemark || '(ไม่ได้ระบุเหตุผล)'}
+                {loaded.approvedBy && ` — โดย ${loaded.approvedBy}`}
+                {loaded.approveDate && ` วันที่ ${loaded.approveDate}`}
+              </p>
+            )}
+          </div>
+        )}
         <SaleOrderForm key={version} ref={form} soNo={no || undefined} initial={loaded} />
+        {approveId === 4 && (
+          <Section title="เลขพัสดุ (Tracking)" icon={Truck}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Field label="เลขพัสดุ" className="flex-1 sm:max-w-xs">
+                <Input
+                  maxLength={50}
+                  value={tracking}
+                  onChange={(e) => setTracking(e.target.value)}
+                  disabled={!canEditTracking}
+                  className="num"
+                />
+              </Field>
+              {canEditTracking && (
+                <Button
+                  size="md"
+                  type="button"
+                  onClick={saveTracking}
+                  disabled={saving || tracking.trim() === (loaded?.tracking ?? '')}
+                >
+                  บันทึกเลขพัสดุ
+                </Button>
+              )}
+            </div>
+          </Section>
+        )}
         <FormActions
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
-          saving={saving || closed}
+          saving={saving}
           cancelHref="/sale/orders"
-          denied={can('Sale Order', 'edit') ? undefined : VIEW_ONLY}
+          denied={
+            closed
+              ? `ใบสั่งขาย${loaded?.approve ?? ''} — แก้ไขไม่ได้`
+              : can('Sale Order', 'edit')
+                ? undefined
+                : VIEW_ONLY
+          }
           extra={
             <>
               <PrintButton
@@ -121,12 +221,18 @@ function EditSaleOrder() {
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
                 disabled={!no}
               />
-              {loaded && !closed && canApprove ? (
+              {loaded && approveId === 2 && canApprove ? (
                 <>
-                  <Button variant="outline" size="md" type="button" onClick={() => decide('reject')} disabled={saving}>
+                  <Button
+                    variant="outline"
+                    size="md"
+                    type="button"
+                    onClick={() => setAsking('reject')}
+                    disabled={saving}
+                  >
                     ส่งกลับแก้ไข
                   </Button>
-                  <Button variant="outline" size="md" type="button" onClick={() => decide('deny')} disabled={saving}>
+                  <Button variant="outline" size="md" type="button" onClick={() => setAsking('deny')} disabled={saving}>
                     ปฏิเสธ
                   </Button>
                   <Button size="md" type="button" onClick={() => decide('approve')} disabled={saving}>
@@ -138,6 +244,36 @@ function EditSaleOrder() {
           }
         />
       </RecordGate>
+      <Modal
+        open={!!asking}
+        onClose={() => setAsking(null)}
+        title={asking ? `${LABEL[asking]}ใบสั่งขาย ${no}` : ''}
+        description={
+          asking === 'deny'
+            ? 'ใบนี้จะถูกปฏิเสธ ไม่ตัดสต๊อก และอนุมัติภายหลังไม่ได้'
+            : 'ใบจะถูกส่งกลับให้ผู้สร้างแก้ไข แล้วส่งขออนุมัติใหม่'
+        }
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setAsking(null)}>
+              ยกเลิก
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={saving || !reason.trim()}
+              onClick={() => asking && decide(asking, reason)}
+            >
+              {asking ? LABEL[asking] : ''}
+            </Button>
+          </>
+        }
+      >
+        <Field label="เหตุผล" required hint="ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้">
+          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+        </Field>
+      </Modal>
     </>
   );
 }

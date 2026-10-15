@@ -27,6 +27,8 @@ export async function seed(db: { query(text: string): Promise<unknown> }): Promi
     INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES
       (1, 'C00001', 'สมชาย ทดสอบ', '081-234-5678'),
       (2, 'C00002', 'บริษัท ตัวอย่าง', '02-123-4567');
+    -- explicit ids above: move the sequence past them, or the next app-created customer collides on id 1
+    SELECT setval(pg_get_serial_sequence('customer', 'customer_id'), (SELECT max(customer_id) FROM customer));
 
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, product_serial,
                      job_create_date, job_reception_date, job_closed_date) VALUES

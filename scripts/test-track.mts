@@ -97,7 +97,7 @@ await seed(pool);
 const guard = await import('@/server/track-guard');
 const { clientIp } = await import('@/lib/client-ip');
 const { originAuthOk } = await import('@/lib/origin-auth');
-const { jobNoForLink, publicJobByNo, rotateToken, ensureToken, linkStatus, findDoc } =
+const { jobNoForLink, publicJobByNo, rotateToken, ensureToken, linkStatus, findDoc, docForLink } =
   await import('@/server/services/tracking');
 const S = await import('@/lib/session');
 const { POST: sessionPOST } = await import('@/app/api/track/session/route');
@@ -959,7 +959,7 @@ try {
     assert.ok(docTicket, `url shape: ${r.json.url}`);
     assert.equal(r.json.url!.includes(ownJob), false);
   });
-  await test('DB stores sha256(ticket) only; TTL = 60 seconds', async () => {
+  await test('DB stores sha256(ticket) only; TTL = 10 minutes', async () => {
     const rows = (
       await db.execute<{ raw: number; ttl: number }>(sql`
     SELECT (SELECT count(*)::int FROM track_doc_ticket WHERE encode(token_hash, 'escape') LIKE ${'%' + docTicket + '%'}) raw,
@@ -968,34 +968,45 @@ try {
     ).rows;
     assert.equal(rows.length, 1);
     assert.equal(Number(rows[0].raw), 0);
-    assert.ok(Math.abs(Number(rows[0].ttl) - 60) <= 1);
+    assert.ok(Math.abs(Number(rows[0].ttl) - 600) <= 1);
   });
-  await test('ticket: other IP / other browser → refused (not burnt); owner once; replay → refused', async () => {
-    assert.equal(await guard.consumeDocTicket(docTicket, nextIp(), UA), null);
-    assert.equal(await guard.consumeDocTicket(docTicket, otpIp, 'curl/8'), null);
-    assert.deepEqual(await guard.consumeDocTicket(docTicket, otpIp, UA), { jobNo: ownJob, kind: 'job', ref: ownJob });
-    assert.equal(await guard.consumeDocTicket(docTicket, otpIp, UA), null);
-    assert.equal(await guard.consumeDocTicket('x'.repeat(43), otpIp, UA), null);
-    assert.equal(await guard.consumeDocTicket('../../etc', otpIp, UA), null);
+  // LINE's in-app browser opens the link, then hands it to Safari: no IP / browser binding, not single-use
+  await test('doc link: opens again and from any browser while the session lives; bad shape → null', async () => {
+    const doc = { jobNo: ownJob, kind: 'job', ref: ownJob };
+    assert.deepEqual(await docForLink(docTicket), doc);
+    assert.deepEqual(await docForLink(docTicket), doc, 'second open');
+    assert.equal(await docForLink('x'.repeat(43)), null);
+    assert.equal(await docForLink('../../etc'), null);
   });
-  await test('ticket: expired → refused; 10 concurrent uses → exactly one', async () => {
-    const a = (await docReq({ jobNo: ownJob, kind: 'job', ref: ownJob }, otpIp, { session: otpSession })).json.url;
-    await db.execute(
-      sql`UPDATE track_doc_ticket SET expires_at = now() - interval '1 second' WHERE token_hash = ${guard.sha256(ticketOf(a))}`,
+  await test('doc link: expired → null; its OTP session ended → null', async () => {
+    const a = ticketOf(
+      (await docReq({ jobNo: ownJob, kind: 'job', ref: ownJob }, otpIp, { session: otpSession })).json.url,
     );
-    assert.equal(await guard.consumeDocTicket(ticketOf(a), otpIp, UA), null);
+    await db.execute(
+      sql`UPDATE track_doc_ticket SET expires_at = now() - interval '1 second' WHERE token_hash = ${guard.sha256(a)}`,
+    );
+    assert.equal(await docForLink(a), null);
     const b = ticketOf(
       (await docReq({ jobNo: ownJob, kind: 'job', ref: ownJob }, otpIp, { session: otpSession })).json.url,
     );
-    const all = await Promise.all(Array.from({ length: 10 }, () => guard.consumeDocTicket(b, otpIp, UA)));
-    assert.equal(all.filter(Boolean).length, 1);
+    const hash = guard.sha256(otpSession);
+    const [{ e }] = (
+      await db.execute<{ e: string }>(sql`SELECT expires_at::text e FROM track_session WHERE token_hash = ${hash}`)
+    ).rows;
+    await db.execute(sql`UPDATE track_session SET expires_at = now() - interval '1 second' WHERE token_hash = ${hash}`);
+    try {
+      assert.equal(await docForLink(b), null);
+    } finally {
+      await db.execute(sql`UPDATE track_session SET expires_at = ${e}::timestamptz WHERE token_hash = ${hash}`);
+    }
+    assert.ok(await docForLink(b), 'live again with the session');
   });
   await test("OTP: someone else's job / another job's quotation / unknown kind → the same 404", async () => {
     const other = (
       await db.execute<{ no: string; q: string }>(sql`
     SELECT j.job_no no, q.quotation_no q FROM job j JOIN customer c ON c.customer_id = j.customer_id
       JOIN quotation_hd q ON q.reference_job_no = j.job_no AND q.quotation_status_id = 3 AND q.record_status <> 'DELETED'
-     WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\D', '', 'g') NOT LIKE ${'%' + PHONE.slice(1) + '%'} LIMIT 1`)
+     WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') NOT LIKE ${'%' + PHONE.slice(1) + '%'} LIMIT 1`)
     ).rows[0];
     const a = await docReq({ jobNo: other.no, kind: 'job', ref: other.no }, otpIp, { session: otpSession });
     const b = await docReq({ jobNo: ownJob, kind: 'quotation', ref: other.q }, otpIp, { session: otpSession });

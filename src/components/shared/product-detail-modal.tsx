@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ImageIcon, Upload } from 'lucide-react';
+import { ImageIcon, Search, Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import type { Product } from '@/data/mock';
 import { int } from '@/lib/utils';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { useAccess } from '@/lib/use-access';
 import { productSchema } from '@/lib/validation/admin';
 
 export type ProductMode = 'view' | 'edit' | 'add';
@@ -93,6 +94,8 @@ export function ProductDetailModal({
   const { data: COLORS } = useColors();
   const { data: CATEGORIES } = useCategories();
   const { data: MANUFACTURERS } = useManufacturers();
+  // ราคาทุน: System Admin / Product edit only — the API leaves it out for everyone else, so hide the field too
+  const seeCost = useAccess().can('Product', 'edit');
 
   const ro = mode === 'view';
   const code = product?.sysCode ?? '';
@@ -108,6 +111,8 @@ export function ProductDetailModal({
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
   const [image, setImage] = React.useState('');
+  const [brokenImage, setBrokenImage] = React.useState(''); // the file that failed to load → placeholder
+  const [modelQ, setModelQ] = React.useState('');
   const [uploading, setUploading] = React.useState(false);
 
   // รูปอะไหล่ → bucket oneservice/products/{code}/… แล้วเก็บชื่อไฟล์ใน product.pictrue_file_name
@@ -141,9 +146,11 @@ export function ProductDetailModal({
   if (open && seenSession !== session) {
     setSeenSession(session);
     fe.setErrors({});
+    setModelQ('');
     if (mode === 'add' || !code) {
       setImage('');
-      setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? '', brand: MANUFACTURERS[0]?.name ?? '' });
+      // ยี่ห้อ starts empty: defaulting to the first one (70mai) saved parts under the wrong brand
+      setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? '' });
     }
   }
   if (detailKey && loaded.data && !loaded.validating && filledFor !== session) {
@@ -209,6 +216,20 @@ export function ProductDetailModal({
   if (!product && mode !== 'add') return null;
   const p: Product = detail ?? product ?? NEW_PRODUCT;
 
+  // รุ่นสินค้า (~1,200): view = only this part's models; edit = ticked ones first, then what the search finds
+  const nameOf = new Map(MODELS.map((m) => [m.code, m]));
+  const words = modelQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const modelRows = ro
+    ? form.models.map((c) => nameOf.get(c) ?? { code: c, name: '', brand: '' })
+    : [
+        ...form.models.map((c) => nameOf.get(c) ?? { code: c, name: '', brand: '' }),
+        ...MODELS.filter(
+          (m) =>
+            !form.models.includes(m.code) &&
+            words.every((w) => `${m.code} ${m.name} ${m.brand}`.toLowerCase().includes(w)),
+        ),
+      ];
+
   // stock on-hand row (single warehouse / condition in the legacy system)
   const onhandRows = [
     {
@@ -253,9 +274,14 @@ export function ProductDetailModal({
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground">Part Image</p>
             <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
-              {image ? (
+              {image && brokenImage !== image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={fileUrl(image)} alt={p.name} className="h-full w-full object-contain" />
+                <img
+                  src={fileUrl(image)}
+                  alt={p.name}
+                  onError={() => setBrokenImage(image)}
+                  className="h-full w-full object-contain"
+                />
               ) : (
                 <div className="text-center">
                   <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
@@ -354,20 +380,22 @@ export function ProductDetailModal({
               </div>
             </Field>
 
-            <Field label="ราคาทุน (Capital) — บาท" error={fe.errors.capitalPrice}>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                value={form.capitalPrice}
-                onChange={(e) => set('capitalPrice', e.target.value)}
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
+            {seeCost && (
+              <Field label="ราคาทุน (Capital) — บาท" error={fe.errors.capitalPrice}>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={form.capitalPrice}
+                  onChange={(e) => set('capitalPrice', e.target.value)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  readOnly={ro}
+                  className="num text-right"
+                />
+              </Field>
+            )}
             <Field label="ราคาขายส่ง (Wholesale) — บาท" error={fe.errors.wholesalePrice}>
               <Input
                 type="number"
@@ -417,25 +445,60 @@ export function ProductDetailModal({
 
         {/* product models */}
         <div>
-          <p className="mb-2 text-sm font-medium">ใช้สำหรับ รุ่นสินค้า</p>
+          <p className="mb-2 text-sm font-medium">
+            ใช้สำหรับ รุ่นสินค้า{' '}
+            <span className="num text-xs font-normal text-muted-foreground">({form.models.length} รุ่น)</span>
+          </p>
           {fe.errors.models && <p className="mb-2 text-xs text-danger">{fe.errors.models}</p>}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-3 lg:grid-cols-4">
-            {MODELS.map((m) => (
-              <label key={m.code} className="flex cursor-pointer items-center gap-2 text-xs" title={m.name}>
-                <Checkbox
-                  disabled={ro}
-                  checked={form.models.includes(m.code)}
-                  onChange={() =>
-                    set(
-                      'models',
-                      form.models.includes(m.code) ? form.models.filter((c) => c !== m.code) : [...form.models, m.code],
-                    )
-                  }
-                />{' '}
-                {m.code}
-              </label>
-            ))}
-            {MODELS.length === 0 && <span className="text-xs text-muted-foreground">ไม่มีข้อมูลรุ่นสินค้า</span>}
+          {!ro && (
+            <div className="mb-2 flex items-center gap-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Input
+                type="search"
+                aria-label="ค้นหารุ่นสินค้า"
+                placeholder="พิมพ์รหัสรุ่น ชื่อรุ่น หรือยี่ห้อ…"
+                value={modelQ}
+                onChange={(e) => setModelQ(e.target.value)}
+                className="h-8 max-w-sm"
+              />
+            </div>
+          )}
+          <div className="grid max-h-72 grid-cols-1 gap-x-4 gap-y-2 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-2 lg:grid-cols-3">
+            {modelRows.map((m) =>
+              ro ? (
+                <span key={m.code} className="flex min-w-0 items-baseline gap-2 text-xs">
+                  <span className="num shrink-0 text-muted-foreground">{m.code}</span>
+                  <span className="truncate">{m.name || '—'}</span>
+                </span>
+              ) : (
+                <label key={m.code} className="flex min-w-0 cursor-pointer items-center gap-2 text-xs">
+                  <Checkbox
+                    checked={form.models.includes(m.code)}
+                    onChange={() =>
+                      set(
+                        'models',
+                        form.models.includes(m.code)
+                          ? form.models.filter((c) => c !== m.code)
+                          : [...form.models, m.code],
+                      )
+                    }
+                  />
+                  <span className="num shrink-0 text-muted-foreground">{m.code}</span>
+                  <span className="truncate" title={m.brand ? `${m.name} · ${m.brand}` : m.name}>
+                    {m.name}
+                  </span>
+                </label>
+              ),
+            )}
+            {modelRows.length === 0 && (
+              <span className="text-xs text-muted-foreground">
+                {ro
+                  ? 'ยังไม่ได้ระบุรุ่นสินค้า'
+                  : MODELS.length === 0
+                    ? 'ไม่มีข้อมูลรุ่นสินค้า'
+                    : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
+              </span>
+            )}
           </div>
         </div>
 

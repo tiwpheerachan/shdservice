@@ -30,6 +30,7 @@ function NewJobForm() {
   const attach = React.useRef<AttachmentsHandle>(null);
   const [saving, setSaving] = React.useState(false);
   const { can } = useAccess();
+  const canRepair = can('Job Repair', 'edit');
   // after saving we stop here first so the tracking link can be copied and sent
   // to the customer right away (the job is trackable from the moment it exists)
   const [opened, setOpened] = React.useState<string | null>(null);
@@ -75,18 +76,29 @@ function NewJobForm() {
         open={!!opened}
         onClose={() => setOpened(null)}
         title={`เปิดงานเรียบร้อย · ${opened ?? ''}`}
-        description="ส่งลิงก์ติดตามให้ลูกค้าได้เลย หรือพิมพ์ใบรับงานก่อน"
+        description="พิมพ์ใบรับงานให้ลูกค้า และส่งลิงก์ติดตามงานได้เลย"
         footer={
           <>
+            {/* the repair screen is the technician's — offered only to a role that may save it */}
+            {canRepair && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => opened && router.push(`/jobs/repair?job=${encodeURIComponent(opened)}`)}
+              >
+                ไปบันทึกงานซ่อม
+              </Button>
+            )}
+            {/* the form is already empty for the next customer */}
+            <Button variant="outline" size="sm" onClick={() => setOpened(null)}>
+              เปิดงานใหม่อีกงาน
+            </Button>
             <Button
-              variant="outline"
               size="sm"
+              autoFocus
               onClick={() => opened && window.open(`/print/job/${encodeURIComponent(opened)}`, '_blank')}
             >
               พิมพ์ใบรับงาน
-            </Button>
-            <Button size="sm" onClick={() => opened && router.push(`/jobs/repair?job=${encodeURIComponent(opened)}`)}>
-              ไปบันทึกงานซ่อม
             </Button>
           </>
         }

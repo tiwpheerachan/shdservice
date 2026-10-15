@@ -10,6 +10,7 @@ import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/mock';
 import { TTL_MASTER, useApi, useProvinces } from '@/data/db';
 import { qs } from '@/lib/api';
 import type { FieldErrors } from '@/lib/validation';
+import { isIndividual } from '@/lib/validation/customer';
 
 /**
  * Customer form shared by the ข้อมูลลูกค้า page (modal) and CustomerSelect
@@ -114,9 +115,11 @@ const FIELD_LABEL: Record<CustomerConflict['field'], string> = {
 export function ConflictNotice({
   conflicts,
   onPick,
+  pickLabel = 'ใช้ลูกค้ารายนี้',
 }: {
   conflicts: CustomerConflict[];
   onPick?: (code: string) => void;
+  pickLabel?: string;
 }) {
   const byCode = new Map<string, CustomerConflict & { fields: string[] }>();
   for (const c of conflicts) {
@@ -142,7 +145,7 @@ export function ConflictNotice({
             <span className="text-xs text-danger">ซ้ำ: {c.fields.join(', ')}</span>
             {onPick && (
               <Button size="sm" variant="outline" onClick={() => onPick(c.code)}>
-                ใช้ลูกค้ารายนี้
+                {pickLabel}
               </Button>
             )}
           </li>
@@ -180,7 +183,7 @@ export function CustomerFields({
   return (
     <FieldGrid cols={2}>
       <Field label="รหัสลูกค้า">
-        <Input value={editing?.code || 'Generate Auto'} readOnly />
+        <Input value={editing?.code || 'ออกรหัสอัตโนมัติเมื่อบันทึก'} readOnly />
       </Field>
       <Field label="ประเภทลูกค้า" error={errors.type}>
         <div className="flex items-center gap-3">
@@ -295,7 +298,13 @@ export function CustomerFields({
         label="เบอร์โทรศัพท์"
         required={!editing || !!editing.phone?.trim()}
         error={errors.phone}
-        hint={editing ? undefined : 'ต้องมีเบอร์มือถือ — ลูกค้าใช้รับรหัส OTP ติดตามงาน'}
+        hint={
+          editing
+            ? 'มือถือใช้รับ OTP ติดตามงาน'
+            : isIndividual(form.type)
+              ? 'ลูกค้าบุคคลต้องมีเบอร์มือถือ — มือถือใช้รับ OTP ติดตามงาน'
+              : 'นิติบุคคล / ตัวแทน ใช้เบอร์สำนักงานได้ — มือถือใช้รับ OTP ติดตามงาน'
+        }
       >
         <Input
           inputMode="tel"

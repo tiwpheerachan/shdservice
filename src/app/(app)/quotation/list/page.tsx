@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from '@/data/mock';
-import { useQuotationsPage, useManufacturers } from '@/data/db';
+import { useQuotationsPage, useManufacturers, useTable } from '@/data/db';
 import { baht, isFilterActive } from '@/lib/utils';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
@@ -62,6 +62,8 @@ const NO_FILTER: Filters = {
 export default function QuotationListPage() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/quotation/list');
   const { data: MANUFACTURERS } = useManufacturers();
+  // every status in quotation_status (the fixed list is only the fallback while it loads)
+  const { data: STATUSES } = useTable<{ id: number; name: string }>('quotation_statuses');
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
@@ -164,7 +166,7 @@ export default function QuotationListPage() {
     },
     {
       key: 'action',
-      header: 'Action',
+      header: 'จัดการ',
       width: '110px',
       align: 'center',
       sortable: false,
@@ -278,7 +280,7 @@ export default function QuotationListPage() {
             emptyLabel="ทั้งหมด"
             value={draft.status}
             onChange={(v) => setD('status', v)}
-            options={strOptions(QUOTATION_STATUS_OPTIONS)}
+            options={strOptions(STATUSES.length ? STATUSES.map((x) => x.name) : QUOTATION_STATUS_OPTIONS)}
           />
         </Field>
       </FilterBar>

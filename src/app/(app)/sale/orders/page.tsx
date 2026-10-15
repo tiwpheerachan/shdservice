@@ -13,20 +13,12 @@ import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { type SaleOrder } from '@/data/mock';
+import { SO_TONE as TONE } from '@/components/shared/sale-order-form';
 import { useSaleOrdersPage, useStaff } from '@/data/db';
 import { baht, isFilterActive } from '@/lib/utils';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
 import { ExportButton } from '@/components/shared/export-button';
-
-// approve_status.approve_name_th → badge tone
-const TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
-  รออนุมัติ: 'warning',
-  อนุมัติแล้ว: 'success',
-  ปฏิเสธ: 'danger',
-  แก้ไขข้อมูล: 'danger',
-  กำลังดำเนินการจัดทำ: 'info',
-};
 
 type Filters = { no: string; customer: string; from: string; to: string; code: string; sales: string; approve: string };
 const NO_FILTER: Filters = { no: '', customer: '', from: '', to: '', code: '', sales: '', approve: '' };
@@ -59,7 +51,7 @@ export default function SaleOrderPage() {
   const columns: Column<SaleOrder>[] = [
     {
       key: 'no',
-      header: 'SO No.',
+      header: 'เลขใบสั่งขาย',
       width: '120px',
       cell: (r) => (
         <Link
@@ -108,13 +100,13 @@ export default function SaleOrderPage() {
     },
     {
       key: 'tracking',
-      header: 'TrackingNo',
+      header: 'เลขพัสดุ',
       hideBelow: 'xl',
       cell: (r) => <span className="num text-xs">{r.tracking || '—'}</span>,
     },
     {
       key: 'action',
-      header: 'Action',
+      header: 'จัดการ',
       width: '110px',
       align: 'center',
       sortable: false,
