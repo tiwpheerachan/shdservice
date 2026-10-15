@@ -17,6 +17,7 @@ import { type Job } from '@/data/mock';
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from '@/data/db';
 import { api, postJson, errMsg, qs } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { apiFieldErrors } from '@/lib/use-form-errors';
 import { isFilterActive } from '@/lib/utils';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
@@ -136,7 +137,8 @@ export default function AssignPage() {
       });
       refetch();
     } catch (e) {
-      push({ kind: 'error', title: 'รับงานไม่สำเร็จ', desc: errMsg(e) });
+      // no engineer field here (always the signed-in user) — the API's reason goes in the toast
+      push({ kind: 'error', title: 'รับงานไม่สำเร็จ', desc: apiFieldErrors(e)?.engineerId ?? errMsg(e) });
     } finally {
       setSaving(false);
     }

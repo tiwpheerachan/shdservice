@@ -55,8 +55,9 @@ import {
   str,
 } from '@/server/mappers/format';
 import { getCustomerByCode, getCustomerById } from './customers';
+import { staffOrKeep } from './users';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
-import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
+import { adjustQty, listPartRequests, lockStock, PART, partsTotalOf, productsByCode } from './stock';
 import { RS, statusStamp } from '@/server/record-status';
 import { addDays } from '@/lib/dates';
 import {
@@ -66,9 +67,13 @@ import {
   outsourceActionSchema,
   swapRefundActionSchema,
   closeActionSchema,
+  jobAmountDue,
+  RECEIVE_BEFORE_SEND,
+  OUTSOURCE_NOT_BACK,
   type JobRequiredKey,
 } from '@/lib/validation/job';
 import { assertValid } from '@/server/validate';
+import { summary, type FieldErrors } from '@/lib/validation';
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
@@ -103,6 +108,14 @@ export const JS = {
 
 const REPAIRED_GROUP = 'Repaired';
 const FINISHED_GROUP = 'Finished';
+
+/**
+ * The status group the dashboard cards / KPI links / report counts use: job_status_group, except
+ * "ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)" (6) — listed under Repaired in job_status, but the customer declined,
+ * nothing was repaired — counts as Cancel. (Cancel's own status 0 = soft-deleted, hidden everywhere.)
+ * Needs job_status joined.
+ */
+export const kpiGroup = sql<string>`(case when ${job.jobStatusId} = ${sql.raw(String(JS.REPAIR_CANCELLED))} then 'Cancel' else ${jobStatus.jobStatusGroup} end)`;
 
 const eng = alias(appUser, 'eng');
 const opener = alias(appUser, 'opener');
@@ -164,6 +177,18 @@ async function lockJob(tx: Tx, jobNo: string): Promise<number | null> {
   return r.status;
 }
 
+/** an out-source send not yet recorded as received (saveOutsource's open row) */
+const outsourceOpen = (jobNo: string) =>
+  and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว'));
+
+/** Stamp job_repaired_date/by only while it is still the 1900 sentinel (never repaired-stamped). */
+async function stampRepairedIfMissing(tx: Tx, jobNo: string, at: string, byUserId: number) {
+  await tx
+    .update(job)
+    .set({ jobRepairedDate: at, jobRepairedBy: byUserId })
+    .where(and(eq(job.jobNo, jobNo), sql`coalesce(${job.jobRepairedDate}, '1900-01-01') < '1901-01-01'`));
+}
+
 /** Change status + log (no-op when unchanged). Returns true if changed. */
 async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: number, current?: number | null) {
   if (current === statusId) return false;
@@ -174,8 +199,18 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
     extra.jobRepairedBy = byUserId;
   }
   if (group === FINISHED_GROUP) {
+    // a job sent out-source must come back before it is closed (owner, Dogfood round 2). Only on the way
+    // INTO Finished: an already-closed legacy job (7 → 8, adding the tracking no.) is not blocked.
+    const closing = current == null || (await statusGroup(current)) !== FINISHED_GROUP;
+    const [out] = closing
+      ? await tx.select({ id: jobSendForwardDt.id }).from(jobSendForwardDt).where(outsourceOpen(jobNo)).limit(1)
+      : [];
+    if (out) throw new HttpError(400, OUTSOURCE_NOT_BACK, { fields: { status: OUTSOURCE_NOT_BACK } });
     extra.jobClosedDate = nowThai();
     extra.jobClosedBy = byUserId;
+    // safety net: closed without ever being repaired-stamped (e.g. out-source received → closed) — the
+    // close is the repair date, so the job still shows up in the repair reports
+    await stampRepairedIfMissing(tx, jobNo, extra.jobClosedDate, byUserId);
   }
   await tx
     .update(job)
@@ -412,14 +447,15 @@ export function jobWhere(q: string, f: JobFilters) {
       : undefined,
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
     f.statusId !== undefined ? eq(job.jobStatusId, f.statusId) : undefined,
-    f.statusGroup ? eq(jobStatus.jobStatusGroup, f.statusGroup) : undefined,
+    f.statusGroup ? eq(kpiGroup, f.statusGroup) : undefined,
     f.open ? isOpenJob : undefined,
     f.overdue ? overdueWhere : undefined,
     f.type ? eq(jobType.jobTypeName, f.type) : undefined,
     f.engineer
       ? /^\d+$/.test(f.engineer)
         ? eq(job.engineerId, Number(f.engineer))
-        : sql`trim(coalesce(${eng.firstName},'') || ' ' || coalesce(${eng.lastName},'')) = ${f.engineer}`
+        : // the same name fullName() builds: each part trimmed, empty parts dropped
+          sql`concat_ws(' ', nullif(trim(${eng.firstName}),''), nullif(trim(${eng.lastName}),'')) = ${f.engineer.trim()}`
       : undefined,
     f.channel ? eq(job.productSaleOutChannel, f.channel) : undefined,
     from ? gte(dateCol(f.dateBy), dayStart(f.dateBy, from)) : undefined,
@@ -617,6 +653,8 @@ export type JobDetail = {
   deliveryCost: number;
   boxCost: number;
   totalCost: number;
+  /** what the customer still pays: totalCost less the deposit (jobAmountDue) */
+  amountDue: number;
   /** the real due date (effectiveDue) */
   dueDate: string;
   /** true = no user picked it: opened + the job type's SLA (a legacy "+1 day" date is ignored) */
@@ -812,6 +850,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     deliveryCost: num(j.deliveryCost),
     boxCost: num(j.cartonBoxCost),
     totalCost: num(j.jobTotalCost),
+    amountDue: jobAmountDue(num(j.jobTotalCost), num(j.depositCost)),
     dueDate: fmtDate(r.due),
     dueDateAuto: !j.dueDateSetByUser,
     engineerId: j.engineerId ?? 0,
@@ -989,6 +1028,13 @@ async function lookups(i: JobInput) {
         .where(inArray(symptom.symptomName, names))
     : [];
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
+  // a name that was sent but is not in the list used to be saved as id 0 — refuse it under its field
+  const fields: FieldErrors = {};
+  if (i.brand && !mf) fields.brand = `ไม่พบยี่ห้อ "${i.brand}" ในรายการ`;
+  if (i.modelCode && !md) fields.modelCode = `ไม่พบรุ่น "${i.modelCode}" ในรายการ`;
+  const unknown = names.filter((n) => !syms.some((s) => s.name === n));
+  if (unknown.length) fields.symptoms = `ไม่พบอาการเสีย "${unknown.join('", "')}" ในรายการ`;
+  if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
   return {
     jobTypeId: jt?.id,
     productTypeId: pt?.id,
@@ -1243,10 +1289,11 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
 export async function assignJobs(jobNos: string[], engineerId: number, byUserId: number): Promise<number> {
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
   if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
+  await staffOrKeep(engineerId, undefined, 'engineerId', 0, 'ไม่พบช่างคนนี้ในรายชื่อปัจจุบัน'); // an active app_user
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
-      .select({ no: job.jobNo, status: job.jobStatusId })
+      .select({ no: job.jobNo, status: job.jobStatusId, eng: job.engineerId })
       .from(job)
       .where(inArray(job.jobNo, jobNos))
       .orderBy(job.jobNo)
@@ -1271,7 +1318,7 @@ export async function assignJobs(jobNos: string[], engineerId: number, byUserId:
         entity: 'job',
         key: r.no,
         summary: `มอบหมายงานให้ช่าง #${engineerId}`,
-        changes: { engineerId: [null, engineerId] },
+        changes: { engineerId: [r.eng, engineerId] },
       })),
     );
     for (const r of rows) if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
@@ -1418,11 +1465,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         partsTotal += useA ? totalA : 0;
       }
     } else {
-      const [sum] = await tx
-        .select({ s: sql<string>`coalesce(sum(spare_part_total_price),0)` })
-        .from(jobOrderSparePartLog)
-        .where(and(eq(jobOrderSparePartLog.jobNo, jobNo), ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED)));
-      partsTotal = num(sum?.s);
+      partsTotal = await partsTotalOf(tx, jobNo);
     }
 
     // ---- job fields ----
@@ -1497,28 +1540,6 @@ export type OutsourceInput = {
   status?: string;
 };
 
-/**
- * ส่งโดย / รับโดย: an active staff member, or the person already on the row (who may have left
- * since — keeping them is never an error). Anything else is a 400 under that field.
- */
-async function staffOrKeep(
-  id: number | undefined,
-  current: number | null | undefined,
-  field: string,
-  fallback: number,
-): Promise<number> {
-  if (id === undefined) return fallback;
-  if (id === current) return id;
-  const [u] = await db
-    .select({ id: appUser.userId })
-    .from(appUser)
-    .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
-    .limit(1);
-  if (!u)
-    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { [field]: 'ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน' } });
-  return id;
-}
-
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
   const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
@@ -1534,7 +1555,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   const [openRow] = await db
     .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
     .from(jobSendForwardDt)
-    .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว')))
+    .where(outsourceOpen(jobNo))
     .orderBy(desc(jobSendForwardDt.id))
     .limit(1);
   const sendBy = await staffOrKeep(i.send?.by, openRow?.sendBy, 'send.by', byUserId);
@@ -1542,12 +1563,24 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
 
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
+    const open = await tx
+      .select()
+      .from(jobSendForwardDt)
+      .where(outsourceOpen(jobNo))
+      .orderBy(desc(jobSendForwardDt.id))
+      .limit(1);
+    // the send date is usually stored already (the page sends the receive block alone)
+    const sentOn = fmtDate(open[0]?.sendDate);
+    if (i.receive?.date && sentOn && i.receive.date < sentOn)
+      throw new HttpError(400, RECEIVE_BEFORE_SEND, { fields: { 'receive.date': RECEIVE_BEFORE_SEND } });
     const fields = {
       ...(es ? { engineerSymptomId: es.id } : {}),
       ...(i.symptomOther !== undefined ? { productSymptomOther: str(i.symptomOther).slice(0, 200) } : {}),
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: str(i.repairDetail).slice(0, 200) } : {}),
     };
+    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
+    const o = open[0];
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Repair',
@@ -1558,20 +1591,18 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
         : i.receive
           ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
           : 'บันทึกงานส่งซ่อมต่อ',
-      changes: diff(null, {
-        ...fields,
-        ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
-        ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}),
-      }),
+      // old values: the job row + the open send row (none yet → null)
+      changes: diff(
+        { ...before, ...(o ? { sendTo: o.sendToName, sendDate: sentOn, sendBy: o.sendBy } : {}) },
+        {
+          ...fields,
+          ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
+          ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}),
+        },
+      ),
     });
 
     let target = newStatus;
-    const open = await tx
-      .select()
-      .from(jobSendForwardDt)
-      .where(and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว')))
-      .orderBy(desc(jobSendForwardDt.id))
-      .limit(1);
 
     if (i.receive && (i.receive.date || i.receive.detail) && open[0]) {
       await tx
@@ -1583,6 +1614,9 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           sendStatus: 'รับเครื่องซ่อมแล้ว',
         })
         .where(eq(jobSendForwardDt.id, open[0].id));
+      // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
+      // the job is closed with job_repaired_date 1900 and drops out of the repair reports
+      await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
       target ??= JS.OUTSOURCE_RECEIVED;
     } else if (i.send?.to) {
       if (open[0]) {
@@ -1951,11 +1985,11 @@ async function computeDashboard(from: string, to: string, type = '') {
   // the four panels are independent: run them side by side (the page waits for the slowest, not the sum)
   const [groups, tat, trend, top] = await Promise.all([
     db
-      .select({ group: jobStatus.jobStatusGroup, n: count() })
+      .select({ group: kpiGroup, n: count() })
       .from(job)
       .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
       .where(createdIn)
-      .groupBy(jobStatus.jobStatusGroup),
+      .groupBy(kpiGroup),
     db
       .select({
         statusId: jobStatus.jobStatusId,
@@ -1995,7 +2029,8 @@ async function computeDashboard(from: string, to: string, type = '') {
     Pending: { key: 'pending', label: 'งานระหว่างดำเนินการ', sub: 'Pending', tone: 'warning', ord: 1 },
     Repaired: { key: 'repaired', label: 'ซ่อมเสร็จ / รอปิดงาน', sub: 'Repaired', tone: 'info', ord: 2 },
     Finished: { key: 'finished', label: 'ปิดงานแล้ว', sub: 'Finished', tone: 'success', ord: 3 },
-    Cancel: { key: 'cancel', label: 'ยกเลิก', sub: 'Cancel', tone: 'danger', ord: 4 },
+    // = ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม) — see kpiGroup
+    Cancel: { key: 'cancel', label: 'ยกเลิก / ลูกค้าไม่ซ่อม', sub: 'Cancel', tone: 'danger', ord: 4 },
   };
   const dashGroups = Object.entries(G)
     .map(([g, meta]) => {
@@ -2145,12 +2180,15 @@ async function loadJobStats() {
   let total = 0;
   let fresh = 0;
   let done = 0;
+  let declined = 0;
   for (const r of rows) {
     if (r.id === JS.CANCELLED) continue; // = DELETED
     const n = Number(r.n);
     total += n;
     if (r.id === JS.NEW) fresh += n;
+    else if (r.id === JS.REPAIR_CANCELLED)
+      declined += n; // ลูกค้าไม่ซ่อม: neither repaired nor in progress (kpiGroup)
     else if (r.group === 'Finished' || r.group === 'Repaired') done += n;
   }
-  return { total, fresh, done, progress: total - fresh - done };
+  return { total, fresh, done, progress: total - fresh - done - declined };
 }

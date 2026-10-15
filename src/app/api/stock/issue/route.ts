@@ -59,7 +59,7 @@ async function issue(req: NextRequest, userId: number) {
   }
   return issueOther(
     {
-      payTo: b.payTo ?? '',
+      payTo: b.payTo,
       remark: b.remark,
       lines: b.lines.map((l) => ({ code: String(l.code ?? ''), qty: Number(l.qty) })),
     },

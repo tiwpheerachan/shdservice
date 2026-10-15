@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isoDateString } from './index';
 
 /**
  * Bodies of the write routes that had no schema (stock in/out, assign, SO approve /
@@ -20,20 +21,32 @@ const lines = <T extends z.ZodRawShape>(shape: T) =>
   z.array(z.looseObject(shape)).min(1, 'ต้องมีอย่างน้อย 1 รายการ').max(500, 'รายการมากเกิน 500 บรรทัด');
 
 export const receiveSchema = z.looseObject({
-  date: text(30),
+  date: isoDateString('ต้องระบุวันที่รับเข้า'),
   poRef: text(100),
   supplier: text(200),
   remark: text(500),
   lines: lines({ code: z.string().min(1, 'ต้องระบุรหัสอะไหล่').max(50), qty }),
 });
 
-export const issueSchema = z.looseObject({
-  type: z.enum(['job', 'sale', 'other', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
-  ref: text(50),
-  payTo: text(200),
-  remark: text(500),
-  lines: lines({ logId: id.nullish(), dtId: id.nullish(), code: z.string().max(50).nullish(), qty }),
-});
+export const issueSchema = z
+  .looseObject({
+    type: z.enum(['job', 'sale', 'other', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
+    ref: text(50),
+    // จ่ายให้ / รับคืนจาก: required — a stock-out document without a recipient was saved (inventory_hd.reference_out_to, 50)
+    payTo: z
+      .string()
+      .trim()
+      .max(50, 'ยาวเกิน 50 ตัวอักษร')
+      .nullish()
+      .transform((v) => v ?? ''),
+    remark: text(500),
+    lines: lines({ logId: id.nullish(), dtId: id.nullish(), code: z.string().max(50).nullish(), qty }),
+  })
+  .refine((v) => !!v.payTo, {
+    path: ['payTo'],
+    error: (iss) => ((iss.input as { type?: unknown }).type === 'return' ? 'ต้องเลือก รับคืนจาก' : 'ต้องเลือก จ่ายให้'),
+    when: (p) => typeof p.value === 'object' && p.value !== null, // also when another field failed: every error at once
+  });
 
 export const assignSchema = z.looseObject({
   jobNos: z.array(z.string().min(1).max(20)).min(1, 'ยังไม่ได้เลือกงาน').max(500, 'เลือกงานได้ไม่เกิน 500 งาน'),

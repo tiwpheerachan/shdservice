@@ -74,7 +74,7 @@ export default function Page() {
     sort: table.sort?.key,
     dir: table.sort?.dir,
   };
-  const { data: sum } = useProductStats({ ...filters, q: f.q });
+  const { data: sum } = useProductStats({ ...filters, q: table.q || f.q });
   const {
     rows,
     total,

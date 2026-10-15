@@ -32,7 +32,9 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
   if (!j) notFound();
   const co = await profileForDocument(j.documentProfileId); // ออกเอกสารในนาม
   const c = j.customer;
-  const parts = j.parts.filter((p) => p.statusId === 3 || p.granted > 0);
+  // billed qty = issued less returned to stock (รับคืนจากการเบิก); a line returned in full is not printed
+  const used = (p: (typeof j.parts)[number]) => (p.granted > 0 ? p.granted - p.returned : p.requested);
+  const parts = j.parts.filter((p) => (p.statusId === 3 || p.granted > 0) && used(p) > 0);
   const [eng] =
     j.engineerId > 0
       ? await db
@@ -247,7 +249,7 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
               </tr>
             )}
             {parts.map((p, i) => {
-              const qty = p.granted || p.requested;
+              const qty = used(p);
               return (
                 <tr key={p.logId}>
                   <td className="num text-center">{i + 1}</td>
@@ -333,11 +335,11 @@ export async function ReturnNoteDoc({ no }: { no: string }) {
           </tr>
           <tr>
             <td className="text-right font-bold">รวมทั้งสิ้น / Grand Total :</td>
-            <td className="num text-right font-bold">{money(j.totalCost)}</td>
+            <td className="num text-right font-bold">{money(j.amountDue)}</td>
           </tr>
           <tr>
             <td className="words text-center font-semibold" colSpan={3}>
-              ({bahtText(j.totalCost)})
+              ({bahtText(j.amountDue)})
             </td>
           </tr>
         </tbody>

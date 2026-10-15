@@ -56,7 +56,7 @@ const columns: Column<SaleOrder>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), sales: '', approve: '' });
-  const { data: STAFF } = useStaff();
+  const { data: STAFF } = useStaff('sales');
   const salesId = STAFF.find((s) => s.name === f.sales)?.id;
   const filters = { from: f.from, to: f.to, sales: salesId ?? f.sales, approve: f.approve };
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
@@ -67,7 +67,7 @@ export default function Page() {
     sort: table.sort?.key,
     dir: table.sort?.dir,
   };
-  const { data: sum } = useSaleOrderSummary(filters);
+  const { data: sum } = useSaleOrderSummary({ ...filters, q: table.q });
   const {
     rows: SALE_ORDERS,
     total: totalRows,
@@ -93,8 +93,12 @@ export default function Page() {
       kpis={[
         { label: 'ใบสั่งขายทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },
         { label: 'อนุมัติแล้ว', value: int(S?.approved ?? 0), tone: 'success' },
-        { label: 'ยอดขายรวม', value: baht(total) },
-        { label: 'ยอดเฉลี่ย/ใบ', value: baht(avg) },
+        {
+          label: 'ยอดขายรวม (อนุมัติแล้ว)',
+          value: baht(total),
+          sub: S?.notApprovedAmount ? `ไม่รวมที่ยังไม่อนุมัติ/ถูกปฏิเสธ ${baht(S.notApprovedAmount)}` : undefined,
+        },
+        { label: 'ยอดเฉลี่ย/ใบ (อนุมัติแล้ว)', value: baht(avg) },
       ]}
       columns={columns}
       rows={SALE_ORDERS}

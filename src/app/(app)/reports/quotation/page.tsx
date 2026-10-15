@@ -74,7 +74,7 @@ export default function Page() {
     sort: table.sort?.key,
     dir: table.sort?.dir,
   };
-  const { data: sum } = useQuotationSummary(filters);
+  const { data: sum } = useQuotationSummary({ ...filters, q: table.q });
   const {
     rows: QUOTATIONS,
     total: totalRows,
@@ -100,7 +100,11 @@ export default function Page() {
       kpis={[
         { label: 'ใบเสนอราคาทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },
         { label: 'ลูกค้าตกลงซ่อม', value: int(S?.agreed ?? 0), tone: 'success' },
-        { label: 'มูลค่ารวม', value: baht(total) },
+        {
+          label: 'มูลค่ารวม',
+          value: baht(total),
+          sub: S?.cancelledAmount ? `ไม่รวมใบที่ยกเลิก ${baht(S.cancelledAmount)}` : undefined,
+        },
         { label: 'มูลค่าที่ตกลง', value: baht(approvedTotal), tone: 'success' },
       ]}
       columns={columns}

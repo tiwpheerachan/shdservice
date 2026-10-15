@@ -4,6 +4,8 @@ import { asc, eq, ne, and, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documentProfile, job, quotationHd, saleOutHd } from '@/db/schema';
 import { HttpError } from '@/server/auth';
+import { assertValid } from '@/server/validate';
+import { documentProfileSchema } from '@/lib/validation/admin';
 import { audit, diff } from '@/server/audit';
 import { nowThai } from '@/server/mappers/format';
 
@@ -166,7 +168,7 @@ export async function deleteDocumentProfile(id: number, byUserId: number): Promi
       entity: 'document_profile',
       key: id,
       summary: `ลบโปรไฟล์ผู้ออกเอกสาร ${before.code} — ${before.nameTh}${hadDocuments ? ' (เคยออกเอกสารแล้ว เอกสารเดิมยังพิมพ์ได้)' : ''}`,
-      changes: { deletedAt: [null, nowThai()] },
+      changes: { deletedAt: [before.deletedAt, nowThai()] }, // before.deletedAt is null here (checked above)
     });
   });
   invalidate('docprofiles:');
@@ -198,8 +200,7 @@ const SYSTEM_PREFIXES = { prefixJob: 'J', prefixQuotation: 'Q', prefixSaleOrder:
 export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: number): Promise<DocumentProfile> {
   const code = str(i.code, 20).toUpperCase();
   const nameTh = str(i.nameTh);
-  if (!code) throw new HttpError(400, 'ต้องระบุรหัสโปรไฟล์ (เช่น SHD)');
-  if (!nameTh) throw new HttpError(400, 'ต้องระบุชื่อบริษัท');
+  assertValid(documentProfileSchema, i); // same rules as the page: errors under code / nameTh
 
   const values = {
     code,
@@ -228,7 +229,10 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
       .from(documentProfile)
       .where(and(isNull(documentProfile.deletedAt), i.id ? ne(documentProfile.id, i.id) : undefined));
     for (const o of others) {
-      if (o.code === code) throw new HttpError(409, `รหัสโปรไฟล์ ${code} ถูกใช้แล้ว (${o.nameTh})`);
+      if (o.code === code) {
+        const msg = `รหัสโปรไฟล์ ${code} ถูกใช้แล้ว (${o.nameTh})`;
+        throw new HttpError(409, msg, { fields: { code: msg } });
+      }
     }
 
     let before: Row | undefined;

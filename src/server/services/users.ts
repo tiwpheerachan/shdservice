@@ -1,7 +1,7 @@
 import { audit, diff } from '@/server/audit';
 import 'server-only';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
@@ -185,11 +185,44 @@ export async function listSystemUsers(deleted: DeletedMode = 'exclude'): Promise
   return rows.map(toUser);
 }
 
-/** Everyone active — for technician / opener / salesperson dropdowns. */
-export function listStaff(): Promise<{ id: number; name: string; userType: string }[]> {
-  return cached('staff', TTL_MASTER, loadStaff);
+/**
+ * A person picked from the staff list (ส่งโดย / รับโดย, พนักงานขาย, ช่าง): an active app_user, or the
+ * person already on the row (who may have left since — keeping them is never an error). Anything
+ * else is a 400 under `field`. Left out (undefined) → `fallback`.
+ */
+export async function staffOrKeep(
+  id: number | undefined,
+  current: number | null | undefined,
+  field: string,
+  fallback: number,
+  message = 'ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน',
+): Promise<number> {
+  if (id === undefined) return fallback;
+  if (id === current) return id;
+  const [u] = await db
+    .select({ id: appUser.userId })
+    .from(appUser)
+    .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
+    .limit(1);
+  if (!u) throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { [field]: message } });
+  return id;
 }
-async function loadStaff(): Promise<{ id: number; name: string; userType: string }[]> {
+
+/**
+ * Everyone active — for technician / opener / salesperson dropdowns. `usedAs` (report filters)
+ * adds the people who have left but are still on jobs (engineer) / sale orders (sales), labelled
+ * "(ไม่ใช้งานแล้ว)", so old periods can still be filtered by them.
+ */
+export function listStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; name: string; userType: string }[]> {
+  return cached(usedAs ? `staff:${usedAs}` : 'staff', TTL_MASTER, () => loadStaff(usedAs));
+}
+async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; name: string; userType: string }[]> {
+  const used =
+    usedAs === 'engineer'
+      ? sql`${appUser.userId} IN (SELECT engineer_id FROM job)`
+      : usedAs === 'sales'
+        ? sql`${appUser.userId} IN (SELECT document_create_by FROM sale_out_hd)`
+        : undefined;
   const rows = await db
     .select({
       id: appUser.userId,
@@ -197,13 +230,14 @@ async function loadStaff(): Promise<{ id: number; name: string; userType: string
       last: appUser.lastName,
       username: appUser.username,
       userType: appUser.userType,
+      status: appUser.recordStatus,
     })
     .from(appUser)
-    .where(eq(appUser.recordStatus, RS.ACTIVE))
+    .where(or(eq(appUser.recordStatus, RS.ACTIVE), used))
     .orderBy(asc(appUser.firstName), asc(appUser.lastName));
   return rows.map((r) => ({
     id: r.id,
-    name: fullName(r.first, r.last) || r.username || `#${r.id}`,
+    name: (fullName(r.first, r.last) || r.username || `#${r.id}`) + (r.status === RS.ACTIVE ? '' : ' (ไม่ใช้งานแล้ว)'),
     userType: r.userType?.trim() ?? '',
   }));
 }
@@ -298,6 +332,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
 
 /** One-click approve: first real role + Active. */
 export async function approveUser(userId: number, role?: string, actorId = 0): Promise<User> {
+  const [old] = await db.select({ type: appUser.userType }).from(appUser).where(eq(appUser.userId, userId));
   const [row] = await db
     .update(appUser)
     .set({ userType: role?.trim() || DEFAULT_APPROVED_TYPE, ...statusStamp(RS.ACTIVE, actorId), deleted: false })
@@ -311,12 +346,13 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
     entity: 'app_user',
     key: userId,
     summary: `อนุมัติผู้ใช้ ${fullName(row.firstName, row.lastName)} → ${row.userType}`,
-    changes: { userType: [null, row.userType] },
+    changes: { userType: [old?.type ?? null, row.userType] },
   });
   return toUser(row);
 }
 
 export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
+  const [old] = await db.select({ rs: appUser.recordStatus }).from(appUser).where(eq(appUser.userId, userId));
   await db
     .update(appUser)
     .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
@@ -328,7 +364,7 @@ export async function setUserDeleted(userId: number, deleted: boolean, actorId =
     entity: 'app_user',
     key: userId,
     summary: deleted ? `ลบผู้ใช้ #${userId}` : `กู้คืนผู้ใช้ #${userId}`,
-    changes: { recordStatus: [null, deleted ? RS.DELETED : RS.ACTIVE] },
+    changes: { recordStatus: [old?.rs ?? null, deleted ? RS.DELETED : RS.ACTIVE] },
   });
 }
 

@@ -35,7 +35,14 @@ import { useAccess } from '@/lib/use-access';
 import type { JobDetail } from '@/lib/use-job';
 import { useFormErrors, apiFieldErrors } from '@/lib/use-form-errors';
 import type { z } from 'zod';
-import { jobSchema, filledRequired, missingRequired, JOB_FIELD_LABEL, type JobRequiredKey } from '@/lib/validation/job';
+import {
+  jobSchema,
+  filledRequired,
+  missingRequired,
+  jobAmountDue,
+  JOB_FIELD_LABEL,
+  type JobRequiredKey,
+} from '@/lib/validation/job';
 import type { FieldErrors } from '@/lib/validation';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
@@ -989,10 +996,18 @@ function CostRow({
   );
 }
 
-export function CostSummary({ partsTotal }: { partsTotal?: number }) {
-  const { s, set } = useJobForm();
+/** `action`: the screen's own payload errors (บันทึกซ่อม sends the costs too) — shown with the form's own */
+export function CostSummary({
+  partsTotal,
+  action,
+}: {
+  partsTotal?: number;
+  action?: { errors: FieldErrors; clear: (key: string) => void };
+}) {
+  const { s, set, errors } = useJobForm();
   const parts = partsTotal ?? s.partsCost;
   const net = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
+  const deposit = Number(s.depositCost) || 0;
 
   return (
     <Section title="สรุปค่าใช้จ่าย" icon={Coins}>
@@ -1003,22 +1018,37 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
           </div>
         </CostRow>
 
-        {COST_FIELDS.map((f) => (
-          <CostRow key={f.key} label={f.label} htmlFor={`cost-${f.key}`}>
-            <input
-              id={`cost-${f.key}`}
-              type="number"
-              step="0.01"
-              min={0}
-              inputMode="decimal"
-              value={s[f.key] === 0 ? '' : s[f.key]}
-              placeholder="0.00"
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) => set(f.key, Number(e.target.value) || 0)}
-              className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-            />
-          </CostRow>
-        ))}
+        {COST_FIELDS.map((f) => {
+          const error = action?.errors[f.key] ?? errors[f.key];
+          return (
+            <div key={f.key}>
+              <CostRow label={f.label} htmlFor={`cost-${f.key}`}>
+                <input
+                  id={`cost-${f.key}`}
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  inputMode="decimal"
+                  value={s[f.key] === 0 ? '' : s[f.key]}
+                  placeholder="0.00"
+                  aria-invalid={!!error || undefined}
+                  aria-describedby={error ? `cost-${f.key}-error` : undefined}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => {
+                    set(f.key, Number(e.target.value) || 0);
+                    action?.clear(f.key);
+                  }}
+                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                />
+              </CostRow>
+              {error && (
+                <p id={`cost-${f.key}-error`} role="alert" className="mt-1 text-right text-2xs text-danger">
+                  {error}
+                </p>
+              )}
+            </div>
+          );
+        })}
 
         <div className="border-t border-border pt-2.5">
           <CostRow label="รวมเป็นเงินสุทธิ" strong>
@@ -1027,6 +1057,17 @@ export function CostSummary({ partsTotal }: { partsTotal?: number }) {
             </div>
           </CostRow>
         </div>
+        {/* the deposit was taken at reception — what is left to pay at close */}
+        {deposit > 0 && (
+          <>
+            <CostRow label="หักเงินมัดจำ">
+              <div className="num px-3 text-right text-sm">-{baht(deposit)}</div>
+            </CostRow>
+            <CostRow label="ยอดที่ต้องชำระ" strong>
+              <div className="num px-3 text-right text-base font-semibold">{baht(jobAmountDue(net, deposit))}</div>
+            </CostRow>
+          </>
+        )}
       </div>
     </Section>
   );

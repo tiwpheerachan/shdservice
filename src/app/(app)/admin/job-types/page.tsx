@@ -1,4 +1,5 @@
 import { MasterTable } from '@/components/shared/master-table';
+import { MASTER_NAME_LABEL } from '@/lib/validation/admin';
 import { getJobTypes } from '@/data/queries';
 
 export const metadata = { title: 'ประเภทงานซ่อม' };
@@ -12,7 +13,7 @@ export default async function Page() {
         kind: 'job_types',
         title: 'ประเภทงานซ่อม',
         description: 'ประเภทงานหลักที่ใช้ตอนเปิดงานบริการ',
-        nameLabel: 'ประเภทงานซ่อม',
+        nameLabel: MASTER_NAME_LABEL.job_types,
         detailLabel: 'รายละเอียด',
         daysLabel: 'SLA (วัน)',
         daysHint:

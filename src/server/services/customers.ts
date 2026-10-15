@@ -12,7 +12,7 @@ import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
-import { customerSchema, conflictErrors } from '@/lib/validation/customer';
+import { customerSchema, conflictErrors, normalizePhone } from '@/lib/validation/customer';
 import { assertValid } from '@/server/validate';
 
 export type DeletedMode = StatusMode;
@@ -342,7 +342,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   // same rules as the form (lib/validation/customer): phone required unless an old customer never had one
   assertValid(customerSchema(!prev || !!str(prev.phone)), i);
   const name = str(i.name).slice(0, 200);
-  const phone = str(i.phone).slice(0, 50);
+  const phone = normalizePhone(i.phone).slice(0, 50);
 
   // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
   // the fields that actually change are checked (legacy data already holds duplicates)

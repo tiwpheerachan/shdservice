@@ -174,6 +174,8 @@ function RepairForm() {
   const upd = (id: number, patch: Partial<Line>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
+  // part-line rule errors ("parts.<row>.a.qty" …) — listed under the table by row number
+  const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
   const totalA = lines.reduce((s, l) => s + (l.aQuote ? l.price * l.aQty : 0), 0);
   const totalB = lines.reduce((s, l) => s + (l.bQuote ? l.price * l.bQty : 0), 0);
 
@@ -303,6 +305,7 @@ function RepairForm() {
 
                       <td className="border-l border-border px-2 py-2 text-center">
                         <Checkbox
+                          aria-label={`เบิก แบบ A ${l.code}`}
                           checked={l.aPick}
                           disabled={l.locked}
                           onChange={() => upd(l.id, { aPick: !l.aPick })}
@@ -310,6 +313,7 @@ function RepairForm() {
                       </td>
                       <td className="px-2 py-2 text-center">
                         <Checkbox
+                          aria-label={`เสนอ แบบ A ${l.code}`}
                           checked={l.aQuote}
                           disabled={l.locked}
                           onChange={() => upd(l.id, { aQuote: !l.aQuote })}
@@ -319,9 +323,14 @@ function RepairForm() {
                         <NumberInput
                           min={0}
                           placeholder="0"
+                          aria-label={`จำนวน แบบ A ${l.code}`}
                           value={l.aQty}
                           disabled={l.locked}
-                          onChange={(n) => upd(l.id, { aQty: n })}
+                          aria-invalid={!!act.errors[`parts.${i}.a.qty`] || undefined}
+                          onChange={(n) => {
+                            upd(l.id, { aQty: n });
+                            act.clear(`parts.${i}.a.qty`);
+                          }}
                           className="h-7 w-14 px-1.5 text-xs"
                         />
                       </td>
@@ -329,6 +338,7 @@ function RepairForm() {
 
                       <td className="border-l border-border px-2 py-2 text-center">
                         <Checkbox
+                          aria-label={`เบิก แบบ B ${l.code}`}
                           checked={l.bPick}
                           disabled={l.locked}
                           onChange={() => upd(l.id, { bPick: !l.bPick })}
@@ -336,6 +346,7 @@ function RepairForm() {
                       </td>
                       <td className="px-2 py-2 text-center">
                         <Checkbox
+                          aria-label={`เสนอ แบบ B ${l.code}`}
                           checked={l.bQuote}
                           disabled={l.locked}
                           onChange={() => upd(l.id, { bQuote: !l.bQuote })}
@@ -345,9 +356,14 @@ function RepairForm() {
                         <NumberInput
                           min={0}
                           placeholder="0"
+                          aria-label={`จำนวน แบบ B ${l.code}`}
                           value={l.bQty}
                           disabled={l.locked}
-                          onChange={(n) => upd(l.id, { bQty: n })}
+                          aria-invalid={!!act.errors[`parts.${i}.b.qty`] || undefined}
+                          onChange={(n) => {
+                            upd(l.id, { bQty: n });
+                            act.clear(`parts.${i}.b.qty`);
+                          }}
                           className="h-7 w-14 px-1.5 text-xs"
                         />
                       </td>
@@ -399,6 +415,15 @@ function RepairForm() {
               )}
             </table>
           </div>
+          {partErrors.length > 0 && (
+            <ul role="alert" className="space-y-0.5 border-t border-border px-3 py-2 text-2xs text-danger">
+              {partErrors.map(([k, m]) => (
+                <li key={k}>
+                  แถว {Number(k.split('.')[1]) + 1}: {m}
+                </li>
+              ))}
+            </ul>
+          )}
         </Section>
 
         <Section title="รายละเอียดการซ่อม" icon={Wrench}>
@@ -453,7 +478,7 @@ function RepairForm() {
           </FieldGrid>
         </Section>
 
-        <CostSummary partsTotal={totalA} />
+        <CostSummary partsTotal={totalA} action={act} />
         <OtherInfoSection />
         <AttachmentSection jobNo={job?.no} />
 

@@ -46,8 +46,17 @@ const columns: Column<Job>[] = [
 
 export default function Page() {
   const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), engineer: '', symptom: '' });
+  const { data: STAFF } = useStaff('engineer');
+  // by id like the sale-order report: names carry stray spaces and may repeat
+  const engineerId = STAFF.find((s) => s.name === f.engineer)?.id;
   // "วันที่ซ่อม" = job_repaired_date
-  const filters = { from: f.from, to: f.to, dateBy: 'repaired', engineer: f.engineer, symptom: f.symptom };
+  const filters = {
+    from: f.from,
+    to: f.to,
+    dateBy: 'repaired',
+    engineer: engineerId ? String(engineerId) : f.engineer,
+    symptom: f.symptom,
+  };
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   const pageArgs = {
     page: table.page,
@@ -56,7 +65,7 @@ export default function Page() {
     sort: table.sort?.key,
     dir: table.sort?.dir,
   };
-  const { data: sum } = useJobSummary(filters);
+  const { data: sum } = useJobSummary({ ...filters, q: table.q });
   const {
     rows: JOBS,
     total: totalRows,
@@ -65,7 +74,6 @@ export default function Page() {
     refetch: retryLoad,
   } = useJobsPage({ ...pageArgs, ...filters });
   const { data: SYMPTOMS } = useSymptoms();
-  const { data: STAFF } = useStaff();
   const S = sum[0];
   const count = S?.total ?? 0;
   const done = S?.done ?? 0;

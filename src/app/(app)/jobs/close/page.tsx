@@ -31,7 +31,7 @@ import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { closeActionSchema } from '@/lib/validation/job';
+import { closeActionSchema, jobAmountDue, OUTSOURCE_NOT_BACK, STATUS_CLOSED_TRACKED } from '@/lib/validation/job';
 
 function CloseForm() {
   const { push } = useToast();
@@ -66,8 +66,10 @@ function CloseForm() {
   const ERR_KEY: Partial<Record<keyof typeof d, string>> = {
     status: 'status',
     payType: 'payment.type',
+    payAmount: 'payment.amount',
     returnType: 'return.type',
     returnDate: 'return.date',
+    tracking: 'return.tracking',
   };
   const upd = (p: Partial<typeof d>) => {
     setD((x) => ({ ...x, ...p }));
@@ -99,6 +101,9 @@ function CloseForm() {
     { label: 'ค่ากล่องพัสดุ', v: job?.boxCost ?? 0 },
   ];
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
+  // still at the out-source vendor → the server refuses the close; say so before the user fills the form
+  const outsourceOut = !!job?.outsource.some((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
+  const deposit = job?.depositCost ?? 0;
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -106,7 +111,8 @@ function CloseForm() {
     const today = thaiToday(); // Thai calendar, not UTC
     const next = {
       payType: job.payment.type || JOB_PAYMENT_METHODS[0],
-      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.totalCost > 0 ? String(job.totalCost) : '',
+      // the deposit was paid at reception — default to what is left (job.amountDue), not the whole total
+      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.amountDue > 0 ? String(job.amountDue) : '',
       payDate: today,
       payNo: job.payment.no,
       payDetail: job.payment.detail,
@@ -268,6 +274,18 @@ function CloseForm() {
                     <span>รวมเป็นเงินสุทธิ</span>
                     <span className="num text-primary">{baht(net)} ฿</span>
                   </li>
+                  {deposit > 0 && (
+                    <>
+                      <li className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">หักเงินมัดจำ</span>
+                        <span className="num">-{baht(deposit)}</span>
+                      </li>
+                      <li className="flex justify-between gap-3 text-base font-semibold">
+                        <span>ยอดที่ต้องชำระ</span>
+                        <span className="num text-primary">{baht(jobAmountDue(net, deposit))} ฿</span>
+                      </li>
+                    </>
+                  )}
                 </ul>
               </div>
               <FieldGrid cols={2}>
@@ -279,7 +297,7 @@ function CloseForm() {
                     {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
                   </Select>
                 </Field>
-                <Field label="จำนวนเงินที่ชำระ (บาท)">
+                <Field label="จำนวนเงินที่ชำระ (บาท)" error={act.errors['payment.amount']}>
                   <Input
                     type="number"
                     step="0.01"
@@ -379,13 +397,22 @@ function CloseForm() {
                 ))}
               </datalist>
             </Field>
-            <Field label="หมายเลขพัสดุ">
+            <Field
+              label="หมายเลขพัสดุ"
+              required={d.status === STATUS_CLOSED_TRACKED}
+              error={act.errors['return.tracking']}
+            >
               <Input className="num" value={d.tracking} onChange={(e) => upd({ tracking: e.target.value })} />
             </Field>
             <Field label="รายละเอียดการส่งคืน" wide>
               <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
             </Field>
-            <Field label="โปรดระบุ สถานะงาน" required wide error={act.errors.status}>
+            <Field
+              label="โปรดระบุ สถานะงาน"
+              required
+              wide
+              error={act.errors.status ?? (outsourceOut ? OUTSOURCE_NOT_BACK : undefined)}
+            >
               <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
                 <option value="">- - Please Select - -</option>
                 {CLOSE_STATUS_OPTIONS.map((st) => (

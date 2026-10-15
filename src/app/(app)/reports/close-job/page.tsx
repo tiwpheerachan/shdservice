@@ -84,7 +84,7 @@ export default function Page() {
     sort: table.sort?.key,
     dir: table.sort?.dir,
   };
-  const { data: sum } = useJobSummary({ ...filters, q: f.no });
+  const { data: sum } = useJobSummary({ ...filters, q: table.q || f.no });
   const {
     rows: JOBS,
     total: totalRows,

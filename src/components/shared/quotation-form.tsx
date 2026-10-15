@@ -9,7 +9,7 @@ import { ProfileSelect } from './profile-select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
-import { Input, Textarea, NumberInput } from '@/components/ui/input';
+import { Input, Textarea, NumberInput, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions, withCurrent } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useProducts } from '@/data/db';
@@ -19,7 +19,7 @@ import { api, errMsg, qs } from '@/lib/api';
 import type { JobDetail } from '@/lib/use-job';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { quotationSchema } from '@/lib/validation/quotation';
+import { computeTotals, parseDiscount, quotationSchema } from '@/lib/validation/quotation';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 
@@ -124,10 +124,11 @@ export const QuotationForm = React.forwardRef<
     })),
   );
   const [service, setService] = React.useState(initial?.serviceAmount ?? 0);
-  const [discount, setDiscount] = React.useState(() => {
-    const pct = initial?.discountFormula.match(/^([\d.]+)%$/);
-    return pct ? Number(pct[1]) : 0;
-  });
+  // a loaded quotation keeps its own discount: % or บาท (legacy "200บาท"), on the total / parts / service
+  const loadedDiscount = parseDiscount(initial?.discountType ?? 'ไม่มีส่วนลด', initial?.discountFormula ?? '');
+  const discountType = loadedDiscount.type;
+  const [discount, setDiscount] = React.useState(loadedDiscount.value);
+  const [discountUnit, setDiscountUnit] = React.useState(loadedDiscount.unit);
   const [vatRate, setVatRate] = React.useState(initial?.vatRate ?? 0);
   const [remark, setRemark] = React.useState(initial?.remark ?? '');
   const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
@@ -147,6 +148,7 @@ export const QuotationForm = React.forwardRef<
     lines,
     service,
     discount,
+    discountUnit,
     vatRate,
     remark,
     status,
@@ -232,11 +234,16 @@ export const QuotationForm = React.forwardRef<
 
   const partsTotal = lines.filter((l) => l.itemType !== 'Delivery').reduce((s, l) => s + l.qty * l.price, 0);
   const deliveryTotal = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.qty * l.price, 0);
-  const subtotal = partsTotal + service + deliveryTotal;
-  const discountAmt = (subtotal * discount) / 100;
-  const beforeVat = subtotal - discountAmt;
-  const vat = (beforeVat * vatRate) / 100;
-  const net = beforeVat + vat;
+  // the server's own rules (stored amounts = what the print shows)
+  const t = computeTotals({
+    parts: partsTotal,
+    service,
+    delivery: deliveryTotal,
+    discountType: discount > 0 ? discountType : 'ไม่มีส่วนลด',
+    discountValue: discount,
+    discountUnit,
+    vatRate,
+  });
 
   // a value that changes — typed or filled in from the job — takes its error away
   const { clear } = fe;
@@ -262,9 +269,9 @@ export const QuotationForm = React.forwardRef<
       discountPercent: 0,
     })),
     serviceAmount: service,
-    discountType: discount > 0 ? 'ส่วนลดรวม' : 'ไม่มีส่วนลด',
+    discountType: discount > 0 ? discountType : 'ไม่มีส่วนลด',
     discountValue: discount,
-    discountUnit: '%',
+    discountUnit,
     vatRate,
     remark,
     status,
@@ -573,24 +580,38 @@ export const QuotationForm = React.forwardRef<
                 />
               </div>
               {deliveryTotal > 0 && <Row label="ค่าขนส่ง" value={baht(deliveryTotal)} />}
-              <Row label="รวมเป็นเงิน" value={baht(subtotal)} />
+              <Row label="รวมเป็นเงิน" value={baht(t.sumExclude)} />
               <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">ส่วนลด (%)</dt>
-                <NumberInput
-                  aria-label="ส่วนลด (%)"
-                  aria-invalid={!!fe.errors.discountValue || undefined}
-                  step="0.01"
-                  placeholder="0"
-                  value={discount}
-                  onChange={(n) => {
-                    setDiscount(n);
-                    fe.clear('discountValue');
-                  }}
-                  className="h-8 w-32 text-xs"
-                />
+                <dt className="text-muted-foreground">{discountType === 'ส่วนลดรวม' ? 'ส่วนลด' : discountType}</dt>
+                <div className="flex gap-1">
+                  <NumberInput
+                    aria-label={`ส่วนลด (${discountUnit})`}
+                    aria-invalid={!!fe.errors.discountValue || undefined}
+                    step="0.01"
+                    placeholder="0"
+                    value={discount}
+                    onChange={(n) => {
+                      setDiscount(n);
+                      fe.clear('discountValue');
+                    }}
+                    className="h-8 w-24 text-xs"
+                  />
+                  <Select
+                    aria-label="หน่วยส่วนลด"
+                    value={discountUnit}
+                    onChange={(e) => {
+                      setDiscountUnit(e.target.value === 'บาท' ? 'บาท' : '%');
+                      fe.clear('discountValue');
+                    }}
+                    className="h-8 w-20 text-xs"
+                  >
+                    <option value="%">%</option>
+                    <option value="บาท">บาท</option>
+                  </Select>
+                </div>
               </div>
-              <Row label="ส่วนลดเป็นเงิน" value={baht(discountAmt)} />
-              <Row label="มูลค่าก่อนภาษี" value={baht(beforeVat)} />
+              <Row label="ส่วนลดเป็นเงิน" value={baht(t.discount)} />
+              <Row label="มูลค่าก่อนภาษี" value={baht(t.totalBase)} />
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
                 <NumberInput
@@ -606,10 +627,10 @@ export const QuotationForm = React.forwardRef<
                   className="h-8 w-32 text-xs"
                 />
               </div>
-              <Row label="ภาษีมูลค่าเพิ่ม" value={baht(vat)} />
+              <Row label="ภาษีมูลค่าเพิ่ม" value={baht(t.vat)} />
               <div className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">
                 <dt>รวมเป็นเงินสุทธิ</dt>
-                <dd className="num text-primary">{baht(net)} ฿</dd>
+                <dd className="num text-primary">{baht(t.net)} ฿</dd>
               </div>
             </dl>
           </div>

@@ -14,6 +14,8 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { postJson, del, errMsg, uploadFile } from '@/lib/api';
 import { useApi } from '@/data/db';
+import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { shippingProfileSchema } from '@/lib/validation/admin';
 
 /** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
 type Profile = {
@@ -55,15 +57,19 @@ export default function ShippingProfilesPage() {
   const rows = data?.rows ?? [];
   const load = () => mutate();
 
+  const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
+  useClearOnChange(fe.clear, form);
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
     setForm(p ? { ...p } : EMPTY);
+    fe.setErrors({});
     setPendingLogo(null);
     setOpen(true);
   };
 
   const save = async () => {
+    if (fe.report(fe.run(shippingProfileSchema, form))) return;
     setSaving(true);
     try {
       const d = await postJson<{ row: Profile }>('/api/admin/shipping-profiles', { ...form, id: editing?.id });
@@ -79,7 +85,7 @@ export default function ShippingProfilesPage() {
       await load();
       setOpen(false);
     } catch (e) {
-      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -221,7 +227,7 @@ export default function ShippingProfilesPage() {
         }
       >
         <FieldGrid cols={2}>
-          <Field label="รหัส" required hint="ตัวย่อ เช่น FLASH, JNT">
+          <Field label="รหัส" required hint="ตัวย่อ เช่น FLASH, JNT" error={fe.errors.code}>
             <Input value={form.code} onChange={(e) => set('code', e.target.value.toUpperCase())} className="num" />
           </Field>
           <Field label="ลำดับแสดง">
@@ -232,7 +238,7 @@ export default function ShippingProfilesPage() {
               className="num"
             />
           </Field>
-          <Field label="ชื่อ (ไทย)" required>
+          <Field label="ชื่อ (ไทย)" required error={fe.errors.nameTh}>
             <Input value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
           </Field>
           <Field label="ชื่อ (อังกฤษ)">
@@ -242,6 +248,7 @@ export default function ShippingProfilesPage() {
           <Field
             label="ลิงก์ติดตามของขนส่ง"
             wide
+            error={fe.errors.trackUrl}
             hint="ใส่ {no} ตรงตำแหน่งเลขพัสดุ เช่น https://www.flashexpress.com/fle/tracking?se={no} — เว้นว่างได้ ลูกค้าจะเห็นแค่เลขพัสดุ"
           >
             <Input

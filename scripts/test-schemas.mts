@@ -3,7 +3,7 @@
  * Pure: no DB, no network.
  */
 import assert from 'node:assert/strict';
-import { validate, summary } from '../src/lib/validation/index.ts';
+import { validate, summary, isRealDate } from '../src/lib/validation/index.ts';
 import {
   jobSchema,
   filledRequired,
@@ -13,11 +13,20 @@ import {
   outsourceActionSchema,
   swapRefundActionSchema,
   closeActionSchema,
+  jobAmountDue,
+  STATUS_CLOSED_TRACKED,
 } from '../src/lib/validation/job.ts';
 import { customerSchema, conflictErrors } from '../src/lib/validation/customer.ts';
 import { quotationSchema } from '../src/lib/validation/quotation.ts';
 import { saleOrderSchema } from '../src/lib/validation/sale-order.ts';
-import { masterSchema, modelSchema, userSchema, productSchema } from '../src/lib/validation/admin.ts';
+import {
+  masterSchema,
+  modelSchema,
+  userSchema,
+  productSchema,
+  documentProfileSchema,
+  shippingProfileSchema,
+} from '../src/lib/validation/admin.ts';
 import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '../src/lib/validation/stock.ts';
 import { fileProblem } from '../src/server/storage.ts';
 import { clampInt, orderBy, ymd } from '../src/server/paging.ts';
@@ -75,6 +84,24 @@ test('dates must be YYYY-MM-DD', () => {
   assert.ok(errorsOf(jobSchema(), { ...fullJob, saleOrderDate: '01/09/2026' }).saleOrderDate);
   assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, receptionDate: '' }), {});
 });
+test('dates must be a real calendar day (2026-02-30 used to reach the DB as a 500)', () => {
+  assert.equal(
+    errorsOf(jobSchema(), { ...fullJob, expireDate: '2026-02-30' }).expireDate,
+    'วันที่ไม่ถูกต้อง (ไม่มีวันนี้ในปฏิทิน)',
+  );
+  assert.ok(errorsOf(jobSchema(), { ...fullJob, dueDate: '2026-13-01' }).dueDate);
+  assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, saleOrderDate: '2024-02-29' }), {});
+  for (const bad of ['2026-02-30', '2025-02-29', '2026-04-31', '0000-01-01', '2026-1-5', 'abc', ''])
+    assert.equal(isRealDate(bad), false, bad);
+  assert.equal(isRealDate('2024-02-29'), true);
+});
+test('warranty months: whole numbers only (12.5 used to be cut to 12)', () => {
+  assert.equal(
+    errorsOf(jobSchema(), { ...fullJob, warrantyMonth: '12.5' }).warrantyMonth,
+    'รับประกัน (เดือน) ต้องเป็นจำนวนเต็ม',
+  );
+  assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, warrantyMonth: '12' }), {});
+});
 test('costs must not be negative', () => assert.ok(errorsOf(jobSchema(), { ...fullJob, serviceCost: -5 }).serviceCost));
 test('a new job needs its due date (วันประเมินซ่อมเสร็จ) — ISSUE-013', () => {
   assert.equal(errorsOf(jobSchema(), { ...fullJob, dueDate: '' }).dueDate, 'ต้องระบุวันประเมินซ่อมเสร็จ');
@@ -104,6 +131,41 @@ console.log('\nWorkflow screens');
 test('repair: status required', () => {
   assert.ok(errorsOf(repairActionSchema, { repairDetail: 'x' }).status);
   assert.deepEqual(errorsOf(repairActionSchema, { status: 'ซ่อมเสร็จ', parts: [] }), {});
+});
+test('repair: costs and part prices not negative; part qty whole and not negative (0 = option unused)', () => {
+  const part = (unitPrice: unknown, aQty: unknown, bQty: unknown = 0) => ({
+    code: 'P1',
+    unitPrice,
+    a: { pick: true, quote: true, qty: aQty },
+    b: { pick: false, quote: false, qty: bQty },
+  });
+  const ok = {
+    status: 'ซ่อมเสร็จ',
+    serviceCost: 100,
+    toolCost: '',
+    deliveryCost: 0,
+    boxCost: '20',
+    parts: [part(50, 1)],
+  };
+  assert.deepEqual(errorsOf(repairActionSchema, ok), {});
+  const e = errorsOf(repairActionSchema, {
+    ...ok,
+    serviceCost: -1,
+    toolCost: -2,
+    deliveryCost: -3,
+    boxCost: -4,
+    parts: [part(-50, 1), part(50, 1.5, -1)],
+  });
+  assert.deepEqual(Object.keys(e).sort(), [
+    'boxCost',
+    'deliveryCost',
+    'parts.0.unitPrice',
+    'parts.1.a.qty',
+    'parts.1.b.qty',
+    'serviceCost',
+    'toolCost',
+  ]);
+  assert.equal(e.serviceCost, 'ค่าบริการการซ่อมต้องไม่ติดลบ');
 });
 test('outsource: sending needs to + date; receiving back needs neither', () => {
   assert.deepEqual(Object.keys(errorsOf(outsourceActionSchema, { status: 'x', send: { to: '', date: '' } })).sort(), [
@@ -148,6 +210,55 @@ test('close: status, payment method, return method and return date', () => {
     }),
     {},
   );
+});
+test('close: paid amount not negative; return date a real day', () => {
+  const body = {
+    status: 'ปิดงาน (Complete)',
+    payment: { type: 'เงินสด', amount: '-1' },
+    return: { type: 'ลูกค้ามารับเอง', date: '2026-02-30' },
+  };
+  assert.deepEqual(Object.keys(errorsOf(closeActionSchema, body)).sort(), ['payment.amount', 'return.date']);
+  assert.deepEqual(
+    errorsOf(closeActionSchema, {
+      ...body,
+      payment: { type: 'เงินสด', amount: '' },
+      return: { ...body.return, date: '2026-02-28' },
+    }),
+    {},
+  );
+});
+test('close: "ลงเลขที่พัสดุแล้ว" needs a tracking no.; other statuses do not', () => {
+  const body = {
+    status: STATUS_CLOSED_TRACKED,
+    payment: { type: 'เงินโอน' },
+    return: { type: 'บริษัทขนส่งเอกชน', date: '2026-10-15', tracking: '  ' },
+  };
+  assert.deepEqual(errorsOf(closeActionSchema, body), { 'return.tracking': 'ต้องระบุหมายเลขพัสดุ' });
+  assert.deepEqual(errorsOf(closeActionSchema, { ...body, return: { ...body.return, tracking: undefined } }), {
+    'return.tracking': 'ต้องระบุหมายเลขพัสดุ',
+  });
+  assert.deepEqual(errorsOf(closeActionSchema, { ...body, return: { ...body.return, tracking: 'TH123' } }), {});
+  // 7 = the number is still to come
+  assert.deepEqual(errorsOf(closeActionSchema, { ...body, status: 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)' }), {});
+});
+test('outsource: receive date not before the send date (both in the payload)', () => {
+  const send = { to: 'ร้าน A', date: '2026-10-10' };
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', send, receive: { date: '2026-10-09' } }), {
+    'receive.date': 'วันที่รับต้องไม่ก่อนวันที่ส่ง',
+  });
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', send, receive: { date: '2026-10-10' } }), {});
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', send, receive: { date: '' } }), {});
+});
+test('amount due at close = job total - deposit, never below 0', () => {
+  assert.equal(jobAmountDue(830, 100), 730);
+  assert.equal(jobAmountDue(1234.56, 0), 1234.56);
+  assert.equal(jobAmountDue(100, 250), 0);
+  assert.equal(jobAmountDue(0.3, 0.1), 0.2); // no float dust (0.19999999999999998)
+});
+test('outsource: send / receive dates must be real days', () => {
+  assert.ok(errorsOf(outsourceActionSchema, { status: 'x', send: { to: 'ร้าน A', date: '2026-02-30' } })['send.date']);
+  assert.ok(errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '2026-02-30' } })['receive.date']);
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '', detail: 'ok' } }), {});
 });
 
 console.log('\nCustomer');
@@ -241,8 +352,29 @@ test('qty > 0 per row; price and paid amount not negative', () => {
   const e = errorsOf(saleOrderSchema, { ...so, lines: [{ code: 'P1', qty: 0, price: -1 }], paymentAmount: -5 });
   assert.deepEqual(Object.keys(e).sort(), ['lines.0.price', 'lines.0.qty', 'paymentAmount']);
 });
+test('qty a whole number (1.5 used to be cut to 1); salesperson id whole', () => {
+  assert.equal(
+    errorsOf(saleOrderSchema, { ...so, lines: [{ code: 'P1', qty: 1.5 }] })['lines.0.qty'],
+    'จำนวนต้องเป็นจำนวนเต็ม',
+  );
+  assert.deepEqual(errorsOf(saleOrderSchema, { ...so, lines: [{ code: 'P1', qty: '2' }] }), {});
+  assert.ok(errorsOf(saleOrderSchema, { ...so, salesId: 7.5 }).salesId);
+});
 
 console.log('\nBack office');
+test('document / shipping profile: code + Thai name; tracking link https with {no}', () => {
+  assert.deepEqual(errorsOf(documentProfileSchema, { code: ' ', nameTh: '' }), {
+    code: 'ต้องระบุรหัสโปรไฟล์ (เช่น SHD)',
+    nameTh: 'ต้องระบุชื่อบริษัท',
+  });
+  assert.deepEqual(errorsOf(documentProfileSchema, { code: 'SHD', nameTh: 'บริษัท' }), {});
+  assert.deepEqual(Object.keys(errorsOf(shippingProfileSchema, {})).sort(), ['code', 'nameTh']);
+  const ship = { code: 'FLASH', nameTh: 'แฟลช' };
+  assert.deepEqual(errorsOf(shippingProfileSchema, { ...ship, trackUrl: '' }), {});
+  assert.deepEqual(errorsOf(shippingProfileSchema, { ...ship, trackUrl: 'https://x.test/?no={no}' }), {});
+  assert.ok(errorsOf(shippingProfileSchema, { ...ship, trackUrl: 'http://x.test/?no={no}' }).trackUrl);
+  assert.ok(errorsOf(shippingProfileSchema, { ...ship, trackUrl: 'https://x.test/' }).trackUrl);
+});
 test("master list row: the name, in the list's own words", () => {
   assert.equal(errorsOf(masterSchema('ชื่อหมวดหมู่'), { name: ' ' }).name, 'ต้องระบุชื่อหมวดหมู่');
   assert.deepEqual(errorsOf(masterSchema(), { name: 'สายไฟ' }), {});
@@ -298,21 +430,45 @@ test('an empty body still reports every rule (no early stop)', () => {
 console.log('\nStock / assign / approve / call-log bodies (routes that had no schema)');
 const ok = (schema: Parameters<typeof validate>[0], data: unknown) => validate(schema, data).ok;
 test("qty: whole numbers 0–100,000 only (1.5 / -1 / 1e9 / 'abc' refused, '3' accepted)", () => {
-  const body = (qty: unknown) => ({ lines: [{ code: 'P00001', qty }] });
+  const body = (qty: unknown) => ({ date: '2026-10-01', lines: [{ code: 'P00001', qty }] });
   assert.equal(ok(receiveSchema, body(3)), true);
   assert.equal(ok(receiveSchema, body('3')), true);
   assert.equal(ok(receiveSchema, body(0)), true); // 0 = skip line, the service filters it
   for (const bad of [1.5, -1, 1e9, 'abc']) assert.equal(ok(receiveSchema, body(bad)), false, String(bad));
 });
 test('receive / issue need 1–500 lines; issue type is one of four', () => {
-  assert.equal(ok(receiveSchema, { lines: [] }), false);
+  assert.equal(ok(receiveSchema, { date: '2026-10-01', lines: [] }), false);
   assert.equal(ok(receiveSchema, {}), false);
   assert.equal(ok(receiveSchema, { lines: Array.from({ length: 501 }, () => ({ code: 'P1', qty: 1 })) }), false);
   assert.equal(
-    ok(issueSchema, { type: 'job', ref: 'J2600001', lines: [{ logId: 5, dtId: null, code: null, qty: 1 }] }),
+    ok(issueSchema, {
+      type: 'job',
+      ref: 'J2600001',
+      payTo: 'ช่าง A',
+      lines: [{ logId: 5, dtId: null, code: null, qty: 1 }],
+    }),
     true,
   );
   assert.equal(ok(issueSchema, { type: 'steal', lines: [{ code: 'P1', qty: 1 }] }), false);
+});
+test('receive: date required and a real day (the page prefills today)', () => {
+  const lines = [{ code: 'P1', qty: 1 }];
+  assert.equal(errorsOf(receiveSchema, { lines }).date, 'ต้องระบุวันที่รับเข้า');
+  assert.equal(errorsOf(receiveSchema, { date: '', lines }).date, 'ต้องระบุวันที่รับเข้า');
+  assert.equal(errorsOf(receiveSchema, { date: 'abc', lines }).date, 'ต้องระบุวันที่รับเข้า');
+  assert.equal(errorsOf(receiveSchema, { date: '2026-02-30', lines }).date, 'วันที่ไม่ถูกต้อง (ไม่มีวันนี้ในปฏิทิน)');
+  assert.deepEqual(errorsOf(receiveSchema, { date: '2026-10-01', lines }), {});
+});
+test('issue: จ่ายให้ / รับคืนจาก required (message by type), trimmed, max 50 — reported with other errors', () => {
+  const lines = [{ code: 'P1', qty: 1 }];
+  for (const type of ['job', 'sale', 'other'])
+    assert.equal(errorsOf(issueSchema, { type, lines }).payTo, 'ต้องเลือก จ่ายให้', type);
+  assert.equal(errorsOf(issueSchema, { type: 'return', payTo: '  ', lines }).payTo, 'ต้องเลือก รับคืนจาก');
+  assert.equal(errorsOf(issueSchema, { type: 'other', payTo: null, lines }).payTo, 'ต้องเลือก จ่ายให้');
+  assert.ok(errorsOf(issueSchema, { type: 'other', payTo: 'x'.repeat(51), lines }).payTo);
+  assert.deepEqual(Object.keys(errorsOf(issueSchema, { type: 'other', lines: [] })).sort(), ['lines', 'payTo']);
+  const v = validate(issueSchema, { type: 'other', payTo: ' คลังสินค้าดี ', lines });
+  assert.ok(v.ok && v.data.payTo === 'คลังสินค้าดี', 'trimmed');
 });
 test('SO decision is approve | deny | reject — a typo is refused, not treated as reject', () => {
   assert.equal(ok(approveSchema, { decision: 'approve' }), true);
@@ -378,6 +534,50 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
   ])
     assert.equal(ymd(bad), undefined, String(bad));
 });
+
+// ==== legacy data: phones / quotation discounts (agent B, 2026-10-15) ====
+console.log('\nLegacy data: invisible characters in phones, บาท discounts on quotations');
+{
+  const { normalizePhone } = await import('../src/lib/validation/customer.ts');
+  const { parseDiscount, computeTotals } = await import('../src/lib/validation/quotation.ts');
+  test('phone: zero-width / bidi / BOM stripped, en/em dash → "-", trimmed — then the rule passes', () => {
+    assert.equal(normalizePhone(' 081\u200B-234\u2060-5678\uFEFF '), '081-234-5678');
+    assert.equal(normalizePhone('\u202A02\u2013123\u20144567\u202C'), '02-123-4567');
+    assert.equal(normalizePhone(undefined), '');
+    assert.deepEqual(errorsOf(customerSchema(), { name: 'ก', phone: '081\u200B2345678\u200F' }), {});
+    assert.deepEqual(errorsOf(customerSchema(), { name: 'ก', phone: '02\u2013123\u20134567' }), {});
+  });
+  test('phone: text in the phone is still refused; only invisible characters = empty = required', () => {
+    assert.ok(errorsOf(customerSchema(), { name: 'ก', phone: 'คุณตูน 0922798963' }).phone);
+    assert.equal(errorsOf(customerSchema(), { name: 'ก', phone: '\u200B\uFEFF' }).phone, 'ต้องระบุเบอร์โทรศัพท์');
+  });
+  test('discount: the record\'s own unit and base are kept ("200บาท" on parts, "15%" on parts)', () => {
+    assert.deepEqual(parseDiscount('ส่วนลดค่าอะไหล่', '200บาท'), { type: 'ส่วนลดค่าอะไหล่', value: 200, unit: 'บาท' });
+    assert.deepEqual(parseDiscount('ส่วนลดรวม', '9.5%'), { type: 'ส่วนลดรวม', value: 9.5, unit: '%' });
+    assert.deepEqual(parseDiscount('ไม่มีส่วนลด', '0บาท'), { type: 'ส่วนลดรวม', value: 0, unit: '%' });
+    // Q2300006: 1500 parts, 200 บาท off the parts → 1300; Q2501491: 15 % of 800 parts (not of 1200) = 120
+    const base = { service: 0, vatRate: 0 };
+    assert.equal(
+      computeTotals({ ...base, parts: 1500, ...disc(parseDiscount('ส่วนลดค่าอะไหล่', '200บาท')) }).net,
+      1300,
+    );
+    assert.equal(
+      computeTotals({ ...base, parts: 800, service: 400, ...disc(parseDiscount('ส่วนลดค่าอะไหล่', '15%')) }).discount,
+      120,
+    );
+  });
+  test('discount: over 100 is refused as %, allowed as บาท', () => {
+    const q = { customerCode: 'C1', jobNo: 'J2612164' };
+    assert.deepEqual(errorsOf(quotationSchema(), { ...q, discountValue: 1500, discountUnit: 'บาท' }), {});
+    assert.equal(
+      errorsOf(quotationSchema(), { ...q, discountValue: 150, discountUnit: '%' }).discountValue,
+      'ส่วนลดต้องไม่เกิน 100',
+    );
+  });
+  function disc(d: ReturnType<typeof parseDiscount>) {
+    return { discountType: d.type, discountValue: d.value, discountUnit: d.unit };
+  }
+}
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

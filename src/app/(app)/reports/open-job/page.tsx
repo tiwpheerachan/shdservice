@@ -59,7 +59,7 @@ export default function Page() {
     dir: table.sort?.dir,
   };
   // KPIs over the whole range (1 query) + one page of rows
-  const { data: sum } = useJobSummary(filters);
+  const { data: sum } = useJobSummary({ ...filters, q: table.q });
   const { rows: JOBS, total, loading, error: loadError, refetch: retryLoad } = useJobsPage({ ...pageArgs, ...filters });
   const { data: JOB_TYPES } = useJobTypes();
   const S = sum[0];

@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 
 /**
  * Form validation shared by the browser and the API (zod). Every form's rules live in one schema
@@ -10,6 +10,22 @@ import type { z } from 'zod';
  * its field (see src/lib/use-form-errors.ts).
  */
 export type FieldErrors = Record<string, string>;
+
+/** a real calendar day "YYYY-MM-DD" (same rule as ymd() in server/paging.ts) — 2026-02-30 or "abc"
+ *  would reach a date column and fail the save as a 500 */
+export function isRealDate(s: string): boolean {
+  const [m, y, mo, d] = /^([12]\d{3})-(\d{2})-(\d{2})$/.exec(s) ?? [];
+  if (!m || !y || !mo || !d) return false;
+  const t = new Date(Date.UTC(+y, +mo - 1, +d));
+  return t.getUTCMonth() === +mo - 1 && t.getUTCDate() === +d;
+}
+
+/** a date field: `msg` when missing / not YYYY-MM-DD, "วันที่ไม่ถูกต้อง" when there is no such day */
+export const isoDateString = (msg = 'รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)') =>
+  z
+    .string({ error: msg })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, msg)
+    .refine(isRealDate, 'วันที่ไม่ถูกต้อง (ไม่มีวันนี้ในปฏิทิน)');
 
 /** first message per field, in the schema's field order */
 export function toFieldErrors(error: z.ZodError): FieldErrors {

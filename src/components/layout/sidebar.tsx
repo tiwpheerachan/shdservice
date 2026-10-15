@@ -75,6 +75,20 @@ export function Sidebar({
 
   React.useEffect(() => () => cancelClose(), []);
 
+  // mobile drawer: focus moves in when it opens, Esc closes it, focus goes back (the menu button) after
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    const back = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseMobile();
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      back?.focus();
+    };
+  }, [mobileOpen, onCloseMobile]);
+
   const flyoutGroup = flyout ? NAV.find((g) => g.id === flyout.id) : null;
   const FlyoutIcon = flyoutGroup?.icon;
 
@@ -88,6 +102,9 @@ export function Sidebar({
       )}
 
       <aside
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen || undefined}
+        aria-label={mobileOpen ? 'เมนู' : undefined}
         className={cn(
           'fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground',
           'border-r border-sidebar-border shadow-xs transition-[width,transform] duration-200 ease-out no-print',
@@ -121,6 +138,7 @@ export function Sidebar({
             </Link>
           )}
           <button
+            ref={closeRef}
             onClick={onCloseMobile}
             className="rounded-md p-1 text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
             aria-label="ปิดเมนู"

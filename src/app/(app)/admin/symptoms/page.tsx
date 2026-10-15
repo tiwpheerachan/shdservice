@@ -1,4 +1,5 @@
 import { MasterTable } from '@/components/shared/master-table';
+import { MASTER_NAME_LABEL } from '@/lib/validation/admin';
 import { getSymptoms } from '@/data/queries';
 
 export const metadata = { title: 'อาการเสีย มาตรฐาน' };
@@ -15,7 +16,7 @@ export default async function Page() {
         kind: 'symptoms',
         title: 'อาการเสีย มาตรฐาน',
         description: 'รายการอาการเสียมาตรฐานสำหรับเลือกตอนเปิดงานและบันทึกงานซ่อม',
-        nameLabel: 'อาการเสีย',
+        nameLabel: MASTER_NAME_LABEL.symptoms,
         detailLabel: 'รายละเอียด',
         extraLabel: 'กลุ่มอาการเสีย',
         extraOptions: GROUPS,

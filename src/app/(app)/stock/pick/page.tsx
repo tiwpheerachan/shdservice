@@ -16,6 +16,7 @@ import { api, postJson, errMsg, qs } from '@/lib/api';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { issueSchema } from '@/lib/validation/stock';
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 
@@ -197,23 +198,24 @@ export default function PickPage() {
 
   // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
   const save = async () => {
-    const e: Record<string, string> = {};
+    const body = {
+      type: kind,
+      ref,
+      payTo,
+      remark,
+      lines: lines
+        .filter((l) => l.issue > 0)
+        .map((l) => ({ logId: l.logId, dtId: l.dtId, code: l.code, qty: l.issue })),
+    };
+    // the API's rules (lib/validation/stock); the lines message names what this screen asks for
+    const e = { ...fe.run(issueSchema, body) };
     if (totalIssue === 0)
       e.lines = isReturn ? 'ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ' : 'ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ';
-    if (!payTo) e.payTo = isReturn ? 'ต้องเลือก รับคืนจาก' : 'ต้องเลือก จ่ายให้';
     fe.setErrors(e);
     if (fe.report(e)) return;
     setSaving(true);
     try {
-      const d = await postJson<{ no: string; total: number }>('/api/stock/issue', {
-        type: kind,
-        ref,
-        payTo,
-        remark,
-        lines: lines
-          .filter((l) => l.issue > 0)
-          .map((l) => ({ logId: l.logId, dtId: l.dtId, code: l.code, qty: l.issue })),
-      });
+      const d = await postJson<{ no: string; total: number }>('/api/stock/issue', body);
       push({
         kind: 'success',
         title: isReturn ? `บันทึกการรับคืนแล้ว ${d.total} ชิ้น` : `บันทึกการจ่ายออกแล้ว ${d.total} ชิ้น`,
@@ -225,7 +227,7 @@ export default function PickPage() {
       setRemark('');
       refetchProducts();
     } catch (e) {
-      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

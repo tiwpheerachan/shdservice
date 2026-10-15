@@ -18,6 +18,7 @@ import { postJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { receiveSchema } from '@/lib/validation/stock';
 import type { Product } from '@/data/mock';
 
 type Row = {
@@ -86,30 +87,27 @@ export default function ReceivePage() {
   const [saving, setSaving] = React.useState(false);
 
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
-  useClearOnChange(fe.clear, { lines: typedQty }); // typing a quantity takes the error away
+  useClearOnChange(fe.clear, { lines: typedQty, date }); // typing a quantity / picking a date takes the error away
 
   // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
   const save = async () => {
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
-    const e: Record<string, string> = lines.length ? {} : { lines: 'ต้องระบุจำนวนรับเข้าอย่างน้อย 1 รายการ' };
+    const body = { date, poRef: po, supplier, remark, lines };
+    // the API's rules (lib/validation/stock); the lines message names what this screen asks for
+    const e = { ...fe.run(receiveSchema, body) };
+    if (!lines.length) e.lines = 'ต้องระบุจำนวนรับเข้าอย่างน้อย 1 รายการ';
     fe.setErrors(e);
     if (fe.report(e)) return;
     setSaving(true);
     try {
-      const d = await postJson<{ no: string; total: number }>('/api/stock/receive', {
-        date,
-        poRef: po,
-        supplier,
-        remark,
-        lines,
-      });
+      const d = await postJson<{ no: string; total: number }>('/api/stock/receive', body);
       push({ kind: 'success', title: 'บันทึกการรับเข้าแล้ว', desc: `${d.no} · รวม ${int(d.total)} ชิ้น` });
       setPo('');
       setSupplier('');
       setRemark('');
       refetch();
     } catch (e) {
-      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -206,7 +204,7 @@ export default function ReceivePage() {
           <Field label="อ้างอิงใบสั่งซื้อ (PO)">
             <Input placeholder="PO2600000" value={po} onChange={(e) => setPo(e.target.value)} />
           </Field>
-          <Field label="วันที่รับเข้า" required>
+          <Field label="วันที่รับเข้า" required error={fe.errors.date}>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="รับเข้าคลัง" required>

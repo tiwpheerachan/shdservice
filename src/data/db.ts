@@ -236,7 +236,9 @@ export function useDashboard(range: DashRange = {}) {
 
 /* ---- lookups added for the real backend ---- */
 export type Staff = { id: number; name: string; userType: string };
-export const useStaff = () => useTable<Staff>('staff', undefined, 'exclude', {}, TTL_MASTER);
+/** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
+export const useStaff = (usedAs?: 'engineer' | 'sales') =>
+  useTable<Staff>('staff', undefined, 'exclude', usedAs ? { usedAs } : {}, TTL_MASTER);
 export const useRoles = () => useTable<string>('roles', undefined, 'exclude', {}, TTL_MASTER);
 export const useModules = () => useTable<string>('modules', undefined, 'exclude', {}, TTL_MASTER);
 export const useProvinces = () =>
@@ -275,11 +277,21 @@ export type SymptomStat = { id: number; name: string; group: string; count: numb
 export const useSymptomStats = () => useTable<SymptomStat>('symptom_stats', undefined, 'exclude', {}, TTL_MASTER);
 export const useModelSymptoms = (model: string) =>
   useTable<{ id: number; name: string; count: number }>('model_symptoms', undefined, 'exclude', { model }, TTL_MASTER);
-export type IssuedLine = Movement & { code: string; item: string; category: string; qty: number; value: number };
+/** qty < 0 = รับคืนจากการเบิก; value = qty × price (`priceBasis`: ราคา ณ วันเบิก, else ราคาปัจจุบัน) */
+export type IssuedLine = Movement & {
+  code: string;
+  item: string;
+  category: string;
+  qty: number;
+  price: number;
+  priceBasis: string;
+  value: number;
+};
 export const useIssuedLines = (params: Params = {}) =>
   useTable<IssuedLine>('issued_lines', undefined, 'exclude', params);
 export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>('issued_lines', params);
-export type IssuedStats = { lines: number; qty: number; value: number; top: string };
+/** net of returns; `todayPriced` = lines valued at today's price (no price stored) */
+export type IssuedStats = { lines: number; qty: number; value: number; todayPriced: number; top: string };
 export const useIssuedStats = (params: Params = {}) =>
   useTable<IssuedStats>('issued_stats', undefined, 'exclude', params);
 
@@ -295,10 +307,24 @@ export type JobSummary = {
   topChannel: string;
 };
 export const useJobSummary = (params: Params = {}) => useTable<JobSummary>('job_summary', undefined, 'exclude', params);
-export type QuotationSummary = { total: number; agreed: number; amount: number; agreedAmount: number };
+export type QuotationSummary = {
+  total: number;
+  agreed: number;
+  /** without cancelled quotations (5) — `cancelledAmount` is that part */
+  amount: number;
+  cancelledAmount: number;
+  agreedAmount: number;
+};
 export const useQuotationSummary = (params: Params = {}) =>
   useTable<QuotationSummary>('quotation_summary', undefined, 'exclude', params);
-export type SaleOrderSummary = { total: number; approved: number; amount: number; avg: number };
+export type SaleOrderSummary = {
+  total: number;
+  approved: number;
+  /** approved orders only — `notApprovedAmount` = waiting / rejected / denied */
+  amount: number;
+  notApprovedAmount: number;
+  avg: number;
+};
 export const useSaleOrderSummary = (params: Params = {}) =>
   useTable<SaleOrderSummary>('sale_order_summary', undefined, 'exclude', params);
 export const useJobStats = () =>

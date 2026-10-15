@@ -14,7 +14,7 @@ import { getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { getJob } from './jobs';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
-import { quotationSchema } from '@/lib/validation/quotation';
+import { computeTotals, quotationSchema } from '@/lib/validation/quotation';
 import { assertValid } from '@/server/validate';
 
 /** quotation_status ids (from the dump) */
@@ -299,37 +299,6 @@ export type QuotationInput = {
   /** row_version the edit page loaded: another save since → 409; absent = no check */
   version?: number;
 };
-
-/** Amount rules reverse-engineered from quotation_hd columns. */
-export function computeTotals(i: {
-  parts: number;
-  service: number;
-  /** Delivery lines (SVD0001) — legacy keeps them out of spare_part_amount but inside sum_exclude_amount */
-  delivery?: number;
-  discountType: string;
-  discountValue: number;
-  discountUnit: 'บาท' | '%';
-  vatRate: number;
-}) {
-  const sumExclude = i.parts + i.service + (i.delivery ?? 0);
-  let baseForDiscount = sumExclude;
-  if (i.discountType === 'ส่วนลดค่าบริการ') baseForDiscount = i.service;
-  else if (i.discountType === 'ส่วนลดค่าอะไหล่') baseForDiscount = i.parts;
-  else if (i.discountType === 'ไม่มีส่วนลด') baseForDiscount = 0;
-  const discount =
-    i.discountType === 'ไม่มีส่วนลด'
-      ? 0
-      : i.discountUnit === '%'
-        ? Math.round(baseForDiscount * i.discountValue) / 100
-        : Math.min(i.discountValue, baseForDiscount);
-  const afterDiscount = sumExclude - discount;
-  const totalBase = afterDiscount;
-  const vat = Math.round(totalBase * i.vatRate) / 100;
-  const total = totalBase + vat;
-  const net = Math.round(total * 100) / 100;
-  const rounding = Math.round((net - total) * 100) / 100;
-  return { sumExclude, discount, afterDiscount, totalBase, vat, total, rounding, net };
-}
 
 export async function saveQuotation(i: QuotationInput, byUserId: number): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one

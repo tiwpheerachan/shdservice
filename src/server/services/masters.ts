@@ -19,7 +19,7 @@ import {
   type RecordStatus,
 } from '@/server/record-status';
 import { assertValid } from '@/server/validate';
-import { masterSchema, modelSchema } from '@/lib/validation/admin';
+import { MASTER_NAME_LABEL, masterSchema, modelSchema } from '@/lib/validation/admin';
 
 export type DeletedMode = StatusMode;
 
@@ -132,7 +132,7 @@ export async function saveSimple(
   byUserId = 0,
 ): Promise<MasterRow> {
   const d = SIMPLE[kind];
-  assertValid(masterSchema(undefined, { days: !!d.keys.days }), input);
+  assertValid(masterSchema(MASTER_NAME_LABEL[kind], { days: !!d.keys.days }), input);
   const name = str(input.name).slice(0, d.nameLen);
   const rs = fromUiStatus(input.status);
   const values: Record<string, unknown> = {
@@ -196,6 +196,7 @@ export async function saveSimple(
 /** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
 export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
+  const [old] = await db.select({ rs: d.active }).from(d.table).where(eq(d.id, id));
   await db
     .update(d.table)
     .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
@@ -206,7 +207,7 @@ export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordSt
     entity: kind,
     key: id,
     summary: `${kind} #${id} → ${rs}`,
-    changes: { recordStatus: [null, rs] },
+    changes: { recordStatus: [old?.rs ?? null, rs] },
   });
   invalidate(`master:${kind}:`);
 }
@@ -244,7 +245,7 @@ export async function saveSymptom(
   byUserId = 0,
 ): Promise<Symptom> {
   const name = str(input.name).slice(0, 50);
-  assertValid(masterSchema('ชื่ออาการเสีย'), input);
+  assertValid(masterSchema(MASTER_NAME_LABEL.symptoms), input);
   const values = {
     symptomName: name,
     symptomDescription: str(input.detail).slice(0, 100),
@@ -281,6 +282,7 @@ export async function saveSymptom(
 }
 
 export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
+  const [old] = await db.select({ rs: symptom.recordStatus }).from(symptom).where(eq(symptom.symptomId, id));
   await db.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
   await audit(db, byUserId, {
     action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
@@ -288,7 +290,7 @@ export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: n
     entity: 'symptom',
     key: id,
     summary: `อาการเสีย #${id} → ${rs}`,
-    changes: { recordStatus: [null, rs] },
+    changes: { recordStatus: [old?.rs ?? null, rs] },
   });
   invalidate('master:symptoms:');
 }
@@ -380,6 +382,7 @@ export async function saveModel(
 }
 
 export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
+  const [old] = await db.select({ rs: model.recordStatus }).from(model).where(eq(model.modelCode, code));
   await db
     .update(model)
     .set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() })
@@ -390,7 +393,7 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
     entity: 'model',
     key: code,
     summary: `รุ่นสินค้า ${code} → ${rs}`,
-    changes: { recordStatus: [null, rs] },
+    changes: { recordStatus: [old?.rs ?? null, rs] },
   });
   invalidate('master:models:');
 }

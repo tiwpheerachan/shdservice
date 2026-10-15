@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isoDateString } from './index';
 
 /**
  * Job form rules (เปิดงาน / แก้ไขงาน / บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) —
@@ -44,9 +45,8 @@ export const JOB_FIELD_LABEL: Record<JobRequiredKey, string> = {
   dueDate: 'วันประเมินซ่อมเสร็จ',
 };
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const text = z.string().optional();
-const date = z.union([z.literal(''), z.string().regex(ISO_DATE, 'รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)')]).optional();
+const date = z.union([z.literal(''), isoDateString()]).optional();
 // the message names the field: the toast lists messages without their field ("ต้องไม่ติดลบ" alone said nothing)
 const numberLike = (field: string) =>
   z
@@ -54,6 +54,12 @@ const numberLike = (field: string) =>
     .optional()
     .refine((v) => v === undefined || v === '' || Number.isFinite(Number(v)), `${field}ต้องเป็นตัวเลข`)
     .refine((v) => v === undefined || v === '' || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
+/** numberLike + no fractions (an integer column would silently drop them) */
+const wholeLike = (field: string) =>
+  numberLike(field).refine(
+    (v) => v === undefined || v === '' || Number.isInteger(Number(v)),
+    `${field}ต้องเป็นจำนวนเต็ม`,
+  );
 
 /** field types — everything optional here; what is required is decided per mode below */
 const jobInputShape = z.object({
@@ -67,7 +73,7 @@ const jobInputShape = z.object({
   channel: text,
   shopName: text,
   saleOrderDate: date,
-  warrantyMonth: numberLike('รับประกัน (เดือน) '),
+  warrantyMonth: wholeLike('รับประกัน (เดือน) '),
   expireDate: date,
   warranty: text,
   productType: text,
@@ -143,27 +149,47 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
  * ------------------------------------------------------------------ */
 
 const req = (msg: string) => z.string({ error: msg }).trim().min(1, msg);
-const reqDate = (msg: string) => z.string({ error: msg }).regex(ISO_DATE, msg);
 
 /** ส่งโดย / รับโดย: an app_user id (left out → the server uses the person saving) */
 const staffId = (msg: string) => z.number({ error: msg }).int(msg).positive(msg).optional();
 
-/** บันทึกงานซ่อม → POST /api/jobs/:no/repair */
-export const repairActionSchema = z.looseObject({ status: req('โปรดระบุสถานะงานซ่อม') });
+/** an A / B quote of a part line: qty 0 = that option is not used */
+const partOption = z.looseObject({ qty: wholeLike('จำนวนอะไหล่') }).optional();
+
+/** บันทึกงานซ่อม → POST /api/jobs/:no/repair (costs and part prices not negative, part qty whole) */
+export const repairActionSchema = z.looseObject({
+  status: req('โปรดระบุสถานะงานซ่อม'),
+  serviceCost: numberLike('ค่าบริการการซ่อม'),
+  toolCost: numberLike('ค่าเครื่องมือพิเศษ'),
+  deliveryCost: numberLike('ค่าขนส่ง'),
+  boxCost: numberLike('ค่ากล่องพัสดุ'),
+  parts: z.array(z.looseObject({ unitPrice: numberLike('ราคาอะไหล่'), a: partOption, b: partOption })).optional(),
+});
 
 /** บันทึกงานส่งซ่อมต่อ → POST /api/jobs/:no/outsource (sending: to + date; receiving back: the receive block) */
 export const outsourceActionSchema = z
   .looseObject({
     status: z.string().optional(),
     send: z
-      .looseObject({ to: req('ต้องระบุ ส่งไปยัง'), date: reqDate('ต้องระบุวันที่ส่ง'), by: staffId('ต้องเลือกผู้ส่ง') })
+      .looseObject({
+        to: req('ต้องระบุ ส่งไปยัง'),
+        date: isoDateString('ต้องระบุวันที่ส่ง'),
+        by: staffId('ต้องเลือกผู้ส่ง'),
+      })
       .optional(),
-    receive: z.looseObject({ by: staffId('ต้องเลือกผู้รับ') }).optional(),
+    receive: z.looseObject({ by: staffId('ต้องเลือกผู้รับ'), date }).optional(),
   })
   .superRefine((v, ctx) => {
     if (!isFilled(v.status)) ctx.addIssue({ code: 'custom', path: ['status'], message: 'โปรดระบุสถานะงานซ่อม' });
     if (!v.send && !v.receive) ctx.addIssue({ code: 'custom', path: ['send', 'to'], message: 'ต้องระบุ ส่งไปยัง' });
+    // both dates are YYYY-MM-DD here, so string order = date order (the stored send date: saveOutsource)
+    if (v.send?.date && v.receive?.date && v.receive.date < v.send.date)
+      ctx.addIssue({ code: 'custom', path: ['receive', 'date'], message: RECEIVE_BEFORE_SEND });
   });
+
+export const RECEIVE_BEFORE_SEND = 'วันที่รับต้องไม่ก่อนวันที่ส่ง';
+/** ปิดงานไม่ได้ระหว่างที่เครื่องยังอยู่ที่ Out-Source (setStatus → Finished; หน้า ปิดงาน เตือนก่อนกด) */
+export const OUTSOURCE_NOT_BACK = 'งานนี้ส่งซ่อมภายนอกอยู่ — ต้องบันทึก "รับคืนจาก Out-Source แล้ว" ก่อนปิดงาน';
 
 /** บันทึกงาน Swap / Refund → POST /api/jobs/:no/swap-refund (refund = the body carries refund fields) */
 export const swapRefundActionSchema = z
@@ -186,12 +212,31 @@ export const swapRefundActionSchema = z
     }
   });
 
+/** job_status 8 — the parcel went out with a carrier and its number is recorded (7 = number still to come) */
+export const STATUS_CLOSED_TRACKED = 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)';
+
 /** ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close */
-export const closeActionSchema = z.looseObject({
-  status: req('โปรดระบุสถานะงาน'),
-  payment: z.looseObject({ type: req('ต้องเลือกวิธีการชำระเงิน') }, { error: 'ต้องเลือกวิธีการชำระเงิน' }),
-  return: z.looseObject(
-    { type: req('ต้องระบุวิธีการส่งคืนสินค้า'), date: reqDate('ต้องระบุวันที่ส่งคืน') },
-    { error: 'ต้องระบุวิธีการส่งคืนสินค้า' },
-  ),
-});
+export const closeActionSchema = z
+  .looseObject({
+    status: req('โปรดระบุสถานะงาน'),
+    payment: z.looseObject(
+      { type: req('ต้องเลือกวิธีการชำระเงิน'), amount: numberLike('จำนวนเงินที่ชำระ') },
+      { error: 'ต้องเลือกวิธีการชำระเงิน' },
+    ),
+    return: z.looseObject(
+      { type: req('ต้องระบุวิธีการส่งคืนสินค้า'), date: isoDateString('ต้องระบุวันที่ส่งคืน'), tracking: text },
+      { error: 'ต้องระบุวิธีการส่งคืนสินค้า' },
+    ),
+  })
+  .superRefine((v, ctx) => {
+    if (v.status === STATUS_CLOSED_TRACKED && !isFilled(v.return.tracking))
+      ctx.addIssue({ code: 'custom', path: ['return', 'tracking'], message: 'ต้องระบุหมายเลขพัสดุ' });
+  });
+
+/**
+ * What the customer still pays at close: the job total less the deposit taken at reception, never
+ * below 0. job_total_cost keeps its legacy meaning (no deposit) — this is for display and defaults.
+ */
+export function jobAmountDue(total: number, deposit: number): number {
+  return Math.max(0, Math.round((total - deposit) * 100) / 100);
+}

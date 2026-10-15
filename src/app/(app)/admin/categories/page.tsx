@@ -1,4 +1,5 @@
 import { MasterTable } from '@/components/shared/master-table';
+import { MASTER_NAME_LABEL } from '@/lib/validation/admin';
 import { getCategories } from '@/data/queries';
 
 export const metadata = { title: 'หมวดหมู่สินค้า' };
@@ -12,7 +13,7 @@ export default async function Page() {
         kind: 'categories',
         title: 'หมวดหมู่สินค้า',
         description: 'จัดกลุ่มอะไหล่และสินค้าเพื่อใช้ในการค้นหาและออกรายงาน',
-        nameLabel: 'ชื่อหมวดหมู่',
+        nameLabel: MASTER_NAME_LABEL.categories,
         detailLabel: 'รายละเอียด',
         rows,
       }}

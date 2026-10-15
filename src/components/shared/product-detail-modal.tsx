@@ -308,10 +308,11 @@ export function ProductDetailModal({
             <Field label="คุม S/N (Serial Control)" group="radiogroup">
               <div className="flex h-9 items-center gap-4">
                 <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name={`sn-${p.sysCode}`} disabled /> True
+                  <Radio name={`sn-${p.sysCode}`} checked={!!p.serialControl} readOnly disabled /> True
                 </label>
                 <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name={`sn-${p.sysCode}`} defaultChecked disabled /> False
+                  {/* controlled: the stored value (False when null), not a defaultChecked lost on re-render */}
+                  <Radio name={`sn-${p.sysCode}`} checked={!p.serialControl} readOnly disabled /> False
                 </label>
               </div>
             </Field>

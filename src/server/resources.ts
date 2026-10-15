@@ -112,8 +112,10 @@ export async function readResource(req: NextRequest, resource: string): Promise<
       return paged
         ? pageModels(p, deleted, { brand: p.f.brand, code: p.f.code, name: p.f.name, status: p.f.status })
         : listModels(deleted);
-    case 'staff':
-      return listStaff();
+    case 'staff': {
+      const usedAs = sp.get('usedAs');
+      return listStaff(usedAs === 'engineer' || usedAs === 'sales' ? usedAs : undefined);
+    }
     case 'provinces':
       return listProvinces();
     case 'job_statuses':

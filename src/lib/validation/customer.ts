@@ -3,6 +3,16 @@ import type { FieldErrors } from './index';
 import { isFilled } from './job';
 
 /**
+ * Legacy phones carry invisible characters (zero-width space, bidi marks, BOM) and en/em dashes
+ * pasted from chat apps: strip / map them before testing and before saving.
+ */
+export const normalizePhone = (v: unknown) =>
+  String(v ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .trim();
+
+/**
  * Customer form rules (ข้อมูลลูกค้า page + the quick add inside CustomerSelect) — payload = CustomerInput.
  *  - name: always
  *  - phone: a new customer needs one; an existing customer that has one must keep one
@@ -22,9 +32,9 @@ export function customerSchema(phoneRequired = true) {
       // required checks here, not on the fields: a missing key must not stop the other rules
       .superRefine((v, ctx) => {
         if (!isFilled(v.name)) ctx.addIssue({ code: 'custom', path: ['name'], message: 'ต้องระบุชื่อลูกค้า' });
-        if (phoneRequired && !isFilled(v.phone))
+        const phone = normalizePhone(v.phone);
+        if (phoneRequired && !phone)
           ctx.addIssue({ code: 'custom', path: ['phone'], message: 'ต้องระบุเบอร์โทรศัพท์' });
-        const phone = String(v.phone ?? '').trim();
         if (phone && (!/^[\d\s+\-/(),.]+$/.test(phone) || phone.replace(/\D/g, '').length < 9))
           ctx.addIssue({
             code: 'custom',

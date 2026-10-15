@@ -27,6 +27,7 @@
     "db:test:prepare": "tsx tests/prepare-db.mts",
     "db:dev:up": "docker compose -f docker-compose.yml up -d --wait",
     "db:dev:load": "tsx scripts/dev-db.mts",
+    "db:dev:migrate": "DATABASE_URL=postgresql://root:dev_pass@127.0.0.1:55435/shd_oneservice_dev_db tsx scripts/migrate.ts",
     "test:domain": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-domain.mts",
     "db:dev:down": "docker compose -f docker-compose.yml down",
     "format": "prettier --write .",

@@ -1,4 +1,5 @@
 import { MasterTable } from '@/components/shared/master-table';
+import { MASTER_NAME_LABEL } from '@/lib/validation/admin';
 import { getColors } from '@/data/queries';
 
 export const metadata = { title: 'สีสินค้า' };
@@ -12,7 +13,7 @@ export default async function Page() {
         kind: 'colors',
         title: 'สีสินค้า',
         description: 'รหัสสีมาตรฐานสำหรับระบุสีของเครื่องที่รับซ่อม',
-        nameLabel: 'ชื่อสี',
+        nameLabel: MASTER_NAME_LABEL.colors,
         detailLabel: 'รายละเอียด',
         rows,
       }}

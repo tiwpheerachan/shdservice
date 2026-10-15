@@ -16,6 +16,7 @@ import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
 import { saleOrderSchema } from '@/lib/validation/sale-order';
 import { assertValid } from '@/server/validate';
+import { staffOrKeep } from './users';
 
 /** approve_status ids */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
@@ -256,6 +257,15 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
   assertValid(saleOrderSchema, i);
   const cust = await getCustomerByCode(str(i.customerCode));
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
+  // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
+  const [cur] = i.no
+    ? await db
+        .select({ salesId: saleOutHd.documentCreateBy })
+        .from(saleOutHd)
+        .where(eq(saleOutHd.saleOutHdNo, i.no))
+        .limit(1)
+    : [];
+  const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
   const codes = i.lines.map((l) => str(l.code)).filter(Boolean);
   const prods = await db
     .select({
@@ -292,12 +302,17 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       };
     });
   const totalBase = lines.reduce((s, l) => s + l.amount, 0);
-  const fee = num(i.fee);
-  const net = Math.round((totalBase + fee) * 100) / 100;
   const approveId = i.submit === false ? AS.DRAFT : AS.WAIT;
 
   const no = await db.transaction(async (tx) => {
     const now = nowThai();
+    let no = i.no;
+    // edit — lock: an approval running now must finish first, so the APPROVED check below sees it
+    const [prev] = no ? await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update') : [];
+    if (no && !prev) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    // the edit form sends neither fee nor tracking: left out → the order keeps its own (a save used to wipe them)
+    const fee = i.fee !== undefined ? num(i.fee) : num(prev?.feeAmount);
+    const net = Math.round((totalBase + fee) * 100) / 100;
     const hdValues = {
       customerId: cust.id,
       customerCode: cust.code,
@@ -305,7 +320,6 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       customerName: cust.name,
       customerAddress: cust.address.slice(0, 500),
       customerPhoneNumber: cust.phone,
-      customerFaxNumber: '',
       totalBaseAmount: money(totalBase),
       vatRat: '0.00',
       vatAmount: '0.00',
@@ -316,19 +330,15 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       remarkHd: str(i.remark).slice(0, 100),
       paymentType: str(i.paymentType) || 'โอนเงิน',
       paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== '' ? num(i.paymentAmount) : net),
-      deliveryTrackingNo: str(i.tracking).slice(0, 50),
+      ...(i.tracking !== undefined || !prev ? { deliveryTrackingNo: str(i.tracking).slice(0, 50) } : {}),
     };
-    let no = i.no;
-    if (no) {
-      // lock: an approval running now must finish first, so the APPROVED check below sees it
-      const [prev] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
-      if (!prev) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    if (no && prev) {
       assertVersion(i.version, prev.rowVersion);
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
       const upd = {
         ...hdValues,
         approveStatusId: approveId,
-        ...(i.salesId ? { documentCreateBy: Number(i.salesId) } : {}),
+        documentCreateBy: salesId,
       };
       await tx.update(saleOutHd).set(upd).where(eq(saleOutHd.saleOutHdNo, no));
       await tx.delete(saleOutDt).where(eq(saleOutDt.saleOutHdNo, no));
@@ -356,7 +366,8 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         saleOutHdNo: no,
         documentType: 'SaleOrder',
         documentCreateDate: now,
-        documentCreateBy: i.salesId ? Number(i.salesId) : byUserId,
+        documentCreateBy: salesId,
+        customerFaxNumber: '', // not on the form: written on create only, an edit keeps a legacy order's fax
         documentStatus: true,
         documentCreditNoteNo: '',
         documentCancelDate: SENTINEL_TS,
@@ -453,19 +464,23 @@ export async function approveSaleOrder(
 
 export async function setTracking(no: string, tracking: string, byUserId: number): Promise<SaleOrderDetail> {
   await db.transaction(async (tx) => {
-    const r = await tx
+    const [before] = await tx
+      .select({ tracking: saleOutHd.deliveryTrackingNo })
+      .from(saleOutHd)
+      .where(eq(saleOutHd.saleOutHdNo, no))
+      .for('update');
+    if (!before) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    await tx
       .update(saleOutHd)
       .set({ deliveryTrackingNo: str(tracking).slice(0, 50), deliveryDate: nowThai() })
-      .where(eq(saleOutHd.saleOutHdNo, no))
-      .returning({ no: saleOutHd.saleOutHdNo });
-    if (!r[0]) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+      .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Sale Order',
       entity: 'sale_out_hd',
       key: no,
       summary: `บันทึกเลขพัสดุ ${str(tracking)}`,
-      changes: { deliveryTrackingNo: [null, str(tracking)] },
+      changes: { deliveryTrackingNo: [before.tracking ?? null, str(tracking)] },
     });
   });
   return (await getSaleOrder(no))!;

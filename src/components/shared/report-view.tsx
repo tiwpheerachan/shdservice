@@ -48,7 +48,8 @@ export function ReportView<T extends Record<string, unknown>>({
   title: string;
   description: string;
   filters: ReportFilter[];
-  kpis: { label: string; value: string; tone?: 'primary' | 'success' | 'warning' | 'danger' }[];
+  /** `sub` = a small second line under the value (e.g. what the total leaves out) */
+  kpis: { label: string; value: string; tone?: 'primary' | 'success' | 'warning' | 'danger'; sub?: string }[];
   columns: Column<T>[];
   rows: T[];
   rowKey: (r: T, i: number) => string;
@@ -150,6 +151,7 @@ export function ReportView<T extends Record<string, unknown>>({
               <p className={cn('num mt-1 text-xl font-semibold tracking-tight', k.tone && toneMap[k.tone])}>
                 {k.value}
               </p>
+              {k.sub && <p className="num mt-1 text-2xs text-muted-foreground">{k.sub}</p>}
             </div>
           ))}
         </div>

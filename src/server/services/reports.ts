@@ -15,7 +15,7 @@ import {
   symptom,
 } from '@/db/schema';
 import { num } from '@/server/mappers/format';
-import { jobWhere, type JobFilters } from './jobs';
+import { jobWhere, kpiGroup, type JobFilters } from './jobs';
 import { quotationWhere, type QuotationFilters } from './quotations';
 import { saleOrderWhere, type SaleOrderFilters } from './sale-orders';
 
@@ -31,7 +31,8 @@ async function jobBase(f: JobFilters, q = '') {
     .select({
       total: count(),
       fresh: sql<string>`count(*) filter (where ${job.jobStatusId} = 1)`,
-      done: sql<string>`count(*) filter (where ${jobStatus.jobStatusGroup} in ('Repaired','Finished'))`,
+      // ลูกค้าไม่ซ่อม (status 6) is not a successful repair — kpiGroup counts it as Cancel
+      done: sql<string>`count(*) filter (where ${kpiGroup} in ('Repaired','Finished'))`,
       amount: sql<string>`coalesce(sum(${job.jobTotalCost}),0)`,
       paid: sql<string>`coalesce(sum(${job.jobPaymentAmount}) filter (where ${job.jobPaymentAmount} > 0),0)`,
       tatSum: sql<string>`coalesce(sum(greatest(0, (${job.jobClosedDate}::date - ${job.jobCreateDate}::date))) filter (where ${job.jobClosedDate} > '1901-01-01'),0)`,
@@ -81,7 +82,9 @@ export async function quotationReportSummary(f: QuotationFilters, q = '') {
     .select({
       total: count(),
       agreed: sql<string>`count(*) filter (where ${quotationHd.quotationStatusId} in (3,6,9))`,
-      amount: sql<string>`coalesce(sum(${quotationHd.netAmount}),0)`,
+      // มูลค่ารวม leaves out cancelled quotations (5 ยกเลิกใบเสนอราคา); the card shows that amount apart
+      amount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} is distinct from 5),0)`,
+      cancelledAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} = 5),0)`,
       agreedAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} in (3,6,9)),0)`,
     })
     .from(quotationHd)
@@ -90,7 +93,13 @@ export async function quotationReportSummary(f: QuotationFilters, q = '') {
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
     .where(quotationWhere(q, f));
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
-  return { total: Number(r.total), agreed: num(r.agreed), amount: num(r.amount), agreedAmount: num(r.agreedAmount) };
+  return {
+    total: Number(r.total),
+    agreed: num(r.agreed),
+    amount: num(r.amount),
+    cancelledAmount: num(r.cancelledAmount),
+    agreedAmount: num(r.agreedAmount),
+  };
 }
 
 export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
@@ -99,14 +108,22 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
     .select({
       total: count(),
       approved: sql<string>`count(*) filter (where ${saleOutHd.approveStatusId} = 4)`,
-      amount: sql<string>`coalesce(sum(${saleOutHd.netAmount}),0)`,
+      // ยอดขายรวม = approved orders only (4 อนุมัติแล้ว); waiting / rejected / denied are shown apart
+      amount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} = 4),0)`,
+      notApprovedAmount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} is distinct from 4),0)`,
     })
     .from(saleOutHd)
     .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
     .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
     .where(saleOrderWhere(q, f));
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
-  const total = Number(r.total);
+  const approved = num(r.approved);
   const amount = num(r.amount);
-  return { total, approved: num(r.approved), amount, avg: total ? amount / total : 0 };
+  return {
+    total: Number(r.total),
+    approved,
+    amount,
+    notApprovedAmount: num(r.notApprovedAmount),
+    avg: approved ? amount / approved : 0, // per approved order, like ยอดขายรวม
+  };
 }

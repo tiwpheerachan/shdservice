@@ -75,6 +75,8 @@ export type Product = {
   issued?: number;
   reserved?: number;
   ubRepairOnly?: boolean;
+  /** product.is_serial_control — คุม S/N (null / not sent = False) */
+  serialControl?: boolean;
   forModelColor?: string;
   createdDate?: string;
   createdBy?: string;

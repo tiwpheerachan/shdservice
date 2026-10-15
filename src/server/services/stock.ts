@@ -8,6 +8,7 @@ import {
   inventoryDt,
   inventoryHd,
   inventoryType,
+  job,
   jobOrderSparePartLog,
   manufacturer,
   product,
@@ -65,6 +66,7 @@ const productSelect = {
   createDate: product.createDate,
   createBy: product.createBy,
   ubOnly: product.isUbRepairOnly,
+  serialControl: product.isSerialControl,
   forModelColor: product.forModelColor,
   picture: product.pictrueFileName,
   onhand: productNoneSerial.quantityRemain,
@@ -112,6 +114,7 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
     issued: r.used ?? 0,
     reserved: r.booking ?? 0,
     ubRepairOnly: !!r.ubOnly,
+    serialControl: !!r.serialControl, // product.is_serial_control (คุม S/N) — null = False
     forModelColor: r.forModelColor ?? '',
     createdDate: fmtDateTime(r.createDate),
     createdBy: creator ?? '',
@@ -332,7 +335,10 @@ async function adjustQty(
   const booking = Math.max(0, (row.quantityBooking ?? 0) + (d.booking ?? 0));
   // apply the delta to remain (a few legacy rows drifted from available-used; keep their numbers)
   const remain = (row.quantityRemain ?? 0) + (d.available ?? 0) - (d.used ?? 0);
-  if (remain < 0 && !opts.allowNegative) throw new HttpError(409, 'สต๊อกไม่พอ (คงเหลือติดลบ)');
+  if (remain < 0 && !opts.allowNegative) {
+    const [p] = await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId));
+    throw new HttpError(409, `สต๊อก ${p?.code ?? `#${productId}`} ไม่พอ (คงเหลือ ${row.quantityRemain ?? 0})`);
+  }
   await tx
     .update(productNoneSerial)
     .set({ quantityAvailable: available, quantityUsed: used, quantityBooking: booking, quantityRemain: remain })
@@ -492,6 +498,8 @@ export type PartRequestLine = {
   need: number; // still to grant
   requested: number;
   granted: number;
+  /** returned to stock (รับคืนจากการเบิก) — billed qty = granted - returned */
+  returned: number;
   statusId: number;
   status: string;
   unitPrice: number;
@@ -520,6 +528,7 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
       onhand: productNoneSerial.quantityRemain,
       requested: jobOrderSparePartLog.requestQty,
       granted: jobOrderSparePartLog.grantQty,
+      returned: jobOrderSparePartLog.returnQty,
       statusId: jobOrderSparePartLog.orderStatusId,
       unitPrice: jobOrderSparePartLog.sparePartUnitPrice,
       isQuotation: jobOrderSparePartLog.isQuotation,
@@ -555,6 +564,7 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
       need: Math.max(0, requested - granted),
       requested,
       granted,
+      returned: r.returned ?? 0,
       statusId: r.statusId ?? 1,
       status:
         r.statusId === PART.REQUESTED && granted > 0 && granted < requested
@@ -570,6 +580,15 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
       isSpecialB: !!r.isSpecialB,
     };
   });
+}
+
+/** job.spare_part_total_cost = the job's charged part lines (cancelled ones excluded) */
+export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
+  const [sum] = await tx
+    .select({ s: sql<string>`coalesce(sum(${jobOrderSparePartLog.sparePartTotalPrice}),0)` })
+    .from(jobOrderSparePartLog)
+    .where(and(eq(jobOrderSparePartLog.jobNo, jobNo), ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED)));
+  return num(sum?.s);
 }
 
 /** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows. */
@@ -741,7 +760,8 @@ export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> 
 /**
  * รับคืนจากการเบิก → WHI (type 2), reverses the issue on the counters
  * (used -= qty → remain += qty) and records return_qty/date/by on the ใบเบิก row;
- * a fully returned line becomes status 5 (คืนแล้ว).
+ * a fully returned line becomes status 5 (คืนแล้ว). A charged line is re-priced to what is still
+ * used (granted - returned) and the job's parts / total cost follow in the same transaction.
  */
 export async function returnFromJob(
   i: { jobNo: string; remark?: string; from?: string; lines: { logId: number; qty: number }[] },
@@ -751,6 +771,8 @@ export async function returnFromJob(
   if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนรับคืน');
   return db
     .transaction(async (tx) => {
+      // the job row before its part rows — the order saveRepair locks them in
+      const [j] = await tx.select().from(job).where(eq(job.jobNo, i.jobNo)).for('update');
       const reqs = await tx
         .select()
         .from(jobOrderSparePartLog)
@@ -793,6 +815,9 @@ export async function returnFromJob(
             returnBy: byUserId,
             returnStockId: STORE_LOCATION_ID,
             orderStatusId: returned >= (r.grantQty ?? 0) ? PART.RETURNED : r.orderStatusId,
+            ...(r.isQuotation
+              ? { sparePartTotalPrice: money(num(r.sparePartUnitPrice) * Math.max(0, (r.grantQty ?? 0) - returned)) }
+              : {}),
           })
           .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
         mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
@@ -803,13 +828,20 @@ export async function returnFromJob(
         mvLines,
         byUserId,
       );
+      let costs: Record<string, string> = {};
+      if (j) {
+        const parts = await partsTotalOf(tx, i.jobNo);
+        const rest = num(j.serviceCost) + num(j.serviceToolCost) + num(j.deliveryCost) + num(j.cartonBoxCost);
+        costs = { sparePartTotalCost: money(parts), jobTotalCost: money(parts + rest) };
+        await tx.update(job).set(costs).where(eq(job.jobNo, i.jobNo));
+      }
       await audit(tx, byUserId, {
         action: 'RETURN',
         module: 'Job ReturnStock',
         entity: 'job',
         key: i.jobNo,
         summary: `รับคืนอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`,
-        changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)] },
+        changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)], ...diff(j, costs) },
       });
       return { no, total: mvLines.reduce((s, l) => s + l.qty, 0) };
     })
@@ -1039,66 +1071,14 @@ export async function movementLines(no: string) {
   }));
 }
 
-/** รายงานการเบิกจ่ายอะไหล่ — every issued line (WHO types 3/4/5) in a date range. */
-export async function listIssuedLines(
-  opts: { from?: string; to?: string; category?: string; code?: string; limit?: number } = {},
-) {
-  const from = ymd(opts.from),
-    to = ymd(opts.to);
-  const rows = await db
-    .select({
-      doc: inventoryHd.inventoryNo,
-      date: inventoryHd.createDate,
-      type: inventoryType.inventoryTypeName,
-      ref: inventoryHd.referenceDocumentNo,
-      code: inventoryDt.itemCode,
-      item: product.productName,
-      category: category.categoryName,
-      qty: inventoryDt.itemQuantity,
-      price: productNoneSerial.retailPrice,
-      byFirst: appUser.firstName,
-      byLast: appUser.lastName,
-    })
-    .from(inventoryDt)
-    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
-    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
-    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
-    .leftJoin(category, eq(category.categoryId, product.categoryId))
-    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
-    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
-    .where(
-      and(
-        inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER]),
-        ne(inventoryHd.isActive, false),
-        from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
-        to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
-        opts.category ? eq(category.categoryName, opts.category) : undefined,
-        opts.code
-          ? or(ilike(inventoryDt.itemCode, `%${opts.code}%`), ilike(product.productName, `%${opts.code}%`))
-          : undefined,
-      ),
-    )
+/** รายงานการเบิกจ่ายอะไหล่ — every issued line (WHO types 3/4/5, returns 2 as negative qty) in a date range; the Excel export.
+ *  Same filter (issuedWhere) and rows as the screen (pageIssuedLines), only not paged. */
+export async function listIssuedLines(opts: IssuedFilters & { limit?: number } = {}) {
+  const rows = await issuedBase()
+    .where(issuedWhere('', opts))
     .orderBy(desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId))
     .limit(Math.min(opts.limit ?? 5000, 20000));
-  return rows.map((r) => {
-    const qty = num(r.qty);
-    const price = num(r.price);
-    return {
-      doc: r.doc ?? '',
-      date: fmtDateTime(r.date),
-      type: r.type ?? '',
-      ref: r.ref ?? '',
-      by: fullName(r.byFirst, r.byLast),
-      from: 'คลังสินค้าดี',
-      to: r.ref ?? '',
-      remark: '',
-      code: r.code ?? '',
-      item: r.item ?? '',
-      category: r.category ?? '',
-      qty,
-      value: qty * price,
-    };
-  });
+  return rows.map(toIssued);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1147,8 +1127,11 @@ function productWhere(q: string, f: ProductFilters) {
     f.name ? ilike(product.productName, `%${f.name}%`) : undefined,
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
-    f.creator
-      ? sql`trim(coalesce(${creatorUser.firstName},'') || ' ' || coalesce(${creatorUser.lastName},'')) ilike ${'%' + f.creator + '%'}`
+    f.creator?.trim()
+      ? /^\d+$/.test(f.creator.trim())
+        ? eq(product.createBy, Number(f.creator.trim()))
+        : // the same name fullName() builds: each part trimmed, empty parts dropped
+          sql`concat_ws(' ', nullif(trim(${creatorUser.firstName}),''), nullif(trim(${creatorUser.lastName}),'')) ilike ${'%' + f.creator.trim() + '%'}`
       : undefined,
     ymd(f.date) ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
     f.model
@@ -1381,12 +1364,28 @@ export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<P
 
 export type IssuedFilters = { from?: string; to?: string; category?: string; code?: string };
 
+/** a line's qty in the report: issued (3/4/5) counts up, รับคืนจากการเบิก (2) counts back down */
+const issuedQty = sql<string>`(case when ${inventoryHd.inventoryTypeId} = ${sql.raw(String(INV.RETURN_FROM_JOB))} then -${inventoryDt.itemQuantity} else ${inventoryDt.itemQuantity} end)`;
+/**
+ * The unit price stored when the part went out: the job's part line (job_order_spare_part_log, issue and
+ * return reference the job no.) or the sale-order line (sale_out_dt.retail_price). inventory_dt itself has
+ * no price. 0 = not stored (warranty lines are often 0) → null, and the report falls back to today's price.
+ */
+const storedPrice = sql<string | null>`coalesce(
+  (select l.spare_part_unit_price from job_order_spare_part_log l
+    where l.job_no = ${inventoryHd.referenceDocumentNo} and l.spare_part_code = ${inventoryDt.itemCode} and l.spare_part_unit_price > 0
+    order by l.job_order_log_id desc limit 1),
+  (select s.retail_price from sale_out_dt s
+    where s.sale_out_hd_no = ${inventoryHd.referenceDocumentNo} and s.product_code = ${inventoryDt.itemCode} and s.retail_price > 0
+    order by s.sale_out_dt_id desc limit 1))`;
+const issuedValue = sql`${issuedQty} * coalesce(${storedPrice}, ${productNoneSerial.retailPrice}, 0)`;
+
 function issuedWhere(q: string, f: IssuedFilters) {
   const code = (f.code || q).trim();
   const from = ymd(f.from),
     to = ymd(f.to);
   return and(
-    inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER]),
+    inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER, INV.RETURN_FROM_JOB]),
     ne(inventoryHd.isActive, false),
     from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
@@ -1411,8 +1410,9 @@ const issuedBase = () =>
       code: inventoryDt.itemCode,
       item: product.productName,
       category: category.categoryName,
-      qty: inventoryDt.itemQuantity,
-      price: productNoneSerial.retailPrice,
+      qty: issuedQty,
+      stored: storedPrice,
+      today: productNoneSerial.retailPrice,
       byFirst: appUser.firstName,
       byLast: appUser.lastName,
     })
@@ -1423,6 +1423,29 @@ const issuedBase = () =>
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy));
+
+function toIssued(r: Awaited<ReturnType<typeof issuedBase>>[number]) {
+  const qty = num(r.qty);
+  const price = r.stored != null ? num(r.stored) : num(r.today);
+  return {
+    doc: r.doc ?? '',
+    date: fmtDateTime(r.date),
+    type: r.type ?? '',
+    ref: r.ref ?? '',
+    by: fullName(r.byFirst, r.byLast),
+    from: 'คลังสินค้าดี',
+    to: r.ref ?? '',
+    remark: '',
+    code: r.code ?? '',
+    item: r.item ?? '',
+    category: r.category ?? '',
+    qty,
+    price,
+    /** where `price` came from: stored on the job / sale-order line, or today's price (none stored) */
+    priceBasis: r.stored != null ? 'ราคา ณ วันเบิก' : 'ราคาปัจจุบัน',
+    value: qty * price,
+  };
+}
 
 const issuedCountBase = () =>
   db
@@ -1438,8 +1461,8 @@ const ISSUED_SORT = {
   type: inventoryType.inventoryTypeName,
   code: inventoryDt.itemCode,
   item: product.productName,
-  qty: inventoryDt.itemQuantity,
-  value: sql`${inventoryDt.itemQuantity} * coalesce(${productNoneSerial.retailPrice},0)`,
+  qty: issuedQty,
+  value: issuedValue,
   by: appUser.firstName,
 };
 
@@ -1455,24 +1478,7 @@ export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
       .offset(offsetOf(p)),
   ]);
   return {
-    rows: rows.map((r) => {
-      const qty = num(r.qty);
-      return {
-        doc: r.doc ?? '',
-        date: fmtDateTime(r.date),
-        type: r.type ?? '',
-        ref: r.ref ?? '',
-        by: fullName(r.byFirst, r.byLast),
-        from: 'คลังสินค้าดี',
-        to: r.ref ?? '',
-        remark: '',
-        code: r.code ?? '',
-        item: r.item ?? '',
-        category: r.category ?? '',
-        qty,
-        value: qty * num(r.price),
-      };
-    }),
+    rows: rows.map(toIssued),
     total: totalOf(counted),
     page: p.page,
     pageSize: p.pageSize,
@@ -1484,8 +1490,9 @@ export async function issuedStats(q: string, f: IssuedFilters) {
   const [r] = await db
     .select({
       lines: countFn(),
-      qty: sql<string>`coalesce(sum(${inventoryDt.itemQuantity}),0)`,
-      value: sql<string>`coalesce(sum(${inventoryDt.itemQuantity} * coalesce(${productNoneSerial.retailPrice},0)),0)`,
+      qty: sql<string>`coalesce(sum(${issuedQty}),0)`,
+      value: sql<string>`coalesce(sum(${issuedValue}),0)`,
+      todayPriced: sql<string>`count(*) filter (where ${storedPrice} is null)`,
     })
     .from(inventoryDt)
     .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
@@ -1495,14 +1502,20 @@ export async function issuedStats(q: string, f: IssuedFilters) {
     .where(w);
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   const [top] = await db
-    .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${inventoryDt.itemQuantity})` })
+    .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${issuedQty})` })
     .from(inventoryDt)
     .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
     .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .where(w)
     .groupBy(inventoryDt.itemCode)
-    .orderBy(desc(sql`sum(${inventoryDt.itemQuantity})`))
+    .orderBy(desc(sql`sum(${issuedQty})`), asc(inventoryDt.itemCode)) // a tie → the lowest code, every time
     .limit(1);
-  return { lines: Number(r.lines), qty: num(r.qty), value: num(r.value), top: top?.code ?? '—' };
+  return {
+    lines: Number(r.lines),
+    qty: num(r.qty),
+    value: num(r.value),
+    todayPriced: num(r.todayPriced),
+    top: top?.code ?? '—',
+  };
 }

@@ -13,6 +13,7 @@ import { useUnsavedChangesGuard } from '@/lib/use-unsaved-changes';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const closeMobile = React.useCallback(() => setMobileOpen(false), []); // stable: the drawer's focus effect keys on it
   // collapsed sidebar is remembered per browser (and follows a change made in another tab)
   const [collapsedPref, setCollapsedPref] = useLocalStorage('shd-sidebar-collapsed', '0');
   const collapsed = collapsedPref === '1';
@@ -39,11 +40,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <AccessGuard />
       <Sidebar
         mobileOpen={mobileOpen}
-        onCloseMobile={() => setMobileOpen(false)}
+        onCloseMobile={closeMobile}
         collapsed={collapsed}
         onToggleCollapse={toggleCollapse}
       />
       <div
+        inert={mobileOpen} // the open mobile drawer is modal: Tab stays inside it
         className={cn(
           'flex min-h-screen flex-col transition-[padding] duration-200 ease-out',
           collapsed ? 'lg:pl-[72px]' : 'lg:pl-[268px]',

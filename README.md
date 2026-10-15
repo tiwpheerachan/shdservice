@@ -31,6 +31,9 @@ npm run dev                                          # http://localhost:3000
 |---|---|
 | `npm run db:dev:up` | เปิด dev DB (`docker-compose.yml`, port 55435, เก็บข้อมูลข้าม restart) |
 | `npm run db:dev:load` | ล้างแล้วโหลดใหม่จาก dump ระบบเดิม `../setupdata/out` (~10 วินาที) + รัน migration |
+| `npm run db:dev:migrate` | รันเฉพาะ migration ใหม่กับ dev DB (ข้อมูลอยู่ครบ) |
+
+หลัง `git pull` ที่มี migration ใหม่ (`drizzle/*.sql`) ให้รัน `npm run db:dev:migrate` (= `DATABASE_URL=postgresql://root:dev_pass@127.0.0.1:55435/shd_oneservice_dev_db npx tsx scripts/migrate.ts`) หรือ `npm run db:dev:load` — ถ้าไม่รัน API จะตอบ 500 แบบงง ๆ เช่น `relation "idempotency_key" does not exist`
 
 ต่อจาก DBeaver / psql: host `127.0.0.1` · port `55435` · database `shd_oneservice_dev_db` · user `root` · password `dev_pass` (ค่าเดียวกับ OneLink, loopback เท่านั้น — เปลี่ยนได้ด้วย `DEV_DB_*` ใน shell)
 

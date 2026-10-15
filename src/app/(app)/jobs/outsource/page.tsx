@@ -73,6 +73,7 @@ function OutsourceForm() {
     sendDate: 'send.date',
     sendBy: 'send.by',
     recvBy: 'receive.by',
+    recvDate: 'receive.date',
     status: 'status',
   };
   const upd = (p: Partial<typeof d>) => {
@@ -260,7 +261,7 @@ function OutsourceForm() {
             <Field label="วันที่ส่ง" required error={act.errors['send.date']}>
               <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
             </Field>
-            <Field label="ส่งโดย" required error={act.errors['send.by']}>
+            <Field label="ส่งโดย (ค่าเริ่มต้น: ผู้บันทึก)" error={act.errors['send.by']}>
               <SearchSelect
                 value={d.sendBy}
                 onChange={(v) => upd({ sendBy: v })}
@@ -284,7 +285,7 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
               />
             </Field>
-            <Field label="วันที่รับ">
+            <Field label="วันที่รับ" error={act.errors['receive.date']}>
               <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
             </Field>
             <Field label="รับโดย" error={act.errors['receive.by']}>

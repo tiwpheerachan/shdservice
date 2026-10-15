@@ -3,6 +3,8 @@ import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { shippingProfile } from '@/db/schema';
 import { HttpError } from '@/server/auth';
+import { assertValid } from '@/server/validate';
+import { shippingProfileSchema } from '@/lib/validation/admin';
 import { audit, diff } from '@/server/audit';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { nowThai } from '@/server/mappers/format';
@@ -81,10 +83,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
   const code = str(i.code, 20).toUpperCase();
   const nameTh = str(i.nameTh);
   const trackUrl = str(i.trackUrl, 300);
-  if (!code) throw new HttpError(400, 'ต้องระบุรหัส (เช่น FLASH)');
-  if (!nameTh) throw new HttpError(400, 'ต้องระบุชื่อบริษัทขนส่ง');
-  if (trackUrl && !/^https:\/\//i.test(trackUrl)) throw new HttpError(400, 'ลิงก์ติดตามต้องขึ้นต้นด้วย https://');
-  if (trackUrl && !/\{no\}/i.test(trackUrl)) throw new HttpError(400, 'ลิงก์ติดตามต้องมี {no} ตรงตำแหน่งเลขพัสดุ');
+  assertValid(shippingProfileSchema, i); // same rules as the page: errors under code / nameTh / trackUrl
 
   const values = {
     code,
@@ -101,7 +100,11 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
       .select()
       .from(shippingProfile)
       .where(and(isNull(shippingProfile.deletedAt), i.id ? ne(shippingProfile.id, i.id) : undefined));
-    for (const o of others) if (o.code === code) throw new HttpError(409, `รหัส ${code} ถูกใช้แล้ว (${o.nameTh})`);
+    for (const o of others)
+      if (o.code === code) {
+        const msg = `รหัส ${code} ถูกใช้แล้ว (${o.nameTh})`;
+        throw new HttpError(409, msg, { fields: { code: msg } });
+      }
 
     let before: Row | undefined;
     if (i.id) {
@@ -140,7 +143,7 @@ export async function deleteShippingProfile(id: number, byUserId: number): Promi
       entity: 'shipping_profile',
       key: id,
       summary: `ลบโปรไฟล์บริษัทขนส่ง ${before.code} — ${before.nameTh}`,
-      changes: { deletedAt: [null, nowThai()] },
+      changes: { deletedAt: [before.deletedAt, nowThai()] }, // before.deletedAt is null here (checked above)
     });
   });
   invalidate('shippers:');

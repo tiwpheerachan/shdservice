@@ -70,6 +70,40 @@ export async function setRecordStatus(
     quotations: ['quotation_hd', 'Quotation'],
     sale_orders: ['sale_out_hd', 'Sale Order'],
   };
+  // the record_status before this change — the audit keeps [old, new], not [null, new]
+  const OLD: Partial<Record<RecordTable, () => Promise<{ rs: string }[]>>> = {
+    users: () =>
+      db
+        .select({ rs: appUser.recordStatus })
+        .from(appUser)
+        .where(eq(appUser.userId, Number(id))),
+    products: () =>
+      db
+        .select({ rs: product.recordStatus })
+        .from(product)
+        .where(eq(product.productCode, String(id))),
+    customers: () =>
+      db
+        .select({ rs: customer.recordStatus })
+        .from(customer)
+        .where(eq(customer.customerCode, String(id))),
+    jobs: () =>
+      db
+        .select({ rs: job.recordStatus })
+        .from(job)
+        .where(eq(job.jobNo, String(id))),
+    quotations: () =>
+      db
+        .select({ rs: quotationHd.recordStatus })
+        .from(quotationHd)
+        .where(eq(quotationHd.quotationNo, String(id))),
+    sale_orders: () =>
+      db
+        .select({ rs: saleOutHd.recordStatus })
+        .from(saleOutHd)
+        .where(eq(saleOutHd.saleOutHdNo, String(id))),
+  };
+  const old = (await OLD[table]?.())?.[0]?.rs ?? null;
   const log = async (w: Parameters<typeof audit>[0] = db) => {
     const e = ENTITY[table];
     if (!e) return;
@@ -79,7 +113,7 @@ export async function setRecordStatus(
       entity: e[0],
       key: id,
       summary: rs === RS.DELETED ? `ลบ (soft delete) ${e[0]} ${id}` : `${e[0]} ${id} → ${rs}`,
-      changes: { recordStatus: [null, rs] },
+      changes: { recordStatus: [old, rs] },
     });
   };
   if (isSimpleKind(table)) return setSimpleStatus(table, Number(id), rs, byUserId);

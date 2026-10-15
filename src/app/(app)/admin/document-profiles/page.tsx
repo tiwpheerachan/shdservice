@@ -14,6 +14,8 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { api, postJson, del, errMsg, uploadFile } from '@/lib/api';
 import { useApi } from '@/data/db';
+import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { documentProfileSchema } from '@/lib/validation/admin';
 
 type Profile = {
   id: number;
@@ -86,15 +88,19 @@ export default function DocumentProfilesPage() {
   const rows = data?.rows ?? [];
   const load = () => mutate();
 
+  const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
+  useClearOnChange(fe.clear, form);
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
     setForm(p ? { ...p } : EMPTY);
+    fe.setErrors({});
     setPendingLogo(null);
     setOpen(true);
   };
 
   const save = async () => {
+    if (fe.report(fe.run(documentProfileSchema, form))) return;
     setSaving(true);
     try {
       const d = await postJson<{ row: Profile }>('/api/admin/document-profiles', { ...form, id: editing?.id });
@@ -116,7 +122,7 @@ export default function DocumentProfilesPage() {
       await load();
       setOpen(false);
     } catch (e) {
-      push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -267,10 +273,10 @@ export default function DocumentProfilesPage() {
         }
       >
         <FieldGrid>
-          <Field label="รหัสโปรไฟล์" required hint="สั้น ๆ เช่น SHD, HASHTAG">
+          <Field label="รหัสโปรไฟล์" required hint="สั้น ๆ เช่น SHD, HASHTAG" error={fe.errors.code}>
             <Input value={form.code} onChange={(e) => set('code', e.target.value.toUpperCase())} placeholder="SHD" />
           </Field>
-          <Field label="ชื่อบริษัท (ไทย)" required>
+          <Field label="ชื่อบริษัท (ไทย)" required error={fe.errors.nameTh}>
             <Input value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
           </Field>
           <Field label="ชื่อบริษัท (อังกฤษ)">

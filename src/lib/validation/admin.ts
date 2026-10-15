@@ -13,7 +13,17 @@ const nonNegative = (field: string) =>
     .refine((v) => v === undefined || v === '' || Number.isFinite(Number(v)), `${field}ต้องเป็นตัวเลข`)
     .refine((v) => v === undefined || v === '' || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
 
-/** a master list row — `nameLabel` is the list's own word ("ชื่อหมวดหมู่", "ชื่ออาการเสีย" …) */
+/** the name field's label per master list — the page shows it and both the page and the API say "ต้องระบุ<label>" */
+export const MASTER_NAME_LABEL = {
+  categories: 'ชื่อหมวดหมู่',
+  manufacturers: 'ชื่อยี่ห้อ',
+  colors: 'ชื่อสี',
+  job_types: 'ประเภทงานซ่อม',
+  product_types: 'ประเภทเครื่องซ่อม',
+  symptoms: 'อาการเสีย',
+} as const;
+
+/** a master list row — `nameLabel` is the list's own word (MASTER_NAME_LABEL) */
 /** `days`: the master has a whole-number days field (job types: SLA, 1–365) */
 export function masterSchema(nameLabel = 'ชื่อ', opts: { days?: boolean } = {}) {
   return z
@@ -58,4 +68,25 @@ export const productSchema = z
   })
   .superRefine((v, ctx) => {
     if (!isFilled(v.name)) ctx.addIssue({ code: 'custom', path: ['name'], message: 'ต้องระบุชื่ออะไหล่ (TH)' });
+  });
+
+/** โปรไฟล์ผู้ออกเอกสาร: code + Thai company name */
+export const documentProfileSchema = z
+  .looseObject({ code: z.string().optional(), nameTh: z.string().optional() })
+  .superRefine((v, ctx) => {
+    if (!isFilled(v.code)) ctx.addIssue({ code: 'custom', path: ['code'], message: 'ต้องระบุรหัสโปรไฟล์ (เช่น SHD)' });
+    if (!isFilled(v.nameTh)) ctx.addIssue({ code: 'custom', path: ['nameTh'], message: 'ต้องระบุชื่อบริษัท' });
+  });
+
+/** บริษัทขนส่ง: code + Thai name; the tracking link (optional) is https and has {no} where the parcel number goes */
+export const shippingProfileSchema = z
+  .looseObject({ code: z.string().optional(), nameTh: z.string().optional(), trackUrl: z.string().optional() })
+  .superRefine((v, ctx) => {
+    if (!isFilled(v.code)) ctx.addIssue({ code: 'custom', path: ['code'], message: 'ต้องระบุรหัส (เช่น FLASH)' });
+    if (!isFilled(v.nameTh)) ctx.addIssue({ code: 'custom', path: ['nameTh'], message: 'ต้องระบุชื่อบริษัทขนส่ง' });
+    const url = v.trackUrl?.trim() ?? '';
+    if (url && !/^https:\/\//i.test(url))
+      ctx.addIssue({ code: 'custom', path: ['trackUrl'], message: 'ลิงก์ติดตามต้องขึ้นต้นด้วย https://' });
+    else if (url && !/\{no\}/i.test(url))
+      ctx.addIssue({ code: 'custom', path: ['trackUrl'], message: 'ลิงก์ติดตามต้องมี {no} ตรงตำแหน่งเลขพัสดุ' });
   });
