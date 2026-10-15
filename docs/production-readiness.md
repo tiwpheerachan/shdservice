@@ -173,7 +173,8 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   ✅ 2026-10-14: `SSO_ORIGIN` env (prod ต้อง https — env check) · fake SSO (`tests/e2e/support/fake-sso.ts`) · 5 spec: owner login→dashboard, unknown→/pending, role ไม่มี Customer view → เมนูซ่อน + API 403, เปิดงานได้เลข, open redirect · ทุก spec ล้มถ้ามี CSP violation · CI job `e2e` · `/track` ข้าม (production ปฏิเสธ Turnstile test key + SMS log)
 - [x] `noUncheckedIndexedAccess` ทีละโฟลเดอร์ (เริ่ม `src/db`, `src/server`) · M
   ✅ 2026-10-14: เปิดทั้งโปรเจกต์ แก้ 168 จุดตามความหมาย (throw ชัดเจนเมื่อ query ต้องได้แถว, `totalOf()`, รายการคงที่ type `[string, ...string[]]`) · ไม่มี @ts-ignore / as any · `!` 1 จุด (thai-baht, มี comment) · `npm run typecheck` ใน CI · masters update id ที่ไม่มี → 404
-- [ ] Prettier + `.git-blame-ignore-revs` · S
+- [x] Prettier + `.git-blame-ignore-revs` · S
+  ✅ 2026-10-14: config เดียวกับ OneLink (single quote, 120) · `npm run format` / `format:check` (ขั้นแรกใน CI) · eslint-config-prettier · ลบ comment ไร้ประโยชน์/แก้ comment ล้าสมัย ~15 จุดก่อนจัดรูปแบบ
 - [x] ADR (`adr/`) ย้ายการตัดสินใจจาก `backend-rebase-plan.md`: timestamp ไทยไม่มี TZ, soft delete `record_status`, single instance cache, track fail-closed · M
   ✅ 2026-10-14: `adr/` 0001–0006 (+ DB production safety, แบ่งงาน agent) · plan §0/§13/§31/§35 ลิงก์ไป ADR แทนข้อความเดิม · README ลิงก์
 - [x] Logout เป็น POST + cross-site check · S
