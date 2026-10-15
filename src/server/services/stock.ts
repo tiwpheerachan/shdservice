@@ -1,5 +1,6 @@
 import 'server-only';
-import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '@/db/client';
 import {
@@ -10,6 +11,7 @@ import {
   inventoryType,
   job,
   jobOrderSparePartLog,
+  jobStatus,
   manufacturer,
   model,
   product,
@@ -21,6 +23,7 @@ import {
 } from '@/db/schema';
 import type { Movement, Product } from '@/data/mock';
 import { HttpError, fullName } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
@@ -123,30 +126,66 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
   };
 }
 
-const productQuery = () =>
-  db
+const productQuery = (x: Tx | typeof db = db) =>
+  x
     .select(productSelect)
     .from(product)
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId));
 
+/** a name search looks in the Thai, English and Chinese names */
+const nameLike = (t: string) =>
+  or(
+    ilike(product.productName, `%${t}%`),
+    ilike(product.productNameEn, `%${t}%`),
+    ilike(product.productNameCn, `%${t}%`),
+  );
+/** free-text search of every product list / picker: system code, vendor part no or any of the names */
+const productSearch = (t: string) =>
+  or(ilike(product.productCode, `%${t}%`), ilike(product.productVenderCode, `%${t}%`), nameLike(t));
+
 export async function listProducts(opts: { deleted?: DeletedMode; q?: string } = {}): Promise<Product[]> {
   const { deleted = 'exclude', q = '' } = opts;
   const active = statusFilter(product.recordStatus, deleted);
   const term = q.trim();
-  const search = term
-    ? or(
-        ilike(product.productCode, `%${term}%`),
-        ilike(product.productName, `%${term}%`),
-        ilike(product.productVenderCode, `%${term}%`),
-      )
-    : undefined;
+  const search = term ? productSearch(term) : undefined;
   const rows = await productQuery().where(and(active, search)).orderBy(asc(product.productCode));
   return rows.map((r) => toProduct(r));
 }
 
-export async function getProduct(code: string): Promise<(Product & { models: string[] }) | null> {
+const modelsOf = async (x: Tx | typeof db, productId: number) =>
+  (await x.select({ code: productModel.modelCode }).from(productModel).where(eq(productModel.productId, productId)))
+    .map((m) => m.code ?? '')
+    .filter(Boolean);
+
+/**
+ * Optimistic lock of the product form (assertVersion). product has no row_version column (drizzle/0026)
+ * and the prices live in product_none_serial, whose counters every stock movement moves — so the version
+ * is a hash of exactly what the form edits: a receipt / issue never makes an open form stale, another
+ * save of the form always does, a save that changes nothing keeps it.
+ */
+function productVersion(r: ProductRow, models: string[]): number {
+  const edited = [
+    r.mfgCode,
+    r.name,
+    r.nameEn,
+    r.nameCn,
+    r.description,
+    r.categoryId,
+    r.manufacturerId,
+    r.active,
+    r.ubOnly,
+    r.forModelColor,
+    num(r.capital),
+    num(r.wholesale),
+    num(r.retail),
+    [...models].sort(),
+  ];
+  return createHash('sha1').update(JSON.stringify(edited)).digest().readUInt32BE(0);
+}
+
+export async function getProduct(code: string): Promise<(Product & { models: string[]; version: number }) | null> {
   const [r] = await productQuery().where(eq(product.productCode, code)).limit(1);
   if (!r) return null;
   const [creator] = r.createBy
@@ -159,13 +198,11 @@ export async function getProduct(code: string): Promise<(Product & { models: str
           .from(appUser)
           .where(eq(appUser.userId, r.cancelBy))
       : [];
-  const models = await db
-    .select({ code: productModel.modelCode })
-    .from(productModel)
-    .where(eq(productModel.productId, r.id!));
+  const models = await modelsOf(db, r.id!);
   return {
     ...toProduct(r, creator ? fullName(creator.f, creator.l) : '', canceller ? fullName(canceller.f, canceller.l) : ''),
-    models: models.map((m) => m.code ?? '').filter(Boolean),
+    models,
+    version: productVersion(r, models),
   };
 }
 
@@ -185,6 +222,8 @@ export type ProductInput = {
   ubRepairOnly?: boolean;
   forModelColor?: string;
   models?: string[];
+  /** `version` from getProduct as the edit form loaded it: another save since → 409; absent = no check */
+  version?: number | string;
 };
 
 export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
@@ -244,7 +283,9 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
     let productId: number;
     let code = i.sysCode;
     if (code) {
-      const [before] = await tx.select().from(product).where(eq(product.productCode, code));
+      const [before] = await tx.select().from(product).where(eq(product.productCode, code)).for('update');
+      const [loaded] = before ? await productQuery(tx).where(eq(product.productId, before.productId)) : [];
+      if (loaded) assertVersion(i.version, productVersion(loaded, await modelsOf(tx, before!.productId)));
       const [row] = await tx
         .update(product)
         .set(values)
@@ -580,6 +621,7 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
         onlyPending
           ? and(
               eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+              eq(jobOrderSparePartLog.isSpecial, true), // เสนอ-only lines (not ticked เบิก) are not for stock
               sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
             )
           : ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED),
@@ -625,6 +667,26 @@ export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
   return num(sum?.s);
 }
 
+/** job_status ids of a closed or cancelled job (jobs.ts JS — not imported: that module imports this one):
+ *  0 ยกเลิกข้อมูล · 6 ยกเลิกซ่อม · 7 / 8 / 20 / 21 / 23 / 24 ปิดงาน */
+export const JOB_CLOSED_STATUSES = [0, 6, 7, 8, 20, 21, 23, 24];
+
+/** No part goes out to a closed / cancelled job (returns from it stay allowed). In a transaction the
+ *  job row is share-locked first (job → request rows → stock, the order the repair save locks in). */
+export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = db) {
+  const [j] = await x
+    .select({ id: job.jobStatusId, name: jobStatus.jobStatusName })
+    .from(job)
+    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+    .where(eq(job.jobNo, jobNo))
+    .for('share', { of: job });
+  if (j?.id != null && JOB_CLOSED_STATUSES.includes(j.id))
+    throw new HttpError(
+      409,
+      `งาน ${jobNo} ปิดงานหรือยกเลิกแล้ว (${clean(j.name) || `สถานะ ${j.id}`}) — ตัดจ่ายอะไหล่ให้งานนี้ไม่ได้`,
+    );
+}
+
 /** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows. */
 export async function issueForJob(
   i: { jobNo: string; remark?: string; payTo?: string; lines: { logId: number; qty: number }[] },
@@ -634,6 +696,7 @@ export async function issueForJob(
   if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนจ่ายออก');
   return db
     .transaction(async (tx) => {
+      await assertJobOpenForIssue(i.jobNo, tx);
       const reqs = await tx
         .select()
         .from(jobOrderSparePartLog)
@@ -660,7 +723,7 @@ export async function issueForJob(
       const now = nowThai();
       for (const l of lines) {
         const r = byId.get(l.logId);
-        if (!r || r.orderStatusId !== PART.REQUESTED)
+        if (!r || r.orderStatusId !== PART.REQUESTED || !r.isSpecial)
           throw new HttpError(400, `รายการเบิก #${l.logId} ไม่อยู่ในสถานะรอเบิก`);
         const need = (r.requestQty ?? 0) - (r.grantQty ?? 0);
         if (l.qty > need) throw new HttpError(400, `จ่ายเกินจำนวนที่ขอ (${r.sparePartCode})`);
@@ -700,6 +763,7 @@ export async function issueForJob(
           and(
             eq(jobOrderSparePartLog.jobNo, i.jobNo),
             eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+            eq(jobOrderSparePartLog.isSpecial, true),
             sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
           ),
         );
@@ -709,14 +773,17 @@ export async function issueForJob(
 }
 
 /* ---- job lists for the pick page reference dropdown ---- */
-/** Jobs that still have parts waiting to be issued (any job status), newest request first. */
+/** Open jobs (not closed / cancelled) that still have parts waiting to be issued, newest request first. */
 export async function jobsWithPendingParts(limit = 300): Promise<string[]> {
   const rows = await db
     .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.requestDate})` })
     .from(jobOrderSparePartLog)
+    .leftJoin(job, eq(job.jobNo, jobOrderSparePartLog.jobNo))
     .where(
       and(
+        or(isNull(job.jobStatusId), notInArray(job.jobStatusId, JOB_CLOSED_STATUSES)),
         eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+        eq(jobOrderSparePartLog.isSpecial, true),
         sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
       ),
     )
@@ -1162,16 +1229,10 @@ function productWhere(q: string, f: ProductFilters) {
         : statusFilter(product.recordStatus, f.mode ?? 'exclude');
   return and(
     rs,
-    term
-      ? or(
-          ilike(product.productCode, `%${term}%`),
-          ilike(product.productName, `%${term}%`),
-          ilike(product.productVenderCode, `%${term}%`),
-        )
-      : undefined,
+    term ? productSearch(term) : undefined,
     f.sysCode ? ilike(product.productCode, `%${f.sysCode}%`) : undefined,
     f.mfgCode ? ilike(product.productVenderCode, `%${f.mfgCode}%`) : undefined,
-    f.name ? ilike(product.productName, `%${f.name}%`) : undefined,
+    f.name ? nameLike(f.name) : undefined,
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
     f.creator?.trim()
@@ -1260,10 +1321,10 @@ export async function productStats(q: string, f: ProductFilters) {
   return { total: Number(r.total), qty: num(r.qty), value: num(r.value), low: num(r.low), out: num(r.out) };
 }
 
-/** Lite rows for dropdowns / pickers — 5 fields instead of ~25 (1.2 MB → ~150 KB). */
+/** Lite rows for dropdowns / pickers — a few fields instead of ~25 (the EN / CN names: the pickers search them). */
 export type ProductLite = Pick<
   Product,
-  'sysCode' | 'mfgCode' | 'name' | 'onhand' | 'price' | 'status' | 'category' | 'brand'
+  'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'status' | 'category' | 'brand'
 >;
 export function listProductsLite(q = ''): Promise<ProductLite[]> {
   // every form with a part picker loads the whole catalog — memo it; productsChanged() drops it
@@ -1276,6 +1337,8 @@ async function loadProductsLite(term: string): Promise<ProductLite[]> {
       sysCode: product.productCode,
       mfgCode: product.productVenderCode,
       name: product.productName,
+      nameEn: product.productNameEn,
+      nameCn: product.productNameCn,
       onhand: productNoneSerial.quantityRemain,
       price: productNoneSerial.retailPrice,
       category: category.categoryName,
@@ -1285,23 +1348,14 @@ async function loadProductsLite(term: string): Promise<ProductLite[]> {
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
-    .where(
-      and(
-        eq(product.recordStatus, 'ACTIVE'),
-        term
-          ? or(
-              ilike(product.productCode, `%${term}%`),
-              ilike(product.productName, `%${term}%`),
-              ilike(product.productVenderCode, `%${term}%`),
-            )
-          : undefined,
-      ),
-    )
+    .where(and(eq(product.recordStatus, 'ACTIVE'), term ? productSearch(term) : undefined))
     .orderBy(asc(product.productCode));
   return rows.map((r) => ({
     sysCode: r.sysCode ?? '',
     mfgCode: r.mfgCode ?? '',
     name: r.name ?? '',
+    nameEn: r.nameEn ?? '',
+    nameCn: r.nameCn ?? '',
     onhand: r.onhand ?? 0,
     price: num(r.price),
     status: 'Active',

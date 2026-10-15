@@ -33,7 +33,7 @@ export default function PendingPage() {
       const r = await fetch('/api/sso/refresh', { cache: 'no-store' });
       const d = await r.json().catch(() => ({}));
       if (d?.approved && !preview) {
-        hardNavigate('/jobs/dashboard'); // approved → full reload so the new role's permissions load
+        hardNavigate('/'); // approved → full reload so the new role's permissions load
         return;
       }
       const n = new Date();

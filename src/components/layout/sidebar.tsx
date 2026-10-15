@@ -129,7 +129,7 @@ export function Sidebar({
             </div>
           ) : (
             <Link
-              href="/jobs/dashboard"
+              href="/"
               onClick={onCloseMobile}
               aria-label="OneService — หน้าแรก"
               className="flex min-w-0 flex-1 items-center rounded-lg px-1 py-1 text-sidebar-foreground transition-opacity hover:opacity-90"

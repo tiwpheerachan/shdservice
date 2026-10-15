@@ -1,4 +1,5 @@
 import { AutoPrint } from './auto-print';
+import { withPrefix } from '@/lib/validation/customer';
 import type { DocumentProfile } from '@/server/services/document-profiles';
 
 /**
@@ -26,10 +27,18 @@ export function ShippingLabel({
   district?: string;
   province?: string;
 }) {
-  // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line (a bare "ต. อ. จ." printed before)
-  const tao = [subDistrict && `ต.${subDistrict}`, district && `อ.${district}`, province && `จ.${province}`]
-    .filter(Boolean)
-    .join(' ');
+  // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line (a bare "ต. อ. จ." printed before).
+  // customer_address already ends with them + the postcode (composeAddress / legacy): then print it once
+  const tao =
+    province && address.includes(province)
+      ? ''
+      : [
+          subDistrict && withPrefix('ต.', subDistrict),
+          district && withPrefix('อ.', district),
+          province && withPrefix('จ.', province),
+        ]
+          .filter(Boolean)
+          .join(' ');
   return (
     <>
       <style>{`

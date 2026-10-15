@@ -88,7 +88,8 @@ function EditSaleOrder() {
     }
   };
 
-  const approved = (loaded?.approveId ?? 0) === 4;
+  // 4 อนุมัติแล้ว / 5 ปฏิเสธ are final — the server refuses any change, so no save or decision buttons
+  const closed = [4, 5].includes(loaded?.approveId ?? 0);
   const canApprove = isAdmin || can('Sale Order', 'edit');
 
   return (
@@ -107,7 +108,7 @@ function EditSaleOrder() {
         <FormActions
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
-          saving={saving || approved}
+          saving={saving || closed}
           cancelHref="/sale/orders"
           denied={can('Sale Order', 'edit') ? undefined : VIEW_ONLY}
           extra={
@@ -120,7 +121,7 @@ function EditSaleOrder() {
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
                 disabled={!no}
               />
-              {loaded && !approved && canApprove ? (
+              {loaded && !closed && canApprove ? (
                 <>
                   <Button variant="outline" size="md" type="button" onClick={() => decide('reject')} disabled={saving}>
                     ส่งกลับแก้ไข

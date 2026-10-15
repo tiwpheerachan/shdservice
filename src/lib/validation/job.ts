@@ -276,6 +276,10 @@ export const outsourceActionSchema = z
   });
 
 export const RECEIVE_BEFORE_SEND = 'วันที่รับต้องไม่ก่อนวันที่ส่ง';
+/** รับคืนจาก Out-Source ต้องมีวันที่รับ (saveOutsource; หน้า Out-Source เช็กก่อนกด) — ไม่มีวันที่ = 1900 ในรายงาน */
+export const RECEIVE_DATE_REQUIRED = 'ต้องระบุวันที่รับคืน';
+/** หน้า Out-Source เปลี่ยนสถานะได้แค่ ส่งซ่อม / รับคืนจาก Out-Source (สถานะเดิมของงานบันทึกซ้ำได้) */
+export const OUTSOURCE_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะ ส่งซ่อม Out-Source แล้ว / รับคืนจาก Out-Source แล้ว';
 /** ปิดงานไม่ได้ระหว่างที่เครื่องยังอยู่ที่ Out-Source (setStatus → Finished; หน้า ปิดงาน เตือนก่อนกด) */
 export const OUTSOURCE_NOT_BACK = 'งานนี้ส่งซ่อมภายนอกอยู่ — ต้องบันทึก "รับคืนจาก Out-Source แล้ว" ก่อนปิดงาน';
 
@@ -330,6 +334,14 @@ export function swapRefundSchema(
 
 /** job_status 8 — the parcel went out with a carrier and its number is recorded (7 = number still to come) */
 export const STATUS_CLOSED_TRACKED = 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)';
+/** job_status 7 — closeJob moves it to 8 once a parcel no. is saved */
+export const STATUS_CLOSED_WAIT_TRACKING = 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)';
+export const TRACKING_REQUIRED = 'สถานะ "ลงเลขที่พัสดุแล้ว" ต้องมีหมายเลขพัสดุ — บันทึกที่หน้า ปิดงาน-ส่งคืนสินค้า';
+
+/** ซ่อมเสร็จ while parts requested from stock (เบิก) are not issued yet (setStatus; the repair page shows it first) */
+export const partsNotIssuedMsg = (codes: string[]) =>
+  `ยังเปลี่ยนเป็น "ซ่อมเสร็จ" ไม่ได้ — อะไหล่ที่ขอเบิกยังไม่ได้จ่ายจากสต๊อก (${[...new Set(codes)].join(', ')}): ` +
+  'รอสต๊อกจ่ายอะไหล่ก่อน หรือลบรายการอะไหล่นั้น / เอาติ๊ก "เบิก" ออก';
 
 /** job_payment_detail = "ชำระ <date> · <note>" — a note loaded back from an earlier save drops its old date first */
 export const paymentDetailOf = (date?: string | null, note?: string | null) =>
@@ -343,22 +355,27 @@ export function returnDetailOf(courier?: string | null, note?: string | null) {
   return [c, c && (n === c || n.startsWith(`${c} · `)) ? n.slice(c.length + 3) : n].filter(Boolean).join(' · ');
 }
 
-/** ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close. `prev` = the receipt / parcel no stored now. */
+/**
+ * ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close. `prev` = the receipt / parcel no stored now.
+ * `payment` is left out when nobody entered one (an in-warranty job): nothing is written then.
+ */
 export function closeSchema(prev: { payNo?: string | null; tracking?: string | null } = {}) {
   return z
     .looseObject({
       status: req('โปรดระบุสถานะงาน'),
       repairDetail: maxNote(200, 'วิธีการซ่อม '),
-      payment: z.looseObject(
-        {
-          type: req('ต้องเลือกวิธีการชำระเงิน'),
-          amount: moneyField('จำนวนเงินที่ชำระ'),
-          date,
-          no: codeField(PAY_NO_RE, `เลขที่ใบเสร็จ ${PAY_NO_MSG}`, prev.payNo),
-          detail: z.string().nullish(),
-        },
-        { error: 'ต้องเลือกวิธีการชำระเงิน' },
-      ),
+      payment: z
+        .looseObject(
+          {
+            type: req('ต้องเลือกวิธีการชำระเงิน'),
+            amount: moneyField('จำนวนเงินที่ชำระ'),
+            date,
+            no: codeField(PAY_NO_RE, `เลขที่ใบเสร็จ ${PAY_NO_MSG}`, prev.payNo),
+            detail: z.string().nullish(),
+          },
+          { error: 'ต้องเลือกวิธีการชำระเงิน' },
+        )
+        .optional(),
       return: z.looseObject(
         {
           type: req('ต้องระบุวิธีการส่งคืนสินค้า'),
@@ -374,7 +391,7 @@ export function closeSchema(prev: { payNo?: string | null; tracking?: string | n
       if (v.status === STATUS_CLOSED_TRACKED && !isFilled(v.return.tracking))
         ctx.addIssue({ code: 'custom', path: ['return', 'tracking'], message: 'ต้องระบุหมายเลขพัสดุ' });
       // both go into a varchar(100) with what is put in front of them
-      if (paymentDetailOf(v.payment.date, v.payment.detail).length > 100)
+      if (v.payment && paymentDetailOf(v.payment.date, v.payment.detail).length > 100)
         ctx.addIssue({
           code: 'custom',
           path: ['payment', 'detail'],

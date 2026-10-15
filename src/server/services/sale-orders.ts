@@ -341,6 +341,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     if (no && prev) {
       assertVersion(i.version, prev.rowVersion);
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
+      if (prev.approveStatusId === AS.DENIED) throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว แก้ไขไม่ได้');
       const upd = {
         ...hdValues,
         approveStatusId: approveId,
@@ -432,7 +433,10 @@ export async function approveSaleOrder(
   await db.transaction(async (tx) => {
     const [hd] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
     if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    // 4 / 5 are final (approve_status.is_can_edit = f) — checked under the row lock, so two clicks can't both pass
     if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, 'อนุมัติไปแล้ว');
+    if (hd.approveStatusId === AS.DENIED)
+      throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว อนุมัติหรือเปลี่ยนสถานะไม่ได้');
     await tx
       .update(saleOutHd)
       .set({

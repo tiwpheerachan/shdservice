@@ -13,7 +13,7 @@ export default function LogoutPage() {
         <h1 className="mt-4 text-lg font-semibold">ออกจากระบบเรียบร้อย</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">เซสชันของคุณถูกปิดแล้ว ขอบคุณที่ใช้งานระบบ</p>
         <Link
-          href="/jobs/dashboard"
+          href="/"
           className="mt-6 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <ArrowLeft className="h-3.5 w-3.5" />

@@ -269,6 +269,12 @@ export async function userPrev(id: unknown): Promise<{ username: string | null; 
   return row ?? null;
 }
 
+/** An admin cannot lock themselves out: their own account is never disabled, deleted or given another role. */
+export function refuseSelf(userId: number, actorId: number) {
+  if (userId === actorId)
+    throw new HttpError(409, 'เปลี่ยนบทบาท ถอนสิทธิ์ หรือลบบัญชีของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน');
+}
+
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
 export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
   const email = clean(input.email).toLowerCase();
@@ -282,6 +288,8 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   const targetId = input.id ? Number(input.id) : NaN;
   const [before] = Number.isFinite(targetId) ? await db.select().from(appUser).where(eq(appUser.userId, targetId)) : [];
   if (Number.isFinite(targetId) && !before) throw new HttpError(404, 'user not found');
+  if (before && (rs !== RS.ACTIVE || userType !== (before.userType?.trim() || null)))
+    refuseSelf(before.userId, actorId);
 
   // the role must be one of the roles (or the one the user already has)
   if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
@@ -391,6 +399,7 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
 }
 
 export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
+  if (deleted) refuseSelf(userId, actorId);
   const [old] = await db.select({ rs: appUser.recordStatus }).from(appUser).where(eq(appUser.userId, userId));
   await db
     .update(appUser)

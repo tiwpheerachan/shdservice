@@ -11,7 +11,7 @@ export default function NotFound() {
         <h1 className="mt-4 text-lg font-semibold">ไม่พบหน้าที่ต้องการ</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">หน้าที่คุณเรียกดูอาจถูกย้ายหรือไม่มีอยู่ในระบบ</p>
         <Link
-          href="/jobs/dashboard"
+          href="/"
           className="mt-6 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           กลับหน้าหลัก

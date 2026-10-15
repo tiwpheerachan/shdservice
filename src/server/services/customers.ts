@@ -12,7 +12,7 @@ import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
-import { customerSchema, conflictErrors, normalizePhone, taxIdDigits } from '@/lib/validation/customer';
+import { customerSchema, conflictErrors, normalizePhone, taxIdDigits, withPrefix } from '@/lib/validation/customer';
 import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 
@@ -115,7 +115,7 @@ const SORT = {
  * "081 496 9925", so "0814969925" never matched an ilike (dogfood 2026-10-14). Same rule as
  * /track; backed by the trigram expression index in drizzle/0024.
  */
-const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\D', '', 'g')`;
+const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
 const phoneHas = (digits: string) => sql`${phoneDigits} LIKE ${'%' + digits + '%'}`;
 
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
@@ -218,18 +218,18 @@ async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
       .select({ n: mtSubDistrict.nameTh })
       .from(mtSubDistrict)
       .where(eq(mtSubDistrict.subDistrictId, i.subDistrictId));
-    if (sd) parts.push((i.cityId === 10 ? 'แขวง' : 'ต.') + sd.n);
+    if (sd) parts.push(withPrefix(i.cityId === 10 ? 'แขวง' : 'ต.', sd.n));
   }
   if (i.districtId && i.districtId > 0) {
     const [d] = await tx
       .select({ n: mtDistrict.nameTh })
       .from(mtDistrict)
       .where(eq(mtDistrict.districtId, i.districtId));
-    if (d) parts.push((i.cityId === 10 ? 'เขต' : 'อ.') + d.n);
+    if (d) parts.push(withPrefix(i.cityId === 10 ? 'เขต' : 'อ.', d.n));
   }
   if (i.cityId && i.cityId > 0) {
     const [c] = await tx.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, i.cityId));
-    if (c) parts.push((i.cityId === 10 ? '' : 'จ.') + c.n);
+    if (c) parts.push(withPrefix(i.cityId === 10 ? '' : 'จ.', c.n));
   }
   parts.push(str(i.postalCode));
   return parts.filter(Boolean).join(' ').slice(0, 200);
@@ -345,18 +345,9 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   const name = clean(i.name);
   const phone = clean(normalizePhone(i.phone));
   const taxId = taxIdDigits(i.taxId);
-  // แขวง / ตำบล picked → its postal code (a new / changed pair must match; legacy mismatches stay savable)
+  // the postal code is NOT checked against mt_sub_district.postal_code: the master is wrong for many
+  // ตำบล (every Mueang Chiang Mai one says 50000; real 50200 / 50300) — the form only hints at a difference
   const subDistrictId = i.subDistrictId ?? -1;
-  if (subDistrictId > 0 && (!prev || prev.subDistrictId !== subDistrictId || prev.postalCode !== clean(i.postalCode))) {
-    const [sd] = await db
-      .select({ postal: mtSubDistrict.postalCode })
-      .from(mtSubDistrict)
-      .where(eq(mtSubDistrict.subDistrictId, subDistrictId));
-    if (sd && sd.postal.trim() !== clean(i.postalCode)) {
-      const msg = `รหัสไปรษณีย์ของตำบลนี้คือ ${sd.postal.trim()}`;
-      throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { postalCode: msg } });
-    }
-  }
 
   // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
   // the fields that actually change are checked (legacy data already holds duplicates)

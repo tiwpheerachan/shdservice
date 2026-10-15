@@ -31,6 +31,22 @@ export const phoneFormatOk = (v: unknown) => {
 export const hasThaiMobile = (v: unknown) =>
   /(?:^|\D)(?:0|\+?66)[689]\d{8}(?:\D|$)/.test(normalizePhone(v).replace(/[\s\-().]/g, ''));
 
+/** each level's own prefixes — a ตำบล named "จ.ป.ร." is not a province prefix */
+const ADDRESS_PREFIXES = [
+  ['แขวง', 'ตำบล', 'ต.'],
+  ['เขต', 'อำเภอ', 'กิ่งอำเภอ', 'อ.'],
+  ['จังหวัด', 'จ.'],
+];
+/**
+ * "ต." + name, unless the master name already carries one of its level's prefixes
+ * (every Bangkok แขวง / เขต does) — "แขวงแขวงห้วยขวาง" was stored before.
+ */
+export function withPrefix(prefix: string, name: string): string {
+  const n = name.trim();
+  const own = ADDRESS_PREFIXES.find((f) => f.includes(prefix)) ?? [];
+  return !prefix || own.some((p) => n.startsWith(p)) ? n : prefix + n;
+}
+
 /** the stored values the form opened with — an UNCHANGED legacy value still passes ("never worse") */
 export type CustomerPrev = Partial<
   Record<'name' | 'phone' | 'taxId' | 'email' | 'line' | 'type' | 'priceGroup' | 'postalCode', string>

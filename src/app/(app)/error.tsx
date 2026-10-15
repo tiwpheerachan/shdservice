@@ -29,7 +29,7 @@ export default function AppError({ error, retry }: { error: Error & { digest?: s
             ลองใหม่
           </button>
           <Link
-            href="/jobs/dashboard"
+            href="/"
             className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-muted"
           >
             กลับหน้าหลัก

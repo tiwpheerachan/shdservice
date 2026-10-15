@@ -22,6 +22,8 @@ import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { userSchema } from '@/lib/validation/admin';
 import { isFilterActive } from '@/lib/utils';
 import { ExportButton } from '@/components/shared/export-button';
+import { useAccess } from '@/lib/use-access';
+import { ADMIN_USER_TYPE } from '@/lib/modules';
 
 type UserForm = {
   id: string;
@@ -41,7 +43,7 @@ const EMPTY: UserForm = {
   code: '',
   name: '',
   username: '',
-  role: ROLES[0],
+  role: '', // nothing pre-picked: the first role is System Admin
   branch: '',
   email: '',
   phone: '',
@@ -52,11 +54,25 @@ const EMPTY: UserForm = {
 export default function UsersPage() {
   const { push } = useToast();
   const confirm = useConfirm();
+  // your own row: no revoke / delete / role or status change (the API refuses them with a 409)
+  const { userId: myId } = useAccess();
+  const isMe = (r: { id: string }) => r.id === String(myId);
   const [view, setView] = React.useState<'active' | 'deleted'>('active');
   const { data: USERS, loading, refetch } = useUsers(view === 'deleted' ? 'only' : 'exclude');
   // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
   const { data: dbRoles } = useRoles();
-  const ROLE_OPTIONS = React.useMemo(() => (dbRoles.length ? [...dbRoles, 'รออนุมัติ'] : ROLES), [dbRoles]);
+  // System Admin last: the dropdown keyboard-highlights the first row, and Enter there granted full admin
+  const ROLE_OPTIONS = React.useMemo(
+    () =>
+      dbRoles.length
+        ? [
+            ...dbRoles.filter((x) => x !== ADMIN_USER_TYPE),
+            ...dbRoles.filter((x) => x === ADMIN_USER_TYPE),
+            'รออนุมัติ',
+          ]
+        : ROLES,
+    [dbRoles],
+  );
   const pendingCount = USERS.filter((u) => u.role === 'รออนุมัติ').length;
 
   // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
@@ -105,7 +121,7 @@ export default function UsersPage() {
     code: r.code ?? '',
     name: r.name ?? '',
     username: r.username ?? '',
-    role: r.role ?? ROLES[0],
+    role: r.role ?? '',
     branch: r.branch ?? '',
     email: r.email ?? '',
     phone: r.phone ?? '',
@@ -190,6 +206,19 @@ export default function UsersPage() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  // ถอนสิทธิ์ / คืนสิทธิ์ — one click used to act at once; ask first, naming the person
+  const setActive = async (r: User, active: boolean) => {
+    const ok = await confirm({
+      tone: active ? 'default' : 'danger',
+      title: active ? `คืนสิทธิ์ ${r.name}?` : `ถอนสิทธิ์ ${r.name}?`,
+      description: active
+        ? `${r.name} (${r.role}) จะกลับมาเข้าระบบได้ตามสิทธิ์ของบทบาทนี้`
+        : `${r.name} (${r.role}) จะเข้าระบบไม่ได้จนกว่าจะคืนสิทธิ์ — ข้อมูลและงานเก่ายังอยู่ครบ`,
+      confirmLabel: active ? 'คืนสิทธิ์' : 'ถอนสิทธิ์',
+    });
+    if (ok) await quickSet(r, { status: active ? 'Active' : 'Inactive' }, active ? 'คืนสิทธิ์แล้ว' : 'ถอนสิทธิ์แล้ว');
   };
 
   // Soft delete / restore via the generic records endpoint (401-resilient).
@@ -342,10 +371,12 @@ export default function UsersPage() {
               >
                 อนุมัติ
               </button>
+            ) : isMe(r) ? (
+              <span className="px-1 text-2xs text-muted-foreground">บัญชีของคุณ</span>
             ) : r.status === 'Active' ? (
               <button
                 disabled={busyId === r.id}
-                onClick={() => quickSet(r, { status: 'Inactive' }, 'ถอนสิทธิ์แล้ว')}
+                onClick={() => setActive(r, false)}
                 className="rounded-md border border-danger/30 px-2.5 py-1 text-2xs font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-50"
               >
                 ถอนสิทธิ์
@@ -353,13 +384,13 @@ export default function UsersPage() {
             ) : (
               <button
                 disabled={busyId === r.id}
-                onClick={() => quickSet(r, { status: 'Active' }, 'คืนสิทธิ์แล้ว')}
+                onClick={() => setActive(r, true)}
                 className="rounded-md border border-success/30 px-2.5 py-1 text-2xs font-medium text-success transition-colors hover:bg-success-soft disabled:opacity-50"
               >
                 คืนสิทธิ์
               </button>
             )}
-            <RowActions onEdit={() => openEdit(r)} onDelete={() => softSet(r, true)} />
+            <RowActions onEdit={() => openEdit(r)} onDelete={isMe(r) ? undefined : () => softSet(r, true)} />
           </div>
         ),
     },
@@ -565,9 +596,15 @@ export default function UsersPage() {
             label="ประเภทผู้ใช้งาน / สิทธิ์"
             required
             error={fe.errors.role}
-            hint="กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้"
+            hint={isMe(form) ? 'เปลี่ยนบทบาทของตัวเองไม่ได้' : 'กำหนดบทบาทเพื่อคุมสิทธิ์เมนูที่เข้าถึงได้'}
           >
-            <SearchSelect value={form.role} onChange={(v) => set('role', v)} options={strOptions(ROLE_OPTIONS)} />
+            <SearchSelect
+              placeholder="- - เลือกบทบาท - -"
+              value={form.role}
+              onChange={(v) => set('role', v)}
+              options={strOptions(ROLE_OPTIONS)}
+              disabled={isMe(form)}
+            />
           </Field>
           <Field label="สาขา / หน่วยงาน" error={fe.errors.branch}>
             <Input maxLength={100} value={form.branch} onChange={(e) => set('branch', e.target.value)} />
@@ -582,7 +619,7 @@ export default function UsersPage() {
             />
           </Field>
           <Field label="สถานะ">
-            <Select value={form.status} onChange={(e) => set('status', e.target.value)}>
+            <Select value={form.status} onChange={(e) => set('status', e.target.value)} disabled={isMe(form)}>
               <option>Active</option>
               <option>Inactive</option>
             </Select>

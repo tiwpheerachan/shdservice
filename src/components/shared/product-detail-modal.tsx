@@ -29,7 +29,8 @@ type Card = {
   ref: string;
   remark: string;
 };
-type Detail = Product & { models: string[] };
+/** `version`: what the save sends back — another save of this product since it loaded → 409 */
+type Detail = Product & { models: string[]; version?: number };
 
 type Form = {
   mfgCode: string;
@@ -134,6 +135,9 @@ export function ProductDetailModal({
   const session = `${open ? 1 : 0}|${mode}|${code}`;
   const [seenSession, setSeenSession] = React.useState('');
   const [filledFor, setFilledFor] = React.useState('');
+  // the version of the answer the form was filled from (a later re-read must not move it: the save
+  // would then claim to be based on values the form never showed)
+  const [version, setVersion] = React.useState<number>();
   if (open && seenSession !== session) {
     setSeenSession(session);
     fe.setErrors({});
@@ -145,6 +149,7 @@ export function ProductDetailModal({
   if (detailKey && loaded.data && !loaded.validating && filledFor !== session) {
     const d = loaded.data;
     setFilledFor(session);
+    setVersion(d.product.version);
     setImage(d.product.image ?? '');
     setForm({
       mfgCode: d.product.mfgCode,
@@ -176,7 +181,11 @@ export function ProductDetailModal({
       const d = await postJson<{ row: Product; sameMfgCode?: string[] }>('/api/products', {
         ...form,
         sysCode: code || undefined,
+        version: mode === 'add' ? undefined : version,
       });
+      // the dialog fills from this cached answer when it opens again: re-read it now, or the next edit of
+      // this product starts from the values before this save and writes them back
+      if (detailKey) await loaded.mutate();
       push({
         kind: 'success',
         title: mode === 'add' ? 'เพิ่มอะไหล่แล้ว' : 'บันทึกการแก้ไขอะไหล่แล้ว',

@@ -175,6 +175,8 @@ export function CustomerFields({
     clearError?.(k);
   };
   const { PROVINCES, districts, subDistricts } = useAddressLists(form.cityId, form.districtId);
+  // a hint only, never an error — the master's code is wrong for some ตำบล (Mueang Chiang Mai: all 50000)
+  const postalHint = subDistricts.find((s) => s.id === form.subDistrictId)?.postal?.trim();
   return (
     <FieldGrid cols={2}>
       <Field label="รหัสลูกค้า">
@@ -271,7 +273,15 @@ export function CustomerFields({
           searchPlaceholder="พิมพ์ชื่อแขวง / ตำบล หรือรหัสไปรษณีย์…"
         />
       </Field>
-      <Field label="รหัสไปรษณีย์" error={errors.postalCode}>
+      <Field
+        label="รหัสไปรษณีย์"
+        error={errors.postalCode}
+        hint={
+          postalHint && form.postalCode.trim() && postalHint !== form.postalCode.trim()
+            ? `ตำบลนี้ในระบบใช้ ${postalHint} — ถ้ารหัสที่กรอกถูกต้องแล้ว บันทึกได้เลย`
+            : undefined
+        }
+      >
         <Input
           inputMode="numeric"
           maxLength={5}

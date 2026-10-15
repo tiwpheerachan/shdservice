@@ -16,19 +16,21 @@ const FRESH_MS = 60_000;
 /**
  * Topbar bell: open jobs past their customer due date, each with who is responsible
  * (GET /api/alerts/overdue — an Engineer sees their own jobs, everyone else all of them).
- * A quiet background poll (every 5 min, only while the tab is visible): a failed / forbidden
- * answer just hides the badge.
+ * A quiet background poll (every 5 min, only while the tab is visible): a failed answer just
+ * hides the badge. A role that may not view jobs (the API's 403) gets no bell at all.
  */
 export function OverdueBell() {
+  const { can, jobLink } = useAccess();
+  const allowed = can('Job Management', 'view');
   // quiet background poll through swr: every 5 min, paused while the tab is hidden, once more
   // when a tab comes back after that long; a failed answer keeps the last one on screen
-  const { data, mutate, ageMs } = useApi<OverdueAlerts>('/api/alerts/overdue', {
+  const { data, error, mutate, ageMs } = useApi<OverdueAlerts>(allowed ? '/api/alerts/overdue' : null, {
     quiet: true,
     refreshInterval: POLL_MS,
     revalidateOnFocus: true,
   });
   const [open, setOpen] = React.useState(false);
-  const { jobLink } = useAccess();
+  if (!allowed) return null;
 
   const total = data?.total ?? 0;
   const mine = data?.scope === 'mine';
@@ -77,7 +79,9 @@ export function OverdueBell() {
         </div>
 
         {!data ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">กำลังโหลด…</p>
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {error ? 'โหลดการแจ้งเตือนไม่สำเร็จ ลองเปิดใหม่อีกครั้ง' : 'กำลังโหลด…'}
+          </p>
         ) : total === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">ไม่มีงานเกินกำหนดส่ง</p>
         ) : (

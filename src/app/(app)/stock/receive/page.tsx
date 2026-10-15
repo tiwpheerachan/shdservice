@@ -25,6 +25,8 @@ type Row = {
   sysCode: string;
   mfgCode: string;
   name: string;
+  /** TH + EN + CN names — what the name filter searches */
+  names: string;
   brand: string;
   category: string;
   status: string;
@@ -38,6 +40,7 @@ function toRows(products: Product[]): Row[] {
     sysCode: p.sysCode,
     mfgCode: p.mfgCode ?? '',
     name: p.name,
+    names: [p.name, p.nameEn, p.nameCn].filter(Boolean).join(' '),
     brand: p.brand ?? '',
     category: p.category ?? '',
     status: p.status,
@@ -74,7 +77,7 @@ export default function ReceivePage() {
         (r) =>
           has(r.sysCode, filter.code) &&
           has(r.mfgCode, filter.mfgCode) &&
-          has(r.name, filter.name) &&
+          has(r.names, filter.name) &&
           (!filter.brand || r.brand === filter.brand) &&
           (!filter.category || r.category === filter.category),
       ),

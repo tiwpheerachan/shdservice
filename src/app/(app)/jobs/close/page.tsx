@@ -31,7 +31,16 @@ import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { closeSchema, jobAmountDue, OUTSOURCE_NOT_BACK, STATUS_CLOSED_TRACKED } from '@/lib/validation/job';
+import {
+  closeSchema,
+  jobAmountDue,
+  OUTSOURCE_NOT_BACK,
+  STATUS_CLOSED_TRACKED,
+  STATUS_CLOSED_WAIT_TRACKING,
+} from '@/lib/validation/job';
+
+/** the date saved inside job_payment_detail ("ชำระ <date> · …") */
+const payDateOf = (detail: string) => /^ชำระ (\d{4}-\d{2}-\d{2})/.exec(detail)?.[1] ?? '';
 
 function CloseForm() {
   const { push } = useToast();
@@ -49,7 +58,7 @@ function CloseForm() {
   const [tab, setTab] = React.useState('product');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
-    payType: JOB_PAYMENT_METHODS[0],
+    payType: '',
     payAmount: '',
     payDate: '',
     payNo: '',
@@ -115,10 +124,11 @@ function CloseForm() {
     setSlip(job.payment.slip);
     const today = thaiToday(); // Thai calendar, not UTC
     const next = {
-      payType: job.payment.type || JOB_PAYMENT_METHODS[0],
+      // no default method / date: a payment is written only when someone enters one (in-warranty = none)
+      payType: job.payment.type,
       // the deposit was paid at reception — default to what is left (job.amountDue), not the whole total
       payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.amountDue > 0 ? String(job.amountDue) : '',
-      payDate: today,
+      payDate: payDateOf(job.payment.detail), // kept as it is on a re-save
       payNo: job.payment.no,
       payDetail: job.payment.detail,
       returnType: job.return.type,
@@ -140,8 +150,19 @@ function CloseForm() {
   // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    // the payment goes only when it differs from the one stored: untouched = kept as it is (a legacy
+    // amount without a method too); the amount due filled in above = asked for its method
+    const p = job.payment;
+    const paid =
+      d.payType !== p.type ||
+      Number(d.payAmount || 0) !== p.amount ||
+      d.payNo !== p.no ||
+      d.payDetail !== p.detail ||
+      d.payDate !== payDateOf(p.detail);
     const body = {
-      payment: { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail },
+      payment: paid
+        ? { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail }
+        : undefined,
       return: {
         type: d.returnType,
         date: d.returnDate,
@@ -154,7 +175,10 @@ function CloseForm() {
     };
     const canEdit = can('Job Management', 'edit');
     // the receipt / parcel no as loaded: an unchanged legacy value still passes
-    if (!act.check(closeSchema({ payNo: saved?.payNo, tracking: saved?.tracking }), body, canEdit)) return;
+    if (!act.check(closeSchema({ payNo: saved?.payNo, tracking: saved?.tracking }), body, canEdit)) {
+      if (paid && !d.payType) setTab('payment'); // the method is asked on the payment tab
+      return;
+    }
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -296,7 +320,11 @@ function CloseForm() {
               </div>
               <FieldGrid cols={2}>
                 <Field label="วิธีการชำระเงิน" required error={act.errors['payment.type']}>
-                  <Select value={d.payType} onChange={(e) => upd({ payType: e.target.value })}>
+                  <Select
+                    value={d.payType}
+                    onChange={(e) => upd({ payType: e.target.value, payDate: d.payDate || thaiToday() })}
+                  >
+                    <option value="">- - เลือก - -</option>
                     {JOB_PAYMENT_METHODS.map((p) => (
                       <option key={p}>{p}</option>
                     ))}
@@ -439,6 +467,11 @@ function CloseForm() {
               required
               wide
               error={act.errors.status ?? (outsourceOut ? OUTSOURCE_NOT_BACK : undefined)}
+              hint={
+                d.status === STATUS_CLOSED_WAIT_TRACKING && d.tracking.trim()
+                  ? `มีหมายเลขพัสดุแล้ว — บันทึกเป็น "${STATUS_CLOSED_TRACKED}"`
+                  : undefined
+              }
             >
               <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
                 <option value="">- - Please Select - -</option>

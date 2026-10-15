@@ -75,6 +75,10 @@ import {
   returnDetailOf,
   RECEIVE_BEFORE_SEND,
   OUTSOURCE_NOT_BACK,
+  OUTSOURCE_STATUS_ONLY,
+  RECEIVE_DATE_REQUIRED,
+  TRACKING_REQUIRED,
+  partsNotIssuedMsg,
   type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
@@ -200,6 +204,30 @@ async function stampRepairedIfMissing(tx: Tx, jobNo: string, at: string, byUserI
 /** Change status + log (no-op when unchanged). Returns true if changed. */
 async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: number, current?: number | null) {
   if (current === statusId) return false;
+  // 8 = "ลงเลขที่พัสดุแล้ว": every path into it (close, repair, swap, edit) needs the parcel no. stored
+  if (statusId === JS.CLOSED_TRACKED) {
+    const [r] = await tx.select({ t: job.returnCustomerTrackingNo }).from(job).where(eq(job.jobNo, jobNo));
+    if (!r?.t?.trim()) throw new HttpError(400, TRACKING_REQUIRED, { fields: { status: TRACKING_REQUIRED } });
+  }
+  // repaired while a part requested from stock (เบิก) is still not issued: the charge would reach the close
+  // with no part in the job. Only on a change INTO it — a job already repaired re-saves as before.
+  if (statusId === JS.REPAIRED || statusId === JS.REPAIRED_PAID) {
+    const waiting = await tx
+      .select({ code: jobOrderSparePartLog.sparePartCode })
+      .from(jobOrderSparePartLog)
+      .where(
+        and(
+          eq(jobOrderSparePartLog.jobNo, jobNo),
+          eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+          eq(jobOrderSparePartLog.isSpecial, true),
+          sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
+        ),
+      );
+    if (waiting.length) {
+      const msg = partsNotIssuedMsg(waiting.map((w) => w.code ?? ''));
+      throw new HttpError(400, msg, { fields: { status: msg } });
+    }
+  }
   const extra: Partial<typeof job.$inferInsert> = {};
   const group = await statusGroup(statusId);
   if (group === REPAIRED_GROUP) {
@@ -214,11 +242,14 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
       ? await tx.select({ id: jobSendForwardDt.id }).from(jobSendForwardDt).where(outsourceOpen(jobNo)).limit(1)
       : [];
     if (out) throw new HttpError(400, OUTSOURCE_NOT_BACK, { fields: { status: OUTSOURCE_NOT_BACK } });
-    extra.jobClosedDate = nowThai();
-    extra.jobClosedBy = byUserId;
-    // safety net: closed without ever being repaired-stamped (e.g. out-source received → closed) — the
-    // close is the repair date, so the job still shows up in the repair reports
-    await stampRepairedIfMissing(tx, jobNo, extra.jobClosedDate, byUserId);
+    // closed → closed (7 → 8 when the parcel no. comes later) keeps the original close date / closer
+    if (closing) {
+      extra.jobClosedDate = nowThai();
+      extra.jobClosedBy = byUserId;
+      // safety net: closed without ever being repaired-stamped (e.g. out-source received → closed) — the
+      // close is the repair date, so the job still shows up in the repair reports
+      await stampRepairedIfMissing(tx, jobNo, extra.jobClosedDate, byUserId);
+    }
   }
   await tx
     .update(job)
@@ -436,6 +467,8 @@ export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
+  // a phone typed as digits ("0814969925") also finds "081-4969925" — same match as f.phone below
+  const termDigits = /^[\d\s()+-]+$/.test(term) ? term.replace(/\D/g, '') : '';
   const from = ymd(f.from),
     to = ymd(f.to),
     closedFrom = ymd(f.closedFrom),
@@ -451,6 +484,9 @@ export function jobWhere(q: string, f: JobFilters) {
           ilike(job.productImeiNo, `%${term}%`),
           ilike(job.productSerial, `%${term}%`),
           ilike(job.productModelName, `%${term}%`),
+          termDigits.length >= 4
+            ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + termDigits + '%'}`
+            : undefined,
         )
       : undefined,
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
@@ -500,7 +536,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
     f.phone && f.phone.replace(/\D/g, '')
-      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\D', '', 'g') LIKE ${'%' + f.phone.replace(/\D/g, '') + '%'}`
+      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + f.phone.replace(/\D/g, '') + '%'}`
       : undefined,
     f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
     f.imei
@@ -1569,11 +1605,11 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
   return (await getJob(jobNo))!;
 }
 
-/** Called by stock after issuing all pending requests of a job. */
+/** Called by stock after issuing all pending requests of a job: เริ่มเบิก / รออะไหล่ → เบิกจ่ายอะไหล่ครบแล้ว. */
 export async function markPartsIssued(jobNo: string, byUserId: number) {
   await db.transaction(async (tx) => {
     const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
-    if (!cur || cur.status !== JS.PARTS_REQUESTED) return;
+    if (!cur || (cur.status !== JS.PARTS_REQUESTED && cur.status !== JS.WAIT_PARTS)) return;
     // recount under the job lock: a repair saved since the issue may have requested more parts
     const [waiting] = await tx
       .select({ n: sql<number>`count(*)::int` })
@@ -1614,6 +1650,12 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
         .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
+  // only the out-source statuses here — the job's own status re-saves unchanged ("never worse")
+  const outsourceStatuses: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED, cur.status ?? -1];
+  if (newStatus !== undefined && !outsourceStatuses.includes(newStatus))
+    throw new HttpError(400, OUTSOURCE_STATUS_ONLY, { fields: { status: OUTSOURCE_STATUS_ONLY } });
+  if (i.receive && !i.receive.date)
+    throw new HttpError(400, RECEIVE_DATE_REQUIRED, { fields: { 'receive.date': RECEIVE_DATE_REQUIRED } });
   const [openRow] = await db
     .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
     .from(jobSendForwardDt)
@@ -1666,7 +1708,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
 
     let target = newStatus;
 
-    if (i.receive && (i.receive.date || i.receive.detail) && open[0]) {
+    if (i.receive && open[0]) {
       await tx
         .update(jobSendForwardDt)
         .set({
@@ -1681,7 +1723,20 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
       target ??= JS.OUTSOURCE_RECEIVED;
     } else if (i.send?.to) {
-      if (open[0]) {
+      // the page sends the send block again after the receive: the same vendor + send date as the last
+      // row (already back) is that row saved again, not a new trip — no second row, no going back to 14
+      const [last] = open[0]
+        ? []
+        : await tx
+            .select()
+            .from(jobSendForwardDt)
+            .where(eq(jobSendForwardDt.jobNo, jobNo))
+            .orderBy(desc(jobSendForwardDt.id))
+            .limit(1);
+      const again =
+        !!last && clean(last.sendToName) === clean(i.send.to) && fmtDate(last.sendDate) === str(i.send.date);
+      const row = open[0] ?? (again ? last : undefined);
+      if (row) {
         await tx
           .update(jobSendForwardDt)
           .set({
@@ -1690,7 +1745,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
             sendDate: dateOrSentinel(i.send.date ?? nowThai()),
             sendBy,
           })
-          .where(eq(jobSendForwardDt.id, open[0].id));
+          .where(eq(jobSendForwardDt.id, row.id));
       } else {
         await tx.insert(jobSendForwardDt).values({
           jobNo,
@@ -1704,7 +1759,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           sendStatus: 'ส่งเครื่องซ่อมแล้ว',
         });
       }
-      target ??= JS.OUTSOURCE_SENT;
+      if (!again) target ??= JS.OUTSOURCE_SENT;
     }
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
@@ -1870,7 +1925,9 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     .where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   assertValid(closeSchema({ payNo: cur.payNo, tracking: cur.tracking }), i);
-  const newStatus = await statusIdByName(i.status);
+  let newStatus = await statusIdByName(i.status);
+  // "รอลงเลขที่พัสดุ" + a parcel no. typed now = it is in: the guide's path (close as 7, add the no. later)
+  if (newStatus === JS.CLOSED_WAIT_TRACKING && cleanTracking(i.return?.tracking)) newStatus = JS.CLOSED_TRACKED;
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
     const pay = i.payment ?? {};

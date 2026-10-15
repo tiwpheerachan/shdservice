@@ -58,7 +58,7 @@ export default function PickPage() {
   const { push } = useToast();
   const fe = useFormErrors(); // same as every form: the error under its field, focus, one summary toast
   const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
-  // งานที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (ไม่ผูกกับสถานะงาน)
+  // งานที่ยังไม่ปิด/ไม่ยกเลิกที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (รับคืนได้ทุกสถานะงาน)
   const { data: PENDING_JOB_NOS } = useJobNos(300, 'pending_parts');
   const { data: RETURNABLE_JOB_NOS } = useJobNos(300, 'returnable');
   const { data: SALE_ORDERS } = useSaleOrders({ approve: 'อนุมัติแล้ว', limit: 100 });

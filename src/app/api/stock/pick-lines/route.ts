@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, HttpError, requireView } from '@/server/auth';
-import { listPartRequests, listSaleOrderPickLines, listReturnableLines } from '@/server/services/stock';
+import {
+  assertJobOpenForIssue,
+  listPartRequests,
+  listSaleOrderPickLines,
+  listReturnableLines,
+} from '@/server/services/stock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,7 +17,10 @@ export const GET = handle(async (req: NextRequest) => {
   const type = sp.get('type');
   const ref = (sp.get('ref') ?? '').trim();
   if (!ref) throw new HttpError(400, 'ref required');
-  if (type === 'job') return NextResponse.json({ rows: await listPartRequests(ref, true) });
+  if (type === 'job') {
+    await assertJobOpenForIssue(ref); // a closed / cancelled job has nothing left to issue
+    return NextResponse.json({ rows: await listPartRequests(ref, true) });
+  }
   if (type === 'sale') return NextResponse.json({ rows: await listSaleOrderPickLines(ref) });
   if (type === 'return') return NextResponse.json({ rows: await listReturnableLines(ref) });
   throw new HttpError(400, 'type must be job, sale or return');

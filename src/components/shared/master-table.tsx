@@ -132,6 +132,15 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     const r = rows.find((x) => x.id === id);
     if (!r) return;
     const next = r.status === 'Active' ? 'Inactive' : 'Active';
+    const ok = await confirm({
+      title: `เปลี่ยนสถานะ "${r.name}" เป็น ${next}?`,
+      description:
+        next === 'Inactive'
+          ? 'รายการนี้จะไม่แสดงเป็นตัวเลือกในทุกฟอร์ม ข้อมูลเก่าที่เคยใช้ค่านี้ยังแสดงชื่อได้ตามเดิม'
+          : 'รายการนี้จะกลับมาเป็นตัวเลือกในทุกฟอร์ม',
+      confirmLabel: next === 'Inactive' ? 'ปิดใช้งาน' : 'เปิดใช้งาน',
+    });
+    if (!ok) return;
     try {
       await postJson('/api/admin/records', {
         table: config.kind,

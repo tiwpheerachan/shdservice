@@ -10,7 +10,10 @@ import { baht, cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
 
 /** The fields the picker needs — `useProducts()` (lite rows) already carries them. */
-export type PickableProduct = Pick<Product, 'sysCode' | 'mfgCode' | 'name' | 'onhand' | 'price' | 'brand' | 'category'>;
+export type PickableProduct = Pick<
+  Product,
+  'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'brand' | 'category'
+>;
 
 /** Non-stock lines a form may offer (e.g. SVD0001 ค่าขนส่ง) — pinned above the search results. */
 export type ExtraItem = { code: string; name: string; price?: number };
@@ -21,7 +24,7 @@ export type PickedItem<T extends PickableProduct> = { code: string; name: string
 const MAX_ROWS = 60;
 
 /**
- * Word search over code / vendor part no / name / brand / category: every typed
+ * Word search over code / vendor part no / name (TH/EN/CN) / brand / category: every typed
  * word must appear somewhere (any order), exact code or part-no matches first,
  * then code prefix, then name prefix, then the rest in code order.
  */
@@ -34,7 +37,7 @@ export function matchProducts<T extends PickableProduct>(products: T[], q: strin
     const code = p.sysCode.toLowerCase();
     const mfg = (p.mfgCode ?? '').toLowerCase();
     const name = p.name.toLowerCase();
-    const hay = `${code} ${mfg} ${name} ${(p.brand ?? '').toLowerCase()} ${(p.category ?? '').toLowerCase()}`;
+    const hay = `${code} ${mfg} ${name} ${(p.nameEn ?? '').toLowerCase()} ${(p.nameCn ?? '').toLowerCase()} ${(p.brand ?? '').toLowerCase()} ${(p.category ?? '').toLowerCase()}`;
     if (!words.every((w) => hay.includes(w))) continue;
     const s =
       code === full || mfg === full

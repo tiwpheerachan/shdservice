@@ -35,7 +35,10 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg } from '@/lib/api';
-import { repairActionSchema } from '@/lib/validation/job';
+import { partsNotIssuedMsg, repairActionSchema } from '@/lib/validation/job';
+
+/** ซ่อมเสร็จ / ซ่อมเสร็จ (ชำระเงินแล้ว) — refused while a part requested from stock is not issued (setStatus) */
+const REPAIRED = ['ซ่อมเสร็จ', 'ซ่อมเสร็จ (ชำระเงินแล้ว)'];
 
 type Line = {
   id: number;
@@ -51,6 +54,7 @@ type Line = {
   bQty: number;
   status: string;
   locked?: boolean; // already issued / returned — read-only
+  waiting?: boolean; // requested from stock (เบิก) and not all issued yet
 };
 
 function RepairForm() {
@@ -107,6 +111,7 @@ function RepairForm() {
         bQty: p.requestQtyB,
         status: p.status,
         locked: p.statusId !== 1 || p.granted > 0,
+        waiting: p.statusId === 1 && p.isSpecial && p.requested > p.granted,
       })),
     };
     setDetail(next.detail);
@@ -136,6 +141,7 @@ function RepairForm() {
     };
     const canEdit = can('Job Management', 'edit');
     if (!act.check(repairActionSchema, body, canEdit)) return;
+    if (partsBlock) return push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: partsBlock });
     setSaving(true);
     try {
       // product / other-info sections shown on this screen are saved too
@@ -178,6 +184,12 @@ function RepairForm() {
   const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
   const totalA = lines.reduce((s, l) => s + (l.aQuote ? l.price * l.aQty : 0), 0);
   const totalB = lines.reduce((s, l) => s + (l.bQuote ? l.price * l.bQty : 0), 0);
+  // the server refuses the change to ซ่อมเสร็จ while these are not issued — say so before saving
+  const notIssued = lines.filter((l) => (l.locked ? l.waiting : l.aPick && l.aQty > 0)).map((l) => l.code);
+  const partsBlock =
+    REPAIRED.includes(detail.status) && detail.status !== job?.status && notIssued.length
+      ? partsNotIssuedMsg(notIssued)
+      : undefined;
 
   return (
     <>
@@ -481,7 +493,7 @@ function RepairForm() {
                 }}
               />
             </Field>
-            <Field label="สถานะงานซ่อม" required error={act.errors.status}>
+            <Field label="สถานะงานซ่อม" required error={act.errors.status ?? partsBlock}>
               <SearchSelect
                 value={detail.status}
                 onChange={(v) => {

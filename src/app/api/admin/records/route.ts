@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { handle, requireAdmin, requireCan, readJson, HttpError } from '@/server/auth';
 import { setRecordStatus, RECORD_MODULES, type RecordTable } from '@/server/services/records';
 import { isRecordStatus, RS, type RecordStatus } from '@/server/record-status';
+import { refuseSelf } from '@/server/services/users';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,6 +24,7 @@ export const POST = handle(async (req: NextRequest) => {
 
   if (table === 'users') {
     const me = await requireAdmin(req);
+    if (rs !== RS.ACTIVE) refuseSelf(Number(id), me.userId); // never disable / delete your own account
     await setRecordStatus('users', Number(id), rs, me.userId);
     return NextResponse.json({ ok: true, status: rs });
   }

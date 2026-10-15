@@ -33,10 +33,17 @@ import { useJob, type JobDetail } from '@/lib/use-job';
 import { useAccess } from '@/lib/use-access';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { outsourceActionSchema } from '@/lib/validation/job';
+import { outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/job';
 
 // ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
 const OTHER = 'อื่นๆ (ระบุ)';
+/** the statuses this page sets (saveOutsource refuses others; the job's own status is kept as an option) */
+const OUTSOURCE_STATUSES = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source'));
+/** receiving back needs its date (saveOutsource says the same) */
+const receiveSchema = outsourceActionSchema.refine((v) => !!v.receive?.date, {
+  path: ['receive', 'date'],
+  message: RECEIVE_DATE_REQUIRED,
+});
 
 function OutsourceForm() {
   const { push } = useToast();
@@ -140,7 +147,7 @@ function OutsourceForm() {
       status: d.status || undefined,
     };
     const canEdit = can('Job Management', 'edit');
-    if (!act.check(outsourceActionSchema, body, canEdit)) return;
+    if (!act.check(receiving ? receiveSchema : outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -304,7 +311,7 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
               />
             </Field>
-            <Field label="วันที่รับ" error={act.errors['receive.date']}>
+            <Field label="วันที่รับ" required={!!open} error={act.errors['receive.date']}>
               <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
             </Field>
             <Field label="รับโดย" error={act.errors['receive.by']}>
@@ -327,7 +334,11 @@ function OutsourceForm() {
               <SearchSelect
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
-                options={strOptions(JOB_STATUS_OPTIONS)}
+                options={strOptions(
+                  job && !OUTSOURCE_STATUSES.includes(job.status) && JOB_STATUS_OPTIONS.includes(job.status)
+                    ? [job.status, ...OUTSOURCE_STATUSES]
+                    : OUTSOURCE_STATUSES,
+                )}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />
             </Field>
