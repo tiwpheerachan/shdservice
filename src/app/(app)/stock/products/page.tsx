@@ -130,6 +130,8 @@ export default function ProductsPage() {
   // cards follow the applied filters; say so once anything beyond the default (Active only) narrows the list
   const narrowed = !!table.q.trim() || isFilterActive(filters, { ...NO_FILTER, status: 'Active' });
   const query = React.useMemo(() => ({ q: table.q, ...filters }), [table.q, filters]);
+  const searched = [table.q, filters.name].map((t) => t.trim().toLowerCase().split(/\s+/).filter(Boolean));
+  const nameHit = (n: string) => searched.some((ws) => ws.length > 0 && ws.every((w) => n.toLowerCase().includes(w)));
   const {
     rows: PRODUCTS,
     total: totalRows,
@@ -204,7 +206,16 @@ export default function ProductsPage() {
     {
       key: 'name',
       header: 'ชื่ออะไหล่',
-      cell: (r) => <span className="line-clamp-2 max-w-[420px] font-medium">{r.name}</span>,
+      cell: (r) => {
+        // found by its English / Chinese name → show that name under the Thai one
+        const alt = [r.nameEn, r.nameCn].find((n) => n && nameHit(n) && !nameHit(r.name));
+        return (
+          <>
+            <span className="line-clamp-2 max-w-[420px] font-medium">{r.name}</span>
+            {alt && <span className="line-clamp-1 max-w-[420px] text-xs text-muted-foreground">{alt}</span>}
+          </>
+        );
+      },
     },
     { key: 'category', header: 'หมวดหมู่', hideBelow: 'xl' },
     {

@@ -32,6 +32,7 @@ import {
   jobType,
   manufacturer,
   model,
+  product,
   productType,
   shippingProfile,
   symptom,
@@ -81,6 +82,7 @@ import {
   RECEIVE_DATE_REQUIRED,
   TRACKING_REQUIRED,
   partsNotIssuedMsg,
+  REOPEN_ADMIN_ONLY,
   type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
@@ -206,6 +208,11 @@ async function stampRepairedIfMissing(tx: Tx, jobNo: string, at: string, byUserI
 /** Change status + log (no-op when unchanged). Returns true if changed. */
 async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: number, current?: number | null) {
   if (current === statusId) return false;
+  const group = await statusGroup(statusId);
+  const fromGroup = current == null ? '' : await statusGroup(current);
+  // a closed job back to an open status (a re-save picking the first status in the list did that by accident)
+  if (fromGroup === FINISHED_GROUP && group !== FINISHED_GROUP && !(await isSystemAdmin(byUserId)))
+    throw new HttpError(409, REOPEN_ADMIN_ONLY, { fields: { status: REOPEN_ADMIN_ONLY } });
   // 8 = "ลงเลขที่พัสดุแล้ว": every path into it (close, repair, swap, edit) needs the parcel no. stored
   if (statusId === JS.CLOSED_TRACKED) {
     const [r] = await tx.select({ t: job.returnCustomerTrackingNo }).from(job).where(eq(job.jobNo, jobNo));
@@ -215,8 +222,9 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
   // with no part in the job. Only on a change INTO it — a job already repaired re-saves as before.
   if (statusId === JS.REPAIRED || statusId === JS.REPAIRED_PAID) {
     const waiting = await tx
-      .select({ code: jobOrderSparePartLog.sparePartCode })
+      .select({ code: jobOrderSparePartLog.sparePartCode, name: product.productName })
       .from(jobOrderSparePartLog)
+      .leftJoin(product, eq(product.productCode, jobOrderSparePartLog.sparePartCode))
       .where(
         and(
           eq(jobOrderSparePartLog.jobNo, jobNo),
@@ -226,12 +234,11 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
         ),
       );
     if (waiting.length) {
-      const msg = partsNotIssuedMsg(waiting.map((w) => w.code ?? ''));
+      const msg = partsNotIssuedMsg(waiting.map((w) => ({ code: w.code ?? '', name: w.name ?? '' })));
       throw new HttpError(400, msg, { fields: { status: msg } });
     }
   }
   const extra: Partial<typeof job.$inferInsert> = {};
-  const group = await statusGroup(statusId);
   if (group === REPAIRED_GROUP) {
     extra.jobRepairedDate = nowThai();
     extra.jobRepairedBy = byUserId;
@@ -239,7 +246,7 @@ async function setStatus(tx: Tx, jobNo: string, statusId: number, byUserId: numb
   if (group === FINISHED_GROUP) {
     // a job sent out-source must come back before it is closed (owner, Dogfood round 2). Only on the way
     // INTO Finished: an already-closed legacy job (7 → 8, adding the tracking no.) is not blocked.
-    const closing = current == null || (await statusGroup(current)) !== FINISHED_GROUP;
+    const closing = fromGroup !== FINISHED_GROUP;
     const [out] = closing
       ? await tx.select({ id: jobSendForwardDt.id }).from(jobSendForwardDt).where(outsourceOpen(jobNo)).limit(1)
       : [];
@@ -314,13 +321,17 @@ const listSelect = {
   quotationNo: job.quotationNoApproved,
   serviceCost: job.serviceCost,
   partsCost: job.sparePartTotalCost,
+  deposit: job.depositCost,
 };
 
 /** a select field's value: a column's data type, or an sql<T> expression's T */
 type FieldData<F> = F extends SQL<infer T> ? T : F extends { _: { data: infer D } } ? D : never;
 type ListRow = { [K in keyof typeof listSelect]: FieldData<(typeof listSelect)[K]> | null };
 
-function toJob(r: ListRow): Job {
+/** a job-list row + มัดจำ / ค้างชำระ (the Excel export) */
+export type JobListRow = Job & { deposit: number; outstanding: number };
+
+function toJob(r: ListRow): JobListRow {
   return {
     no: r.no ?? '',
     openDate: fmtDateTime(r.openDate),
@@ -360,6 +371,8 @@ function toJob(r: ListRow): Job {
     serviceCost: num(r.serviceCost),
     partsCost: num(r.partsCost),
     modelDetail: r.modelDetail ?? '',
+    deposit: num(r.deposit),
+    outstanding: jobBalance(num(r.amount), num(r.deposit), num(r.paymentAmount)).outstanding,
   };
 }
 
@@ -467,10 +480,14 @@ export const overdueWhere = and(isOpenJob, sql`${effectiveDue} < ${thaiToday}`);
 /** whole days past the real due date (1 = due yesterday) */
 export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith(Number);
 
+/** a phone's digits as stored ("+66 89 999 3466" → "0899993466": the country code typed for the leading 0) */
+const phoneDigits = (v: string) => v.replace(/\D/g, '').replace(/^66(?=\d{8,9}$)/, '0');
+
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   // a phone typed as digits ("0814969925") also finds "081-4969925" — same match as f.phone below
-  const termDigits = /^[\d\s()+-]+$/.test(term) ? term.replace(/\D/g, '') : '';
+  const termDigits = /^[\d\s()+-]+$/.test(term) ? phoneDigits(term) : '';
+  const phone = phoneDigits(f.phone ?? '');
   const from = ymd(f.from),
     to = ymd(f.to),
     closedFrom = ymd(f.closedFrom),
@@ -537,8 +554,8 @@ export function jobWhere(q: string, f: JobFilters) {
     f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
     f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
-    f.phone && f.phone.replace(/\D/g, '')
-      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + f.phone.replace(/\D/g, '') + '%'}`
+    phone
+      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + phone + '%'}`
       : undefined,
     f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
     f.imei
@@ -617,7 +634,7 @@ export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> 
 }
 
 /** Un-paged list for reports (server-filtered, capped). */
-export async function listJobs(f: JobFilters & { q?: string; limit?: number } = {}): Promise<Job[]> {
+export async function listJobs(f: JobFilters & { q?: string; limit?: number } = {}): Promise<JobListRow[]> {
   const rows = await baseQuery()
     .where(jobWhere(f.q ?? '', f))
     .orderBy(desc(job.jobCreateDate), desc(job.jobNo))
@@ -746,6 +763,44 @@ export type JobDetail = {
   version: number;
 };
 
+/** audit fields holding an app_user id — the job history shows the person's name */
+const USER_KEYS = new Set(['engineerId', 'sendBy', 'receiveBy', 'jobReturnBy', 'jobRepairedBy', 'jobClosedBy']);
+const ASSIGNED_TO = /มอบหมายงานให้ช่าง #(\d+)/;
+
+/** ประวัติการแก้ไข: user ids → names, status ids → status names (also in older "มอบหมายงานให้ช่าง #116" lines) */
+async function readableHistory(rows: AuditRow[]): Promise<AuditRow[]> {
+  const ids = new Set<number>();
+  for (const r of rows) {
+    for (const [k, pair] of Object.entries(r.changes ?? {}))
+      if (USER_KEYS.has(k)) for (const v of pair) if (Number(v) > 0) ids.add(Number(v));
+    const m = ASSIGNED_TO.exec(r.summary);
+    if (m) ids.add(Number(m[1]));
+  }
+  const users = ids.size
+    ? await db
+        .select({ id: appUser.userId, f: appUser.firstName, l: appUser.lastName })
+        .from(appUser)
+        .where(inArray(appUser.userId, [...ids]))
+    : [];
+  const statuses = await jobStatuses();
+  const person = (v: unknown) => {
+    if (!(Number(v) > 0)) return null; // 0 / -1 = nobody
+    const u = users.find((x) => x.id === Number(v));
+    return (u && fullName(u.f, u.l)) || `#${v}`;
+  };
+  const status = (v: unknown) => (v == null ? null : (statuses.find((x) => x.id === Number(v))?.name ?? v));
+  const readable = (k: string, v: unknown) => (USER_KEYS.has(k) ? person(v) : k === 'jobStatusId' ? status(v) : v);
+  return rows.map((r) => ({
+    ...r,
+    summary: r.summary.replace(ASSIGNED_TO, (_, id: string) => `มอบหมายงานให้ช่าง ${person(id)}`),
+    changes:
+      r.changes &&
+      Object.fromEntries(
+        Object.entries(r.changes).map(([k, [a, b]]) => [k, [readable(k, a), readable(k, b)] as [unknown, unknown]]),
+      ),
+  }));
+}
+
 export async function getJob(jobNo: string): Promise<JobDetail | null> {
   const engSym = alias(symptom, 'eng_sym');
   const [r] = await db
@@ -830,7 +885,7 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       .leftJoin(appUser, eq(appUser.userId, jobLog.jobActionBy))
       .where(eq(jobLog.jobNo, jobNo))
       .orderBy(desc(jobLog.jobLogDate), desc(jobLog.jobLogId)), // newest first, like call log / audit
-    auditFor('job', jobNo, 100),
+    auditFor('job', jobNo, 100).then(readableHistory),
   ]);
 
   const symptomIds = syms.length
@@ -1143,11 +1198,14 @@ const MONEY_COLS = {
 } as const satisfies Partial<Record<keyof JobRow, string>>;
 const MONEY_TEXT = new Set<string>(['jobPaymentType', 'jobPaymentNo', 'jobPaymentDetail']);
 
+async function isSystemAdmin(userId: number): Promise<boolean> {
+  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, userId)).limit(1);
+  return u?.t?.trim() === ADMIN_USER_TYPE;
+}
+
 /** closed (Finished) and the user is not System Admin → the job's money may not change */
 async function moneyLocked(statusId: number | null, byUserId: number): Promise<boolean> {
-  if ((await statusGroup(statusId ?? -1)) !== FINISHED_GROUP) return false;
-  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, byUserId)).limit(1);
-  return u?.t?.trim() !== ADMIN_USER_TYPE;
+  return (await statusGroup(statusId ?? -1)) === FINISHED_GROUP && !(await isSystemAdmin(byUserId));
 }
 
 /**
@@ -1452,6 +1510,11 @@ export async function assignJobs(
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
   if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
   await staffOrKeep(engineerId, undefined, 'engineerId', 0, 'ไม่พบช่างคนนี้ในรายชื่อปัจจุบัน'); // an active app_user
+  const [who] = await db
+    .select({ f: appUser.firstName, l: appUser.lastName })
+    .from(appUser)
+    .where(eq(appUser.userId, engineerId));
+  const engName = (who && fullName(who.f, who.l)) || `#${engineerId}`;
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
@@ -1481,7 +1544,7 @@ export async function assignJobs(
         module: 'Job Assign',
         entity: 'job',
         key: r.no,
-        summary: `มอบหมายงานให้ช่าง #${engineerId}`,
+        summary: `มอบหมายงานให้ช่าง ${engName}`,
         changes: { engineerId: [r.eng, engineerId] },
       })),
     );
@@ -1698,8 +1761,9 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       changes: diff(j as unknown as Record<string, unknown>, toWrite as Record<string, unknown>),
     });
 
-    // ---- status: explicit choice wins; new stock requests move a new/in-progress job to 11 ----
-    let target = newStatus;
+    // ---- status: a changed choice wins (the page sends the current one back unchanged); new stock
+    // requests move a new/in-progress job to 11 ----
+    let target = newStatus === status ? undefined : newStatus;
     if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS))
       target = JS.PARTS_REQUESTED;
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
@@ -1720,6 +1784,7 @@ export async function markPartsIssued(jobNo: string, byUserId: number) {
         and(
           eq(jobOrderSparePartLog.jobNo, jobNo),
           eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+          eq(jobOrderSparePartLog.isSpecial, true), // เสนอ-only lines are not for stock (listPartRequests)
           sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
         ),
       );
@@ -1758,14 +1823,15 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     throw new HttpError(400, OUTSOURCE_STATUS_ONLY, { fields: { status: OUTSOURCE_STATUS_ONLY } });
   if (i.receive && !i.receive.date)
     throw new HttpError(400, RECEIVE_DATE_REQUIRED, { fields: { 'receive.date': RECEIVE_DATE_REQUIRED } });
-  const [openRow] = await db
+  // the people on the latest row (open, or already back and saved again) may stay even if they left
+  const [lastRow] = await db
     .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
     .from(jobSendForwardDt)
-    .where(outsourceOpen(jobNo))
+    .where(eq(jobSendForwardDt.jobNo, jobNo))
     .orderBy(desc(jobSendForwardDt.id))
     .limit(1);
-  const sendBy = await staffOrKeep(i.send?.by, openRow?.sendBy, 'send.by', byUserId);
-  const receiveBy = await staffOrKeep(i.receive?.by, openRow?.receiveBy, 'receive.by', byUserId);
+  const sendBy = await staffOrKeep(i.send?.by, lastRow?.sendBy, 'send.by', byUserId);
+  const receiveBy = await staffOrKeep(i.receive?.by, lastRow?.receiveBy, 'receive.by', byUserId);
 
   await db.transaction(async (tx) => {
     const status = await lockJob(tx, jobNo);
@@ -1786,24 +1852,57 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     };
     const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
-    const o = open[0];
+    // the latest send row: the open one, or the one already back (its fields saved again after the receive)
+    const [last] = open[0]
+      ? open
+      : await tx
+          .select()
+          .from(jobSendForwardDt)
+          .where(eq(jobSendForwardDt.jobNo, jobNo))
+          .orderBy(desc(jobSendForwardDt.id))
+          .limit(1);
+    const back = last?.sendStatus === 'รับเครื่องซ่อมแล้ว';
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Repair',
       entity: 'job',
       key: jobNo,
-      summary: i.send
-        ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
-        : i.receive
-          ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
+      summary: i.receive
+        ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
+        : i.send
+          ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
           : 'บันทึกงานส่งซ่อมต่อ',
-      // old values: the job row + the open send row (none yet → null)
+      // old values: the job row + the latest send row (none yet → null)
       changes: diff(
-        { ...before, ...(o ? { sendTo: o.sendToName, sendDate: sentOn, sendBy: o.sendBy } : {}) },
+        {
+          ...before,
+          ...(last
+            ? {
+                sendTo: last.sendToName,
+                sendDate: fmtDate(last.sendDate),
+                sendBy: last.sendBy,
+                ...(back
+                  ? {
+                      receiveFrom: last.sendToName,
+                      receiveDate: fmtDate(last.receiveDate),
+                      receiveBy: last.receiveBy,
+                      receiveDetail: last.receiveDetail,
+                    }
+                  : {}),
+              }
+            : {}),
+        },
         {
           ...fields,
           ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
-          ...(i.receive ? { receiveFrom: str(i.receive.from), receiveDate: str(i.receive.date), receiveBy } : {}),
+          ...(i.receive
+            ? {
+                receiveFrom: str(i.receive.from),
+                receiveDate: str(i.receive.date),
+                receiveBy,
+                receiveDetail: cleanText(i.receive.detail),
+              }
+            : {}),
         },
       ),
     });
@@ -1825,18 +1924,14 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
       target ??= JS.OUTSOURCE_RECEIVED;
     } else if (i.send?.to) {
-      // the page sends the send block again after the receive: the same vendor + send date as the last
-      // row (already back) is that row saved again, not a new trip — no second row, no going back to 14
-      const [last] = open[0]
-        ? []
-        : await tx
-            .select()
-            .from(jobSendForwardDt)
-            .where(eq(jobSendForwardDt.jobNo, jobNo))
-            .orderBy(desc(jobSendForwardDt.id))
-            .limit(1);
+      // the page sends the send block again after the receive (+ the receive block, its note may be edited):
+      // the same vendor + send date as the last row (already back) is that row saved again, not a new
+      // trip — no second row, no going back to 14
       const again =
-        !!last && clean(last.sendToName) === clean(i.send.to) && fmtDate(last.sendDate) === str(i.send.date);
+        !open[0] &&
+        !!last &&
+        clean(last.sendToName) === clean(i.send.to) &&
+        fmtDate(last.sendDate) === str(i.send.date);
       const row = open[0] ?? (again ? last : undefined);
       if (row) {
         await tx
@@ -1846,6 +1941,13 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
             sendDetail: cleanText(i.send.detail),
             sendDate: dateOrSentinel(i.send.date ?? nowThai()),
             sendBy,
+            ...(again && back && i.receive
+              ? {
+                  receiveDate: dateOrSentinel(i.receive.date),
+                  receiveBy,
+                  receiveDetail: cleanText(i.receive.detail),
+                }
+              : {}),
           })
           .where(eq(jobSendForwardDt.id, row.id));
       } else {

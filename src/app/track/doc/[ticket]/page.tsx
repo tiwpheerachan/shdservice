@@ -22,7 +22,8 @@ export const dynamic = 'force-dynamic';
  * The proxy (src/proxy.ts) gives this path the /track headers (no-store, noindex, no-referrer, CSP).
  */
 const FAIL_LIMIT = 5; // invalid tickets per IP per 10 minutes → blocked 15 minutes (as /api/track/data)
-const DOC_EXPIRED = `ลิงก์เอกสารนี้หมดอายุแล้ว (ใช้ได้ ${DOC_LINK_MINUTES} นาที) กรุณากดเปิดเอกสารใหม่จากหน้าติดตามสถานะ`;
+// the link may be young: tapping "ออก" on the tracking page ends the session it lives on, too
+const DOC_EXPIRED = `ลิงก์นี้ใช้ไม่ได้แล้ว (เกิน ${DOC_LINK_MINUTES} นาที หรือออกจากหน้าติดตามงานแล้ว) — กดเปิดเอกสารใหม่จากหน้าติดตามงาน`;
 
 export default async function Page({ params }: { params: Promise<{ ticket: string }> }) {
   const { ticket } = await params;

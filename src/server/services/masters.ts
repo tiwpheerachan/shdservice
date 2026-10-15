@@ -38,13 +38,12 @@ const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
 const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
   sql`lower(regexp_replace(coalesce(${col}, ''), '[[:space:]]', '', 'g'))`;
 /** 409 under the name field: the same name ignoring case and spaces exists (the unique index used to answer 500).
- *  The message names the row that has it (the toast: one line) — it may be Inactive or deleted, i.e. not in the list. */
-const duplicate = (dup: { name: string | null; ref: string | number; rs?: string | null }) =>
-  new HttpError(
-    409,
-    `${DUPLICATE_NAME}: "${clean(dup.name)}" (รหัส ${dup.ref}${dup.rs === RS.DELETED ? ' · อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? ' · Inactive' : ''})`,
-    { fields: { name: DUPLICATE_NAME } },
-  );
+ *  The message names the row that has it — it may be Inactive or deleted, i.e. not in the list — and the
+ *  field error IS that message: the toast fades, the line under the name stays (it used to say only "มีชื่อนี้อยู่แล้ว"). */
+function duplicate(dup: { name: string | null; ref: string | number; rs?: string | null }) {
+  const msg = `${DUPLICATE_NAME}: "${clean(dup.name)}" (รหัส ${dup.ref}${dup.rs === RS.DELETED ? ' · อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? ' · Inactive' : ''})`;
+  return new HttpError(409, msg, { fields: { name: msg } });
+}
 
 /* ------------------------------------------------------------------ *
  * Simple id/name/detail/is_active masters

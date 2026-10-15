@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAccess } from '@/lib/use-access';
-import { ALL_LINKS, findBreadcrumb } from '@/lib/nav';
+import { findBreadcrumb } from '@/lib/nav';
 import { useToast } from '@/components/ui/toast';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
@@ -24,13 +24,12 @@ export function AccessGuard() {
   const { canPath } = useAccess();
   const { push } = useToast();
 
-  // Page-level permission (app_config `view`): a user who types a URL they may
-  // not open is sent to the first menu they can see — and told why, not silently.
+  // Page-level permission (app_config `view`; a create page also needs `add`): a user who types a URL
+  // they may not open is sent to their landing page ("/" picks it by role) — and told why, not silently.
   // (AppShell does not render that page, so it fires no API call first.) The API
   // enforces the same grants on every write regardless.
   React.useEffect(() => {
     if (canPath(pathname)) return;
-    const first = ALL_LINKS.find((l) => canPath(l.href));
     const page = findBreadcrumb(pathname);
     push({
       kind: 'warning',
@@ -38,7 +37,7 @@ export function AccessGuard() {
       title: `ไม่มีสิทธิ์เข้าหน้า ${page?.item?.title ?? page?.group.title ?? pathname}`,
       desc: 'ขอสิทธิ์ได้จากผู้ดูแลระบบ',
     });
-    router.replace(first ? first.href : '/pending');
+    router.replace('/');
   }, [pathname, canPath, router, push]);
 
   // still signed in / still approved? — read from /api/sso/me, which never extends the session
@@ -51,9 +50,9 @@ export function AccessGuard() {
   }, [pathname, refresh]);
   React.useEffect(() => {
     if (me.unauthorized)
-      toLogin(); // expired / signed out on another device
+      toLogin({ signedOut: me.signedOut }); // expired / signed out on another device / ออกจากระบบ in another tab
     else if (me.approved === false) hardNavigate('/pending'); // approval revoked → reload into the pending page
-  }, [me.unauthorized, me.approved]);
+  }, [me.unauthorized, me.signedOut, me.approved]);
 
   // a save refused for an expired session / a form with typed data when the session ran out
   // (lib/navigation sessionExpired): the page stays as it is — sign in again in another tab

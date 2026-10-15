@@ -24,6 +24,9 @@ import { useConfirm } from '@/components/ui/confirm';
 import { postJson, errMsg } from '@/lib/api';
 import { useRecord } from '@/lib/use-record';
 import { useAccess } from '@/lib/use-access';
+import { useFormErrors } from '@/lib/use-form-errors';
+import { SELF_APPROVE, SELF_APPROVE_SALES } from '@/lib/validation/sale-order';
+import { trackingSchema } from '@/lib/validation/stock';
 
 function EditSaleOrder() {
   const { push } = useToast();
@@ -106,11 +109,13 @@ function EditSaleOrder() {
   // เลขพัสดุ — only on an approved order (POST /api/sale-orders/:no/tracking; the server checks the format)
   const [tracking, setTracking] = React.useState('');
   const [trackingOf, setTrackingOf] = React.useState<SaleOrderLoaded | null>(null);
+  const te = useFormErrors(); // a bad parcel no. → under the box, with the allowed format
   if (loaded !== trackingOf) {
     setTrackingOf(loaded);
     setTracking(loaded?.tracking ?? '');
   }
   const saveTracking = async () => {
+    if (te.report(te.run(trackingSchema(loaded?.tracking), { tracking }))) return;
     setSaving(true);
     try {
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/tracking`, {
@@ -119,7 +124,7 @@ function EditSaleOrder() {
       setLoaded(d.order);
       push({ kind: 'success', title: 'บันทึกเลขพัสดุแล้ว', desc: d.order.tracking || no });
     } catch (e) {
-      push({ kind: 'error', title: 'บันทึกเลขพัสดุไม่สำเร็จ', desc: errMsg(e) });
+      if (!te.fromApi(e)) push({ kind: 'error', title: 'บันทึกเลขพัสดุไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -130,6 +135,7 @@ function EditSaleOrder() {
   const closed = [4, 5].includes(approveId);
   // only a waiting order is decided, and not by its creator (System Admin may) — the server checks the same
   const isCreator = !isAdmin && !!userId && (loaded?.creatorIds ?? []).includes(userId);
+  const selfReason = !isCreator ? '' : userId === loaded?.createdById ? SELF_APPROVE : SELF_APPROVE_SALES;
   const canApprove = (isAdmin || can('Sale Order', 'edit')) && !isCreator;
   const decided = approveId === 3 || approveId === 5; // the reason banner
   const canEditTracking = isAdmin || can('Sale Order', 'edit');
@@ -154,9 +160,12 @@ function EditSaleOrder() {
               </Badge>
               {approveId === 2 && !canApprove && (
                 <span className="text-muted-foreground">
-                  รอผู้มีสิทธิ์อนุมัติ (Sale Order: แก้ไข)
-                  {isCreator && ' — ผู้สร้างใบสั่งขายอนุมัติเองไม่ได้'}
+                  รออนุมัติจาก: {loaded.approverRoles?.join(', ') || 'System Admin'}
+                  {selfReason && ` — ${selfReason.split(' — ')[0]}`}
                 </span>
+              )}
+              {approveId === 1 && userId !== loaded.createdById && (
+                <span className="text-muted-foreground">รอผู้สร้างกด ส่งขออนุมัติ</span>
               )}
               {approveId === 4 && loaded.approvedBy && (
                 <span className="text-muted-foreground">
@@ -177,11 +186,14 @@ function EditSaleOrder() {
         {approveId === 4 && (
           <Section title="เลขพัสดุ (Tracking)" icon={Truck}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <Field label="เลขพัสดุ" className="flex-1 sm:max-w-xs">
+              <Field label="เลขพัสดุ" className="flex-1 sm:max-w-xs" error={te.errors.tracking}>
                 <Input
                   maxLength={50}
                   value={tracking}
-                  onChange={(e) => setTracking(e.target.value)}
+                  onChange={(e) => {
+                    setTracking(e.target.value);
+                    te.clear('tracking');
+                  }}
                   disabled={!canEditTracking}
                   className="num"
                 />

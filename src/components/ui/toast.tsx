@@ -55,7 +55,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         gap={8}
         offset={16}
         closeButton
-        className="no-print"
+        // an open modal sets pointer-events:none on <body> (Radix): the toasts inherited it, so a click
+        // on "โหลดใหม่" went through to the dark overlay — the toaster takes clicks of its own
+        className="no-print pointer-events-auto"
         icons={{
           success: <CheckCircle2 className="h-4 w-4" />,
           error: <XCircle className="h-4 w-4" />,

@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     path: '/',
     maxAge: Math.max(0, Math.floor((exp - Date.now()) / 1000)),
   });
-  res.cookies.set(SEEN_COOKIE, '1', {
+  res.cookies.set(SEEN_COOKIE, String(u.userId), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

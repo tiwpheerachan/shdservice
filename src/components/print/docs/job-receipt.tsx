@@ -3,7 +3,7 @@ import { getJob } from '@/server/services/jobs';
 import { PrintFrame, Box, KV, Signatures, money } from '@/components/print/print-frame';
 import { REPAIR_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
-import { maskJobForCustomer } from '@/server/services/tracking';
+import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
 
 /** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track (masked). */
 export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
@@ -18,8 +18,10 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
       title="ใบรับงานซ่อม"
       docNo={j.no}
       meta={[
-        { label: 'วันที่รับงาน', value: j.createDate },
-        { label: 'ผู้รับงาน', value: j.createByName },
+        // วันที่รับเครื่อง = /track and the return note (job_reception_date); เปิดงาน = when the job was keyed in
+        { label: 'วันที่รับเครื่อง', value: receivedDateOf(j) },
+        { label: 'วันที่เปิดงาน', value: j.createDate },
+        ...(forCustomer ? [] : [{ label: 'ผู้รับงาน', value: j.createByName }]),
         { label: 'สถานะ', value: j.status },
       ]}
     >

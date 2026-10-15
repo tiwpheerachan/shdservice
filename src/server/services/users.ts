@@ -232,7 +232,7 @@ async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; n
     usedAs === 'engineer'
       ? sql`${appUser.userId} IN (SELECT engineer_id FROM job)`
       : usedAs === 'sales'
-        ? sql`${appUser.userId} IN (SELECT document_create_by FROM sale_out_hd)`
+        ? sql`${appUser.userId} IN (SELECT sale_out_by FROM sale_out_hd)`
         : undefined;
   const rows = await db
     .select({
@@ -345,19 +345,23 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
     if (!row) throw new HttpError(404, 'user not found');
     userChanged(row.emailAddress);
-    await audit(db, actorId, {
-      ...userAuditLine(
-        fullName(first, last),
-        { userType: before.userType?.trim() || null, rs: before.recordStatus },
-        { userType, rs },
-      ),
-      module: 'Admin',
-      entity: 'app_user',
-      key: targetId,
-      changes: diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
-        skip: ['deleted', 'isActive'],
-      }),
-    }); // recordStatus stays: disable / re-enable is what an audit must show
+    // recordStatus stays in the diff: disable / re-enable is what an audit must show
+    const changes = diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
+      skip: ['deleted', 'isActive'],
+    });
+    // saved with nothing changed (e.g. opening your own account and pressing บันทึก) → no audit line
+    if (changes)
+      await audit(db, actorId, {
+        ...userAuditLine(
+          fullName(first, last),
+          { userType: before.userType?.trim() || null, rs: before.recordStatus },
+          { userType, rs },
+        ),
+        module: 'Admin',
+        entity: 'app_user',
+        key: targetId,
+        changes,
+      });
     return { user: toUser(row), created: false };
   }
 
@@ -431,16 +435,25 @@ export async function approveUser(userId: number, role?: string, actorId = 0): P
   return toUser(row);
 }
 
+/**
+ * ลบ / กู้คืน. A restored user comes back INACTIVE: restoring must never re-open an account whose access
+ * was revoked before it was deleted — the admin gives access back with คืนสิทธิ์ (upsertUser, audited).
+ */
 export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
   if (deleted) refuseSelf(userId, actorId);
   const [old] = await db
     .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName })
     .from(appUser)
     .where(eq(appUser.userId, userId));
-  const who = fullName(old?.first, old?.last) || `#${userId}`;
+  if (!old) throw new HttpError(404, 'user not found');
+  // only a deleted user is restored — "restore" on a live account would have switched it off
+  if (!deleted && old.rs !== RS.DELETED)
+    throw new HttpError(409, 'ผู้ใช้นี้ไม่ได้อยู่ในรายการที่ลบ — เปิดใช้งานด้วยปุ่ม คืนสิทธิ์');
+  const who = fullName(old.first, old.last) || `#${userId}`;
+  const rs = deleted ? RS.DELETED : RS.INACTIVE;
   await db
     .update(appUser)
-    .set({ ...statusStamp(deleted ? RS.DELETED : RS.ACTIVE, actorId), deleted })
+    .set({ ...statusStamp(rs, actorId), deleted })
     .where(eq(appUser.userId, userId));
   userChanged();
   await audit(db, actorId, {
@@ -448,8 +461,8 @@ export async function setUserDeleted(userId: number, deleted: boolean, actorId =
     module: 'Admin',
     entity: 'app_user',
     key: userId,
-    summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who}`,
-    changes: { recordStatus: [old?.rs ?? null, deleted ? RS.DELETED : RS.ACTIVE] },
+    summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who} (ยังปิดการใช้งาน)`,
+    changes: { recordStatus: [old.rs, rs] },
   });
 }
 

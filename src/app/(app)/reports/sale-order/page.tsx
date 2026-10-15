@@ -15,7 +15,7 @@ const TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
   รออนุมัติ: 'warning',
   อนุมัติแล้ว: 'success',
   ปฏิเสธ: 'danger',
-  แก้ไขข้อมูล: 'danger',
+  ส่งกลับแก้ไข: 'danger',
   กำลังดำเนินการจัดทำ: 'info',
 };
 

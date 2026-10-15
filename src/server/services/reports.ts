@@ -113,7 +113,7 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
       notApprovedAmount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} is distinct from 4),0)`,
     })
     .from(saleOutHd)
-    .leftJoin(creator, eq(creator.userId, saleOutHd.documentCreateBy))
+    .leftJoin(creator, eq(creator.userId, saleOutHd.saleOutBy)) // the salesperson (document_create_by = who keyed it in)
     .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
     .where(saleOrderWhere(q, f));
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row

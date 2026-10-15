@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 import { ROLES, type Permission } from '@/data/mock';
 import { usePermissions, useRoles, useModules } from '@/data/db';
 import { postJson } from '@/lib/api';
@@ -46,6 +47,7 @@ type Cell = { add: boolean; edit: boolean; del: boolean; view: boolean };
 
 export default function PermissionsPage() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const { data: perms, loading, refetch } = usePermissions();
   const { data: dbRoles } = useRoles();
   const { data: dbModules } = useModules();
@@ -75,6 +77,30 @@ export default function PermissionsPage() {
 
   const cellOf = (r: string, menu: string): Cell =>
     map[keyOf(r, menu)] ?? { add: false, edit: false, del: false, view: false };
+
+  // ticked but not saved: switching role used to drop these edits without a word
+  const FIELDS = ['add', 'edit', 'del', 'view'] as const;
+  const savedMap = React.useMemo(() => buildMap(perms), [perms]);
+  const dirty = MENUS.some((menu) => {
+    const saved = savedMap[keyOf(role, menu)];
+    const now = cellOf(role, menu);
+    return FIELDS.some((f) => now[f] !== !!saved?.[f]);
+  });
+  const pickRole = async (v: string) => {
+    if (v !== role && dirty) {
+      const ok = await confirm({
+        tone: 'danger',
+        title: 'มีการแก้ไขที่ยังไม่บันทึก — ทิ้งการแก้ไข?',
+        description: `สิทธิ์ของ ${role} ที่ติ๊กไว้ยังไม่ได้บันทึก ถ้าเปลี่ยนบทบาทตอนนี้ การแก้ไขจะหายไป`,
+        confirmLabel: 'ทิ้งการแก้ไข',
+        cancelLabel: 'อยู่ต่อ',
+      });
+      if (!ok) return setDraft((d) => ({ ...d, role })); // the dropdown goes back to the role being edited
+      setMap(savedMap);
+    }
+    setDraft((d) => ({ ...d, role: v }));
+    setRole(v);
+  };
 
   const toggle = (menu: string, field: keyof Cell) =>
     setMap((s) => {
@@ -159,24 +185,17 @@ export default function PermissionsPage() {
 
       <FilterBar
         onSearch={() => {
-          setRole(draft.role);
+          void pickRole(draft.role);
           setMenuFilter(draft.menu);
         }}
         onReset={() => {
-          setDraft({ role: firstRole, menu: '' });
-          setRole(firstRole);
+          setDraft((d) => ({ ...d, menu: '' }));
           setMenuFilter('');
+          void pickRole(firstRole);
         }}
       >
         <Field label="ประเภทผู้ใช้งาน" required>
-          <SearchSelect
-            value={draft.role}
-            onChange={(v) => {
-              setDraft((d) => ({ ...d, role: v }));
-              setRole(v);
-            }}
-            options={strOptions(ASSIGNABLE_ROLES)}
-          />
+          <SearchSelect value={draft.role} onChange={(v) => void pickRole(v)} options={strOptions(ASSIGNABLE_ROLES)} />
         </Field>
         <Field label="เมนูงาน">
           <SearchSelect

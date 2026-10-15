@@ -50,6 +50,75 @@ export const JOB_FIELD_LABEL: Record<JobRequiredKey, string> = {
   dueDate: 'วันประเมินซ่อมเสร็จ',
 };
 
+/** job columns (+ the out-source row fields) as the audit log stores them → their name on the form (ประวัติการแก้ไข) */
+export const JOB_COLUMN_LABEL: Record<string, string> = {
+  customerId: JOB_FIELD_LABEL.customerCode,
+  customerDetail: 'ข้อมูลลูกค้า',
+  customerDueDate: JOB_FIELD_LABEL.dueDate,
+  dueDateSetByUser: 'กำหนดวันประเมินเอง',
+  jobTypeId: JOB_FIELD_LABEL.jobType,
+  jobTypeDetail: 'งานย่อย',
+  jobStatusId: 'สถานะงาน',
+  productImeiNo: 'IMEI',
+  productSerial: JOB_FIELD_LABEL.serial,
+  productTypeId: 'ประเภทสินค้า',
+  productBrandId: JOB_FIELD_LABEL.brand,
+  productModelId: JOB_FIELD_LABEL.modelCode,
+  productModelName: 'ชื่อรุ่น',
+  productModelDetail: 'รุ่นย่อย',
+  productColor: 'สี',
+  productSymptomId: JOB_FIELD_LABEL.symptoms,
+  productSymptomOther: 'อาการเสีย (อื่นๆ)',
+  productEquipment: 'อุปกรณ์',
+  productFault: 'จุดตำหนิ',
+  productWarranty: 'Warranty',
+  productSaleOutChannel: JOB_FIELD_LABEL.channel,
+  productSaleOrderDate: JOB_FIELD_LABEL.saleOrderDate,
+  productWarrantyMonth: JOB_FIELD_LABEL.warrantyMonth,
+  productExpireDate: JOB_FIELD_LABEL.expireDate,
+  productSaleOutShopName: 'Shop Name',
+  jobReferenceNo: JOB_FIELD_LABEL.so,
+  jobRemark: 'หมายเหตุ',
+  jobReceptionType: 'รับสินค้าเข้าโดย',
+  jobReceptionDate: 'วันที่รับเข้า',
+  jobReceptionTrackingNo: 'เลขพัสดุจากลูกค้า',
+  jobReceptionShipper: 'บริษัทขนส่ง (รับเข้า)',
+  isJobBounce: 'งานซ่อมซ้ำ',
+  engineerId: 'ช่างผู้รับผิดชอบ',
+  engineerSymptomId: 'อาการเสียที่ตรวจพบ',
+  engineerRepairDetail: 'วิธีการซ่อม',
+  engineerRemark: 'หมายเหตุช่าง',
+  sparePartReplace: 'อะไหล่ที่เปลี่ยน / New S/N',
+  estimateCost: 'ค่าประเมินงานซ่อม',
+  depositCost: 'ค่ามัดจำงานซ่อม',
+  sparePartTotalCost: 'รวมค่าอะไหล่',
+  serviceCost: 'ค่าบริการการซ่อม',
+  serviceToolCost: 'ค่าเครื่องมือพิเศษ',
+  deliveryCost: 'ค่าขนส่ง',
+  cartonBoxCost: 'ค่ากล่องพัสดุ',
+  jobTotalCost: 'รวมเป็นเงินสุทธิ',
+  jobPaymentType: 'วิธีการชำระเงิน',
+  jobPaymentNo: 'เลขที่ใบเสร็จ / อ้างอิง',
+  jobPaymentAmount: 'จำนวนเงินที่ชำระ / เงินคืน',
+  jobPaymentDetail: 'รายละเอียดการชำระเงิน',
+  jobReturnDate: 'วันที่ส่งคืน',
+  returnCustomerType: 'วิธีการส่งคืนสินค้า',
+  returnCustomerTrackingNo: 'หมายเลขพัสดุ (ส่งคืน)',
+  returnCustomerDetail: 'รายละเอียดการส่งคืน',
+  returnShipperId: 'บริษัทขนส่ง (ส่งคืน)',
+  jobReturnBy: 'ส่งคืนโดย',
+  swapRefundDetail: 'รายละเอียด Swap / Refund',
+  swapRefundDocumentNo: 'เลขที่เอกสาร Swap / Refund',
+  sendTo: 'ส่งไปยัง',
+  sendDate: 'วันที่ส่ง',
+  sendBy: 'ส่งโดย',
+  receiveFrom: 'รับจาก',
+  receiveDate: 'วันที่รับ',
+  receiveBy: 'รับโดย',
+  receiveDetail: 'หมายเหตุการรับคืน',
+  file: 'ไฟล์',
+};
+
 const text = z.string().optional();
 const date = z.union([z.literal(''), isoDateString()]).optional();
 // the message names the field: the toast lists messages without their field ("ต้องไม่ติดลบ" alone said nothing)
@@ -346,21 +415,32 @@ export const STATUS_CLOSED_TRACKED = 'ปิดงาน-ส่งคืนส�
 export const STATUS_CLOSED_WAIT_TRACKING = 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)';
 export const TRACKING_REQUIRED = 'สถานะ "ลงเลขที่พัสดุแล้ว" ต้องมีหมายเลขพัสดุ — บันทึกที่หน้า ปิดงาน-ส่งคืนสินค้า';
 
-/** ซ่อมเสร็จ while parts requested from stock (เบิก) are not issued yet (setStatus; the repair page shows it first) */
-export const partsNotIssuedMsg = (codes: string[]) =>
-  `ยังเปลี่ยนเป็น "ซ่อมเสร็จ" ไม่ได้ — อะไหล่ที่ขอเบิกยังไม่ได้จ่ายจากสต๊อก (${[...new Set(codes)].join(', ')}): ` +
-  'รอสต๊อกจ่ายอะไหล่ก่อน หรือลบรายการอะไหล่นั้น / เอาติ๊ก "เบิก" ออก';
+/**
+ * ซ่อมเสร็จ while parts requested from stock (เบิก) are not issued yet (setStatus; the repair page shows it
+ * first, before anything is saved — stock only sees a request once the job is saved, so it says to save first)
+ */
+export const partsNotIssuedMsg = (parts: { code: string; name?: string }[]) =>
+  `ยังเปลี่ยนเป็น "ซ่อมเสร็จ" ไม่ได้ — อะไหล่ที่ติ๊ก "เบิก" ยังไม่ได้จ่ายจากสต๊อก (${[
+    ...new Set(parts.map((p) => [p.code, p.name].filter(Boolean).join(' '))),
+  ].join(', ')}): บันทึกเป็น "รออะไหล่" ก่อน เพื่อส่งคำขอเบิกให้สต๊อก แล้วเปลี่ยนเป็น "ซ่อมเสร็จ" เมื่อสต๊อกจ่ายแล้ว ` +
+  '— หรือเอาติ๊ก "เบิก" ออก / ลบรายการอะไหล่นั้น';
+
+/** a closed job (Finished) goes back to an open status only by System Admin (setStatus) */
+export const REOPEN_ADMIN_ONLY = 'งานปิดแล้ว — เปิดงานกลับได้เฉพาะ System Admin';
 
 /** job_payment_detail = "ชำระ <date> · <note>" — a note loaded back from an earlier save drops its old date first */
 export const paymentDetailOf = (date?: string | null, note?: string | null) =>
   [date ? `ชำระ ${clean(date)}` : '', clean(note).replace(/^ชำระ \d{4}-\d{2}-\d{2}(?: · |$)/, '')]
     .filter(Boolean)
     .join(' · ');
-/** return_customer_detail = "<courier> · <note>" — a note loaded back already starts with its courier */
+/**
+ * return_customer_detail = "<courier> · <note>" — a note loaded back already starts with its courier
+ * (or a longer name of it: "ไปรษณีย์ไทย · …" with courier "ไปรษณีย์") and is kept as it is, never prefixed again
+ */
 export function returnDetailOf(courier?: string | null, note?: string | null) {
   const c = clean(courier);
   const n = clean(note);
-  return [c, c && (n === c || n.startsWith(`${c} · `)) ? n.slice(c.length + 3) : n].filter(Boolean).join(' · ');
+  return c && n.startsWith(c) ? n : [c, n].filter(Boolean).join(' · ');
 }
 
 /**

@@ -83,9 +83,14 @@ function stepOf(statusId: number, group: string): TrackStepKey | null {
   return 'diagnosing';
 }
 
-/** the current status in words the customer can act on — the 5 steps merge some of them */
-function statusLabel(statusId: number, step: TrackStepKey | null): string {
+/**
+ * The current status in words the customer can act on — the 5 steps merge some of them.
+ * `lastQuote` = the job's latest sent quotation: past its validity, "รอคำตอบจากคุณ" would ask for an answer it can no longer take.
+ */
+function statusLabel(statusId: number, step: TrackStepKey | null, lastQuote?: LastQuote): string {
   if (!step) return 'ยกเลิกรายการ';
+  if (statusId === JS.QUOTED && lastQuote && quoteExpired(lastQuote.st, lastQuote.at, statusId))
+    return `ใบเสนอราคา${QUOTE_EXPIRED_TEXT}`;
   if (statusId === JS.QUOTED) return 'รอคำตอบจากคุณ (ใบเสนอราคา)';
   if (statusId === JS.WAIT_QUOTE) return 'ศูนย์กำลังจัดทำใบเสนอราคา';
   if (statusId === JS.QUOTE_EXPIRED) return `ใบเสนอราคา${QUOTE_EXPIRED_TEXT}`;
@@ -101,15 +106,47 @@ const DUE_PASSED_TEXT = 'เลยกำหนดเดิม — ศูนย�
 /** "7 Days" → 7: the validity printed on the quotation */
 const QUOTE_VALID_DAYS = parseInt(QUOTATION_VALIDITY, 10) || 7;
 
-/** วันที่รับเครื่อง — ONE source for the header, the timeline and the receipt's date (a legacy 1900 → opened) */
+/** a sent quotation the customer can no longer answer: พ้นกำหนด (8), or sent (2) and past its validity / the job says so */
+export const quoteExpired = (st: number | null | undefined, at: string | null, jobStatusId: number | null) =>
+  st === 8 || (st === 2 && (fmtDate(at) < addDays(today(), -QUOTE_VALID_DAYS) || jobStatusId === JS.QUOTE_EXPIRED));
+
+/** the job's latest quotation the customer was sent (statuses as CUSTOMER_QUOTATION_STATUSES) — status + date */
+type LastQuote = { st: number; at: string } | null;
+const lastQuote = sql<LastQuote>`(SELECT json_build_object('st', q.quotation_status_id, 'at', to_char(q.create_date, 'YYYY-MM-DD'))
+    FROM quotation_hd q WHERE q.reference_job_no = ${job.jobNo} AND q.record_status <> ${RS.DELETED}
+      AND q.quotation_status_id IN (2, 3, 4, 6, 8, 9) ORDER BY q.create_date DESC LIMIT 1)`;
+
+/** วันที่รับเครื่อง — ONE source for the header, the timeline and the documents' date (a legacy 1900 → opened) */
 const receivedOf = (r: { receivedDate: string | null; createDate: string | null }) =>
   fmtDate(isSentinelDate(r.receivedDate) ? r.createDate : r.receivedDate);
+/** the same date for a job as the printed documents get it (ใบรับงานซ่อม / ใบส่งคืนสินค้า, staff and customer copies) */
+export const receivedDateOf = (j: Pick<JobDetail, 'receptionDate' | 'createDate'>) =>
+  receivedOf({ receivedDate: j.receptionDate, createDate: j.createDate });
+
+/** customer list: a closed job the customer has not got back yet (to collect / parcel not sent) is still in progress */
+export const inProgressForCustomer = (statusId: number | null, group: string | null) => {
+  const g = group?.trim() ?? '';
+  if (statusId === JS.CLOSED_WAIT_PICKUP || statusId === JS.CLOSED_WAIT_TRACKING) return true;
+  return g !== 'Finished' && g !== 'Cancel';
+};
 
 /* masking — what /track and the documents opened from it show instead of the real value */
+/** a company / shop, not a person: never "คุณ บริ…" */
+const COMPANY =
+  /บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน|มหาชน|^ร้าน|มูลนิธิ|สมาคม|สหกรณ์|\b(?:co|ltd|inc|corp|plc)\b\.?|\b(?:company|limited|corporation)\b/i;
+const COMPANY_PREFIX = /^(?:บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน(?:จำกัด|สามัญ)?|ร้าน|มูลนิธิ|สมาคม|สหกรณ์)\s*/;
 const TITLE = /^(?:คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.|(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))\s*/i;
-/** "C43600 คุณสมชาย ใจดี 081…" → "คุณ สมช…" (one title, never "คุณ คุณ…") */
+/**
+ * "C43600 คุณสมชาย ใจดี 081…" → "คุณ สมช…" (one title, never "คุณ คุณ…");
+ * a company keeps its kind, no "คุณ": "บริษัท เอบีซี จำกัด" → "บริษัท เอบ…", "ABC Co., Ltd." → "ABC…"
+ */
 export const maskName = (full: string) => {
   let name = (full ?? '').trim().replace(/^[A-Z]\d+\s+/i, ''); // customer_detail = "C43600 ชื่อ เบอร์"
+  if (COMPANY.test(name)) {
+    const prefix = COMPANY_PREFIX.exec(name)?.[0] ?? '';
+    const word = name.slice(prefix.length).split(/\s+/)[0] ?? '';
+    return [prefix.trim(), word && `${word.slice(0, 3)}…`].filter(Boolean).join(' ') || 'ลูกค้า';
+  }
   while (TITLE.test(name)) name = name.replace(TITLE, '');
   const first = name.split(/\s+/)[0] ?? '';
   return first ? `คุณ ${first.slice(0, 3)}…` : 'ลูกค้า';
@@ -141,7 +178,7 @@ const maskCustomer = <C extends { name: string; address: string; phone: string }
 
 /**
  * A job as a document opened from /track (app/track/doc) shows it: no more than the tracking
- * page — masked name / phone / address / serial / IMEI, no technician, no contact details.
+ * page — masked name / phone / address / serial / IMEI, no staff names (technician / opener / closer), no contact details.
  * Prices stay (the customer decides on the quotation with them). Staff print views never call this.
  */
 export function maskJobForCustomer(j: JobDetail): JobDetail {
@@ -153,6 +190,9 @@ export function maskJobForCustomer(j: JobDetail): JobDetail {
     serial: maskRef(j.serial),
     engineerId: 0,
     engineer: '',
+    createBy: 0,
+    createByName: '', // staff names stay on the staff copy (ผู้รับงาน / ผู้ส่งคืน)
+    outsource: [],
     logs: [],
     history: [],
     attachments: [],
@@ -169,6 +209,7 @@ export function maskQuotationForCustomer(q: QuotationDetail): QuotationDetail {
     imei: maskRef(q.imei),
     customerDetail: c,
     job: q.job && maskJobForCustomer(q.job),
+    createdBy: '', // เสนอราคาโดย — a staff name
     createdByPhone: '',
     createdByEmail: '',
   };
@@ -206,6 +247,7 @@ function base(where: SQL | undefined) {
       trackingNo: job.returnCustomerTrackingNo,
       shipperId: job.returnShipperId,
       recordStatus: job.recordStatus,
+      lastQuote,
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
@@ -257,11 +299,10 @@ async function docsFor(row: {
     )
     .orderBy(asc(quotationHd.createDate))
     .limit(10);
-  const lapsedBefore = addDays(today(), -QUOTE_VALID_DAYS);
   for (const q of qs) {
     const no = (q.no ?? '').trim();
-    // พ้นกำหนดเสนอราคา (8), or sent (2) and past its validity / the job says so — never shown as current
-    const expired = q.st === 8 || (q.st === 2 && (fmtDate(q.at) < lapsedBefore || row.statusId === JS.QUOTE_EXPIRED));
+    // never shown as current once expired
+    const expired = quoteExpired(q.st, q.at, row.statusId);
     const label = `ใบเสนอราคา ${no}${expired ? ` · ${QUOTE_EXPIRED_TEXT}` : ''}`;
     if (no) docs.push({ kind: 'quotation', ref: no, label, date: fmtDate(q.at), step: 'waiting' });
   }
@@ -395,9 +436,15 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const beforeRepaired = step === 'received' || step === 'diagnosing' || step === 'waiting';
   const dueDate = !due || due >= today() ? due : beforeRepaired ? DUE_PASSED_TEXT : '';
 
+  // "รอยืนยัน / รออะไหล่" merges two things: once passed, the step says which one(s) it really was
+  const was = (...ids: number[]) => logs.some((l) => ids.includes(l.statusId ?? -1));
+  const waitedFor = [was(JS.WAIT_QUOTE, JS.QUOTED, JS.QUOTE_EXPIRED) && 'ใบเสนอราคา', was(JS.WAIT_PARTS) && 'รออะไหล่']
+    .filter(Boolean)
+    .join(' · ');
+
   const order = TRACK_STEPS.map((s) => s.key);
   const history = [...seen.entries()]
-    .map(([key, at]) => ({ key, at }))
+    .map(([key, at]) => ({ key, at, ...(key === 'waiting' && waitedFor ? { label: waitedFor } : {}) }))
     .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 
   return {
@@ -408,7 +455,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
     receivedDate: receivedOf(row),
     dueDate,
     step,
-    stepLabel: statusLabel(row.statusId ?? -1, step),
+    stepLabel: statusLabel(row.statusId ?? -1, step, row.lastQuote),
     cancelled: step === null,
     history,
     shipper: (row.shipper ?? '').trim(),
@@ -582,6 +629,7 @@ export async function listJobsForCustomers(
       receivedDate: job.jobReceptionDate,
       createDate: job.jobCreateDate,
       closedDate: job.jobClosedDate,
+      lastQuote,
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
@@ -602,9 +650,7 @@ export async function listJobsForCustomers(
   const active: PublicJobSummary[] = [];
   const history: PublicJobSummary[] = [];
   for (const r of rows) {
-    const group = r.group?.trim() ?? '';
-    const step = stepOf(r.statusId ?? -1, group);
-    const done = group === 'Finished' || group === 'Cancel';
+    const step = stepOf(r.statusId ?? -1, r.group?.trim() ?? '');
     const item: PublicJobSummary = {
       no: r.no,
       brandModel: [r.brand, r.model].filter(Boolean).join(' ').trim(),
@@ -612,10 +658,10 @@ export async function listJobsForCustomers(
       receivedDate: receivedOf(r),
       closedDate: isSentinelDate(r.closedDate) ? '' : fmtDate(r.closedDate),
       step,
-      stepLabel: statusLabel(r.statusId ?? -1, step),
+      stepLabel: statusLabel(r.statusId ?? -1, step, r.lastQuote),
       cancelled: step === null,
     };
-    (done ? history : active).push(item);
+    (inProgressForCustomer(r.statusId, r.group) ? active : history).push(item);
   }
   return { active, history };
 }

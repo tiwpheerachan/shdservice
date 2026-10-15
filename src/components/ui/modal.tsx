@@ -39,6 +39,10 @@ export function Modal({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 no-print">
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
           <DialogPrimitive.Content
+            // a click on a toast (its "โหลดใหม่" / close) is not a click outside: the dialog stays open
+            onInteractOutside={(e) => {
+              if (e.target instanceof Element && e.target.closest('[data-sonner-toaster]')) e.preventDefault();
+            }}
             className={cn(
               'relative z-10 w-full overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in',
               w,

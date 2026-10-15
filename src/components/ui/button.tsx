@@ -59,8 +59,16 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size }), className)}
         {...props}
       >
-        {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-        {children}
+        {/* asChild: Slot takes exactly ONE element — a `false` spinner slot beside it made Slot throw
+            ("Slot failed to slot onto its children") and took the whole page down */}
+        {asChild ? (
+          children
+        ) : (
+          <>
+            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {children}
+          </>
+        )}
       </Comp>
     );
   },

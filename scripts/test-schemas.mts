@@ -702,7 +702,16 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
   test('sale order: qty 1–1000, paid ≤ 10,000,000 (1e9 was a 500), remark ≤ 100, payment type from the list', () => {
     assert.ok(errorsOf(saleOrderSchema(), { ...order, lines: [{ code: 'P1', qty: 1001 }] })['lines.0.qty']);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentAmount: 1e9 }).paymentAmount);
-    assert.deepEqual(errorsOf(saleOrderSchema(), { ...order, paymentAmount: '10000000' }), {});
+    // the cap holds on an order big enough to be paid 10,000,000 (paying more than the total is refused — round 3)
+    assert.deepEqual(
+      errorsOf(saleOrderSchema(), {
+        ...order,
+        lines: [{ code: 'P1', qty: 1000, price: 10000 }],
+        paymentType: 'โอนเงิน',
+        paymentAmount: '10000000',
+      }),
+      {},
+    );
     assert.ok(errorsOf(saleOrderSchema(), { ...order, remark: 'ก'.repeat(101) }).remark);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentType: 'บิทคอยน์' }).paymentType);
     assert.deepEqual(

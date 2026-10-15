@@ -116,7 +116,14 @@ const SORT = {
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
-const phoneHas = (digits: string) => sql`${phoneDigits} LIKE ${'%' + digits + '%'}`;
+// "+66 89 999 3466" typed → also "0899993466" (numbers are stored 0-prefixed)
+const phoneHas = (digits: string) =>
+  or(
+    sql`${phoneDigits} LIKE ${'%' + digits + '%'}`,
+    digits.length >= 6 && digits.startsWith('66')
+      ? sql`${phoneDigits} LIKE ${'%0' + digits.slice(2) + '%'}`
+      : undefined,
+  );
 
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);

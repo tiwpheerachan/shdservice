@@ -1,14 +1,15 @@
 import { notFound } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { appUser } from '@/db/schema';
+import { appUser, job } from '@/db/schema';
+import { fullName } from '@/server/auth';
 import { getJob } from '@/server/services/jobs';
 import { AutoPrint } from '@/components/print/auto-print';
 import { money } from '@/components/print/print-frame';
 import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
-import { maskJobForCustomer } from '@/server/services/tracking';
+import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -37,16 +38,22 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   // billed qty = issued less returned to stock (รับคืนจากการเบิก); a line returned in full is not printed
   const used = (p: (typeof j.parts)[number]) => (p.granted > 0 ? p.granted - p.returned : p.requested);
   const parts = j.parts.filter((p) => (p.statusId === 3 || p.granted > 0) && used(p) > 0);
-  const [eng] =
-    j.engineerId > 0
-      ? await db
-          .select({ phone: appUser.phoneNo, email: appUser.emailAddress })
-          .from(appUser)
-          .where(eq(appUser.userId, j.engineerId))
-          .limit(1)
-      : [undefined];
-  // the technician's own contact on the staff copy; the customer's copy (no technician) gets the company's
-  const contact = forCustomer ? { phone: co.phone, email: co.email } : eng;
+  // ผู้ส่งคืน = who closed the job (job_closed_by — often CS, not the technician), on the staff copy only;
+  // the customer's copy names no staff and gets the company's contact
+  const [closer] = forCustomer
+    ? [undefined]
+    : await db
+        .select({
+          first: appUser.firstName,
+          last: appUser.lastName,
+          phone: appUser.phoneNo,
+          email: appUser.emailAddress,
+        })
+        .from(job)
+        .innerJoin(appUser, eq(appUser.userId, job.jobClosedBy))
+        .where(eq(job.jobNo, j.no))
+        .limit(1);
+  const contact = forCustomer ? { phone: co.phone, email: co.email } : closer;
   const contactLine = [contact?.phone && `Tel. : ${contact.phone}`, contact?.email && `Email : ${contact.email}`]
     .filter(Boolean)
     .join('  ');
@@ -176,7 +183,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                     <td className="pad">
                       <p>
                         <span className={lbl}>วันที่รับเครื่อง :</span>&nbsp;&nbsp;
-                        <span className="num">{dmy(j.createDate)}</span>
+                        <span className="num">{dmy(receivedDateOf(j))}</span>
                       </p>
                       <p className="mt-0.5">
                         <span className={lbl}>วันที่ซ่อมเสร็จ :</span>&nbsp;&nbsp;
@@ -285,7 +292,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
       <table className="sum">
         <tbody>
           <tr>
-            <td rowSpan={j.outstanding > 0 ? 8 : 6} style={{ width: '58%' }}>
+            <td rowSpan={5 + (j.depositCost > 0 ? 2 : 0) + (j.outstanding > 0 ? 2 : 0)} style={{ width: '58%' }}>
               <table className="kv text-[11px]">
                 <tbody>
                   <tr>
@@ -335,17 +342,26 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
             <td className="text-right font-semibold">ค่าขนส่ง + กล่อง / Shipping :</td>
             <td className="num text-right">{money(shipping)}</td>
           </tr>
+          {/* the job's own total; a deposit is taken off below it, never hidden inside it */}
           <tr>
-            <td className="text-right font-semibold">มัดจำ / Deposit :</td>
-            <td className="num text-right">{j.depositCost ? `-${money(j.depositCost)}` : money(0)}</td>
+            <td className="text-right font-bold">รวมทั้งสิ้น / Grand Total :</td>
+            <td className="num text-right font-bold">{money(j.totalCost)}</td>
           </tr>
-          {/* deposit more than the total (not repaired): what goes back to the customer, not 0.00 */}
-          <tr>
-            <td className="text-right font-bold">
-              {j.depositRefund > 0 ? 'ต้องคืนเงินมัดจำ / Refund :' : 'รวมทั้งสิ้น / Grand Total :'}
-            </td>
-            <td className="num text-right font-bold">{money(j.depositRefund || j.amountDue)}</td>
-          </tr>
+          {j.depositCost > 0 && (
+            <>
+              <tr>
+                <td className="text-right font-semibold">หักมัดจำ / Deposit :</td>
+                <td className="num text-right">-{money(j.depositCost)}</td>
+              </tr>
+              {/* deposit more than the total (not repaired): what goes back to the customer, not 0.00 */}
+              <tr>
+                <td className="text-right font-bold">
+                  {j.depositRefund > 0 ? 'ต้องคืนเงินมัดจำ / Refund :' : 'ยอดที่ต้องชำระ (หักมัดจำแล้ว) :'}
+                </td>
+                <td className="num text-right font-bold">{money(j.depositRefund || j.amountDue)}</td>
+              </tr>
+            </>
+          )}
           {/* paid short at close (allowed, never silent) */}
           {j.outstanding > 0 && (
             <>
@@ -392,10 +408,10 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                 {co.nameTh}
               </p>
               <div className="mt-5 flex items-end gap-2">
-                <span className="font-semibold">ผู้ส่งคืน / ช่าง :</span>
+                <span className="font-semibold">ผู้ส่งคืน :</span>
                 <span className="flex-1 border-b border-black" />
               </div>
-              <p className="mt-1 text-center">( {or(j.engineer, '—')} )</p>
+              {!forCustomer && <p className="mt-1 text-center">( {or(fullName(closer?.first, closer?.last), '—')} )</p>}
               <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
             </td>
           </tr>

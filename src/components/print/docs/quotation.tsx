@@ -5,7 +5,7 @@ import { money } from '@/components/print/print-frame';
 import { QUOTATION_VALIDITY } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
-import { maskQuotationForCustomer } from '@/server/services/tracking';
+import { maskQuotationForCustomer, quoteExpired } from '@/server/services/tracking';
 
 const dmy = (s: string) => {
   // "2026-09-17 16:37" / "2026-09-17" → "17-09-2026" (legacy prints dd-mm-yyyy)
@@ -23,7 +23,8 @@ const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : das
  * ใบเสนอราคา — laid out to match the legacy form (setupdata/receipt/Q2600468_163754.pdf):
  * logomark + company text · bilingual boxed header · full-height item table ·
  * bank details + totals with the amount in Thai words · two signature boxes.
- * `forCustomer` = opened from /track: masked like the tracking page, no technician, prices kept.
+ * `forCustomer` = opened from /track: masked like the tracking page, no staff names, prices kept;
+ * past its validity it is stamped หมดอายุแล้ว and no longer asks to be signed and sent back.
  */
 export async function QuotationDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getQuotation(no);
@@ -39,6 +40,10 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
   const contactLine = [co.phone && `Tel. : ${co.phone}`, co.email && `Email : ${co.email}`].filter(Boolean).join('  ');
   const engineer = forCustomer ? '' : j?.engineer?.trim() || q.createdBy;
   const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
+  // label the number by what it is (q.imei = the job's IMEI when there is no job detail)
+  const deviceLabel = (j ? [j.imei && 'IMEI', j.serial && 'S/N'].filter(Boolean).join(' / ') : 'IMEI') || 'IMEI / S/N';
+  // the same rule as the /track list and status line (services/tracking.ts)
+  const expired = forCustomer && quoteExpired(q.statusId, q.date, j?.statusId ?? null);
   const lbl = 'text-neutral-700';
 
   return (
@@ -94,6 +99,14 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         <h1 className="text-[15px] font-bold">ใบเสนอราคา / QUOTATION</h1>
         <span className="text-[10.5px]">Page : 1 / 1</span>
       </div>
+      {expired && (
+        <p className="mx-auto mt-1.5 w-fit -rotate-2 rounded border-[3px] border-red-600 px-4 py-1 text-center text-[18px] font-bold leading-tight text-red-600">
+          หมดอายุแล้ว / EXPIRED
+          <span className="block text-[11px] font-semibold">
+            ใบเสนอราคานี้ใช้ตอบรับไม่ได้แล้ว กรุณาติดต่อศูนย์บริการเพื่อขอใบเสนอราคาใหม่
+          </span>
+        </p>
+      )}
 
       {/* ── customer / job boxes ── */}
       <table className="grid-b mt-1.5">
@@ -130,7 +143,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                     <td className="num">{or(j?.so)}</td>
                   </tr>
                   <tr>
-                    <td className="k">IMEI No. :</td>
+                    <td className="k">{deviceLabel} :</td>
                     <td className="num">{or(j ? [j.imei, j.serial].filter(Boolean).join(' / ') : q.imei)}</td>
                   </tr>
                   {!forCustomer && (
@@ -295,10 +308,18 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         <tbody>
           <tr>
             <td className="w-[58%] br sig text-center">
-              <p className="text-[10.5px]">
-                กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้{co.email ? 'มาที่' : 'กลับมาที่ศูนย์บริการ'}
-              </p>
-              {co.email && <p className="mt-1">Email : {co.email}</p>}
+              {expired ? (
+                <p className="text-[10.5px] font-semibold text-red-600">
+                  ใบเสนอราคานี้หมดอายุแล้ว — กรุณาติดต่อศูนย์บริการเพื่อขอใบเสนอราคาใหม่
+                </p>
+              ) : (
+                <>
+                  <p className="text-[10.5px]">
+                    กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้{co.email ? 'มาที่' : 'กลับมาที่ศูนย์บริการ'}
+                  </p>
+                  {co.email && <p className="mt-1">Email : {co.email}</p>}
+                </>
+              )}
               <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
               <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
                 <span>(</span>
@@ -321,7 +342,8 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                 <span className="font-semibold">เสนอราคาโดย :</span>
                 <span className="flex-1 border-b border-black" />
               </div>
-              <p className="mt-1 text-center">( {or(q.createdBy, '—')} )</p>
+              {/* a staff name: the staff copy only (masked to "" for the customer) */}
+              {!forCustomer && <p className="mt-1 text-center">( {or(q.createdBy, '—')} )</p>}
               <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
             </td>
           </tr>

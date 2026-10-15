@@ -883,7 +883,7 @@ try {
     const created = await json(await createSO(U.admin, 'TD-keep'));
     const no = (created.body.order as { no: string }).no;
     await db.execute(sql`
-      UPDATE sale_out_hd SET delivery_tracking_no = 'TDTRACK1', fee_amount = 50, document_create_by = ${U.inactive.id}
+      UPDATE sale_out_hd SET delivery_tracking_no = 'TDTRACK1', fee_amount = 50, sale_out_by = ${U.inactive.id}
        WHERE sale_out_hd_no = ${no}`);
     const r = await json(
       await soPOST(
@@ -904,7 +904,7 @@ try {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const [hd] = (
       await db.execute<{ t: string; fee: string; net: string; by: number }>(
-        sql`SELECT delivery_tracking_no AS t, fee_amount AS fee, net_amount AS net, document_create_by AS by
+        sql`SELECT delivery_tracking_no AS t, fee_amount AS fee, net_amount AS net, sale_out_by AS by
               FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
       )
     ).rows;
@@ -1577,7 +1577,9 @@ try {
     await test('J: master names unique ignoring case and spaces → 409 under name; a row keeping its name saves', async () => {
       const first = await saveSimple('colors', { name: 'TD J Navy Blue' }, U.admin.id);
       const dup = await fieldsOf(saveSimple('colors', { name: ' td j  navyblue ' }, U.admin.id));
-      assert.deepEqual([dup.status, dup.fields], [409, { name: 'มีชื่อนี้อยู่แล้ว' }]);
+      // R3: the line under the name is the whole message — it names the row that has the name
+      assert.deepEqual([dup.status, dup.fields], [409, { name: dup.message }]);
+      assert.match(dup.message ?? '', /^มีชื่อนี้อยู่แล้ว: "TD J Navy Blue"/);
       assert.equal(
         (await fieldsOf(saveSimple('colors', { id: first.id, name: 'TD J Navy Blue', detail: 'x' }, U.admin.id)))
           .status,
@@ -1599,7 +1601,8 @@ try {
     await test('J: model name twice for one brand (ignoring case / spaces) → 409, not a 500', async () => {
       const m = await saveModel({ name: 'TD J Model X1', brand: 'TD J Brand', price: 0 }, U.admin.id);
       const dup = await fieldsOf(saveModel({ name: 'td j model  x1', brand: 'TD J Brand', price: 0 }, U.admin.id));
-      assert.deepEqual([dup.status, dup.fields], [409, { name: 'มีชื่อนี้อยู่แล้ว' }]);
+      assert.deepEqual([dup.status, dup.fields], [409, { name: dup.message }]);
+      assert.match(dup.message ?? '', /^มีชื่อนี้อยู่แล้ว: "TD J Model X1" \(รหัส /);
       const same = await fieldsOf(
         saveModel({ code: m.code, name: 'TD J Model X1', brand: 'TD J Brand', price: 10 }, U.admin.id),
       );
@@ -2279,7 +2282,8 @@ try {
         pub.docs.find((d) => d.kind === 'quotation')!.label,
         /หมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่/,
       );
-      assert.equal(pub.stepLabel, 'รอคำตอบจากคุณ (ใบเสนอราคา)');
+      // round 3: the status line no longer asks for an answer to it either
+      assert.equal(pub.stepLabel, 'ใบเสนอราคาหมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่');
     });
     await test('R2 track: one received date — header, timeline and receipt all show job_reception_date (1900 → opened)', async () => {
       const a = (await tracking.publicJobByNo('TDJ0282'))!;
@@ -2405,12 +2409,12 @@ try {
           a: 'UPDATE',
           s: 'เปลี่ยนสิทธิ์ผู้ใช้ TD td-pending: TD Job Clerk → TD Seller',
         });
-        await save('TD Seller', 'Active');
-        assert.equal((await last()).s, 'แก้ไขข้อมูลผู้ใช้ TD td-pending · สิทธิ์ TD Seller');
+        await save('TD Seller', 'Active'); // R3: saved with nothing changed → no audit line
+        assert.equal((await last()).s, 'เปลี่ยนสิทธิ์ผู้ใช้ TD td-pending: TD Job Clerk → TD Seller');
         await setUserDeleted(id, true, U.admin.id);
         assert.deepEqual(await last(), { a: 'DELETE', s: 'ลบผู้ใช้ TD td-pending' });
-        await setUserDeleted(id, false, U.admin.id);
-        assert.deepEqual(await last(), { a: 'STATUS', s: 'กู้คืนผู้ใช้ TD td-pending' });
+        await setUserDeleted(id, false, U.admin.id); // R3: restored INACTIVE
+        assert.deepEqual(await last(), { a: 'STATUS', s: 'กู้คืนผู้ใช้ TD td-pending (ยังปิดการใช้งาน)' });
       } finally {
         await db.execute(
           sql`UPDATE app_user SET user_type = NULL, record_status = 'ACTIVE', deleted = false, first_name = 'TD', last_name = 'td-pending' WHERE user_id = ${id}`,
@@ -2541,6 +2545,425 @@ try {
         [other.status, Object.keys(other.fields ?? {}).sort()],
         [400, ['expireDate', 'saleOrderDate', 'so']],
       );
+    });
+  }
+  // ── Round 3: customer /track + print documents ──
+  console.log('\nRound 3 — customer /track + print documents');
+  {
+    const tracking = await import('@/server/services/tracking');
+    const { getQuotation } = await import('@/server/services/quotations');
+    // customer 9281 + TDJ0281 (status 4, a 2001 quotation) + TDJ0283 (closed, status 8) come from the Round 2 block
+    await pool.query(`
+      INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
+        SELECT * FROM (VALUES (4, 'อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า', 4, 'Pending', true),
+                              (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true)) v(id, name, ord, grp, act)
+         WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+      DELETE FROM quotation_hd WHERE quotation_no IN ('TDQ0392', 'TDQ0393');
+      DELETE FROM job WHERE job_no IN ('TDJ0391', 'TDJ0392', 'TDJ0393');
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_by,
+                       job_create_date, job_reception_date, job_closed_date)
+        VALUES ('TDJ0391', 24, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', ${U.admin.id},
+                '2026-09-07 11:50:47', '2026-09-08', now()),
+               ('TDJ0392', 4, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', ${U.admin.id}, now(), current_date, '1900-01-01'),
+               ('TDJ0393', 4, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', ${U.admin.id}, now(), current_date, '1900-01-01');
+      INSERT INTO quotation_hd (quotation_no, customer_code, reference_job_no, net_amount, quotation_status_id, create_date, create_by, is_active)
+        VALUES ('TDQ0392', 'TDC281', 'TDJ0392', 500, 2, now() - interval '30 days', ${U.admin.id}, true),
+               ('TDQ0393', 'TDC281', 'TDJ0393', 500, 2, now(), ${U.admin.id}, true);`);
+
+    await test('R3 track docs: no staff names on the customer copy (ผู้รับงาน / เสนอราคาโดย); a company is never "คุณ บริ…"', async () => {
+      const staff = (await getJob('TDJ0391'))!;
+      assert.equal(staff.createByName, 'TD td-admin', 'staff print unchanged');
+      const j = tracking.maskJobForCustomer(staff);
+      assert.deepEqual([j.createByName, j.createBy, j.engineer, j.outsource], ['', 0, '', []]);
+      const sq = (await getQuotation('TDQ0392'))!;
+      assert.equal(sq.createdBy, 'TD td-admin', 'staff print unchanged');
+      assert.equal(tracking.maskQuotationForCustomer(sq).createdBy, '');
+      assert.equal(tracking.maskName('บริษัท เอบีซี จำกัด'), 'บริษัท เอบ…');
+      assert.equal(tracking.maskName('C43600 บริษัทเอบีซี จำกัด (มหาชน) 02-111-2222'), 'บริษัท เอบ…');
+      assert.equal(tracking.maskName('หจก. สมบูรณ์การช่าง'), 'หจก. สมบ…');
+      assert.equal(tracking.maskName('ABC Co., Ltd.'), 'ABC…');
+      assert.equal(tracking.maskName('คุณสมชาย ใจดี'), 'คุณ สมช…', 'a person keeps "คุณ"');
+      assert.equal(tracking.maskName('Corinne Smith'), 'คุณ Cor…', '"Co" inside a name is not a company');
+    });
+    await test('R3 track docs: receipt + return note use the /track received date (job_reception_date), not job_create_date', async () => {
+      const j = (await getJob('TDJ0391'))!;
+      assert.equal(j.createDate.slice(0, 10), '2026-09-07');
+      assert.equal(tracking.receivedDateOf(j), '2026-09-08');
+      assert.equal(tracking.receivedDateOf(tracking.maskJobForCustomer(j)), '2026-09-08', 'customer copy too');
+      assert.equal((await tracking.publicJobByNo('TDJ0391'))!.receivedDate, tracking.receivedDateOf(j), 'one truth');
+      // legacy 1900 reception date → the day the job was opened, as on /track
+      assert.equal(tracking.receivedDateOf({ receptionDate: '', createDate: '2026-09-07 11:50' }), '2026-09-07');
+    });
+    await test('R3 track: a quotation past its validity → status line + list say expired, not "รอคำตอบจากคุณ"', async () => {
+      const expired = 'ใบเสนอราคาหมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่';
+      assert.equal((await tracking.publicJobByNo('TDJ0392'))!.stepLabel, expired);
+      assert.equal((await tracking.publicJobByNo('TDJ0393'))!.stepLabel, 'รอคำตอบจากคุณ (ใบเสนอราคา)', 'still valid');
+      const { active } = await tracking.listJobsForCustomers([9281]);
+      const label = (no: string) => active.find((r) => r.no === no)?.stepLabel;
+      assert.deepEqual([label('TDJ0392'), label('TDJ0393')], [expired, 'รอคำตอบจากคุณ (ใบเสนอราคา)']);
+      // the document opened from /track uses the same rule (stamp, no sign-and-return)
+      const q = (await getQuotation('TDQ0392'))!;
+      assert.equal(tracking.quoteExpired(q.statusId, q.date, q.job?.statusId ?? null), true);
+      const fresh = (await getQuotation('TDQ0393'))!;
+      assert.equal(tracking.quoteExpired(fresh.statusId, fresh.date, fresh.job?.statusId ?? null), false);
+    });
+    await test('R3 track: "พร้อมให้มารับที่ศูนย์" (24) stays under กำลังดำเนินการ until collected; a shipped job is history', async () => {
+      const { active, history } = await tracking.listJobsForCustomers([9281]);
+      const row = active.find((r) => r.no === 'TDJ0391');
+      assert.equal(row?.stepLabel, 'พร้อมให้มารับที่ศูนย์');
+      assert.ok(!history.some((r) => r.no === 'TDJ0391'), 'not in ประวัติ');
+      assert.ok(
+        history.some((r) => r.no === 'TDJ0283'),
+        'ส่งคืนแล้ว (พัสดุ) is history',
+      );
+      assert.deepEqual(
+        [
+          tracking.inProgressForCustomer(24, 'Finished'),
+          tracking.inProgressForCustomer(7, 'Finished'),
+          tracking.inProgressForCustomer(8, 'Finished'),
+          tracking.inProgressForCustomer(20, 'Finished'),
+          tracking.inProgressForCustomer(0, 'Cancel'),
+          tracking.inProgressForCustomer(3, 'Pending'),
+        ],
+        [true, true, false, false, false, true],
+      );
+    });
+  }
+  // ── Round 3: sale orders + quotations + customers + stock ──
+  console.log('\nRound 3 — sale orders + quotations + customers + stock');
+  {
+    const { SELF_APPROVE, SELF_APPROVE_SALES, getSaleOrder, pageSaleOrders } =
+      await import('@/server/services/sale-orders');
+    const post = async (u: TestUser, body: Record<string, unknown>) =>
+      json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
+    const so = (u: TestUser, salesId: number, extra: Record<string, unknown> = {}) =>
+      post(u, {
+        customerCode: CUSTOMER,
+        salesId,
+        submit: true,
+        lines: [{ code: P.a.code, qty: 1, price: 100 }],
+        ...extra,
+      });
+    const noOf = (r: { status: number; body: Record<string, unknown> }) => {
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return (r.body.order as { no: string }).no;
+    };
+    const hdOf = async (no: string) =>
+      (
+        await db.execute<{ t: string | null; a: string | null; c: number; s: number }>(
+          sql`SELECT payment_type AS t, payment_amount AS a, document_create_by AS c, sale_out_by AS s
+              FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
+        )
+      ).rows[0];
+    const fieldKeys = (r: { body: Record<string, unknown> }) =>
+      Object.keys((r.body.details as { fields?: object })?.fields ?? {});
+
+    await test('R3 SO: no payment entered → no type / amount saved; more than the total → 400 under paymentAmount (new, and an edit that lowers the qty)', async () => {
+      const none = await hdOf(noOf(await so(U.admin, U.admin.id)));
+      assert.deepEqual([none.t ?? '', none.a], ['', null], 'was โอนเงิน + the net');
+      // 3 × 100 paid 300 → the manager lowers it to 1: the 300 must not stay on a 100 order
+      const paid = noOf(
+        await so(U.admin, U.admin.id, {
+          lines: [{ code: P.a.code, qty: 3, price: 100 }],
+          paymentType: 'โอนเงิน',
+          paymentAmount: '300',
+        }),
+      );
+      assert.deepEqual({ ...(await hdOf(paid)) }.a, '300.00');
+      const lowered = await so(U.admin, U.admin.id, { no: paid, paymentType: 'โอนเงิน', paymentAmount: '300' });
+      assert.deepEqual([lowered.status, fieldKeys(lowered)], [400, ['paymentAmount']]);
+      assert.equal((await hdOf(paid)).a, '300.00', 'nothing saved');
+      // no price sent (the server takes the product's 100) — the server's own check
+      const noPrice = await post(U.admin, {
+        customerCode: CUSTOMER,
+        salesId: U.admin.id,
+        lines: [{ code: P.a.code, qty: 1 }],
+        paymentType: 'เงินสด',
+        paymentAmount: 9_999_999, // more than any product's price
+      });
+      assert.deepEqual([noPrice.status, fieldKeys(noPrice)], [400, ['paymentAmount']]);
+      // an amount needs its payment type
+      const noType = await so(U.admin, U.admin.id, { paymentAmount: '100' });
+      assert.deepEqual([noType.status, fieldKeys(noType)], [400, ['paymentType']]);
+      assert.equal(
+        (await so(U.admin, U.admin.id, { no: paid, paymentType: 'โอนเงิน', paymentAmount: '100' })).status,
+        200,
+      );
+    });
+
+    await test('R3 SO: document_create_by = who keyed it in, sale_out_by = the salesperson; shown apart; self-approval says which', async () => {
+      const bySeller = noOf(await so(U.seller, U.admin.id)); // CS keys in an order for another salesperson
+      assert.deepEqual({ ...(await hdOf(bySeller)) }, { t: '', a: null, c: U.seller.id, s: U.admin.id });
+      const o = (await getSaleOrder(bySeller))!;
+      assert.deepEqual([o.createdById, o.createdBy, o.sales], [U.seller.id, 'TD td-seller', 'TD td-admin']);
+      const approve = async (u: TestUser, no: string) =>
+        json(
+          await soApprovePOST(
+            await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body: { decision: 'approve' } }),
+            { params: Promise.resolve({ no }) },
+          ),
+        );
+      assert.deepEqual([(await approve(U.seller, bySeller)).body.error], [SELF_APPROVE]);
+      const forSeller = noOf(await so(U.admin, U.seller.id));
+      const r = await approve(U.seller, forSeller);
+      assert.deepEqual([r.status, r.body.error], [403, SELF_APPROVE_SALES]);
+      // an edit by someone else keeps who keyed it in; the salesperson changes
+      assert.equal((await so(U.admin, U.seller.id, { no: bySeller })).status, 200);
+      assert.deepEqual([(await hdOf(bySeller)).c, (await hdOf(bySeller)).s], [U.seller.id, U.seller.id]);
+    });
+
+    await test('R3 SO: a waiting order names the roles that may approve (Sale Order edit); a draft none; 3 reads ส่งกลับแก้ไข (+ its filter)', async () => {
+      await pool.query(`
+        INSERT INTO approve_status (approve_status_id, approve_name_th)
+          SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ'), (2, 'รออนุมัติ'), (3, 'แก้ไขข้อมูล'), (4, 'อนุมัติแล้ว'), (5, 'ปฏิเสธ')) v(id, name)
+           WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id)`);
+      const waiting = (await getSaleOrder(noOf(await so(U.admin, U.admin.id))))!;
+      assert.ok(waiting.approverRoles.includes('TD Seller'), waiting.approverRoles.join());
+      assert.ok(!waiting.approverRoles.includes('TD Job Clerk'), 'Job Management only');
+      assert.ok(!waiting.approverRoles.includes('System Admin'), 'always may — not listed');
+      const draft = (await getSaleOrder(noOf(await so(U.admin, U.admin.id, { submit: false }))))!;
+      assert.deepEqual(draft.approverRoles, []);
+      const back = noOf(await so(U.admin, U.admin.id));
+      const r = await json(
+        await soApprovePOST(
+          await request(`/api/sale-orders/${back}/approve`, U.seller, {
+            method: 'POST',
+            body: { decision: 'reject', remark: 'TD fix' },
+          }),
+          { params: Promise.resolve({ no: back }) },
+        ),
+      );
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal((await getSaleOrder(back))!.approve, 'ส่งกลับแก้ไข');
+      const page = await pageSaleOrders({ page: 1, pageSize: 25, q: back, f: {} }, { approve: 'ส่งกลับแก้ไข' });
+      assert.deepEqual(
+        page.rows.map((x) => [x.no, x.approve]),
+        [[back, 'ส่งกลับแก้ไข']],
+      );
+    });
+
+    await test("R3 stock: จ่ายออกอื่นๆ search finds a part by its English / Chinese name (the pickers' word search)", async () => {
+      const { productsChanged, listProductsLite } = await import('@/server/services/stock');
+      const { matchProducts } = await import('@/lib/product-match');
+      await db.execute(sql`UPDATE product SET product_name_en = 'TD Brushroll window assembly', product_name_cn = 'TD滚刷窗组件',
+      record_status = 'ACTIVE' WHERE product_code = ${P.a.code}`);
+      productsChanged();
+      const rows = await listProductsLite(); // what the pick page loads (useProducts)
+      const codes = (q: string) => matchProducts(rows, q, Infinity).map((p) => p.sysCode);
+      assert.ok(codes('brushroll window').includes(P.a.code), 'EN');
+      assert.ok(codes('滚刷窗').includes(P.a.code), 'CN');
+      assert.ok(!codes('brushroll nothing-like-this').includes(P.a.code));
+    });
+
+    await test('R3 customers: "+66 2000 0000" finds "02-000-0000" (search box, phone filter, the picker lookup)', async () => {
+      const { listCustomers } = await import('@/server/services/customers');
+      const { GET: lookupGET } = await import('@/app/api/customers/lookup/route');
+      const hit = async (o: Parameters<typeof listCustomers>[0]) =>
+        (await listCustomers(o)).some((c) => c.code === CUSTOMER);
+      assert.ok(await hit({ q: '+6620000000' }), 'search box');
+      assert.ok(await hit({ q: '+66 2000 0000' }), 'search box, spaced');
+      assert.ok(await hit({ filters: { phone: '6620000000' } }), 'phone filter');
+      const r = await json(
+        await lookupGET(await request(`/api/customers/lookup?q=${encodeURIComponent('+6620000000')}`, U.admin)),
+      );
+      assert.ok(
+        (r.body.rows as { code: string }[]).some((c) => c.code === CUSTOMER),
+        'customer picker',
+      );
+    });
+  }
+  // ── Round 3: app shell + admin ──
+  console.log('\nRound 3 — app shell + admin');
+  {
+    const { GET: meGET } = await import('@/app/api/sso/me/route');
+    const { canViewPath } = await import('@/lib/modules');
+    const { upsertUser, setUserDeleted } = await import('@/server/services/users');
+    const { saveSimple, saveModel } = await import('@/server/services/masters');
+    await test('R3 shell: /api/sso/me marks who used this browser (os_seen = user id); a signed-out browser gets signedOut, an expired one does not', async () => {
+      const ok = await meGET(await request('/api/sso/me', U.admin));
+      assert.equal(ok.status, 200);
+      assert.equal(ok.cookies.get('os_seen')?.value, String(U.admin.id));
+      // ออกจากระบบ cleared both cookies → the other open tabs go to /login?bye=1, no `next`
+      const out = await json(await meGET(await request('/api/sso/me', null)));
+      assert.deepEqual([out.status, out.body.signedOut], [401, true]);
+      // idle expiry: the session cookie is gone but os_seen stays → the "expired" flow (back to this page)
+      const expired = await json(
+        await meGET(await request('/api/sso/me', null, { headers: { cookie: `os_seen=${U.admin.id}` } })),
+      );
+      assert.deepEqual([expired.status, expired.body.signedOut], [401, undefined]);
+    });
+    await test("R3 shell: a create page (…/new) needs the module's add, not only view; edit / list pages stay view", async () => {
+      const viewOnly = {
+        'Job Management': { add: false, edit: true, del: false, view: true },
+        Quotation: { add: false, edit: false, del: false, view: true },
+        'Sale Order': { add: false, edit: false, del: false, view: true },
+      };
+      for (const p of ['/jobs/new', '/quotation/new', '/sale/orders/new'])
+        assert.equal(canViewPath(false, viewOnly, p), false, p);
+      for (const p of ['/jobs/list', '/jobs/edit', '/quotation/edit', '/sale/orders', '/sale/orders/edit'])
+        assert.equal(canViewPath(false, viewOnly, p), true, p);
+      const adder = { 'Job Management': { add: true, edit: false, del: false, view: true } };
+      assert.equal(canViewPath(false, adder, '/jobs/new'), true);
+      assert.equal(
+        canViewPath(false, { 'Job Management': { ...adder['Job Management'], view: false } }, '/jobs/new'),
+        false,
+      );
+      assert.equal(canViewPath(true, {}, '/jobs/new'), true, 'admin');
+    });
+    await test('R3 masters: a duplicate name names the existing row and its state, under the field (brands / models / colors)', async () => {
+      // by hand (max + 1): other fixtures insert manufacturer ids directly, the identity sequence lags behind
+      const [brand] = (
+        await db.execute<{
+          id: number;
+        }>(sql`INSERT INTO manufacturer (manufacturer_id, manufacturer_name, record_status, is_active)
+          VALUES ((SELECT coalesce(max(manufacturer_id), 0) + 1 FROM manufacturer), 'TD Trail Brand R3', 'INACTIVE', false)
+          RETURNING manufacturer_id AS id`)
+      ).rows;
+      const b = await fieldsOf(saveSimple('manufacturers', { name: 'td trail brand  r3' }, U.admin.id));
+      assert.equal(b.status, 409);
+      assert.equal(b.message, `มีชื่อนี้อยู่แล้ว: "TD Trail Brand R3" (รหัส ${brand!.id} · Inactive)`);
+      assert.deepEqual(b.fields, { name: b.message });
+      const color = await saveSimple('colors', { name: 'TD J R3 Teal' }, U.admin.id); // 'TD J%' rows are reset above
+      await setSimpleStatus('colors', Number(color.id), 'DELETED', U.admin.id);
+      const c = await fieldsOf(saveSimple('colors', { name: 'td j r3 TEAL' }, U.admin.id));
+      assert.deepEqual(c.fields, { name: `มีชื่อนี้อยู่แล้ว: "TD J R3 Teal" (รหัส ${color.id} · อยู่ในรายการที่ลบ)` });
+      const m = await saveModel({ name: 'TD J R3 Model', brand: 'TD J Brand', price: 0 }, U.admin.id);
+      const d = await fieldsOf(saveModel({ name: 'td j r3 model', brand: 'TD J Brand', price: 0 }, U.admin.id));
+      assert.deepEqual(d.fields, { name: `มีชื่อนี้อยู่แล้ว: "TD J R3 Model" (รหัส ${m.code})` });
+    });
+    await test('R3 admin users: restoring a deleted user brings them back INACTIVE (revoked stays revoked); restore of a live user → 409', async () => {
+      const id = U.inactive.id; // a fixture already revoked (INACTIVE) — the case that came back ACTIVE
+      const row = async () =>
+        (
+          await db.execute<{ rs: string; act: boolean; del: boolean }>(
+            sql`SELECT record_status AS rs, is_active AS act, deleted AS del FROM app_user WHERE user_id = ${id}`,
+          )
+        ).rows[0];
+      await setUserDeleted(id, true, U.admin.id);
+      await setUserDeleted(id, false, U.admin.id);
+      assert.deepEqual(await row(), { rs: 'INACTIVE', act: false, del: false });
+      const [line] = (
+        await db.execute<{ s: string }>(
+          sql`SELECT summary AS s FROM audit_log WHERE entity = 'app_user' AND entity_key = ${String(id)} ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows;
+      assert.equal(line?.s, 'กู้คืนผู้ใช้ TD td-inactive (ยังปิดการใช้งาน)');
+      assert.equal(await statusOf(setUserDeleted(id, false, U.admin.id)), 409, 'not in the deleted list');
+      assert.deepEqual(await row(), { rs: 'INACTIVE', act: false, del: false });
+    });
+    await test('R3 admin users: saving an account with nothing changed (your own included) writes no audit line', async () => {
+      const count = async () =>
+        (
+          await db.execute<{ n: number }>(
+            sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'app_user' AND entity_key = ${String(U.admin.id)}`,
+          )
+        ).rows[0].n;
+      const self = { id: String(U.admin.id), name: 'TD td-admin', role: 'System Admin', status: 'Active' };
+      await upsertUser(self, U.admin.id); // the fixture row → this form's values (may write one line)
+      const before = await count();
+      await upsertUser(self, U.admin.id);
+      await upsertUser(self, U.admin.id);
+      assert.equal(await count(), before);
+      await upsertUser({ ...self, name: 'TD td-admin2' }, U.admin.id);
+      assert.equal(await count(), before + 1, 'a real change is still audited');
+      await upsertUser(self, U.admin.id);
+    });
+  }
+  // ── Round 3: jobs ──
+  console.log('\nRound 3 — jobs (closed-job status / เสนอ-only parts / out-source receive / close / export / phone)');
+  {
+    const { saveSwapRefund, markPartsIssued, listJobs } = await import('@/server/services/jobs');
+    const { REOPEN_ADMIN_ONLY, returnDetailOf } = await import('@/lib/validation/job');
+    const { exportXlsx } = await import('@/server/export');
+    const ExcelJS = (await import('exceljs')).default;
+    const job = (no: string, status: number, customer = `${CUSTOMER} ลูกค้า ทดสอบโดเมน`) =>
+      `('${no}', ${status}, 9001, '${customer}', 'Model TD', now(), current_date, '1900-01-01')`;
+    const part = (no: string, pick: boolean) =>
+      `('${no}', '${P.a.code}', '', 1, true, ${pick}, 1, 1, now(), ${U.admin.id}, 0, 0)`;
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+        VALUES ${job('TDJ0401', 20)}, ${job('TDJ0402', 3)}, ${job('TDJ0403', 2)}, ${job('TDJ0404', 5)}, ${job('TDJ0405', 20)},
+               ${job('TDJ0406', 2, `${CUSTOMER} ลูกค้า R3 โทร 089-999-3466`)};
+      INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
+        VALUES ${part('TDJ0402', true)}, ${part('TDJ0402', false)};
+      UPDATE job SET service_cost = 1300, spare_part_total_cost = 0, job_total_cost = 1300, deposit_cost = 300,
+                     job_payment_type = 'เงินสด', job_payment_amount = 500 WHERE job_no = 'TDJ0405';`);
+    await test('R3 jobs: a closed job re-saved with its own status stays closed; an open status → 409 (not System Admin); admin may', async () => {
+      const [s20, s5, s2] = [await statusName(20), await statusName(5), await statusName(2)];
+      // what /jobs/repair now sends for a closed job: its current status, unchanged
+      const same = await fieldsOf(saveRepair('TDJ0401', { status: s20, repairDetail: 'TD R3 note' }, U.clerk.id));
+      assert.equal(same.status, 200, JSON.stringify(same));
+      assert.deepEqual([(await jobRow('TDJ0401')).s, await logRows('TDJ0401')], [20, []]);
+      // picking an open status by mistake: refused on every path (setStatus), nothing written
+      const repair = await fieldsOf(saveRepair('TDJ0401', { status: s5, repairDetail: 'TD R3 x' }, U.clerk.id));
+      assert.deepEqual([repair.status, repair.fields], [409, { status: REOPEN_ADMIN_ONLY }]);
+      const swap = await fieldsOf(saveSwapRefund('TDJ0401', { status: s2, newSerial: 'TDR3SERIAL' }, U.clerk.id));
+      assert.equal(swap.status, 409);
+      const s14 = await statusName(14);
+      const out = await fieldsOf(
+        saveOutsource('TDJ0401', { send: { to: 'TD Vendor R3', date: '2026-10-10' }, status: s14 }, U.clerk.id),
+      );
+      assert.equal(out.status, 409, 'out-source sent (14)');
+      assert.deepEqual([(await jobRow('TDJ0401')).s, await logRows('TDJ0401')], [20, []]);
+      assert.equal((await getJob('TDJ0401'))!.repairDetail, 'TD R3 note');
+      // System Admin re-opens on purpose
+      assert.equal((await fieldsOf(saveRepair('TDJ0401', { status: s5 }, U.admin.id))).status, 200);
+      assert.deepEqual([(await jobRow('TDJ0401')).s, await logRows('TDJ0401')], [5, [5]]);
+    });
+    await test('R3 jobs: stock issues every เบิก line → เบิกจ่ายอะไหล่ครบแล้ว (10), a เสนอ-only line does not hold it at 3', async () => {
+      await setStock(P.a.code, 10);
+      const [log] = (
+        await db.execute<{ id: number }>(
+          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0402' AND is_special`,
+        )
+      ).rows;
+      await issueForJob({ jobNo: 'TDJ0402', lines: [{ logId: log.id, qty: 1 }] }, U.admin.id);
+      await markPartsIssued('TDJ0402', U.admin.id); // what POST /api/stock/issue calls next
+      assert.equal((await jobRow('TDJ0402')).s, 10);
+      assert.deepEqual(await logRows('TDJ0402'), [10]);
+    });
+    await test('R3 jobs: out-source already back — saving again with a new หมายเหตุการรับคืน stores it (one row, still 15)', async () => {
+      const [s14, s15] = [await statusName(14), await statusName(15)];
+      const send = { to: 'TD Vendor R3', date: '2026-10-10' };
+      await saveOutsource('TDJ0403', { send, status: s14 }, U.admin.id);
+      const receive = { from: send.to, date: '2026-10-12', detail: 'TD first note', by: U.admin.id };
+      await saveOutsource('TDJ0403', { receive, status: s15 }, U.admin.id);
+      // what the page sends once the row is back: the send block + the receive block (its note edited)
+      const r = await fieldsOf(
+        saveOutsource('TDJ0403', { send, receive: { ...receive, detail: 'TD edited note' }, status: s15 }, U.admin.id),
+      );
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const rows = (
+        await db.execute<{ st: string; d: string; vendor: string }>(
+          sql`SELECT send_status AS st, receive_detail AS d, send_to_name AS vendor FROM job_send_forward_dt WHERE job_no = 'TDJ0403'`,
+        )
+      ).rows;
+      assert.deepEqual(rows, [{ st: 'รับเครื่องซ่อมแล้ว', d: 'TD edited note', vendor: send.to }]);
+      assert.equal((await jobRow('TDJ0403')).s, 15);
+    });
+    await test('R3 jobs: close — a return note starting with a longer carrier name ("ไปรษณีย์ไทย · …") is not prefixed again', async () => {
+      assert.equal(returnDetailOf('ไปรษณีย์', 'ไปรษณีย์ไทย · ฝากหน้าบ้าน'), 'ไปรษณีย์ไทย · ฝากหน้าบ้าน');
+      assert.equal(returnDetailOf('Flash', 'ฝากหน้าบ้าน'), 'Flash · ฝากหน้าบ้าน');
+      const ret = { type: 'บริษัทขนส่งเอกชน', date: '2026-10-15', courier: 'ไปรษณีย์', detail: 'ไปรษณีย์ไทย · TD R3' };
+      for (let n = 0; n < 2; n++) await closeJob('TDJ0404', { status: await statusName(20), return: ret }, U.admin.id);
+      assert.equal((await getJob('TDJ0404'))!.return.detail, 'ไปรษณีย์ไทย · TD R3');
+    });
+    await test('R3 jobs: the job list Excel has มัดจำ and ค้างชำระ (1,300 − deposit 300 − paid 500 = 500)', async () => {
+      const { buffer } = await exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs');
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+      const ws = wb.worksheets[0]!;
+      const [head, row] = [1, 2].map((n) => (ws.getRow(n).values as unknown[]).slice(1));
+      assert.equal(row[head.indexOf('เลขที่งาน')], 'TDJ0405');
+      assert.deepEqual([row[head.indexOf('มัดจำ')], row[head.indexOf('ค้างชำระ')]], [300, 500]);
+    });
+    await test('R3 jobs: a phone typed as +66… finds "089-999-3466" (search box and phone filter)', async () => {
+      const found = async (f: Parameters<typeof listJobs>[0]) => (await listJobs(f)).some((j) => j.no === 'TDJ0406');
+      assert.ok(await found({ q: '+66899993466' }), 'search +66');
+      assert.ok(await found({ q: '+66 89 999 3466' }), 'search with spaces');
+      assert.ok(await found({ phone: '+66899993466' }), 'phone filter');
+      assert.ok(await found({ q: '0899993466' }), 'the 0 form still works');
+      assert.ok(!(await found({ q: '+66899993467' })), 'another number');
     });
   }
 } finally {

@@ -5,53 +5,15 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { ChevronsUpDown, Package, Search, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
 import { Badge } from '@/components/ui/badge';
-import { type Product } from '@/data/mock';
+import { MAX_ROWS, matchProducts, type PickableProduct } from '@/lib/product-match';
 import { baht, cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
-
-/** The fields the picker needs — `useProducts()` (lite rows) already carries them. */
-export type PickableProduct = Pick<
-  Product,
-  'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'brand' | 'category'
->;
 
 /** Non-stock lines a form may offer (e.g. SVD0001 ค่าขนส่ง) — pinned above the search results. */
 export type ExtraItem = { code: string; name: string; price?: number };
 
 /** What `onPick` hands back — `product` is set for stock items, absent for extras. */
 export type PickedItem<T extends PickableProduct> = { code: string; name: string; price?: number; product?: T };
-
-const MAX_ROWS = 60;
-
-/**
- * Word search over code / vendor part no / name (TH/EN/CN) / brand / category: every typed
- * word must appear somewhere (any order), exact code or part-no matches first,
- * then code prefix, then name prefix, then the rest in code order.
- */
-export function matchProducts<T extends PickableProduct>(products: T[], q: string, limit = MAX_ROWS): T[] {
-  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return products.slice(0, limit);
-  const full = words.join(' ');
-  const scored: { p: T; s: number }[] = [];
-  for (const p of products) {
-    const code = p.sysCode.toLowerCase();
-    const mfg = (p.mfgCode ?? '').toLowerCase();
-    const name = p.name.toLowerCase();
-    const hay = `${code} ${mfg} ${name} ${(p.nameEn ?? '').toLowerCase()} ${(p.nameCn ?? '').toLowerCase()} ${(p.brand ?? '').toLowerCase()} ${(p.category ?? '').toLowerCase()}`;
-    if (!words.every((w) => hay.includes(w))) continue;
-    const s =
-      code === full || mfg === full
-        ? 0
-        : code.startsWith(full) || mfg.startsWith(full)
-          ? 1
-          : name.startsWith(full)
-            ? 2
-            : 3;
-    scored.push({ p, s });
-  }
-  scored.sort((a, b) => a.s - b.s);
-  return scored.slice(0, limit).map((x) => x.p);
-}
 
 export function ProductPicker<T extends PickableProduct>({
   products,

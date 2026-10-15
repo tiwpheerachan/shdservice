@@ -5,6 +5,7 @@ import { History, ChevronDown, ChevronUp } from 'lucide-react';
 import { Section } from './section';
 import { Badge, type Tone } from '@/components/ui/badge';
 import type { JobDetail } from '@/lib/use-job';
+import { JOB_COLUMN_LABEL } from '@/lib/validation/job';
 
 const ACTION: Record<string, { label: string; tone: Tone }> = {
   CREATE: { label: 'เปิดงาน', tone: 'success' },
@@ -17,8 +18,17 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
 };
 
+/** a value as people read it: empty / the legacy 1900-01-01 "no date" → —, yes/no in Thai */
 const fmt = (v: unknown) =>
-  v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  v === null || v === undefined || v === '' || String(v).startsWith('1900-01-01')
+    ? '—'
+    : typeof v === 'boolean'
+      ? v
+        ? 'ใช่'
+        : 'ไม่ใช่'
+      : typeof v === 'object'
+        ? JSON.stringify(v)
+        : String(v);
 
 /**
  * ประวัติการแก้ไขของงาน — audit_log rows for this job (who / when / what changed),
@@ -74,7 +84,7 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
                 <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-md bg-muted/40 p-3 text-xs sm:grid-cols-2">
                   {Object.entries(r.changes).map(([k, [a, b]]) => (
                     <div key={k} className="flex flex-wrap gap-1">
-                      <dt className="num font-medium">{k}:</dt>
+                      <dt className="font-medium">{JOB_COLUMN_LABEL[k] ?? k}:</dt>
                       <dd className="text-muted-foreground line-through">{fmt(a)}</dd>
                       <dd>→ {fmt(b)}</dd>
                     </div>

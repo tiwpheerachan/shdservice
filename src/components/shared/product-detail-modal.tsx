@@ -113,6 +113,7 @@ export function ProductDetailModal({
   const [image, setImage] = React.useState('');
   const [brokenImage, setBrokenImage] = React.useState(''); // the file that failed to load → placeholder
   const [modelQ, setModelQ] = React.useState('');
+  const [allBrands, setAllBrands] = React.useState(false); // รุ่นสินค้า: only the chosen ยี่ห้อ's models unless ticked
   const [uploading, setUploading] = React.useState(false);
 
   // รูปอะไหล่ → bucket oneservice/products/{code}/… แล้วเก็บชื่อไฟล์ใน product.pictrue_file_name
@@ -147,6 +148,7 @@ export function ProductDetailModal({
     setSeenSession(session);
     fe.setErrors({});
     setModelQ('');
+    setAllBrands(false);
     if (mode === 'add' || !code) {
       setImage('');
       // ยี่ห้อ starts empty: defaulting to the first one (70mai) saved parts under the wrong brand
@@ -216,7 +218,9 @@ export function ProductDetailModal({
   if (!product && mode !== 'add') return null;
   const p: Product = detail ?? product ?? NEW_PRODUCT;
 
-  // รุ่นสินค้า (~1,200): view = only this part's models; edit = ticked ones first, then what the search finds
+  // รุ่นสินค้า (~1,200): view = only this part's models; edit = ticked ones first, then what the search
+  // finds — of the chosen ยี่ห้อ only, unless "แสดงทุกยี่ห้อ" is ticked
+  const brandOnly = !allBrands && !!form.brand.trim();
   const nameOf = new Map(MODELS.map((m) => [m.code, m]));
   const words = modelQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const modelRows = ro
@@ -226,6 +230,7 @@ export function ProductDetailModal({
         ...MODELS.filter(
           (m) =>
             !form.models.includes(m.code) &&
+            (!brandOnly || m.brand.trim().toLowerCase() === form.brand.trim().toLowerCase()) &&
             words.every((w) => `${m.code} ${m.name} ${m.brand}`.toLowerCase().includes(w)),
         ),
       ];
@@ -461,6 +466,12 @@ export function ProductDetailModal({
                 onChange={(e) => setModelQ(e.target.value)}
                 className="h-8 max-w-sm"
               />
+              {form.brand.trim() && (
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
+                  <Checkbox checked={allBrands} onChange={() => setAllBrands((x) => !x)} />
+                  แสดงทุกยี่ห้อ
+                </label>
+              )}
             </div>
           )}
           <div className="grid max-h-72 grid-cols-1 gap-x-4 gap-y-2 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -496,7 +507,9 @@ export function ProductDetailModal({
                   ? 'ยังไม่ได้ระบุรุ่นสินค้า'
                   : MODELS.length === 0
                     ? 'ไม่มีข้อมูลรุ่นสินค้า'
-                    : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
+                    : brandOnly
+                      ? `ไม่พบรุ่นของยี่ห้อ ${form.brand}${modelQ.trim() ? ` ที่ตรงกับ "${modelQ.trim()}"` : ''} — ติ๊ก แสดงทุกยี่ห้อ`
+                      : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
               </span>
             )}
           </div>

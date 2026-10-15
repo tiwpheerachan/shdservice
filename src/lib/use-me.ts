@@ -4,7 +4,14 @@ import * as React from 'react';
 import useSWR from 'swr';
 
 export type Me = { name: string; email: string; avatar?: string };
-type MeResponse = { user: Me | null; exp?: number; approved?: boolean; unauthorized?: boolean };
+type MeResponse = {
+  user: Me | null;
+  exp?: number;
+  approved?: boolean;
+  unauthorized?: boolean;
+  /** 401 because this browser signed out (ออกจากระบบ in another tab), not an expiry */
+  signedOut?: boolean;
+};
 
 export const ME_KEY = '/api/sso/me';
 
@@ -14,7 +21,10 @@ export const ME_KEY = '/api/sso/me';
  */
 async function fetchMe(url: string): Promise<MeResponse> {
   const r = await fetch(url, { cache: 'no-store' });
-  if (r.status === 401) return { user: null, unauthorized: true };
+  if (r.status === 401) {
+    const b = (await r.json().catch(() => null)) as { signedOut?: boolean } | null;
+    return { user: null, unauthorized: true, signedOut: !!b?.signedOut };
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as MeResponse;
 }
@@ -41,6 +51,7 @@ export function useMe(opts: { poll?: number } = {}) {
     /** undefined until known */
     approved: data?.approved,
     unauthorized: !!data?.unauthorized,
+    signedOut: !!data?.signedOut,
     refresh,
   };
 }

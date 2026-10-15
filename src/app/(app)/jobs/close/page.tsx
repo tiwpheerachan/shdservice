@@ -139,9 +139,10 @@ function CloseForm() {
       payDetail: job.payment.detail,
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
-      courier:
-        SHIPPERS.find((c) => job.return.detail.includes(c)) ??
-        (job.return.detail.includes(' · ') ? (job.return.detail.split(' · ')[0] ?? '') : ''),
+      // saved as "<courier> · <note>": its own head first ("ไปรษณีย์ไทย · …" is not the shorter "ไปรษณีย์")
+      courier: job.return.detail.includes(' · ')
+        ? (job.return.detail.split(' · ')[0] ?? '')
+        : (SHIPPERS.find((c) => job.return.detail.includes(c)) ?? ''),
       shipperId: job.return.shipperId ?? 0,
       tracking: job.return.tracking,
       returnDetail: job.return.detail,
@@ -342,7 +343,7 @@ function CloseForm() {
                 </ul>
               </div>
               <FieldGrid cols={2}>
-                <Field label="วิธีการชำระเงิน" required error={act.errors['payment.type']} hint={lock}>
+                <Field label="วิธีการชำระเงิน" required={bal.due > 0} error={act.errors['payment.type']} hint={lock}>
                   <Select
                     value={d.payType}
                     disabled={!!lock}
@@ -450,6 +451,10 @@ function CloseForm() {
                 }}
               >
                 <option value="">- - เลือก - -</option>
+                {/* a profile deleted since (hidden from the list): the job keeps it */}
+                {d.shipperId > 0 && !SHIPPING.some((p) => p.id === d.shipperId) && (
+                  <option value={d.shipperId}>{d.courier || `#${d.shipperId}`} (ค่าเดิม)</option>
+                )}
                 {SHIPPING.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.nameTh}

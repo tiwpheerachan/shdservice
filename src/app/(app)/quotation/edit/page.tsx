@@ -33,7 +33,10 @@ function EditQuotation() {
     pick: (d: { quotation: QuotationLoaded }) => d.quotation,
     initial: initialNo,
     onRecord: () => setVersion((v) => v + 1),
-    onLoaded: (d) => push({ kind: 'success', title: 'เรียกข้อมูลใบเสนอราคาสำเร็จ', desc: d.no }),
+    onLoaded: (d) => {
+      push({ kind: 'success', title: 'เรียกข้อมูลใบเสนอราคาสำเร็จ', desc: d.no });
+      window.history.replaceState(null, '', `?no=${encodeURIComponent(d.no)}`); // a refresh keeps this one
+    },
     onMissing: (n) => push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: n }),
   });
   const no = loaded?.no ?? '';

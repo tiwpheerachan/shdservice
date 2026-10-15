@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Plus, Trash2, Wrench, Stethoscope } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { JobSearch } from '@/components/shared/job-search';
+import { JobHistorySection } from '@/components/shared/job-history';
 import { Section } from '@/components/shared/section';
 import {
   CustomerSection,
@@ -21,7 +22,7 @@ import {
   useMoneyLock,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type Tone } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea, Checkbox, NumberInput } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
@@ -36,10 +37,12 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg } from '@/lib/api';
-import { partsNotIssuedMsg, repairActionSchema } from '@/lib/validation/job';
+import { partsNotIssuedMsg, repairActionSchema, REOPEN_ADMIN_ONLY } from '@/lib/validation/job';
 
 /** ซ่อมเสร็จ / ซ่อมเสร็จ (ชำระเงินแล้ว) — refused while a part requested from stock is not issued (setStatus) */
 const REPAIRED = ['ซ่อมเสร็จ', 'ซ่อมเสร็จ (ชำระเงินแล้ว)'];
+/** a line not ticked เบิก: priced in the quotation only, stock is not asked for it */
+const QUOTE_ONLY = 'เสนอ (ยังไม่เบิก)';
 
 type Line = {
   id: number;
@@ -97,7 +100,8 @@ function RepairForm() {
         repairDetail: job.repairDetail,
         engineerRemark: job.engineerRemark,
         newSerial: '',
-        status: REPAIR_STATUS_OPTIONS.includes(job.status) ? job.status : '',
+        // the job's own status even when the list does not offer it (closed, out-source…): saved unchanged = kept
+        status: job.status,
       },
       lines: job.parts.map((p) => ({
         id: ++idRef.current,
@@ -187,11 +191,38 @@ function RepairForm() {
   const totalA = lines.reduce((s, l) => s + (l.aQuote ? l.price * l.aQty : 0), 0);
   const totalB = lines.reduce((s, l) => s + (l.bQuote ? l.price * l.bQty : 0), 0);
   // the server refuses the change to ซ่อมเสร็จ while these are not issued — say so before saving
-  const notIssued = lines.filter((l) => (l.locked ? l.waiting : l.aPick && l.aQty > 0)).map((l) => l.code);
+  const notIssued = lines.filter((l) => (l.locked ? l.waiting : l.aPick && l.aQty > 0));
   const partsBlock =
     REPAIRED.includes(detail.status) && detail.status !== job?.status && notIssued.length
       ? partsNotIssuedMsg(notIssued)
       : undefined;
+  // a closed job keeps its status (System Admin may re-open it: setStatus); otherwise its own one comes first
+  const statusOptions =
+    lock && job
+      ? [job.status]
+      : job && !REPAIR_STATUS_OPTIONS.includes(job.status)
+        ? [job.status, ...REPAIR_STATUS_OPTIONS]
+        : REPAIR_STATUS_OPTIONS;
+  const statusOf = (l: Line) => (!l.locked && !l.aPick ? QUOTE_ONLY : l.status);
+  const partTone = (st: string): Tone =>
+    st === QUOTE_ONLY
+      ? 'neutral'
+      : /พร้อม|จ่ายแล้ว|คืนแล้ว/.test(st)
+        ? 'success'
+        : /รออะไหล่/.test(st)
+          ? 'danger'
+          : 'warning';
+  const removeLine = (l: Line) =>
+    !l.locked &&
+    !lock && (
+      <button
+        onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+        className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+        aria-label="ลบ"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    );
 
   return (
     <>
@@ -262,7 +293,87 @@ function RepairForm() {
               />
             </div>
           )}
-          <div className="table-scroll rounded-none">
+          {/* phone: one card per line (the 14-column table does not fit) — the same fields, desktop keeps the table */}
+          <ul className="divide-y divide-border md:hidden">
+            {lines.length === 0 && (
+              <li className="px-3 py-8 text-center text-xs text-muted-foreground">
+                ยังไม่มีรายการอะไหล่ — ค้นหาในช่องด้านบนเพื่อเพิ่ม
+              </li>
+            )}
+            {lines.map((l, i) => (
+              <li key={l.id} className="space-y-2 p-3 text-sm">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="num font-medium">
+                      {i + 1}. {l.code}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{l.name}</p>
+                  </div>
+                  <span className="num shrink-0">{baht(l.price)}</span>
+                  {removeLine(l)}
+                </div>
+                {(['a', 'b'] as const).map((k) => {
+                  const pick = k === 'a' ? l.aPick : l.bPick;
+                  const quote = k === 'a' ? l.aQuote : l.bQuote;
+                  const qty = k === 'a' ? l.aQty : l.bQty;
+                  const off = l.locked || !!lock;
+                  const T = k.toUpperCase();
+                  return (
+                    <div key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span className="w-14 text-muted-foreground">แบบ {T}</span>
+                      <label className="inline-flex items-center gap-1">
+                        <Checkbox
+                          aria-label={`เบิก แบบ ${T} ${l.code}`}
+                          checked={pick}
+                          disabled={off}
+                          onChange={() => upd(l.id, k === 'a' ? { aPick: !pick } : { bPick: !pick })}
+                        />
+                        เบิก
+                      </label>
+                      <label className="inline-flex items-center gap-1">
+                        <Checkbox
+                          aria-label={`เสนอ แบบ ${T} ${l.code}`}
+                          checked={quote}
+                          disabled={off}
+                          onChange={() => upd(l.id, k === 'a' ? { aQuote: !quote } : { bQuote: !quote })}
+                        />
+                        เสนอ
+                      </label>
+                      <NumberInput
+                        min={0}
+                        max={1000}
+                        placeholder="0"
+                        aria-label={`จำนวน แบบ ${T} ${l.code}`}
+                        value={qty}
+                        disabled={off}
+                        aria-invalid={!!act.errors[`parts.${i}.${k}.qty`] || undefined}
+                        onChange={(n) => {
+                          upd(l.id, k === 'a' ? { aQty: n } : { bQty: n });
+                          act.clear(`parts.${i}.${k}.qty`);
+                        }}
+                        className="h-8 w-16 px-1.5 text-xs"
+                      />
+                      <span className="num ml-auto">{baht(quote ? l.price * qty : 0)}</span>
+                    </div>
+                  );
+                })}
+                <Badge tone={partTone(statusOf(l))} dot>
+                  {statusOf(l)}
+                </Badge>
+              </li>
+            ))}
+            {lines.length > 0 && (
+              <li className="flex justify-between bg-muted/50 px-3 py-2 text-xs font-semibold">
+                <span>
+                  รวมแบบ A <span className="num text-primary">{baht(totalA)}</span>
+                </span>
+                <span>
+                  รวมแบบ B <span className="num text-primary">{baht(totalB)}</span>
+                </span>
+              </li>
+            )}
+          </ul>
+          <div className="table-scroll hidden rounded-none md:block">
             <table className="w-full min-w-[1080px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -388,30 +499,11 @@ function RepairForm() {
                       <td className="num px-2 py-2 text-right">{baht(l.bQuote ? l.price * l.bQty : 0)}</td>
 
                       <td className="px-2 py-2">
-                        <Badge
-                          tone={
-                            /พร้อม|จ่ายแล้ว|คืนแล้ว/.test(l.status)
-                              ? 'success'
-                              : /รออะไหล่/.test(l.status)
-                                ? 'danger'
-                                : 'warning'
-                          }
-                          dot
-                        >
-                          {l.status}
+                        <Badge tone={partTone(statusOf(l))} dot>
+                          {statusOf(l)}
                         </Badge>
                       </td>
-                      <td className="px-2 py-2 text-center">
-                        {!l.locked && !lock && (
-                          <button
-                            onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                            aria-label="ลบ"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </td>
+                      <td className="px-2 py-2 text-center">{removeLine(l)}</td>
                     </tr>
                   ))
                 )}
@@ -497,14 +589,19 @@ function RepairForm() {
                 }}
               />
             </Field>
-            <Field label="สถานะงานซ่อม" required error={act.errors.status ?? partsBlock}>
+            <Field
+              label="สถานะงานซ่อม"
+              required
+              error={act.errors.status ?? partsBlock}
+              hint={lock ? REOPEN_ADMIN_ONLY : undefined}
+            >
               <SearchSelect
                 value={detail.status}
                 onChange={(v) => {
                   setDetail((d) => ({ ...d, status: v }));
                   act.clear('status');
                 }}
-                options={strOptions(REPAIR_STATUS_OPTIONS)}
+                options={strOptions(statusOptions)}
                 minWidth={360}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />
@@ -515,6 +612,7 @@ function RepairForm() {
         <CostSummary partsTotal={totalA} action={act} />
         <OtherInfoSection />
         <AttachmentSection jobNo={job?.no} />
+        <JobHistorySection job={job} />
 
         <FormActions
           saveLabel="บันทึกงานซ่อม"

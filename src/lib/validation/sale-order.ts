@@ -5,16 +5,28 @@ import { PAYMENT_METHODS } from '@/data/mock';
 
 export { cleanTracking, trackingField } from './index'; // shared with job reception / return tracking
 
+const num = (v: unknown) => Number(v) || 0;
+
+/** approval refused to the order's own people (System Admin may) — the page says the same */
+export const SELF_APPROVE = 'คุณเป็นผู้สร้างใบสั่งขายนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
+export const SELF_APPROVE_SALES = 'คุณเป็นพนักงานขายของใบนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
+export const overpaidMessage = (total: number) =>
+  `จำนวนเงินที่ชำระมากกว่ายอดรวม (${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท)`;
+
 /**
  * Sale order rules (สร้าง / แก้ไขใบสั่งขาย) — payload = SaleOrderInput (sale-order-form payload()).
  * `prev` = the order being edited (an unchanged legacy payment type / tracking no still passes).
  *  - customer, salesperson (prefilled with the signed-in user) and at least one product line
  *  - qty a whole number 1–1000, prices money (≤ 1,000,000), the paid amount ≤ 10,000,000
  *    (payment_amount numeric(11,2) — 1e9 used to fail the save as a 500)
- *  - payment type from the list; remark ≤ 100 (the column — nothing is cut off silently)
+ *  - payment type from the list; no default type or amount (nothing paid until the user says so);
+ *    an amount needs its type and may not exceed the lines' total + `prev.fee` (the server re-checks the net)
+ *  - remark ≤ 100 (the column — nothing is cut off silently)
  * Line errors are keyed "lines.<row>.qty" / "lines.<row>.price" (row = position on screen).
  */
-export function saleOrderSchema(prev?: { paymentType?: string | null; tracking?: string | null } | null) {
+export function saleOrderSchema(
+  prev?: { paymentType?: string | null; tracking?: string | null; fee?: number | null } | null,
+) {
   return (
     z
       .looseObject({
@@ -54,6 +66,17 @@ export function saleOrderSchema(prev?: { paymentType?: string | null; tracking?:
           ctx.addIssue({ code: 'custom', path: ['salesId'], message: 'ต้องเลือกพนักงานขาย' });
         if (!(v.lines ?? []).some((l) => isFilled(l.code)))
           ctx.addIssue({ code: 'custom', path: ['lines'], message: 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ' });
+        const paid = num(v.paymentAmount);
+        if (paid > 0 && !v.paymentType?.trim())
+          ctx.addIssue({ code: 'custom', path: ['paymentType'], message: 'เลือกวิธีชำระเงิน' });
+        // a line without a price takes the product's price on the server — only the server knows that total
+        const lines = (v.lines ?? []).filter((l) => isFilled(l.code));
+        if (lines.every((l) => l.price != null && l.price !== '')) {
+          const total =
+            lines.reduce((s, l) => s + Math.round(num(l.qty) * num(l.price) * 100) / 100, 0) + num(v.fee ?? prev?.fee);
+          if (paid > Math.round(total * 100) / 100)
+            ctx.addIssue({ code: 'custom', path: ['paymentAmount'], message: overpaidMessage(total) });
+        }
       })
   );
 }

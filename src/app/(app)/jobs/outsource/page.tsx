@@ -115,12 +115,12 @@ function OutsourceForm() {
       sendDate: last?.sendDate || today,
       sendBy: String(last?.sendById || meId),
       sendDetail: last?.sendDetail ?? '',
-      recvFrom: last?.status === 'ส่งเครื่องซ่อมแล้ว' ? last.sendTo : '',
+      recvFrom: last?.sendTo ?? '', // received back from the vendor it was sent to (no column of its own)
       recvDate: last?.receiveDate ?? '',
       recvBy: last?.receiveById ? String(last.receiveById) : '',
       recvDetail: last?.receiveDetail ?? '',
       // the job's current status, so saving without a change keeps it (the field is required)
-      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : '',
+      status: job.status,
     };
     upd(next);
     setSaved(next);
@@ -129,6 +129,9 @@ function OutsourceForm() {
   const go = (v: string) => find(v);
 
   const open = job?.outsource.find((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
+  // already received: saving again sends the receive block too (its note / date / person may be edited) —
+  // a legacy row received without a date is saved as before (send block only)
+  const back = !open && job?.outsource.at(-1)?.status === 'รับเครื่องซ่อมแล้ว' && !!d.recvDate;
 
   // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
@@ -141,13 +144,14 @@ function OutsourceForm() {
       send: !receiving
         ? { to: sendTo, date: d.sendDate, detail: d.sendDetail, by: Number(d.sendBy) || undefined }
         : undefined,
-      receive: receiving
-        ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail, by: Number(d.recvBy || meId) || undefined }
-        : undefined,
+      receive:
+        receiving || back
+          ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail, by: Number(d.recvBy || meId) || undefined }
+          : undefined,
       status: d.status || undefined,
     };
     const canEdit = can('Job Management', 'edit');
-    if (!act.check(receiving ? receiveSchema : outsourceActionSchema, body, canEdit)) return;
+    if (!act.check(receiving || back ? receiveSchema : outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -335,7 +339,7 @@ function OutsourceForm() {
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
                 options={strOptions(
-                  job && !OUTSOURCE_STATUSES.includes(job.status) && JOB_STATUS_OPTIONS.includes(job.status)
+                  job && !OUTSOURCE_STATUSES.includes(job.status)
                     ? [job.status, ...OUTSOURCE_STATUSES]
                     : OUTSOURCE_STATUSES,
                 )}

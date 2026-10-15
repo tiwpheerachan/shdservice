@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, NumberInput } from '@/components/ui/input';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { matchProducts } from '@/lib/product-match';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useProducts, useJobNos, useStaff } from '@/data/db';
 import { STOCK_PICK_TYPES } from '@/data/mock';
@@ -210,8 +211,13 @@ export default function PickPage() {
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
   const term = find.trim().toLowerCase();
-  const shown = term
-    ? lines.filter((l) => l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
+  // the same word search as the product pickers (code / part no / TH-EN-CN name / brand), plus the line's own name
+  const hit = React.useMemo(
+    () => (term ? new Set(matchProducts(PRODUCTS, term, Infinity).map((p) => p.sysCode)) : null),
+    [PRODUCTS, term],
+  );
+  const shown = hit
+    ? lines.filter((l) => hit.has(l.code) || l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
     : lines;
   useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 

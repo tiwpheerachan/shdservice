@@ -18,16 +18,16 @@ import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { saleOrderSchema } from '@/lib/validation/sale-order';
+import { overpaidMessage, saleOrderSchema } from '@/lib/validation/sale-order';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 
-// approve_status.approve_name_th → badge tone (list + edit page)
+// approve status label (approve_name_th; 3 is shown as ส่งกลับแก้ไข) → badge tone (list + edit page)
 export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
   รออนุมัติ: 'warning',
   อนุมัติแล้ว: 'success',
   ปฏิเสธ: 'danger',
-  แก้ไขข้อมูล: 'danger',
+  ส่งกลับแก้ไข: 'danger',
   กำลังดำเนินการจัดทำ: 'info',
 };
 
@@ -39,6 +39,9 @@ export type SaleOrderLoaded = {
   date: string;
   sales: string;
   createdBy: string;
+  createdById?: number;
+  /** a waiting order: the roles that may approve it */
+  approverRoles?: string[];
   approve: string;
   approveId?: number;
   approveRemark?: string;
@@ -49,6 +52,7 @@ export type SaleOrderLoaded = {
   creatorIds?: number[];
   paymentType?: string;
   paymentAmount?: number;
+  fee?: number;
   remark?: string;
   slip: string;
   documentProfileId?: number; // ออกเอกสารในนาม
@@ -135,7 +139,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         : userId && STAFF.some((x) => x.id === userId)
           ? userId
           : 0);
-    const [payment, setPayment] = React.useState(initial?.paymentType || PAYMENT_METHODS[0]);
+    // no default: an order records a payment only when the user enters one
+    const [payment, setPayment] = React.useState(initial?.paymentType ?? '');
     const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : '');
     const [remark, setRemark] = React.useState(initial?.remark ?? '');
     const [slip, setSlip] = React.useState(initial?.slip ?? '');
@@ -196,6 +201,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     };
 
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
+    const net = total + (initial?.fee ?? 0); // the edit keeps the order's fee
+    // the server refuses more than the total — shown as soon as a line change makes it so
+    const overpaid = payAmount !== '' && Number(payAmount) > Math.round(net * 100) / 100;
 
     // a value that changes takes its error away
     const { clear } = fe;
@@ -203,6 +211,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     React.useEffect(() => clear('salesId'), [salesId, clear]);
     React.useEffect(() => clear('lines'), [lines.length, clear]);
     React.useEffect(() => clear('paymentAmount'), [payAmount, clear]);
+    React.useEffect(() => clear('paymentType'), [payment, clear]);
 
     React.useImperativeHandle(ref, () => ({
       uploadPendingSlip: async (no: string) => {
@@ -216,7 +225,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       },
       // an edit keeps a legacy payment type ("ยังไม่ชำระเงิน") it already has
       validate: () =>
-        !fe.report(fe.run(saleOrderSchema(initial ? { paymentType: initial.paymentType } : null), payloadOf())),
+        !fe.report(
+          fe.run(saleOrderSchema(initial ? { paymentType: initial.paymentType, fee: initial.fee } : null), payloadOf()),
+        ),
       fromApi: fe.fromApi,
       payload: () => payloadOf(),
     }));
@@ -409,13 +420,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
           <FieldGrid>
-            <Field
-              label="วิธีการชำระเงิน"
-              required
-              className="lg:col-span-2"
-              group="radiogroup"
-              error={fe.errors.paymentType}
-            >
+            <Field label="วิธีการชำระเงิน" className="lg:col-span-2" group="radiogroup" error={fe.errors.paymentType}>
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
                 {PAYMENT_METHODS.map((p) => (
                   <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -425,14 +430,18 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 ))}
               </div>
             </Field>
-            <Field label="จำนวนเงินที่ชำระ (บาท)" error={fe.errors.paymentAmount}>
+            <Field
+              label="จำนวนเงินที่ชำระ (บาท)"
+              error={fe.errors.paymentAmount || (overpaid ? overpaidMessage(net) : undefined)}
+              hint={`ยอดรวม ${baht(net)} — ใส่เฉพาะยอดที่ลูกค้าชำระแล้ว`}
+            >
               <Input
                 type="number"
                 step="0.01"
                 min={0}
                 max={10_000_000}
                 inputMode="decimal"
-                placeholder={total ? total.toFixed(2) : '0.00'}
+                placeholder="ยังไม่ชำระ"
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}

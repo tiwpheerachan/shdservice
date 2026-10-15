@@ -29,8 +29,8 @@ export type PublicJob = {
   /** UI label of the current status, already softened for customers */
   stepLabel: string;
   cancelled: boolean;
-  /** first time each step was reached (from job_log) */
-  history: { key: TrackStepKey; at: string }[];
+  /** first time each step was reached (from job_log); `label` = what a passed merged step really was ("รออะไหล่") */
+  history: { key: TrackStepKey; at: string; label?: string }[];
   /** filled once the job is closed and shipped back */
   shipper: string;
   trackingNo: string;

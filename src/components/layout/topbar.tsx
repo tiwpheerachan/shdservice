@@ -10,6 +10,7 @@ import { SessionTimer } from './session-timer';
 import { OverdueBell } from './overdue-bell';
 import { cn } from '@/lib/utils';
 import { useMe } from '@/lib/use-me';
+import { startSignOut } from '@/lib/navigation';
 
 export function Topbar({
   onOpenMobile,
@@ -117,9 +118,11 @@ export function Topbar({
           <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ''}</p>
         </div>
         {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
-            /api/sso/logout silently signed the user out after every page load */}
+            /api/sso/logout silently signed the user out after every page load. onClick: the /me poll's
+            401 meanwhile is this sign-out, not an expiry (lib/navigation) */}
         <a
           href="/api/sso/logout"
+          onClick={startSignOut}
           title="ออกจากระบบ"
           className={cn(
             'rounded-md p-2 text-muted-foreground transition-colors',

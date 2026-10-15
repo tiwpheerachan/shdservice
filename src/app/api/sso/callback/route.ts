@@ -1,7 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { clientIp } from '@/lib/client-ip';
-import { SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
-import { signSession, verifySession, SESSION_COOKIE, SESSION_TTL_MS, type SessionUser } from '@/lib/session';
+import { DEFAULT_AFTER_LOGIN, SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
+import {
+  signSession,
+  verifySession,
+  SEEN_COOKIE,
+  SESSION_COOKIE,
+  SESSION_TTL_MS,
+  type SessionUser,
+} from '@/lib/session';
 import { lookupByEmail } from '@/lib/directory';
 import { provisionFailure, provisionSsoUser } from '@/server/services/users';
 import { audit } from '@/server/audit';
@@ -180,7 +187,11 @@ export async function GET(request: NextRequest) {
     sv: sessionVersion,
   };
 
-  const res = NextResponse.redirect(new URL(nextFromState, appOrigin(request)));
+  // os_seen = who last used this browser (set by /api/sso/me): a `next` left by someone else's expired
+  // session is dropped, so a shared PC never opens the previous person's page
+  const seen = request.cookies.get(SEEN_COOKIE)?.value ?? '';
+  const next = /^\d+$/.test(seen) && seen !== String(userId) ? DEFAULT_AFTER_LOGIN : nextFromState;
+  const res = NextResponse.redirect(new URL(next, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.
   // os_state has Max-Age=600 and expires on its own.

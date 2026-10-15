@@ -14,6 +14,7 @@ export type DocOpener = (d: PublicDoc) => Promise<{ url?: string; error?: string
 /** Renders a PublicJob (already masked / whitelisted by the server). */
 export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocOpener }) {
   const reached = new Map(j.history.map((h) => [h.key, h.at]));
+  const passedAs = new Map(j.history.map((h) => [h.key, h.label]));
   const currentIndex = j.step ? TRACK_STEPS.findIndex((s) => s.key === j.step) : -1;
   const docs = onOpenDoc ? j.docs : [];
   const [busy, setBusy] = React.useState('');
@@ -134,9 +135,11 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               const done = i < currentIndex;
               const now = i === currentIndex;
               const at = reached.get(s.key);
-              // the current step says what it really is ("รออะไหล่", "พร้อมให้มารับที่ศูนย์") — the
-              // step's own label / hint merge two meanings, so they show only for the other steps
-              const label = now ? j.stepLabel : s.label;
+              // never waited (no quotation, no parts): a ticked "รอยืนยัน / รออะไหล่" would say it did
+              if (done && s.key === 'waiting' && !reached.has(s.key)) return null;
+              // the current step says what it really is ("รออะไหล่", "พร้อมให้มารับที่ศูนย์"), a passed one what
+              // it was — the step's own label / hint merge two meanings, so they show only for steps not reached yet
+              const label = now ? j.stepLabel : (done && passedAs.get(s.key)) || s.label;
               return (
                 <li key={s.key} className="flex gap-3">
                   <div className="flex flex-col items-center">

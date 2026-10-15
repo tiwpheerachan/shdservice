@@ -95,14 +95,26 @@ function EditJobForm() {
           cancelHref="/jobs/list"
           denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
           extra={
-            <PrintButton
-              label="พิมพ์ใบรับงาน"
-              kind="job"
-              no={job?.no ?? ''}
-              profileId={job?.documentProfileId}
-              href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
-              disabled={!job}
-            />
+            <>
+              <PrintButton
+                label="พิมพ์ใบรับงาน"
+                kind="job"
+                no={job?.no ?? ''}
+                profileId={job?.documentProfileId}
+                href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+                disabled={!job}
+              />
+              {/* a closed job is no longer on the close screen's list: its return note is printed from here */}
+              {job?.statusGroup === 'Finished' && (
+                <PrintButton
+                  label="พิมพ์ใบส่งคืน"
+                  kind="job"
+                  no={job.no}
+                  profileId={job.documentProfileId}
+                  href={`/print/job/${encodeURIComponent(job.no)}/return`}
+                />
+              )}
+            </>
           }
         />
       </RecordGate>

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { Plus, Trash2, FileText, UserRound, Wrench, Calculator } from 'lucide-react';
 import { Section } from './section';
 import { CustomerSelect } from './customer-select';
@@ -352,15 +353,25 @@ export const QuotationForm = React.forwardRef<
             required={mode === 'new' || !!initial?.jobRef?.trim()}
             error={fe.errors.jobNo}
           >
-            <Input
-              className="num"
-              placeholder="J2612164"
-              maxLength={8}
-              value={jobRef}
-              onChange={(e) => setJobRef(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && loadJob(jobRef, lines.length === 0)}
-              onBlur={() => jobRef && jobRef.toUpperCase() !== job?.no && loadJob(jobRef, lines.length === 0)}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                className="num"
+                placeholder="J2612164"
+                maxLength={8}
+                value={jobRef}
+                onChange={(e) => setJobRef(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && loadJob(jobRef, lines.length === 0)}
+                onBlur={() => jobRef && jobRef.toUpperCase() !== job?.no && loadJob(jobRef, lines.length === 0)}
+              />
+              {mode === 'edit' && job?.no && (
+                <Link
+                  href={`/jobs/edit?job=${encodeURIComponent(job.no)}`}
+                  className="shrink-0 text-xs text-primary hover:underline"
+                >
+                  เปิดงาน
+                </Link>
+              )}
+            </div>
           </Field>
           <Field label="สถานะงานซ่อม (ปัจจุบัน)">
             <ReadOnly>

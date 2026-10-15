@@ -231,10 +231,18 @@ export default function UsersPage() {
           <>
             {r.name} ({r.role}) จะเข้าระบบไม่ได้และหายจากรายชื่อพนักงานในทุกฟอร์ม งานเก่าที่เคยทำยังแสดงชื่อได้ตามเดิม
             <br />
-            กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่พักการใช้งาน ให้แก้ไขแล้วเลือกสถานะ Inactive แทน
+            กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่พักการใช้งาน ให้กด ถอนสิทธิ์ แทน
           </>
         ),
         confirmLabel: 'ลบผู้ใช้',
+      });
+      if (!ok) return;
+    } else {
+      // the server restores INACTIVE (a revoked account must not come back open by itself) — say so first
+      const ok = await confirm({
+        title: `กู้คืนผู้ใช้ ${r.name}?`,
+        description: `${r.name} จะกลับมาอยู่ในรายชื่อแบบ Inactive — ยังเข้าระบบไม่ได้ ถ้าจะให้ใช้งานต่อ กด คืนสิทธิ์ ที่แถวนั้นอีกครั้ง`,
+        confirmLabel: 'กู้คืน',
       });
       if (!ok) return;
     }
@@ -243,7 +251,7 @@ export default function UsersPage() {
       await postJson('/api/admin/records', { table: 'users', id: r.id, deleted });
       push({
         kind: 'success',
-        title: deleted ? 'ย้ายไปรายการที่ลบแล้ว' : 'กู้คืนแล้ว',
+        title: deleted ? 'ย้ายไปรายการที่ลบแล้ว' : 'กู้คืนแล้ว (ยังปิดการใช้งาน)',
         desc: r.name,
       });
       refetch();
@@ -624,7 +632,7 @@ export default function UsersPage() {
               onChange={(e) => set('phone', e.target.value)}
             />
           </Field>
-          <Field label="สถานะ">
+          <Field label="สถานะ" hint={isMe(form) ? 'เปลี่ยนสถานะของตัวเองไม่ได้' : undefined}>
             <Select value={form.status} onChange={(e) => set('status', e.target.value)} disabled={isMe(form)}>
               <option>Active</option>
               <option>Inactive</option>

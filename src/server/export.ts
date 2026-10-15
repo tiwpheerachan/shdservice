@@ -103,6 +103,8 @@ const SPECS: Record<string, { title: string; module: Module | null | 'any'; cols
       { key: 'amount', header: 'รวมสุทธิ', width: 12, money: true },
       { key: 'paymentType', header: 'วิธีชำระ', width: 12 },
       { key: 'paymentAmount', header: 'ยอดชำระ', width: 12, money: true },
+      { key: 'deposit', header: 'มัดจำ', width: 12, money: true },
+      { key: 'outstanding', header: 'ค้างชำระ', width: 12, money: true }, // jobBalance — who still owes
     ],
   },
   quotations: {

@@ -14,7 +14,17 @@ export async function GET(request: NextRequest) {
     ? await resolveUser(session).catch((e) => (e instanceof HttpError && e.status === 503 ? e : null))
     : null;
   if (user instanceof HttpError) return NextResponse.json({ error: user.message }, { status: 503 });
-  if (!session || !user) return NextResponse.json({ user: null }, { status: 401 });
+  // no session cookie AND no os_seen marker = this browser signed out (logout clears both) → the other
+  // open tabs go to /login?bye=1, not "expired" with their page as `next`; an idle expiry keeps os_seen
+  if (!session || !user)
+    return NextResponse.json(
+      {
+        user: null,
+        ...(!request.cookies.get(SESSION_COOKIE)?.value &&
+          !request.cookies.get(SEEN_COOKIE)?.value && { signedOut: true }),
+      },
+      { status: 401 },
+    );
   // read-only: this never re-issues the cookie (the idle timer is renewed only by real activity →
   // /api/sso/refresh). AccessGuard polls this for "still signed in / still approved".
   const res = NextResponse.json({
@@ -24,7 +34,9 @@ export async function GET(request: NextRequest) {
     // has a role but the account is INACTIVE / DELETED → /pending says "disabled", not "awaiting approval"
     disabled: !user.isActive && !!user.userType,
   });
-  res.cookies.set(SEEN_COOKIE, '1', {
+  // os_seen = who last used this browser: sign-in drops a `next` page that belonged to someone else
+  // (src/app/api/sso/callback). Never a secret — only an id, httpOnly.
+  res.cookies.set(SEEN_COOKIE, String(user.userId), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

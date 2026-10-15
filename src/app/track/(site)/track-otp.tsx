@@ -46,7 +46,8 @@ const PAGE_SIZE = 5;
 /** list filters — applied in the browser to the list the server already scoped to this customer */
 type Filters = { q: string; status: string; from: string; to: string };
 const NO_FILTERS: Filters = { q: '', status: '', from: '', to: '' };
-const statusKey = (r: PublicJobSummary) => (r.cancelled ? 'cancelled' : (r.step ?? ''));
+/** the status the row shows ("รออะไหล่", "พร้อมให้มารับที่ศูนย์") — not its merged timeline step */
+const statusKey = (r: PublicJobSummary) => (r.cancelled ? 'ยกเลิกรายการ' : r.stepLabel);
 function matches(r: PublicJobSummary, f: Filters) {
   const q = f.q.trim().toLowerCase();
   if (q && ![r.no, r.brandModel, r.deviceRef.replace(/•/g, '')].some((v) => v.toLowerCase().includes(q))) return false;
@@ -410,13 +411,12 @@ export function TrackOtp({
     setFilters((f) => ({ ...f, [k]: v }));
     setPages({ active: 1, history: 1 });
   };
-  // status options: only what this tab actually holds, in timeline order, with counts
-  const statusOptions = [
-    ...TRACK_STEPS.map((s) => ({ key: s.key as string, label: s.label })),
-    { key: 'cancelled', label: 'ยกเลิกรายการ' },
-  ]
-    .map((o) => ({ ...o, n: tabRows.filter((r) => statusKey(r) === o.key).length }))
-    .filter((o) => o.n > 0);
+  // status options: only what this tab actually holds, in timeline order (cancelled last), with counts
+  const stepOrder = (r: PublicJobSummary) =>
+    r.step ? TRACK_STEPS.findIndex((s) => s.key === r.step) : TRACK_STEPS.length;
+  const statusOptions = [...new Set([...tabRows].sort((a, b) => stepOrder(a) - stepOrder(b)).map(statusKey))].map(
+    (key) => ({ key, label: key, n: tabRows.filter((r) => statusKey(r) === key).length }),
+  );
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   const page = Math.min(pages[tab], totalPages);
   const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

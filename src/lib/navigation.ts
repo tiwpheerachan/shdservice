@@ -19,17 +19,26 @@ export function hardNavigate(path: string) {
 /** AccessGuard shows the "session expired — your data is still here" dialog on this window event */
 export const SESSION_EXPIRED_EVENT = 'shd:session-expired';
 
+// ออกจากระบบ was clicked: the page is on its way to /api/sso/logout — the 401s that follow (the /me poll,
+// the countdown) are that sign-out, not an expiry. Without this the poll won the race and sent the PC to
+// /login?expired=1&next=<this page>, and the NEXT person signing in landed on the previous user's page.
+let signingOut = false;
+export function startSignOut() {
+  signingOut = true;
+}
+
 /** the session is gone but this page must stay (a save failed, or a form holds typed data): ask the
  *  user to sign in again in a NEW tab — the cookie is shared, so saving here works again after */
 export function sessionExpired() {
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  if (typeof window !== 'undefined' && !signingOut) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 
 /** session expired → our /login with the "expired" note, back to this exact page (filters included) after.
+ *  `signedOut` (signed out in another tab — /api/sso/me says so): /login?bye=1, no `next` to carry over.
  *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired). */
-export function toLogin() {
-  if (typeof window === 'undefined') return;
+export function toLogin(opts: { signedOut?: boolean } = {}) {
+  if (typeof window === 'undefined' || signingOut) return;
   if (hasUnsavedChanges()) return sessionExpired();
   const here = window.location.pathname + window.location.search;
-  hardNavigate(`/login?expired=1&next=${encodeURIComponent(here)}`);
+  hardNavigate(opts.signedOut ? '/login?bye=1' : `/login?expired=1&next=${encodeURIComponent(here)}`);
 }

@@ -64,11 +64,19 @@ export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | 
   return !!grants[module]?.[action];
 }
 
+/** The grant a page needs beyond `view`: a create page (…/new — เปิดงานใหม่, สร้างใบเสนอราคา,
+ *  สร้างใบสั่งขาย) exists only to insert, so it needs the module's `add`. */
+export function pageAction(pathname: string): Action {
+  return /\/new(\/|$)/.test(pathname) ? 'add' : 'view';
+}
+
 /** May this user open `pathname` at all? */
 export function canViewPath(isAdmin: boolean, grants: GrantMap, pathname: string): boolean {
   if (isAdmin) return true;
   if (isAdminOnlyPath(pathname)) return false;
   const m = moduleForPath(pathname);
   // routes without a module (e.g. "/") are open to every approved user
-  return m ? checkGrant(false, grants, m, 'view') : true;
+  if (!m) return true;
+  const need = pageAction(pathname);
+  return checkGrant(false, grants, m, 'view') && (need === 'view' || checkGrant(false, grants, m, need));
 }
