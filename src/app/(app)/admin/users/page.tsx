@@ -90,7 +90,10 @@ export default function UsersPage() {
   useClearOnChange(fe.clear, form);
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  // the stored username / phone of the user being edited: an unchanged legacy value still saves
+  const [prev, setPrev] = React.useState<{ username?: string; phone?: string } | null>(null);
   const openAdd = () => {
+    setPrev(null);
     setForm(EMPTY);
     fe.setErrors({});
     setEditing(false);
@@ -111,6 +114,7 @@ export default function UsersPage() {
   });
 
   const openEdit = (r: User) => {
+    setPrev({ username: r.username, phone: r.phone });
     setForm(toForm(r));
     fe.setErrors({});
     setEditing(true);
@@ -149,7 +153,7 @@ export default function UsersPage() {
   const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>('/api/admin/users', body);
 
   const save = async () => {
-    if (fe.report(fe.run(userSchema, form))) return; // the API checks the same
+    if (fe.report(fe.run(userSchema(prev), form))) return; // the API checks the same
     setSaving(true);
     try {
       const data = await postUser(form);
@@ -549,13 +553,13 @@ export default function UsersPage() {
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
           <Field label="อีเมล" error={fe.errors.email}>
-            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+            <Input type="email" maxLength={100} value={form.email} onChange={(e) => set('email', e.target.value)} />
           </Field>
-          <Field label="Username">
-            <Input value={form.username} onChange={(e) => set('username', e.target.value)} />
+          <Field label="Username" error={fe.errors.username}>
+            <Input maxLength={50} value={form.username} onChange={(e) => set('username', e.target.value)} />
           </Field>
-          <Field label="รหัสพนักงาน / Lark ID">
-            <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="—" />
+          <Field label="รหัสพนักงาน / Lark ID" error={fe.errors.code}>
+            <Input maxLength={50} value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="—" />
           </Field>
           <Field
             label="ประเภทผู้ใช้งาน / สิทธิ์"
@@ -565,11 +569,17 @@ export default function UsersPage() {
           >
             <SearchSelect value={form.role} onChange={(v) => set('role', v)} options={strOptions(ROLE_OPTIONS)} />
           </Field>
-          <Field label="สาขา / หน่วยงาน">
-            <Input value={form.branch} onChange={(e) => set('branch', e.target.value)} />
+          <Field label="สาขา / หน่วยงาน" error={fe.errors.branch}>
+            <Input maxLength={100} value={form.branch} onChange={(e) => set('branch', e.target.value)} />
           </Field>
-          <Field label="เบอร์โทรศัพท์">
-            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+          <Field label="เบอร์โทรศัพท์" error={fe.errors.phone}>
+            <Input
+              inputMode="tel"
+              maxLength={15}
+              placeholder="0812345678"
+              value={form.phone}
+              onChange={(e) => set('phone', e.target.value)}
+            />
           </Field>
           <Field label="สถานะ">
             <Select value={form.status} onChange={(e) => set('status', e.target.value)}>

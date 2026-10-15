@@ -6,6 +6,8 @@ import { documentProfile, job, quotationHd, saleOutHd } from '@/db/schema';
 import { HttpError } from '@/server/auth';
 import { assertValid } from '@/server/validate';
 import { documentProfileSchema } from '@/lib/validation/admin';
+import { taxIdDigits } from '@/lib/validation/customer';
+import { clean, cleanCode } from '@/lib/validation';
 import { audit, diff } from '@/server/audit';
 import { nowThai } from '@/server/mappers/format';
 
@@ -193,28 +195,28 @@ export type DocumentProfileInput = {
   sortOrder?: number;
 };
 
-const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 /** document-type prefixes are system-wide (see db/running-no.ts) — stored on the row only because the columns are NOT NULL */
 const SYSTEM_PREFIXES = { prefixJob: 'J', prefixQuotation: 'Q', prefixSaleOrder: 'SO' } as const;
 
 export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: number): Promise<DocumentProfile> {
-  const code = str(i.code, 20).toUpperCase();
-  const nameTh = str(i.nameTh);
-  assertValid(documentProfileSchema, i); // same rules as the page: errors under code / nameTh
+  assertValid(documentProfileSchema, i); // same rules as the page: errors under each field
+  const code = cleanCode(i.code);
+  const nameTh = clean(i.nameTh);
 
+  // cleaned values — the schema checked them against the columns, nothing is cut off
   const values = {
     code,
     nameTh,
-    nameEn: str(i.nameEn),
-    addressLine1: str(i.addressLine1),
-    addressLine2: str(i.addressLine2),
-    phone: str(i.phone, 50),
-    email: str(i.email, 100).toLowerCase(),
-    taxId: str(i.taxId, 20),
-    bankName: str(i.bankName, 100),
-    bankAccountType: str(i.bankAccountType, 50),
-    bankAccountNo: str(i.bankAccountNo, 50),
-    bankAccountName: str(i.bankAccountName),
+    nameEn: clean(i.nameEn),
+    addressLine1: clean(i.addressLine1),
+    addressLine2: clean(i.addressLine2),
+    phone: clean(i.phone),
+    email: clean(i.email).toLowerCase(),
+    taxId: taxIdDigits(i.taxId),
+    bankName: clean(i.bankName),
+    bankAccountType: clean(i.bankAccountType),
+    bankAccountNo: clean(i.bankAccountNo),
+    bankAccountName: clean(i.bankAccountName),
     ...SYSTEM_PREFIXES,
     isDefault: !!i.isDefault,
     isActive: i.isActive !== false,

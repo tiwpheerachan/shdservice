@@ -17,7 +17,6 @@ import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS, type Customer } from '@/da
 import {
   useJobTypes,
   useJobTypeDetails,
-  useShippers,
   useSymptomStats,
   useModelSymptoms,
   useManufacturers,
@@ -41,6 +40,8 @@ import {
   missingRequired,
   jobAmountDue,
   JOB_FIELD_LABEL,
+  NO_SERIAL,
+  type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
 import type { FieldErrors } from '@/lib/validation';
@@ -312,9 +313,13 @@ export function JobFormProvider({ initial, children }: { initial?: JobFormState;
   const dirty = React.useMemo(() => JSON.stringify(s) !== JSON.stringify(saved), [s, saved]);
   useUnsavedChanges(dirty);
   const { errors, setErrors, run, clear, report, fromApi } = useFormErrors();
-  // required fields the job had when it was loaded ("never worse"); null = new job (all required)
-  const baselineOf = (f: JobFormState) => (f.jobNo ? filledRequired(toJobInput(f)) : null);
-  const [baseline, setBaseline] = React.useState<JobRequiredKey[] | null>(() => baselineOf(initial ?? EMPTY_JOB_FORM));
+  // the job as loaded ("never worse"): the required fields it had + its values (an unchanged legacy
+  // value passes the format rules) + its open date; null = new job (all required, opened today)
+  const baselineOf = (f: JobFormState): { keep: JobRequiredKey[]; check: JobCheck } | null =>
+    f.jobNo
+      ? { keep: filledRequired(toJobInput(f)), check: { prev: toJobInput(f), openDate: f.createDate.slice(0, 10) } }
+      : null;
+  const [baseline, setBaseline] = React.useState(() => baselineOf(initial ?? EMPTY_JOB_FORM));
   const value = React.useMemo<Ctx>(
     () => ({
       s,
@@ -338,10 +343,10 @@ export function JobFormProvider({ initial, children }: { initial?: JobFormState;
         setErrors({});
       },
       errors,
-      validate: () => run(jobSchema(baseline ?? undefined), toJobInput(s)),
+      validate: () => run(jobSchema(baseline?.keep, baseline?.check), toJobInput(s)),
       report,
       fromApi,
-      incomplete: baseline ? missingRequired(toJobInput(s)).filter((k) => !baseline.includes(k)) : null,
+      incomplete: baseline ? missingRequired(toJobInput(s)).filter((k) => !baseline.keep.includes(k)) : null,
     }),
     [s, errors, baseline, run, clear, report, fromApi, setErrors],
   );
@@ -512,10 +517,11 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
             )}
           />
         </Field>
-        <Field label="งานย่อย" className="lg:col-span-2">
+        <Field label="งานย่อย" className="lg:col-span-2" error={errors.jobTypeDetail}>
           {/* ค่าที่ใช้ในระบบเดิมทั้ง 24 ค่า (job.job_type_detail) เป็นรายการแนะนำ + พิมพ์ค่าใหม่ได้ */}
           <Input
             list="job-type-detail-options"
+            maxLength={50}
             value={s.jobTypeDetail}
             onChange={(e) => set('jobTypeDetail', e.target.value)}
             placeholder="- - เลือกหรือพิมพ์ - -"
@@ -591,7 +597,6 @@ export function ProductSection({
   variant?: 'full' | 'open' | 'repair';
 }) {
   const { s, set, patch, errors, incomplete } = useJobForm();
-  const { data: SHIPPERS } = useShippers();
   const { data: PRODUCT_TYPES } = useProductTypes();
   const { data: MANUFACTURERS } = useManufacturers();
   const { data: MODELS } = useModels();
@@ -613,6 +618,7 @@ export function ProductSection({
   };
 
   const repair = variant === 'repair';
+  const noSerial = s.serial.trim() === NO_SERIAL;
   // an old job saved before these fields were required: it can still be saved, but say what is missing
   const incompleteNotice = incomplete && incomplete.length > 0 && (
     <p
@@ -632,7 +638,13 @@ export function ProductSection({
 
   const soField = (
     <Field label="Sale Order No." required error={errors.so}>
-      <Input placeholder="SO2600760" className="num" value={s.so} onChange={(e) => set('so', e.target.value)} />
+      <Input
+        placeholder="SO2600760"
+        className="num"
+        maxLength={50}
+        value={s.so}
+        onChange={(e) => set('so', e.target.value)}
+      />
     </Field>
   );
   const channelField = (
@@ -640,7 +652,8 @@ export function ProductSection({
       <SearchSelect
         value={s.channel}
         onChange={(v) => set('channel', v)}
-        options={withCurrent(strOptions(CHANNELS), s.channel)}
+        // "ยังไม่ระบุ" is the legacy "none" (counts as empty) — a legacy job still shows its own value
+        options={withCurrent(strOptions(CHANNELS.filter((c) => c !== 'ยังไม่ระบุ')), s.channel)}
       />
     </Field>
   );
@@ -661,6 +674,7 @@ export function ProductSection({
       <Input
         type="number"
         min={0}
+        max={60}
         inputMode="numeric"
         value={s.warrantyMonth}
         onChange={(e) => {
@@ -678,7 +692,7 @@ export function ProductSection({
     </Field>
   );
   const warrantyField = (
-    <Field label="Warranty">
+    <Field label="Warranty" error={errors.warranty}>
       <Select value={s.warranty} onChange={(e) => set('warranty', e.target.value)}>
         <option value="">- - Please Select - -</option>
         {WARRANTY_OPTIONS.map((w) => (
@@ -688,9 +702,11 @@ export function ProductSection({
     </Field>
   );
   const imeiField = (
-    <Field label="Imei No.">
+    <Field label="Imei No." error={errors.imei}>
       <Input
         className="num"
+        inputMode="numeric"
+        maxLength={50}
         placeholder="35xxxxxxxxxxxxx"
         value={s.imei}
         onChange={(e) => set('imei', e.target.value)}
@@ -701,10 +717,17 @@ export function ProductSection({
     <Field label="Serial No." required error={errors.serial}>
       <Input
         className="num"
-        placeholder="SN-XXXXXXXX"
-        value={s.serial}
+        maxLength={50}
+        placeholder={noSerial ? 'ไม่มี S/N / S/N เสียหาย' : 'SN-XXXXXXXX'}
+        value={noSerial ? '' : s.serial}
+        disabled={noSerial}
         onChange={(e) => set('serial', e.target.value)}
       />
+      {/* stored as the legacy "none" marker "-" (NO_SERIAL) — instead of typing a note into the serial */}
+      <label className="mt-1.5 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+        <Checkbox checked={noSerial} onChange={(e) => set('serial', e.target.checked ? NO_SERIAL : '')} />
+        ไม่มี S/N / S/N เสียหาย
+      </label>
     </Field>
   );
   const brandField = (
@@ -731,14 +754,15 @@ export function ProductSection({
     </Field>
   );
   const modelDetailField = (
-    <Field label="รุ่นย่อย (ถ้ามี)">
-      <Input value={s.modelDetail} onChange={(e) => set('modelDetail', e.target.value)} />
+    <Field label="รุ่นย่อย (ถ้ามี)" error={errors.modelDetail}>
+      <Input maxLength={200} value={s.modelDetail} onChange={(e) => set('modelDetail', e.target.value)} />
     </Field>
   );
   const equipmentField = (
-    <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
+    <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2" error={errors.equipment}>
       <Textarea
         rows={2}
+        maxLength={100}
         placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง"
         value={s.equipment}
         onChange={(e) => set('equipment', e.target.value)}
@@ -746,9 +770,10 @@ export function ProductSection({
     </Field>
   );
   const faultField = (
-    <Field label="จุดตำหนิ" className="lg:col-span-2">
+    <Field label="จุดตำหนิ" className="lg:col-span-2" error={errors.fault}>
       <Textarea
         rows={2}
+        maxLength={100}
         placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ"
         value={s.fault}
         onChange={(e) => set('fault', e.target.value)}
@@ -757,21 +782,22 @@ export function ProductSection({
   );
   const symptomsField = <MainSymptomField />;
   const symptomOtherField = (
-    <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-      <Textarea rows={2} value={s.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
+    <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={errors.symptomOther}>
+      <Textarea rows={2} maxLength={200} value={s.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
     </Field>
   );
   const remarkField = (
-    <Field label="หมายเหตุ" className="lg:col-span-2">
-      <Textarea rows={2} value={s.remark} onChange={(e) => set('remark', e.target.value)} />
+    <Field label="หมายเหตุ" className="lg:col-span-2" error={errors.remark}>
+      <Textarea rows={2} maxLength={2000} value={s.remark} onChange={(e) => set('remark', e.target.value)} />
     </Field>
   );
 
   const shopField = open ? (
-    <Field label="Shop Name">
+    <Field label="Shop Name" error={errors.shopName}>
       {/* free text in the legacy data (511 spellings) — the most used names as suggestions, new ones can be typed */}
       <Input
         list="shop-name-options"
+        maxLength={100}
         placeholder="- - เลือกหรือพิมพ์ - -"
         value={s.shopName}
         onChange={(e) => set('shopName', e.target.value)}
@@ -783,19 +809,29 @@ export function ProductSection({
       </datalist>
     </Field>
   ) : (
-    <Field label="Shop Name">
-      <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set('shopName', e.target.value)} />
+    <Field label="Shop Name" error={errors.shopName}>
+      <Input
+        placeholder="ชื่อร้านค้า"
+        maxLength={100}
+        value={s.shopName}
+        onChange={(e) => set('shopName', e.target.value)}
+      />
     </Field>
   );
   const receptionDateField = (
-    <Field label="วันที่รับเข้า">
+    <Field label="วันที่รับเข้า" error={errors.receptionDate}>
       <Input type="date" value={s.receptionDate} onChange={(e) => set('receptionDate', e.target.value)} />
     </Field>
   );
   const trackingField = (
-    <Field label="เลขพัสดุจากลูกค้า">
+    <Field
+      label="เลขพัสดุจากลูกค้า"
+      error={errors.receptionTrackingNo}
+      hint="ไม่มีเลขพัสดุ (ลูกค้า / ไรเดอร์มาส่งเอง) ให้เว้นว่าง แล้วเลือก รับสินค้าเข้าโดย"
+    >
       <Input
         className="num"
+        maxLength={50}
         value={s.receptionTrackingNo}
         onChange={(e) => set('receptionTrackingNo', e.target.value)}
       />
@@ -804,8 +840,9 @@ export function ProductSection({
   // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value ("F", "flash" …) stays selectable as-is
   const legacyShipper =
     s.receptionShipper && !SHIPPING_PROFILES.some((p) => p.nameTh === s.receptionShipper) ? s.receptionShipper : '';
-  const shipperField = open ? (
-    <Field label="โดยบริษัทขนส่ง">
+  // the API accepts a profile name or the job's own legacy value only (no free text)
+  const shipperField = (
+    <Field label="โดยบริษัทขนส่ง" error={errors.receptionShipper}>
       <Select value={s.receptionShipper} onChange={(e) => set('receptionShipper', e.target.value)}>
         <option value="">- - Please Select - -</option>
         {SHIPPING_PROFILES.map((p) => (
@@ -816,24 +853,9 @@ export function ProductSection({
         {legacyShipper && <option value={legacyShipper}>{legacyShipper} (ค่าเดิม)</option>}
       </Select>
     </Field>
-  ) : (
-    <Field label="โดยบริษัทขนส่ง">
-      {/* ระบบเดิมเป็นข้อความอิสระ — แนะนำจากค่าที่ใช้บ่อยใน DB (Flash, ไปรษณีย์, THAIPOST, KEX, J&T …) */}
-      <Input
-        list="shipper-options"
-        value={s.receptionShipper}
-        onChange={(e) => set('receptionShipper', e.target.value)}
-        placeholder="- - เลือกหรือพิมพ์ - -"
-      />
-      <datalist id="shipper-options">
-        {SHIPPERS.map((c) => (
-          <option key={c} value={c} />
-        ))}
-      </datalist>
-    </Field>
   );
   const receptionTypeField = (
-    <Field label="รับสินค้าเข้าโดย" wide group="radiogroup">
+    <Field label="รับสินค้าเข้าโดย" wide group="radiogroup" error={errors.receptionType}>
       <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
         {RECEIVE_METHODS.map((m) => (
           <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -921,7 +943,7 @@ export function ProductSection({
         {warrantyMonthField}
         {expireField}
         {warrantyField}
-        <Field label="ประเภทสินค้า">
+        <Field label="ประเภทสินค้า" error={errors.productType}>
           <SearchSelect
             value={s.productType}
             onChange={(v) => set('productType', v)}
@@ -1103,7 +1125,7 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
   return (
     <Section title="ข้อมูลอื่นๆ" icon={ClipboardList}>
       <FieldGrid>
-        <Field label="ค่าประเมินงานซ่อม (บาท)">
+        <Field label="ค่าประเมินงานซ่อม (บาท)" error={errors.estimateCost}>
           <Input
             type="number"
             step="0.01"
@@ -1116,7 +1138,7 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
             className="num text-right"
           />
         </Field>
-        <Field label="ค่ามัดจำงานซ่อม (บาท)">
+        <Field label="ค่ามัดจำงานซ่อม (บาท)" error={errors.depositCost}>
           <Input
             type="number"
             step="0.01"

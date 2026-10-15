@@ -47,6 +47,7 @@ const { setSimpleStatus } = await import('@/server/services/masters');
 const { setUserDeleted } = await import('@/server/services/users');
 const { setTracking } = await import('@/server/services/sale-orders');
 const { OUTSOURCE_NOT_BACK } = await import('@/lib/validation/job');
+const { addDays, today } = await import('@/lib/dates');
 const { GET: dataGET } = await import('@/app/api/data/[resource]/route');
 const { POST: soPOST } = await import('@/app/api/sale-orders/route');
 const { POST: soApprovePOST } = await import('@/app/api/sale-orders/[no]/approve/route');
@@ -73,7 +74,7 @@ const JOB_CLOSE = 'TDJ0001'; // closeJob race
 const JOB_PARTS = 'TDJ0002'; // issueForJob over stock
 const JOB_REPAIR = 'TDJ0003'; // saveRepair race
 const JOB_EDIT = 'TDJ0004'; // row_version
-const JOB_QUOTE = 'TDJ00005'; // a quotation's job (the form wants letters + ≥ 5 digits)
+const JOB_QUOTE = 'J9900005'; // a quotation's job (J + 7 digits — the quotation form's rule)
 const JOB_BILL = 'TDJ0006'; // deposit + returned parts (amount due, parts cost)
 const JOB_OUT = 'TDJ0007'; // out-source send → close refused → receive → close
 const JOB_NOREPAIR = 'TDJ0008'; // closed with job_repaired_date still 1900
@@ -121,7 +122,7 @@ async function seed() {
     DELETE FROM inventory_hd WHERE inventory_no LIKE 'TDW%';
     DELETE FROM color WHERE color_name = 'TD color';
     DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'TDJ%';
-    DELETE FROM job WHERE job_no LIKE 'TDJ%';
+    DELETE FROM job WHERE job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}';
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date) VALUES
       ('${JOB_CLOSE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_PARTS}', 11, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
@@ -413,7 +414,7 @@ try {
     const r = await stockIssuePOST(
       await request('/api/stock/issue', U.admin, {
         method: 'POST',
-        body: { type: 'sale', ref: soNo, payTo: 'TD', lines: [{ dtId: soDtId, qty: 2 }] },
+        body: { type: 'sale', ref: soNo, payTo: 'คลังสินค้าดี', lines: [{ dtId: soDtId, qty: 2 }] },
       }),
     );
     assert.equal(r.status, 409);
@@ -661,7 +662,14 @@ try {
     await db.execute(sql`UPDATE job SET job_remark = 'TD legacy write' WHERE job_no = ${JOB_EDIT}`);
     assert.equal(await version('job', sql`job_no = ${JOB_EDIT}`), v0 + 1);
   });
-  const jobEdit = { customerCode: CUSTOMER, jobType: '', dueDate: '2026-12-31', warrantyMonth: 0, channel: 'Online' }; // what an edit of this fixture must keep
+  // what an edit of this fixture must keep (a due date within a year of its open date = today; a listed channel)
+  const jobEdit = {
+    customerCode: CUSTOMER,
+    jobType: '',
+    dueDate: addDays(today(), 30),
+    warrantyMonth: 0,
+    channel: 'SHOPEE',
+  };
   await test('job: save with the loaded version → OK (+1); a second save with that old version → 409, data unchanged', async () => {
     const v = await version('job', sql`job_no = ${JOB_EDIT}`);
     const saved = await updateJob(JOB_EDIT, { ...jobEdit, remark: 'TD first', version: v }, U.admin.id);
@@ -771,7 +779,7 @@ try {
           customerCode: CUSTOMER,
           jobType: 'งานซ่อม',
           so: 'TD-SO',
-          channel: 'Online',
+          channel: 'SHOPEE',
           saleOrderDate: '2026-10-01',
           warrantyMonth: 12,
           expireDate: '2027-10-01',
@@ -779,7 +787,7 @@ try {
           brand: 'TD-NOPE-BRAND',
           modelCode: 'TD-NOPE-MODEL',
           symptoms: ['TD-NOPE-SYMPTOM'],
-          dueDate: '2026-10-20',
+          dueDate: addDays(today(), 5),
         },
         U.admin.id,
       ),
@@ -810,7 +818,7 @@ try {
           customerCode: CUSTOMER,
           jobType: jt!.n,
           so: 'TD-SO-TRAIL',
-          channel: 'Online',
+          channel: 'SHOPEE',
           saleOrderDate: '2026-10-01',
           warrantyMonth: 12,
           expireDate: '2027-10-01',
@@ -818,7 +826,7 @@ try {
           brand: 'TD Trail Brand',
           modelCode: m!.c,
           symptoms: ['TD trail sym'],
-          dueDate: '2026-10-20',
+          dueDate: addDays(today(), 5),
         },
         U.admin.id,
       ),
@@ -1222,6 +1230,384 @@ try {
     await setTracking('TDS0001', 'TRK-NEW', U.admin.id);
     assert.deepEqual((await lastChanges('sale_out_hd', 'TDS0001'))?.deliveryTrackingNo, ['TRK-OLD', 'TRK-NEW']);
   });
+  // ==== field formats: products / customers / quotation / sale order / stock / users (agent P, 2026-10-15) ====
+  console.log('\nField formats (agent P) — the API refuses what the forms refuse, legacy values still save');
+  {
+    const { saveProduct } = await import('@/server/services/stock');
+    const { upsertUser } = await import('@/server/services/users');
+    const mfgOf = async (code: string) =>
+      (await db.execute<{ m: string }>(sql`SELECT product_vender_code AS m FROM product WHERE product_code = ${code}`))
+        .rows[0].m;
+    await test('product: the vendor code is stored cleaned + upper-case ("2a190159r " → "2A190159R")', async () => {
+      await saveProduct({ sysCode: P.a.code, name: 'อะไหล่ทดสอบ 1', mfgCode: ' 2a190159r\u200B ' }, U.admin.id);
+      assert.equal(await mfgOf(P.a.code), '2A190159R');
+    });
+    await test('product: a Thai / spaced / listed vendor code → 400 under mfgCode, nothing saved', async () => {
+      for (const bad of ['อะไหล่-JIMMY JV85', 'A,B', 'Cancel_2A19']) {
+        const r = await fieldsOf(saveProduct({ sysCode: P.a.code, name: 'อะไหล่ทดสอบ 1', mfgCode: bad }, U.admin.id));
+        assert.equal(r.status, 400, bad);
+        assert.ok((r.fields as Record<string, string>).mfgCode, bad);
+      }
+      assert.equal(await mfgOf(P.a.code), '2A190159R');
+    });
+    await test('product: a legacy junk vendor code left unchanged still saves; changing it to junk → 400', async () => {
+      await db.execute(
+        sql`UPDATE product SET product_vender_code = 'อะไหล่-jimmy JV85' WHERE product_code = ${P.b.code}`,
+      );
+      const keep = { sysCode: P.b.code, name: 'อะไหล่ทดสอบ 2 แก้ชื่อ', mfgCode: 'อะไหล่-jimmy JV85' };
+      assert.equal((await fieldsOf(saveProduct(keep, U.admin.id))).status, 200);
+      assert.equal((await fieldsOf(saveProduct({ ...keep, mfgCode: 'อะไหล่-jimmy JV86' }, U.admin.id))).status, 400);
+      await db.execute(
+        sql`UPDATE product SET product_vender_code = '', product_name = 'อะไหล่ทดสอบ 2' WHERE product_code = ${P.b.code}`,
+      );
+    });
+    await test('product: an unknown brand / category / model → 400 under each (was: no brand, category #1)', async () => {
+      const r = await fieldsOf(
+        saveProduct(
+          {
+            sysCode: P.a.code,
+            name: 'อะไหล่ทดสอบ 1',
+            brand: 'TD no brand',
+            category: 'TD no cat',
+            models: ['TD-NO-MODEL'],
+          },
+          U.admin.id,
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.deepEqual(Object.keys(r.fields ?? {}).sort(), ['brand', 'category', 'models']);
+    });
+
+    const postCustomer = async (body: Record<string, unknown>) =>
+      json(await customerPOST(await request('/api/customers', U.admin, { method: 'POST', body })));
+    await test('customer: a legacy phone nobody touched still saves; changing it to junk → 400 under phone', async () => {
+      await db.execute(sql`UPDATE customer SET phone_number = 'คุณตูน 0922798963' WHERE customer_code = ${CUSTOMER}`);
+      const base = { code: CUSTOMER, name: 'ลูกค้า ทดสอบโดเมน', phone: 'คุณตูน 0922798963' };
+      const ok = await postCustomer({ ...base, line: '@td.shop' });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      const bad = await postCustomer({ ...base, phone: 'คุณตูน' });
+      assert.equal(bad.status, 400);
+      assert.ok((bad.body.details as { fields: Record<string, string> }).fields.phone);
+      await postCustomer({ ...base, phone: '02-000-0000', line: '' });
+    });
+    await test('customer: a new one without a mobile → 400; a wrong tax ID check digit → 400 (no row)', async () => {
+      const count = async () =>
+        (
+          await db.execute<{ n: number }>(
+            sql`SELECT count(*)::int AS n FROM customer WHERE customer_name LIKE 'TD ใหม่%'`,
+          )
+        ).rows[0].n;
+      const n0 = await count();
+      const noMobile = await postCustomer({ name: 'TD ใหม่ ไม่มีมือถือ', phone: '02-111-2222' });
+      assert.equal(noMobile.status, 400);
+      assert.match((noMobile.body.details as { fields: Record<string, string> }).fields.phone, /มือถือ/);
+      const badTax = await postCustomer({ name: 'TD ใหม่ ภาษี', phone: '0899990001', taxId: '1234567890123' });
+      assert.equal(badTax.status, 400);
+      assert.ok((badTax.body.details as { fields: Record<string, string> }).fields.taxId);
+      assert.equal(await count(), n0);
+    });
+    await test('quotation: qty 1.5 and VAT 5 % → 400 under lines.0.qty / vatRate', async () => {
+      const r = await fieldsOf(
+        saveQuotation(
+          {
+            customerCode: CUSTOMER,
+            jobNo: JOB_QUOTE,
+            vatRate: 5,
+            lines: [
+              {
+                itemType: 'SparePart',
+                code: P.a.code,
+                detail: 'TD',
+                qty: 1.5,
+                unit: 'ชิ้น',
+                unitPrice: 100,
+                discount: 0,
+                discountPercent: 0,
+              },
+            ],
+          },
+          U.admin.id,
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.deepEqual(Object.keys(r.fields ?? {}).sort(), ['lines.0.qty', 'vatRate']);
+    });
+    await test('sale order: paid 1e9 → 400 under paymentAmount (was a 500 from numeric(11,2)), no order', async () => {
+      const r = await json(
+        await soPOST(
+          await request('/api/sale-orders', U.admin, {
+            method: 'POST',
+            body: {
+              customerCode: CUSTOMER,
+              salesId: U.admin.id,
+              remark: 'TD-1e9',
+              paymentAmount: 1e9,
+              lines: [{ code: P.b.code, qty: 1 }],
+            },
+          }),
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.ok((r.body.details as { fields: Record<string, string> }).fields.paymentAmount);
+      assert.equal(await soCount('TD-1e9'), 0);
+    });
+    await test('stock receive: a 51-character PO ref → 400 under poRef (was cut to 50), nothing received', async () => {
+      await setStock(P.b.code, 10);
+      const r = await json(
+        await stockReceivePOST(
+          await request('/api/stock/receive', U.admin, {
+            method: 'POST',
+            body: { date: '2026-10-01', poRef: 'P'.repeat(51), lines: [{ code: P.b.code, qty: 1 }] },
+          }),
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.ok((r.body.details as { fields: Record<string, string> }).fields.poRef);
+      assert.equal((await qty(P.b.code)).remain, 10);
+    });
+    await test('stock issue: จ่ายให้ not in the list (store / current staff) → 400 under payTo', async () => {
+      const r = await json(
+        await stockIssuePOST(
+          await request('/api/stock/issue', U.admin, {
+            method: 'POST',
+            body: { type: 'other', payTo: 'ใครก็ได้', lines: [{ code: P.a.code, qty: 1 }] },
+          }),
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.ok((r.body.details as { fields: Record<string, string> }).fields.payTo);
+    });
+    await test('user: a new user with an existing email → 409 under email, the other user unchanged', async () => {
+      const before = (await db.execute(sql`SELECT * FROM app_user WHERE user_id = ${U.clerk.id}`)).rows[0];
+      const r = await fieldsOf(
+        upsertUser(
+          { name: 'TD ซ้ำ อีเมล', role: 'TD Job Clerk', email: ` ${U.clerk.email.toUpperCase()} ` },
+          U.admin.id,
+        ),
+      );
+      assert.equal(r.status, 409);
+      assert.ok((r.fields as Record<string, string>).email);
+      const after = (await db.execute(sql`SELECT * FROM app_user WHERE user_id = ${U.clerk.id}`)).rows[0];
+      assert.deepEqual(after, before);
+    });
+  }
+  console.log('\nField formats (agent J) — jobs / masters: legacy values still save, new junk → 400 under the field');
+  {
+    const { addCallLog, saveSwapRefund } = await import('@/server/services/jobs');
+    const { saveSimple, saveSymptom, saveModel } = await import('@/server/services/masters');
+    const JOB_LEGACY = 'TDJ0010'; // legacy junk in SO / serial / IMEI / tracking / channel / warranty months
+    const LEGACY_PARTS = 'มอเตอร์ดูดฝุ่น H11 MAX,H12';
+    await pool.query(`
+      DELETE FROM job WHERE job_no = '${JOB_LEGACY}';
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date,
+                       job_reception_date, job_closed_date, job_reference_no, product_serial, product_imei_no,
+                       job_reception_tracking_no, job_reception_shipper, product_sale_out_channel,
+                       product_warranty_month, spare_part_replace, swap_refund_document_no)
+        VALUES ('${JOB_LEGACY}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01',
+                'so 12', 'SN เสียหาย', '-', 'ไรเดอร์มาส่ง', 'F', 'Online', 1224, '${LEGACY_PARTS}', 'เบิก 1');
+      DELETE FROM color WHERE color_name ILIKE 'TD J%';
+      DELETE FROM category WHERE category_name ILIKE 'TD J%';
+      DELETE FROM symptom WHERE symptom_name ILIKE 'TD J%';
+      DELETE FROM model WHERE model_name ILIKE 'TD J%';
+      DELETE FROM manufacturer WHERE manufacturer_name = 'TD J Brand';
+      INSERT INTO manufacturer (manufacturer_id, manufacturer_name, record_status, is_active)
+        VALUES ((SELECT coalesce(max(manufacturer_id), 0) + 1 FROM manufacturer), 'TD J Brand', 'ACTIVE', true);`);
+    // what the edit form sends back for a job it loaded (fromJob → toJobInput)
+    const asLoaded = async (no: string) => {
+      const j = (await getJob(no))!;
+      return {
+        customerCode: CUSTOMER,
+        so: j.so,
+        channel: j.channel,
+        serial: j.serial,
+        imei: j.imei,
+        warrantyMonth: j.warrantyMonth,
+        receptionTrackingNo: j.receptionTrackingNo,
+        receptionShipper: j.receptionShipper,
+        receptionDate: j.receptionDate,
+        dueDate: j.dueDate,
+        version: j.version,
+      };
+    };
+    const row = async (no: string) =>
+      (
+        await db.execute<Record<string, string>>(sql`
+          SELECT job_reference_no AS so, product_serial AS serial, job_reception_tracking_no AS tracking,
+                 product_sale_out_shop_name AS shop, job_remark AS remark, spare_part_replace AS parts,
+                 return_customer_detail AS ret, job_payment_detail AS pay
+            FROM job WHERE job_no = ${no}`)
+      ).rows[0];
+
+    await test('J: a legacy job with a junk SO / serial / IMEI / tracking no / channel / 1224 months saves unchanged', async () => {
+      const r = await fieldsOf(updateJob(JOB_LEGACY, await asLoaded(JOB_LEGACY), U.admin.id));
+      assert.equal(r.status, 200, JSON.stringify(r.fields ?? r));
+      const j = await row(JOB_LEGACY);
+      assert.deepEqual([j.so, j.serial, j.tracking], ['SO 12', 'SN เสียหาย', 'ไรเดอร์มาส่ง'], 'kept (only cleaned)');
+    });
+    await test('J: changing them to new junk → 400 under each field, nothing saved', async () => {
+      const base = await asLoaded(JOB_LEGACY);
+      const r = await fieldsOf(
+        updateJob(
+          JOB_LEGACY,
+          {
+            ...base,
+            so: 'ไม่มี',
+            serial: 'SN หาย',
+            imei: '123',
+            receptionTrackingNo: 'มาส่งเอง',
+            channel: 'Offline',
+            warrantyMonth: 1225,
+            receptionShipper: 'TD ขนส่งไม่มีจริง',
+            productType: 'TD-NOPE-TYPE',
+            remark: 'TD junk',
+          },
+          U.admin.id,
+        ),
+      );
+      assert.equal(r.status, 400);
+      assert.deepEqual(Object.keys(r.fields ?? {}).sort(), [
+        'channel',
+        'imei',
+        'receptionTrackingNo',
+        'serial',
+        'so',
+        'warrantyMonth',
+      ]);
+      // the master-list checks answer once the formats are right
+      const m = await fieldsOf(
+        updateJob(
+          JOB_LEGACY,
+          { ...base, receptionShipper: 'TD ขนส่งไม่มีจริง', productType: 'TD-NOPE-TYPE' },
+          U.admin.id,
+        ),
+      );
+      assert.deepEqual(Object.keys(m.fields ?? {}).sort(), ['productType', 'receptionShipper']);
+      assert.notEqual((await row(JOB_LEGACY)).remark, 'TD junk');
+    });
+    await test('J: values are stored cleaned (cleanCode / no "S/N:" / no spaces in parcel no / clean text)', async () => {
+      const r = await fieldsOf(
+        updateJob(
+          JOB_LEGACY,
+          {
+            ...(await asLoaded(JOB_LEGACY)),
+            so: ' so-2600123 ',
+            serial: 's/n: ab12345',
+            imei: '',
+            receptionTrackingNo: 'th 1234 5678 9ΤΗ',
+            shopName: '  ร้าน​   A  ',
+            remark: ' บรรทัด 1  \n  บรรทัด 2 ',
+          },
+          U.admin.id,
+        ),
+      );
+      assert.equal(r.status, 200, JSON.stringify(r.fields ?? r));
+      const j = await row(JOB_LEGACY);
+      assert.deepEqual(
+        [j.so, j.serial, j.tracking, j.shop, j.remark],
+        ['SO-2600123', 'AB12345', 'TH123456789TH', 'ร้าน A', 'บรรทัด 1\nบรรทัด 2'],
+      );
+    });
+    await test('J: repair "New Serial" is added to the legacy part list, never written over it', async () => {
+      await saveRepair(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'new0001' }, U.admin.id);
+      assert.equal((await row(JOB_LEGACY)).parts, `${LEGACY_PARTS}\nNew S/N: NEW0001`);
+      await saveRepair(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'NEW0002' }, U.admin.id);
+      assert.equal((await row(JOB_LEGACY)).parts, `${LEGACY_PARTS}\nNew S/N: NEW0002`, 'the earlier one is replaced');
+      const r = await fieldsOf(saveRepair(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'SN ใหม่' }, U.admin.id));
+      assert.deepEqual([r.status, Object.keys(r.fields ?? {})], [400, ['newSerial']]);
+    });
+    await test('J: swap — legacy doc no unchanged passes, the part list is kept; refund over 1,000,000 → 400', async () => {
+      const ok = await fieldsOf(
+        saveSwapRefund(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'SWAP0001', docNo: 'เบิก 1' }, U.admin.id),
+      );
+      assert.equal(ok.status, 200, JSON.stringify(ok.fields ?? ok));
+      assert.equal((await row(JOB_LEGACY)).parts, `${LEGACY_PARTS}\nNew S/N: SWAP0001`);
+      const bad = await fieldsOf(
+        saveSwapRefund(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'SWAP0001', docNo: 'เบิก 2' }, U.admin.id),
+      );
+      assert.deepEqual(Object.keys(bad.fields ?? {}), ['docNo']);
+      const refund = await fieldsOf(
+        saveSwapRefund(
+          JOB_LEGACY,
+          { status: 'ซ่อมเสร็จ', refundAmount: 1000000.5, refundMethod: 'เงินสด' },
+          U.admin.id,
+        ),
+      );
+      assert.deepEqual([refund.status, Object.keys(refund.fields ?? {})], [400, ['refundAmount']]);
+    });
+    await test('J: close — parcel no stored without spaces; the courier / date prefix is not added twice', async () => {
+      const input = {
+        status: 'ซ่อมเสร็จ',
+        payment: { type: 'เงินสด', date: '2026-10-01', detail: 'จ่ายครบ' },
+        return: {
+          type: 'ส่งไปรษณีย์',
+          date: '2026-10-01',
+          tracking: 'ed 0063 9063 5th',
+          courier: 'Flash',
+          detail: 'ฝากหน้าบ้าน',
+        },
+      };
+      await closeJob(JOB_LEGACY, input, U.admin.id);
+      let j = await row(JOB_LEGACY);
+      // saved again with what the close screen loads back (the stored, already-prefixed texts)
+      await closeJob(
+        JOB_LEGACY,
+        { ...input, payment: { ...input.payment, detail: j.pay }, return: { ...input.return, detail: j.ret } },
+        U.admin.id,
+      );
+      j = await row(JOB_LEGACY);
+      assert.deepEqual([j.pay, j.ret], ['ชำระ 2026-10-01 · จ่ายครบ', 'Flash · ฝากหน้าบ้าน']);
+      const [t] = (
+        await db.execute<{ t: string }>(
+          sql`SELECT return_customer_tracking_no AS t FROM job WHERE job_no = ${JOB_LEGACY}`,
+        )
+      ).rows;
+      assert.equal(t.t, 'ED006390635TH');
+    });
+    await test('J: call log of 201+ characters → 400, nothing saved (it used to keep the first 200)', async () => {
+      const count = async () =>
+        (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM job_call_log WHERE job_no = ${JOB_LEGACY}`))
+          .rows[0].n;
+      const before = await count();
+      const r = await fieldsOf(addCallLog(JOB_LEGACY, 'ก'.repeat(201), U.admin.id));
+      assert.deepEqual([r.status, Object.keys(r.fields ?? {})], [400, ['detail']]);
+      assert.equal(await count(), before);
+      const rows = await addCallLog(JOB_LEGACY, 'ข'.repeat(200), U.admin.id);
+      assert.equal(rows[0]?.detail, 'ข'.repeat(200), 'all 200 kept');
+    });
+    await test('J: master names unique ignoring case and spaces → 409 under name; a row keeping its name saves', async () => {
+      const first = await saveSimple('colors', { name: 'TD J Navy Blue' }, U.admin.id);
+      const dup = await fieldsOf(saveSimple('colors', { name: ' td j  navyblue ' }, U.admin.id));
+      assert.deepEqual([dup.status, dup.fields], [409, { name: 'มีชื่อนี้อยู่แล้ว' }]);
+      assert.equal(
+        (await fieldsOf(saveSimple('colors', { id: first.id, name: 'TD J Navy Blue', detail: 'x' }, U.admin.id)))
+          .status,
+        200,
+      );
+      // explicit id: other fixtures insert symptom ids by hand, the identity sequence lags behind
+      await db.execute(sql`INSERT INTO symptom (symptom_id, symptom_name, record_status)
+        VALUES ((SELECT coalesce(max(symptom_id), 0) + 1 FROM symptom), 'TD J เปิดไม่ติด', 'ACTIVE')`);
+      assert.equal((await fieldsOf(saveSymptom({ name: 'td j เปิด ไม่ติด' }, U.admin.id))).status, 409);
+    });
+    await test('J: category detail of 51+ characters → 400 under detail (was a 500); 50 saves', async () => {
+      const r = await fieldsOf(saveSimple('categories', { name: 'TD J Cat', detail: 'ก'.repeat(51) }, U.admin.id));
+      assert.deepEqual([r.status, Object.keys(r.fields ?? {})], [400, ['detail']]);
+      assert.equal(
+        (await fieldsOf(saveSimple('categories', { name: 'TD J Cat', detail: 'ก'.repeat(50) }, U.admin.id))).status,
+        200,
+      );
+    });
+    await test('J: model name twice for one brand (ignoring case / spaces) → 409, not a 500', async () => {
+      const m = await saveModel({ name: 'TD J Model X1', brand: 'TD J Brand', price: 0 }, U.admin.id);
+      const dup = await fieldsOf(saveModel({ name: 'td j model  x1', brand: 'TD J Brand', price: 0 }, U.admin.id));
+      assert.deepEqual([dup.status, dup.fields], [409, { name: 'มีชื่อนี้อยู่แล้ว' }]);
+      const same = await fieldsOf(
+        saveModel({ code: m.code, name: 'TD J Model X1', brand: 'TD J Brand', price: 10 }, U.admin.id),
+      );
+      assert.equal(same.status, 200, 'editing the model itself');
+      const long = await fieldsOf(saveModel({ name: 'X'.repeat(51), brand: 'TD J Brand', price: 0 }, U.admin.id));
+      assert.deepEqual(Object.keys(long.fields ?? {}), ['name']);
+    });
+  }
 } finally {
   await pool.end();
 }

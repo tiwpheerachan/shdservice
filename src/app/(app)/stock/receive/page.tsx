@@ -201,29 +201,49 @@ export default function ReceivePage() {
             <Input readOnly value="Generate Auto" />
           </Field>
           {/* ระบบเดิมไม่เคยบันทึก PO (reference_document_no ว่างทั้ง 6,309 ใบ) → ไม่บังคับ */}
-          <Field label="อ้างอิงใบสั่งซื้อ (PO)">
-            <Input placeholder="PO2600000" value={po} onChange={(e) => setPo(e.target.value)} />
+          <Field label="อ้างอิงใบสั่งซื้อ (PO)" error={fe.errors.poRef}>
+            <Input
+              placeholder="PO2600000"
+              maxLength={50}
+              value={po}
+              onChange={(e) => {
+                setPo(e.target.value.toUpperCase());
+                fe.clear('poRef');
+              }}
+            />
           </Field>
           <Field label="วันที่รับเข้า" required error={fe.errors.date}>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Input type="date" max={today()} value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="รับเข้าคลัง" required>
             <Select defaultValue="คลังสินค้าดี">
               <option>คลังสินค้าดี</option>
             </Select>
           </Field>
-          <Field label="ผู้จัดส่ง / Supplier">
-            <Input placeholder="ชื่อผู้จัดส่ง" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+          <Field label="ผู้จัดส่ง / Supplier" error={fe.errors.supplier}>
+            <Input
+              placeholder="ชื่อผู้จัดส่ง"
+              maxLength={40}
+              value={supplier}
+              onChange={(e) => {
+                setSupplier(e.target.value);
+                fe.clear('supplier');
+              }}
+            />
           </Field>
           <Field label="รับเข้าโดย">
             <Input readOnly value={me || '—'} />
           </Field>
-          <Field label="หมายเหตุ" wide>
+          <Field label="หมายเหตุ" wide error={fe.errors.remark}>
             <Textarea
               rows={2}
+              maxLength={47}
               placeholder="รายละเอียดเพิ่มเติม เช่น เลข Lot, สภาพสินค้า"
               value={remark}
-              onChange={(e) => setRemark(e.target.value)}
+              onChange={(e) => {
+                setRemark(e.target.value);
+                fe.clear('remark');
+              }}
             />
           </Field>
         </FieldGrid>

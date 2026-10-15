@@ -12,7 +12,8 @@ import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
-import { customerSchema, conflictErrors, normalizePhone } from '@/lib/validation/customer';
+import { customerSchema, conflictErrors, normalizePhone, taxIdDigits } from '@/lib/validation/customer';
+import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 
 export type DeletedMode = StatusMode;
@@ -339,17 +340,30 @@ export async function findCustomerConflicts(
 /** Create/update a customer. New codes come from running "Customer" (C00001). */
 export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
   const prev = i.code ? await getCustomerByCode(i.code) : null;
-  // same rules as the form (lib/validation/customer): phone required unless an old customer never had one
-  assertValid(customerSchema(!prev || !!str(prev.phone)), i);
-  const name = str(i.name).slice(0, 200);
-  const phone = normalizePhone(i.phone).slice(0, 50);
+  // same rules as the form (lib/validation/customer); unchanged legacy values still save
+  assertValid(customerSchema(prev), i);
+  const name = clean(i.name);
+  const phone = clean(normalizePhone(i.phone));
+  const taxId = taxIdDigits(i.taxId);
+  // แขวง / ตำบล picked → its postal code (a new / changed pair must match; legacy mismatches stay savable)
+  const subDistrictId = i.subDistrictId ?? -1;
+  if (subDistrictId > 0 && (!prev || prev.subDistrictId !== subDistrictId || prev.postalCode !== clean(i.postalCode))) {
+    const [sd] = await db
+      .select({ postal: mtSubDistrict.postalCode })
+      .from(mtSubDistrict)
+      .where(eq(mtSubDistrict.subDistrictId, subDistrictId));
+    if (sd && sd.postal.trim() !== clean(i.postalCode)) {
+      const msg = `รหัสไปรษณีย์ของตำบลนี้คือ ${sd.postal.trim()}`;
+      throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { postalCode: msg } });
+    }
+  }
 
   // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
   // the fields that actually change are checked (legacy data already holds duplicates)
   const check = {
     phone: !prev || digits(prev.phone) !== digits(phone) ? phone : undefined,
     email: !prev || normEmail(prev.email) !== normEmail(i.email) ? str(i.email) : undefined,
-    taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? str(i.taxId) : undefined,
+    taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? taxId : undefined,
   };
   const conflicts = await findCustomerConflicts(check, i.code);
   const [first] = conflicts;
@@ -362,22 +376,24 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   }
 
   return db.transaction(async (tx) => {
+    // cleaned values (customerSchema checked their length against the columns — nothing is cut)
     const values = {
       customerName: name,
-      customerCardId: str(i.taxId).slice(0, 20),
-      customerType: str(i.type) || 'Normal',
+      // digits only; a legacy value nobody changed (not 13 digits) is kept as it was
+      customerCardId: /^\d{13}$/.test(taxId) ? taxId : clean(i.taxId),
+      customerType: clean(i.type) || 'Normal',
       isCustomerOnline: i.online !== false,
-      customerAddress: await composeAddress(tx, i),
-      customerAddress1: str(i.address1).slice(0, 100),
-      customerAddress2: str(i.address2).slice(0, 100),
+      customerAddress: await composeAddress(tx, { ...i, address1: clean(i.address1), address2: clean(i.address2) }),
+      customerAddress1: clean(i.address1),
+      customerAddress2: clean(i.address2),
       cityId: i.cityId ?? -1,
       districtId: i.districtId ?? -1,
-      subDistrictId: i.subDistrictId ?? -1,
-      postalCode: str(i.postalCode).slice(0, 5),
+      subDistrictId,
+      postalCode: clean(i.postalCode),
       phoneNumber: phone,
-      email: str(i.email).slice(0, 50),
-      lineId: str(i.line).slice(0, 50),
-      usePriceGroup: PRICE_GROUP_VALUE[str(i.priceGroup)] ?? (str(i.priceGroup) || 'Retail'),
+      email: clean(i.email).toLowerCase(),
+      lineId: clean(i.line),
+      usePriceGroup: PRICE_GROUP_VALUE[clean(i.priceGroup)] ?? (clean(i.priceGroup) || 'Retail'),
       ...statusStamp(fromUiStatus(i.status), byUserId),
     };
     if (i.code) {

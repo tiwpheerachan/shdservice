@@ -14,7 +14,9 @@ import { getCustomerByCode, addressNames } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
-import { saleOrderSchema } from '@/lib/validation/sale-order';
+import { cleanTracking, saleOrderSchema } from '@/lib/validation/sale-order';
+import { trackingSchema } from '@/lib/validation/stock';
+import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 import { staffOrKeep } from './users';
 
@@ -253,18 +255,22 @@ export type SaleOrderInput = {
 };
 
 export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promise<SaleOrderDetail> {
-  // same rules as the form (lib/validation/sale-order)
-  assertValid(saleOrderSchema, i);
-  const cust = await getCustomerByCode(str(i.customerCode));
-  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
-  // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
   const [cur] = i.no
     ? await db
-        .select({ salesId: saleOutHd.documentCreateBy })
+        .select({
+          salesId: saleOutHd.documentCreateBy,
+          paymentType: saleOutHd.paymentType,
+          tracking: saleOutHd.deliveryTrackingNo,
+        })
         .from(saleOutHd)
         .where(eq(saleOutHd.saleOutHdNo, i.no))
         .limit(1)
     : [];
+  // same rules as the form (lib/validation/sale-order); an edit keeps a legacy payment type / tracking no
+  assertValid(saleOrderSchema(cur), i);
+  const cust = await getCustomerByCode(str(i.customerCode));
+  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
+  // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
   const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
   const codes = i.lines.map((l) => str(l.code)).filter(Boolean);
   const prods = await db
@@ -327,10 +333,10 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       roundingAmount: '0.00',
       feeAmount: money(fee),
       netAmount: money(net),
-      remarkHd: str(i.remark).slice(0, 100),
-      paymentType: str(i.paymentType) || 'โอนเงิน',
+      remarkHd: clean(i.remark),
+      paymentType: clean(i.paymentType) || 'โอนเงิน',
       paymentAmount: money(i.paymentAmount !== undefined && i.paymentAmount !== '' ? num(i.paymentAmount) : net),
-      ...(i.tracking !== undefined || !prev ? { deliveryTrackingNo: str(i.tracking).slice(0, 50) } : {}),
+      ...(i.tracking !== undefined || !prev ? { deliveryTrackingNo: cleanTracking(i.tracking) } : {}),
     };
     if (no && prev) {
       assertVersion(i.version, prev.rowVersion);
@@ -433,7 +439,7 @@ export async function approveSaleOrder(
         approveStatusId: statusId,
         approveDate: nowThai(),
         approveBy: byUserId,
-        approveRemark: str(remark).slice(0, 100),
+        approveRemark: clean(remark), // approveSchema: ≤ 100 (the column)
       })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
@@ -470,17 +476,18 @@ export async function setTracking(no: string, tracking: string, byUserId: number
       .where(eq(saleOutHd.saleOutHdNo, no))
       .for('update');
     if (!before) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    assertValid(trackingSchema(before.tracking), { tracking });
     await tx
       .update(saleOutHd)
-      .set({ deliveryTrackingNo: str(tracking).slice(0, 50), deliveryDate: nowThai() })
+      .set({ deliveryTrackingNo: cleanTracking(tracking), deliveryDate: nowThai() })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Sale Order',
       entity: 'sale_out_hd',
       key: no,
-      summary: `บันทึกเลขพัสดุ ${str(tracking)}`,
-      changes: { deliveryTrackingNo: [before.tracking ?? null, str(tracking)] },
+      summary: `บันทึกเลขพัสดุ ${cleanTracking(tracking)}`,
+      changes: { deliveryTrackingNo: [before.tracking ?? null, cleanTracking(tracking)] },
     });
   });
   return (await getSaleOrder(no))!;

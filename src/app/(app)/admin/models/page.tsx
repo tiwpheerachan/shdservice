@@ -250,7 +250,7 @@ export default function ModelsPage() {
               <Input value={form.code || 'Generate Auto'} readOnly />
             </Field>
             <Field label="Model Name" required error={fe.errors.name}>
-              <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
+              <Input value={form.name} maxLength={50} onChange={(e) => set('name', e.target.value)} />
             </Field>
             <Field label="ยี่ห้อ" required error={fe.errors.brand}>
               <SearchSelect

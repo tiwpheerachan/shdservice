@@ -274,28 +274,41 @@ export default function DocumentProfilesPage() {
       >
         <FieldGrid>
           <Field label="รหัสโปรไฟล์" required hint="สั้น ๆ เช่น SHD, HASHTAG" error={fe.errors.code}>
-            <Input value={form.code} onChange={(e) => set('code', e.target.value.toUpperCase())} placeholder="SHD" />
+            <Input
+              maxLength={20}
+              value={form.code}
+              onChange={(e) => set('code', e.target.value.toUpperCase())}
+              placeholder="SHD"
+            />
           </Field>
           <Field label="ชื่อบริษัท (ไทย)" required error={fe.errors.nameTh}>
-            <Input value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
+            <Input maxLength={200} value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
           </Field>
-          <Field label="ชื่อบริษัท (อังกฤษ)">
-            <Input value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} />
+          <Field label="ชื่อบริษัท (อังกฤษ)" error={fe.errors.nameEn}>
+            <Input maxLength={200} value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} />
           </Field>
-          <Field label="ที่อยู่ บรรทัด 1" wide>
-            <Input value={form.addressLine1} onChange={(e) => set('addressLine1', e.target.value)} />
+          <Field label="ที่อยู่ บรรทัด 1" wide error={fe.errors.addressLine1}>
+            <Input maxLength={200} value={form.addressLine1} onChange={(e) => set('addressLine1', e.target.value)} />
           </Field>
-          <Field label="ที่อยู่ บรรทัด 2" wide>
-            <Input value={form.addressLine2} onChange={(e) => set('addressLine2', e.target.value)} />
+          <Field label="ที่อยู่ บรรทัด 2" wide error={fe.errors.addressLine2}>
+            <Input maxLength={200} value={form.addressLine2} onChange={(e) => set('addressLine2', e.target.value)} />
           </Field>
-          <Field label="โทรศัพท์">
-            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} className="num" />
-          </Field>
-          <Field label="อีเมล">
-            <Input value={form.email} onChange={(e) => set('email', e.target.value)} />
-          </Field>
-          <Field label="เลขประจำตัวผู้เสียภาษี">
+          <Field label="โทรศัพท์" error={fe.errors.phone}>
             <Input
+              inputMode="tel"
+              maxLength={50}
+              value={form.phone}
+              onChange={(e) => set('phone', e.target.value)}
+              className="num"
+            />
+          </Field>
+          <Field label="อีเมล" error={fe.errors.email}>
+            <Input type="email" maxLength={100} value={form.email} onChange={(e) => set('email', e.target.value)} />
+          </Field>
+          <Field label="เลขประจำตัวผู้เสียภาษี" error={fe.errors.taxId}>
+            <Input
+              inputMode="numeric"
+              maxLength={17}
               value={form.taxId}
               onChange={(e) => set('taxId', e.target.value)}
               className="num"
@@ -303,26 +316,44 @@ export default function DocumentProfilesPage() {
             />
           </Field>
 
-          <Field label="ธนาคาร" hint="พิมพ์บนใบเสนอราคา">
+          <Field label="ธนาคาร" hint="พิมพ์บนใบเสนอราคา" error={fe.errors.bankName}>
             <Input
+              maxLength={100}
               value={form.bankName}
               onChange={(e) => set('bankName', e.target.value)}
               placeholder="ธ.ไทยพาณิชย์ จำกัด (มหาชน)"
             />
           </Field>
-          <Field label="ประเภทบัญชี">
-            <Input value={form.bankAccountType} onChange={(e) => set('bankAccountType', e.target.value)} />
+          <Field label="ประเภทบัญชี" error={fe.errors.bankAccountType}>
+            <Input
+              maxLength={50}
+              value={form.bankAccountType}
+              onChange={(e) => set('bankAccountType', e.target.value)}
+            />
           </Field>
-          <Field label="เลขที่บัญชี">
-            <Input value={form.bankAccountNo} onChange={(e) => set('bankAccountNo', e.target.value)} className="num" />
+          <Field label="เลขที่บัญชี" error={fe.errors.bankAccountNo}>
+            <Input
+              inputMode="numeric"
+              maxLength={20}
+              value={form.bankAccountNo}
+              onChange={(e) => set('bankAccountNo', e.target.value)}
+              className="num"
+            />
           </Field>
-          <Field label="ชื่อบัญชี">
-            <Input value={form.bankAccountName} onChange={(e) => set('bankAccountName', e.target.value)} />
+          <Field label="ชื่อบัญชี" error={fe.errors.bankAccountName}>
+            <Input
+              maxLength={200}
+              value={form.bankAccountName}
+              onChange={(e) => set('bankAccountName', e.target.value)}
+            />
           </Field>
 
-          <Field label="ลำดับแสดง">
+          <Field label="ลำดับแสดง" error={fe.errors.sortOrder}>
             <Input
               type="number"
+              min={0}
+              max={999}
+              step={1}
               value={String(form.sortOrder)}
               onChange={(e) => set('sortOrder', Number(e.target.value) || 0)}
               className="num"

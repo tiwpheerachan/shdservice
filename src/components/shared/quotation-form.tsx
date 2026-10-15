@@ -134,7 +134,6 @@ export const QuotationForm = React.forwardRef<
   const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
   const [customer, setCustomer] = React.useState<Customer | null>(initial?.customerDetail ?? null);
   const [contact, setContact] = React.useState(initial?.contactName ?? '');
-  const [fax, setFax] = React.useState('');
   const [jobRef, setJobRef] = React.useState(initial?.jobRef ?? '');
   const [job, setJob] = React.useState<JobDetail | null>(initial?.job ?? null);
   const date = initial?.date ?? '';
@@ -154,7 +153,6 @@ export const QuotationForm = React.forwardRef<
     status,
     customer: customer?.code ?? '',
     contact,
-    fax,
     jobRef,
   };
   const [saved, setSaved] = React.useState(now);
@@ -280,7 +278,8 @@ export const QuotationForm = React.forwardRef<
     customer: () => customer,
     payload,
     // an old quotation saved without a job may stay without one ("never worse")
-    validate: () => !fe.report(fe.run(quotationSchema(mode === 'new' || !!initial?.jobRef?.trim()), payload())),
+    validate: () =>
+      !fe.report(fe.run(quotationSchema(mode === 'new' ? undefined : (initial?.jobRef ?? '')), payload())),
     fromApi: fe.fromApi,
   }));
 
@@ -333,11 +332,8 @@ export const QuotationForm = React.forwardRef<
           <CustomerSelect value={customer} onChange={setCustomer} />
         </Field>
         <FieldGrid className="mt-4">
-          <Field label="แฟกซ์">
-            <Input className="num" value={fax} onChange={(e) => setFax(e.target.value)} />
-          </Field>
-          <Field label="ชื่อผู้ติดต่อ" className="lg:col-span-2">
-            <Input value={contact} onChange={(e) => setContact(e.target.value)} />
+          <Field label="ชื่อผู้ติดต่อ" className="lg:col-span-2" error={fe.errors.contactName}>
+            <Input maxLength={100} value={contact} onChange={(e) => setContact(e.target.value)} />
           </Field>
         </FieldGrid>
       </Section>
@@ -362,6 +358,7 @@ export const QuotationForm = React.forwardRef<
             <Input
               className="num"
               placeholder="J2612164"
+              maxLength={8}
               value={jobRef}
               onChange={(e) => setJobRef(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && loadJob(jobRef, lines.length === 0)}
@@ -482,8 +479,13 @@ export const QuotationForm = React.forwardRef<
                     </td>
                     <td className="px-3 py-2">
                       <Input
+                        aria-invalid={!!fe.errors[`lines.${i}.detail`] || undefined}
+                        maxLength={100}
                         value={l.name}
-                        onChange={(e) => upd(l.id, { name: e.target.value })}
+                        onChange={(e) => {
+                          upd(l.id, { name: e.target.value });
+                          fe.clear(`lines.${i}.detail`);
+                        }}
                         className="h-8 text-xs"
                         placeholder="รายละเอียดรายการ"
                       />
@@ -492,7 +494,10 @@ export const QuotationForm = React.forwardRef<
                       <NumberInput
                         aria-label={`จำนวน แถว ${i + 1}`}
                         aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
-                        min={0}
+                        min={1}
+                        max={9999}
+                        step={1}
+                        inputMode="numeric"
                         placeholder="0"
                         value={l.qty}
                         onChange={(n) => {
@@ -534,9 +539,10 @@ export const QuotationForm = React.forwardRef<
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
           <FieldGrid cols={2}>
-            <Field label="หมายเหตุ" wide>
+            <Field label="หมายเหตุ" wide error={fe.errors.remark}>
               <Textarea
                 rows={4}
+                maxLength={1000}
                 placeholder="เงื่อนไขการเสนอราคา ระยะเวลายืนราคา ฯลฯ"
                 value={remark}
                 onChange={(e) => setRemark(e.target.value)}
@@ -614,18 +620,20 @@ export const QuotationForm = React.forwardRef<
               <Row label="มูลค่าก่อนภาษี" value={baht(t.totalBase)} />
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
-                <NumberInput
+                {/* 0 or 7 % only (quotation_hd.vat_rate) — a free number let 5 % through */}
+                <Select
                   aria-label="ภาษีมูลค่าเพิ่ม (%)"
                   aria-invalid={!!fe.errors.vatRate || undefined}
-                  step="0.01"
-                  placeholder="0"
-                  value={vatRate}
-                  onChange={(n) => {
-                    setVatRate(n);
+                  value={String(vatRate)}
+                  onChange={(e) => {
+                    setVatRate(Number(e.target.value));
                     fe.clear('vatRate');
                   }}
                   className="h-8 w-32 text-xs"
-                />
+                >
+                  <option value="0">0</option>
+                  <option value="7">7</option>
+                </Select>
               </div>
               <Row label="ภาษีมูลค่าเพิ่ม" value={baht(t.vat)} />
               <div className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">

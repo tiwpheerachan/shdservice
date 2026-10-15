@@ -4,6 +4,8 @@ import { idempotent } from '@/server/idempotency';
 import { issueForJob, issueForSaleOrder, issueOther, returnFromJob } from '@/server/services/stock';
 import { markPartsIssued } from '@/server/services/jobs';
 import { assertValid } from '@/server/validate';
+import { listStaff } from '@/server/services/users';
+import { cleanCode } from '@/lib/validation';
 import { issueSchema } from '@/lib/validation/stock';
 
 export const runtime = 'nodejs';
@@ -17,8 +19,16 @@ export const POST = handle(async (req: NextRequest) => {
   );
 });
 
+/** จ่ายให้ / รับคืนจาก: the pick page's list — the good-stock store or a current staff member */
+const STORE_RECIPIENT = 'คลังสินค้าดี';
+
 async function issue(req: NextRequest, userId: number) {
-  const b = assertValid(issueSchema, await readJson(req));
+  const body = assertValid(issueSchema, await readJson(req));
+  const b = { ...body, ref: cleanCode(body.ref), remark: body.remark ?? undefined };
+  if (b.payTo !== STORE_RECIPIENT && !(await listStaff()).some((s) => s.name === b.payTo)) {
+    const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือก${b.type === 'return' ? 'ผู้คืน' : 'ผู้รับ'}จากรายการ`;
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { payTo: msg } });
+  }
   if (b.type === 'job') {
     if (!b.ref) throw new HttpError(400, 'ต้องระบุหมายเลขงาน');
     const r = await issueForJob(

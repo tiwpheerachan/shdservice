@@ -11,6 +11,7 @@ import {
   job,
   jobOrderSparePartLog,
   manufacturer,
+  model,
   product,
   productModel,
   productNoneSerial,
@@ -187,35 +188,58 @@ export type ProductInput = {
 };
 
 export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
-  assertValid(productSchema, i);
-  const name = str(i.name).slice(0, 500);
-  const [cat] = i.category
+  // an unchanged legacy vendor code still saves ("never worse"); a new / changed one must be clean
+  const [cur] = i.sysCode
+    ? await db
+        .select({ mfgCode: product.productVenderCode })
+        .from(product)
+        .where(eq(product.productCode, i.sysCode))
+        .limit(1)
+    : [];
+  assertValid(productSchema(cur), i);
+  const name = clean(i.name);
+  const [cat] = str(i.category)
     ? await db
         .select({ id: category.categoryId })
         .from(category)
         .where(sql`btrim(${category.categoryName}, E' \t\r\n') = ${str(i.category)}`)
         .limit(1)
     : [];
-  const [mfg] = i.brand
+  const [mfg] = str(i.brand)
     ? await db
         .select({ id: manufacturer.manufacturerId })
         .from(manufacturer)
         .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${str(i.brand)}`) // legacy names carry trailing spaces
         .limit(1)
     : [];
+  const modelCodes = Array.from(new Set((i.models ?? []).map((m) => str(m)).filter(Boolean)));
+  const known = modelCodes.length
+    ? new Set(
+        (await db.select({ c: model.modelCode }).from(model).where(inArray(model.modelCode, modelCodes))).map(
+          (r) => r.c,
+        ),
+      )
+    : new Set();
+  // a name that is not in the list used to be saved as "no brand" / category #1 without a word
+  const fields: Record<string, string> = {};
+  if (str(i.category) && !cat) fields.category = `ไม่พบหมวดหมู่ "${str(i.category)}" ในรายการ`;
+  if (str(i.brand) && !mfg) fields.brand = `ไม่พบยี่ห้อ "${str(i.brand)}" ในรายการ`;
+  const unknownModels = modelCodes.filter((c) => !known.has(c));
+  if (unknownModels.length) fields.models = `ไม่พบรุ่นสินค้า ${unknownModels.join(', ')}`;
+  if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
 
   const code = await db.transaction(async (tx) => {
     const values = {
-      productVenderCode: str(i.mfgCode).slice(0, 50),
+      productVenderCode: cleanMfgCode(i.mfgCode),
       productName: name,
-      productNameEn: str(i.nameEn).slice(0, 200),
-      productNameCn: str(i.nameCn).slice(0, 200),
-      productDescription: str(i.description).slice(0, 200),
+      productNameEn: clean(i.nameEn),
+      productNameCn: clean(i.nameCn),
+      productDescription: clean(i.description),
       categoryId: cat?.id ?? 1,
       manufacturerId: mfg?.id ?? null,
       ...statusStamp(fromUiStatus(i.status), byUserId),
       isUbRepairOnly: !!i.ubRepairOnly,
-      forModelColor: str(i.forModelColor).slice(0, 50),
+      forModelColor: clean(i.forModelColor),
     };
     let productId: number;
     let code = i.sysCode;
@@ -273,7 +297,9 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       .from(productNoneSerial)
       .where(eq(productNoneSerial.productId, productId));
     if (onhand) {
-      await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
+      // no price sent (an API call with names only) → nothing to set: drizzle refuses an empty SET
+      if (Object.values(prices).some((v) => v !== undefined))
+        await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
     } else {
       await tx.insert(productNoneSerial).values({
         productId,
@@ -296,8 +322,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
 
     if (i.models) {
       await tx.delete(productModel).where(eq(productModel.productId, productId));
-      const codes = Array.from(new Set(i.models.map((m) => str(m)).filter(Boolean)));
-      if (codes.length) await tx.insert(productModel).values(codes.map((c) => ({ productId, modelCode: c })));
+      if (modelCodes.length) await tx.insert(productModel).values(modelCodes.map((c) => ({ productId, modelCode: c })));
     }
     if (!i.sysCode)
       await audit(tx, byUserId, {
@@ -388,9 +413,10 @@ async function insertMovement(
     inventoryNo: no,
     inventoryTypeId: h.typeId,
     itemType: 'SparePart',
-    referenceDocumentNo: str(h.ref).slice(0, 50),
-    referenceOutTo: str(h.outTo).slice(0, 50),
-    inventoryRemark: str(h.remark).slice(0, 100),
+    // the forms' schemas keep these within the columns; the slice is for derived values (SO payTo = customer name)
+    referenceDocumentNo: cleanCode(h.ref).slice(0, 50),
+    referenceOutTo: clean(h.outTo).slice(0, 50),
+    inventoryRemark: clean(h.remark).slice(0, 100),
     createDate: h.date ? `${h.date} ${nowThai().slice(11)}` : nowThai(),
     createBy: byUserId,
     isActive: true,
@@ -415,7 +441,7 @@ export type StockLine = { code: string; qty: number };
 
 /** รับเข้าอะไหล่ → WHI (type 1), available += qty. */
 export async function receiveStock(
-  i: { date?: string; poRef?: string; supplier?: string; remark?: string; lines: StockLine[] },
+  i: { date?: string; poRef?: string | null; supplier?: string | null; remark?: string | null; lines: StockLine[] },
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
   const lines = i.lines.filter((l) => l.qty > 0);
@@ -435,15 +461,23 @@ export async function receiveStock(
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
         await adjustQty(tx, p.id, { available: l.qty });
       }
-      const remark = [i.supplier ? `Supplier: ${i.supplier}` : '', i.remark ?? ''].filter(Boolean).join(' · ');
-      const no = await insertMovement(tx, { typeId: INV.RECEIVE, ref: i.poRef, remark, date: i.date }, lines, byUserId);
+      // receiveSchema: supplier ≤ 40 + remark ≤ 47 → fits inventory_remark varchar(100)
+      const remark = [clean(i.supplier) ? `Supplier: ${clean(i.supplier)}` : '', clean(i.remark)]
+        .filter(Boolean)
+        .join(' · ');
+      const no = await insertMovement(
+        tx,
+        { typeId: INV.RECEIVE, ref: i.poRef ?? '', remark, date: i.date },
+        lines,
+        byUserId,
+      );
       const total = lines.reduce((s, l) => s + l.qty, 0);
       await audit(tx, byUserId, {
         action: 'RECEIVE',
         module: 'Product Receive Stock',
         entity: 'inventory_hd',
         key: no,
-        summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${str(i.poRef)}` : ''}`,
+        summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${cleanCode(i.poRef)}` : ''}`,
         changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] },
       });
       return { no, total };
@@ -1087,7 +1121,20 @@ export async function listIssuedLines(opts: IssuedFilters & { limit?: number } =
 import { count as countFn } from 'drizzle-orm';
 import { orderBy as orderByCols, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { assertValid } from '@/server/validate';
-import { productSchema } from '@/lib/validation/admin';
+import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
+import { clean, cleanCode, summary } from '@/lib/validation';
+
+/** other products that already carry this vendor code — a warning on save, not a block (legacy has pairs) */
+export async function productsWithMfgCode(mfgCode: string, exceptSysCode: string): Promise<string[]> {
+  const code = cleanMfgCode(mfgCode);
+  if (!code) return [];
+  const rows = await db
+    .select({ c: product.productCode })
+    .from(product)
+    .where(and(sql`upper(btrim(${product.productVenderCode})) = ${code}`, ne(product.productCode, exceptSysCode)))
+    .limit(5);
+  return rows.map((r) => r.c ?? '');
+}
 
 export type ProductFilters = {
   mode?: DeletedMode;

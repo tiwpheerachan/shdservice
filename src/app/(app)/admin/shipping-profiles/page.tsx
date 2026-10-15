@@ -228,21 +228,29 @@ export default function ShippingProfilesPage() {
       >
         <FieldGrid cols={2}>
           <Field label="รหัส" required hint="ตัวย่อ เช่น FLASH, JNT" error={fe.errors.code}>
-            <Input value={form.code} onChange={(e) => set('code', e.target.value.toUpperCase())} className="num" />
+            <Input
+              maxLength={20}
+              value={form.code}
+              onChange={(e) => set('code', e.target.value.toUpperCase())}
+              className="num"
+            />
           </Field>
-          <Field label="ลำดับแสดง">
+          <Field label="ลำดับแสดง" error={fe.errors.sortOrder}>
             <Input
               type="number"
+              min={0}
+              max={999}
+              step={1}
               value={String(form.sortOrder)}
               onChange={(e) => set('sortOrder', Number(e.target.value) || 0)}
               className="num"
             />
           </Field>
           <Field label="ชื่อ (ไทย)" required error={fe.errors.nameTh}>
-            <Input value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
+            <Input maxLength={200} value={form.nameTh} onChange={(e) => set('nameTh', e.target.value)} />
           </Field>
-          <Field label="ชื่อ (อังกฤษ)">
-            <Input value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} />
+          <Field label="ชื่อ (อังกฤษ)" error={fe.errors.nameEn}>
+            <Input maxLength={200} value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} />
           </Field>
 
           <Field
@@ -252,6 +260,7 @@ export default function ShippingProfilesPage() {
             hint="ใส่ {no} ตรงตำแหน่งเลขพัสดุ เช่น https://www.flashexpress.com/fle/tracking?se={no} — เว้นว่างได้ ลูกค้าจะเห็นแค่เลขพัสดุ"
           >
             <Input
+              maxLength={300}
               value={form.trackUrl}
               onChange={(e) => set('trackUrl', e.target.value)}
               placeholder="https://…/track?no={no}"

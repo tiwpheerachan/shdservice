@@ -5,12 +5,13 @@ import { db } from '@/db/client';
 import { category, color, jobType, manufacturer, model, productType, symptom, runningNo } from '@/db/schema';
 import type { MasterRow, Symptom, Model } from '@/data/mock';
 import { HttpError } from '@/server/auth';
-import { fmtDateTime, money, nowThai, num, str } from '@/server/mappers/format';
+import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { count, desc, ilike, or } from 'drizzle-orm';
 import { orderBy as orderByCols, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import {
+  RS,
   statusFilter,
   uiStatus,
   fromUiStatus,
@@ -19,11 +20,25 @@ import {
   type RecordStatus,
 } from '@/server/record-status';
 import { assertValid } from '@/server/validate';
-import { MASTER_NAME_LABEL, masterSchema, modelSchema } from '@/lib/validation/admin';
+import {
+  DUPLICATE_NAME,
+  MASTER_DETAIL_MAX,
+  MASTER_NAME_LABEL,
+  masterNameKey,
+  masterSchema,
+  modelSchema,
+} from '@/lib/validation/admin';
+import { clean } from '@/lib/validation';
 
 export type DeletedMode = StatusMode;
 
 const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
+
+/** the column as masterNameKey() sees a name (no spaces, lower case) */
+const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
+  sql`lower(regexp_replace(coalesce(${col}, ''), '[[:space:]]', '', 'g'))`;
+/** 409 under the name field: the same name ignoring case and spaces exists (the unique index used to answer 500) */
+const duplicate = () => new HttpError(409, DUPLICATE_NAME, { fields: { name: DUPLICATE_NAME } });
 
 /* ------------------------------------------------------------------ *
  * Simple id/name/detail/is_active masters
@@ -132,8 +147,11 @@ export async function saveSimple(
   byUserId = 0,
 ): Promise<MasterRow> {
   const d = SIMPLE[kind];
-  assertValid(masterSchema(MASTER_NAME_LABEL[kind], { days: !!d.keys.days }), input);
-  const name = str(input.name).slice(0, d.nameLen);
+  assertValid(
+    masterSchema(MASTER_NAME_LABEL[kind], { days: !!d.keys.days, detailMax: MASTER_DETAIL_MAX[kind] }),
+    input,
+  );
+  const name = clean(input.name);
   const rs = fromUiStatus(input.status);
   const values: Record<string, unknown> = {
     [d.keys.name]: name,
@@ -142,24 +160,31 @@ export async function saveSimple(
     statusChangedAt: nowThai(),
     statusChangedBy: byUserId,
   };
-  if (d.keys.detail) values[d.keys.detail] = str(input.detail).slice(0, 100);
-  if (d.keys.extra) values[d.keys.extra] = str(input.extra).slice(0, 50);
+  if (d.keys.detail) values[d.keys.detail] = clean(input.detail);
+  // the page has no field for it (categories.shot_code): not sent = keep it (every edit used to blank it)
+  if (d.keys.extra && input.extra !== undefined) values[d.keys.extra] = clean(input.extra).slice(0, 50);
   if (d.keys.days) values[d.keys.days] = Number(input.days);
 
-  // unique-name guard (legacy has unique indexes on most names)
-  const dup = await db
-    .select({ id: d.id })
-    .from(d.table)
-    .where(and(eq(d.name, name), input.id ? ne(d.id, Number(input.id)) : undefined))
-    .limit(1);
-  if (dup[0]) throw new HttpError(409, `มีชื่อ "${name}" อยู่แล้ว`);
-
-  if (input.id) {
-    const [before] = await db
-      .select()
+  const [before] = input.id
+    ? await db
+        .select()
+        .from(d.table)
+        .where(eq(d.id, Number(input.id)))
+    : [];
+  if (input.id && !before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`); // was: silent update of nothing + undefined answer
+  // unique name ignoring case + spaces (legacy has unique indexes on most names); a row keeping its own
+  // name is not checked — 5 legacy symptom pairs already clash and must stay editable
+  const oldName = before ? (before as Record<string, unknown>)[d.keys.name] : undefined;
+  if (!before || masterNameKey(oldName) !== masterNameKey(name)) {
+    const dup = await db
+      .select({ id: d.id })
       .from(d.table)
-      .where(eq(d.id, Number(input.id)));
-    if (!before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`); // was: silent update of nothing + undefined answer
+      .where(and(sql`${nameKeyOf(d.name)} = ${masterNameKey(name)}`, input.id ? ne(d.id, Number(input.id)) : undefined))
+      .limit(1);
+    if (dup[0]) throw duplicate();
+  }
+
+  if (input.id && before) {
     await db
       .update(d.table)
       .set(values)
@@ -244,18 +269,36 @@ export async function saveSymptom(
   },
   byUserId = 0,
 ): Promise<Symptom> {
-  const name = str(input.name).slice(0, 50);
-  assertValid(masterSchema(MASTER_NAME_LABEL.symptoms), input);
+  assertValid(masterSchema(MASTER_NAME_LABEL.symptoms, { detailMax: MASTER_DETAIL_MAX.symptoms }), input);
+  const name = clean(input.name);
   const values = {
     symptomName: name,
-    symptomDescription: str(input.detail).slice(0, 100),
-    symptomGroupName: str(input.group).slice(0, 50),
+    symptomDescription: clean(input.detail),
+    symptomGroupName: clean(input.group),
     ...statusStamp(fromUiStatus(input.status), byUserId),
   };
+  const [before] = input.id
+    ? await db
+        .select()
+        .from(symptom)
+        .where(eq(symptom.symptomId, Number(input.id)))
+    : [];
+  if (!before || masterNameKey(before.symptomName) !== masterNameKey(name)) {
+    const [dup] = await db
+      .select({ id: symptom.symptomId })
+      .from(symptom)
+      .where(
+        and(
+          sql`${nameKeyOf(symptom.symptomName)} = ${masterNameKey(name)}`,
+          input.id ? ne(symptom.symptomId, Number(input.id)) : undefined,
+        ),
+      )
+      .limit(1);
+    if (dup) throw duplicate();
+  }
   let id: number;
   if (input.id) {
     id = Number(input.id);
-    const [before] = await db.select().from(symptom).where(eq(symptom.symptomId, id));
     await db.update(symptom).set(values).where(eq(symptom.symptomId, id));
     await audit(db, byUserId, {
       action: 'UPDATE',
@@ -336,14 +379,37 @@ export async function saveModel(
   },
   byUserId = 0,
 ): Promise<Model> {
-  const name = str(input.name).slice(0, 50);
   assertValid(modelSchema, input);
+  const name = clean(input.name);
   const brand = await db
     .select({ id: manufacturer.manufacturerId })
     .from(manufacturer)
-    .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${str(input.brand)}`) // legacy names carry trailing spaces
+    .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${clean(input.brand)}`) // legacy names carry trailing spaces
     .limit(1);
-  if (!brand[0]) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + str(input.brand));
+  if (!brand[0]) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + clean(input.brand));
+  // one name per brand, ignoring case + spaces (ix_unique_model used to answer a duplicate with a 500);
+  // a model keeping its own name and brand is not checked
+  const [before] = input.code
+    ? await db
+        .select({ name: model.modelName, mfg: model.manufacturerId })
+        .from(model)
+        .where(eq(model.modelCode, input.code))
+    : [];
+  if (!before || before.mfg !== brand[0].id || masterNameKey(before.name) !== masterNameKey(name)) {
+    const [dup] = await db
+      .select({ id: model.modelId })
+      .from(model)
+      .where(
+        and(
+          eq(model.manufacturerId, brand[0].id),
+          sql`${nameKeyOf(model.modelName)} = ${masterNameKey(name)}`,
+          ne(model.recordStatus, RS.DELETED),
+          input.code ? sql`${model.modelCode} is distinct from ${input.code}` : undefined,
+        ),
+      )
+      .limit(1);
+    if (dup) throw duplicate();
+  }
   const values = {
     modelName: name,
     manufacturerId: brand[0].id,
@@ -373,7 +439,7 @@ export async function saveModel(
       module: 'Admin',
       entity: 'model',
       key: c,
-      summary: `เพิ่มรุ่นสินค้า ${name} (${str(input.brand)})`,
+      summary: `เพิ่มรุ่นสินค้า ${name} (${clean(input.brand)})`,
     });
     return c;
   });

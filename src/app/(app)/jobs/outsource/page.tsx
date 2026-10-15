@@ -72,7 +72,10 @@ function OutsourceForm() {
     sendToOther: 'send.to',
     sendDate: 'send.date',
     sendBy: 'send.by',
+    sendDetail: 'send.detail',
     recvBy: 'receive.by',
+    recvDetail: 'receive.detail',
+    repairDetail: 'repairDetail',
     recvDate: 'receive.date',
     status: 'status',
   };
@@ -229,11 +232,21 @@ function OutsourceForm() {
           <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
             <FieldGrid>
               <MainSymptomField />
-              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
+              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={act.errors.symptomOther}>
+                <Textarea
+                  rows={2}
+                  maxLength={200}
+                  value={form.symptomOther}
+                  onChange={(e) => set('symptomOther', e.target.value)}
+                />
               </Field>
-              <Field label="วิธีการซ่อมเบื้องต้น" wide>
-                <Textarea rows={3} value={d.repairDetail} onChange={(e) => upd({ repairDetail: e.target.value })} />
+              <Field label="วิธีการซ่อมเบื้องต้น" wide error={act.errors.repairDetail}>
+                <Textarea
+                  rows={3}
+                  maxLength={200}
+                  value={d.repairDetail}
+                  onChange={(e) => upd({ repairDetail: e.target.value })}
+                />
               </Field>
             </FieldGrid>
           </Section>
@@ -252,6 +265,7 @@ function OutsourceForm() {
                 {d.sendTo === OTHER && (
                   <Input
                     placeholder="ระบุชื่อผู้รับซ่อมต่อ"
+                    maxLength={50}
                     value={d.sendToOther}
                     onChange={(e) => upd({ sendToOther: e.target.value })}
                   />
@@ -269,8 +283,13 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้ส่ง…"
               />
             </Field>
-            <Field label="หมายเหตุการส่ง" wide>
-              <Textarea rows={2} value={d.sendDetail} onChange={(e) => upd({ sendDetail: e.target.value })} />
+            <Field label="หมายเหตุการส่ง" wide error={act.errors['send.detail']}>
+              <Textarea
+                rows={2}
+                maxLength={100}
+                value={d.sendDetail}
+                onChange={(e) => upd({ sendDetail: e.target.value })}
+              />
             </Field>
           </FieldGrid>
         </Section>
@@ -296,8 +315,13 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้รับ…"
               />
             </Field>
-            <Field label="หมายเหตุการรับคืน" wide>
-              <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
+            <Field label="หมายเหตุการรับคืน" wide error={act.errors['receive.detail']}>
+              <Textarea
+                rows={2}
+                maxLength={100}
+                value={d.recvDetail}
+                onChange={(e) => upd({ recvDetail: e.target.value })}
+              />
             </Field>
             <Field label="โปรดระบุ สถานะงานซ่อม" required wide error={act.errors.status}>
               <SearchSelect

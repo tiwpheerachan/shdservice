@@ -31,7 +31,7 @@ import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { closeActionSchema, jobAmountDue, OUTSOURCE_NOT_BACK, STATUS_CLOSED_TRACKED } from '@/lib/validation/job';
+import { closeSchema, jobAmountDue, OUTSOURCE_NOT_BACK, STATUS_CLOSED_TRACKED } from '@/lib/validation/job';
 
 function CloseForm() {
   const { push } = useToast();
@@ -67,7 +67,12 @@ function CloseForm() {
     status: 'status',
     payType: 'payment.type',
     payAmount: 'payment.amount',
+    payDate: 'payment.date',
+    payNo: 'payment.no',
+    payDetail: 'payment.detail',
     returnType: 'return.type',
+    courier: 'return.detail',
+    returnDetail: 'return.detail',
     returnDate: 'return.date',
     tracking: 'return.tracking',
   };
@@ -148,7 +153,8 @@ function CloseForm() {
       status: d.status,
     };
     const canEdit = can('Job Management', 'edit');
-    if (!act.check(closeActionSchema, body, canEdit)) return;
+    // the receipt / parcel no as loaded: an unchanged legacy value still passes
+    if (!act.check(closeSchema({ payNo: saved?.payNo, tracking: saved?.tracking }), body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -310,11 +316,16 @@ function CloseForm() {
                     className="num text-right"
                   />
                 </Field>
-                <Field label="วันที่ชำระเงิน">
+                <Field label="วันที่ชำระเงิน" error={act.errors['payment.date']}>
                   <Input type="date" value={d.payDate} onChange={(e) => upd({ payDate: e.target.value })} />
                 </Field>
-                <Field label="เลขที่ใบเสร็จ">
-                  <Input className="num" value={d.payNo} onChange={(e) => upd({ payNo: e.target.value })} />
+                <Field label="เลขที่ใบเสร็จ" error={act.errors['payment.no']}>
+                  <Input
+                    className="num"
+                    maxLength={50}
+                    value={d.payNo}
+                    onChange={(e) => upd({ payNo: e.target.value })}
+                  />
                 </Field>
                 <Field label="สลิปหลักฐานการชำระ" wide>
                   <div className="flex items-center gap-2">
@@ -337,8 +348,13 @@ function CloseForm() {
                     )}
                   </div>
                 </Field>
-                <Field label="หมายเหตุ" wide>
-                  <Textarea rows={2} value={d.payDetail} onChange={(e) => upd({ payDetail: e.target.value })} />
+                <Field label="หมายเหตุ" wide error={act.errors['payment.detail']}>
+                  <Textarea
+                    rows={2}
+                    maxLength={100}
+                    value={d.payDetail}
+                    onChange={(e) => upd({ payDetail: e.target.value })}
+                  />
                 </Field>
               </FieldGrid>
             </div>
@@ -385,6 +401,7 @@ function CloseForm() {
                 <Input
                   className="mt-2"
                   list="close-shipper-options"
+                  maxLength={50}
                   value={d.courier}
                   onChange={(e) => upd({ courier: e.target.value })}
                   placeholder="พิมพ์ชื่อบริษัทขนส่ง"
@@ -402,10 +419,20 @@ function CloseForm() {
               required={d.status === STATUS_CLOSED_TRACKED}
               error={act.errors['return.tracking']}
             >
-              <Input className="num" value={d.tracking} onChange={(e) => upd({ tracking: e.target.value })} />
+              <Input
+                className="num"
+                maxLength={50}
+                value={d.tracking}
+                onChange={(e) => upd({ tracking: e.target.value })}
+              />
             </Field>
-            <Field label="รายละเอียดการส่งคืน" wide>
-              <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
+            <Field label="รายละเอียดการส่งคืน" wide error={act.errors['return.detail']}>
+              <Textarea
+                rows={2}
+                maxLength={100}
+                value={d.returnDetail}
+                onChange={(e) => upd({ returnDetail: e.target.value })}
+              />
             </Field>
             <Field
               label="โปรดระบุ สถานะงาน"

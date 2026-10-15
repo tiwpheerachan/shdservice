@@ -5,6 +5,7 @@ import { shippingProfile } from '@/db/schema';
 import { HttpError } from '@/server/auth';
 import { assertValid } from '@/server/validate';
 import { shippingProfileSchema } from '@/lib/validation/admin';
+import { clean, cleanCode } from '@/lib/validation';
 import { audit, diff } from '@/server/audit';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { nowThai } from '@/server/mappers/format';
@@ -77,18 +78,16 @@ export type ShippingProfileInput = {
   sortOrder?: number;
 };
 
-const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-
 export async function saveShippingProfile(i: ShippingProfileInput, byUserId: number): Promise<ShippingProfile> {
-  const code = str(i.code, 20).toUpperCase();
-  const nameTh = str(i.nameTh);
-  const trackUrl = str(i.trackUrl, 300);
-  assertValid(shippingProfileSchema, i); // same rules as the page: errors under code / nameTh / trackUrl
+  assertValid(shippingProfileSchema, i); // same rules as the page: errors under code / nameTh / trackUrl (≤ 300)
+  const code = cleanCode(i.code);
+  const nameTh = clean(i.nameTh);
+  const trackUrl = clean(i.trackUrl);
 
   const values = {
     code,
     nameTh,
-    nameEn: str(i.nameEn),
+    nameEn: clean(i.nameEn),
     trackUrl,
     isActive: i.isActive !== false,
     sortOrder: Number(i.sortOrder ?? 0) || 0,

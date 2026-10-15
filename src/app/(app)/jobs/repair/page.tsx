@@ -322,6 +322,7 @@ function RepairForm() {
                       <td className="px-2 py-2">
                         <NumberInput
                           min={0}
+                          max={1000}
                           placeholder="0"
                           aria-label={`จำนวน แบบ A ${l.code}`}
                           value={l.aQty}
@@ -355,6 +356,7 @@ function RepairForm() {
                       <td className="px-2 py-2">
                         <NumberInput
                           min={0}
+                          max={1000}
                           placeholder="0"
                           aria-label={`จำนวน แบบ B ${l.code}`}
                           value={l.bQty}
@@ -441,26 +443,42 @@ function RepairForm() {
                 placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
               />
             </Field>
-            <Field label="วิธีการซ่อม" className="lg:col-span-2">
+            <Field label="วิธีการซ่อม" className="lg:col-span-2" error={act.errors.repairDetail}>
               <Textarea
                 rows={3}
+                maxLength={200}
                 placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ"
                 value={detail.repairDetail}
-                onChange={(e) => setDetail((d) => ({ ...d, repairDetail: e.target.value }))}
+                onChange={(e) => {
+                  setDetail((d) => ({ ...d, repairDetail: e.target.value }));
+                  act.clear('repairDetail');
+                }}
               />
             </Field>
-            <Field label="หมายเหตุ" className="lg:col-span-2">
+            <Field label="หมายเหตุ" className="lg:col-span-2" error={act.errors.engineerRemark}>
               <Textarea
                 rows={3}
+                maxLength={200}
                 value={detail.engineerRemark}
-                onChange={(e) => setDetail((d) => ({ ...d, engineerRemark: e.target.value }))}
+                onChange={(e) => {
+                  setDetail((d) => ({ ...d, engineerRemark: e.target.value }));
+                  act.clear('engineerRemark');
+                }}
               />
             </Field>
-            <Field label="New Serial No.">
+            <Field
+              label="New Serial No."
+              error={act.errors.newSerial}
+              hint="เพิ่มต่อท้ายรายการอะไหล่ที่เปลี่ยน (ของเดิมไม่หาย)"
+            >
               <Input
                 className="num"
+                maxLength={50}
                 value={detail.newSerial}
-                onChange={(e) => setDetail((d) => ({ ...d, newSerial: e.target.value }))}
+                onChange={(e) => {
+                  setDetail((d) => ({ ...d, newSerial: e.target.value }));
+                  act.clear('newSerial');
+                }}
               />
             </Field>
             <Field label="สถานะงานซ่อม" required error={act.errors.status}>

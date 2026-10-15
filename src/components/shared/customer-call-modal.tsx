@@ -257,6 +257,7 @@ export function CustomerCallModal({
               <div className="flex gap-2">
                 <input
                   value={text}
+                  maxLength={200}
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addLog()}
                   placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"

@@ -1,53 +1,77 @@
 import { z } from 'zod';
+import { clean, cleanCode, maxNote, maxText, moneyField } from './index';
 import { isFilled } from './job';
 
 /**
  * Quotation rules (สร้าง / แก้ไขใบเสนอราคา) — payload = QuotationInput (quotation-form payload()).
+ * `prevJobNo` = the job no the quotation has now (left out = a new quotation).
  *  - customer: always
- *  - job no (the only * on the form): a new quotation needs one; an existing one that has one must
- *    keep one ("never worse"); the API also checks that the job exists
- *  - numbers: qty > 0, prices / service not negative, discount and VAT 0–100 %
+ *  - job no J + 7 digits (the only * on the form): a new quotation needs one; an existing one that
+ *    has one must keep one ("never worse"); an unchanged legacy value passes; the API also checks
+ *    that the job exists
+ *  - lines: qty a whole 1–9999, unit price money, detail ≤ 100; service money; discount 0–100 %
+ *    (บาท: money); VAT 0 or 7 %; contact ≤ 100; remark ≤ 1000 — nothing is cut off silently
  *  - no minimum number of lines (service-only / draft quotations exist)
  * Line errors are keyed "lines.<row>.qty" / "lines.<row>.unitPrice" (row = position on screen).
  */
-const JOB_NO = /^[A-Z]{1,6}\d{5,}$/i;
-const amount = (field: string, max?: number) =>
+export const JOB_NO_RE = /^J\d{7}$/;
+const amount = (field: string) =>
   z
     .union([z.number(), z.string()])
     .optional()
     .refine((v) => v === undefined || v === '' || Number.isFinite(Number(v)), `${field}ต้องเป็นตัวเลข`)
-    .refine((v) => v === undefined || v === '' || Number(v) >= 0, `${field}ต้องไม่ติดลบ`)
-    .refine((v) => max === undefined || v === undefined || v === '' || Number(v) <= max, `${field}ต้องไม่เกิน ${max}`);
+    .refine((v) => v === undefined || v === '' || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
 
-export function quotationSchema(jobRequired = true) {
+export function quotationSchema(prevJobNo?: string | null) {
+  const jobRequired = prevJobNo == null || !!clean(prevJobNo);
   return (
     z
       .looseObject({
-        customerCode: z.string().optional(),
-        jobNo: z.string().optional(),
+        contactName: maxText(100, 'ชื่อผู้ติดต่อ'),
         lines: z
           .array(
             z.looseObject({
-              qty: z.union([z.number(), z.string()]).refine((v) => Number(v) > 0, 'จำนวนต้องมากกว่า 0'),
-              unitPrice: amount('ราคา/หน่วย'),
+              detail: maxText(100, 'รายละเอียด'),
+              qty: z
+                .union([z.number(), z.string()])
+                .refine(
+                  (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 9999,
+                  'จำนวนต้องเป็นจำนวนเต็ม 1–9999',
+                ),
+              unitPrice: moneyField('ราคา/หน่วย'),
             }),
           )
           .optional(),
-        serviceAmount: amount('ค่าบริการ'),
+        serviceAmount: moneyField('ค่าบริการ'),
         discountValue: amount('ส่วนลด'), // ≤ 100 unless in บาท (legacy quotations carry บาท discounts)
-        vatRate: amount('ภาษีมูลค่าเพิ่ม', 100),
+        vatRate: z
+          .union([z.number(), z.string()])
+          .optional()
+          .refine(
+            (v) => v === undefined || v === '' || [0, 7].includes(Number(v)),
+            'ภาษีมูลค่าเพิ่มต้องเป็น 0 หรือ 7 %',
+          ),
+        remark: maxNote(1000, 'หมายเหตุ'),
+        approveRemark: maxText(100, 'หมายเหตุการตอบรับ'),
       })
       // required checks here, not on the fields: a missing key must not stop the other rules
       .superRefine((v, ctx) => {
         if (v.discountUnit !== 'บาท' && Number(v.discountValue) > 100)
           ctx.addIssue({ code: 'custom', path: ['discountValue'], message: 'ส่วนลดต้องไม่เกิน 100' });
+        if (v.discountUnit === 'บาท' && Number(v.discountValue) > 1_000_000)
+          ctx.addIssue({ code: 'custom', path: ['discountValue'], message: 'ส่วนลดต้องไม่เกิน 1,000,000 บาท' });
         if (!isFilled(v.customerCode))
           ctx.addIssue({ code: 'custom', path: ['customerCode'], message: 'ต้องเลือกลูกค้า' });
-        if (!isFilled(v.jobNo)) {
+        const jobNo = cleanCode(v.jobNo);
+        if (!jobNo) {
           if (jobRequired)
             ctx.addIssue({ code: 'custom', path: ['jobNo'], message: 'ต้องระบุหมายเลขงานซ่อมที่อ้างถึง' });
-        } else if (!JOB_NO.test(String(v.jobNo).trim())) {
-          ctx.addIssue({ code: 'custom', path: ['jobNo'], message: 'รูปแบบหมายเลขงานไม่ถูกต้อง (เช่น J2612164)' });
+        } else if (!JOB_NO_RE.test(jobNo) && jobNo !== cleanCode(prevJobNo)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['jobNo'],
+            message: 'รูปแบบหมายเลขงานไม่ถูกต้อง (J + ตัวเลข 7 หลัก เช่น J2612164)',
+          });
         }
       })
   );

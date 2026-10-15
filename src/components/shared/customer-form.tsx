@@ -180,7 +180,7 @@ export function CustomerFields({
       <Field label="รหัสลูกค้า">
         <Input value={editing?.code || 'Generate Auto'} readOnly />
       </Field>
-      <Field label="ประเภทลูกค้า">
+      <Field label="ประเภทลูกค้า" error={errors.type}>
         <div className="flex items-center gap-3">
           <Select value={form.type} onChange={(e) => set('type', e.target.value)} className="flex-1">
             {CUSTOMER_TYPES.map((t) => (
@@ -199,16 +199,24 @@ export function CustomerFields({
       </Field>
 
       <Field label="ชื่อลูกค้า" required wide error={errors.name}>
-        <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
+        <Input maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} />
       </Field>
 
       <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี" wide error={errors.taxId}>
-        <Input value={form.taxId} onChange={(e) => set('taxId', e.target.value)} className="num" />
+        <Input
+          inputMode="numeric"
+          maxLength={17}
+          placeholder="13 หลัก"
+          value={form.taxId}
+          onChange={(e) => set('taxId', e.target.value)}
+          className="num"
+        />
       </Field>
 
       <Field
         label="ที่อยู่ เลขที่"
         wide
+        error={errors.address1}
         hint={
           editing && (editing.cityId ?? -1) <= 0 && form.address1
             ? 'ที่อยู่เดิมจากระบบเก่ายังไม่แยกจังหวัด/อำเภอ — ถ้าจะเลือกจังหวัดด้านล่าง กรุณาตัดส่วนตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ออกจากช่องนี้ก่อน ไม่เช่นนั้นที่อยู่จะซ้ำ'
@@ -217,14 +225,20 @@ export function CustomerFields({
       >
         <Textarea
           rows={2}
+          maxLength={100}
           value={form.address1}
           onChange={(e) => set('address1', e.target.value)}
           placeholder="บ้านเลขที่ / หมู่ / หมู่บ้าน / อาคาร"
         />
       </Field>
 
-      <Field label="ซอย - ถนน">
-        <Input value={form.address2} onChange={(e) => set('address2', e.target.value)} placeholder="ซอย / ถนน" />
+      <Field label="ซอย - ถนน" error={errors.address2}>
+        <Input
+          maxLength={100}
+          value={form.address2}
+          onChange={(e) => set('address2', e.target.value)}
+          placeholder="ซอย / ถนน"
+        />
       </Field>
       <Field label="จังหวัด">
         <SearchSelect
@@ -250,32 +264,46 @@ export function CustomerFields({
             const id = Number(v) || -1;
             const hit = subDistricts.find((s) => s.id === id);
             setForm((f) => ({ ...f, subDistrictId: id, postalCode: hit?.postal || f.postalCode }));
+            clearError?.('postalCode');
           }}
           options={subDistricts.map((s) => ({ value: String(s.id), label: s.name, sub: s.postal || undefined }))}
           disabled={form.districtId <= 0}
           searchPlaceholder="พิมพ์ชื่อแขวง / ตำบล หรือรหัสไปรษณีย์…"
         />
       </Field>
-      <Field label="รหัสไปรษณีย์">
+      <Field label="รหัสไปรษณีย์" error={errors.postalCode}>
         <Input
+          inputMode="numeric"
+          maxLength={5}
           value={form.postalCode}
           onChange={(e) => set('postalCode', e.target.value)}
           className="num"
           placeholder="10000"
         />
       </Field>
-      <Field label="เบอร์โทรศัพท์" required={!editing || !!editing.phone?.trim()} error={errors.phone}>
-        <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} className="num" />
+      <Field
+        label="เบอร์โทรศัพท์"
+        required={!editing || !!editing.phone?.trim()}
+        error={errors.phone}
+        hint={editing ? undefined : 'ต้องมีเบอร์มือถือ — ลูกค้าใช้รับรหัส OTP ติดตามงาน'}
+      >
+        <Input
+          inputMode="tel"
+          maxLength={50}
+          value={form.phone}
+          onChange={(e) => set('phone', e.target.value)}
+          className="num"
+        />
       </Field>
 
       <Field label="Email" error={errors.email}>
-        <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+        <Input type="email" maxLength={50} value={form.email} onChange={(e) => set('email', e.target.value)} />
       </Field>
-      <Field label="Line ID">
-        <Input value={form.line} onChange={(e) => set('line', e.target.value)} />
+      <Field label="Line ID" error={errors.line}>
+        <Input maxLength={21} value={form.line} onChange={(e) => set('line', e.target.value)} />
       </Field>
 
-      <Field label="ใช้กลุ่มราคา">
+      <Field label="ใช้กลุ่มราคา" error={errors.priceGroup}>
         <Select value={form.priceGroup} onChange={(e) => set('priceGroup', e.target.value)}>
           {PRICE_GROUPS.map((g) => (
             <option key={g}>{g}</option>

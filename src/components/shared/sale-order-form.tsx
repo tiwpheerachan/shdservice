@@ -196,7 +196,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
         }
       },
-      validate: () => !fe.report(fe.run(saleOrderSchema, payloadOf())),
+      // an edit keeps a legacy payment type ("ยังไม่ชำระเงิน") it already has
+      validate: () =>
+        !fe.report(fe.run(saleOrderSchema(initial ? { paymentType: initial.paymentType } : null), payloadOf())),
       fromApi: fe.fromApi,
       payload: () => payloadOf(),
     }));
@@ -276,7 +278,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
               />
             </Field>
             <Field label="จำนวน" className="sm:w-28">
-              <NumberInput min={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
+              <NumberInput min={1} max={1000} step={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
             </Field>
             <Field label="หน่วยนับ" className="sm:w-28">
               <Input readOnly value="Pcs." />
@@ -320,6 +322,9 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                           aria-label={`จำนวน ${l.code}`}
                           aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
                           min={1}
+                          max={1000}
+                          step={1}
+                          inputMode="numeric"
                           value={l.qty}
                           onChange={(n) =>
                             setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
@@ -369,7 +374,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
           <FieldGrid>
-            <Field label="วิธีการชำระเงิน" required className="lg:col-span-2" group="radiogroup">
+            <Field
+              label="วิธีการชำระเงิน"
+              required
+              className="lg:col-span-2"
+              group="radiogroup"
+              error={fe.errors.paymentType}
+            >
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
                 {PAYMENT_METHODS.map((p) => (
                   <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -384,6 +395,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 type="number"
                 step="0.01"
                 min={0}
+                max={10_000_000}
                 inputMode="decimal"
                 placeholder={total ? total.toFixed(2) : '0.00'}
                 value={payAmount}
@@ -415,8 +427,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 )}
               </div>
             </Field>
-            <Field label="หมายเหตุ" wide>
-              <Textarea rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />
+            <Field label="หมายเหตุ" wide error={fe.errors.remark}>
+              <Textarea rows={2} maxLength={100} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
             <Field label="Action" required wide group="radiogroup">
               <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">

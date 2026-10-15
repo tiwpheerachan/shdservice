@@ -169,15 +169,25 @@ export function ProductDetailModal({
   }
 
   const save = async () => {
-    if (fe.report(fe.run(productSchema, form))) return; // the API checks the same
+    // the API checks the same; the vendor code the product already has (legacy) still saves
+    if (fe.report(fe.run(productSchema(detail), form))) return;
     setSaving(true);
     try {
-      const d = await postJson<{ row: Product }>('/api/products', { ...form, sysCode: code || undefined });
+      const d = await postJson<{ row: Product; sameMfgCode?: string[] }>('/api/products', {
+        ...form,
+        sysCode: code || undefined,
+      });
       push({
         kind: 'success',
         title: mode === 'add' ? 'เพิ่มอะไหล่แล้ว' : 'บันทึกการแก้ไขอะไหล่แล้ว',
         desc: d.row.sysCode,
       });
+      if (d.sameMfgCode?.length)
+        push({
+          kind: 'warning',
+          title: `รหัสผู้ผลิต ${d.row.mfgCode} ซ้ำกับอะไหล่อื่น`,
+          desc: `${d.sameMfgCode.join(', ')} — ตรวจว่าไม่ได้สร้างอะไหล่ซ้ำ`,
+        });
       onSave?.(d.row);
       onClose();
     } catch (e) {
@@ -266,26 +276,44 @@ export function ProductDetailModal({
             <Field label="รหัสอะไหล่ (ระบบ)">
               <Input value={p.sysCode || 'Generate Auto'} readOnly className="num" />
             </Field>
-            <Field label="รหัสอะไหล่ (ผู้ผลิต)">
+            <Field
+              label="รหัสอะไหล่ (ผู้ผลิต)"
+              error={fe.errors.mfgCode}
+              hint={ro ? undefined : 'รหัสเดียว: A-Z 0-9 . _ / - (ไม่มีภาษาไทย ช่องว่าง หรือจุลภาค)'}
+            >
               <Input
                 value={form.mfgCode}
-                onChange={(e) => set('mfgCode', e.target.value)}
+                onChange={(e) => set('mfgCode', e.target.value.toUpperCase())}
                 readOnly={ro}
+                maxLength={50}
+                autoCapitalize="characters"
+                spellCheck={false}
                 className="num"
               />
             </Field>
 
             <Field label="ชื่ออะไหล่ (TH)" required wide error={fe.errors.name}>
-              <Input value={form.name} onChange={(e) => set('name', e.target.value)} readOnly={ro} />
+              <Input maxLength={500} value={form.name} onChange={(e) => set('name', e.target.value)} readOnly={ro} />
             </Field>
-            <Field label="ชื่ออะไหล่ (EN)" wide>
-              <Input value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} readOnly={ro} />
-            </Field>
-            <Field label="ชื่ออะไหล่ (CN)" wide>
-              <Input value={form.nameCn} onChange={(e) => set('nameCn', e.target.value)} readOnly={ro} />
-            </Field>
-            <Field label="รายละเอียด" wide>
+            <Field label="ชื่ออะไหล่ (EN)" wide error={fe.errors.nameEn}>
               <Input
+                maxLength={200}
+                value={form.nameEn}
+                onChange={(e) => set('nameEn', e.target.value)}
+                readOnly={ro}
+              />
+            </Field>
+            <Field label="ชื่ออะไหล่ (CN)" wide error={fe.errors.nameCn}>
+              <Input
+                maxLength={200}
+                value={form.nameCn}
+                onChange={(e) => set('nameCn', e.target.value)}
+                readOnly={ro}
+              />
+            </Field>
+            <Field label="รายละเอียด" wide error={fe.errors.description}>
+              <Input
+                maxLength={200}
                 value={form.description}
                 onChange={(e) => set('description', e.target.value)}
                 placeholder="รายละเอียดเพิ่มเติม"
@@ -293,7 +321,7 @@ export function ProductDetailModal({
               />
             </Field>
 
-            <Field label="หมวดหมู่">
+            <Field label="หมวดหมู่" error={fe.errors.category}>
               <SearchSelect
                 value={form.category}
                 onChange={(v) => set('category', v)}
@@ -363,7 +391,7 @@ export function ProductDetailModal({
               <Input value={p.onhand} readOnly className="num text-right" />
             </Field>
 
-            <Field label="ยี่ห้อ (ผู้ผลิต)" wide>
+            <Field label="ยี่ห้อ (ผู้ผลิต)" wide error={fe.errors.brand}>
               <SearchSelect
                 value={form.brand}
                 onChange={(v) => set('brand', v)}
@@ -381,6 +409,7 @@ export function ProductDetailModal({
         {/* product models */}
         <div>
           <p className="mb-2 text-sm font-medium">ใช้สำหรับ รุ่นสินค้า</p>
+          {fe.errors.models && <p className="mb-2 text-xs text-danger">{fe.errors.models}</p>}
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-3 lg:grid-cols-4">
             {MODELS.map((m) => (
               <label key={m.code} className="flex cursor-pointer items-center gap-2 text-xs" title={m.name}>

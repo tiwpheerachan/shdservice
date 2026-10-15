@@ -1,7 +1,7 @@
 import { audit, diff } from '@/server/audit';
 import 'server-only';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
@@ -15,6 +15,7 @@ function userChanged(email?: string | null) {
 }
 import type { User, Permission } from '@/data/mock';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
+import { clean } from '@/lib/validation';
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 
 const DEFAULT_APPROVED_TYPE = 'Customer Service';
@@ -256,21 +257,59 @@ export type UpsertUserInput = {
   title?: string;
 };
 
+/** the stored username / phone of the user being edited — userSchema lets unchanged legacy values pass */
+export async function userPrev(id: unknown): Promise<{ username: string | null; phone: string | null } | null> {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const [row] = await db
+    .select({ username: appUser.username, phone: appUser.phoneNo })
+    .from(appUser)
+    .where(eq(appUser.userId, n))
+    .limit(1);
+  return row ?? null;
+}
+
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
 export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
-  const email = (input.email ?? '').trim().toLowerCase();
-  const userType = input.role.trim() === PENDING_ROLE ? null : input.role.trim() || null;
+  const email = clean(input.email).toLowerCase();
+  const role = clean(input.role);
+  const userType = role === PENDING_ROLE ? null : role || null;
   const rs = fromUiStatus(input.status);
-  const { first, last } = splitName(input.name);
+  const { first, last } = splitName(clean(input.name));
+  const username = clean(input.username);
+  const phone = clean(input.phone).replace(/[\s-]/g, '');
 
-  let targetId = input.id ? Number(input.id) : NaN;
-  if (!Number.isFinite(targetId) && email) {
-    const byEmail = await findAppUserByEmail(email);
-    if (byEmail) targetId = byEmail.userId;
+  const targetId = input.id ? Number(input.id) : NaN;
+  const [before] = Number.isFinite(targetId) ? await db.select().from(appUser).where(eq(appUser.userId, targetId)) : [];
+  if (Number.isFinite(targetId) && !before) throw new HttpError(404, 'user not found');
+
+  // the role must be one of the roles (or the one the user already has)
+  if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { role: 'ไม่พบประเภทผู้ใช้งานนี้ในรายการ' } });
+  // email / username belong to one user: a new user with someone's email used to UPDATE that user silently
+  const clash: Record<string, string> = {};
+  if (email) {
+    const other = await findAppUserByEmail(email);
+    if (other && other.userId !== before?.userId)
+      clash.email = `อีเมลนี้เป็นของผู้ใช้ ${fullName(other.firstName, other.lastName) || other.username || `#${other.userId}`} แล้ว — แก้ไขจากรายการแทน`;
   }
+  if (username && username.toLowerCase() !== clean(before?.username).toLowerCase()) {
+    const [other] = await db
+      .select({ id: appUser.userId, first: appUser.firstName, last: appUser.lastName })
+      .from(appUser)
+      .where(
+        and(
+          sql`lower(btrim(${appUser.username})) = ${username.toLowerCase()}`,
+          ne(appUser.userId, before?.userId ?? -1),
+        ),
+      )
+      .limit(1);
+    if (other) clash.username = `Username นี้เป็นของ ${fullName(other.first, other.last) || `#${other.id}`} แล้ว`;
+  }
+  const [firstClash] = Object.values(clash);
+  if (firstClash) throw new HttpError(409, firstClash, { fields: clash });
 
-  if (Number.isFinite(targetId)) {
-    const [before] = await db.select().from(appUser).where(eq(appUser.userId, targetId));
+  if (before) {
     const userValues = {
       firstName: first,
       lastName: last,
@@ -278,12 +317,12 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       ...statusStamp(rs, actorId),
       deleted: false,
       emailAddress: email || undefined,
-      phoneNo: input.phone?.slice(0, 50) || undefined,
-      larkId: input.code || undefined,
-      department: input.branch || undefined,
+      phoneNo: phone || undefined,
+      larkId: clean(input.code) || undefined,
+      department: clean(input.branch) || undefined,
       title: input.title || undefined,
       avatar: input.avatar || undefined,
-      username: input.username?.slice(0, 50) || undefined,
+      username: username || undefined,
     };
     const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
     if (!row) throw new HttpError(404, 'user not found');
@@ -304,16 +343,16 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   const [row] = await db
     .insert(appUser)
     .values({
-      username: (input.username || (email ? email.split('@')[0] : first) || 'user').slice(0, 50),
+      username: (username || (email ? email.split('@')[0] : first) || 'user').slice(0, 50),
       password: '',
       firstName: first,
       lastName: last,
       userType,
       ...statusStamp(rs, actorId),
       emailAddress: email || null,
-      phoneNo: input.phone?.slice(0, 50) || null,
-      larkId: input.code || null,
-      department: input.branch || null,
+      phoneNo: phone || null,
+      larkId: clean(input.code) || null,
+      department: clean(input.branch) || null,
       title: input.title || null,
       avatar: input.avatar || null,
     })

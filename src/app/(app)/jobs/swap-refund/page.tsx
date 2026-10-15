@@ -32,17 +32,7 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { swapRefundActionSchema } from '@/lib/validation/job';
-
-// parse the "key: value" lines this app writes into job.swap_refund_detail
-function parseSwap(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of text.split('\n')) {
-    const i = line.indexOf(':');
-    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return out;
-}
+import { parseSwap, swapRefundSchema } from '@/lib/validation/job';
 
 function SwapRefundForm() {
   const { push } = useToast();
@@ -130,7 +120,9 @@ function SwapRefundForm() {
             status: d.status || undefined,
           };
     const canEdit = can('Job Management', 'edit');
-    if (!act.check(swapRefundActionSchema, body, canEdit)) return;
+    // a refund may not exceed the job's total (the cost sections are saved first); unchanged stored values pass
+    const total = form.partsCost + form.serviceCost + form.toolCost + form.deliveryCost + form.boxCost;
+    if (!act.check(swapRefundSchema({ total, prev: saved?.d }), body, canEdit)) return;
     setSaving(true);
     try {
       adopt(await saveCommonSections(job.no, form, canEdit));
@@ -209,8 +201,13 @@ function SwapRefundForm() {
               <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
                 <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
               </Field>
-              <Field label="ผลการตรวจสอบ" wide>
-                <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
+              <Field label="ผลการตรวจสอบ" wide error={act.errors.inspection}>
+                <Textarea
+                  rows={3}
+                  maxLength={200}
+                  value={d.inspection}
+                  onChange={(e) => upd({ inspection: e.target.value })}
+                />
               </Field>
             </FieldGrid>
           </Section>
@@ -241,16 +238,26 @@ function SwapRefundForm() {
             {mode === 'swap' ? (
               <>
                 <Field label="New Serial No." required error={act.errors.newSerial}>
-                  <Input className="num" value={d.newSerial} onChange={(e) => upd({ newSerial: e.target.value })} />
+                  <Input
+                    className="num"
+                    maxLength={50}
+                    value={d.newSerial}
+                    onChange={(e) => upd({ newSerial: e.target.value })}
+                  />
                 </Field>
                 <Field label="รุ่นที่เปลี่ยนให้">
                   <Input value={d.newModel} onChange={(e) => upd({ newModel: e.target.value })} />
                 </Field>
-                <Field label="วันที่เปลี่ยนเครื่อง">
+                <Field label="วันที่เปลี่ยนเครื่อง" error={act.errors.swapDate}>
                   <Input type="date" value={d.swapDate} onChange={(e) => upd({ swapDate: e.target.value })} />
                 </Field>
-                <Field label="เลขที่เอกสารเบิกสินค้า">
-                  <Input className="num" value={d.docNo} onChange={(e) => upd({ docNo: e.target.value })} />
+                <Field label="เลขที่เอกสารเบิกสินค้า" error={act.errors.docNo}>
+                  <Input
+                    className="num"
+                    maxLength={50}
+                    value={d.docNo}
+                    onChange={(e) => upd({ docNo: e.target.value })}
+                  />
                 </Field>
               </>
             ) : (
@@ -275,10 +282,15 @@ function SwapRefundForm() {
                     <option>คืนผ่านช่องทางการขาย</option>
                   </Select>
                 </Field>
-                <Field label="เลขที่บัญชี / อ้างอิง">
-                  <Input className="num" value={d.refundRef} onChange={(e) => upd({ refundRef: e.target.value })} />
+                <Field label="เลขที่บัญชี / อ้างอิง" error={act.errors.refundRef}>
+                  <Input
+                    className="num"
+                    maxLength={50}
+                    value={d.refundRef}
+                    onChange={(e) => upd({ refundRef: e.target.value })}
+                  />
                 </Field>
-                <Field label="วันที่คืนเงิน">
+                <Field label="วันที่คืนเงิน" error={act.errors.refundDate}>
                   <Input type="date" value={d.refundDate} onChange={(e) => upd({ refundDate: e.target.value })} />
                 </Field>
               </>

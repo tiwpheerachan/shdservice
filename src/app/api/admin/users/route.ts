@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, requireAdmin, readJson } from '@/server/auth';
 import { lookupByEmail } from '@/lib/directory';
-import { listSystemUsers, upsertUser } from '@/server/services/users';
+import { listSystemUsers, upsertUser, userPrev } from '@/server/services/users';
 import { parseStatusMode } from '@/server/record-status';
 import { assertValid } from '@/server/validate';
 import { userSchema } from '@/lib/validation/admin';
@@ -26,7 +26,8 @@ export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await readJson(req);
 
-  assertValid(userSchema, body); // same rules as the user form (lib/validation/admin)
+  // same rules as the user form (lib/validation/admin); an unchanged legacy username / phone passes
+  assertValid(userSchema(await userPrev(body.id)), body);
   const name = str(body.name);
   const role = str(body.role);
   const email = str(body.email).toLowerCase();

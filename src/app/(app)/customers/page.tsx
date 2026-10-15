@@ -118,8 +118,8 @@ function CustomersPageInner() {
   }
 
   const save = async () => {
-    // an existing customer without a phone (old data) may stay without one
-    if (fe.report(fe.run(customerSchema(!editing || !!editing.phone?.trim()), form))) return;
+    // an existing customer: values it already had (old data) still save — only changed fields are checked
+    if (fe.report(fe.run(customerSchema(editing), form))) return;
     setSaving(true);
     setConflicts(null);
     try {

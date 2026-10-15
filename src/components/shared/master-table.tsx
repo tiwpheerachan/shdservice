@@ -17,7 +17,7 @@ import type { MasterRow } from '@/data/mock';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
-import { masterSchema } from '@/lib/validation/admin';
+import { MASTER_DETAIL_MAX, masterSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
@@ -98,7 +98,11 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     setRows((s) => (s.some((x) => x.id === row.id) ? s.map((x) => (x.id === row.id ? row : x)) : [...s, row]));
 
   const save = async () => {
-    if (fe.report(fe.run(masterSchema(config.nameLabel, { days: !!config.daysLabel }), form))) return; // the API checks the same
+    const schema = masterSchema(config.nameLabel, {
+      days: !!config.daysLabel,
+      detailMax: MASTER_DETAIL_MAX[config.kind],
+    });
+    if (fe.report(fe.run(schema, form))) return; // the API checks the same
     setSaving(true);
     try {
       const d = await postJson<{ row: MasterRow & { group?: string } }>(`/api/masters/${config.kind}`, {
@@ -317,6 +321,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
           <Field label={config.nameLabel} required error={fe.errors.name}>
             <Input
               value={form.name}
+              maxLength={50}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               placeholder={config.nameLabel}
             />
@@ -342,10 +347,11 @@ export function MasterTable({ config }: { config: MasterConfig }) {
             </Field>
           )}
           {config.extraLabel && (
-            <Field label={config.extraLabel}>
+            <Field label={config.extraLabel} error={fe.errors.group}>
               {/* พิมพ์กลุ่มใหม่ได้ + เลือกจากค่าที่มีอยู่แล้วใน DB (datalist) */}
               <Input
                 list={`${config.kind}-group-options`}
+                maxLength={50}
                 value={form.group}
                 onChange={(e) => setForm((f) => ({ ...f, group: e.target.value }))}
                 placeholder="- - ไม่ระบุ - -"
@@ -358,8 +364,9 @@ export function MasterTable({ config }: { config: MasterConfig }) {
             </Field>
           )}
           {config.detailLabel && (
-            <Field label={config.detailLabel} wide>
+            <Field label={config.detailLabel} wide error={fe.errors.detail}>
               <Textarea
+                maxLength={MASTER_DETAIL_MAX[config.kind]}
                 value={form.detail}
                 onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
                 rows={3}

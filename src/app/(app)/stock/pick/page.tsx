@@ -394,8 +394,9 @@ export default function PickPage() {
               searchPlaceholder="พิมพ์ชื่อ…"
             />
           </Field>
-          <Field label="หมายเหตุ" wide>
+          <Field label="หมายเหตุ" wide error={fe.errors.remark}>
             <Input
+              maxLength={100}
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
               placeholder={isReturn ? 'หมายเหตุการรับคืน…' : 'หมายเหตุการจ่ายออก…'}

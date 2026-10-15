@@ -15,6 +15,7 @@ import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { getJob } from './jobs';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
 import { computeTotals, quotationSchema } from '@/lib/validation/quotation';
+import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 
 /** quotation_status ids (from the dump) */
@@ -309,17 +310,11 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         .where(eq(quotationHd.quotationNo, i.no))
         .limit(1)
     : [];
-  assertValid(quotationSchema(!i.no || !!str(before?.jobNo)), i);
-  if (str(i.jobNo)) {
-    const [found] = await db
-      .select({ no: job.jobNo })
-      .from(job)
-      .where(eq(job.jobNo, str(i.jobNo).toUpperCase()))
-      .limit(1);
-    if (!found)
-      throw new HttpError(400, 'ไม่พบหมายเลขงาน', {
-        fields: { jobNo: `ไม่พบหมายเลขงาน ${str(i.jobNo).toUpperCase()}` },
-      });
+  assertValid(quotationSchema(i.no ? (before?.jobNo ?? '') : undefined), i);
+  const jobNo = cleanCode(i.jobNo); // stored upper-case
+  if (jobNo) {
+    const [found] = await db.select({ no: job.jobNo }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
+    if (!found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
   }
   const cust = await getCustomerByCode(str(i.customerCode));
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
@@ -350,20 +345,15 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
   // a quotation raised from a job is issued under the job's profile unless the user picked another
   const jobProfileId =
-    !i.no && str(i.jobNo)
-      ? ((
-          await db
-            .select({ p: job.documentProfileId })
-            .from(job)
-            .where(eq(job.jobNo, str(i.jobNo).toUpperCase()))
-            .limit(1)
-        )[0]?.p ?? undefined)
+    !i.no && jobNo
+      ? ((await db.select({ p: job.documentProfileId }).from(job).where(eq(job.jobNo, jobNo)).limit(1))[0]?.p ??
+        undefined)
       : undefined;
 
   const no = await db.transaction(async (tx) => {
     const values = {
       customerCode: cust.code,
-      customerContactName: str(i.contactName).slice(0, 100),
+      customerContactName: clean(i.contactName),
       sparePartAmount: money(parts),
       serviceAmount: money(service),
       sumExcludeAmount: money(t.sumExclude),
@@ -377,10 +367,10 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       totalAmount: money(t.total),
       roundingAmount: money(t.rounding),
       netAmount: money(t.net),
-      remark: str(i.remark),
-      referenceJobNo: str(i.jobNo).slice(0, 50),
+      remark: cleanText(i.remark),
+      referenceJobNo: jobNo,
       quotationStatusId: statusId,
-      customerApproveRemark: str(i.approveRemark).slice(0, 100),
+      customerApproveRemark: clean(i.approveRemark),
       quotationType: type,
     };
     let no = i.no;
@@ -438,7 +428,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
           lineNumber: l.lineNumber,
           itemType: l.itemType ?? 'SparePart',
           itemCode: str(l.code).slice(0, 50),
-          itemDetail: str(l.detail).slice(0, 100),
+          itemDetail: clean(l.detail),
           quantity: String(l.qty),
           unit: (str(l.unit) || 'หน่วย').slice(0, 10),
           unitPrice: l.unitPrice.toFixed(2),
