@@ -54,6 +54,11 @@ export function orderBy(sort: Sort | undefined, map: Record<string, PgColumn | S
   return fallback;
 }
 
+/** A user's text for LIKE/ILIKE with its own backslash, `%`, `_` matched literally (Postgres' default LIKE escape is backslash). */
+export const likeEscape = (s: string) => s.replace(/[\\%_]/g, '\\$&');
+/** `%term%` — "contains" for ilike(); "%" or "J26121_4" typed in a search box are not wildcards. */
+export const likeTerm = (s: string) => `%${likeEscape(s)}%`;
+
 export const offsetOf = (p: PageQuery) => (p.page - 1) * p.pageSize;
 
 /** `total` of a `select({ total: count() })` without GROUP BY — Postgres always returns exactly one row */

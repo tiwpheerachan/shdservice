@@ -20,6 +20,8 @@ import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { issueSchema } from '@/lib/validation/stock';
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
+/** รับคืนจากการเบิก is by job: a WHO document no. (or a job nothing went out to) has nothing to return */
+const RETURN_REF_HINT = 'ใส่เลขงาน (J…) ที่เคยเบิกอะไหล่ — ไม่ใช่เลขเอกสารจ่ายออก (WHO…)';
 
 type Line = {
   docNo: string;
@@ -151,7 +153,9 @@ export default function PickPage() {
           })),
         );
         setLoaded(true);
-        push({ kind: 'success', title: 'ดึงรายการที่รับคืนได้แล้ว', desc: `${ref} — ${d.rows.length} รายการ` });
+        if (d.rows.length)
+          push({ kind: 'success', title: 'ดึงรายการที่รับคืนได้แล้ว', desc: `${ref} — ${d.rows.length} รายการ` });
+        else push({ kind: 'info', title: `${ref} ไม่มีอะไหล่ที่รับคืนได้`, desc: RETURN_REF_HINT });
       } else if (kind === 'job') {
         const d = await api<{ rows: PartLine[] }>(`/api/stock/pick-lines${qs({ type: 'job', ref })}`);
         setLines(
@@ -200,14 +204,17 @@ export default function PickPage() {
     }
   };
 
+  // a quantity over the limit stays as typed and is flagged (never cut down quietly) — the server refuses it too
   const setIssue = (key: number | string, v: number) =>
-    setLines((s) =>
-      s.map((l) =>
-        (l.logId ?? l.dtId ?? l.code) === key
-          ? { ...l, issue: Math.max(0, Math.min(v, isReturn ? l.need : Math.min(l.need, l.onhand))) }
-          : l,
-      ),
-    );
+    setLines((s) => s.map((l) => ((l.logId ?? l.dtId ?? l.code) === key ? { ...l, issue: Math.max(0, v) } : l)));
+  const maxOf = (l: Line) => (isReturn ? l.need : Math.min(l.need, l.onhand));
+  const overMsg = (l: Line) =>
+    l.issue <= maxOf(l)
+      ? ''
+      : l.issue > l.need
+        ? `เกินจำนวน${isReturn ? 'ที่รับคืนได้' : kind === 'other' ? 'คงเหลือ' : 'ที่ขอ'} (เหลือ ${int(l.need)})`
+        : `เกินจำนวนคงเหลือในสต๊อก (มี ${int(l.onhand)})`;
+  const overCount = lines.filter((l) => l.issue > maxOf(l)).length;
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
   const term = find.trim().toLowerCase();
@@ -236,6 +243,7 @@ export default function PickPage() {
     const e = { ...fe.run(issueSchema, body) };
     if (totalIssue === 0)
       e.lines = isReturn ? 'ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ' : 'ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ';
+    else if (overCount) e.lines = `จำนวนเกิน ${overCount} รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก`;
     fe.setErrors(e);
     if (fe.report(e)) return;
     setSaving(true);
@@ -299,7 +307,7 @@ export default function PickPage() {
                     placeholder={
                       kind === 'job'
                         ? 'เลือกหรือพิมพ์เลขงานที่ค้างเบิก เช่น J2612088'
-                        : 'เลือกหรือพิมพ์เลขงานที่จ่ายอะไหล่ไปแล้ว'
+                        : 'เลือกหรือพิมพ์เลขงาน (J…) ที่เคยเบิกอะไหล่'
                     }
                     className="num"
                   />
@@ -334,8 +342,10 @@ export default function PickPage() {
             </div>
           </Field>
           {kind === 'sale' && (
-            <p className="col-span-full text-2xs text-muted-foreground">
-              อนุมัติใบสั่งขายแล้วระบบตัดสต๊อกให้ทันที — ที่นี่จึงแสดงเฉพาะใบที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย
+            <p role="status" className="col-span-full text-2xs text-muted-foreground">
+              {!refOptions.length && !pickOrders.loading
+                ? 'ไม่มีใบสั่งขายที่ต้องจ่ายที่นี่ — ใบสั่งขายที่อนุมัติแล้วถูกตัดสต๊อกให้ตอนอนุมัติเรียบร้อย ไม่ต้องจ่ายออกซ้ำ'
+                : 'อนุมัติใบสั่งขายแล้วระบบตัดสต๊อกให้ทันที — ที่นี่จึงแสดงเฉพาะใบที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย'}
             </p>
           )}
         </FieldGrid>
@@ -387,7 +397,9 @@ export default function PickPage() {
                       : loaded
                         ? kind === 'other'
                           ? 'ไม่มีอะไหล่ที่มีของในสต๊อก'
-                          : 'ไม่มีรายการค้างจ่าย'
+                          : isReturn
+                            ? `ไม่มีอะไหล่ที่รับคืนได้ — ${RETURN_REF_HINT}`
+                            : 'ไม่มีรายการค้างจ่าย'
                         : kind === 'other'
                           ? 'กด Get Data เพื่อดึงรายการอะไหล่ที่มีของในสต๊อก'
                           : kind === 'sale'
@@ -421,17 +433,23 @@ export default function PickPage() {
                       {int(l.onhand)}
                     </td>
                     <td className="num px-3 py-2 text-right">{int(l.need)}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 text-right">
                       <NumberInput
                         aria-label={`${isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก'} ${l.code}`}
                         min={0}
-                        max={isReturn ? l.need : Math.min(l.need, l.onhand)}
+                        max={maxOf(l)}
+                        aria-invalid={!!overMsg(l) || undefined}
                         placeholder="0"
                         value={l.issue}
                         disabled={!isReturn && l.onhand === 0}
                         onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
                         className="ml-auto h-8 w-24"
                       />
+                      {overMsg(l) && (
+                        <p role="alert" className="mt-1 text-2xs text-danger">
+                          {overMsg(l)}
+                        </p>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -488,6 +488,15 @@ export function returnDetailOf(courier?: string | null, note?: string | null) {
   const n = clean(note);
   return c && n.startsWith(c) ? n : [c, n].filter(Boolean).join(' · ');
 }
+/**
+ * The maxLength of a note input the save puts something in front of (paymentDetailOf / returnDetailOf as
+ * `detailOf`): 100 less what it adds — so what can be typed always saves. An empty note counts as typed
+ * (the " · " comes with its first character).
+ */
+export function noteMaxLength(detailOf: (note: string) => string, note: string) {
+  const n = clean(note) || '-';
+  return 100 - detailOf(n).length + n.length;
+}
 
 /** the close page's payment fields (as loaded / as on screen) */
 export type ClosePayment = { payType: string; payAmount: string; payDate: string; payNo: string; payDetail: string };

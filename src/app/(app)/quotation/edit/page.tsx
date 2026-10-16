@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { postJson, errMsg } from '@/lib/api';
 import { useRecord } from '@/lib/use-record';
 import { useAccess } from '@/lib/use-access';
+import { quoteJobNote } from '@/lib/quote-job';
 
 function EditQuotation() {
   const { push } = useToast();
@@ -55,6 +56,9 @@ function EditQuotation() {
       });
       setLoaded(d.quotation);
       push({ kind: 'success', title: 'บันทึกการแก้ไขใบเสนอราคาแล้ว', desc: d.quotation.no });
+      // a new status that leaves the job where it is says so (the saved job is the one after the save)
+      const note = p.status !== loaded?.status ? quoteJobNote(p.status, d.quotation.job) : '';
+      if (note) push({ kind: 'info', title: 'สถานะงานไม่เปลี่ยน', desc: note });
     } catch (e) {
       if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {

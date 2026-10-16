@@ -27,7 +27,7 @@ import {
 } from '@/components/shared/customer-form';
 import { api, postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
-import { useFormErrors } from '@/lib/use-form-errors';
+import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form-errors';
 import { customerSchema } from '@/lib/validation/customer';
 import { isFilterActive } from '@/lib/utils';
 import { ExportButton } from '@/components/shared/export-button';
@@ -130,8 +130,12 @@ function CustomersPageInner() {
     } catch (e) {
       // 409 = phone / email / tax id already belongs to another customer (server refuses)
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
-      if (details?.conflicts?.length) setConflicts(details.conflicts);
-      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      // the notice + the field's own error say it — no toast (it sat on the dialog's บันทึกข้อมูล button)
+      if (details?.conflicts?.length) {
+        setConflicts(details.conflicts);
+        fe.setErrors(apiFieldErrors(e) ?? {});
+        focusFirstInvalid();
+      } else if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -265,9 +269,10 @@ function CustomersPageInner() {
           <SearchSelect
             value={draft.province}
             onChange={(v) => setD('province', v)}
-            options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
-            placeholder="ทั้งหมด"
-            emptyLabel="ทั้งหมด"
+            // mt_city -1 is the legacy blank "not set" row (an empty extra row in the list)
+            options={PROVINCES.filter((p) => p.id > 0).map((p) => ({ value: String(p.id), label: p.name }))}
+            placeholder="ทุกจังหวัด"
+            emptyLabel="ทุกจังหวัด"
             searchPlaceholder="พิมพ์ชื่อจังหวัด…"
           />
         </Field>
@@ -342,6 +347,7 @@ function CustomersPageInner() {
             <div className="mt-4">
               <ConflictNotice
                 conflicts={conflicts}
+                editing={!!editing}
                 pickLabel="เปิดลูกค้ารายนี้"
                 onPick={async (code) => {
                   // the clashing customer is often not on this page of the list — look it up by its code

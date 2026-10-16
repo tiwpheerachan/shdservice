@@ -15,6 +15,7 @@ import { listJobs, filtersFromQuery } from '@/server/services/jobs';
 import { listQuotations } from '@/server/services/quotations';
 import { listSaleOrders } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
+import { fieldLabel } from '@/lib/field-labels';
 
 /**
  * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
@@ -333,7 +334,7 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         ...r,
         changesText: r.changes
           ? Object.entries(r.changes)
-              .map(([k, [a, b]]) => `${k}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`)
+              .map(([k, [a, b]]) => `${fieldLabel(k)}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`)
               .join('; ')
           : '',
       })) as unknown as Row[];

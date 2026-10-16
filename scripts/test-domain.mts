@@ -4830,6 +4830,155 @@ try {
       assert.ok(!(await nos({ no: o.no, customer: 'TD-NOBODY-XYZ' })).length, 'a wrong name is not dropped');
     });
   }
+  // ── Round 8: sales, customers, products, stock history ──
+  {
+    const { pageMovements } = await import('@/server/services/stock');
+    await test('R8 stock history: a code and a name typed together ("P02556 ฝาหลัง") find the document, every word must match', async () => {
+      await db.execute(sql`UPDATE product SET product_name_en = 'TD R8 Back Cover' WHERE product_code = ${P.a.code}`);
+      const { no } = await receiveStock(
+        { supplier: 'TD-R8', poRef: 'TD-R8-PO', lines: [{ code: P.a.code, qty: 1 }] },
+        U.admin.id,
+      );
+      const docs = async (q: string, f: { code?: string } = {}) =>
+        (await pageMovements({ page: 1, pageSize: 100, q, f: {} }, f)).rows.map((r) => r.doc);
+      assert.ok((await docs(`${P.a.code} back cover`)).includes(no), 'search box: code + name words');
+      assert.ok((await docs(`cover ${P.a.code}`)).includes(no), 'any order');
+      assert.ok((await docs(`TD-R8-PO back`)).includes(no), 'reference + name');
+      assert.ok((await docs(`${no} ${P.a.code}`)).includes(no), 'document no + code');
+      assert.ok(!(await docs(`${P.a.code} TD-NO-SUCH-WORD`)).includes(no), 'one word that matches nothing → not found');
+      assert.ok((await docs('', { code: `${P.a.code} Back` })).includes(no), 'รหัส / ชื่ออะไหล่ filter: code + name');
+      assert.ok(!(await docs('', { code: `${P.a.code} TD-NO-SUCH-WORD` })).includes(no), 'filter: every word');
+    });
+  }
+  // ── Round 8: shared UI, admin, /track, API docs ──
+  {
+    const { upsertUser } = await import('@/server/services/users');
+    const { PENDING_ROLE } = await import('@/lib/access');
+    const { fieldLabel } = await import('@/lib/field-labels');
+    const { JOB_COLUMN_LABEL } = await import('@/lib/validation/job');
+    const tracking = await import('@/server/services/tracking');
+    /** the 400's status + field names of a refused call (null when it went through) */
+    const refusal = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: unknown) => {
+          if (!(e instanceof HttpError)) throw e;
+          return [e.status, Object.keys((e.details as { fields?: object } | undefined)?.fields ?? {})];
+        },
+      );
+
+    await test('R8 date filters: an impossible date (2026-02-30) is a 400 under its name, not a dropped filter', async () => {
+      const get = async (resource: string, query: string) =>
+        json(
+          await dataGET(await request(`/api/data/${resource}?${query}`, U.admin), {
+            params: Promise.resolve({ resource }),
+          }),
+        );
+      for (const [resource, query, field] of [
+        ['audit_log', 'paged=1&from=2026-02-30', 'from'],
+        ['jobs', 'paged=1&to=abc', 'to'],
+        ['quotations', 'from=2026-13-01', 'from'],
+        ['movements', 'to=2026-02-29', 'to'], // 2026 is not a leap year
+      ] as const) {
+        const r = await get(resource, query);
+        assert.equal(r.status, 400, `${resource} ${query}`);
+        assert.deepEqual(Object.keys((r.body.details as { fields: object }).fields), [field], `${resource} ${query}`);
+      }
+      assert.equal((await get('audit_log', 'paged=1&from=2026-02-28&to=2028-02-29')).status, 200, 'real days pass');
+      assert.equal((await get('audit_log', 'paged=1&from=&to=')).status, 200, 'empty = no filter');
+    });
+
+    await test('R8 admin users: "รออนุมัติ" cannot be given from the user form (400 under role); a pending user keeps it', async () => {
+      const email = 'td-r8-pending@example.invalid';
+      assert.deepEqual(
+        await refusal(upsertUser({ name: 'TD r8-new', email, role: PENDING_ROLE, status: 'Active' }, U.admin.id)),
+        [400, ['role']],
+        'new user',
+      );
+      assert.equal((await db.execute(sql`SELECT 1 FROM app_user WHERE email_address = ${email}`)).rows.length, 0);
+      const clerk = { id: String(U.clerk.id), name: 'TD td-clerk', status: 'Active' };
+      assert.deepEqual(
+        await refusal(upsertUser({ ...clerk, role: PENDING_ROLE }, U.admin.id)),
+        [400, ['role']],
+        'a user with a role',
+      );
+      const typeOf = async (id: number) =>
+        (await db.execute<{ t: string | null }>(sql`SELECT user_type AS t FROM app_user WHERE user_id = ${id}`)).rows[0]
+          ?.t;
+      assert.equal(await typeOf(U.clerk.id), U.clerk.type, 'role kept');
+      // never worse: a still-pending user saved as it is (ถอนสิทธิ์ / แก้ไข) still saves
+      await upsertUser(
+        { id: String(U.pending.id), name: 'TD td-pending', role: PENDING_ROLE, status: 'Active' },
+        U.admin.id,
+      );
+      assert.equal(await typeOf(U.pending.id), null);
+    });
+
+    await test('R8 audit log: one Thai label map for the job history and the audit log; an unknown key shows as it is', async () => {
+      for (const [k, v] of Object.entries(JOB_COLUMN_LABEL)) assert.equal(fieldLabel(k), v, k);
+      assert.equal(fieldLabel('nameEn'), 'ชื่อ (อังกฤษ)');
+      assert.equal(fieldLabel('isActive'), 'เปิดใช้งาน');
+      assert.equal(fieldLabel('trackUrl'), 'ลิงก์ติดตามพัสดุ');
+      assert.equal(fieldLabel('recordStatus'), 'สถานะรายการ');
+      assert.equal(fieldLabel('someNewColumn'), 'someNewColumn');
+      assert.equal(fieldLabel('constructor'), 'constructor', 'own keys only');
+    });
+
+    await test('R8 /track: a cancelled quotation leaves no "ใบเสนอราคา" step on the timeline (a sent one still does)', async () => {
+      // customer 9281 comes from the Round 2 block
+      await pool.query(`
+        INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
+          SELECT * FROM (VALUES (4, 'อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า', 4, 'Pending', true),
+                                (13, 'อยู่ระหว่างการซ่อม - รอเสนอราคา', 13, 'Pending', true)) v(id, name, ord, grp, act)
+           WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+        DELETE FROM quotation_hd WHERE quotation_no = 'TDQ0881';
+        DELETE FROM job_log WHERE job_no = 'TDJ0881';
+        DELETE FROM job WHERE job_no = 'TDJ0881';
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_by,
+                         job_create_date, job_reception_date, job_closed_date)
+          VALUES ('TDJ0881', 5, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', ${U.admin.id},
+                  '2026-09-07 10:00', '2026-09-07', '1900-01-01');
+        INSERT INTO job_log (job_no, job_status_id, job_log_date, job_action_by)
+          VALUES ('TDJ0881', 1, '2026-09-07 10:00', ${U.admin.id}), ('TDJ0881', 13, '2026-09-08 10:00', ${U.admin.id}),
+                 ('TDJ0881', 4, '2026-09-08 11:00', ${U.admin.id}), ('TDJ0881', 5, '2026-09-10 10:00', ${U.admin.id});
+        INSERT INTO quotation_hd (quotation_no, customer_code, reference_job_no, net_amount, quotation_status_id, create_date, create_by, is_active)
+          VALUES ('TDQ0881', 'TDC281', 'TDJ0881', 500, 5, '2026-09-08', ${U.admin.id}, true);`);
+      const cancelled = (await tracking.publicJobByNo('TDJ0881'))!;
+      assert.ok(!cancelled.docs.some((d) => d.kind === 'quotation'), 'no document');
+      assert.deepEqual(
+        cancelled.history.map((h) => h.key),
+        ['received', 'repaired'],
+        'no passed quotation step',
+      );
+      await pool.query(`UPDATE quotation_hd SET quotation_status_id = 2 WHERE quotation_no = 'TDQ0881'`);
+      const sent = (await tracking.publicJobByNo('TDJ0881'))!;
+      assert.deepEqual(
+        sent.history.find((h) => h.key === 'waiting'),
+        { key: 'waiting', at: '2026-09-08', label: 'ใบเสนอราคา' },
+      );
+      assert.ok(sent.docs.some((d) => d.kind === 'quotation' && d.ref === 'TDQ0881'));
+    });
+
+    // ── Round 8: wrap-up ──
+    await test('R8 search: a typed "%" or "_" is matched literally, not as a LIKE wildcard', async () => {
+      const { listJobs } = await import('@/server/services/jobs');
+      const { listCustomers } = await import('@/server/services/customers');
+      await pool.query(`
+        DELETE FROM job WHERE job_no IN ('TDJ0891', 'TDJ0892');
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+          VALUES ('TDJ0891', 2, 9001, '${CUSTOMER} ร้านลด 100%_ดี', 'Model TD', now(), current_date, '1900-01-01'),
+                 ('TDJ0892', 2, 9001, '${CUSTOMER} ร้านลด 100xyดี', 'Model TD', now(), current_date, '1900-01-01');`);
+      const hits = async (f: Parameters<typeof listJobs>[0]) =>
+        (await listJobs(f)).map((j) => j.no).filter((n) => n === 'TDJ0891' || n === 'TDJ0892');
+      assert.deepEqual(await hits({ q: '%' }), ['TDJ0891'], 'search box: "%" alone is not "everything"');
+      assert.deepEqual(await hits({ q: '100%_ดี' }), ['TDJ0891'], 'search box: "100%_ดี" is not "100…?ดี"');
+      assert.deepEqual(await hits({ q: 'ลด 100_' }), [], '"_" is not "any one character"');
+      assert.deepEqual(await hits({ customer: '0%' }), ['TDJ0891'], 'customer filter');
+      assert.deepEqual(await hits({ customer: '100xyดี' }), ['TDJ0892'], 'plain text still finds');
+      assert.ok(!(await listCustomers({ q: '%' })).some((c) => c.code === CUSTOMER), 'customer search');
+      assert.ok(!(await listCustomers({ filters: { code: '_' } })).some((c) => c.code === CUSTOMER), 'customer code');
+    });
+  }
 } finally {
   await pool.end();
 }

@@ -93,7 +93,8 @@ export function useAddressLists(cityId: number, districtId: number) {
   );
   const districts = React.useMemo(() => (cityId > 0 ? (d?.rows ?? []) : []), [cityId, d]);
   const subDistricts = React.useMemo(() => (districtId > 0 ? (sd?.rows ?? []) : []), [districtId, sd]);
-  return { PROVINCES, districts, subDistricts };
+  // mt_city -1 is the legacy blank "not set" row — the placeholder row stands for it
+  return { PROVINCES: PROVINCES.filter((p) => p.id > 0), districts, subDistricts };
 }
 
 /** Server 409 payload when phone / email / tax id already belong to another customer. */
@@ -116,10 +117,13 @@ export function ConflictNotice({
   conflicts,
   onPick,
   pickLabel = 'ใช้ลูกค้ารายนี้',
+  editing = false,
 }: {
   conflicts: CustomerConflict[];
   onPick?: (code: string) => void;
   pickLabel?: string;
+  /** an existing customer's edit — nothing is being created */
+  editing?: boolean;
 }) {
   const byCode = new Map<string, CustomerConflict & { fields: string[] }>();
   for (const c of conflicts) {
@@ -130,7 +134,8 @@ export function ConflictNotice({
   return (
     <div className="rounded-md border border-danger/30 bg-danger-soft p-3 text-sm">
       <p className="flex items-center gap-1.5 font-medium text-danger">
-        <AlertTriangle className="h-4 w-4" /> ข้อมูลนี้มีลูกค้าอยู่แล้ว — ระบบไม่สร้างซ้ำ
+        <AlertTriangle className="h-4 w-4" />{' '}
+        {editing ? 'ข้อมูลนี้เป็นของลูกค้ารายอื่นแล้ว — ระบบไม่บันทึก' : 'ข้อมูลนี้มีลูกค้าอยู่แล้ว — ระบบไม่สร้างซ้ำ'}
       </p>
       <ul className="mt-2 space-y-1.5">
         {[...byCode.values()].map((c) => (
@@ -250,6 +255,8 @@ export function CustomerFields({
           value={form.cityId > 0 ? String(form.cityId) : ''}
           onChange={(v) => setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1 }))}
           options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
+          placeholder="- - เลือกจังหวัด - -"
+          emptyLabel="- - เลือกจังหวัด - -"
           searchPlaceholder="พิมพ์ชื่อจังหวัด…"
         />
       </Field>

@@ -1,7 +1,7 @@
 import 'server-only';
 import { cached, TTL_STATIC } from '@/server/cache';
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
-import { orderBy, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
+import { and, asc, count, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
+import { orderBy, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import { db } from '@/db/client';
 import type { Tx } from '@/db/client';
 import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from '@/db/schema';
@@ -134,15 +134,15 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
   const termDigits = term.replace(/\D/g, '');
   const search = term
     ? or(
-        ilike(customer.customerCode, `%${term}%`),
-        ilike(customer.customerName, `%${term}%`),
-        ilike(customer.phoneNumber, `%${term}%`),
+        ilike(customer.customerCode, likeTerm(term)),
+        ilike(customer.customerName, likeTerm(term)),
+        ilike(customer.phoneNumber, likeTerm(term)),
         termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
-        ilike(customer.email, `%${term}%`),
-        ilike(customer.customerCardId, `%${term}%`),
+        ilike(customer.email, likeTerm(term)),
+        ilike(customer.customerCardId, likeTerm(term)),
       )
     : undefined;
-  const like = (v?: string) => (v && v.trim() ? `%${v.trim()}%` : null);
+  const like = (v?: string) => (v && v.trim() ? likeTerm(v.trim()) : null);
   const phone = f.phone ? f.phone.replace(/\D/g, '') : '';
   return and(
     active,
@@ -396,10 +396,11 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
   const [first] = conflicts;
   if (first) {
     const label = { phone: 'เบอร์โทรศัพท์', email: 'อีเมล', taxId: 'เลขบัตร/ผู้เสียภาษี' };
-    throw new HttpError(409, `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`, {
-      conflicts,
-      fields: conflictErrors(conflicts),
-    });
+    // an edit is not "creating" anything: it says whose number it is
+    const message = prev
+      ? `${label[first.field]}นี้เป็นของลูกค้า ${first.code} ${first.name} แล้ว`
+      : `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`;
+    throw new HttpError(409, message, { conflicts, fields: conflictErrors(conflicts) });
   }
 
   return db.transaction(async (tx) => {
@@ -466,7 +467,12 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
 /* Address master data for cascading dropdowns */
 export function listProvinces() {
   return cached('provinces', TTL_STATIC, () =>
-    db.select({ id: mtCity.cityId, name: mtCity.nameTh }).from(mtCity).orderBy(asc(mtCity.nameTh)),
+    // city_id -1 is the legacy "not chosen" row with an empty name — never a choice
+    db
+      .select({ id: mtCity.cityId, name: mtCity.nameTh })
+      .from(mtCity)
+      .where(gt(mtCity.cityId, 0))
+      .orderBy(asc(mtCity.nameTh)),
   );
 }
 export async function listDistricts(cityId: number) {

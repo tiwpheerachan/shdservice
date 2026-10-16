@@ -32,9 +32,6 @@ type LinkStatus = {
 };
 type LinkResponse = { url: string; ready?: boolean; status: LinkStatus };
 
-/** characters of the link that always stay visible at its end (the token's tail) */
-const URL_TAIL = 8;
-
 /** what really happens (services/tracking.ts LINK_* + app/api/track/session) — testers saw "24 ชม." because a staff open is not counted */
 const LINK_TEXT =
   'ลูกค้ากดยืนยันว่าไม่ใช่บอท (captcha) แล้วเห็นสถานะงาน และเปิดเอกสารของงานนี้ได้ (ใบรับงาน · ใบเสนอราคาพร้อมราคา · ใบส่งคืน) — ' +
@@ -160,20 +157,17 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
       <p className="mt-1 text-xs text-muted-foreground">ส่งให้ลูกค้าทาง LINE — {LINK_TEXT}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {/* middle ellipsis: the start shrinks with "…", the token's last characters always show —
-            enough to tell two links apart; the full link is in the tooltip and is what gets copied */}
+        {/* the whole link in one text node (wrapped anywhere): selecting it by hand copies a working link */}
         {url ? (
           <>
             <code
-              title={url}
               translate="no"
               className={cn(
-                'flex min-w-0 flex-1 basis-60 rounded-md bg-muted px-2.5 py-2 text-xs',
+                'min-w-0 flex-1 basis-60 break-all rounded-md bg-muted px-2.5 py-2 text-xs',
                 !usable && 'text-muted-foreground line-through',
               )}
             >
-              <span className="truncate">{url.slice(0, -URL_TAIL)}</span>
-              <span className="shrink-0">{url.slice(-URL_TAIL)}</span>
+              {url}
             </code>
             <Button variant="outline" size="sm" type="button" onClick={copy} disabled={!usable}>
               {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}

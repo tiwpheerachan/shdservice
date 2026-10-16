@@ -5,7 +5,7 @@ import { History, ChevronDown, ChevronUp } from 'lucide-react';
 import { Section } from './section';
 import { Badge, type Tone } from '@/components/ui/badge';
 import type { JobDetail } from '@/lib/use-job';
-import { JOB_COLUMN_LABEL } from '@/lib/validation/job';
+import { fieldLabel } from '@/lib/field-labels';
 
 const ACTION: Record<string, { label: string; tone: Tone }> = {
   CREATE: { label: 'เปิดงาน', tone: 'success' },
@@ -84,7 +84,7 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
                 <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-md bg-muted/40 p-3 text-xs sm:grid-cols-2">
                   {Object.entries(r.changes).map(([k, [a, b]]) => (
                     <div key={k} className="flex flex-wrap gap-1">
-                      <dt className="font-medium">{JOB_COLUMN_LABEL[k] ?? k}:</dt>
+                      <dt className="font-medium">{fieldLabel(k)}:</dt>
                       <dd className="text-muted-foreground line-through">{fmt(a)}</dd>
                       <dd>→ {fmt(b)}</dd>
                     </div>

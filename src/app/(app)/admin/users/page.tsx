@@ -24,6 +24,7 @@ import { isFilterActive } from '@/lib/utils';
 import { ExportButton } from '@/components/shared/export-button';
 import { useAccess } from '@/lib/use-access';
 import { ADMIN_USER_TYPE } from '@/lib/modules';
+import { PENDING_ROLE } from '@/lib/access';
 
 type UserForm = {
   id: string;
@@ -107,7 +108,7 @@ export default function UsersPage() {
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // the stored username / phone of the user being edited: an unchanged legacy value still saves
-  const [prev, setPrev] = React.useState<{ username?: string; phone?: string } | null>(null);
+  const [prev, setPrev] = React.useState<{ username?: string; phone?: string; role?: string } | null>(null);
   const openAdd = () => {
     setPrev(null);
     setForm(EMPTY);
@@ -130,7 +131,7 @@ export default function UsersPage() {
   });
 
   const openEdit = (r: User) => {
-    setPrev({ username: r.username, phone: r.phone });
+    setPrev({ username: r.username, phone: r.phone, role: r.role });
     setForm(toForm(r));
     fe.setErrors({});
     setEditing(true);
@@ -636,7 +637,8 @@ export default function UsersPage() {
               placeholder="- - เลือกบทบาท - -"
               value={form.role}
               onChange={(v) => set('role', v)}
-              options={strOptions(ROLE_OPTIONS)}
+              // "รออนุมัติ" is not a role to give (อนุมัติ picks one; the API refuses it) — only a pending user keeps it
+              options={strOptions(ROLE_OPTIONS.filter((x) => x !== PENDING_ROLE || prev?.role === PENDING_ROLE))}
               disabled={isMe(form)}
             />
           </Field>

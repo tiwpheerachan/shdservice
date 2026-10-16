@@ -20,7 +20,7 @@ import {
   type CustomerFormValues,
   type CustomerConflict,
 } from './customer-form';
-import { useFormErrors } from '@/lib/use-form-errors';
+import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form-errors';
 import { customerSchema } from '@/lib/validation/customer';
 import { useApi } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
@@ -97,8 +97,12 @@ export function CustomerSelect({
       setMode('existing');
     } catch (e) {
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
-      if (details?.conflicts?.length) setConflicts(details.conflicts);
-      if (!fe.fromApi(e)) push({ kind: 'error', title: 'สร้างลูกค้าไม่สำเร็จ', desc: errMsg(e) });
+      // the notice + the field's own error say it — no toast (it sat on the dialog's save button), as on /customers
+      if (details?.conflicts?.length) {
+        setConflicts(details.conflicts);
+        fe.setErrors(apiFieldErrors(e) ?? {});
+        focusFirstInvalid();
+      } else if (!fe.fromApi(e)) push({ kind: 'error', title: 'สร้างลูกค้าไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

@@ -43,7 +43,7 @@ import { HttpError, fullName, hasRight, userHasRight } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, actorName, diff, auditFor, type AuditRow } from '@/server/audit';
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { orderBy, likeEscape, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import {
   dateOrNull,
   dateOrSentinel,
@@ -57,6 +57,7 @@ import {
   SENTINEL_TS,
   str,
 } from '@/server/mappers/format';
+import { QUOTE_MOVES_BY_ID, QUOTE_STEP } from '@/lib/quote-job';
 import { getCustomerByCode, getCustomerById } from './customers';
 import { staffOrKeep } from './users';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
@@ -303,26 +304,6 @@ async function setStatus(
   return true;
 }
 
-/** quotation_status → the job status it moves the job to (owner 2026-10-16): เสนอราคาแล้ว → 4, ลูกค้าตกลงซ่อม
- *  (+ รอชำระเงิน) → 12, ตกลงซ่อม รออะไหล่ → 3. Declined / cancelled / expired / waiting leave the job alone. */
-const QUOTE_MOVES: Partial<Record<number, number>> = {
-  2: JS.QUOTED,
-  3: JS.CUSTOMER_AGREED,
-  6: JS.CUSTOMER_AGREED,
-  9: JS.WAIT_PARTS,
-};
-/** how far a job is in the quotation part of the flow: only a job at a smaller step moves. Any other status
- *  (repair under way, parts, out-source, repaired, closed, cancelled) is never moved by a quotation. */
-const QUOTE_STEP: Partial<Record<number, number>> = {
-  [JS.NEW]: 0,
-  [JS.IN_PROGRESS]: 0,
-  [JS.WAIT_QUOTE]: 1,
-  [JS.QUOTE_EXPIRED]: 1,
-  [JS.QUOTED]: 2,
-  [JS.CUSTOMER_AGREED]: 3,
-  [JS.WAIT_PARTS]: 4,
-};
-
 /** a quotation saved with a new status moves its job forward (never back, never a closed one) — same tx as the save */
 export async function followQuotation(
   tx: Tx,
@@ -332,7 +313,7 @@ export async function followQuotation(
   quotationStatus: string,
   byUserId: number,
 ) {
-  const target = QUOTE_MOVES[quotationStatusId];
+  const target = QUOTE_MOVES_BY_ID[quotationStatusId]; // the rule lives in src/lib/quote-job.ts (the page shares it)
   if (target === undefined) return false;
   const current = await lockJob(tx, jobNo);
   const from = QUOTE_STEP[current ?? -1];
@@ -560,12 +541,12 @@ export function jobWhere(q: string, f: JobFilters) {
     f.includeCancelled ? undefined : ne(job.recordStatus, RS.DELETED),
     term
       ? or(
-          ilike(job.jobNo, `%${term}%`),
-          ilike(job.customerDetail, `%${term}%`),
-          ilike(job.jobReferenceNo, `%${term}%`),
-          ilike(job.productImeiNo, `%${term}%`),
-          ilike(job.productSerial, `%${term}%`),
-          ilike(job.productModelName, `%${term}%`),
+          ilike(job.jobNo, likeTerm(term)),
+          ilike(job.customerDetail, likeTerm(term)),
+          ilike(job.jobReferenceNo, likeTerm(term)),
+          ilike(job.productImeiNo, likeTerm(term)),
+          ilike(job.productSerial, likeTerm(term)),
+          ilike(job.productModelName, likeTerm(term)),
           termDigits.length >= 4
             ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + termDigits + '%'}`
             : undefined,
@@ -595,7 +576,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.returnType ? eq(job.returnCustomerType, f.returnType) : undefined,
     closedFrom ? gte(job.jobClosedDate, `${closedFrom} 00:00:00`) : undefined,
     closedTo ? lte(job.jobClosedDate, `${closedTo} 23:59:59`) : undefined,
-    f.customerCode ? sql`${job.customerDetail} like ${f.customerCode + ' %'}` : undefined,
+    f.customerCode ? sql`${job.customerDetail} like ${likeEscape(f.customerCode) + ' %'}` : undefined,
     f.unassigned
       ? and(isOpenJob, or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`))
       : undefined,
@@ -606,8 +587,8 @@ export function jobWhere(q: string, f: JobFilters) {
         )
       : undefined,
     // ---- job-list filter bar ----
-    f.no ? ilike(job.jobNo, `%${f.no.trim()}%`) : undefined,
-    f.ref ? ilike(job.jobReferenceNo, `%${f.ref.trim()}%`) : undefined,
+    f.no ? ilike(job.jobNo, likeTerm(f.no.trim())) : undefined,
+    f.ref ? ilike(job.jobReferenceNo, likeTerm(f.ref.trim())) : undefined,
     // brand/model are matched without adding joins to the count query
     f.brand
       ? sql`${job.productBrandId} in (select manufacturer_id from manufacturer where manufacturer_name = ${f.brand})`
@@ -615,14 +596,14 @@ export function jobWhere(q: string, f: JobFilters) {
     f.model ? eq(job.productModelName, f.model) : undefined,
     f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
     f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
-    f.customer ? ilike(job.customerDetail, `%${f.customer.trim()}%`) : undefined,
+    f.customer ? ilike(job.customerDetail, likeTerm(f.customer.trim())) : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
     phone
       ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + phone + '%'}`
       : undefined,
-    f.tracking ? ilike(job.jobReceptionTrackingNo, `%${f.tracking.trim()}%`) : undefined,
+    f.tracking ? ilike(job.jobReceptionTrackingNo, likeTerm(f.tracking.trim())) : undefined,
     f.imei
-      ? or(ilike(job.productImeiNo, `%${f.imei.trim()}%`), ilike(job.productSerial, `%${f.imei.trim()}%`))
+      ? or(ilike(job.productImeiNo, likeTerm(f.imei.trim())), ilike(job.productSerial, likeTerm(f.imei.trim())))
       : undefined,
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
     f.bounce ? eq(job.isJobBounce, true) : undefined,

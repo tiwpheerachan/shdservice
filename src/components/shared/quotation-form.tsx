@@ -18,6 +18,7 @@ import { QUOTATION_STATUS_OPTIONS, type Customer } from '@/data/mock';
 import { baht } from '@/lib/utils';
 import { api, errMsg, qs } from '@/lib/api';
 import type { JobDetail } from '@/lib/use-job';
+import { quoteJobNote } from '@/lib/quote-job';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { computeTotals, parseDiscount, quotationSchema, quotedParts } from '@/lib/validation/quotation';
@@ -240,6 +241,9 @@ export const QuotationForm = React.forwardRef<
   const { clear } = fe;
   React.useEffect(() => clear('customerCode'), [customer, clear]);
   React.useEffect(() => clear('jobNo'), [jobRef, clear]);
+
+  // the save moves the job only when the status changes (followQuotation) — the stored status says nothing new
+  const jobNoteOf = (st: string) => (st === initial?.status ? '' : quoteJobNote(st, job));
 
   const payload = (): QuotationPayload => ({
     no: quotationNo || initial?.no || undefined,
@@ -519,6 +523,7 @@ export const QuotationForm = React.forwardRef<
                         aria-label={`ราคา/หน่วย แถว ${i + 1}`}
                         aria-invalid={!!fe.errors[`lines.${i}.unitPrice`] || undefined}
                         step="0.01"
+                        showZero={!!initial}
                         value={l.price}
                         onChange={(n) => {
                           upd(l.id, { price: n });
@@ -555,10 +560,15 @@ export const QuotationForm = React.forwardRef<
                 onChange={(e) => setRemark(e.target.value)}
               />
             </Field>
-            <Field label="สถานะใบเสนอราคา" wide>
+            {/* a new sent / agreed status moves the job forward only — say so when this job stays where it is */}
+            <Field label="สถานะใบเสนอราคา" wide hint={jobNoteOf(status) || undefined}>
               <SearchSelect
                 value={status}
-                onChange={setStatus}
+                onChange={(v) => {
+                  setStatus(v);
+                  const note = jobNoteOf(v);
+                  if (note) push({ kind: 'info', title: 'บันทึกได้ แต่สถานะงานจะไม่เปลี่ยน', desc: note });
+                }}
                 options={withCurrent(strOptions(QUOTATION_STATUS_OPTIONS), status)}
               />
             </Field>
@@ -584,6 +594,7 @@ export const QuotationForm = React.forwardRef<
                   aria-label="ค่าบริการ"
                   aria-invalid={!!fe.errors.serviceAmount || undefined}
                   step="0.01"
+                  showZero={!!initial}
                   value={service}
                   onChange={(n) => {
                     setService(n);
@@ -602,6 +613,7 @@ export const QuotationForm = React.forwardRef<
                     aria-invalid={!!fe.errors.discountValue || undefined}
                     step="0.01"
                     placeholder="0"
+                    showZero={!!initial}
                     value={discount}
                     onChange={(n) => {
                       setDiscount(n);

@@ -39,7 +39,8 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
   const hasDiscount = (q.discountAmount ?? 0) > 0;
   // ติดต่อสอบถาม… = the issuing company (document profile); nothing set → the line is left out
   const contactLine = [co.phone && `Tel. : ${co.phone}`, co.email && `Email : ${co.email}`].filter(Boolean).join('  ');
-  const engineer = forCustomer ? '' : j?.engineer?.trim() || q.createdBy;
+  // the job's engineer — not the quotation's creator (a CS clerk printed as ช่าง); none assigned → —
+  const engineer = forCustomer ? '' : j?.engineer?.trim() || '—';
   const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
   // label the number by what it is (q.imei = the job's IMEI when there is no job detail)
   const deviceLabel = (j ? [j.imei && 'IMEI', j.serial && 'S/N'].filter(Boolean).join(' / ') : 'IMEI') || 'IMEI / S/N';

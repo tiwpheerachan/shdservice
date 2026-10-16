@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import useSWR, { mutate, type SWRConfiguration } from 'swr';
+import useSWR, { mutate, useSWRConfig, type SWRConfiguration } from 'swr';
 import { api, qs, errMsg, onApiWrite } from '@/lib/api';
 import type { Order, DeletedMode } from './queries';
 import type {
@@ -75,9 +75,12 @@ export function invalidateLists() {
 onApiWrite(invalidateLists);
 
 /** Re-fetch a cached key when it is older than `ttl` (or its age is unknown). */
-function useStaleCheck(url: string, hasData: boolean, ttl: number, revalidate: () => Promise<unknown>) {
+function useStaleCheck(url: string | null, ttl: number, revalidate: () => Promise<unknown>) {
+  const { cache } = useSWRConfig();
   React.useEffect(() => {
-    if (!hasData) return; // no cache → swr fetches on mount by itself
+    // THIS key's own cache entry, not the hook's `data`: keepPreviousData hands the previous page's rows
+    // to a new key, and revalidating then would fetch it a second time on top of swr's own first fetch
+    if (!url || cache.get(url)?.data === undefined) return; // no cache → swr fetches on mount by itself
     const at = fetchedAt.get(url);
     if (!at || Date.now() - at > ttl) void revalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,7 +108,7 @@ export function useTable<T>(
 ): TableState<T> {
   const url = `/api/data/${table}${qs({ deleted, ...params })}`;
   const { data, error, isLoading, mutate: revalidate } = useSWR<T[]>(url, fetcher, SWR_OPTS);
-  useStaleCheck(url, data !== undefined, ttl, revalidate);
+  useStaleCheck(url, ttl, revalidate);
 
   const col = order?.column;
   const asc = order?.ascending;
@@ -142,7 +145,7 @@ const EMPTY: never[] = [];
 export function usePagedTable<T>(table: string, params: PageParams, deleted: DeletedMode = 'exclude'): PageState<T> {
   const url = `/api/data/${table}${qs({ paged: 1, deleted, ...params })}`;
   const { data, error, isLoading, mutate: revalidate } = useSWR<{ rows: T[]; total: number }>(url, fetcher, SWR_OPTS);
-  useStaleCheck(url, data !== undefined, TTL_DEFAULT, revalidate);
+  useStaleCheck(url, TTL_DEFAULT, revalidate);
   const refetch = React.useCallback(() => {
     void revalidate();
   }, [revalidate]);
@@ -386,7 +389,7 @@ export function useApi<T>(url: string | null, opts: ApiOpts<T> = {}) {
     ...(opts.onError ? { onError: (e: unknown) => opts.onError?.(errMsg(e)) } : {}),
     ...(opts.onSuccess ? { onSuccess: (d: T) => opts.onSuccess?.(d) } : {}),
   });
-  useStaleCheck(url ?? '', data !== undefined && !!url && !opts.fresh, opts.ttl ?? TTL_DEFAULT, swrMutate);
+  useStaleCheck(opts.fresh ? null : url, opts.ttl ?? TTL_DEFAULT, swrMutate);
   /** ms since this key was last read from the server (Infinity when never) */
   const ageMs = React.useCallback(() => {
     const at = url ? fetchedAt.get(url) : undefined;

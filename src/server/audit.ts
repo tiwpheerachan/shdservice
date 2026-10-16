@@ -4,7 +4,7 @@ import { db, type Tx } from '@/db/client';
 import { appUser, auditLog } from '@/db/schema';
 import { fullName } from '@/server/auth';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
-import { orderBy as orderByCols, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 
 /**
  * Audit trail — every write the app performs records WHO did WHAT to WHICH
@@ -162,9 +162,9 @@ function auditWhere(q: string, f: AuditFilters) {
   return and(
     term
       ? or(
-          ilike(auditLog.entityKey, `%${term}%`),
-          ilike(auditLog.summary, `%${term}%`),
-          ilike(auditLog.userName, `%${term}%`),
+          ilike(auditLog.entityKey, likeTerm(term)),
+          ilike(auditLog.summary, likeTerm(term)),
+          ilike(auditLog.userName, likeTerm(term)),
         )
       : undefined,
     ymd(f.from) ? gte(auditLog.at, `${ymd(f.from)} 00:00:00`) : undefined, // junk date = no filter, not a 500
@@ -172,7 +172,7 @@ function auditWhere(q: string, f: AuditFilters) {
     f.user
       ? /^\d+$/.test(f.user)
         ? eq(auditLog.userId, Number(f.user))
-        : ilike(auditLog.userName, `%${f.user}%`)
+        : ilike(auditLog.userName, likeTerm(f.user))
       : undefined,
     f.module ? eq(auditLog.module, f.module) : undefined,
     f.entity ? eq(auditLog.entity, f.entity) : undefined,

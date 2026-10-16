@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isRealDate } from '@/lib/validation';
 import { deletedMode } from './admin';
 import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, page } from './common';
 import { defineOperation, type Operation } from './registry';
@@ -33,7 +34,12 @@ const s = z.string();
 const n = z.number();
 const tags = ['Data'];
 const q = s.optional().meta({ description: 'Free-text search.' });
-const ymd = s.optional().meta({ format: 'date' });
+/** a date filter: a real day or left out — 2026-02-30 / "abc" is a 400 under its name, not a silently dropped filter */
+const ymd = s
+  .refine((v) => v === '' || isRealDate(v), 'วันที่ไม่ถูกต้อง (YYYY-MM-DD)')
+  .optional()
+  .meta({ format: 'date' });
+const BAD_DATE = { 400: errorResponse('A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.') };
 const limit = s.optional().meta({ description: 'Row cap of the unpaged list.' });
 const flag = choice(['1']);
 /** ?page=&pageSize=&sort=&dir= (src/server/paging.ts parsePageQuery) */
@@ -76,6 +82,7 @@ function resource(
         paged ? 'The list, or one page of it with `paged=1`.' : 'The list.',
         paged ? z.union([page(paged), body]) : body,
       ),
+      ...(Object.values(query).includes(ymd) ? BAD_DATE : {}),
       ...SIGNED_IN,
       ...RATE_LIMITED,
     },
@@ -423,6 +430,7 @@ export const exportXlsx = defineOperation({
         },
       },
     },
+    ...BAD_DATE,
     ...SIGNED_IN,
     404: errorResponse('Unknown resource.'),
     ...RATE_LIMITED,

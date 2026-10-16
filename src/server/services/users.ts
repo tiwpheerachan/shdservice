@@ -325,6 +325,11 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   // a stale tab's คืนสิทธิ์ / แก้ไข on a user deleted meanwhile used to set it straight back to ACTIVE
   if (before?.recordStatus === RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
 
+  // "รออนุมัติ" (no role) is where a sign-up starts, never a role to give: only a user still pending keeps it
+  if (!userType && (!before || before.userType?.trim()))
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
+      fields: { role: 'เลือกบทบาท — "รออนุมัติ" ใช้กับบัญชีที่สมัครเข้ามาและยังไม่ได้อนุมัติเท่านั้น' },
+    });
   // the role must be one of the roles (or the one the user already has)
   if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { role: 'ไม่พบประเภทผู้ใช้งานนี้ในรายการ' } });

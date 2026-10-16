@@ -13,6 +13,7 @@ import { Modal } from '@/components/ui/modal';
 import { useAuditPage, useAuditModules, type AuditRow } from '@/data/db';
 import { exportXlsx } from '@/lib/api';
 import { isFilterActive } from '@/lib/utils';
+import { fieldLabel } from '@/lib/field-labels';
 import { ExportButton } from '@/components/shared/export-button';
 
 // action → badge tone / Thai label
@@ -179,6 +180,8 @@ export default function AuditPage() {
         loading={loading}
         error={loadError}
         onRetry={retryLoad}
+        // the table's own page size must match the first query's, or it asks for 25 right after the 50
+        pageSize={table.pageSize}
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />
@@ -203,7 +206,9 @@ export default function AuditPage() {
               <tbody>
                 {Object.entries(detail.changes).map(([k, [a, b]]) => (
                   <tr key={k} className="border-b border-border/70 last:border-0">
-                    <td className="num px-3 py-2 font-medium">{k}</td>
+                    <td className="px-3 py-2 font-medium" title={k}>
+                      {fieldLabel(k)}
+                    </td>
                     <td className="px-3 py-2 text-muted-foreground break-all">{fmt(a)}</td>
                     <td className="px-3 py-2 break-all">{fmt(b)}</td>
                   </tr>

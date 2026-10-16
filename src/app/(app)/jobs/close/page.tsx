@@ -37,7 +37,10 @@ import {
   closePaymentEdited,
   closeSchema,
   jobBalance,
+  noteMaxLength,
   partsWaitingMsg,
+  paymentDetailOf,
+  returnDetailOf,
   refundDateOf,
   OUTSOURCE_NOT_BACK,
   STATUS_CLOSED_TRACKED,
@@ -147,6 +150,9 @@ function CloseForm() {
   const gaveBackHow = gaveBack
     ? [gaveBack.type, gaveBack.no, refundDateOf(gaveBack.detail)].filter(Boolean).join(', ')
     : '';
+  // the save puts the payment date / the courier in front of these notes (one varchar(100) each)
+  const payDetailMax = noteMaxLength((n) => paymentDetailOf(d.payDate, n), d.payDetail);
+  const returnDetailMax = noteMaxLength((n) => returnDetailOf(d.courier, n), d.returnDetail);
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -155,8 +161,9 @@ function CloseForm() {
     const next = {
       // no default method / date: a payment is written only when someone enters one (in-warranty = none)
       payType: job.payment.type,
-      // the deposit was paid at reception — default to what is left (job.amountDue), not the whole total
-      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : job.amountDue > 0 ? String(job.amountDue) : '',
+      // nothing paid yet → empty (an untouched box is no payment, so it must not show one): choosing the
+      // method fills in what is left to pay (job.amountDue)
+      payAmount: job.payment.amount > 0 ? String(job.payment.amount) : '',
       payDate: payDateOf(job.payment.detail), // kept as it is on a re-save
       payNo: job.payment.no,
       payDetail: job.payment.detail,
@@ -441,7 +448,13 @@ function CloseForm() {
                     <Select
                       value={d.payType}
                       disabled={!!lock}
-                      onChange={(e) => upd({ payType: e.target.value, payDate: d.payDate || thaiToday() })}
+                      onChange={(e) =>
+                        upd({
+                          payType: e.target.value,
+                          payDate: d.payDate || thaiToday(),
+                          payAmount: d.payAmount || (bal.due > 0 ? String(bal.due) : ''),
+                        })
+                      }
                     >
                       <option value="">- - เลือก - -</option>
                       {JOB_PAYMENT_METHODS.map((p) => (
@@ -502,10 +515,15 @@ function CloseForm() {
                       )}
                     </div>
                   </Field>
-                  <Field label="หมายเหตุ" wide error={act.errors['payment.detail']}>
+                  <Field
+                    label="หมายเหตุ"
+                    wide
+                    error={act.errors['payment.detail']}
+                    hint={`${d.payDetail.length}/${payDetailMax} ตัวอักษร${d.payDate ? ' (บันทึกพร้อมวันที่ชำระ)' : ''}`}
+                  >
                     <Textarea
                       rows={2}
-                      maxLength={100}
+                      maxLength={payDetailMax}
                       value={d.payDetail}
                       disabled={!!lock}
                       onChange={(e) => upd({ payDetail: e.target.value })}
@@ -586,10 +604,15 @@ function CloseForm() {
                 onChange={(e) => upd({ tracking: e.target.value })}
               />
             </Field>
-            <Field label="รายละเอียดการส่งคืน" wide error={act.errors['return.detail']}>
+            <Field
+              label="รายละเอียดการส่งคืน"
+              wide
+              error={act.errors['return.detail']}
+              hint={`${d.returnDetail.length}/${returnDetailMax} ตัวอักษร${d.courier ? ' (บันทึกพร้อมชื่อบริษัทขนส่ง)' : ''}`}
+            >
               <Textarea
                 rows={2}
-                maxLength={100}
+                maxLength={returnDetailMax}
                 value={d.returnDetail}
                 onChange={(e) => upd({ returnDetail: e.target.value })}
               />

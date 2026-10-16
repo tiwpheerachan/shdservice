@@ -143,13 +143,13 @@ const productQuery = (x: Tx | typeof db = db) =>
 /** a name search looks in the Thai, English and Chinese names */
 const nameLike = (t: string) =>
   or(
-    ilike(product.productName, `%${t}%`),
-    ilike(product.productNameEn, `%${t}%`),
-    ilike(product.productNameCn, `%${t}%`),
+    ilike(product.productName, likeTerm(t)),
+    ilike(product.productNameEn, likeTerm(t)),
+    ilike(product.productNameCn, likeTerm(t)),
   );
 /** free-text search of every product list / picker: system code, vendor part no or any of the names */
 const productSearch = (t: string) =>
-  or(ilike(product.productCode, `%${t}%`), ilike(product.productVenderCode, `%${t}%`), nameLike(t));
+  or(ilike(product.productCode, likeTerm(t)), ilike(product.productVenderCode, likeTerm(t)), nameLike(t));
 
 export async function listProducts(opts: { deleted?: DeletedMode; q?: string } = {}): Promise<Product[]> {
   const { deleted = 'exclude', q = '' } = opts;
@@ -1123,6 +1123,26 @@ export async function issueForSaleOrder(
 /* ------------------------------------------------------------------ *
  * Movements (ประวัติการเคลื่อนไหว) — inventory_hd + summarised lines
  * ------------------------------------------------------------------ */
+/**
+ * Word search like the product picker's: every typed word ("P02556 ฝาหลัง") must match the document no /
+ * reference (`docs`) or a line's part code or Thai / English / Chinese name — the words in any order.
+ */
+const movementSearch = (text: string, docs: boolean) =>
+  and(
+    ...text
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) =>
+        or(
+          docs ? ilike(inventoryHd.inventoryNo, likeTerm(w)) : undefined,
+          docs ? ilike(inventoryHd.referenceDocumentNo, likeTerm(w)) : undefined,
+          sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and (d.item_code ilike ${likeTerm(w)}
+            or d.item_code in (select ${product.productCode} from ${product} where ${nameLike(w)})))`,
+        ),
+      ),
+  );
+
 export async function listMovements(
   opts: { limit?: number; q?: string; from?: string; to?: string; type?: string } = {},
 ): Promise<Movement[]> {
@@ -1152,13 +1172,7 @@ export async function listMovements(
     .where(
       and(
         ne(inventoryHd.isActive, false),
-        term
-          ? or(
-              ilike(inventoryHd.inventoryNo, `%${term}%`),
-              ilike(inventoryHd.referenceDocumentNo, `%${term}%`),
-              sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${'%' + term + '%'})`,
-            )
-          : undefined,
+        movementSearch(term, true),
         from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
         to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
         type ? eq(inventoryType.inventoryTypeName, type) : undefined,
@@ -1266,7 +1280,7 @@ export async function listIssuedLines(opts: IssuedFilters & { limit?: number } =
  * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
  * ------------------------------------------------------------------ */
 import { count as countFn } from 'drizzle-orm';
-import { orderBy as orderByCols, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { assertValid } from '@/server/validate';
 import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
 import { clean, cleanCode, summary } from '@/lib/validation';
@@ -1310,8 +1324,8 @@ function productWhere(q: string, f: ProductFilters) {
   return and(
     rs,
     term ? productSearch(term) : undefined,
-    f.sysCode ? ilike(product.productCode, `%${f.sysCode}%`) : undefined,
-    f.mfgCode ? ilike(product.productVenderCode, `%${f.mfgCode}%`) : undefined,
+    f.sysCode ? ilike(product.productCode, likeTerm(f.sysCode)) : undefined,
+    f.mfgCode ? ilike(product.productVenderCode, likeTerm(f.mfgCode)) : undefined,
     f.name ? nameLike(f.name) : undefined,
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
@@ -1319,7 +1333,7 @@ function productWhere(q: string, f: ProductFilters) {
       ? /^\d+$/.test(f.creator.trim())
         ? eq(product.createBy, Number(f.creator.trim()))
         : // the same name fullName() builds: each part trimmed, empty parts dropped
-          sql`concat_ws(' ', nullif(trim(${creatorUser.firstName}),''), nullif(trim(${creatorUser.lastName}),'')) ilike ${'%' + f.creator.trim() + '%'}`
+          sql`concat_ws(' ', nullif(trim(${creatorUser.firstName}),''), nullif(trim(${creatorUser.lastName}),'')) ilike ${likeTerm(f.creator.trim())}`
       : undefined,
     ymd(f.date) ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
     f.model
@@ -1468,20 +1482,11 @@ function movementWhere(f: MovementFilters) {
     to = ymd(f.to);
   return and(
     ne(inventoryHd.isActive, false),
-    term
-      ? or(
-          ilike(inventoryHd.inventoryNo, `%${term}%`),
-          ilike(inventoryHd.referenceDocumentNo, `%${term}%`),
-          sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${'%' + term + '%'})`,
-        )
-      : undefined,
-    f.doc ? ilike(inventoryHd.inventoryNo, `%${f.doc}%`) : undefined,
-    f.ref ? ilike(inventoryHd.referenceDocumentNo, `%${f.ref}%`) : undefined,
-    // รหัสอะไหล่ filter: the code, or a part whose Thai / English / Chinese name has the words
-    f.code
-      ? sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and (d.item_code ilike ${'%' + f.code.trim() + '%'}
-          or d.item_code in (select ${product.productCode} from ${product} where ${nameLike(f.code.trim())})))`
-      : undefined,
+    movementSearch(term, true),
+    f.doc ? ilike(inventoryHd.inventoryNo, likeTerm(f.doc)) : undefined,
+    f.ref ? ilike(inventoryHd.referenceDocumentNo, likeTerm(f.ref)) : undefined,
+    // รหัส / ชื่ออะไหล่ filter: the lines' part codes and names only
+    movementSearch(f.code ?? '', false),
     from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
     f.type ? eq(inventoryType.inventoryTypeName, f.type) : undefined,
@@ -1580,9 +1585,9 @@ function issuedWhere(q: string, f: IssuedFilters) {
     f.category ? eq(category.categoryName, f.category) : undefined,
     code
       ? or(
-          ilike(inventoryDt.itemCode, `%${code}%`),
-          ilike(product.productName, `%${code}%`),
-          ilike(inventoryHd.inventoryNo, `%${code}%`),
+          ilike(inventoryDt.itemCode, likeTerm(code)),
+          ilike(product.productName, likeTerm(code)),
+          ilike(inventoryHd.inventoryNo, likeTerm(code)),
         )
       : undefined,
   );

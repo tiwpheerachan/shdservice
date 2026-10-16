@@ -153,7 +153,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       });
     // no default: an order records a payment only when the user enters one
     const [payment, setPayment] = React.useState(initial?.paymentType ?? '');
-    const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : '');
+    // a saved order's 0 shows as 0 — the API sends 0 for "no amount" too, so an order with neither type nor
+    // amount stays empty (a save then keeps it null)
+    const [payAmount, setPayAmount] = React.useState(
+      initial && (initial.paymentAmount || initial.paymentType) ? String(initial.paymentAmount ?? 0) : '',
+    );
     const [remark, setRemark] = React.useState(initial?.remark ?? '');
     const [slip, setSlip] = React.useState(initial?.slip ?? '');
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
@@ -398,6 +402,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                             aria-label={`ราคา ${l.code}`}
                             aria-invalid={!!fe.errors[`lines.${i}.price`] || undefined}
                             step="0.01"
+                            showZero={!!initial}
                             value={l.price}
                             onChange={(n) => {
                               setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));

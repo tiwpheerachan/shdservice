@@ -122,6 +122,8 @@ export function TrackOtp({
     const s = session.current;
     session.current = null;
     if (s) void call('/api/track/me', { method: 'DELETE', session: s }).catch(() => {});
+    // signed in → out (ออก / expired): the next person on a shared phone must not see this number
+    if (s) setPhone('');
     setJob(null);
     setLists({ active: [], history: [] });
     setCode(EMPTY_CODE);
@@ -259,7 +261,16 @@ export function TrackOtp({
   };
 
   /* ---------- views ---------- */
-  const errorBox = error && <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>;
+  const errorBox = error && (
+    <p
+      className={cn(
+        'rounded-md px-3 py-2 text-sm',
+        error === TRACK_MSG.signedOut ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger',
+      )}
+    >
+      {error}
+    </p>
+  );
   const inputCls =
     'num h-11 w-full rounded-md border border-input bg-background px-3 text-base tracking-wide outline-hidden focus-visible:ring-2 focus-visible:ring-ring';
   const btnCls =
@@ -365,7 +376,11 @@ export function TrackOtp({
         <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
         <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่</span>
       </span>
-      <button type="button" onClick={() => signOut()} className="inline-flex items-center gap-1 hover:text-foreground">
+      <button
+        type="button"
+        onClick={() => signOut(TRACK_MSG.signedOut)}
+        className="inline-flex items-center gap-1 hover:text-foreground"
+      >
         <LogOut className="h-3.5 w-3.5" /> ออก
       </button>
     </div>
@@ -405,7 +420,10 @@ export function TrackOtp({
   }
 
   const tabRows = tab === 'active' ? lists.active : lists.history;
-  const all = tabRows.filter((r) => matches(r, filters));
+  // a reversed range finds nothing: say so and leave the dates out until it is fixed
+  const reversed = !!filters.from && !!filters.to && filters.from > filters.to;
+  const applied = reversed ? { ...filters, from: '', to: '' } : filters;
+  const all = tabRows.filter((r) => matches(r, applied));
   const filtered = Object.values(filters).some((v) => v.trim() !== '');
   const setFilter = (k: keyof Filters, v: string) => {
     setFilters((f) => ({ ...f, [k]: v }));
@@ -446,7 +464,7 @@ export function TrackOtp({
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
-              {label} <span className="num">({filtered ? lists[k].filter((r) => matches(r, filters)).length : n})</span>
+              {label} <span className="num">({filtered ? lists[k].filter((r) => matches(r, applied)).length : n})</span>
             </button>
           ))}
         </div>
@@ -488,6 +506,11 @@ export function TrackOtp({
                 aria-label="รับเครื่องถึงวันที่"
               />
             </div>
+            {reversed && (
+              <p role="alert" className="text-xs font-medium text-danger sm:col-span-2">
+                วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด
+              </p>
+            )}
             {filtered && (
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground sm:col-span-2">
                 <span>

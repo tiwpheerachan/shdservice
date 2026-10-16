@@ -440,6 +440,11 @@ for (const guide of Object.values<any>(data.docs ?? {})) {
   if (typeof guide?.html === 'string') guide.html = guide.html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/, '');
 }
 
+// The IoT / code indexes this build has none of: present and empty, so the page does not fetch
+// /data/cat.iot.index.json and /data/cat.code.index.json (404s) looking for them.
+data['iot.index'] = { elements: [] };
+data['code.index'] = { elements: [] };
+
 const listed = data.cat.docs;
 const guides = Object.keys(listed)
   .filter((key) => !['header', 'footer'].includes(key) && !key.startsWith('group.'))
@@ -498,5 +503,108 @@ html = html
   )
   .replace('},"Respuesta",-1)', '},"Response",-1)')
   .replace('("api.tryIt","Enviar una petición de ejemplo")', '("api.tryIt","Try it")');
+
+/*
+ * One language switch, ไทย / English (the header's): APIDoc ships seven UI languages and no Thai,
+ * and a second per-endpoint switch whose TH changed nothing (every endpoint has the same English
+ * text in both). Now the header offers ไทย and English, ไทย = the English words with the visible
+ * ones in Thai, picking one also sets the content language, and the per-endpoint box is gone.
+ * Plus the requests that only ever 404: /data/home.md and /favicon.svg (/favicon.ico).
+ */
+const THAI_UI = {
+  nav: {
+    home: 'หน้าแรก',
+    docs: 'เอกสาร',
+    expandAll: 'ขยายทั้งหมด',
+    collapseAll: 'ย่อทั้งหมด',
+    apiReference: 'API ทั้งหมด',
+    apiReferenceDescription: 'ทุก endpoint ของ API',
+    documentation: 'เอกสาร',
+    documentationDescription: 'คู่มือและเอกสารทั่วไป',
+  },
+  homepage: {
+    exploreApi: 'ดู API',
+    apiStatistics: 'สถิติ API',
+    totalEndpoints: 'จำนวน endpoint',
+    apiGroups: 'กลุ่ม API',
+    endpointsByMethod: 'Endpoint ตาม HTTP method',
+    apiGroupsList: 'กลุ่ม API',
+    quickAccess: 'ทางลัด',
+    guidesAndTutorials: 'คู่มือ',
+    completeApiDocumentation: 'เอกสาร API ทั้งหมด',
+  },
+  api: {
+    description: 'คำอธิบาย',
+    parameters: 'พารามิเตอร์',
+    response: 'คำตอบ',
+    responses: 'คำตอบ',
+    success: 'สำเร็จ',
+    error: 'ข้อผิดพลาด',
+    examples: 'ตัวอย่าง',
+    tryIt: 'ลองเรียก',
+    send: 'ส่ง',
+    sending: 'กำลังส่ง…',
+    request: 'คำขอ',
+    version: 'เวอร์ชัน',
+  },
+  search: {
+    placeholder: 'ค้นหาในเอกสาร…',
+    noResults: 'ไม่พบผลลัพธ์สำหรับ "{query}"',
+    typeToSearch: 'พิมพ์เพื่อค้นหา',
+  },
+  docs: { title: 'เอกสาร', documentation: 'เอกสาร' },
+  common: {
+    loading: 'กำลังโหลด…',
+    error: 'ข้อผิดพลาด',
+    required: 'จำเป็น',
+    optional: 'ไม่บังคับ',
+    default: 'ค่าเริ่มต้น',
+    type: 'ชนิด',
+    name: 'ชื่อ',
+    value: 'ค่า',
+    close: 'ปิด',
+    copy: 'คัดลอก',
+    copied: 'คัดลอกแล้ว',
+    language: 'ภาษา',
+    tableOfContents: 'สารบัญ',
+  },
+  messages: { noEndpointsAvailable: 'ไม่มี endpoint ในหมวดนี้' },
+};
+/** `en` with THAI_UI laid over it, built in the page (the bundle's own `en` messages) */
+const THAI_MESSAGES = `((b,o)=>{const m=(a,c)=>{for(const k in c)a[k]=c[k]&&typeof c[k]=="object"?m({...a[k]},c[k]):c[k];return a};return m({...b},o)})(en,${JSON.stringify(THAI_UI)})`;
+const LANG_NAMES = '{es:"Español",en:"English",zh:"中文",pt:"Português",fr:"Français",de:"Deutsch",ja:"日本語"}';
+const FIXES: [anchor: string, replacement: string, count?: number][] = [
+  ['messages:{es,en,zh:zhCN,pt:ptBR,fr,de,ja}', `messages:{en,th:${THAI_MESSAGES}}`],
+  ['supportedLocales=["es","en","zh","pt","fr","de","ja"]', 'supportedLocales=["th","en"]'],
+  ['typeof navigator>"u")return"es"', 'typeof navigator>"u")return"th"'],
+  ['return supportedLocales.includes(rr)?rr:"es"', 'return supportedLocales.includes(rr)?rr:"th"'],
+  // a language saved by the old menu (ja, es, …) no longer exists → start from the browser's / ไทย
+  [
+    'typeof localStorage>"u"?"es":localStorage.getItem("apidoc-locale")||getBrowserLocale()',
+    'typeof localStorage>"u"?"th":supportedLocales.find(l=>l===localStorage.getItem("apidoc-locale"))||getBrowserLocale()',
+  ],
+  ['fallbackLocale:"es"', 'fallbackLocale:"en"'],
+  [LANG_NAMES, '{th:"ไทย",en:"English"}', 2],
+  ['renderList(["es","en","zh","pt","fr","de","ja"]', 'renderList(["th","en"]'],
+  // the content language follows the header's choice, at start and on every change
+  ['gr=localStorage.getItem("apicat_language")', 'gr=i18n.global.locale.value'],
+  ['console.log("Changing language to:",vr),rr.value=vr,', 'rr.value=vr,useDocsStore().setLanguage(vr),'],
+  ['changeLang=nr=>{locale.value=nr,', 'changeLang=nr=>{locale.value=nr,useDocsStore().setLanguage(nr),'],
+  [
+    'ur.value&&!cr.value?(openBlock(),createElementBlock("div",_hoisted_12$c',
+    '!1?(openBlock(),createElementBlock("div",_hoisted_12$c',
+  ],
+  ['await fetch("/data/home.md")', '{ok:!1}'],
+  [
+    '<link rel="icon" type="image/svg+xml" href="/favicon.svg">\n  <link rel="alternate icon" href="/favicon.ico">',
+    // no logo (owner 2026-10-16); an empty icon also stops the browser's /favicon.ico request
+    '<link rel="icon" href="data:,">',
+  ],
+  ['<html lang="es">', '<html lang="th">'],
+];
+for (const [anchor, replacement, count = 1] of FIXES) {
+  if (html.split(anchor).length - 1 !== count) throw new Error(`APIDoc template changed: ${anchor.slice(0, 60)}`);
+  html = html.replaceAll(anchor, () => replacement);
+}
 writeFileSync(file, html);
 console.log(`API docs → ${path.relative(root, file)} (${order} endpoints)`);

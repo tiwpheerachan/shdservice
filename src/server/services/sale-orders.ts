@@ -9,7 +9,7 @@ import { ADMIN_USER_TYPE } from '@/lib/modules';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { getCustomerByCode, addressNames } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
@@ -128,22 +128,22 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
     statusFilter(saleOutHd.recordStatus, f.deleted ?? 'exclude'),
     term
       ? or(
-          ilike(saleOutHd.saleOutHdNo, `%${term}%`),
-          ilike(saleOutHd.customerName, `%${term}%`),
-          ilike(saleOutHd.customerCode, `%${term}%`),
-          ilike(saleOutHd.customerPhoneNumber, `%${term}%`),
-          ilike(saleOutHd.deliveryTrackingNo, `%${term}%`),
+          ilike(saleOutHd.saleOutHdNo, likeTerm(term)),
+          ilike(saleOutHd.customerName, likeTerm(term)),
+          ilike(saleOutHd.customerCode, likeTerm(term)),
+          ilike(saleOutHd.customerPhoneNumber, likeTerm(term)),
+          ilike(saleOutHd.deliveryTrackingNo, likeTerm(term)),
         )
       : undefined,
-    f.no?.trim() ? ilike(saleOutHd.saleOutHdNo, `%${f.no.trim()}%`) : undefined,
+    f.no?.trim() ? ilike(saleOutHd.saleOutHdNo, likeTerm(f.no.trim())) : undefined,
     f.customer?.trim()
       ? or(
-          ilike(saleOutHd.customerName, `%${f.customer.trim()}%`),
-          ilike(saleOutHd.customerCode, `%${f.customer.trim()}%`),
+          ilike(saleOutHd.customerName, likeTerm(f.customer.trim())),
+          ilike(saleOutHd.customerCode, likeTerm(f.customer.trim())),
         )
       : undefined,
     f.code?.trim()
-      ? sql`exists (select 1 from sale_out_dt d where d.sale_out_hd_no = ${saleOutHd.saleOutHdNo} and d.product_code ilike ${'%' + f.code.trim() + '%'})`
+      ? sql`exists (select 1 from sale_out_dt d where d.sale_out_hd_no = ${saleOutHd.saleOutHdNo} and d.product_code ilike ${likeTerm(f.code.trim())})`
       : undefined,
     f.approve
       ? eq(
@@ -156,7 +156,7 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
     f.sales
       ? /^\d+$/.test(f.sales)
         ? eq(saleOutHd.saleOutBy, Number(f.sales))
-        : ilike(seller.firstName, `%${f.sales}%`)
+        : ilike(seller.firstName, likeTerm(f.sales))
       : undefined,
   );
 }

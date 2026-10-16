@@ -135,6 +135,50 @@ const TAT_BUCKET: Record<string, string> = {
   total: 'ทุกช่วงวัน',
 };
 type TatSource = { bucket: string; status: string; type: string };
+const PAGE_SIZES = [10, 25, 50, 100];
+
+/**
+ * The list in the URL (filters, table, dashboard chip) — written as it changes, read on load, so a refresh keeps
+ * it. Same names as the deep links into it: dashboard TAT  ?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…
+ * &to=…&type=…, dashboard KPI  ?src=kpi&group=Pending&label=…, bell  ?src=overdue[&engineer=<id>], customer page
+ * ?customer=C43600.
+ */
+function toQuery(f: Filters, t: ServerTableState, tat: TatSource | null, kpi: string | null) {
+  const p = new URLSearchParams();
+  if (tat) p.set('src', 'tat');
+  if (tat?.bucket) p.set('bucket', tat.bucket);
+  if (kpi) p.set('src', 'kpi');
+  if (kpi) p.set('label', kpi);
+  for (const k of Object.keys(NO_FILTER) as (keyof Filters)[])
+    if (f[k] !== NO_FILTER[k]) p.set(k === 'statusGroup' ? 'group' : k, f[k] === true ? '1' : String(f[k]));
+  if (t.page > 1) p.set('page', String(t.page));
+  if (t.pageSize !== 25) p.set('size', String(t.pageSize));
+  if (t.sort) p.set('sort', `${t.sort.key}.${t.sort.dir}`);
+  return p.toString();
+}
+function fromQuery(p: URLSearchParams) {
+  const g = (k: string) => p.get(k)?.trim() ?? '';
+  const f: Filters = { ...NO_FILTER };
+  for (const k of Object.keys(NO_FILTER) as (keyof Filters)[]) {
+    const v = g(k === 'statusGroup' ? 'group' : k);
+    if (v) Object.assign(f, { [k]: typeof NO_FILTER[k] === 'boolean' ? v === '1' : v });
+  }
+  if (g('src') === 'overdue') f.overdue = true;
+  // ids and choices: anything else is no filter
+  for (const k of ['statusId', 'engineer', 'createdBy'] as const) if (!/^\d+$/.test(f[k])) f[k] = '';
+  if (!['create', 'reception', 'closed'].includes(f.dateBy)) f.dateBy = 'create';
+  if (!['', 'yes', 'no'].includes(f.cost)) f.cost = '';
+  // sort=<key>.<dir> (an unknown key is ignored by the server's column map)
+  const [, sortKey, sortDir] = /^(.+)\.(asc|desc)$/.exec(g('sort')) ?? [];
+  return {
+    filters: f,
+    tat: g('src') === 'tat' ? { bucket: g('bucket'), status: f.status, type: f.type } : null,
+    kpi: g('src') === 'kpi' ? g('label') || f.statusGroup : null,
+    page: Math.max(1, parseInt(g('page'), 10) || 1),
+    pageSize: PAGE_SIZES.includes(Number(g('size'))) ? Number(g('size')) : 25,
+    sort: sortKey ? { key: sortKey, dir: sortDir === 'desc' ? ('desc' as const) : ('asc' as const) } : null,
+  };
+}
 
 function StatChip({
   icon: Icon,
@@ -182,82 +226,47 @@ export default function JobListPage() {
   const { data: STAFF } = useStaff();
   const { data: statRows, loading: statsLoading } = useJobStats();
 
-  // FilterBar (applied on ค้นหา) + table state → one server query per change
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  // where a dashboard TAT deep link came from (shown as a clearable chip)
-  const [tat, setTat] = React.useState<TatSource | null>(null);
-  // the dashboard KPI card a deep link came from (its label), shown the same way
-  const [kpi, setKpi] = React.useState<string | null>(null);
-  // deep links:
-  //   customer page  /jobs/list?customer=C43600 → prefilled ลูกค้า filter
-  //   dashboard TAT  /jobs/list?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…&to=…&type=…
-  //   dashboard KPI  /jobs/list?src=kpi&group=Pending&label=…&from=…&to=…&type=… (same count as the card)
-  //   bell           /jobs/list?src=overdue[&engineer=<user id>] → open jobs past their due date
-  // Read on EVERY change of the URL, not only on mount: a link to this page from this page
-  // (the bell in the topbar, back / forward) changes the query string without remounting.
+  // the URL holds the list (toQuery): read on load and on EVERY change of it, not only on mount — a link to
+  // this page from this page (the bell in the topbar, back / forward) changes the query string without
+  // remounting. A link starts from a clean filter set, so e.g. one engineer from the bell never lingers.
   const search = useSearchParams().toString();
-  /** set while we rewrite the URL ourselves (clearing a deep link) — that change is not a new deep link */
-  const ownUrlChange = React.useRef(false);
-  const dropDeepLink = () => {
-    if (!window.location.search) return;
-    ownUrlChange.current = true;
-    window.history.replaceState(null, '', window.location.pathname);
-  };
+  const [init] = React.useState(() => fromQuery(new URLSearchParams(search)));
+  // FilterBar (applied on ค้นหา) + table state → one server query per change
+  const [draft, setDraft] = React.useState<Filters>(init.filters);
+  const [filters, setFilters] = React.useState<Filters>(init.filters);
+  // where a dashboard TAT deep link came from (shown as a clearable chip)
+  const [tat, setTat] = React.useState<TatSource | null>(init.tat);
+  // the dashboard KPI card a deep link came from (its label), shown the same way
+  const [kpi, setKpi] = React.useState<string | null>(init.kpi);
+  const [table, setTable] = React.useState<ServerTableState>({
+    page: init.page,
+    pageSize: init.pageSize,
+    q: '',
+    sort: init.sort,
+  });
+  /** the query string we wrote ourselves (below) — not a new link to read */
+  const ownUrl = React.useRef(search);
   React.useEffect(() => {
-    if (ownUrlChange.current) {
-      ownUrlChange.current = false;
-      return;
-    }
-    const p = new URLSearchParams(search);
-    const g = (k: string) => p.get(k)?.trim() ?? '';
-    const next: Partial<Filters> = {};
-    let tatSrc: TatSource | null = null;
-    if (g('customer')) next.customer = g('customer');
-    if (g('src') === 'tat') {
-      Object.assign(next, {
-        open: g('open') === '1',
-        statusId: /^\d+$/.test(g('statusId')) ? g('statusId') : '',
-        status: g('status'),
-        dateBy: 'create' as const,
-        from: g('from'),
-        to: g('to'),
-        type: g('type'),
-      });
-      tatSrc = { bucket: g('bucket'), status: g('status'), type: g('type') };
-    }
-    let kpiSrc: string | null = null;
-    if (g('src') === 'kpi') {
-      Object.assign(next, {
-        statusGroup: g('group'),
-        dateBy: 'create' as const,
-        from: g('from'),
-        to: g('to'),
-        type: g('type'),
-      });
-      kpiSrc = g('label') || g('group');
-    }
-    if (g('src') === 'overdue') {
-      next.overdue = true;
-      if (/^\d+$/.test(g('engineer'))) next.engineer = g('engineer');
-    }
-    // a deep link (or navigating back to the plain list) starts from a clean filter set,
-    // so e.g. one engineer from the bell never lingers when the next link has none
-    const fresh = { ...NO_FILTER, ...next };
-    setDraft(fresh);
-    setFilters(fresh);
-    setTat(tatSrc);
-    setKpi(kpiSrc);
+    if (search === ownUrl.current) return;
+    const next = fromQuery(new URLSearchParams(search));
+    setDraft(next.filters);
+    setFilters(next.filters);
+    setTat(next.tat);
+    setKpi(next.kpi);
   }, [search]);
+  React.useEffect(() => {
+    const q = toQuery(filters, table, tat, kpi);
+    if (q === new URLSearchParams(window.location.search).toString()) return;
+    ownUrl.current = q;
+    window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}`);
+  }, [filters, table, tat, kpi]);
   const clearAll = () => {
     setDraft(NO_FILTER);
     setFilters(NO_FILTER);
     setTat(null);
     setKpi(null);
-    dropDeepLink();
   };
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // models narrow to the chosen brand (1,171 models in total)
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
@@ -462,7 +471,6 @@ export default function JobListPage() {
             setTat(null);
             setKpi(null);
             setDraft(next);
-            dropDeepLink();
           }
           setFilters(next);
         }}
@@ -682,7 +690,13 @@ export default function JobListPage() {
         error={loadError}
         onRetry={retryLoad}
         rowKey={(r) => r.no}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        pageSize={init.pageSize}
+        server={{
+          total,
+          onChange: setTable,
+          resetKey: JSON.stringify(filters),
+          initial: { page: init.page, sort: init.sort },
+        }}
       />
 
       {modalUsed && (

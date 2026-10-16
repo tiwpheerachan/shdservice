@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { SearchSelect } from '@/components/shared/search-select';
 import { useDashboard, useJobs, useJobTypes } from '@/data/db';
@@ -111,7 +111,10 @@ export default function DashboardPage() {
   // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
   const [type, setType] = React.useState('');
   const { data: JOB_TYPES } = useJobTypes();
-  const range = React.useMemo(() => ({ from, to, type }), [from, to, type]);
+  // a reversed pair finds nothing: say so (as FilterBar does) and keep showing the last range that made sense
+  const reversed = !!from && !!to && from > to;
+  const [range, setRange] = React.useState({ from, to, type });
+  if (!reversed && (range.from !== from || range.to !== to || range.type !== type)) setRange({ from, to, type });
   // presets use the Thai calendar (lib/dates), like the server's date filters
   const preset = (key: '7d' | '30d' | '90d' | 'month' | 'all') => {
     const now = today();
@@ -151,7 +154,8 @@ export default function DashboardPage() {
   const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
   const granularity = DASH?.granularity ?? 'month';
   const rangeText =
-    (!from && !to ? 'ทั้งหมด' : `${thai(from) || 'เริ่มต้น'} – ${thai(to) || 'วันนี้'}`) + (type ? ` · ${type}` : '');
+    (!range.from && !range.to ? 'ทั้งหมด' : `${thai(range.from) || 'เริ่มต้น'} – ${thai(range.to) || 'วันนี้'}`) +
+    (range.type ? ` · ${range.type}` : '');
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));
 
@@ -235,6 +239,12 @@ export default function DashboardPage() {
               aria-label="วันที่สิ้นสุด"
             />
           </div>
+          {reversed && (
+            <p role="alert" className="flex basis-full items-center gap-1.5 text-xs font-medium text-danger">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+              วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด
+            </p>
+          )}
           <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/60 p-0.5 text-xs">
             {(
               [
@@ -278,7 +288,7 @@ export default function DashboardPage() {
           {DASH_GROUPS.map((g) => (
             <Link
               key={g.key}
-              href={kpiHref(g, from, to, type)}
+              href={kpiHref(g, range.from, range.to, range.type)}
               className="group bg-card p-5 transition-colors hover:bg-accent/40"
             >
               <div className="flex items-center gap-2">

@@ -168,9 +168,10 @@ export function ProductDetailModal({
       description: d.product.description ?? '',
       category: d.product.category,
       brand: d.product.brand,
-      capitalPrice: d.product.capitalPrice ? String(d.product.capitalPrice) : '',
-      wholesalePrice: d.product.wholesalePrice ? String(d.product.wholesalePrice) : '',
-      price: d.product.price ? String(d.product.price) : '',
+      // a stored 0 shows as 0 (only a new part starts empty); no cost right → no capitalPrice → empty
+      capitalPrice: String(d.product.capitalPrice ?? ''),
+      wholesalePrice: String(d.product.wholesalePrice ?? ''),
+      price: String(d.product.price ?? ''),
       forModelColor: d.product.forModelColor ?? '',
       status: d.product.status,
       models: d.product.models ?? [],

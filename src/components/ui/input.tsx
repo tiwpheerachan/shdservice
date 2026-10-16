@@ -31,17 +31,20 @@ export function NumberInput({
   onChange,
   className,
   placeholder = '0.00',
+  showZero = false,
   ...props
 }: {
   value: number;
   onChange: (n: number) => void;
+  /** a stored 0 (an existing record's free line / no service fee) shows as 0, not as an empty box */
+  showZero?: boolean;
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
   const field = useFieldControl(props.id);
   return (
     <input
       type="number"
       inputMode="decimal"
-      value={value === 0 ? '' : value}
+      value={value === 0 && !showZero ? '' : value}
       placeholder={placeholder}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => onChange(Number(e.target.value) || 0)}

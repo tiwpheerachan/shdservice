@@ -19,12 +19,14 @@ import {
   parseSwap,
   paymentDetailOf,
   returnDetailOf,
+  noteMaxLength,
   NO_SERIAL,
   STATUS_CLOSED_TRACKED,
   type JobCheck,
   type JobRequiredKey,
 } from '../src/lib/validation/job.ts';
 import { customerSchema, conflictErrors } from '../src/lib/validation/customer.ts';
+import { quoteJobNote } from '../src/lib/quote-job.ts';
 import { quotationSchema } from '../src/lib/validation/quotation.ts';
 import { saleOrderSchema } from '../src/lib/validation/sale-order.ts';
 import {
@@ -977,6 +979,40 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     assert.equal(returnDetailOf('Flash', 'Flash'), 'Flash');
     assert.equal(returnDetailOf('', 'ฝากหน้าบ้าน'), 'ฝากหน้าบ้าน');
     assert.deepEqual(parseSwap('New S/N: AB12\nยอดเงินคืน: 10.00'), { 'New S/N': 'AB12', ยอดเงินคืน: '10.00' });
+  });
+  test('R8 close: a note input takes 100 less what the save puts in front — the most it takes always saves', () => {
+    const pay = (date: string, note: string) => {
+      const max = noteMaxLength((n) => paymentDetailOf(date, n), note);
+      const full = note || 'ก'.repeat(max); // a typed-in note this long saves, one more character does not
+      assert.ok(paymentDetailOf(date, full.padEnd(max, 'ก')).length <= 100, date);
+      assert.ok(paymentDetailOf(date, full.padEnd(max + 1, 'ก')).length > 100, date);
+      return max;
+    };
+    assert.equal(pay('2026-10-15', ''), 100 - 'ชำระ 2026-10-15 · '.length);
+    assert.equal(pay('', ''), 100, 'no date → nothing in front');
+    assert.equal(pay('2026-10-15', 'ชำระ 2026-10-01 · โอน'), 100, 'a loaded note keeps its own date part');
+    const ret = (courier: string) => noteMaxLength((n) => returnDetailOf(courier, n), '');
+    assert.equal(ret('Kerry Express'), 100 - 'Kerry Express · '.length);
+    assert.equal(ret(''), 100);
+    assert.equal(
+      noteMaxLength((n) => returnDetailOf('Flash', n), 'Flash · ฝาก'),
+      100,
+      'already starts with it',
+    );
+  });
+  test('R8 quotation: sent / agreed on a job already further along says the job stays (never moved back)', () => {
+    const job = (statusId: number, status = 'x') => ({ no: 'J1', statusId, status });
+    assert.equal(quoteJobNote('เสนอราคาแล้ว', job(1)), '', 'new job → moves to 4');
+    assert.equal(quoteJobNote('ลูกค้าตกลงซ่อม', job(4)), '', 'quoted → agreed moves');
+    assert.equal(quoteJobNote('เสนอราคาแล้ว', job(4)), '', 'already there');
+    assert.equal(quoteJobNote('ลูกค้าไม่ตกลงซ่อม', job(11)), '', 'declined moves nothing — nothing to say');
+    assert.equal(quoteJobNote('เสนอราคาแล้ว', null), '');
+    assert.equal(
+      quoteJobNote('ลูกค้าตกลงซ่อม', job(11, 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่ ')),
+      'สถานะงาน J1 ไม่เปลี่ยน — งานอยู่ที่ "อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่" แล้ว (ไม่ถอยสถานะกลับ)',
+    );
+    assert.ok(quoteJobNote('เสนอราคาแล้ว', job(12)), 'agreed → sent never goes back');
+    assert.ok(quoteJobNote('ลูกค้าตกลงซ่อม รออะไหล่', job(8)), 'a closed job never moves');
   });
   test('J: call log ≤ 200 (= the column; 800 chars used to be lost silently)', () => {
     assert.equal(validate(callLogSchema, { detail: 'ก'.repeat(200) }).ok, true);

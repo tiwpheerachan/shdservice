@@ -5486,6 +5486,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -6196,6 +6206,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -6465,6 +6485,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -6595,6 +6625,16 @@
                       "top"
                     ]
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -7272,6 +7312,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -7884,6 +7934,16 @@
                       }
                     }
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -8544,6 +8604,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -8806,6 +8876,16 @@
                       "out"
                     ]
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -9334,6 +9414,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -9644,6 +9734,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -9889,6 +9989,16 @@
               }
             }
           },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -10129,6 +10239,16 @@
                       "avg"
                     ]
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -10380,6 +10500,16 @@
                       }
                     }
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -11124,6 +11254,16 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

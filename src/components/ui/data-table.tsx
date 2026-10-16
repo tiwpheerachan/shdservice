@@ -52,6 +52,8 @@ export type ServerTable = {
   onChange: (state: ServerTableState) => void;
   /** change it (e.g. the applied filters as a string) to jump back to page 1 */
   resetKey?: string;
+  /** where the table starts (read once, on mount) — e.g. page + sort from the URL so a refresh keeps them */
+  initial?: { page?: number; sort?: ServerTableState['sort'] };
 };
 
 const HIDE: Record<string, string> = {
@@ -108,8 +110,8 @@ export function DataTable<T extends Record<string, unknown>>({
   onRetry?: () => void;
 }) {
   const [q, setQ] = React.useState('');
-  const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
-  const [page, setPage] = React.useState(1);
+  const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(server?.initial?.sort ?? null);
+  const [page, setPage] = React.useState(server?.initial?.page ?? 1);
   const [pageSize, setPageSize] = React.useState(initialPageSize);
 
   const getVal = React.useCallback((row: T, col: Column<T>) => {
@@ -174,8 +176,11 @@ export function DataTable<T extends Record<string, unknown>>({
     setPage(1);
   }
 
-  const toggleSort = (key: string) =>
+  // a new order starts again at page 1, like a new search
+  const toggleSort = (key: string) => {
     setSort((s) => (s?.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
+    setPage(1);
+  };
 
   const cellPad = dense ? 'px-3 py-1.5' : 'px-3 py-2.5';
 

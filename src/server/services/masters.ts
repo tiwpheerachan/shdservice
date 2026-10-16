@@ -9,7 +9,7 @@ import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { count, desc, ilike, or } from 'drizzle-orm';
-import { orderBy as orderByCols, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
+import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import {
   RS,
   statusFilter,
@@ -496,14 +496,14 @@ export async function pageModels(
     statusFilter(model.recordStatus, mode),
     term
       ? or(
-          ilike(model.modelCode, `%${term}%`),
-          ilike(model.modelName, `%${term}%`),
-          ilike(manufacturer.manufacturerName, `%${term}%`),
+          ilike(model.modelCode, likeTerm(term)),
+          ilike(model.modelName, likeTerm(term)),
+          ilike(manufacturer.manufacturerName, likeTerm(term)),
         )
       : undefined,
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
-    f.code ? ilike(model.modelCode, `%${f.code.trim()}%`) : undefined,
-    f.name ? ilike(model.modelName, `%${f.name.trim()}%`) : undefined,
+    f.code ? ilike(model.modelCode, likeTerm(f.code.trim())) : undefined,
+    f.name ? ilike(model.modelName, likeTerm(f.name.trim())) : undefined,
     f.status === 'Active'
       ? eq(model.recordStatus, 'ACTIVE')
       : f.status === 'Inactive'

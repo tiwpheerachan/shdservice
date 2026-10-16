@@ -460,9 +460,16 @@ async function toPublic(row: Row): Promise<PublicJob> {
     .where(eq(jobLog.jobNo, row.no))
     .orderBy(asc(jobLog.jobLogDate), asc(jobLog.jobLogId));
 
+  const docs = await docsFor(row);
+  // a PASSED quotation step the customer has no quotation for (only cancelled / draft ones) is not shown:
+  // its statuses alone do not make a ticked "รอยืนยัน" step, nor name it "ใบเสนอราคา" with no document
+  const QUOTE_STATUSES: number[] = [JS.WAIT_QUOTE, JS.QUOTED, JS.QUOTE_EXPIRED];
+  const quoted = docs.some((d) => d.kind === 'quotation') || QUOTE_STATUSES.includes(row.statusId ?? -1);
+  const shown = quoted ? logs : logs.filter((l) => !QUOTE_STATUSES.includes(l.statusId ?? -1));
+
   // first time each step was reached; "received" = the header's วันที่รับเครื่อง, not the job's first log
   const seen = new Map<TrackStepKey, string>([['received', receivedOf(row)]]);
-  for (const l of logs) {
+  for (const l of shown) {
     const k = stepOf(l.statusId ?? -1, l.group?.trim() ?? '');
     if (k && !seen.has(k)) seen.set(k, fmtDate(l.at));
   }
@@ -482,7 +489,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const dueDate = !due || due >= today() ? due : beforeRepaired ? DUE_PASSED_TEXT : '';
 
   // "รอยืนยัน / รออะไหล่" merges two things: once passed, the step says which one(s) it really was
-  const was = (...ids: number[]) => logs.some((l) => ids.includes(l.statusId ?? -1));
+  const was = (...ids: number[]) => shown.some((l) => ids.includes(l.statusId ?? -1));
   const waitedFor = [was(JS.WAIT_QUOTE, JS.QUOTED, JS.QUOTE_EXPIRED) && 'ใบเสนอราคา', was(JS.WAIT_PARTS) && 'รออะไหล่']
     .filter(Boolean)
     .join(' · ');
@@ -514,7 +521,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
     trackingNo: (row.trackingNo ?? '').trim(),
     closedDate: fmtDate(row.closedDate),
     courier,
-    docs: await docsFor(row),
+    docs,
   };
 }
 

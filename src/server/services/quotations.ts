@@ -8,7 +8,7 @@ import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
-import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
@@ -135,11 +135,11 @@ export function quotationWhere(q: string, f: QuotationFilters) {
     statusFilter(quotationHd.recordStatus, f.deleted ?? 'exclude'),
     term
       ? or(
-          ilike(quotationHd.quotationNo, `%${term}%`),
-          ilike(quotationHd.referenceJobNo, `%${term}%`),
-          ilike(customer.customerName, `%${term}%`),
-          ilike(quotationHd.customerCode, `%${term}%`),
-          ilike(job.productImeiNo, `%${term}%`),
+          ilike(quotationHd.quotationNo, likeTerm(term)),
+          ilike(quotationHd.referenceJobNo, likeTerm(term)),
+          ilike(customer.customerName, likeTerm(term)),
+          ilike(quotationHd.customerCode, likeTerm(term)),
+          ilike(job.productImeiNo, likeTerm(term)),
         )
       : undefined,
     // trimmed: the table pads some names ("รอเสนอราคา" + 24 spaces) — an exact match never found them
