@@ -294,6 +294,19 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
       // Postgres errors the user can act on (drizzle wraps the pg error in .cause)
       const code = pgCode(e);
       if (code === '23505') return NextResponse.json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' }, { status: 409 });
+      // FK / CHECK (drizzle/0031): the services check first, so reaching the DB rule is worth a log line
+      if (code === '23503' || code === '23514') {
+        logError(e, 'db constraint refused a write', { code }, args[0] instanceof Request ? args[0] : undefined);
+        return NextResponse.json(
+          {
+            error:
+              code === '23503'
+                ? 'ข้อมูลที่อ้างถึงไม่มีอยู่หรือถูกลบไปแล้ว กรุณาโหลดหน้าใหม่'
+                : 'ข้อมูลไม่ผ่านเงื่อนไข (เช่น จำนวนหรือราคาติดลบ)',
+          },
+          { status: 409 },
+        );
+      }
       if (code === '57014')
         return NextResponse.json({ error: 'ใช้เวลานานเกินไป ลองจำกัดช่วงข้อมูลให้แคบลง' }, { status: 503 });
       if (code === '40P01' || code === '40001')

@@ -218,6 +218,20 @@
       "when": 1757900030000,
       "tag": "0030_special_rights",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1757900031000,
+      "tag": "0031_db_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1757900032000,
+      "tag": "0032_database_timezone",
+      "breakpoints": true
     }
   ]
 }

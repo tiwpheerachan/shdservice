@@ -1,5 +1,6 @@
 import 'server-only';
 import { Pool } from 'pg';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema';
 import { dbSsl } from './ssl';
@@ -37,6 +38,8 @@ function createPool() {
     // and stop a runaway query before it holds a connection for minutes
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
+    // honoured by a direct connection (local docker); the Supabase pooler DROPS it (measured 2026-10-16) —
+    // there the timezone comes from the database (drizzle/0032) and timeouts from withStatementTimeout()
     options: '-c TimeZone=Asia/Bangkok -c statement_timeout=30000',
   });
   // An idle client dropped by the pooler emits 'error' on the pool; unhandled, it kills the process.
@@ -50,3 +53,17 @@ export const pool = globalForDb.__shdPool ?? (globalForDb.__shdPool = createPool
 export const db = drizzle(pool, { schema });
 export type Db = typeof db;
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * Runs heavy reads in a transaction with their own statement_timeout. The Supabase pooler drops the
+ * `options` above, so on production this SET LOCAL is the only timeout the app controls (the server's own
+ * cap is 2 min). A timeout (57014) reaches handle() as a 503 "ลองจำกัดช่วงข้อมูลให้แคบลง".
+ * ponytail: reports only — the Excel export reads through every list service on `db`; it stays under the
+ * 2-min cap + MAX_ROWS + its rate limit. Thread a tx through loadRows if exports ever run long.
+ */
+export function withStatementTimeout<T>(run: (tx: Tx) => Promise<T>, ms = 15_000): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${Math.trunc(ms)}`));
+    return run(tx);
+  });
+}

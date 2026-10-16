@@ -94,6 +94,15 @@ async function seed() {
      WHERE running_type = 'Model';
     -- a fresh test DB has no job types; the job-creating tests take the first one
     INSERT INTO job_type (job_type_name, is_active) VALUES ('TD งานซ่อม', true) ON CONFLICT (job_type_name) DO NOTHING;
+    -- stock movements point at these (foreign keys, drizzle/0031): the live rows, src/server/services/stock.ts INV / STORE_LOCATION_ID
+    INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+      SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
+                            (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
+                            (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
+       WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+    INSERT INTO store_location (store_location_id, store_location_name, is_active)
+      SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
+       WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
     DELETE FROM app_config WHERE user_type LIKE 'TD %';
     INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
       ('TD Job Clerk', 'Job Management', false, true, false, true),
@@ -113,14 +122,38 @@ async function seed() {
     INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
       ${users.map((u) => `(${u.id}, 'TD', '${u.email.split('@')[0]}', '${u.email}', ${u.type ? `'${u.type}'` : 'NULL'}, '${u.status}', ${SV})`).join(',\n      ')};
 
+    -- every status a flow can move a job to: job.job_status_id has a foreign key (drizzle/0031)
     INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
       SELECT * FROM (VALUES (0, 'ยกเลิก', 0, 'Cancel', true), (1, 'รับงานใหม่', 1, 'Open', true), (2, 'กำลังดำเนินการ', 2, 'Open', true),
+                            (3, 'อยู่ระหว่างการซ่อม - รออะไหล่', 35, 'Pending', true),
+                            (4, 'อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า', 37, 'Pending', true),
                             (5, 'ซ่อมเสร็จ', 5, 'Repaired', true), (20, 'เสร็จสมบูรณ์', 20, 'Finished', true),
                             (6, 'ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)', 6, 'Repaired', true),
+                            (7, 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)', 50, 'Finished', true),
+                            (8, 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)', 51, 'Finished', true),
+                            (9, 'ซ่อมเสร็จ (ชำระเงินแล้ว)', 45, 'Repaired', true),
+                            (10, 'อยู่ระหว่างการซ่อม - เบิกจ่ายอะไหล่ครบแล้ว', 34, 'Pending', true),
+                            (11, 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่', 33, 'Pending', true),
+                            (12, 'อยู่ระหว่างการซ่อม - ลูกค้าตกลงซ่อม', 38, 'Pending', true),
+                            (13, 'อยู่ระหว่างการซ่อม - รอเสนอราคา', 36, 'Pending', true),
                             (14, 'อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว', 14, 'Pending', true),
                             (15, 'อยู่ระหว่างการซ่อม - รับคืนจาก Out-Source แล้ว', 15, 'Pending', true),
+                            (16, 'อยู่ระหว่างการซ่อม - พ้นกำหนดเสนอราคา', 39, 'Pending', true),
+                            (17, 'อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว', 40, 'Pending', true),
+                            (18, 'อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว', 42, 'Repaired', true),
+                            (19, 'อยู่ระหว่างดำเนินการ - เบิกจ่ายเงินแล้ว', 43, 'Repaired', true),
+                            (21, 'ปิดงานซ่อม (Refund : คืนเงินลูกค้า)', 53, 'Finished', false),
+                            (22, 'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)', 46, 'Repaired', true),
+                            (23, 'ปิดงานซ่อม (Out-Source)', 54, 'Finished', false),
                             (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true)) v(id, name, ord, grp, act)
        WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+
+    -- children before parents (foreign keys, drizzle/0031): the fixture jobs and every job a previous run
+    -- created for the fixture customer
+    DELETE FROM job_log WHERE job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}' OR job_no IN (SELECT job_no FROM job WHERE customer_id = 9001);
+    DELETE FROM job_send_forward_dt WHERE job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}' OR job_no IN (SELECT job_no FROM job WHERE customer_id = 9001);
+    DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}' OR job_no IN (SELECT job_no FROM job WHERE customer_id = 9001);
+    DELETE FROM job WHERE customer_id = 9001 OR job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}';
 
     DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code = '${CUSTOMER}');
     DELETE FROM sale_out_hd WHERE customer_code = '${CUSTOMER}';
@@ -133,14 +166,11 @@ async function seed() {
     INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price) VALUES
       (9201, 9201, 10, 0, 0, 10, 100.00), (9202, 9202, 10, 0, 0, 10, 200.00), (9203, 9203, 10, 0, 0, 10, 300.00);
 
-    DELETE FROM job_log WHERE job_no LIKE 'TDJ%';
-    DELETE FROM job_send_forward_dt WHERE job_no LIKE 'TDJ%';
+    DELETE FROM quotation_dt WHERE quotation_no LIKE 'TDQ%';
     DELETE FROM quotation_hd WHERE quotation_no LIKE 'TDQ%';
     DELETE FROM inventory_dt WHERE inventory_no LIKE 'TDW%';
     DELETE FROM inventory_hd WHERE inventory_no LIKE 'TDW%';
     DELETE FROM color WHERE color_name = 'TD color';
-    DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'TDJ%';
-    DELETE FROM job WHERE job_no LIKE 'TDJ%' OR job_no = '${JOB_QUOTE}';
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date) VALUES
       ('${JOB_CLOSE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_PARTS}', 11, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
@@ -831,6 +861,9 @@ try {
     await db.execute(sql`INSERT INTO symptom (symptom_id, symptom_name)
       VALUES ((SELECT coalesce(max(symptom_id), 0) + 1 FROM symptom), ${'TD trail sym\n'})`);
     // a NEW job (the shared JOB_EDIT fixture must keep its empty brand for the tests below)
+    // a fresh test DB has no model yet (the master tests below create theirs later)
+    await db.execute(sql`INSERT INTO model (model_code, model_name)
+      SELECT 'TD-TRAIL-MODEL', 'TD trail model' WHERE NOT EXISTS (SELECT 1 FROM model)`);
     const [m] = (await db.execute<{ c: string }>(sql`SELECT model_code AS c FROM model LIMIT 1`)).rows;
     const [jt] = (await db.execute<{ n: string }>(sql`SELECT job_type_name AS n FROM job_type LIMIT 1`)).rows;
     const r = await fieldsOf(
@@ -1177,15 +1210,25 @@ try {
     const s = await jobReportSummary(filtersFromQuery(FEB));
     assert.deepEqual([s.total, s.done], [3, 2]);
   });
+  await test('withStatementTimeout cancels a read past its limit (57014), and the setting ends with it', async () => {
+    const { withStatementTimeout } = await import('@/db/client');
+    const err = await withStatementTimeout((tx) => tx.execute(sql`select pg_sleep(2)`), 100).catch((e) => e);
+    assert.equal((err as { cause?: { code?: string } }).cause?.code ?? (err as { code?: string }).code, '57014');
+    const [after] = (await db.execute<{ t: string }>(sql`select current_setting('statement_timeout') t`)).rows;
+    assert.notEqual(after?.t, '100ms', 'SET LOCAL must not leak into the pooled connection');
+  });
 
   console.log('\nProduct-used report — price at issue time, returned parts subtracted');
   await pool.query(`
+    -- the log needs its job (foreign key, drizzle/0031): closed in 2001, outside every other count
+    INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+      VALUES ('TDJ0011', 20, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', '2001-03-05', '2001-03-05', '2001-03-07');
     INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty,
                                           spare_part_unit_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-      VALUES ('TDJ0010', '${P.a.code}', '', 1, false, true, 2, 80, 3, '2001-03-05', 9101, 2, 1);
+      VALUES ('TDJ0011', '${P.a.code}', '', 1, false, true, 2, 80, 3, '2001-03-05', 9101, 2, 1);
     INSERT INTO inventory_hd (inventory_no, inventory_type_id, reference_document_no, create_date, create_by, is_active) VALUES
-      ('TDW0001', 3, 'TDJ0010', '2001-03-05', 9101, true),  -- 2 x TDP1 for the job (stored 80, today 100)
-      ('TDW0002', 2, 'TDJ0010', '2001-03-06', 9101, true),  -- 1 x TDP1 returned
+      ('TDW0001', 3, 'TDJ0011', '2001-03-05', 9101, true),  -- 2 x TDP1 for the job (stored 80, today 100)
+      ('TDW0002', 2, 'TDJ0011', '2001-03-06', 9101, true),  -- 1 x TDP1 returned
       ('TDW0003', 5, 'TD-other', '2001-03-07', 9101, true); -- 1 x TDP2, nothing stored → today's 200
     INSERT INTO inventory_dt (inventory_no, item_code, item_quantity) VALUES
       ('TDW0001', '${P.a.code}', 2), ('TDW0002', '${P.a.code}', 1), ('TDW0003', '${P.b.code}', 1);`);
@@ -4980,6 +5023,11 @@ try {
     });
   }
 } finally {
+  // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next
+  // suite's first app insert (test:api POST /api/masters/symptoms) collides on the primary key
+  await pool.query(`
+    SELECT setval(pg_get_serial_sequence('symptom', 'symptom_id'), (SELECT coalesce(max(symptom_id), 1) FROM symptom));
+    SELECT setval(pg_get_serial_sequence('manufacturer', 'manufacturer_id'), (SELECT coalesce(max(manufacturer_id), 1) FROM manufacturer));`);
   await pool.end();
 }
 

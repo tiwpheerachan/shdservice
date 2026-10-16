@@ -664,12 +664,13 @@ export const quotationDt = pgTable(
     itemType: varchar('item_type', { length: 50 }),
     itemCode: varchar('item_code', { length: 50 }),
     itemDetail: varchar('item_detail', { length: 100 }),
-    quantity: varchar({ length: 10 }),
+    // varchar in the legacy dump, numeric since drizzle/0031
+    quantity: numeric({ precision: 12, scale: 2 }),
     unit: varchar({ length: 10 }),
-    unitPrice: varchar('unit_price', { length: 20 }),
-    unitPriceDiscount: varchar('unit_price_discount', { length: 20 }),
-    totalPrice: varchar('total_price', { length: 20 }),
-    unitPriceDiscountPercent: varchar('unit_price_discount_percent', { length: 20 }),
+    unitPrice: numeric('unit_price', { precision: 18, scale: 2 }),
+    unitPriceDiscount: numeric('unit_price_discount', { precision: 18, scale: 2 }),
+    totalPrice: numeric('total_price', { precision: 18, scale: 2 }),
+    unitPriceDiscountPercent: numeric('unit_price_discount_percent', { precision: 18, scale: 2 }),
   },
   (table) => [index('ix_quotation_dt_quotation_no').using('btree', table.quotationNo.asc().nullsLast().op('text_ops'))],
 );

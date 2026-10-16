@@ -30,9 +30,18 @@ CREATE TABLE IF NOT EXISTS document_profile (
     updated_at          timestamp     NOT NULL DEFAULT now()
 );
 -- prefixes must be unique per document type: the number is the table's primary key
-CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_job  ON document_profile (prefix_job);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_quot ON document_profile (prefix_quotation);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_so   ON document_profile (prefix_sale_order);
+-- (0010 drops these again and gives every profile J / Q / SO — on a re-run over such rows the index
+--  cannot be built, so it is skipped: 0010 would drop it anyway)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM document_profile GROUP BY prefix_job HAVING count(*) > 1)
+     AND NOT EXISTS (SELECT 1 FROM document_profile GROUP BY prefix_quotation HAVING count(*) > 1)
+     AND NOT EXISTS (SELECT 1 FROM document_profile GROUP BY prefix_sale_order HAVING count(*) > 1) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_job  ON document_profile (prefix_job);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_quot ON document_profile (prefix_quotation);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_document_profile_prefix_so   ON document_profile (prefix_sale_order);
+  END IF;
+END $$;
 
 -- seed SHD as id 1 / default with what the legacy forms print
 INSERT INTO document_profile (id, code, name_th, name_en, address_line1, address_line2, phone, bank_name, bank_account_type, prefix_job, prefix_quotation, prefix_sale_order, is_default, sort_order)
