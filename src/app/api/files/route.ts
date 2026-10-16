@@ -1,0 +1,42 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, parseQuery, requireUser, HttpError } from '@/server/auth';
+import { files } from '@/server/contract/misc';
+import { signedUrl } from '@/server/storage';
+import { rateLimit } from '@/server/rate-limit';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/files?path=products/P00230/x.jpg → 302 to a short-lived signed URL.
+ *
+ * Only the folders the app actually writes (storage.ts `filePath`) can be signed —
+ * never an arbitrary object in the bucket:
+ *   jobs/{no}/attachments|slip/…   sale-orders/{no}/slip/…   products/{code}/…
+ *   profiles/{id}/…                shippers/{id}/…
+ * Courier logos (shippers/) and letterhead logos (profiles/, document profiles — nothing
+ * else is stored there) are public: the customer tracking page and the customer's documents
+ * (/track/doc) show them to visitors who are not signed in. Everything else needs a signed-in staff user.
+ */
+const STAFF_PATH = /^(?:jobs\/[^/]+\/(?:attachments|slip)|sale-orders\/[^/]+\/slip|products\/[^/]+)\/[^/]+$/;
+const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
+const URL_TTL_S = 300;
+
+export const GET = handle(async (req: NextRequest) => {
+  // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"
+  const { path } = parseQuery(req, files);
+
+  const isPublic = PUBLIC_PATH.test(path);
+  // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)
+  if (isPublic) await rateLimit(req, 'files-public', 120);
+  else {
+    await requireUser(req);
+    if (!STAFF_PATH.test(path)) throw new HttpError(404, 'ไม่พบไฟล์');
+  }
+  const url = await signedUrl(path, URL_TTL_S);
+  if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)');
+  // the browser may reuse the redirect only while the signed URL is still valid
+  return NextResponse.redirect(url, {
+    headers: { 'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${URL_TTL_S - 60}` },
+  });
+});

@@ -1,30 +1,27 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { Tabs } from "@/components/ui/tabs";
-import {
-  useDashGroups,
-  useTatRows,
-  useMonthly,
-  useTopSymptoms,
-  useJobs,
-} from "@/data/db";
-import { int, cn } from "@/lib/utils";
+import * as React from 'react';
+import Link from 'next/link';
+import { ArrowRight, TriangleAlert } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { SearchSelect } from '@/components/shared/search-select';
+import { useDashboard, useJobs, useJobTypes } from '@/data/db';
+import { int, cn } from '@/lib/utils';
+import { daysAgo, today } from '@/lib/dates';
+import { useAccess } from '@/lib/use-access';
 
 /* one restrained accent per status group — carried as a small dot + thin bar, never a fill */
 const TONE: Record<string, string> = {
-  pending: "bg-warning",
-  repaired: "bg-info",
-  finished: "bg-success",
-  total: "bg-primary",
+  pending: 'bg-warning',
+  repaired: 'bg-info',
+  finished: 'bg-success',
+  total: 'bg-primary',
 };
 
 function tatBand(status: string) {
-  if (/เสร็จ|ปิดงาน|ส่งคืน|Complete/i.test(status)) return "bg-success";
-  if (/เบิก|ซ่อม|out-?source/i.test(status)) return "bg-info";
-  return "bg-warning";
+  if (/เสร็จ|ปิดงาน|ส่งคืน|Complete/i.test(status)) return 'bg-success';
+  if (/เบิก|ซ่อม|out-?source/i.test(status)) return 'bg-info';
+  return 'bg-warning';
 }
 
 /* ---- section shell: flat card, hairline header ---- */
@@ -42,29 +39,123 @@ function Panel({
   bodyClass?: string;
 }) {
   return (
-    <section
-      className={cn(
-        "rounded-xl border border-border bg-card",
-        className
-      )}
-    >
+    <section className={cn('rounded-xl border border-border bg-card', className)}>
       <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
         {meta && <div className="text-2xs text-muted-foreground">{meta}</div>}
       </div>
-      <div className={cn("p-5", bodyClass)}>{children}</div>
+      <div className={cn('p-5', bodyClass)}>{children}</div>
     </section>
   );
 }
 
-export default function DashboardPage() {
-  const [range, setRange] = React.useState("30d");
+const TH_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+/* TAT deep links → job list. Buckets count days from the Thai calendar day (same as the server query),
+   so each bucket is a create-date range: 1–3 = from today−3, 4–7 = today−7…today−4, …, >30 = up to today−31. */
+type TatKey = 'd13' | 'd47' | 'd814' | 'd1530' | 'over30' | 'total';
+const TAT_RANGE: Record<TatKey, [from: number | null, to: number | null]> = {
+  d13: [3, null],
+  d47: [7, 4],
+  d814: [14, 8],
+  d1530: [30, 15],
+  over30: [null, 31],
+  total: [null, null],
+};
+function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: string }) {
+  const [f, t] = TAT_RANGE[bucket];
+  const p = new URLSearchParams({ src: 'tat', bucket, open: '1' });
+  if (status?.id) {
+    p.set('statusId', String(status.id));
+    p.set('status', status.name);
+  }
+  if (f !== null) p.set('from', daysAgo(f));
+  if (t !== null) p.set('to', daysAgo(t));
+  if (type) p.set('type', type);
+  return `/jobs/list?${p}`;
+}
+/** KPI card → the job list counting the same jobs: status group (the card's `sub` is the group name)
+ *  + create-date range + job type, like computeDashboard's `createdIn` */
+function kpiHref(g: { sub: string; label: string }, from: string, to: string, type: string) {
+  const p = new URLSearchParams({ src: 'kpi', group: g.sub, label: g.label });
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  if (type) p.set('type', type);
+  return `/jobs/list?${p}`;
+}
+/** a clickable TAT count — zero stays a quiet dash */
+function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
+  if (!n) return <span className="text-muted-foreground/30">–</span>;
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'rounded px-1 -mx-1 underline-offset-4 transition-colors hover:bg-accent hover:underline',
+        className,
+      )}
+    >
+      {int(n)}
+    </Link>
+  );
+}
+const thai = (iso: string) => {
+  if (!iso) return '';
+  const [y = NaN, m = NaN, d] = iso.split('-').map(Number);
+  return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`;
+};
 
-  const { data: DASH_GROUPS } = useDashGroups();
-  const { data: TAT_ROWS } = useTatRows();
-  const { data: MONTHLY } = useMonthly();
-  const { data: TOP_SYMPTOMS } = useTopSymptoms();
-  const { data: JOBS } = useJobs();
+export default function DashboardPage() {
+  const canAdd = useAccess().can('Job Management', 'add'); // เปิดงานใหม่ only for a role that may
+  // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
+  const [from, setFrom] = React.useState(() => daysAgo(29));
+  const [to, setTo] = React.useState(() => today());
+  // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
+  const [type, setType] = React.useState('');
+  const { data: JOB_TYPES } = useJobTypes();
+  // a reversed pair finds nothing: say so (as FilterBar does) and keep showing the last range that made sense
+  const reversed = !!from && !!to && from > to;
+  const [range, setRange] = React.useState({ from, to, type });
+  if (!reversed && (range.from !== from || range.to !== to || range.type !== type)) setRange({ from, to, type });
+  // presets use the Thai calendar (lib/dates), like the server's date filters
+  const preset = (key: '7d' | '30d' | '90d' | 'month' | 'all') => {
+    const now = today();
+    if (key === 'all') {
+      setFrom('');
+      setTo('');
+      return;
+    }
+    if (key === 'month') {
+      setFrom(`${now.slice(0, 8)}01`);
+      setTo(now);
+      return;
+    }
+    setFrom(daysAgo(key === '7d' ? 6 : key === '30d' ? 29 : 89));
+    setTo(now);
+  };
+  const now = today();
+  const activePreset =
+    !from && !to
+      ? 'all'
+      : to === now && from === daysAgo(6)
+        ? '7d'
+        : to === now && from === daysAgo(29)
+          ? '30d'
+          : to === now && from === daysAgo(89)
+            ? '90d'
+            : to === now && from === `${now.slice(0, 8)}01`
+              ? 'month'
+              : '';
+
+  // one request for every panel (was four in parallel, each computing the whole dashboard)
+  const { data: DASH } = useDashboard(range);
+  const DASH_GROUPS = DASH?.groups ?? [];
+  const TAT_ROWS = DASH?.tat ?? [];
+  const MONTHLY = DASH?.monthly ?? [];
+  const TOP_SYMPTOMS = DASH?.topSymptoms ?? [];
+  const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
+  const granularity = DASH?.granularity ?? 'month';
+  const rangeText =
+    (!range.from && !range.to ? 'ทั้งหมด' : `${thai(range.from) || 'เริ่มต้น'} – ${thai(range.to) || 'วันนี้'}`) +
+    (range.type ? ` · ${range.type}` : '');
 
   const maxSymptom = Math.max(1, ...TOP_SYMPTOMS.map((s) => s.count));
 
@@ -74,104 +165,162 @@ export default function DashboardPage() {
   }));
   const grand = tat.reduce(
     (a, r) => ({
-      d13: a.d13 + r.d13, d47: a.d47 + r.d47, d814: a.d814 + r.d814,
-      d1530: a.d1530 + r.d1530, over30: a.over30 + r.over30, total: a.total + r.total,
+      d13: a.d13 + r.d13,
+      d47: a.d47 + r.d47,
+      d814: a.d814 + r.d814,
+      d1530: a.d1530 + r.d1530,
+      over30: a.over30 + r.over30,
+      total: a.total + r.total,
     }),
-    { d13: 0, d47: 0, d814: 0, d1530: 0, over30: 0, total: 0 }
+    { d13: 0, d47: 0, d814: 0, d1530: 0, over30: 0, total: 0 },
   );
   const dayCols = [
-    { k: "d13" as const, label: "1–3 วัน" },
-    { k: "d47" as const, label: "4–7 วัน" },
-    { k: "d814" as const, label: "8–14 วัน" },
-    { k: "d1530" as const, label: "15–30 วัน" },
-    { k: "over30" as const, label: "เกิน 30 วัน" },
+    { k: 'd13' as const, label: '1–3 วัน' },
+    { k: 'd47' as const, label: '4–7 วัน' },
+    { k: 'd814' as const, label: '8–14 วัน' },
+    { k: 'd1530' as const, label: '15–30 วัน' },
+    { k: 'over30' as const, label: 'เกิน 30 วัน' },
   ];
 
   /* monthly line chart geometry */
-  const W = 640, H = 190, padL = 8, padR = 8, padT = 14, padB = 8;
-  const iw = W - padL - padR, ih = H - padT - padB;
+  const W = 640,
+    H = 190,
+    padL = 8,
+    padR = 8,
+    padT = 14,
+    padB = 8;
+  const iw = W - padL - padR,
+    ih = H - padT - padB;
   const maxM = Math.max(1, ...MONTHLY.flatMap((m) => [m.open, m.close]));
-  const px = (i: number) =>
-    padL + (MONTHLY.length <= 1 ? iw / 2 : (i / (MONTHLY.length - 1)) * iw);
+  const px = (i: number) => padL + (MONTHLY.length <= 1 ? iw / 2 : (i / (MONTHLY.length - 1)) * iw);
   const py = (v: number) => padT + ih - (v / maxM) * ih;
-  const line = (key: "open" | "close") =>
-    MONTHLY.map((m, i) => `${px(i)},${py(m[key])}`).join(" ");
-  const area = (key: "open" | "close") =>
-    MONTHLY.length
-      ? `${padL},${padT + ih} ${line(key)} ${padL + iw},${padT + ih}`
-      : "";
+  const line = (key: 'open' | 'close') => MONTHLY.map((m, i) => `${px(i)},${py(m[key])}`).join(' ');
+  const area = (key: 'open' | 'close') =>
+    MONTHLY.length ? `${padL},${padT + ih} ${line(key)} ${padL + iw},${padT + ih}` : '';
 
   return (
     <div className="space-y-6">
       {/* header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            Service Operations
-          </p>
+          <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Service Operations</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">ภาพรวมงานบริการ</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            สถานะงานซ่อมและระยะเวลาดำเนินงาน (TAT) · ณ 7 ก.ย. 2026
+            การ์ดสรุปและกราฟ: งานที่เปิดในช่วง {rangeText} · ตาราง TAT: งานค้างทั้งหมด ณ ตอนนี้
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Tabs
-            value={range}
-            onChange={setRange}
-            tabs={[
-              { key: "7d", label: "7 วัน" },
-              { key: "30d", label: "30 วัน" },
-              { key: "90d", label: "90 วัน" },
-              { key: "all", label: "ทั้งหมด" },
-            ]}
-          />
-          <Link
-            href="/jobs/new"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            เปิดงานใหม่
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[190px]">
+            <SearchSelect
+              value={type}
+              onChange={setType}
+              options={JOB_TYPES.map((j) => ({ value: j.name, label: j.name }))}
+              placeholder="ทุกประเภทงาน"
+              emptyLabel="ทุกประเภทงาน"
+            />
+          </div>
+          {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+              className="num h-9 w-[150px]"
+              aria-label="วันที่เริ่ม"
+            />
+            <span className="text-xs text-muted-foreground">–</span>
+            <Input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+              className="num h-9 w-[150px]"
+              aria-label="วันที่สิ้นสุด"
+            />
+          </div>
+          {reversed && (
+            <p role="alert" className="flex basis-full items-center gap-1.5 text-xs font-medium text-danger">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+              วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด
+            </p>
+          )}
+          <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/60 p-0.5 text-xs">
+            {(
+              [
+                ['7d', '7 วัน'],
+                ['30d', '30 วัน'],
+                ['90d', '90 วัน'],
+                ['month', 'เดือนนี้'],
+                ['all', 'ทั้งหมด'],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => preset(k)}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 font-medium transition-colors',
+                  activePreset === k ? 'bg-card text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {canAdd && (
+            <Link
+              href="/jobs/new"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              เปิดงานใหม่
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
       </div>
 
-      {/* KPI band — hairline-separated cells, no gradient fills */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
-        {DASH_GROUPS.map((g) => (
-          <Link
-            key={g.key}
-            href="/jobs/list"
-            className="group bg-card p-5 transition-colors hover:bg-accent/40"
-          >
-            <div className="flex items-center gap-2">
-              <span className={cn("h-1.5 w-1.5 rounded-full", TONE[g.key])} />
-              <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
-                {g.label}
-              </span>
-            </div>
-            <p className="num mt-3 text-[30px] font-semibold leading-none tracking-tight tabular-nums">
-              {int(g.jobs)}
-            </p>
-            <div className="mt-3.5 flex items-center gap-2.5">
-              <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-muted">
-                <span
-                  className={cn("block h-full rounded-full", TONE[g.key])}
-                  style={{ width: `${Math.min(100, g.percent)}%` }}
-                />
-              </span>
-              <span className="num text-2xs tabular-nums text-muted-foreground">
-                {g.percent.toFixed(2)}%
-              </span>
-            </div>
-            <p className="mt-2 text-2xs text-muted-foreground">{g.sub}</p>
-          </Link>
-        ))}
-      </div>
+      {/* KPI band — hairline-separated cells, no gradient fills. Its scope said out loud: the TAT table
+          below and the bell count every open job now, so the numbers differ on purpose */}
+      <section className="space-y-2" aria-label="สรุปงานที่เปิดในช่วงวันที่เลือก">
+        <p className="text-xs text-muted-foreground">งานที่เปิดในช่วงวันที่เลือก ({rangeText})</p>
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+          {DASH_GROUPS.map((g) => (
+            <Link
+              key={g.key}
+              href={kpiHref(g, range.from, range.to, range.type)}
+              className="group bg-card p-5 transition-colors hover:bg-accent/40"
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn('h-1.5 w-1.5 rounded-full', TONE[g.key])} />
+                <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">{g.label}</span>
+              </div>
+              <p className="num mt-3 text-[30px] font-semibold leading-none tracking-tight tabular-nums">
+                {int(g.jobs)}
+              </p>
+              <div className="mt-3.5 flex items-center gap-2.5">
+                <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className={cn('block h-full rounded-full', TONE[g.key])}
+                    style={{ width: `${Math.min(100, g.percent)}%` }}
+                  />
+                </span>
+                <span className="num text-2xs tabular-nums text-muted-foreground">{g.percent.toFixed(2)}%</span>
+              </div>
+              <p className="mt-2 text-2xs text-muted-foreground">{g.sub}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       {/* TAT matrix */}
       <Panel
         title="TAT — ระยะเวลาตั้งแต่วันเปิดงานถึงวันส่งคืน"
-        meta={<span>จำแนกตามสถานะงานและช่วงจำนวนวัน</span>}
+        meta={
+          <span>
+            งานค้างทั้งหมด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) · จำแนกตามสถานะงานและช่วงจำนวนวัน{type ? ` · ${type}` : ''}
+          </span>
+        }
         bodyClass="p-0"
       >
         <div className="table-scroll">
@@ -181,7 +330,9 @@ export default function DashboardPage() {
                 <th className="w-10 py-2.5 pl-5 text-left font-medium">#</th>
                 <th className="py-2.5 pr-4 text-left font-medium">สถานะงาน</th>
                 {dayCols.map((c) => (
-                  <th key={c.k} className="px-4 py-2.5 text-right font-medium">{c.label}</th>
+                  <th key={c.k} className="px-4 py-2.5 text-right font-medium">
+                    {c.label}
+                  </th>
                 ))}
                 <th className="py-2.5 pr-5 text-right font-medium">รวม</th>
               </tr>
@@ -191,22 +342,26 @@ export default function DashboardPage() {
                 <tr key={r.status} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
                   <td className="py-2.5 pl-5">
                     <span className="flex items-center gap-2.5">
-                      <span className={cn("h-3.5 w-[3px] rounded-full", tatBand(r.status))} />
+                      <span className={cn('h-3.5 w-[3px] rounded-full', tatBand(r.status))} />
                       <span className="num text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                     </span>
                   </td>
                   <td className="py-2.5 pr-4 font-medium">{r.status}</td>
-                  {(["d13", "d47", "d814", "d1530"] as const).map((k) => (
+                  {(['d13', 'd47', 'd814', 'd1530'] as const).map((k) => (
                     <td key={k} className="num px-4 py-2.5 text-right tabular-nums">
-                      {r[k] || <span className="text-muted-foreground/30">–</span>}
+                      <TatNum n={r[k]} href={tatHref(k, type, { id: r.statusId, name: r.status })} />
                     </td>
                   ))}
                   <td className="num px-4 py-2.5 text-right tabular-nums">
-                    <span className={cn(r.over30 > 20 && "font-semibold text-danger")}>
-                      {r.over30 || <span className="text-muted-foreground/30">–</span>}
-                    </span>
+                    <TatNum
+                      n={r.over30}
+                      href={tatHref('over30', type, { id: r.statusId, name: r.status })}
+                      className={cn(r.over30 > 20 && 'font-semibold text-danger')}
+                    />
                   </td>
-                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">{int(r.total)}</td>
+                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">
+                    <TatNum n={r.total} href={tatHref('total', type, { id: r.statusId, name: r.status })} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -218,11 +373,11 @@ export default function DashboardPage() {
                   </td>
                   {dayCols.map((c) => (
                     <td key={c.k} className="num px-4 py-2.5 text-right font-medium tabular-nums">
-                      {int(grand[c.k])}
+                      {grand[c.k] ? <TatNum n={grand[c.k]} href={tatHref(c.k, type)} /> : 0}
                     </td>
                   ))}
                   <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums text-primary">
-                    {int(grand.total)}
+                    <TatNum n={grand.total} href={tatHref('total', type)} />
                   </td>
                 </tr>
               </tfoot>
@@ -234,28 +389,60 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* monthly line chart */}
         <Panel
-          title="แนวโน้มงานเปิด / ปิด รายเดือน"
+          title={granularity === 'day' ? 'แนวโน้มงานเปิด / ปิด รายวัน' : 'แนวโน้มงานเปิด / ปิด รายเดือน'}
           className="lg:col-span-2"
           meta={
             <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" />เปิดงาน</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" />ปิดงาน</span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-primary" />
+                เปิดงาน
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-success" />
+                ปิดงาน
+              </span>
             </div>
           }
         >
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 200 }} preserveAspectRatio="none" role="img" aria-label="แนวโน้มรายเดือน">
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full"
+            style={{ height: 200 }}
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="แนวโน้มรายเดือน"
+          >
             {[0.25, 0.5, 0.75, 1].map((f) => (
-              <line key={f} x1={padL} x2={padL + iw} y1={padT + ih - f * ih} y2={padT + ih - f * ih}
-                stroke="hsl(var(--border))" strokeWidth="1" />
+              <line
+                key={f}
+                x1={padL}
+                x2={padL + iw}
+                y1={padT + ih - f * ih}
+                y2={padT + ih - f * ih}
+                stroke="hsl(var(--border))"
+                strokeWidth="1"
+              />
             ))}
             {MONTHLY.length > 0 && (
               <>
-                <polygon points={area("close")} fill="hsl(var(--success))" fillOpacity="0.08" />
-                <polygon points={area("open")} fill="hsl(var(--primary))" fillOpacity="0.10" />
-                <polyline points={line("close")} fill="none" stroke="hsl(var(--success))" strokeWidth="2"
-                  strokeLinecap="round" strokeLinejoin="round" />
-                <polyline points={line("open")} fill="none" stroke="hsl(var(--primary))" strokeWidth="2"
-                  strokeLinecap="round" strokeLinejoin="round" />
+                <polygon points={area('close')} fill="hsl(var(--success))" fillOpacity="0.08" />
+                <polygon points={area('open')} fill="hsl(var(--primary))" fillOpacity="0.10" />
+                <polyline
+                  points={line('close')}
+                  fill="none"
+                  stroke="hsl(var(--success))"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points={line('open')}
+                  fill="none"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
                 {MONTHLY.map((m, i) => (
                   <g key={m.m}>
                     <circle cx={px(i)} cy={py(m.open)} r="2.5" fill="hsl(var(--primary))" />
@@ -266,7 +453,11 @@ export default function DashboardPage() {
             )}
           </svg>
           <div className="mt-2 flex justify-between px-1 text-2xs text-muted-foreground">
-            {MONTHLY.map((m) => <span key={m.m}>{m.m}</span>)}
+            {MONTHLY.filter(
+              (_, i, a) => a.length <= 14 || i % Math.ceil(a.length / 12) === 0 || i === a.length - 1,
+            ).map((m) => (
+              <span key={m.m}>{m.m}</span>
+            ))}
           </div>
         </Panel>
 
@@ -277,14 +468,18 @@ export default function DashboardPage() {
               <li key={s.name}>
                 <div className="mb-1.5 flex items-baseline justify-between gap-3 text-xs">
                   <span className="min-w-0 truncate">
-                    <span className="num mr-2 text-muted-foreground tabular-nums">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="num mr-2 text-muted-foreground tabular-nums">
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
                     {s.name}
                   </span>
                   <span className="num shrink-0 font-medium tabular-nums">{int(s.count)}</span>
                 </div>
                 <span className="block h-[3px] overflow-hidden rounded-full bg-muted">
-                  <span className="block h-full rounded-full bg-primary/70"
-                    style={{ width: `${(s.count / maxSymptom) * 100}%` }} />
+                  <span
+                    className="block h-full rounded-full bg-primary/70"
+                    style={{ width: `${(s.count / maxSymptom) * 100}%` }}
+                  />
                 </span>
               </li>
             ))}
@@ -295,7 +490,11 @@ export default function DashboardPage() {
       {/* recent jobs */}
       <Panel
         title="งานล่าสุด"
-        meta={<Link href="/jobs/list" className="font-medium text-primary hover:underline">ดูทั้งหมด →</Link>}
+        meta={
+          <Link href="/jobs/list" className="font-medium text-primary hover:underline">
+            ดูทั้งหมด →
+          </Link>
+        }
         bodyClass="p-0"
       >
         <div className="table-scroll">
@@ -313,7 +512,7 @@ export default function DashboardPage() {
             <tbody>
               {JOBS.slice(0, 6).map((j) => {
                 const done = /เสร็จ|ปิดงาน/.test(j.status);
-                const fresh = j.status === "งานใหม่";
+                const fresh = j.status === 'งานใหม่';
                 return (
                   <tr key={j.no} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
                     <td className="num py-2.5 pl-5 font-medium text-primary">{j.no}</td>
@@ -323,8 +522,12 @@ export default function DashboardPage() {
                     <td className="hidden py-2.5 pr-3 text-muted-foreground lg:table-cell">{j.owner}</td>
                     <td className="py-2.5 pr-5">
                       <span className="inline-flex items-center gap-1.5 text-xs">
-                        <span className={cn("h-1.5 w-1.5 rounded-full",
-                          done ? "bg-success" : fresh ? "bg-info" : "bg-warning")} />
+                        <span
+                          className={cn(
+                            'h-1.5 w-1.5 rounded-full',
+                            done ? 'bg-success' : fresh ? 'bg-info' : 'bg-warning',
+                          )}
+                        />
                         {j.status}
                       </span>
                     </td>

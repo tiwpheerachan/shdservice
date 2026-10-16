@@ -1,4 +1,4 @@
-import * as React from "react";
+import * as React from 'react';
 
 /**
  * Split auth layout — form/content on the left, brand hero on the right.
@@ -9,16 +9,16 @@ export function AuthSplit({
   children,
   heroImageSrc,
   overlayCard,
-  fit = "cover",
+  fit = 'cover',
 }: {
   children: React.ReactNode;
   heroImageSrc?: string;
   overlayCard?: React.ReactNode;
   /** "contain" shows a full designed poster without cropping */
-  fit?: "cover" | "contain";
+  fit?: 'cover' | 'contain';
 }) {
   return (
-    <div className="flex min-h-[100dvh] w-full flex-col md:flex-row">
+    <div className="flex min-h-dvh w-full flex-col md:flex-row">
       <section className="flex flex-1 items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-md">{children}</div>
       </section>
@@ -27,18 +27,12 @@ export function AuthSplit({
         <div
           className="animate-slide-right absolute inset-0 bg-center bg-no-repeat"
           style={{
-            backgroundImage: heroImageSrc
-              ? `url(${heroImageSrc})`
-              : "linear-gradient(135deg,#43a6f8,#55d5a1)",
+            backgroundImage: heroImageSrc ? `url(${heroImageSrc})` : 'linear-gradient(135deg,#43a6f8,#55d5a1)',
             backgroundSize: fit,
-            backgroundColor: "#fefefe",
+            backgroundColor: '#fefefe',
           }}
         >
-          {overlayCard && (
-            <div className="absolute inset-x-6 bottom-6 flex justify-center">
-              {overlayCard}
-            </div>
-          )}
+          {overlayCard && <div className="absolute inset-x-6 bottom-6 flex justify-center">{overlayCard}</div>}
         </div>
       </section>
     </div>

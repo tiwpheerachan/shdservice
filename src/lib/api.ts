@@ -1,0 +1,175 @@
+'use client';
+
+import { sessionExpired, toLogin } from '@/lib/navigation';
+
+/**
+ * Tiny fetch wrapper for the app's own API routes.
+ *  - JSON in / JSON out, throws ApiError { status, message, details } on !ok
+ *  - 401 → try to refresh the session once; then a read goes to our /login page (never straight to
+ *    SSO), a write (save / upload) stays on the page with the "sign in again in a new tab" dialog —
+ *    what the user typed is still there to save again
+ *  - 403 → surfaces the server's Thai permission message
+ * Every call to the app's API goes through here (or exportXlsx) — no hand-rolled fetch + 401 logic.
+ */
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public details?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+/** renewed, or why not (the 401's `reason` — /login says "signed out elsewhere" vs "idle") */
+let refreshing: Promise<{ ok: boolean; reason?: string }> | null = null;
+async function tryRefresh(): Promise<{ ok: boolean; reason?: string }> {
+  refreshing ??= fetch('/api/sso/refresh', { cache: 'no-store' })
+    .then(async (r) =>
+      r.ok ? { ok: true } : { ok: false, reason: ((await r.json().catch(() => null)) as { reason?: string })?.reason },
+    )
+    .catch(() => ({ ok: false }))
+    .finally(() => setTimeout(() => (refreshing = null), 1000));
+  return refreshing;
+}
+
+/**
+ * Listeners run after every successful non-GET call (create/update/delete/
+ * upload) — the data hooks use this to drop their cached lists so the next
+ * screen shows the new rows. Registered from src/data/db.ts.
+ */
+const writeListeners = new Set<() => void>();
+export function onApiWrite(fn: () => void) {
+  writeListeners.add(fn);
+  return () => writeListeners.delete(fn);
+}
+
+/** fetch under the session rules: 401 → refresh once and retry; still 401 → /login, or for a write the
+ *  session-expired dialog (throws either way) */
+async function authedFetch(url: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(url, { cache: 'no-store', ...init });
+  let reason: string | undefined;
+  if (res.status === 401) {
+    const r = await tryRefresh();
+    reason = r.reason;
+    if (r.ok) res = await fetch(url, { cache: 'no-store', ...init });
+  }
+  if (res.status === 401) {
+    if ((init.method ?? 'GET').toUpperCase() === 'GET') toLogin({ reason });
+    else sessionExpired();
+    throw new ApiError(401, 'เซสชันหมดอายุ — เข้าสู่ระบบใหม่ในแท็บใหม่ แล้วกดบันทึกอีกครั้ง');
+  }
+  return res;
+}
+
+/** a non-2xx answer → ApiError with the server's message (+ details such as { fields }) */
+async function failure(res: Response): Promise<ApiError> {
+  const data = (await res.json().catch(() => ({}))) as { error?: string; details?: unknown };
+  return new ApiError(res.status, data.error || `เกิดข้อผิดพลาด (${res.status})`, data.details);
+}
+
+export async function api<T = unknown>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await authedFetch(url, init);
+  if (!res.ok) throw await failure(res);
+  const data = (await res.json().catch(() => ({}))) as T;
+  if ((init.method ?? 'GET').toUpperCase() !== 'GET') writeListeners.forEach((fn) => fn());
+  return data as T;
+}
+
+const json =
+  (method: string) =>
+  <T = unknown>(url: string, body: unknown) =>
+    api<T>(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+
+/**
+ * Idempotency-Key of each POST not yet answered OK, by url + body: sending the same body again
+ * (a retry after a network error / timeout, a second click) reuses the key, so the server
+ * (src/server/idempotency.ts) answers with the first result instead of creating a second
+ * document. An edited form is another body → a new key; after a success the key is dropped,
+ * so the next submit — even an identical one — is a new document.
+ */
+const pendingKeys = new Map<string, string>();
+export async function postJson<T = unknown>(url: string, body: unknown): Promise<T> {
+  const payload = JSON.stringify(body ?? {});
+  const id = `${url}\n${payload}`;
+  // randomUUID exists only on https / localhost — plain-http LAN access must still be able to save
+  const key = pendingKeys.get(id) ?? crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  pendingKeys.set(id, key);
+  const data = await api<T>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+    body: payload,
+  });
+  pendingKeys.delete(id);
+  return data;
+}
+
+/** 409 from optimistic locking (assertVersion): someone else saved this record after the form loaded it */
+export const isStale = (e: unknown) =>
+  e instanceof ApiError && e.status === 409 && (e.details as { stale?: boolean } | undefined)?.stale === true;
+
+export const patchJson = json('PATCH');
+export const putJson = json('PUT');
+export const del = <T = unknown>(url: string) => api<T>(url, { method: 'DELETE' });
+
+/** Build a query string, skipping empty values. */
+export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue;
+    sp.set(k, String(v));
+  }
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
+
+export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Download an .xlsx of a list under the given filters (same params as the data hook).
+ * Fetched first, saved after: a refusal (429 too many exports, 403, 500) throws an ApiError the
+ * button shows as a toast — the page never navigates away to a JSON error.
+ */
+export async function exportXlsx(
+  resource: string,
+  params: Record<string, string | number | boolean | undefined | null> = {},
+) {
+  const res = await authedFetch(`/api/export/${resource}${qs(params)}`, {});
+  if (!res.ok) throw await failure(res);
+  saveBlob(await res.blob(), filenameOf(res.headers.get('content-disposition')) ?? `${resource}.xlsx`);
+}
+
+/** filename from Content-Disposition (RFC 5987 filename*=UTF-8'' first, then filename="…") */
+function filenameOf(cd: string | null): string | null {
+  if (!cd) return null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1];
+  if (star) return decodeURIComponent(star);
+  return /filename="?([^";]+)"?/i.exec(cd)?.[1] ?? null;
+}
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000); // the browser has taken the file by then
+}
+
+/** Upload one file (product image / payment slip) → stored path. */
+export async function uploadFile(
+  kind: 'product-image' | 'sale-order-slip' | 'job-slip' | 'profile-logo' | 'shipper-logo',
+  id: string,
+  file: File,
+) {
+  const fd = new FormData();
+  fd.append('kind', kind);
+  fd.append('id', id);
+  fd.append('file', file);
+  return api<{ ok: true; path: string; file: string }>('/api/upload', { method: 'POST', body: fd });
+}
+
+/** URL that serves a stored file through the app (signed URL behind login). */
+export const fileUrl = (path: string) => `/api/files${qs({ path })}`;

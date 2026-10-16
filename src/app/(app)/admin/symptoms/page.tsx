@@ -1,29 +1,24 @@
-import { MasterTable } from "@/components/shared/master-table";
-import { getSymptoms } from "@/data/queries";
+import { MasterTable } from '@/components/shared/master-table';
+import { MASTER_NAME_LABEL } from '@/lib/validation/admin';
+import { getSymptoms } from '@/data/queries';
 
-export const metadata = { title: "อาการเสีย มาตรฐาน" };
-export const dynamic = "force-dynamic";
+export const metadata = { title: 'อาการเสีย มาตรฐาน' };
+export const dynamic = 'force-dynamic';
 
-const GROUPS = [
-  "ระบบไฟฟ้า",
-  "มอเตอร์",
-  "อุปกรณ์ควบคุม",
-  "จอแสดงผล",
-  "ระบบเชื่อมต่อ",
-  "ประสิทธิภาพ",
-  "โครงสร้าง",
-];
+// กลุ่มอาการเสีย: ใช้ค่าที่มีอยู่ใน DB (symptom_group_name) — เพิ่มค่าใหม่ได้ที่นี่
+const GROUPS: string[] = [];
 
 export default async function Page() {
   const rows = await getSymptoms();
   return (
     <MasterTable
       config={{
-        title: "อาการเสีย มาตรฐาน",
-        description: "รายการอาการเสียมาตรฐานสำหรับเลือกตอนเปิดงานและบันทึกงานซ่อม",
-        nameLabel: "อาการเสีย",
-        detailLabel: "รายละเอียด",
-        extraLabel: "กลุ่มอาการเสีย",
+        kind: 'symptoms',
+        title: 'อาการเสีย มาตรฐาน',
+        description: 'รายการอาการเสียมาตรฐานสำหรับเลือกตอนเปิดงานและบันทึกงานซ่อม',
+        nameLabel: MASTER_NAME_LABEL.symptoms,
+        detailLabel: 'รายละเอียด',
+        extraLabel: 'กลุ่มอาการเสีย',
         extraOptions: GROUPS,
         rows,
       }}

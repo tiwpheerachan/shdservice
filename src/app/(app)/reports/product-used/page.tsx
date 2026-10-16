@@ -1,62 +1,94 @@
-"use client";
+'use client';
 
-import { ReportView } from "@/components/shared/report-view";
-import { Badge } from "@/components/ui/badge";
-import { type Movement } from "@/data/mock";
-import { useMovements, useProducts, useCategories } from "@/data/db";
-import type { Column } from "@/components/ui/data-table";
-import { baht, int } from "@/lib/utils";
-import * as React from "react";
+import * as React from 'react';
+import { ReportView, type ReportValues } from '@/components/shared/report-view';
+import type { ServerTableState } from '@/components/ui/data-table';
+import { Badge } from '@/components/ui/badge';
+import { useIssuedLinesPage, useIssuedStats, useCategories, type IssuedLine } from '@/data/db';
+import type { Column } from '@/components/ui/data-table';
+import { baht, int } from '@/lib/utils';
+import { daysAgo, today } from '@/lib/dates';
+import { exportXlsx } from '@/lib/api';
 
-type Row = Movement & { code: string; item: string; qty: number; value: number };
+type Row = IssuedLine;
 
 const columns: Column<Row>[] = [
-  { key: "doc", header: "Document No.", width: "130px", cell: (r) => <span className="num font-medium">{r.doc}</span> },
-  { key: "date", header: "วันที่", width: "140px", cell: (r) => <span className="num text-xs">{r.date}</span> },
-  { key: "type", header: "ประเภทเอกสาร", hideBelow: "lg", cell: (r) => <Badge tone="info">{r.type}</Badge> },
-  { key: "code", header: "รหัสอะไหล่", width: "110px", cell: (r) => <span className="num">{r.code}</span> },
-  { key: "item", header: "ชื่ออะไหล่", cell: (r) => <span className="line-clamp-1 max-w-[300px]">{r.item}</span> },
-  { key: "qty", header: "จำนวน", align: "right", width: "90px", value: (r) => r.qty },
-  { key: "value", header: "มูลค่า", align: "right", width: "120px", value: (r) => r.value, cell: (r) => baht(r.value) },
-  { key: "by", header: "ผู้ทำรายการ", hideBelow: "xl" },
+  { key: 'doc', header: 'Document No.', width: '130px', cell: (r) => <span className="num font-medium">{r.doc}</span> },
+  { key: 'date', header: 'วันที่', width: '140px', cell: (r) => <span className="num text-xs">{r.date}</span> },
+  { key: 'type', header: 'ประเภทเอกสาร', hideBelow: 'lg', cell: (r) => <Badge tone="info">{r.type}</Badge> },
+  { key: 'code', header: 'รหัสอะไหล่', width: '110px', cell: (r) => <span className="num">{r.code}</span> },
+  { key: 'item', header: 'ชื่ออะไหล่', cell: (r) => <span className="line-clamp-1 max-w-[300px]">{r.item}</span> },
+  { key: 'qty', header: 'จำนวน', align: 'right', width: '90px', value: (r) => r.qty },
+  {
+    key: 'value',
+    header: 'มูลค่า (ราคา ณ วันเบิก)',
+    align: 'right',
+    width: '140px',
+    value: (r) => r.value,
+    cell: (r) => (
+      <span title={r.priceBasis}>
+        {baht(r.value)}
+        {r.priceBasis === 'ราคาปัจจุบัน' && <span className="text-muted-foreground">*</span>}
+      </span>
+    ),
+  },
+  { key: 'by', header: 'ผู้ทำรายการ', hideBelow: 'xl' },
 ];
 
 export default function Page() {
-  const { data: MOVEMENTS, loading } = useMovements();
-  const { data: PRODUCTS } = useProducts();
+  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), category: '', code: '' });
+  // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ) minus รับคืนจากการเบิก — paged + KPIs on the server
+  const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
+  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const pageArgs = {
+    page: table.page,
+    pageSize: table.pageSize,
+    q: table.q,
+    sort: table.sort?.key,
+    dir: table.sort?.dir,
+  };
+  const { data: sum } = useIssuedStats({ ...filters, q: table.q });
+  const {
+    rows,
+    total,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useIssuedLinesPage({ ...pageArgs, ...filters });
   const { data: CATEGORIES } = useCategories();
-
-  const rows: Row[] = React.useMemo(() => {
-    if (PRODUCTS.length === 0) return [];
-    return MOVEMENTS.map((m, i) => {
-      const p = PRODUCTS[i % PRODUCTS.length];
-      const qty = (i % 3) + 1;
-      return { ...m, code: p.sysCode, item: p.name, qty, value: qty * p.price };
-    });
-  }, [MOVEMENTS, PRODUCTS]);
-
-  const qty = rows.reduce((s, r) => s + r.qty, 0);
-  const value = rows.reduce((s, r) => s + r.value, 0);
+  const S = sum[0];
+  const qty = S?.qty ?? 0;
+  const value = S?.value ?? 0;
+  const top = S?.top ?? '—';
   return (
     <ReportView
       title="รายงานการเบิกจ่ายอะไหล่"
-      description="อะไหล่ที่ถูกเบิกใช้ในงานซ่อมและใบสั่งขาย พร้อมมูลค่ารวม"
+      description="อะไหล่ที่ถูกเบิกใช้ในงานซ่อมและใบสั่งขาย (หักที่รับคืนเข้าสต๊อก) พร้อมมูลค่ารวม"
       filters={[
-        { kind: "date", label: "วันที่ (ตั้งแต่)", value: "2026-08-05" },
-        { kind: "date", label: "วันที่ (ถึง)", value: "2026-09-04" },
-        { kind: "select", label: "หมวดหมู่", options: ["- - Select All - -", ...CATEGORIES.map((c) => c.name)] },
-        { kind: "text", label: "รหัสอะไหล่", placeholder: "P02534" },
+        { kind: 'date', key: 'from', label: 'วันที่ (ตั้งแต่)', value: f.from },
+        { kind: 'date', key: 'to', label: 'วันที่ (ถึง)', value: f.to },
+        { kind: 'select', key: 'category', label: 'หมวดหมู่', options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)] },
+        { kind: 'text', key: 'code', label: 'รหัสอะไหล่', placeholder: 'P02534' },
       ]}
+      onApply={setF}
+      onExport={() => exportXlsx('issued_lines', { ...filters, q: table.q })}
       kpis={[
-        { label: "รายการเคลื่อนไหว", value: int(rows.length), tone: "primary" },
-        { label: "จำนวนที่เบิกรวม", value: `${int(qty)} ชิ้น` },
-        { label: "มูลค่ารวม", value: baht(value) },
-        { label: "อะไหล่ที่ใช้บ่อยสุด", value: "P02536" },
+        { label: 'รายการเคลื่อนไหว', value: int(S?.lines ?? 0), tone: 'primary' },
+        { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(qty)} ชิ้น` },
+        {
+          label: 'มูลค่าสุทธิ (ราคา ณ วันเบิก)',
+          value: baht(value),
+          sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
+        },
+        { label: 'อะไหล่ที่ใช้บ่อยสุด', value: top },
       ]}
       columns={columns}
       rows={rows}
       loading={loading}
-      rowKey={(r) => r.doc + r.code}
+      error={loadError}
+      onRetry={retryLoad}
+      rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
+      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
     />
   );
 }

@@ -1,22 +1,24 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+import { useFieldControl } from './field';
+import { Checkbox as ShadcnCheckbox } from '@/components/shadcn/checkbox';
 
 const base =
-  "w-full rounded-md border border-input bg-card text-foreground placeholder:text-muted-foreground/70 " +
-  "transition-[border-color,box-shadow] duration-150 " +
-  "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 " +
-  "disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground " +
-  "read-only:bg-muted/60";
+  'w-full rounded-md border border-input bg-card text-foreground placeholder:text-muted-foreground/70 ' +
+  'transition-[border-color,box-shadow] duration-150 ' +
+  'focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/20 ' +
+  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground ' +
+  'read-only:bg-muted/60';
 
-export const Input = React.forwardRef<
-  HTMLInputElement,
-  React.InputHTMLAttributes<HTMLInputElement>
->(({ className, ...props }, ref) => (
-  <input ref={ref} className={cn(base, "h-9 px-3 text-sm", className)} {...props} />
-));
-Input.displayName = "Input";
+export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, ...props }, ref) => {
+    const field = useFieldControl(props.id);
+    return <input ref={ref} className={cn(base, 'h-9 px-3 text-sm', className)} {...props} {...field} />;
+  },
+);
+Input.displayName = 'Input';
 
 /**
  * Numeric input tuned for easy data entry:
@@ -28,96 +30,118 @@ export function NumberInput({
   value,
   onChange,
   className,
-  placeholder = "0.00",
+  placeholder = '0.00',
+  showZero = false,
   ...props
 }: {
   value: number;
   onChange: (n: number) => void;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type">) {
+  /** a stored 0 (an existing record's free line / no service fee) shows as 0, not as an empty box */
+  showZero?: boolean;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
+  const field = useFieldControl(props.id);
   return (
     <input
       type="number"
       inputMode="decimal"
-      value={value === 0 ? "" : value}
+      value={value === 0 && !showZero ? '' : value}
       placeholder={placeholder}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => onChange(Number(e.target.value) || 0)}
-      className={cn(base, "h-9 px-3 text-sm num text-right", className)}
+      className={cn(base, 'h-9 px-3 text-sm num text-right', className)}
       {...props}
+      {...field}
     />
   );
 }
 
-export const Textarea = React.forwardRef<
-  HTMLTextAreaElement,
-  React.TextareaHTMLAttributes<HTMLTextAreaElement>
->(({ className, rows = 3, ...props }, ref) => (
-  <textarea
-    ref={ref}
-    rows={rows}
-    className={cn(base, "px-3 py-2 text-sm resize-y min-h-[38px]", className)}
-    {...props}
-  />
-));
-Textarea.displayName = "Textarea";
+export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  ({ className, rows = 3, ...props }, ref) => {
+    const field = useFieldControl(props.id);
+    return (
+      <textarea
+        ref={ref}
+        rows={rows}
+        className={cn(base, 'px-3 py-2 text-sm resize-y min-h-[38px]', className)}
+        {...props}
+        {...field}
+      />
+    );
+  },
+);
+Textarea.displayName = 'Textarea';
 
-export const Select = React.forwardRef<
-  HTMLSelectElement,
-  React.SelectHTMLAttributes<HTMLSelectElement>
->(({ className, children, ...props }, ref) => (
-  <div className="relative">
-    <select
-      ref={ref}
-      className={cn(
-        base,
-        "h-9 pl-3 pr-8 text-sm appearance-none cursor-pointer",
-        className
-      )}
-      {...props}
-    >
-      {children}
-    </select>
-    <svg
-      aria-hidden
-      viewBox="0 0 20 20"
-      className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M6 8l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  </div>
-));
-Select.displayName = "Select";
+export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
+  ({ className, children, ...props }, ref) => {
+    const field = useFieldControl(props.id);
+    return (
+      <div className="relative">
+        <select
+          ref={ref}
+          className={cn(base, 'h-9 pl-3 pr-8 text-sm appearance-none cursor-pointer', className)}
+          {...props}
+          {...field}
+        >
+          {children}
+        </select>
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M6 8l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+    );
+  },
+);
+Select.displayName = 'Select';
 
+/**
+ * Checkbox — Radix/shadcn underneath (keyboard, indeterminate, aria-checked),
+ * but keeps the native-input props the app uses: `checked`, `defaultChecked`,
+ * `onChange(e)` (e.target.checked), `disabled`, `name`, `aria-label`.
+ */
 export function Checkbox({
   className,
+  checked,
+  defaultChecked,
+  onChange,
+  disabled,
+  name,
+  value,
+  id,
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'>) {
   return (
-    <input
-      type="checkbox"
-      className={cn(
-        "h-4 w-4 shrink-0 rounded border-input text-primary accent-[hsl(var(--primary))] cursor-pointer",
-        className
-      )}
-      {...props}
+    <ShadcnCheckbox
+      id={id}
+      name={name}
+      value={value as string | undefined}
+      checked={checked}
+      defaultChecked={defaultChecked}
+      disabled={disabled}
+      onCheckedChange={(c) =>
+        onChange?.({
+          target: { checked: c === true, name, value },
+          currentTarget: { checked: c === true, name, value },
+        } as unknown as React.ChangeEvent<HTMLInputElement>)
+      }
+      className={cn('h-4 w-4 shrink-0 rounded-[4px] border-input shadow-none cursor-pointer', className)}
+      aria-label={props['aria-label']}
+      title={props.title}
     />
   );
 }
 
-export function Radio({
-  className,
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
+export function Radio({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       type="radio"
-      className={cn(
-        "h-4 w-4 shrink-0 border-input accent-[hsl(var(--primary))] cursor-pointer",
-        className
-      )}
+      className={cn('h-4 w-4 shrink-0 border-input accent-[hsl(var(--primary))] cursor-pointer', className)}
       {...props}
     />
   );

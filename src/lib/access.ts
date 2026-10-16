@@ -2,26 +2,27 @@
 // A user may enter the app only once an admin has assigned a real role
 // (i.e. not PENDING_ROLE) and their account is Active.
 
-export const PENDING_ROLE = "รออนุมัติ";
-export const ADMIN_ROLE = "System Admin";
+export const PENDING_ROLE = 'รออนุมัติ';
+export const ADMIN_ROLE = 'System Admin';
 
 /**
- * Owner emails are ALWAYS treated as System Admin — a bootstrap so the person
- * running the system can never lock themselves out (e.g. after a DB reset).
- * Configure via OWNER_EMAILS (comma-separated); the defaults are the project owner.
+ * Owner emails become System Admin when their app_user row has no role yet — a
+ * bootstrap so a fresh DB always has an admin. An admin can still change or
+ * disable an owner later. Production reads OWNER_EMAILS (comma-separated) only;
+ * the built-in list applies to dev / test databases.
  */
 const DEFAULT_OWNERS = [
-  "the.dataverse@shd-technology.co.th",
-  "tiw.pheerachan@shd-technology.co.th",
-  "safe.sun@shd-technology.co.th",
+  'the.dataverse@shd-technology.co.th',
+  'tiw.pheerachan@shd-technology.co.th',
+  'safe.sun@shd-technology.co.th',
 ];
 
 export function ownerEmails(): string[] {
-  const fromEnv = (process.env.OWNER_EMAILS || "")
+  const fromEnv = (process.env.OWNER_EMAILS || '')
     .split(/[,\s]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  return Array.from(new Set([...DEFAULT_OWNERS, ...fromEnv]));
+  return Array.from(new Set([...(process.env.NODE_ENV === 'production' ? [] : DEFAULT_OWNERS), ...fromEnv]));
 }
 
 export function isOwner(email: string): boolean {
@@ -30,9 +31,9 @@ export function isOwner(email: string): boolean {
 
 /** True when this role + status combination is allowed to use the app. */
 export function isApproved(role: string | null | undefined, status: string | null | undefined): boolean {
-  const r = (role || "").trim();
-  const s = (status || "").trim();
+  const r = (role || '').trim();
+  const s = (status || '').trim();
   if (!r || r === PENDING_ROLE) return false;
-  if (s && s.toLowerCase() !== "active") return false;
+  if (s && s.toLowerCase() !== 'active') return false;
   return true;
 }
