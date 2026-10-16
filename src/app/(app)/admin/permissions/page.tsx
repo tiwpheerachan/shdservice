@@ -16,7 +16,15 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { ROLES, type Permission } from '@/data/mock';
 import { usePermissions, useRoles } from '@/data/db';
 import { postJson } from '@/lib/api';
-import { PAGE_MODULES, RIGHTS, type Right } from '@/lib/modules';
+import {
+  ADMIN_USER_TYPE,
+  PAGE_MODULES,
+  RIGHTS,
+  RIGHT_HINTS,
+  adminImplicit,
+  type Module,
+  type Right,
+} from '@/lib/modules';
 
 // บทบาท (user_type) มาจากตาราง app_config — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
 // (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว app_config ชื่อ RIGHTS
@@ -67,6 +75,9 @@ export default function PermissionsPage() {
 
   const cellOf = (r: string, menu: string): Cell =>
     map[keyOf(r, menu)] ?? { add: false, edit: false, del: false, view: false };
+  // System Admin holds every module and right without a row (checkGrant / checkRight) — shown ticked and
+  // locked, whatever its rows say (they are saved back as stored); Job Take stays a real tick
+  const implicit = (menu: string) => role === ADMIN_USER_TYPE && adminImplicit(menu as Module);
 
   // ticked but not saved: switching role used to drop these edits without a word
   const FIELDS = ['add', 'edit', 'del', 'view'] as const;
@@ -137,7 +148,12 @@ export default function PermissionsPage() {
     width: '130px',
     sortable: false,
     cell: (r) => (
-      <Checkbox checked={!!r[field]} onChange={() => toggle(r.menu, field)} aria-label={`${header} · ${r.menu}`} />
+      <Checkbox
+        checked={implicit(r.menu) || !!r[field]}
+        disabled={implicit(r.menu)}
+        onChange={() => toggle(r.menu, field)}
+        aria-label={`${header} · ${r.menu}`}
+      />
     ),
   });
 
@@ -214,6 +230,7 @@ export default function PermissionsPage() {
             <span className="num">
               {viewRows.length} / {MENUS.length} เมนู
             </span>
+            {role === ADMIN_USER_TYPE && <span>· System Admin ใช้ได้ทุกเมนูเสมอ (ไม่ต้องติ๊ก)</span>}
           </span>
         }
       />
@@ -225,7 +242,7 @@ export default function PermissionsPage() {
           </h2>
           <p className="text-xs text-muted-foreground">
             เรื่องที่ไม่ได้ผูกกับเมนูใดเมนูหนึ่ง — ติ๊ก = บทบาท {role} ทำได้ · System Admin มีทุกข้อเสมอ ยกเว้น
-            รับงานซ่อม (ติ๊กเมื่อให้มีชื่อในช่องมอบหมายงาน) · บันทึกพร้อมตารางด้านบน
+            {RIGHTS['Job Take']} (ติ๊กเมื่อให้ System Admin มีชื่อในช่องมอบหมายงาน) · บันทึกพร้อมตารางด้านบน
           </p>
         </div>
         <ul className="grid gap-2 sm:grid-cols-2">
@@ -234,11 +251,13 @@ export default function PermissionsPage() {
               <Checkbox
                 id={`right-${i}`}
                 className="mt-0.5"
-                checked={cellOf(role, r).view}
+                checked={implicit(r) || cellOf(role, r).view}
+                disabled={implicit(r)}
                 onChange={() => toggle(r, 'view')}
               />
               <label htmlFor={`right-${i}`} className="cursor-pointer text-sm">
                 {RIGHTS[r]} <span className="text-xs text-muted-foreground">({r})</span>
+                <span className="block text-xs text-muted-foreground">{RIGHT_HINTS[r]}</span>
               </label>
             </li>
           ))}

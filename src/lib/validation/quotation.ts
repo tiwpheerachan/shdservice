@@ -22,38 +22,33 @@ const amount = (field: string) =>
     .refine((v) => v === undefined || v === '' || Number.isFinite(Number(v)), `${field}ต้องเป็นตัวเลข`)
     .refine((v) => v === undefined || v === '' || Number(v) >= 0, `${field}ต้องไม่ติดลบ`);
 
+/** a quotation line's own rules */
+export const quotationLine = z.looseObject({
+  detail: maxText(100, 'รายละเอียด'),
+  qty: z
+    .union([z.number(), z.string()])
+    .refine((v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 9999, 'จำนวนต้องเป็นจำนวนเต็ม 1–9999'),
+  unitPrice: moneyField('ราคา/หน่วย'),
+});
+
+/** the fields' own rules (no stored quotation) — the API reads the body with these (src/server/contract) */
+export const quotationFields = z.looseObject({
+  contactName: maxText(100, 'ชื่อผู้ติดต่อ'),
+  lines: z.array(quotationLine).optional(),
+  serviceAmount: moneyField('ค่าบริการ'),
+  discountValue: amount('ส่วนลด'), // ≤ 100 unless in บาท (legacy quotations carry บาท discounts)
+  vatRate: z
+    .union([z.number(), z.string()])
+    .optional()
+    .refine((v) => v === undefined || v === '' || [0, 7].includes(Number(v)), 'ภาษีมูลค่าเพิ่มต้องเป็น 0 หรือ 7 %'),
+  remark: maxNote(1000, 'หมายเหตุ'),
+  approveRemark: maxText(100, 'หมายเหตุการตอบรับ'),
+});
+
 export function quotationSchema(prevJobNo?: string | null) {
   const jobRequired = prevJobNo == null || !!clean(prevJobNo);
   return (
-    z
-      .looseObject({
-        contactName: maxText(100, 'ชื่อผู้ติดต่อ'),
-        lines: z
-          .array(
-            z.looseObject({
-              detail: maxText(100, 'รายละเอียด'),
-              qty: z
-                .union([z.number(), z.string()])
-                .refine(
-                  (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 9999,
-                  'จำนวนต้องเป็นจำนวนเต็ม 1–9999',
-                ),
-              unitPrice: moneyField('ราคา/หน่วย'),
-            }),
-          )
-          .optional(),
-        serviceAmount: moneyField('ค่าบริการ'),
-        discountValue: amount('ส่วนลด'), // ≤ 100 unless in บาท (legacy quotations carry บาท discounts)
-        vatRate: z
-          .union([z.number(), z.string()])
-          .optional()
-          .refine(
-            (v) => v === undefined || v === '' || [0, 7].includes(Number(v)),
-            'ภาษีมูลค่าเพิ่มต้องเป็น 0 หรือ 7 %',
-          ),
-        remark: maxNote(1000, 'หมายเหตุ'),
-        approveRemark: maxText(100, 'หมายเหตุการตอบรับ'),
-      })
+    quotationFields
       // required checks here, not on the fields: a missing key must not stop the other rules
       .superRefine((v, ctx) => {
         if (v.discountUnit !== 'บาท' && Number(v.discountValue) > 100)

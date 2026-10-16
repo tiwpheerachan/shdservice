@@ -32,6 +32,7 @@ import { baht, cn } from '@/lib/utils';
 import { patchJson, isStale, errMsg } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
 import { useAccess } from '@/lib/use-access';
+import { RIGHTS } from '@/lib/modules';
 import type { JobDetail } from '@/lib/use-job';
 import { useFormErrors, apiFieldErrors } from '@/lib/use-form-errors';
 import type { z } from 'zod';
@@ -1169,6 +1170,9 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
       });
     return opts;
   }, [STAFF, loaded.engineerId, loaded.engineerName]);
+  // the list follows the right, not a role name: say which right — and the roles that hold it now
+  const takerRoles = [...new Set(STAFF.filter((st) => st.takesJobs && st.userType).map((st) => st.userType))];
+  const techHint = `เฉพาะผู้มีสิทธิ์ "${RIGHTS['Job Take']}"${takerRoles.length ? ` (ตอนนี้: ${takerRoles.join(', ')})` : ''}`;
   // a job that already has someone on it goes to another person only when the user says so (the API asks too)
   const assign = async (next: Pick<JobFormState, 'engineerId' | 'engineerName'>) => {
     const had = loaded.engineerId;
@@ -1214,7 +1218,7 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
           />
         </Field>
         {showTech && (
-          <Field label="มอบหมายงานนี้ให้" hint="เฉพาะผู้ใช้ที่เป็น Engineer / Head Engineer" error={errors.engineerId}>
+          <Field label="มอบหมายงานนี้ให้" hint={techHint} error={errors.engineerId}>
             <SearchSelect
               value={s.engineerId ? String(s.engineerId) : ''}
               onChange={(v) => {

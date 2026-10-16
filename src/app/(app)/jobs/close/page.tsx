@@ -141,7 +141,12 @@ function CloseForm() {
   const bal = jobBalance(net, deposit, paid ? Number(d.payAmount || 0) : (job?.payment.amount ?? 0));
   // money already given back (a swap/refund job stores it as a negative payment): shown as it is, no payment inputs
   // — the hidden fields stay as loaded, so a save sends no payment and the refund is kept
-  const refunded = job && job.payment.amount < 0 && bal.refund === 0 ? job.payment : null;
+  const gaveBack = job && job.payment.amount < 0 ? job.payment : null;
+  const refunded = gaveBack && bal.refund === 0 ? gaveBack : null;
+  // how it went back: "เงินสด, 2026-10-01" (the date is in the detail: "คืนมัดจำ <date>")
+  const gaveBackHow = gaveBack
+    ? [gaveBack.type, gaveBack.no, refundDateOf(gaveBack.detail)].filter(Boolean).join(', ')
+    : '';
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -358,11 +363,24 @@ function CloseForm() {
                         <span className="text-muted-foreground">หักเงินมัดจำ</span>
                         <span className="num">-{baht(deposit)}</span>
                       </li>
-                      <li className="flex justify-between gap-3 text-base font-semibold">
-                        {/* a deposit larger than the total (not repaired) goes back to the customer */}
-                        <span>{bal.refund > 0 ? 'ต้องคืนเงินมัดจำ' : 'ยอดที่ต้องชำระ'}</span>
-                        <span className="num text-primary">{baht(bal.refund || bal.due)} ฿</span>
-                      </li>
+                      {bal.refund > 0 && gaveBack ? (
+                        // already given back (a negative payment "คืนมัดจำ …") — not "to refund" any more
+                        <li role="status" className="flex justify-between gap-3 text-base font-semibold">
+                          <span>
+                            คืนเงินมัดจำแล้ว
+                            {gaveBackHow && (
+                              <span className="block text-xs font-normal text-muted-foreground">({gaveBackHow})</span>
+                            )}
+                          </span>
+                          <span className="num text-primary">{baht(-gaveBack.amount)} ฿</span>
+                        </li>
+                      ) : (
+                        <li className="flex justify-between gap-3 text-base font-semibold">
+                          {/* a deposit larger than the total (not repaired) goes back to the customer */}
+                          <span>{bal.refund > 0 ? 'ต้องคืนเงินมัดจำ' : 'ยอดที่ต้องชำระ'}</span>
+                          <span className="num text-primary">{baht(bal.refund || bal.due)} ฿</span>
+                        </li>
+                      )}
                     </>
                   )}
                   {bal.outstanding > 0 && (
@@ -415,7 +433,7 @@ function CloseForm() {
               ) : refunded ? (
                 <p role="status" className="self-start rounded-lg border border-border p-4 text-sm font-medium">
                   คืนเงินแล้ว <span className="num">{baht(-refunded.amount)}</span> บาท
-                  {refunded.type || refunded.no ? ` (${[refunded.type, refunded.no].filter(Boolean).join(', ')})` : ''}
+                  {gaveBackHow ? ` (${gaveBackHow})` : ''}
                 </p>
               ) : (
                 <FieldGrid cols={2}>

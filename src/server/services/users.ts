@@ -359,9 +359,10 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       ...statusStamp(rs, actorId),
       deleted: false,
       emailAddress: email || undefined,
-      phoneNo: phone || undefined,
-      larkId: clean(input.code) || undefined,
-      department: clean(input.branch) || undefined,
+      // optional contact fields: sent empty = cleared; not sent at all = left as stored
+      phoneNo: input.phone === undefined ? undefined : phone || null,
+      larkId: input.code === undefined ? undefined : clean(input.code) || null,
+      department: input.branch === undefined ? undefined : clean(input.branch) || null,
       title: input.title || undefined,
       avatar: input.avatar || undefined,
       username: username || undefined,

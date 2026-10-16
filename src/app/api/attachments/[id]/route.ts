@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documentAttach } from '@/db/schema';
-import { handle, requireCan, HttpError, requireView, JOB_MODULES } from '@/server/auth';
+import { handle, requireCan, HttpError, requireView, JOB_MODULES, parseParams } from '@/server/auth';
+import { attachmentDelete, attachmentGet } from '@/server/contract/jobs';
 import { removeAttachment } from '@/server/services/jobs';
 import { removeFile, signedUrl, filePath, resolvePath } from '@/server/storage';
 
@@ -14,7 +15,7 @@ type Ctx = { params: Promise<{ id: string }> };
 /** Redirect to a short-lived signed URL for the stored file. */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, JOB_MODULES);
-  const { id } = await ctx.params;
+  const { id } = await parseParams(ctx, attachmentGet);
   const [row] = await db
     .select()
     .from(documentAttach)
@@ -29,7 +30,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'edit');
-  const { id } = await ctx.params;
+  const { id } = await parseParams(ctx, attachmentDelete);
   const [row] = await db
     .select()
     .from(documentAttach)

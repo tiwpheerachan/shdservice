@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac, verifyTurnstile, issueTicket, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx, readSmallJson, str } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { jobNoForLink, markLinkOpened, linkExpiry } from '@/server/services/tracking';
-import { userFromRequest } from '@/server/auth';
+import { userFromRequest, checked, parseTrackBody } from '@/server/auth';
+import { trackSession } from '@/server/contract/track';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
 
@@ -18,15 +19,15 @@ export const dynamic = 'force-dynamic';
  * of Cloudflare calls), and the database is touched for the job only AFTER the
  * captcha passed.
  */
-export async function POST(req: NextRequest) {
+export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   const fail = () => trackJson({ ok: false, error: TRACK_MSG.sessionFail }, 403);
   const limited = () => trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
 
   try {
-    const body = await readSmallJson(req);
-    const linkToken = str(body.linkToken, 128).trim();
-    const turnstileToken = str(body.turnstileToken, 4096);
+    const body = await parseTrackBody(req, trackSession);
+    const linkToken = body.linkToken.trim();
+    const turnstileToken = body.turnstileToken;
     if (!linkToken) return fail();
 
     // 1. per-IP limits
@@ -77,4 +78,4 @@ export async function POST(req: NextRequest) {
     logError(e, 'track/session');
     return fail();
   }
-}
+});

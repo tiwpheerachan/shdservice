@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireCan, readJson } from '@/server/auth';
+import { handle, parseBody, requireCan } from '@/server/auth';
+import { stockReceive } from '@/server/contract/stock';
 import { idempotent } from '@/server/idempotency';
 import { receiveStock } from '@/server/services/stock';
-import { assertValid } from '@/server/validate';
-import { receiveSchema } from '@/lib/validation/stock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Product Receive Stock', 'add');
   return idempotent(req, user.userId, async () => {
-    const body = assertValid(receiveSchema, await readJson(req));
+    const body = await parseBody(req, stockReceive); // receiveSchema
     const r = await receiveStock(body, user.userId);
     return NextResponse.json({ ok: true, ...r }, { status: 201 });
   });

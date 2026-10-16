@@ -15,6 +15,8 @@ import { audit } from '@/server/audit';
 import { db } from '@/db/client';
 import { PENDING_ROLE, isApproved } from '@/lib/access';
 import { log, logError, scrubText } from '@/lib/log';
+import { checked, parseQuery } from '@/server/auth';
+import { ssoCallback } from '@/server/contract/misc';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,10 +74,8 @@ function fail(request: NextRequest, reason: string) {
   return NextResponse.redirect(to);
 }
 
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url);
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
+export const GET = checked(async (request: NextRequest) => {
+  const { code, state } = parseQuery(request, ssoCallback);
   const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? '').split(STATE_SEP).filter(Boolean);
   const nextFromState = safeNext(state?.split('|')[1]);
 
@@ -205,4 +205,4 @@ export async function GET(request: NextRequest) {
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
   return res;
-}
+});

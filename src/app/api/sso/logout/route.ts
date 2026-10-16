@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S, SIGNED_OUT_SEEN, verifySession } from '@/lib/session';
 import { appOrigin, isRouterFetch } from '@/lib/sso';
-import { bumpSessionVersion } from '@/server/auth';
+import { bumpSessionVersion, checked } from '@/server/auth';
 import { logError } from '@/lib/log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = checked(async (request: NextRequest) => {
   // Next's client router prefetches links (RSC / Next-Router-Prefetch headers).
   // Never sign out on one of those — only on a real top-level navigation.
   if (isRouterFetch(request)) return new NextResponse(null, { status: 204 });
@@ -37,4 +37,4 @@ export async function GET(request: NextRequest) {
     maxAge: SEEN_TTL_S,
   });
   return res;
-}
+});

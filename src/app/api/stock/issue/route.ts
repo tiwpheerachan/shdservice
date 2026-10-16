@@ -1,12 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireCan, readJson, HttpError } from '@/server/auth';
+import { handle, parseBody, requireCan, HttpError } from '@/server/auth';
+import { stockIssue } from '@/server/contract/stock';
 import { idempotent } from '@/server/idempotency';
 import { issueForJob, issueForSaleOrder, issueOther, returnFromJob } from '@/server/services/stock';
 import { markPartsIssued } from '@/server/services/jobs';
-import { assertValid } from '@/server/validate';
 import { listStaff } from '@/server/services/users';
 import { cleanCode } from '@/lib/validation';
-import { issueSchema } from '@/lib/validation/stock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +22,7 @@ export const POST = handle(async (req: NextRequest) => {
 const STORE_RECIPIENT = 'คลังสินค้าดี';
 
 async function issue(req: NextRequest, userId: number) {
-  const body = assertValid(issueSchema, await readJson(req));
+  const body = await parseBody(req, stockIssue); // issueSchema
   const b = { ...body, ref: cleanCode(body.ref), remark: body.remark ?? undefined };
   if (b.payTo !== STORE_RECIPIENT && !(await listStaff()).some((s) => s.name === b.payTo)) {
     const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือก${b.type === 'return' ? 'ผู้คืน' : 'ผู้รับ'}จากรายการ`;

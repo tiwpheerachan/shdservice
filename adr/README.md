@@ -11,6 +11,7 @@
 | 0004 | [หน้าติดตามสาธารณะ fail-closed](0004-public-tracking-fail-closed.md) | Accepted |
 | 0005 | [ความปลอดภัยของ DB production](0005-production-db-safety.md) | Accepted |
 | 0006 | [แบ่งงาน agent ตามพื้นที่โค้ด](0006-agents-split-by-area.md) | Accepted |
+| 0007 | [API แบบ contract-first: zod → OpenAPI → /api-docs, คำตอบถูกตรวจกับสัญญา](0007-contract-first-api.md) | Accepted |
 
 ## เขียน ADR ใหม่
 

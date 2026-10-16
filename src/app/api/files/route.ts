@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireUser, HttpError } from '@/server/auth';
+import { handle, parseQuery, requireUser, HttpError } from '@/server/auth';
+import { files } from '@/server/contract/misc';
 import { signedUrl } from '@/server/storage';
 import { rateLimit } from '@/server/rate-limit';
 
@@ -22,10 +23,8 @@ const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
 const URL_TTL_S = 300;
 
 export const GET = handle(async (req: NextRequest) => {
-  const path = (new URL(req.url).searchParams.get('path') ?? '').replace(/^\/+/, '');
-  // no traversal, no control characters, no backslashes, sane length
-  if (!path || path.length > 300 || path.includes('..') || /[\x00-\x1f\\]/.test(path))
-    throw new HttpError(400, 'path required');
+  // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"
+  const { path } = parseQuery(req, files);
 
   const isPublic = PUBLIC_PATH.test(path);
   // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)

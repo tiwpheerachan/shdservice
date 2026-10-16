@@ -7,7 +7,15 @@ import prettier from 'eslint-config-prettier/flat';
  * `npm run lint` — Next.js recommended rules (core-web-vitals + TypeScript) plus project rules.
  */
 export default defineConfig([
-  globalIgnores(['.next/**', '.next-*/**', 'node_modules/**', 'drizzle/**', 'public/**', 'next-env.d.ts']),
+  globalIgnores([
+    '.next/**',
+    '.next-*/**',
+    '.apidoc/**',
+    'node_modules/**',
+    'drizzle/**',
+    'public/**',
+    'next-env.d.ts',
+  ]),
   ...nextVitals,
   ...nextTs,
   {

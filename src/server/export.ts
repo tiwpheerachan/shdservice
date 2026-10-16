@@ -1,10 +1,11 @@
 import 'server-only';
 import ExcelJS from 'exceljs';
 import type { NextRequest } from 'next/server';
-import { hasRight, HttpError, requireAdmin, requireCan, type CurrentUser } from '@/server/auth';
-import { parsePageQuery } from '@/server/paging';
+import { hasRight, HttpError, parseQuery, requireAdmin, requireCan, type CurrentUser } from '@/server/auth';
+import { exportXlsx as exportOperation } from '@/server/contract/data';
+import { parsePageQuery, searchOf } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
-import type { Module } from '@/lib/modules';
+import { noRight, type Module } from '@/lib/modules';
 import { listSimple, isSimpleKind, listSymptoms, listModels } from '@/server/services/masters';
 import { listSystemUsers } from '@/server/services/users';
 import { listCustomers, customerFiltersFromQuery } from '@/server/services/customers';
@@ -216,8 +217,7 @@ for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'product_
   SPECS[k] = { title: k, module: null, cols: MASTER_COLS };
 }
 
-async function loadRows(req: NextRequest, resource: string, user: CurrentUser): Promise<Row[]> {
-  const sp = new URL(req.url).searchParams;
+async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser): Promise<Row[]> {
   const p = parsePageQuery(sp);
   const mode = parseStatusMode(sp.get('deleted'));
   const f = p.f;
@@ -275,6 +275,9 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
         from: f.from,
         to: f.to,
         sales: f.sales,
+        no: f.no,
+        customer: f.customer,
+        code: f.code,
         deleted: mode,
         q: p.q,
         limit: MAX_ROWS,
@@ -338,13 +341,18 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
   throw new HttpError(404, `unknown export: ${resource}`);
 }
 
-export async function exportXlsx(req: NextRequest, resource: string): Promise<{ buffer: Buffer; filename: string }> {
+/** `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data). */
+export async function exportXlsx(
+  req: NextRequest,
+  resource: string,
+  query: Record<string, unknown> = parseQuery(req, exportOperation),
+): Promise<{ buffer: Buffer; filename: string }> {
   const spec = SPECS[resource];
   if (!spec) throw new HttpError(404, `unknown export: ${resource}`);
   const user = spec.module === null ? await requireAdmin(req) : await requireCan(req, spec.module, 'view');
   // ส่งออก Excel is its own special right on top of seeing the list
-  if (!(await hasRight(user, 'Export'))) throw new HttpError(403, 'ไม่มีสิทธิ์ส่งออก Excel (สิทธิ์พิเศษ Export)');
-  const rows = await loadRows(req, resource, user);
+  if (!(await hasRight(user, 'Export'))) throw new HttpError(403, noRight('Export'));
+  const rows = await loadRows(searchOf(query), resource, user);
   // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
   const cols =
     resource === 'products' && !(await canSeeCost(user))

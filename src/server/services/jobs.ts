@@ -675,7 +675,7 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
   };
 }
 
-export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<Job>> {
+export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<JobListRow>> {
   const where = jobWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([

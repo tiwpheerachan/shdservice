@@ -9,7 +9,7 @@ import {
   SEEN_TTL_S,
   type SessionUser,
 } from '@/lib/session';
-import { resolveUser, HttpError } from '@/server/auth';
+import { resolveUser, HttpError, checked } from '@/server/auth';
 import { centralSessionActive } from '@/lib/sso';
 import { log } from '@/lib/log';
 
@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic';
  * so an admin's approval takes effect without logging out. Used by /pending and
  * the client-side AccessGuard.
  */
-export async function GET(request: NextRequest) {
+export const GET = checked(async (request: NextRequest) => {
   const current = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   // `reason` = why, for the /login note (same as /api/sso/me)
   if (!current) return NextResponse.json({ user: null, reason: 'expired' }, { status: 401 });
@@ -97,4 +97,4 @@ export async function GET(request: NextRequest) {
     maxAge: SEEN_TTL_S,
   });
   return res;
-}
+});

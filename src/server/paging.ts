@@ -18,6 +18,13 @@ export type Page<T> = { rows: T[]; total: number; page: number; pageSize: number
 
 const RESERVED = new Set(['page', 'pageSize', 'q', 'sort', 'dir', 'order', 'asc', 'deleted', 'all']);
 
+/** A query as its operation parsed it (src/server/contract) → the URLSearchParams parsePageQuery and the list readers take. */
+export function searchOf(query: Record<string, unknown>): URLSearchParams {
+  return new URLSearchParams(
+    Object.entries(query).flatMap(([k, v]) => (typeof v === 'string' ? [[k, v] as [string, string]] : [])),
+  );
+}
+
 /** Parse ?page=&pageSize=&q=&sort=&dir= plus any other filters. */
 export function parsePageQuery(sp: URLSearchParams, defaults: Partial<PageQuery> = {}): PageQuery {
   const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1);

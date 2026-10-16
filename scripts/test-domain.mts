@@ -4751,6 +4751,85 @@ try {
       }
     });
   }
+  // ── Round 7: small fixes ──
+  console.log('\nRound 7 — small fixes (rights names, System Admin on the permissions page)');
+  {
+    const { RIGHTS, PAGE_MODULES, adminImplicit, checkGrant, checkRight, rightLabel, noRight } =
+      await import('@/lib/modules');
+    const { NOT_APPROVER } = await import('@/lib/validation/sale-order');
+    const { NOT_ENGINEER, REOPEN_LOCKED, MONEY_LOCKED, moneyLockedMsg } = await import('@/lib/validation/job');
+    const rights = Object.keys(RIGHTS) as (keyof typeof RIGHTS)[];
+
+    await test('R7 permissions page: System Admin shows ticked + locked exactly what it holds with no row (all but Job Take)', async () => {
+      // the page ticks and locks adminImplicit(m) for System Admin — it must be what the checks grant with no rows
+      for (const r of rights) assert.equal(adminImplicit(r), checkRight(true, {}, r), r);
+      for (const m of PAGE_MODULES)
+        for (const a of ['add', 'edit', 'del', 'view'] as const)
+          assert.equal(adminImplicit(m), checkGrant(true, {}, m, a), `${m} ${a}`);
+      assert.deepEqual(
+        rights.filter((r) => !adminImplicit(r)),
+        ['Job Take'],
+      );
+      // ticked Job Take still counts for System Admin; a non-admin needs the tick for every right
+      assert.equal(
+        checkRight(true, { 'Job Take': { add: false, edit: false, del: false, view: true } }, 'Job Take'),
+        true,
+      );
+      for (const r of rights) assert.equal(checkRight(false, {}, r), false, r);
+    });
+
+    await test('R7 rights: one short name per right — the 403 / 409 messages and hints are built from RIGHTS', async () => {
+      const says = (msg: string, r: keyof typeof RIGHTS) => {
+        assert.ok(msg.includes(`"${RIGHTS[r]}"`) && msg.includes(`(${r})`), `${r}: ${msg}`);
+        assert.ok(msg.includes(rightLabel(r)), msg);
+      };
+      says(NOT_APPROVER, 'SO Approve');
+      assert.equal(NOT_APPROVER, noRight('SO Approve'));
+      says(NOT_ENGINEER, 'Job Take');
+      says(REOPEN_LOCKED, 'Job Reopen');
+      says(MONEY_LOCKED, 'Job Money After Close');
+      says(moneyLockedMsg('ค่าบริการ'), 'Job Money After Close');
+      // the names the testers saw disagree (page vs error) are gone: the page shows RIGHTS[r] itself
+      assert.equal(RIGHTS['SO Approve'], 'อนุมัติใบสั่งขาย');
+      assert.equal(RIGHTS['Job Reopen'], 'เปิดงานที่ปิดแล้ว');
+      for (const r of rights) assert.ok(!RIGHTS[r].includes(' / ') && RIGHTS[r].length <= 30, `short name: ${r}`);
+    });
+  }
+  // ── Round 7: persona R6 — users page could not clear an optional field ──
+  {
+    const { upsertUser } = await import('@/server/services/users');
+    await test('R7 admin users: clearing phone / Lark ID / department saves them empty; leaving them out keeps them', async () => {
+      const row = async () =>
+        (
+          await db.execute<{ p: string | null; l: string | null; d: string | null }>(
+            sql`SELECT phone_no AS p, lark_id AS l, department AS d FROM app_user WHERE user_id = ${U.clerk.id}`,
+          )
+        ).rows[0];
+      const base = { id: String(U.clerk.id), name: 'TD td-clerk', role: U.clerk.type, status: 'Active' };
+      await upsertUser({ ...base, phone: '0812345678', code: 'TD-LARK', branch: 'TD สาขา' }, U.admin.id);
+      assert.deepEqual({ ...(await row()) }, { p: '0812345678', l: 'TD-LARK', d: 'TD สาขา' });
+      await upsertUser(base, U.admin.id); // a caller that does not send them
+      assert.deepEqual({ ...(await row()) }, { p: '0812345678', l: 'TD-LARK', d: 'TD สาขา' }, 'not sent → kept');
+      await upsertUser({ ...base, phone: '', code: '', branch: '' }, U.admin.id); // the edit form, fields emptied
+      assert.deepEqual({ ...(await row()) }, { p: null, l: null, d: null }, 'sent empty → cleared');
+    });
+    await test("R7 sale-order list: the part-code box finds orders by a line's code; SO no. and customer filter on their own", async () => {
+      const { listSaleOrders } = await import('@/server/services/sale-orders');
+      const [o] = (
+        await db.execute<{ no: string; code: string; cust: string }>(sql`
+          SELECT h.sale_out_hd_no AS no, d.product_code AS code, h.customer_name AS cust FROM sale_out_hd h
+            JOIN sale_out_dt d ON d.sale_out_hd_no = h.sale_out_hd_no
+           WHERE h.record_status <> 'DELETED' AND coalesce(d.product_code, '') <> '' LIMIT 1`)
+      ).rows;
+      assert.ok(o, 'a sale order with a coded line exists');
+      const nos = async (f: Parameters<typeof listSaleOrders>[0]) => (await listSaleOrders(f)).map((r) => r.no);
+      assert.ok((await nos({ code: o.code })).includes(o.no), 'by part code');
+      assert.ok(!(await nos({ code: 'TD-NO-SUCH-PART' })).length, 'unknown code → none');
+      assert.deepEqual(await nos({ no: o.no }), [o.no], 'by SO no.');
+      assert.ok((await nos({ no: o.no, customer: o.cust.slice(0, 3) })).includes(o.no), 'both boxes together');
+      assert.ok(!(await nos({ no: o.no, customer: 'TD-NOBODY-XYZ' })).length, 'a wrong name is not dropped');
+    });
+  }
 } finally {
   await pool.end();
 }

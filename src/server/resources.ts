@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requireAdmin, requireUser, requireView, JOB_MODULES, HttpError } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { pageAudit, listAudit, auditModules } from '@/server/audit';
-import { clampInt, parsePageQuery, type Page } from '@/server/paging';
+import { clampInt, parsePageQuery, searchOf, type Page } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from '@/server/services/masters';
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from '@/server/services/users';
@@ -69,9 +69,14 @@ const READ_ACCESS: Record<string, readonly Module[]> = {
  * Read side for the UI hooks in src/data/db.ts. One endpoint per table name the
  * hooks already used, so the pages did not have to change their imports.
  * Returns either a plain array or, with ?paged=1, a { rows, total } page.
+ * `query` = the request's query as the resource's operation parsed it (any other name is a filter).
  */
-export async function readResource(req: NextRequest, resource: string): Promise<unknown[] | Page<unknown>> {
-  const sp = new URL(req.url).searchParams;
+export async function readResource(
+  req: NextRequest,
+  resource: string,
+  query: Record<string, unknown>,
+): Promise<unknown[] | Page<unknown>> {
+  const sp = searchOf(query);
   const deleted = parseStatusMode(sp.get('deleted'));
   const paged = sp.get('paged') === '1';
   const p = parsePageQuery(sp);
@@ -250,12 +255,24 @@ export async function readResource(req: NextRequest, resource: string): Promise<
           });
     case 'sale_orders':
       return paged
-        ? pageSaleOrders(p, { approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted })
+        ? pageSaleOrders(p, {
+            approve: p.f.approve,
+            from: p.f.from,
+            to: p.f.to,
+            sales: p.f.sales,
+            no: p.f.no,
+            customer: p.f.customer,
+            code: p.f.code,
+            deleted,
+          })
         : listSaleOrders({
             approve: p.f.approve,
             from: p.f.from,
             to: p.f.to,
             sales: p.f.sales,
+            no: p.f.no,
+            customer: p.f.customer,
+            code: p.f.code,
             deleted,
             q: p.q,
             limit: clampInt(sp.get('limit'), 5000, 20000),

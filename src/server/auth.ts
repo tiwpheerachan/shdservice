@@ -5,13 +5,19 @@ import { NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
+import type { z } from 'zod';
 import { verifySession, SESSION_COOKIE, type SessionUser } from '@/lib/session';
+import { summary, validate } from '@/lib/validation';
+import type { Invalid, Part } from '@/server/contract/registry';
+import { readSmallJson } from '@/server/track-http';
 import { logError, requestId } from '@/lib/log';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
 import {
   ADMIN_USER_TYPE,
   checkGrant,
   checkRight,
+  noRight,
+  RIGHTS,
   type Action,
   type Grant,
   type GrantMap,
@@ -227,6 +233,8 @@ export async function requireUser(req: NextRequest): Promise<CurrentUser> {
 export async function requireCan(req: NextRequest, module: Module | null, action: Action): Promise<CurrentUser> {
   const u = await requireUser(req);
   if (!(await can(u, module, action))) {
+    // a special right (Report, …) names the right the way the permission screen does
+    if (module && module in RIGHTS) throw new HttpError(403, noRight(module as Right));
     throw new HttpError(403, `ไม่มีสิทธิ์${ACTION_TH[action]}ใน ${module ?? 'ส่วนนี้'}`);
   }
   return u;
@@ -257,9 +265,23 @@ export async function requireAdmin(req: NextRequest): Promise<CurrentUser> {
   return u;
 }
 
+/**
+ * Outside production every answer is held to its declaration in src/server/contract (check.ts): a log
+ * line "API contract drift" under `next dev`, a thrown error under API_CONTRACT_STRICT=1 (the tests).
+ * Production gets `fn` itself. handle() includes it; routes that answer without handle() wrap themselves.
+ */
+export function checked<T extends unknown[]>(fn: (...args: T) => Promise<Response>): (...args: T) => Promise<Response> {
+  if (process.env.NODE_ENV === 'production') return fn;
+  return async (...args) => {
+    const res = await fn(...args);
+    if (args[0] instanceof Request) await (await import('@/server/contract/check')).checkResponse(args[0], res);
+    return res;
+  };
+}
+
 /** Uniform JSON error handling for route handlers. */
 export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response>): (...args: T) => Promise<Response> {
-  return async (...args) => {
+  return checked(async (...args: T) => {
     try {
       return await fn(...args);
     } catch (e) {
@@ -288,13 +310,13 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
       const status = /DATABASE_URL/.test(msg) || code === '08006' || code === '57P01' ? 503 : 500;
       return NextResponse.json({ error: `เกิดข้อผิดพลาดในระบบ (รหัสอ้างอิง ${ref})`, ref }, { status });
     }
-  };
+  });
 }
 
 const MAX_JSON_BYTES = 1_000_000;
 
 /**
- * Parse a JSON body or 400. Content-Type must be application/json: a cross-site
+ * Parse a JSON body or 400 — routes read a body with parseBody (below), which calls this. Content-Type must be application/json: a cross-site
  * <form> or text/plain fetch (no CORS preflight) can't produce it, so it closes
  * the CSRF path that SameSite=Lax leaves to same-site sibling hosts.
  */
@@ -309,6 +331,90 @@ export async function readJson<T = Record<string, unknown>>(req: NextRequest): P
   } catch {
     throw new HttpError(400, 'invalid_json');
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading a request — ONLY through these, with the schemas its operation declares in
+ * src/server/contract (scripts/test-routes-input.mts fails a route that reads input by hand).
+ * A part that fails is refused as the operation's `invalid` says: by default the form rules'
+ * 400 "กรอกข้อมูลไม่ครบ N ช่อง" + details.fields (assertValid); or a status with the first problem's
+ * own message. Call them where the route always read that part: a check's place decides which of
+ * 401 / 403 / 400 / 404 a caller sees first.
+ * ------------------------------------------------------------------ */
+type Declares<K extends Part, S> = { [P in K]: S } & { invalid?: Invalid };
+
+function parsePart<S extends z.ZodType>(op: { invalid?: Invalid }, part: Part, schema: S, value: unknown): z.output<S> {
+  const how = op.invalid?.[part] ?? 'fields';
+  if (how === 'fields') {
+    const v = validate(schema, value);
+    if (v.ok) return v.data;
+    throw new HttpError(400, summary(v.errors), { fields: v.errors });
+  }
+  const r = schema.safeParse(value);
+  if (r.success) return r.data;
+  throw new HttpError(how, r.error.issues[0]?.message ?? 'invalid');
+}
+
+/** first value per name — what URLSearchParams.get / FormData.get read */
+function firstOf<V>(each: (fn: (value: V, name: string) => void) => void): Record<string, V> {
+  const seen = new Map<string, V>();
+  each((value, name) => {
+    if (!seen.has(name)) seen.set(name, value);
+  });
+  return Object.fromEntries(seen);
+}
+
+/** The path parameters (`ctx.params` of a dynamic route). */
+export async function parseParams<S extends z.ZodType>(
+  ctx: { params: Promise<unknown> },
+  op: Declares<'params', S>,
+): Promise<z.output<S>> {
+  return parsePart(op, 'params', op.params, await ctx.params);
+}
+
+/** The query string (a repeated name: its first value). */
+export function parseQuery<S extends z.ZodType>(req: Request, op: Declares<'query', S>): z.output<S> {
+  const sp = new URL(req.url).searchParams;
+  return parsePart(
+    op,
+    'query',
+    op.query,
+    firstOf<string>((fn) => sp.forEach(fn)),
+  );
+}
+
+/** The request headers the operation declares (case-insensitive, as HTTP). */
+export function parseHeaders<S extends z.ZodObject>(req: Request, op: Declares<'headers', S>): z.output<S> {
+  const sent = Object.keys(op.headers.shape).flatMap((name) => {
+    const value = req.headers.get(name);
+    return value === null ? [] : [[name, value] as const];
+  });
+  return parsePart(op, 'headers', op.headers, Object.fromEntries(sent));
+}
+
+/** A JSON body (readJson's 415 / 413 / 400 invalid_json first). */
+export async function parseBody<S extends z.ZodType>(req: NextRequest, op: Declares<'body', S>): Promise<z.output<S>> {
+  return parsePart(op, 'body', op.body, await readJson(req));
+}
+
+/** The small JSON body of the public /track routes: over 8 KB, not JSON or not an object reads as `{}`. */
+export async function parseTrackBody<S extends z.ZodType>(
+  req: NextRequest,
+  op: Declares<'body', S>,
+): Promise<z.output<S>> {
+  return parsePart(op, 'body', op.body, await readSmallJson(req));
+}
+
+/** A multipart/form-data body (a repeated name: its first value). */
+export async function parseForm<S extends z.ZodType>(req: NextRequest, op: Declares<'form', S>): Promise<z.output<S>> {
+  const form = await req.formData().catch(() => null);
+  if (!form) throw new HttpError(400, 'expected multipart/form-data');
+  return parsePart(
+    op,
+    'form',
+    op.form,
+    firstOf<FormDataEntryValue>((fn) => form.forEach(fn)),
+  );
 }
 
 /** SQLSTATE of a Postgres error, also when drizzle wraps it (DrizzleQueryError.cause). */

@@ -1,10 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac, isBlocked, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx, readSmallJson, str, TRACK_SESSION_HEADER } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { touchSession } from '@/server/track-otp';
 import { findDoc, issueDocLink, jobNoForCustomers, jobNoForLink } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { checked, parseHeaders, parseTrackBody } from '@/server/auth';
+import { trackDoc } from '@/server/contract/track';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,7 +22,7 @@ export const dynamic = 'force-dynamic';
  * The URL carries no job number, quotation number or token.
  * Not yours / does not exist / not issued to customers → the same 404.
  */
-export async function POST(req: NextRequest) {
+export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   const notFound = () => trackJson({ ok: false, error: TRACK_MSG.docFail }, 404);
   try {
@@ -32,18 +34,18 @@ export async function POST(req: NextRequest) {
       logEvent('doc_rate_limited', { ipHash: c.ipKey, requestId: c.requestId });
       return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
     }
-    const body = await readSmallJson(req);
+    const body = await parseTrackBody(req, trackDoc);
 
     let jobNo: string | null;
     let auth: string; // the session / link the document link is bound to
-    const sessionToken = req.headers.get(TRACK_SESSION_HEADER);
+    const sessionToken = parseHeaders(req, trackDoc)['x-track-session'];
     if (sessionToken) {
       const s = await touchSession(sessionToken, c.ip, c.ua, true);
       if (!s) return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: 'session' }, 401);
-      jobNo = await jobNoForCustomers(str(body.jobNo, 50), s.customerIds);
+      jobNo = await jobNoForCustomers(body.jobNo, s.customerIds);
       auth = sessionToken;
     } else {
-      const linkToken = str(body.linkToken, 128).trim();
+      const linkToken = body.linkToken.trim();
       if (!(await hit('doc_link_min', hmac(`link:${linkToken}`), 10, 60))) {
         logEvent('doc_rate_limited', { ipHash: c.ipKey, result: 'link', requestId: c.requestId });
         return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
@@ -63,4 +65,4 @@ export async function POST(req: NextRequest) {
     logError(e, 'track/doc');
     return trackJson({ ok: false, error: TRACK_MSG.docFail }, 500);
   }
-}
+});

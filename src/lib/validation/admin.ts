@@ -79,6 +79,17 @@ const staffPhone = (v: unknown) => clean(v).replace(/[\s-]/g, '');
 const issue = (ctx: z.RefinementCtx, path: string, message: string) =>
   ctx.addIssue({ code: 'custom', path: [path], message });
 
+/** ผู้ใช้ระบบ's fields that need no stored user — the API reads the body with these (src/server/contract) */
+export const userFields = z.looseObject({
+  email: z
+    .string()
+    .nullish()
+    .refine((v) => !clean(v) || z.email().safeParse(clean(v).toLowerCase()).success, 'รูปแบบอีเมลไม่ถูกต้อง')
+    .refine((v) => clean(v).length <= 100, 'อีเมลยาวเกิน 100 ตัวอักษร'),
+  code: maxText(50, 'Lark ID '),
+  branch: maxText(100, 'สาขา / หน่วยงาน '),
+});
+
 /**
  * ผู้ใช้ระบบ. `prev` = the user being edited: an unchanged legacy username / phone still passes.
  * email ≤ 100 (unique — the API answers 409), username 3–50 of A-Z a-z 0-9 . _ - (unique ignoring
@@ -86,29 +97,19 @@ const issue = (ctx: z.RefinementCtx, path: string, message: string) =>
  * roles (checked by the API against app_config).
  */
 export function userSchema(prev?: { username?: string | null; phone?: string | null } | null) {
-  return z
-    .looseObject({
-      email: z
-        .string()
-        .nullish()
-        .refine((v) => !clean(v) || z.email().safeParse(clean(v).toLowerCase()).success, 'รูปแบบอีเมลไม่ถูกต้อง')
-        .refine((v) => clean(v).length <= 100, 'อีเมลยาวเกิน 100 ตัวอักษร'),
-      code: maxText(50, 'Lark ID '),
-      branch: maxText(100, 'สาขา / หน่วยงาน '),
-    })
-    .superRefine((v, ctx) => {
-      const [first = '', ...rest] = clean(v.name).split(' ');
-      if (!first) issue(ctx, 'name', 'ต้องระบุชื่อ-สกุล');
-      else if (first.length > 50 || rest.join(' ').length > 50)
-        issue(ctx, 'name', 'ชื่อและนามสกุลต้องยาวไม่เกินอย่างละ 50 ตัวอักษร');
-      if (!isFilled(v.role)) issue(ctx, 'role', 'ต้องเลือกประเภทผู้ใช้งาน');
-      const username = clean(v.username);
-      if (username && !/^[A-Za-z0-9._-]{3,50}$/.test(username) && username !== clean(prev?.username))
-        issue(ctx, 'username', 'Username ใช้ได้เฉพาะ A-Z a-z 0-9 . _ - (3–50 ตัว)');
-      const phone = staffPhone(v.phone);
-      if (phone && !STAFF_PHONE_RE.test(phone) && phone !== staffPhone(prev?.phone))
-        issue(ctx, 'phone', 'เบอร์โทรศัพท์ต้องเป็น 0 ตามด้วยตัวเลข 8–9 หลัก');
-    });
+  return userFields.superRefine((v, ctx) => {
+    const [first = '', ...rest] = clean(v.name).split(' ');
+    if (!first) issue(ctx, 'name', 'ต้องระบุชื่อ-สกุล');
+    else if (first.length > 50 || rest.join(' ').length > 50)
+      issue(ctx, 'name', 'ชื่อและนามสกุลต้องยาวไม่เกินอย่างละ 50 ตัวอักษร');
+    if (!isFilled(v.role)) issue(ctx, 'role', 'ต้องเลือกประเภทผู้ใช้งาน');
+    const username = clean(v.username);
+    if (username && !/^[A-Za-z0-9._-]{3,50}$/.test(username) && username !== clean(prev?.username))
+      issue(ctx, 'username', 'Username ใช้ได้เฉพาะ A-Z a-z 0-9 . _ - (3–50 ตัว)');
+    const phone = staffPhone(v.phone);
+    if (phone && !STAFF_PHONE_RE.test(phone) && phone !== staffPhone(prev?.phone))
+      issue(ctx, 'phone', 'เบอร์โทรศัพท์ต้องเป็น 0 ตามด้วยตัวเลข 8–9 หลัก');
+  });
 }
 
 /** รหัสอะไหล่ (ผู้ผลิต) — decided by the owner 2026-10-15: one code, A-Z 0-9 . _ / - only, upper-case;

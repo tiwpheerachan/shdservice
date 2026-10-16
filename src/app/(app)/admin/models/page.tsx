@@ -64,7 +64,7 @@ export default function ModelsPage() {
       code: m?.code ?? '',
       name: m?.name ?? '',
       brand: m?.brand ?? '', // a new model starts with no brand: the admin must pick it (required)
-      price: m?.price ? String(m.price) : '',
+      price: m ? String(m.price ?? 0) : '', // an existing model's 0 shows as 0 (1,172 legacy models are priced 0); a new one starts empty
       status: m?.status ?? 'Active',
     });
     setOpen(true);

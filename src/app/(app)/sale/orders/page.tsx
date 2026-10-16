@@ -53,7 +53,10 @@ function SaleOrderList() {
   } = useSaleOrdersPage({
     page: table.page,
     pageSize: table.pageSize,
-    q: table.q || filters.no || filters.customer || filters.code,
+    q: table.q,
+    no: filters.no,
+    customer: filters.customer,
+    code: filters.code,
     sort: table.sort?.key,
     dir: table.sort?.dir,
     from: filters.from,
@@ -151,7 +154,10 @@ function SaleOrderList() {
             <ExportButton
               run={() =>
                 exportXlsx('sale_orders', {
-                  q: table.q || filters.no || filters.customer || filters.code,
+                  q: table.q,
+                  no: filters.no,
+                  customer: filters.customer,
+                  code: filters.code,
                   from: filters.from,
                   to: filters.to,
                   sales: filters.sales,

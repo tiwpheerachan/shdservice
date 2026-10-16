@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireAdmin, readJson } from '@/server/auth';
+import { handle, parseBody, parseQuery, requireAdmin } from '@/server/auth';
+import { userSave, usersList } from '@/server/contract/admin';
 import { lookupByEmail } from '@/lib/directory';
 import { listSystemUsers, upsertUser, userPrev } from '@/server/services/users';
 import { parseStatusMode } from '@/server/record-status';
@@ -9,12 +10,12 @@ import { userSchema } from '@/lib/validation/admin';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+const str = (v: string | null | undefined) => v?.trim() ?? '';
 
 /** List system users (people who signed in via SSO). Admin only. */
 export const GET = handle(async (req: NextRequest) => {
   await requireAdmin(req);
-  const deleted = parseStatusMode(new URL(req.url).searchParams.get('deleted'));
+  const deleted = parseStatusMode(parseQuery(req, usersList).deleted);
   return NextResponse.json({ rows: await listSystemUsers(deleted) });
 });
 
@@ -24,7 +25,7 @@ export const GET = handle(async (req: NextRequest) => {
  */
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const body = await readJson(req);
+  const body = await parseBody(req, userSave);
 
   // same rules as the user form (lib/validation/admin); an unchanged legacy username / phone passes
   assertValid(userSchema(await userPrev(body.id)), body);

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { addDays, today } from '@/lib/dates';
 import { CHANNELS, CLOSE_STATUS_OPTIONS, JOB_STATUS_OPTIONS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/mock';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
+import { rightLabel } from '@/lib/modules';
 // only used inside the factories below (sale-order.ts imports isFilled from here — no top-level use, no cycle problem)
 
 /**
@@ -321,7 +322,7 @@ export const partCharge = (o: { pick?: boolean; quote?: boolean; qty: number }, 
   o.pick && o.quote ? o.qty * price : 0;
 
 /** มอบหมายงานนี้ให้ — only a role with the special right Job Take takes jobs; the job's current assignee may stay */
-export const NOT_ENGINEER = 'มอบหมายงานได้เฉพาะผู้ใช้ที่มีสิทธิ์ "รับงานซ่อม" (สิทธิ์พิเศษ Job Take)';
+export const NOT_ENGINEER = `มอบหมายงานได้เฉพาะผู้ใช้ที่มี${rightLabel('Job Take')}`;
 
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair (money 0–1,000,000, part qty whole 0–1000, text ≤ its column) */
 export const repairActionSchema = z.looseObject({
@@ -471,7 +472,7 @@ export const partsWaitingMsg = (parts: { code: string; name?: string }[], status
   ].join(', ')}): ยกเลิกรายการอะไหล่นั้นที่หน้า บันทึกงานซ่อม (เอาติ๊ก "เบิก" ออก / ลบรายการ) หรือรอสต๊อกจ่ายก่อน`;
 
 /** a closed job (Finished) goes back to an open status only with the special right Job Reopen (setStatus) */
-export const REOPEN_LOCKED = 'งานปิดแล้ว — เปิดงานกลับได้เฉพาะผู้มีสิทธิ์ "เปิดงานที่ปิดแล้ว" (Job Reopen)';
+export const REOPEN_LOCKED = `งานปิดแล้ว — เปิดงานกลับได้เฉพาะผู้มี${rightLabel('Job Reopen')}`;
 
 /** job_payment_detail = "ชำระ <date> · <note>" — a note loaded back from an earlier save drops its old date first */
 export const paymentDetailOf = (date?: string | null, note?: string | null) =>
@@ -601,6 +602,6 @@ export function jobBalance(total: number, deposit: number, paid: number) {
 }
 
 /** a closed job (Finished) keeps its money fields — only the special right Job Money After Close changes them */
-const MONEY_RIGHT = 'ผู้มีสิทธิ์ "แก้ช่องเงินหลังปิดงาน" (Job Money After Close)';
+const MONEY_RIGHT = `ผู้มี${rightLabel('Job Money After Close')}`;
 export const MONEY_LOCKED = `งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะ${MONEY_RIGHT}`;
-export const moneyLockedMsg = (label: string) => `งานปิดแล้ว — แก้${label}ไม่ได้ (เฉพาะ${MONEY_RIGHT})`;
+export const moneyLockedMsg = (label: string) => `งานปิดแล้ว — แก้${label}ได้เฉพาะ${MONEY_RIGHT}`;

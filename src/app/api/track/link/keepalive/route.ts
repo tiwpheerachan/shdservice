@@ -1,9 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac } from '@/server/track-guard';
-import { trackJson, trackCtx, readSmallJson, str } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { extendLink } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { checked, parseTrackBody } from '@/server/auth';
+import { trackLinkKeepalive } from '@/server/contract/track';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,11 +16,10 @@ export const dynamic = 'force-dynamic';
  * keeps ≥ 5 minutes on the clock, never past 60 minutes from its first open. It never reopens
  * an expired link and never opens an unopened one. 410 = the link is no longer live.
  */
-export async function POST(req: NextRequest) {
+export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   try {
-    const body = await readSmallJson(req);
-    const linkToken = str(body.linkToken, 128).trim();
+    const linkToken = (await parseTrackBody(req, trackLinkKeepalive)).linkToken.trim();
     if (
       !(await hit('link_keepalive_ip_min', c.ipKey, 20, 60)) ||
       !(await hit('link_keepalive_min', hmac(`link:${linkToken}`), 10, 60))
@@ -32,4 +33,4 @@ export async function POST(req: NextRequest) {
     logError(e, 'track/link/keepalive');
     return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 500);
   }
-}
+});

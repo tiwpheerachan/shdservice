@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '@/db/client';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
@@ -107,7 +107,18 @@ const SORT = {
   tracking: saleOutHd.deliveryTrackingNo,
 };
 
-export type SaleOrderFilters = { approve?: string; from?: string; to?: string; sales?: string; deleted?: StatusMode };
+export type SaleOrderFilters = {
+  approve?: string;
+  from?: string;
+  to?: string;
+  sales?: string;
+  deleted?: StatusMode;
+  /** the list page's own boxes — each its own condition (they used to be folded into one `q`) */
+  no?: string;
+  customer?: string;
+  /** a part / accessory code on one of the order's lines */
+  code?: string;
+};
 
 export function saleOrderWhere(q: string, f: SaleOrderFilters) {
   const term = q.trim();
@@ -123,6 +134,16 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
           ilike(saleOutHd.customerPhoneNumber, `%${term}%`),
           ilike(saleOutHd.deliveryTrackingNo, `%${term}%`),
         )
+      : undefined,
+    f.no?.trim() ? ilike(saleOutHd.saleOutHdNo, `%${f.no.trim()}%`) : undefined,
+    f.customer?.trim()
+      ? or(
+          ilike(saleOutHd.customerName, `%${f.customer.trim()}%`),
+          ilike(saleOutHd.customerCode, `%${f.customer.trim()}%`),
+        )
+      : undefined,
+    f.code?.trim()
+      ? sql`exists (select 1 from sale_out_dt d where d.sale_out_hd_no = ${saleOutHd.saleOutHdNo} and d.product_code ilike ${'%' + f.code.trim() + '%'})`
       : undefined,
     f.approve
       ? eq(

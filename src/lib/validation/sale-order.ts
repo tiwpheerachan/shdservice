@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { maxText, moneyField, trackingField } from './index';
 import { isFilled } from './job';
 import { PAYMENT_METHODS } from '@/data/mock';
+import { noRight } from '@/lib/modules';
 
 export { cleanTracking, trackingField } from './index'; // shared with job reception / return tracking
 
@@ -11,7 +12,7 @@ const num = (v: unknown) => Number(v) || 0;
 export const SELF_APPROVE = 'คุณเป็นผู้สร้างใบสั่งขายนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
 export const SELF_APPROVE_SALES = 'คุณเป็นพนักงานขายของใบนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
 /** who may approve / deny / send back a sale order: the special right SO Approve — not any Sale Order edit grant */
-export const NOT_APPROVER = 'บทบาทของคุณไม่มีสิทธิ์อนุมัติใบสั่งขาย (สิทธิ์พิเศษ "อนุมัติใบสั่งขาย" — SO Approve)';
+export const NOT_APPROVER = noRight('SO Approve');
 /** only who keyed the order in (document_create_by) sends it for approval (System Admin may) */
 export const SUBMIT_CREATOR_ONLY = 'ส่งขออนุมัติได้เฉพาะผู้สร้างใบสั่งขาย';
 /** a waiting (2) order: only its creator (or System Admin) edits it (owner decision) — the page is read-only for others */

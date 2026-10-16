@@ -1,22 +1,24 @@
 import type { NextRequest } from 'next/server';
 import { hit, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx, TRACK_SESSION_HEADER } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { touchSession } from '@/server/track-otp';
 import { publicJobForCustomers } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { checked, parseHeaders, parseParams } from '@/server/auth';
+import { trackMeJob } from '@/server/contract/track';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /** GET /api/track/me/jobs/:no → the (masked) job — only if it belongs to the signed-in customer */
-export async function GET(req: NextRequest, ctx: { params: Promise<{ no: string }> }) {
+export const GET = checked(async (req: NextRequest, ctx: { params: Promise<{ no: string }> }) => {
   const c = trackCtx(req);
   try {
     if (!(await hit('me_ip_min', c.ipKey, 30, 60))) return trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429);
-    const s = await touchSession(req.headers.get(TRACK_SESSION_HEADER), c.ip, c.ua, true);
+    const s = await touchSession(parseHeaders(req, trackMeJob)['x-track-session'], c.ip, c.ua, true);
     if (!s) return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: 'session' }, 401);
-    const { no } = await ctx.params;
+    const { no } = await parseParams(ctx, trackMeJob);
     const job = await publicJobForCustomers(decodeURIComponent(no), s.customerIds);
     // someone else's job and a job that does not exist look the same
     if (!job) return trackJson({ ok: false, error: 'ไม่พบรายการ' }, 404);
@@ -26,4 +28,4 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ no: string 
     logError(e, 'track/me/jobs');
     return trackJson({ ok: false, error: TRACK_MSG.sessionExpired, reason: 'session' }, 500);
   }
-}
+});

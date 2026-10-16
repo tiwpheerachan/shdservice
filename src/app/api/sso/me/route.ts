@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S, seenUserId } from '@/lib/session';
-import { resolveUser, HttpError } from '@/server/auth';
+import { resolveUser, HttpError, checked } from '@/server/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = checked(async (request: NextRequest) => {
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   // a valid signature is not enough: the user row + session version must still match
   // (signed out on another device → every cookie of that user is dead)
@@ -49,4 +49,4 @@ export async function GET(request: NextRequest) {
     maxAge: SEEN_TTL_S,
   });
   return res;
-}
+});

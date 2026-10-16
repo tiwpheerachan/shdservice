@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { HttpError } from '@/server/http-error';
+import { parseHeaders } from '@/server/auth';
+import { IDEMPOTENCY } from '@/server/contract/common';
 
 /**
  * Idempotency-Key on create POSTs (drizzle/0026 idempotency_key). The client sends one key per
@@ -14,9 +16,9 @@ import { HttpError } from '@/server/http-error';
  * No header → `fn` runs exactly as before.
  */
 export async function idempotent(req: NextRequest, userId: number, fn: () => Promise<Response>): Promise<Response> {
-  const key = req.headers.get('idempotency-key')?.trim();
+  // trimmed; over 100 → 400 "Idempotency-Key ยาวเกินไป" (the header as src/server/contract declares it)
+  const key = parseHeaders(req, IDEMPOTENCY)['Idempotency-Key'];
   if (!key) return fn();
-  if (key.length > 100) throw new HttpError(400, 'Idempotency-Key ยาวเกินไป');
   const route = `${req.method} ${req.nextUrl.pathname}`.slice(0, 200);
 
   await db.execute(sql`DELETE FROM idempotency_key WHERE created_at < now() - interval '24 hours'`); // purge as we go

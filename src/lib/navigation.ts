@@ -33,17 +33,39 @@ export function sessionExpired() {
   if (typeof window !== 'undefined' && !signingOut) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 
-/** session expired → our /login with the "expired" note, back to this exact page (filters included) after.
+// the user's last press, and the in-app link it was on: the press itself renews the session (SessionTimer, on
+// pointerdown), so its 401 comes back while the tab still shows the page the link is leaving
+let pressed: { to: string | null; at: number } | null = null;
+if (typeof window !== 'undefined')
+  for (const ev of ['pointerdown', 'click', 'keydown'] as const)
+    window.addEventListener(
+      ev,
+      (e) => {
+        const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null;
+        const u = a && a.target !== '_blank' ? new URL(a.href) : null;
+        const inApp =
+          u?.origin === window.location.origin && u.pathname !== '/login' && !u.pathname.startsWith('/api/');
+        pressed = { to: inApp ? u.pathname + u.search : null, at: Date.now() };
+      },
+      true,
+    );
+
+/** session expired → our /login with the "expired" note. `next` (where the sign-in comes back to) = what the
+ *  user was opening when the 401 hit: the link pressed in the last few seconds, or this page after any other
+ *  press (a button, a search); without a press, this page after an idle expiry (filters included) — but none
+ *  when signed out on another device: this tab's page is stale, the sign-in lands on the role's landing page.
  *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired).
  *  `signedOut` (ออกจากระบบ in another tab — /api/sso/me says so): ALWAYS /login?bye=1, no `next`, no dialog —
  *  the user left on purpose, and the next person must not sign in into this tab's page / typed data.
  *  `reason` = the 401's `reason` from /api/sso/me or /refresh: 'elsewhere' (signed out on another device)
- *  gets its own note instead of "idle 30 min"; `next` is kept the same way. */
+ *  gets its own note instead of "idle 30 min". */
 export function toLogin(opts: { signedOut?: boolean; reason?: string } = {}) {
   if (typeof window === 'undefined' || signingOut) return;
   if (opts.signedOut) return hardNavigate('/login?bye=1');
   if (hasUnsavedChanges()) return sessionExpired();
   const here = window.location.pathname + window.location.search;
+  const next =
+    pressed && Date.now() - pressed.at < 5000 ? (pressed.to ?? here) : opts.reason === 'elsewhere' ? '' : here;
   const why = opts.reason === 'elsewhere' ? 'reason=elsewhere' : 'expired=1';
-  hardNavigate(`/login?${why}&next=${encodeURIComponent(here)}`);
+  hardNavigate(`/login?${why}${next ? `&next=${encodeURIComponent(next)}` : ''}`);
 }

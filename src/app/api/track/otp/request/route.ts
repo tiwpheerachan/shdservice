@@ -1,10 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { hit, verifyTurnstile, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx, readSmallJson, str } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { requestOtp } from '@/server/track-otp';
 import { smsAvailable } from '@/server/sms';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { checked, parseTrackBody } from '@/server/auth';
+import { trackOtpRequest } from '@/server/contract/track';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,15 +18,13 @@ export const dynamic = 'force-dynamic';
  * be used to find out who is a customer. Per IP: 5/min, 20/hour; per number: 1/min, 3/hour
  * (server/track-otp.ts). The captcha comes first; SMS go out only to customer numbers.
  */
-export async function POST(req: NextRequest) {
+export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   const limited = (msg: string = TRACK_MSG.rateLimited) =>
     trackJson({ ok: false, error: msg }, 429, { 'Retry-After': '60' });
   try {
     if (!smsAvailable()) return trackJson({ ok: false, error: TRACK_MSG.otpUnavailable }, 503);
-    const body = await readSmallJson(req);
-    const phone = str(body.phone, 32);
-    const turnstileToken = str(body.turnstileToken, 4096);
+    const { phone, turnstileToken } = await parseTrackBody(req, trackOtpRequest);
 
     if (!(await hit('otp_ip_min', c.ipKey, 5, 60)) || !(await hit('otp_ip_hour', c.ipKey, 20, 3600))) {
       logEvent('otp_rate_limited', { ipHash: c.ipKey, result: 'ip', requestId: c.requestId });
@@ -58,4 +58,4 @@ export async function POST(req: NextRequest) {
     logError(e, 'track/otp/request');
     return trackJson({ ok: false, error: TRACK_MSG.sessionFail }, 500);
   }
-}
+});

@@ -39,18 +39,35 @@ export const PAGE_MODULES: readonly Module[] = [
  * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
  * permissions page, section สิทธิ์พิเศษ). Every rule that used to name a role in code reads one of these.
  * System Admin holds all of them implicitly, except Job Take (checkRight).
+ * The value is the right's one short name — the permissions page, the error messages and the hints all
+ * say this (rightLabel); RIGHT_HINTS is the longer line under it on the permissions page.
  */
 export const RIGHTS = {
-  'SO Approve': 'อนุมัติ / ปฏิเสธ / ส่งกลับใบสั่งขาย',
-  'Job Take': 'รับงานซ่อมและมีชื่อในช่องมอบหมายงาน',
-  'Overdue All': 'ผู้รับงานซ่อม: กระดิ่งงานเกินกำหนดแสดงงานของทุกคน (ไม่ติ๊ก = เฉพาะงานของตัวเอง)',
-  'Job Reopen': 'เปิดงานที่ปิดแล้วกลับมาแก้',
+  'SO Approve': 'อนุมัติใบสั่งขาย',
+  'Job Take': 'รับงานซ่อม',
+  'Overdue All': 'เห็นงานเกินกำหนดของทุกคน',
+  'Job Reopen': 'เปิดงานที่ปิดแล้ว',
   'Job Money After Close': 'แก้ช่องเงินหลังปิดงาน',
   'Product Cost': 'เห็นราคาทุน',
   Report: 'เปิดหน้ารายงาน',
   Export: 'ส่งออก Excel',
 } as const;
+export const RIGHT_HINTS: Record<keyof typeof RIGHTS, string> = {
+  'SO Approve': 'อนุมัติ / ปฏิเสธ / ส่งกลับแก้ไขใบสั่งขายที่รออนุมัติ',
+  'Job Take': 'มีชื่อในช่อง มอบหมายงานนี้ให้ และรับงานเองตอนบันทึกงานซ่อม',
+  'Overdue All': 'ผู้รับงานซ่อม: กระดิ่งงานเกินกำหนดแสดงงานของทุกคน (ไม่ติ๊ก = เฉพาะงานของตัวเอง)',
+  'Job Reopen': 'เปลี่ยนงานที่ปิดแล้วกลับเป็นสถานะที่ยังไม่ปิด เพื่อแก้ต่อ',
+  'Job Money After Close': 'แก้ค่าบริการ / ค่าอะไหล่ / การชำระเงินของงานที่ปิดแล้ว',
+  'Product Cost': 'เห็นราคาทุนในข้อมูลสินค้า',
+  Report: 'เปิดเมนูรายงาน',
+  Export: 'ปุ่มส่งออก Excel ในรายการและรายงาน',
+};
 export type Right = keyof typeof RIGHTS;
+
+/** how messages and hints name a right: สิทธิ์พิเศษ "อนุมัติใบสั่งขาย" (SO Approve) */
+export const rightLabel = (r: Right) => `สิทธิ์พิเศษ "${RIGHTS[r]}" (${r})`;
+/** the 403 of a user whose role lacks the right */
+export const noRight = (r: Right) => `บทบาทของคุณไม่มี${rightLabel(r)}`;
 
 /** Route prefix → module. First match wins (most specific first). */
 const ROUTE_MODULES: [string, Module][] = [
@@ -99,10 +116,13 @@ export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | 
   return !!grants[module]?.[action];
 }
 
-/** Does the role hold a special right? Job Take says who IS a technician (assignee list, self-take), not
- *  what one may do — System Admin holds it only when ticked, as no admin was ever offered as an assignee. */
+/** System Admin holds every module grant and right without a ticked row — except Job Take: it says who IS a
+ *  technician (assignee list, self-take), not what one may do, and no admin was ever offered as an assignee. */
+export const adminImplicit = (m: Module) => m !== 'Job Take';
+
+/** Does the role hold a special right? */
 export function checkRight(isAdmin: boolean, grants: GrantMap, right: Right): boolean {
-  return right === 'Job Take' ? !!grants[right]?.view : checkGrant(isAdmin, grants, right, 'view');
+  return checkGrant(isAdmin && adminImplicit(right), grants, right, 'view');
 }
 
 /** The grant a page needs beyond `view`: a create page (…/new — เปิดงานใหม่, สร้างใบเสนอราคา,

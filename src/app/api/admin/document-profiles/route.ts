@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireAdmin, readJson, HttpError } from '@/server/auth';
+import { handle, parseBody, parseQuery, requireAdmin } from '@/server/auth';
+import { documentProfileDelete, documentProfileSave } from '@/server/contract/admin';
 import {
   listDocumentProfiles,
   saveDocumentProfile,
@@ -19,15 +20,15 @@ export const GET = handle(async (req: NextRequest) => {
 /** DELETE ?id= — soft delete (see deleteDocumentProfile for the rules). */
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const id = Number(new URL(req.url).searchParams.get('id'));
-  if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'id required');
+  const { id } = parseQuery(req, documentProfileDelete); // 400 "id required"
   await deleteDocumentProfile(id, me.userId);
   return NextResponse.json({ ok: true });
 });
 
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const body = (await readJson(req)) as DocumentProfileInput;
-  const row = await saveDocumentProfile(body, me.userId);
+  const body = await parseBody(req, documentProfileSave);
+  // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
+  const row = await saveDocumentProfile(body as DocumentProfileInput, me.userId);
   return NextResponse.json({ row });
 });

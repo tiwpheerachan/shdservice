@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { job, product, saleOutHd } from '@/db/schema';
-import { handle, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
+import { handle, parseForm, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
+import { upload } from '@/server/contract/misc';
 import { rateLimit } from '@/server/rate-limit';
 import { AS } from '@/server/services/sale-orders';
 import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
@@ -25,8 +26,6 @@ const IMAGE_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'im
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Kind = 'product-image' | 'sale-order-slip' | 'job-slip' | 'profile-logo' | 'shipper-logo';
-
 /**
  * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
  * and writes the reference into the legacy column:
@@ -42,15 +41,9 @@ export const POST = handle(async (req: NextRequest) => {
   const declared = Number(req.headers.get('content-length') ?? 0);
   if (declared > MAX_FILE_BYTES + 1024 * 1024) throw new HttpError(413, 'ไฟล์ใหญ่เกิน 10MB');
 
-  const form = await req.formData().catch(() => null);
-  if (!form) throw new HttpError(400, 'expected multipart/form-data');
-  const kind = String(form.get('kind') ?? '') as Kind;
-  const id = String(form.get('id') ?? '')
-    .trim()
-    .toUpperCase();
-  const file = form.get('file');
-  if (!(file instanceof File)) throw new HttpError(400, 'file required');
-  if (!id) throw new HttpError(400, 'id required');
+  // 400 "expected multipart/form-data" / "file required" / "id required"; id upper-cased; an unknown kind
+  // reads as none — refused below ("unknown kind"), after the file checks
+  const { kind, id, file } = await parseForm(req, upload);
   // images only for pictures/logos; slips may also be PDF. Checked against the bytes BEFORE sharp sees them.
   const problem = await fileProblem(
     file,

@@ -41,9 +41,10 @@ const nextConfig = {
       // staff app CSP (OneLink lib/security-headers.ts): no foreign scripts, no plugins, no
       // framing, forms only to us. Inline scripts stay allowed (theme script + Next's bootstrap
       // carry no nonce here); images may be https: (Lark avatars, Supabase signed URLs).
-      // NOT on /track — a second CSP would intersect with its nonce policy and block Turnstile.
+      // NOT on /track — a second CSP would intersect with its nonce policy and block Turnstile —
+      // nor on /api-docs, which sets its own nonce policy (src/app/api-docs/route.ts).
       {
-        source: '/((?!api/|track).*)',
+        source: '/((?!api/|api-docs|track).*)',
         headers: [{ key: 'Content-Security-Policy', value: PAGE_CSP }],
       },
       {

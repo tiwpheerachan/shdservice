@@ -29,3 +29,12 @@ Split a task by area, one agent per area, so each gets a focused brief and none 
 | Web performance | `agent-skills:web-performance-auditor` |
 
 Every agent brief states: the files it owns (and the ones it must not touch), that `.env` is production and only local DBs may be used, that it must not commit, and that it reports file:line, what it skipped and why, and the check results. Areas already in progress are listed in [docs/production-readiness.md](docs/production-readiness.md).
+
+# Adding an API endpoint
+
+The API is contract-first ([adr/0007](adr/0007-contract-first-api.md)): `src/server/contract` is what `/api-docs`, `/api/openapi.json` and the response check are built from.
+
+1. Declare it with `defineOperation` in `src/server/contract/<family>.ts`: params, query, headers, body (or `form` for multipart) and **every** response, errors included (`SIGNED_IN`, `JSON_BODY`, `CONFLICT`, `IDEMPOTENCY`, … from `common.ts`; shared records in `shapes.ts`). A body checked with a form schema from `src/lib/validation` IS that schema; a body a service checks against the stored record is the rule set's static part (`customerFields`, or `.shape` of the factory with the prev-dependent fields at their bare type) plus the types of fields the rules do not declare. A choice the route ignores when wrong is `choice()` / `flag`, never a 400. Refusals: by default the form rules' 400 + `details.fields`; `invalid: { query: 400 }` etc. answers with the schema's own message instead (`'id required'`).
+2. Write the route with `handle()` (a route that answers without it wraps itself in `checked()`) and read **every** input with `parseParams` / `parseQuery` / `parseHeaders` / `parseBody` / `parseForm` (`src/server/auth.ts`) and the operation — never `req.json()`, `searchParams`, `ctx.params` or `headers.get` (`npm test` → `scripts/test-routes-input.mts`). Call them where the check belongs: their place decides whether a caller sees 401 / 403 / 400 / 404 first. Under `next dev` an answer that does not match its declaration logs `API contract drift`.
+3. Call it in `scripts/test-api.mts` — `npm run test:db` runs strict (`API_CONTRACT_STRICT=1`) and fails on drift or on an operation nobody called. A new shared response shape gets a line in `scripts/test-response-types.ts` (its `z.input` = the service type; `tsc` fails on drift).
+4. `npm run test:openapi -- --update` and review the snapshot diff (`tests/fixtures/openapi.snapshot.json`); `npm run docs:api` rebuilds `/api-docs`.

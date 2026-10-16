@@ -4,7 +4,7 @@ import { pgSchema, varchar } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { appUser } from '@/db/schema';
 import { ownerEmails } from '@/lib/access';
-import { userFromRequest } from '@/server/auth';
+import { userFromRequest, checked } from '@/server/auth';
 import { logError, scrubText } from '@/lib/log';
 
 export const runtime = 'nodejs';
@@ -30,7 +30,7 @@ const migrations = pgSchema('drizzle').table('__drizzle_migrations', { hash: var
  * Supabase — it only turns a degraded site into no site (OneLink, same reason).
  * An uptime monitor asserts on the body instead.
  */
-export async function GET(request: NextRequest) {
+export const GET = checked(async (request: NextRequest) => {
   // anonymous callers (uptime checks) get only up/down — config and counts are for System Admin
   const me = await userFromRequest(request).catch(() => null);
   if (!me?.isAdmin) {
@@ -91,4 +91,4 @@ export async function GET(request: NextRequest) {
     out.dbError = scrubText(e instanceof Error ? e.message : String(e)).slice(0, 300);
   }
   return NextResponse.json({ ok: out.db === 'ok', ...out });
-}
+});

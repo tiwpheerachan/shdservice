@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SSO, STATE_COOKIE, STATE_SEP, MAX_STATES, appOrigin, isRouterFetch, safeNext } from '@/lib/sso';
+import { checked, parseQuery } from '@/server/auth';
+import { ssoLogin } from '@/server/contract/misc';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url);
-  const next = safeNext(url.searchParams.get('next'));
+export const GET = checked(async (request: NextRequest) => {
+  const query = parseQuery(request, ssoLogin);
+  const next = safeNext(query.next);
 
   // A soft navigation / prefetch landed here (session gone mid-session): send the
   // router to the app's own /login page instead of the SSO — the user clicks once
@@ -27,7 +29,7 @@ export async function GET(request: NextRequest) {
   authorize.searchParams.set('state', state);
   // "เข้าสู่ระบบด้วยบัญชีอื่น": ask Central SSO to re-authenticate (standard OIDC
   // hints; harmless if the SSO ignores them — it then behaves like a normal login)
-  if (url.searchParams.get('prompt') === 'login') {
+  if (query.prompt === 'login') {
     authorize.searchParams.set('prompt', 'login');
     authorize.searchParams.set('max_age', '0');
   }
@@ -47,4 +49,4 @@ export async function GET(request: NextRequest) {
     maxAge: 600, // 10 min to complete login
   });
   return res;
-}
+});

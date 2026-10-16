@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { type NextRequest } from 'next/server';
 import { searchDirectory } from '@/lib/directory';
-import { requireAdmin } from '@/server/auth';
+import { requireAdmin, checked, parseQuery } from '@/server/auth';
+import { directorySearch } from '@/server/contract/admin';
 import { rateLimit } from '@/server/rate-limit';
 
 // Runs only on the server. CENTRAL_API_KEY never leaves this file / the server —
@@ -9,7 +10,7 @@ import { rateLimit } from '@/server/rate-limit';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = checked(async (request: NextRequest) => {
   // employee directory = personal data + our central API key: only the people
   // who manage system users may query it, and not faster than a human types
   try {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     const status = (e as { status?: number }).status ?? 401;
     return NextResponse.json({ items: [], error: (e as Error).message }, { status });
   }
-  const q = (new URL(request.url).searchParams.get('q') ?? '').trim();
+  const q = (parseQuery(request, directorySearch).q ?? '').trim();
   if (q.length < 2) return NextResponse.json({ items: [] });
 
   if (!process.env.CENTRAL_API_KEY) {
@@ -47,4 +48,4 @@ export async function GET(request: NextRequest) {
     const msg = e instanceof Error ? e.message : 'directory service unavailable';
     return NextResponse.json({ items: [], error: msg }, { status: 502 });
   }
-}
+});

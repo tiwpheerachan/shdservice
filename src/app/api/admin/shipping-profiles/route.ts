@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireAdmin, readJson, HttpError } from '@/server/auth';
+import { handle, parseBody, parseQuery, requireAdmin } from '@/server/auth';
+import { shippingProfileDelete, shippingProfileSave } from '@/server/contract/admin';
 import {
   listShippingProfiles,
   saveShippingProfile,
@@ -18,14 +19,14 @@ export const GET = handle(async (req: NextRequest) => {
 
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const body = (await readJson(req)) as ShippingProfileInput;
-  return NextResponse.json({ row: await saveShippingProfile(body, me.userId) });
+  const body = await parseBody(req, shippingProfileSave);
+  // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
+  return NextResponse.json({ row: await saveShippingProfile(body as ShippingProfileInput, me.userId) });
 });
 
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const id = Number(new URL(req.url).searchParams.get('id'));
-  if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'id required');
+  const { id } = parseQuery(req, shippingProfileDelete); // 400 "id required"
   await deleteShippingProfile(id, me.userId);
   return NextResponse.json({ ok: true });
 });

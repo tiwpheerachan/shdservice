@@ -24,6 +24,9 @@ services:
       # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
         value: '24'
+      # @hrefcl/apidoc (the /api-docs build in `npm run build`) depends on puppeteer; no browser is needed
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: 'true'
       - key: NEXT_PUBLIC_SUPABASE_URL
         value: https://bnntpshuoyzkzckepjse.supabase.co
       # publishable key is client-safe (it is sent to the browser anyway)

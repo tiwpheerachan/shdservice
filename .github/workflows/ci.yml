@@ -45,6 +45,7 @@ jobs:
       TZ: Asia/Bangkok
       TEST_DATABASE_URL: postgresql://postgres:test@127.0.0.1:55442/oneservice_test
       NEXT_TELEMETRY_DISABLED: '1'
+      PUPPETEER_SKIP_DOWNLOAD: 'true' # @hrefcl/apidoc (npm run docs:api) depends on puppeteer; no browser is needed
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,6 +115,7 @@ jobs:
       TZ: Asia/Bangkok
       TEST_DATABASE_URL: postgresql://postgres:test@127.0.0.1:55442/oneservice_test
       NEXT_TELEMETRY_DISABLED: '1'
+      PUPPETEER_SKIP_DOWNLOAD: 'true' # @hrefcl/apidoc (npm run docs:api) depends on puppeteer; no browser is needed
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

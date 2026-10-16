@@ -23,7 +23,7 @@ export function trackCtx(req: NextRequest) {
   };
 }
 
-/** small JSON body only (no field is ever longer than a few hundred chars) */
+/** small JSON body only (no field is ever longer than a few hundred chars) — routes read it with parseTrackBody */
 export async function readSmallJson(req: NextRequest): Promise<Record<string, unknown>> {
   const text = await req.text().catch(() => '');
   if (!text || text.length > 8_192) return {};
@@ -34,8 +34,3 @@ export async function readSmallJson(req: NextRequest): Promise<Record<string, un
     return {};
   }
 }
-
-export const str = (v: unknown, max = 256) => (typeof v === 'string' ? v.slice(0, max) : '');
-
-/** the customer session token (phone + OTP) travels in a header, never a cookie */
-export const TRACK_SESSION_HEADER = 'x-track-session';

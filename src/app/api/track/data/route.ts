@@ -1,9 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { hit, isBlocked, block, consumeTicket, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx, readSmallJson } from '@/server/track-http';
+import { trackJson, trackCtx } from '@/server/track-http';
 import { publicJobByNo } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { checked, parseTrackBody } from '@/server/auth';
+import { trackData } from '@/server/contract/track';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +21,7 @@ export const dynamic = 'force-dynamic';
 const FAIL_LIMIT = 5; // invalid tickets per IP …
 const FAIL_WINDOW = 10 * 60; // … per 10 minutes → blocked 15 minutes
 
-export async function POST(req: NextRequest) {
+export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   const ticketFail = () => trackJson({ ok: false, error: TRACK_MSG.ticketFail, retry: true }, 401);
   const limited = () => trackJson({ ok: false, error: TRACK_MSG.rateLimited }, 429, { 'Retry-After': '60' });
@@ -35,8 +37,8 @@ export async function POST(req: NextRequest) {
       return limited();
     }
 
-    const body = await readSmallJson(req);
-    const jobNo = await consumeTicket(body.ticket, c.ip, c.ua);
+    const { ticket } = await parseTrackBody(req, trackData);
+    const jobNo = await consumeTicket(ticket, c.ip, c.ua);
     if (!jobNo) {
       logEvent('ticket_invalid', { ipHash: c.ipKey, requestId: c.requestId });
       if (!(await hit('ticket_fail', c.ipKey, FAIL_LIMIT, FAIL_WINDOW))) {
@@ -55,4 +57,4 @@ export async function POST(req: NextRequest) {
     logError(e, 'track/data');
     return ticketFail();
   }
-}
+});

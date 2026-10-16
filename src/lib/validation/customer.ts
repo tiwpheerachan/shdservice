@@ -86,16 +86,18 @@ export type CustomerPrev = Partial<
 /** the form's labels + the stored values (customers.ts maps one to the other) */
 const PRICE_GROUP_VALUES = [...PRICE_GROUPS, 'Retail', 'Wholesale', 'Special'];
 
+/** the fields' own rules (no stored customer) — the API reads the body with these (src/server/contract) */
+export const customerFields = z.looseObject({
+  address1: maxText(100, 'ที่อยู่ '),
+  address2: maxText(100, 'ซอย - ถนน '),
+});
+
 export function customerSchema(prev?: CustomerPrev | null) {
   const phoneRequired = !prev || !!normalizePhone(prev.phone);
   const same = (k: keyof CustomerPrev, v: unknown, norm: (x: unknown) => string = clean) =>
     prev != null && norm(v) === norm(prev[k]);
   return (
-    z
-      .looseObject({
-        address1: maxText(100, 'ที่อยู่ '),
-        address2: maxText(100, 'ซอย - ถนน '),
-      })
+    customerFields
       // required checks here, not on the fields: a missing key must not stop the other rules
       .superRefine((v, ctx) => {
         const bad = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });

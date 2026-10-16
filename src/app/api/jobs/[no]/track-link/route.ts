@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, requireCan } from '@/server/auth';
+import { handle, parseParams, requireCan } from '@/server/auth';
+import { trackLinkGet, trackLinkNew } from '@/server/contract/jobs';
 import { db } from '@/db/client';
 import { audit } from '@/server/audit';
 import { appBaseUrl } from '@/lib/sso';
@@ -17,7 +18,7 @@ type Ctx = { params: Promise<{ no: string }> };
  */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireCan(req, 'Job Management', 'view');
-  const { no } = await ctx.params;
+  const { no } = await parseParams(ctx, trackLinkGet);
   const jobNo = decodeURIComponent(no).toUpperCase();
   const token = await ensureToken(jobNo); // jobs are created without a link
   const url = token ? trackLinkFor(token, appBaseUrl(req.headers.get('host'))) : '';
@@ -28,7 +29,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 /** POST — issue a NEW link; the previous one stops working immediately */
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'edit');
-  const { no } = await ctx.params;
+  const { no } = await parseParams(ctx, trackLinkNew);
   const jobNo = decodeURIComponent(no).toUpperCase();
   const token = await rotateToken(jobNo);
   await audit(db, me.userId, {
