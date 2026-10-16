@@ -10,6 +10,7 @@ import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
+import { refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -58,6 +59,8 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
     .filter(Boolean)
     .join('  ');
   const shipping = j.deliveryCost + j.boxCost;
+  // the deposit given back at close (closeJob): a negative payment "คืนมัดจำ <date>"
+  const refunded = j.payment.amount < 0 && j.payment.detail.startsWith(REFUND_DETAIL);
   const lbl = 'text-neutral-700';
 
   return (
@@ -127,9 +130,12 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                 <span>
                   <span className={lbl}>Tel :</span>&nbsp;&nbsp;<span className="num">{or(c?.phone)}</span>
                 </span>
-                <span>
-                  <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
-                </span>
+                {/* never on the customer copy (masked away) — no empty label either */}
+                {!forCustomer && (
+                  <span>
+                    <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
+                  </span>
+                )}
               </div>
             </td>
             <td className="pad" rowSpan={2}>
@@ -309,16 +315,18 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                   <tr>
                     <td className="k">ชำระเงิน :</td>
                     <td>
-                      {[
-                        j.payment.type,
-                        j.payment.amount ? `${money(j.payment.amount)} บาท` : '',
-                        j.payment.no ? `(เลขที่ ${j.payment.no})` : '',
-                      ]
-                        .filter(Boolean)
-                        .join('  ') || '—'}
+                      {refunded
+                        ? `คืนเงินมัดจำ ${money(-j.payment.amount)} บาท (${[j.payment.type, dmy(refundDateOf(j.payment.detail))].filter(Boolean).join(', ')})`
+                        : [
+                            j.payment.type,
+                            j.payment.amount ? `${money(j.payment.amount)} บาท` : '',
+                            j.payment.no ? `(เลขที่ ${j.payment.no})` : '',
+                          ]
+                            .filter(Boolean)
+                            .join('  ') || '—'}
                     </td>
                   </tr>
-                  {j.payment.detail && (
+                  {j.payment.detail && !refunded && (
                     <tr>
                       <td className="k">รายละเอียด :</td>
                       <td>{j.payment.detail}</td>

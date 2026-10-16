@@ -1,7 +1,7 @@
 // Permission modules — the values of app_config.module_name in the legacy DB —
 // and which app routes each one guards. Shared by server (API enforcement) and
-// client (sidebar / button visibility). Admin & report screens have no legacy
-// module: they are System Admin only.
+// client (sidebar / button visibility). Admin screens have no legacy module:
+// they are System Admin only. Special rights (RIGHTS) are app_config rows too.
 
 export type Action = 'add' | 'edit' | 'del' | 'view';
 
@@ -16,7 +16,41 @@ export type Module =
   | 'Product Pick Stock'
   | 'Customer'
   | 'Quotation'
-  | 'Sale Order';
+  | 'Sale Order'
+  | Right;
+
+/** The modules that have a page here — the permissions page lists these (the legacy DB also has
+ *  Booking, Sale In, Sale Out, Warranty Extension, Job PickStock, Job ReturnStock: no page, rows left alone). */
+export const PAGE_MODULES: readonly Module[] = [
+  'Job Management',
+  'Job Assign',
+  'Job Repair',
+  'Job Closing',
+  'Product',
+  'Product Onhand',
+  'Product Receive Stock',
+  'Product Pick Stock',
+  'Customer',
+  'Quotation',
+  'Sale Order',
+];
+
+/**
+ * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
+ * permissions page, section สิทธิ์พิเศษ). Every rule that used to name a role in code reads one of these.
+ * System Admin holds all of them implicitly, except Job Take (checkRight).
+ */
+export const RIGHTS = {
+  'SO Approve': 'อนุมัติ / ปฏิเสธ / ส่งกลับใบสั่งขาย',
+  'Job Take': 'รับงานซ่อมและมีชื่อในช่องมอบหมายงาน',
+  'Overdue All': 'ผู้รับงานซ่อม: กระดิ่งงานเกินกำหนดแสดงงานของทุกคน (ไม่ติ๊ก = เฉพาะงานของตัวเอง)',
+  'Job Reopen': 'เปิดงานที่ปิดแล้วกลับมาแก้',
+  'Job Money After Close': 'แก้ช่องเงินหลังปิดงาน',
+  'Product Cost': 'เห็นราคาทุน',
+  Report: 'เปิดหน้ารายงาน',
+  Export: 'ส่งออก Excel',
+} as const;
+export type Right = keyof typeof RIGHTS;
 
 /** Route prefix → module. First match wins (most specific first). */
 const ROUTE_MODULES: [string, Module][] = [
@@ -32,10 +66,11 @@ const ROUTE_MODULES: [string, Module][] = [
   ['/customers', 'Customer'],
   ['/quotation', 'Quotation'],
   ['/sale', 'Sale Order'],
+  ['/reports', 'Report'],
 ];
 
 /** Routes that only System Admin may use (no legacy module covers them). */
-export const ADMIN_ONLY_PREFIXES = ['/admin', '/reports'];
+export const ADMIN_ONLY_PREFIXES = ['/admin'];
 /** Exceptions inside the admin-only prefixes that every approved user may open. */
 export const EVERYONE_PATHS = ['/admin/guide'];
 
@@ -62,6 +97,12 @@ export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | 
   if (isAdmin) return true;
   if (!module) return false;
   return !!grants[module]?.[action];
+}
+
+/** Does the role hold a special right? Job Take says who IS a technician (assignee list, self-take), not
+ *  what one may do — System Admin holds it only when ticked, as no admin was ever offered as an assignee. */
+export function checkRight(isAdmin: boolean, grants: GrantMap, right: Right): boolean {
+  return right === 'Job Take' ? !!grants[right]?.view : checkGrant(isAdmin, grants, right, 'view');
 }
 
 /** The grant a page needs beyond `view`: a create page (…/new — เปิดงานใหม่, สร้างใบเสนอราคา,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { addDays, today } from '@/lib/dates';
-import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/mock';
+import { CHANNELS, CLOSE_STATUS_OPTIONS, JOB_STATUS_OPTIONS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/mock';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
 // only used inside the factories below (sale-order.ts imports isFilled from here — no top-level use, no cycle problem)
 
@@ -173,7 +173,6 @@ const jobInputShape = z.object({
   deliveryCost: moneyField('ค่าขนส่ง'),
   boxCost: moneyField('ค่ากล่องพัสดุ'),
   engineerId: z.union([z.number(), z.string()]).optional(),
-  engineerEmail: text,
   engineerName: text,
   dueDate: date,
 });
@@ -313,6 +312,17 @@ const partOption = z
   })
   .optional();
 
+/**
+ * What a part line adds to the job's money (spare_part_total_cost → job_total_cost → the close amount,
+ * the return note, the export): only a line ticked เบิก (taken from stock) AND เสนอ (charged) — a เสนอ-only
+ * line is in the quotation, not in the bill (owner 2026-10-15). The repair page and saveRepair share it.
+ */
+export const partCharge = (o: { pick?: boolean; quote?: boolean; qty: number }, price: number) =>
+  o.pick && o.quote ? o.qty * price : 0;
+
+/** มอบหมายงานนี้ให้ — only a role with the special right Job Take takes jobs; the job's current assignee may stay */
+export const NOT_ENGINEER = 'มอบหมายงานได้เฉพาะผู้ใช้ที่มีสิทธิ์ "รับงานซ่อม" (สิทธิ์พิเศษ Job Take)';
+
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair (money 0–1,000,000, part qty whole 0–1000, text ≤ its column) */
 export const repairActionSchema = z.looseObject({
   status: req('โปรดระบุสถานะงานซ่อม'),
@@ -358,7 +368,25 @@ export const RECEIVE_DATE_REQUIRED = 'ต้องระบุวันที่
 /** หน้า Out-Source เปลี่ยนสถานะได้แค่ ส่งซ่อม / รับคืนจาก Out-Source (สถานะเดิมของงานบันทึกซ้ำได้) */
 export const OUTSOURCE_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะ ส่งซ่อม Out-Source แล้ว / รับคืนจาก Out-Source แล้ว';
 /** ปิดงานไม่ได้ระหว่างที่เครื่องยังอยู่ที่ Out-Source (setStatus → Finished; หน้า ปิดงาน เตือนก่อนกด) */
-export const OUTSOURCE_NOT_BACK = 'งานนี้ส่งซ่อมภายนอกอยู่ — ต้องบันทึก "รับคืนจาก Out-Source แล้ว" ก่อนปิดงาน';
+export const OUTSOURCE_NOT_BACK =
+  'งานนี้ส่งซ่อมภายนอกอยู่ — บันทึก "รับคืนจาก Out-Source แล้ว" (วันที่รับคืน) ที่หน้า บันทึกงานส่งซ่อมต่อ (Out-Source) ก่อนปิดงาน';
+
+/**
+ * Statuses only one path sets (setStatus guards; the workflow pages offer neither): a closed one (Finished) only
+ * through ปิดงาน-ส่งคืนสินค้า (the Job Closing right, return info, deposit refund), ยกเลิกข้อมูล (0) only by
+ * System Admin deleting the job. The job's own status saved again unchanged still passes.
+ */
+export const STATUS_CLOSE_ONLY = 'เปลี่ยนเป็นสถานะปิดงานได้ที่หน้า ปิดงาน-ส่งคืนสินค้า เท่านั้น';
+export const STATUS_DELETE_ONLY = 'ยกเลิกข้อมูลงานได้เฉพาะ System Admin (ลบงาน) เท่านั้น';
+/** บันทึกงานซ่อม: REPAIR_STATUS_OPTIONS only (saveRepair, by id) */
+export const REPAIR_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า บันทึกงานซ่อม';
+/** Swap / Refund's list: every status except the closed ones and ยกเลิกข้อมูล (what saveSwapRefund takes) */
+export const SWAP_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
+  (s) => !CLOSE_STATUS_OPTIONS.includes(s) && s !== 'ยกเลิกข้อมูล',
+);
+/** แก้ไขข้อมูลงาน shows the status only — it moves through the workflow pages (updateJob) */
+export const EDIT_STATUS_ONLY =
+  'หน้าแก้ไขข้อมูลงานเปลี่ยนสถานะไม่ได้ — ใช้หน้า บันทึกงานซ่อม / Out-Source / Swap-Refund / ปิดงาน';
 
 /** the "key: value" lines this app writes into job.swap_refund_detail ("New S/N: …", "ยอดเงินคืน: …") */
 export function parseSwap(text: string): Record<string, string> {
@@ -369,6 +397,13 @@ export function parseSwap(text: string): Record<string, string> {
   }
   return out;
 }
+
+/**
+ * The refund this page recorded ("ยอดเงินคืน: …" in swap_refund_detail), '' = none. Only that opens the page
+ * in Refund mode — not any negative payment: a deposit given back at the close ("คืนมัดจำ …") is stored the
+ * same way and is not the Swap / Refund page's to rewrite.
+ */
+export const swapRefundOf = (detail: string) => parseSwap(detail)['ยอดเงินคืน'] ?? '';
 
 /**
  * บันทึกงาน Swap / Refund → POST /api/jobs/:no/swap-refund (refund = the body carries refund fields).
@@ -425,8 +460,18 @@ export const partsNotIssuedMsg = (parts: { code: string; name?: string }[]) =>
   ].join(', ')}): บันทึกเป็น "รออะไหล่" ก่อน เพื่อส่งคำขอเบิกให้สต๊อก แล้วเปลี่ยนเป็น "ซ่อมเสร็จ" เมื่อสต๊อกจ่ายแล้ว ` +
   '— หรือเอาติ๊ก "เบิก" ออก / ลบรายการอะไหล่นั้น';
 
-/** a closed job (Finished) goes back to an open status only by System Admin (setStatus) */
-export const REOPEN_ADMIN_ONLY = 'งานปิดแล้ว — เปิดงานกลับได้เฉพาะ System Admin';
+/**
+ * Closed / declined / no-fault (Finished, 6, 22) while a part requested from stock (เบิก) is not issued: its
+ * booking would stay forever and the job would carry a part never handed over (setStatus; the close and repair
+ * pages show it first). Only on a change INTO those — a legacy job already there saves as before.
+ */
+export const partsWaitingMsg = (parts: { code: string; name?: string }[], status: string) =>
+  `ยังเปลี่ยนเป็น "${status}" ไม่ได้ — อะไหล่ที่ติ๊ก "เบิก" ยังไม่ได้จ่ายจากสต๊อก (${[
+    ...new Set(parts.map((p) => [p.code, p.name].filter(Boolean).join(' '))),
+  ].join(', ')}): ยกเลิกรายการอะไหล่นั้นที่หน้า บันทึกงานซ่อม (เอาติ๊ก "เบิก" ออก / ลบรายการ) หรือรอสต๊อกจ่ายก่อน`;
+
+/** a closed job (Finished) goes back to an open status only with the special right Job Reopen (setStatus) */
+export const REOPEN_LOCKED = 'งานปิดแล้ว — เปิดงานกลับได้เฉพาะผู้มีสิทธิ์ "เปิดงานที่ปิดแล้ว" (Job Reopen)';
 
 /** job_payment_detail = "ชำระ <date> · <note>" — a note loaded back from an earlier save drops its old date first */
 export const paymentDetailOf = (date?: string | null, note?: string | null) =>
@@ -443,11 +488,32 @@ export function returnDetailOf(courier?: string | null, note?: string | null) {
   return c && n.startsWith(c) ? n : [c, n].filter(Boolean).join(' · ');
 }
 
+/** the close page's payment fields (as loaded / as on screen) */
+export type ClosePayment = { payType: string; payAmount: string; payDate: string; payNo: string; payDetail: string };
+/**
+ * ปิดงาน: is there a payment to send? Only fields the user changed from the form as loaded — the amount due
+ * pre-filled on screen is not a payment until something is edited, and a stored refund (negative) is not
+ * shown in the amount box, so it survives any re-save. A money-locked job (closed, no Job Money After Close) never sends one.
+ */
+export const closePaymentEdited = (d: ClosePayment, loaded: ClosePayment | null | undefined, locked: boolean) =>
+  !locked &&
+  !!loaded &&
+  (['payType', 'payAmount', 'payDate', 'payNo', 'payDetail'] as const).some((k) => d[k] !== loaded[k]);
+
+/** a deposit given back at close is stored as a negative payment with job_payment_detail "คืนมัดจำ <date>" */
+export const REFUND_DETAIL = 'คืนมัดจำ';
+export const refundDateOf = (detail: string) => /^คืนมัดจำ (\d{4}-\d{2}-\d{2})/.exec(detail)?.[1] ?? '';
+export const REFUND_REQUIRED = 'ต้องบันทึกการคืนเงินมัดจำ (วิธี / จำนวน / วันที่)';
+
 /**
  * ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close. `prev` = the receipt / parcel no stored now.
  * `payment` is left out when nobody entered one (an in-warranty job): nothing is written then.
+ * `refund` = the deposit to give back (jobBalance) — `max` caps the amount, `required` = nothing recorded
+ * yet on an open job (closeJob decides it from the stored row).
  */
-export function closeSchema(prev: { payNo?: string | null; tracking?: string | null } = {}) {
+export function closeSchema(
+  prev: { payNo?: string | null; tracking?: string | null; refund?: { max: number; required: boolean } } = {},
+) {
   return z
     .looseObject({
       status: req('โปรดระบุสถานะงาน'),
@@ -464,6 +530,16 @@ export function closeSchema(prev: { payNo?: string | null; tracking?: string | n
           { error: 'ต้องเลือกวิธีการชำระเงิน' },
         )
         .optional(),
+      refund: z
+        .looseObject(
+          {
+            type: req('ต้องเลือกวิธีการคืนเงิน'),
+            amount: moneyField('จำนวนเงินที่คืน'),
+            date: isoDateString('ต้องระบุวันที่คืนเงิน'),
+          },
+          { error: REFUND_REQUIRED },
+        )
+        .optional(),
       return: z.looseObject(
         {
           type: req('ต้องระบุวิธีการส่งคืนสินค้า'),
@@ -476,6 +552,16 @@ export function closeSchema(prev: { payNo?: string | null; tracking?: string | n
       ),
     })
     .superRefine((v, ctx) => {
+      const refund = prev.refund ?? { max: 0, required: false };
+      if (!v.refund && refund.required)
+        ctx.addIssue({ code: 'custom', path: ['refund', 'type'], message: REFUND_REQUIRED });
+      const back = Number(v.refund?.amount);
+      if (v.refund && !(back > 0 && Math.round(back * 100) <= Math.round(refund.max * 100)))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['refund', 'amount'],
+          message: `จำนวนเงินที่คืนต้องมากกว่า 0 และไม่เกินเงินมัดจำที่ต้องคืน (${refund.max.toFixed(2)} บาท)`,
+        });
       if (v.status === STATUS_CLOSED_TRACKED && !isFilled(v.return.tracking))
         ctx.addIssue({ code: 'custom', path: ['return', 'tracking'], message: 'ต้องระบุหมายเลขพัสดุ' });
       // both go into a varchar(100) with what is put in front of them
@@ -514,6 +600,7 @@ export function jobBalance(total: number, deposit: number, paid: number) {
   return { due: Math.max(0, net), refund: Math.max(0, -net), outstanding: Math.max(0, r2(net - Math.max(0, paid))) };
 }
 
-/** a closed job (Finished) keeps its money fields — only System Admin may change them (owner 2026-10-15) */
-export const MONEY_LOCKED = 'งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะ System Admin';
-export const moneyLockedMsg = (label: string) => `งานปิดแล้ว — แก้${label}ไม่ได้ (เฉพาะ System Admin)`;
+/** a closed job (Finished) keeps its money fields — only the special right Job Money After Close changes them */
+const MONEY_RIGHT = 'ผู้มีสิทธิ์ "แก้ช่องเงินหลังปิดงาน" (Job Money After Close)';
+export const MONEY_LOCKED = `งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะ${MONEY_RIGHT}`;
+export const moneyLockedMsg = (label: string) => `งานปิดแล้ว — แก้${label}ไม่ได้ (เฉพาะ${MONEY_RIGHT})`;

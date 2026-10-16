@@ -27,13 +27,12 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { JOB_STATUS_OPTIONS } from '@/data/mock';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { parseSwap, swapRefundSchema } from '@/lib/validation/job';
+import { parseSwap, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
 
 function SwapRefundForm() {
   const { push } = useToast();
@@ -44,9 +43,9 @@ function SwapRefundForm() {
     onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt, set } = useJobForm();
-  const act = useWorkflowErrors();
+  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
-  const lock = useMoneyLock(); // a closed job: the refund stays as recorded (System Admin may change it)
+  const lock = useMoneyLock(); // a closed job: the refund stays as recorded (Job Money After Close may change it)
   const [tab, setTab] = React.useState('product');
   const [mode, setMode] = React.useState('swap');
   const [saving, setSaving] = React.useState(false);
@@ -75,20 +74,20 @@ function SwapRefundForm() {
     reset(fromJob(job));
     const sw = parseSwap(job.swap.detail);
     const today = thaiToday(); // Thai calendar, not UTC
-    const refund = !!sw['ยอดเงินคืน'] || job.payment.amount < 0;
+    const refund = !!swapRefundOf(job.swap.detail); // not a deposit given back at the close (swapRefundOf)
     const next = {
       inspection: job.repairDetail,
       newSerial: (sw['New S/N'] ?? '').trim(),
       newModel: sw['รุ่นที่เปลี่ยนให้'] ?? '',
       swapDate: sw['วันที่เปลี่ยนเครื่อง'] || today,
       docNo: job.swap.docNo,
-      refundAmount: sw['ยอดเงินคืน'] ?? (job.payment.amount < 0 ? String(Math.abs(job.payment.amount)) : ''),
+      refundAmount: sw['ยอดเงินคืน'] ?? '',
       refundMethod: sw['วิธีการคืนเงิน'] || 'โอนเงินเข้าบัญชี',
       refundRef: sw['เลขที่บัญชี/อ้างอิง'] ?? '',
       refundDate: sw['วันที่คืนเงิน'] || today,
       detail: sw['รายละเอียด'] ?? (job.swap.detail && Object.keys(sw).length === 0 ? job.swap.detail : ''),
       // the job's current status, so saving without a change keeps it (the field is required)
-      status: JOB_STATUS_OPTIONS.includes(job.status) ? job.status : '',
+      status: job.status,
     };
     setMode(refund ? 'refund' : 'swap');
     upd(next);
@@ -315,7 +314,12 @@ function SwapRefundForm() {
               <SearchSelect
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
-                options={strOptions(JOB_STATUS_OPTIONS)}
+                // not the closed ones / ยกเลิกข้อมูล (saveSwapRefund refuses them); the job's own status may stay
+                options={strOptions(
+                  job && !SWAP_STATUS_OPTIONS.includes(job.status)
+                    ? [job.status, ...SWAP_STATUS_OPTIONS]
+                    : SWAP_STATUS_OPTIONS,
+                )}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />
             </Field>

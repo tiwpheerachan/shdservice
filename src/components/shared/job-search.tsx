@@ -48,6 +48,13 @@ export function JobSearch({
   const field = useFieldControl(id); // tie to the surrounding <Field> label
   const listId = React.useId();
   const [q, setQ] = React.useState('');
+  // a job loaded by any route (a pick, the auto-pick of a full job no, the URL) closes the dropdown
+  const [shown, setShown] = React.useState(value);
+  if (value !== shown) {
+    setShown(value);
+    setOpen(false);
+    setQ('');
+  }
   const { params, hint } = SCOPE[scope];
 
   // debounced server search — same matcher as the job list (job no / customer code·name·phone /

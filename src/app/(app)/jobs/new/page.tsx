@@ -62,7 +62,7 @@ function NewJobForm() {
       <CustomerSection />
       <JobOpenSection status="งานใหม่" />
       <ProductSection variant="open" />
-      <OtherInfoSection directory={false} />
+      <OtherInfoSection />
       <AttachmentSection ref={attach} />
       <FormActions
         saveLabel="บันทึกเปิดงาน"

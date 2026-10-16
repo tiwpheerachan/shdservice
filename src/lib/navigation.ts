@@ -34,11 +34,16 @@ export function sessionExpired() {
 }
 
 /** session expired → our /login with the "expired" note, back to this exact page (filters included) after.
- *  `signedOut` (signed out in another tab — /api/sso/me says so): /login?bye=1, no `next` to carry over.
- *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired). */
-export function toLogin(opts: { signedOut?: boolean } = {}) {
+ *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired).
+ *  `signedOut` (ออกจากระบบ in another tab — /api/sso/me says so): ALWAYS /login?bye=1, no `next`, no dialog —
+ *  the user left on purpose, and the next person must not sign in into this tab's page / typed data.
+ *  `reason` = the 401's `reason` from /api/sso/me or /refresh: 'elsewhere' (signed out on another device)
+ *  gets its own note instead of "idle 30 min"; `next` is kept the same way. */
+export function toLogin(opts: { signedOut?: boolean; reason?: string } = {}) {
   if (typeof window === 'undefined' || signingOut) return;
+  if (opts.signedOut) return hardNavigate('/login?bye=1');
   if (hasUnsavedChanges()) return sessionExpired();
   const here = window.location.pathname + window.location.search;
-  hardNavigate(opts.signedOut ? '/login?bye=1' : `/login?expired=1&next=${encodeURIComponent(here)}`);
+  const why = opts.reason === 'elsewhere' ? 'reason=elsewhere' : 'expired=1';
+  hardNavigate(`/login?${why}&next=${encodeURIComponent(here)}`);
 }

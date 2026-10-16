@@ -28,9 +28,9 @@ import {
   useShopNames,
   useShippingProfiles,
 } from '@/data/db';
-import { PeoplePicker, type Person } from './people-picker';
 import { baht, cn } from '@/lib/utils';
-import { patchJson } from '@/lib/api';
+import { patchJson, isStale, errMsg } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
 import { useAccess } from '@/lib/use-access';
 import type { JobDetail } from '@/lib/use-job';
 import { useFormErrors, apiFieldErrors } from '@/lib/use-form-errors';
@@ -102,7 +102,6 @@ export type JobFormState = {
   depositCost: string;
   engineerId: number;
   engineerName: string;
-  engineerEmail: string;
   /** the user confirmed giving the job (it had an engineer) to someone else — sent as takeOver */
   takeOver: boolean;
   dueDate: string;
@@ -155,7 +154,6 @@ export const EMPTY_JOB_FORM: JobFormState = {
   depositCost: '',
   engineerId: 0,
   engineerName: '',
-  engineerEmail: '',
   takeOver: false,
   dueDate: '',
   dueDateAuto: false,
@@ -262,8 +260,7 @@ export function toJobInput(s: JobFormState) {
     boxCost: s.boxCost,
     estimateCost: s.estimateCost,
     depositCost: s.depositCost,
-    engineerId: s.engineerId || undefined,
-    engineerEmail: s.engineerEmail || undefined,
+    engineerId: s.engineerId, // 0 = มอบหมายงานนี้ให้ cleared: the job has nobody on it (updateJob)
     engineerName: s.engineerName || undefined,
     takeOver: s.takeOver || undefined,
     dueDate: s.dueDate,
@@ -375,9 +372,12 @@ export function JobFormProvider({ initial, children }: { initial?: JobFormState;
  * (when this user may edit them) and the screen's own action payload together, so every missing
  * field shows at once. Action errors are keyed by payload path ("status", "send.to", "return.date").
  */
-export function useWorkflowErrors() {
+/** `reload`: read the same job again (the page's `find(job.no)`) — a stale-save 409's "โหลดใหม่" uses it
+ *  instead of reloading the browser page, which lost the job found through the search bar */
+export function useWorkflowErrors(reload?: () => void) {
   const form = useJobForm();
   const action = useFormErrors();
+  const { push } = useToast();
   const { validate, report } = form;
   const { run } = action;
   /** true = OK to save */
@@ -388,13 +388,22 @@ export function useWorkflowErrors() {
   );
   const fromApi = React.useCallback(
     (err: unknown) => {
+      if (reload && isStale(err)) {
+        push({
+          kind: 'error',
+          title: errMsg(err),
+          desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — "โหลดใหม่" ดึงข้อมูลล่าสุดของงานนี้มาแทนข้อความที่ยังไม่ได้บันทึก (คัดลอกเก็บไว้ก่อนถ้าต้องการ)',
+          action: { label: 'โหลดใหม่', onClick: reload },
+        });
+        return true;
+      }
       const f = apiFieldErrors(err);
       if (!f) return form.fromApi(err); // a stale-version 409 (reload toast); false otherwise
       action.setErrors(f);
       form.fromApi(err);
       return true;
     },
-    [action, form],
+    [action, form, reload, push],
   );
   return { errors: action.errors, clear: action.clear, check, fromApi };
 }
@@ -405,11 +414,11 @@ export function useJobForm(): Ctx {
   return ctx;
 }
 
-/** why the money fields are read-only: a closed job and the user is not System Admin (the API refuses a change) */
+/** why the money fields are read-only: a closed job and no Job Money After Close (the API refuses a change) */
 export function useMoneyLock(): string | undefined {
   const { s } = useJobForm();
-  const { isAdmin } = useAccess();
-  return s.statusGroup === 'Finished' && !isAdmin ? MONEY_LOCKED : undefined;
+  const { has } = useAccess();
+  return s.statusGroup === 'Finished' && !has('Job Money After Close') ? MONEY_LOCKED : undefined;
 }
 
 /* ---------------- lookup bar ---------------- */
@@ -1138,31 +1147,32 @@ export function CostSummary({
 
 /* ---------------- other info ---------------- */
 
-/** `directory={false}` drops the Lark directory lookup under มอบหมายงานนี้ให้ (เปิดงานใหม่ / แก้ไขข้อมูลงาน). */
-export function OtherInfoSection({ showTech = true, directory = true }: { showTech?: boolean; directory?: boolean }) {
+export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   const { s, set, patch, errors, loaded } = useJobForm();
   const lock = useMoneyLock();
   const confirm = useConfirm();
   const { data: STAFF } = useStaff();
-  // "มอบหมายงานนี้ให้" = job.engineer_id → a person in app_user. The directory
-  // picker is kept for lookup; the assignment itself must map to app_user.
-  const [assignee, setAssignee] = React.useState<Person | null>(null);
+  // "มอบหมายงานนี้ให้" = job.engineer_id → an active user whose role has Job Take (the API refuses anyone else)
   const staffOptions = React.useMemo(() => {
-    const opts = STAFF.map((st) => ({ value: String(st.id), label: st.name, sub: st.userType || undefined }));
-    // assigned to someone not in the active staff list (left / inactive) → still show the name
-    if (s.engineerId && !STAFF.some((st) => st.id === s.engineerId))
+    const opts = STAFF.filter((st) => st.takesJobs).map((st) => ({
+      value: String(st.id),
+      label: st.name,
+      sub: st.userType || undefined,
+    }));
+    // the job's own assignee who is not on that list (left / another role) → still shown, may stay
+    const own = loaded.engineerId;
+    if (own > 0 && !opts.some((o) => o.value === String(own)))
       opts.unshift({
-        value: String(s.engineerId),
-        label: s.engineerName || `#${s.engineerId}`,
-        sub: 'ไม่อยู่ในรายชื่อปัจจุบัน',
+        value: String(own),
+        label: loaded.engineerName || `#${own}`,
+        sub: 'ผู้รับงานเดิม (ไม่อยู่ในรายชื่อช่างปัจจุบัน)',
       });
     return opts;
-  }, [STAFF, s.engineerId, s.engineerName]);
+  }, [STAFF, loaded.engineerId, loaded.engineerName]);
   // a job that already has someone on it goes to another person only when the user says so (the API asks too)
-  const assign = async (next: Pick<JobFormState, 'engineerId' | 'engineerName' | 'engineerEmail'>) => {
+  const assign = async (next: Pick<JobFormState, 'engineerId' | 'engineerName'>) => {
     const had = loaded.engineerId;
-    const taking =
-      !!loaded.jobNo && had > 0 && (next.engineerId || -1) !== had && !!(next.engineerId || next.engineerEmail);
+    const taking = !!loaded.jobNo && had > 0 && !!next.engineerId && next.engineerId !== had;
     const ok =
       !taking ||
       s.takeOver ||
@@ -1171,14 +1181,6 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
         confirmLabel: 'มอบให้คนใหม่',
       }));
     if (ok) patch({ ...next, takeOver: taking });
-    return ok;
-  };
-  const pick = async (p: Person | null) => {
-    if (!p) return setAssignee(null);
-    const hit = STAFF.find((st) => st.name === p.name);
-    // known staff → id; otherwise the server resolves/creates app_user by email
-    if (await assign({ engineerId: hit?.id ?? 0, engineerName: p.name, engineerEmail: hit ? '' : p.email }))
-      setAssignee(p);
   };
   return (
     <Section title="ข้อมูลอื่นๆ" icon={ClipboardList}>
@@ -1212,28 +1214,21 @@ export function OtherInfoSection({ showTech = true, directory = true }: { showTe
           />
         </Field>
         {showTech && (
-          <Field
-            label="มอบหมายงานนี้ให้"
-            hint={directory ? 'เลือกช่างจากรายชื่อผู้ใช้ระบบ หรือค้นหาจากไดเรกทอรีกลาง' : undefined}
-          >
-            <div className="space-y-2">
-              <SearchSelect
-                value={s.engineerId ? String(s.engineerId) : ''}
-                onChange={(v) => {
-                  const id = Number(v) || 0;
-                  void assign({
-                    engineerId: id,
-                    engineerName: STAFF.find((st) => st.id === id)?.name ?? '',
-                    engineerEmail: '',
-                  });
-                }}
-                options={staffOptions}
-                placeholder="- - ยังไม่ระบุ - -"
-                emptyLabel="- - ยังไม่ระบุ - -"
-                searchPlaceholder="พิมพ์ชื่อช่าง หรือประเภทผู้ใช้…"
-              />
-              {directory && <PeoplePicker value={assignee} onChange={pick} />}
-            </div>
+          <Field label="มอบหมายงานนี้ให้" hint="เฉพาะผู้ใช้ที่เป็น Engineer / Head Engineer" error={errors.engineerId}>
+            <SearchSelect
+              value={s.engineerId ? String(s.engineerId) : ''}
+              onChange={(v) => {
+                const id = Number(v) || 0;
+                void assign({
+                  engineerId: id,
+                  engineerName: staffOptions.find((o) => o.value === v)?.label ?? '',
+                });
+              }}
+              options={staffOptions}
+              placeholder="- - ยังไม่ระบุ - -"
+              emptyLabel="- - ยังไม่ระบุ - -"
+              searchPlaceholder="พิมพ์ชื่อช่าง…"
+            />
           </Field>
         )}
         <Field

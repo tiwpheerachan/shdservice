@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
+import { mutate } from 'swr';
 import { Truck } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import {
@@ -21,17 +22,17 @@ import { Modal } from '@/components/ui/modal';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { postJson, errMsg } from '@/lib/api';
+import { ApiError, postJson, errMsg } from '@/lib/api';
 import { useRecord } from '@/lib/use-record';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
-import { SELF_APPROVE, SELF_APPROVE_SALES } from '@/lib/validation/sale-order';
+import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
 
 function EditSaleOrder() {
   const { push } = useToast();
   const confirm = useConfirm();
-  const { isAdmin, can, userId } = useAccess();
+  const { isAdmin, can, has, userId } = useAccess();
   const sp = useSearchParams();
   const initialNo = sp.get('no') ?? '';
   const form = React.useRef<SaleOrderFormHandle>(null);
@@ -45,12 +46,16 @@ function EditSaleOrder() {
     loading,
     error,
     find: load,
+    reload,
   } = useRecord<SaleOrderLoaded>({
     url: (n) => `/api/sale-orders/${encodeURIComponent(n)}`,
     pick: (d: { order: SaleOrderLoaded }) => d.order,
     initial: initialNo,
     onRecord: () => setVersion((v) => v + 1),
-    onLoaded: (d) => push({ kind: 'success', title: 'เรียกข้อมูลใบสั่งขายสำเร็จ', desc: d.no }),
+    onLoaded: (d) => {
+      push({ kind: 'success', title: 'เรียกข้อมูลใบสั่งขายสำเร็จ', desc: d.no });
+      window.history.replaceState(null, '', `?no=${encodeURIComponent(d.no)}`); // a refresh keeps this one
+    },
     onMissing: (n) => push({ kind: 'error', title: 'ไม่พบใบสั่งขาย', desc: n }),
   });
   const no = loaded?.no ?? '';
@@ -91,16 +96,24 @@ function EditSaleOrder() {
     }
     setSaving(true);
     try {
+      // the version on screen: the creator saved since (other lines / qty) → 409, nothing is issued
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/approve`, {
         decision,
         remark,
+        version: loaded?.version,
       });
       setLoaded(d.order);
+      void mutate('/api/alerts/sale-orders-pending'); // the bell drops it now, not at the next poll
       setAsking(null);
       setReason('');
       push({ kind: 'success', title: `${label}แล้ว`, desc: `${d.order.no} · ${d.order.approve}` });
     } catch (e) {
       push({ kind: 'error', title: `${label}ไม่สำเร็จ`, desc: errMsg(e) });
+      // decided in another tab / changed by the creator: show the order as it is now (its buttons too)
+      if (e instanceof ApiError && e.status === 409) {
+        setAsking(null);
+        void reload();
+      }
     } finally {
       setSaving(false);
     }
@@ -133,11 +146,14 @@ function EditSaleOrder() {
   // 4 อนุมัติแล้ว / 5 ปฏิเสธ are final — the server refuses any change, so no save or decision buttons
   const approveId = loaded?.approveId ?? 0;
   const closed = [4, 5].includes(approveId);
-  // only a waiting order is decided, and not by its creator (System Admin may) — the server checks the same
+  // only a waiting order is decided, only by a role with SO Approve, and not by its creator (System Admin may)
+  // — the server checks the same
   const isCreator = !isAdmin && !!userId && (loaded?.creatorIds ?? []).includes(userId);
   const selfReason = !isCreator ? '' : userId === loaded?.createdById ? SELF_APPROVE : SELF_APPROVE_SALES;
-  const canApprove = (isAdmin || can('Sale Order', 'edit')) && !isCreator;
+  const canApprove = has('SO Approve') && can('Sale Order', 'edit') && !isCreator;
   const decided = approveId === 3 || approveId === 5; // the reason banner
+  // a waiting order is edited only by its creator (System Admin may) — the server refuses anyone else
+  const waitingLocked = approveId === 2 && !isAdmin && userId !== loaded?.createdById;
   const canEditTracking = isAdmin || can('Sale Order', 'edit');
 
   return (
@@ -217,11 +233,15 @@ function EditSaleOrder() {
           saving={saving}
           cancelHref="/sale/orders"
           denied={
-            closed
-              ? `ใบสั่งขาย${loaded?.approve ?? ''} — แก้ไขไม่ได้`
-              : can('Sale Order', 'edit')
-                ? undefined
-                : VIEW_ONLY
+            loaded?.cancelled
+              ? `${SO_CANCELLED} — แก้ไขไม่ได้`
+              : closed
+                ? `ใบสั่งขาย${loaded?.approve ?? ''} — แก้ไขไม่ได้`
+                : !can('Sale Order', 'edit')
+                  ? VIEW_ONLY
+                  : waitingLocked
+                    ? WAITING_CREATOR_ONLY
+                    : undefined
           }
           extra={
             <>
@@ -233,7 +253,7 @@ function EditSaleOrder() {
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
                 disabled={!no}
               />
-              {loaded && approveId === 2 && canApprove ? (
+              {loaded && approveId === 2 && canApprove && !loaded.cancelled ? (
                 <>
                   <Button
                     variant="outline"
@@ -282,7 +302,7 @@ function EditSaleOrder() {
           </>
         }
       >
-        <Field label="เหตุผล" required hint="ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้">
+        <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร — ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้`}>
           <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
         </Field>
       </Modal>

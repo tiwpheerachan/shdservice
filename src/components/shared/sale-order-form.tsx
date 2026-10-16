@@ -18,7 +18,7 @@ import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { overpaidMessage, saleOrderSchema } from '@/lib/validation/sale-order';
+import { overpaidMessage, saleOrderSchema, SUBMIT_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 
@@ -38,6 +38,10 @@ export type SaleOrderLoaded = {
   no: string;
   date: string;
   sales: string;
+  /** sale_out_by — the salesperson is picked by id (a name can change; one who left is not in the list) */
+  salesId?: number;
+  /** record_status DELETED — the server refuses any change */
+  cancelled?: boolean;
   createdBy: string;
   createdById?: number;
   /** a waiting order: the roles that may approve it */
@@ -95,7 +99,7 @@ export type SaleOrderFormHandle = {
 export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
   function SaleOrderForm({ soNo, initial }, ref) {
     const { push } = useToast();
-    const { name: me, userId } = useAccess();
+    const { name: me, userId, isAdmin } = useAccess();
     const fe = useFormErrors();
     const { data: PRODUCTS } = useProducts();
     const { data: STAFF } = useStaff();
@@ -135,10 +139,18 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const salesId =
       pickedSalesId ||
       (initial
-        ? (STAFF.find((x) => x.name === initial.sales)?.id ?? 0)
+        ? initial.salesId || (STAFF.find((x) => x.name === initial.sales)?.id ?? 0)
         : userId && STAFF.some((x) => x.id === userId)
           ? userId
           : 0);
+    // the order's salesperson who has left is not in the staff list — still shown (and kept) as picked
+    const salesOptions = STAFF.map((u) => ({ value: String(u.id), label: u.name, sub: u.userType || undefined }));
+    if (initial?.salesId && !STAFF.some((x) => x.id === initial.salesId))
+      salesOptions.push({
+        value: String(initial.salesId),
+        label: `${initial.sales || '—'} (ไม่ใช้งานแล้ว)`,
+        sub: undefined,
+      });
     // no default: an order records a payment only when the user enters one
     const [payment, setPayment] = React.useState(initial?.paymentType ?? '');
     const [payAmount, setPayAmount] = React.useState(initial?.paymentAmount ? String(initial.paymentAmount) : '');
@@ -147,8 +159,12 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
     // the radio shows the order's real state: only a waiting (2) order is "sent"; a sent-back (3) one starts unsent
     const [submit, setSubmit] = React.useState(initial?.approveId === 2);
-    // 4 อนุมัติแล้ว / 5 ปฏิเสธ are final — the server refuses any edit, so the form is read-only
-    const readOnly = [4, 5].includes(initial?.approveId ?? 0);
+    // only the creator (or System Admin) sends it for approval — anyone else's save keeps the status (server rule)
+    const canSubmit = !initial || isAdmin || initial.createdById === userId;
+    // read-only, as the server refuses the save: 4 อนุมัติแล้ว / 5 ปฏิเสธ are final, a cancelled order is
+    // closed, and a waiting (2) order is edited only by its creator (System Admin may)
+    const readOnly =
+      [4, 5].includes(initial?.approveId ?? 0) || !!initial?.cancelled || (initial?.approveId === 2 && !canSubmit);
 
     // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
     const onPickSlip = async (f: File | undefined) => {
@@ -285,7 +301,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
               <SearchSelect
                 value={salesId ? String(salesId) : ''}
                 onChange={(v) => setSalesId(Number(v) || 0)}
-                options={STAFF.map((u) => ({ value: String(u.id), label: u.name, sub: u.userType || undefined }))}
+                options={salesOptions}
                 placeholder="- - ยังไม่ระบุ - -"
                 emptyLabel="- - ยังไม่ระบุ - -"
                 searchPlaceholder="พิมพ์ชื่อพนักงานขาย…"
@@ -330,13 +346,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                   <th className="w-20 px-3 py-2 text-right">จำนวน</th>
                   <th className="w-28 px-3 py-2 text-right">ราคาขาย/หน่วย</th>
                   <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
-                  <th className="w-16 px-3 py-2 text-center">ลบ</th>
+                  {!readOnly && <th className="w-16 px-3 py-2 text-center">ลบ</th>}
                 </tr>
               </thead>
               <tbody>
                 {lines.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                    <td colSpan={readOnly ? 6 : 7} className="px-3 py-8 text-center text-xs text-muted-foreground">
                       ยังไม่มีรายการสินค้า
                     </td>
                   </tr>
@@ -391,15 +407,17 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                           />
                         </td>
                         <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
-                        <td className="px-3 py-2 text-center">
-                          <button
-                            onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                            aria-label="ลบ"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
+                        {!readOnly && (
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                              aria-label="ลบ"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -411,7 +429,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                     รวมเป็นเงินทั้งสิ้น
                   </td>
                   <td className="num px-3 py-2 text-right text-primary">{baht(total)}</td>
-                  <td />
+                  {!readOnly && <td />}
                 </tr>
               </tfoot>
             </table>
@@ -420,16 +438,23 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
           <FieldGrid>
-            <Field label="วิธีการชำระเงิน" className="lg:col-span-2" group="radiogroup" error={fe.errors.paymentType}>
-              <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
-                {PAYMENT_METHODS.map((p) => (
-                  <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <Radio name="payment" checked={payment === p} onChange={() => setPayment(p)} />
-                    {p}
-                  </label>
-                ))}
-              </div>
-            </Field>
+            {readOnly ? (
+              // a closed order: the method it was paid by, not a row of greyed-out choices
+              <Field label="วิธีการชำระเงิน" className="lg:col-span-2">
+                <ReadOnly>{payment || 'ยังไม่ระบุ'}</ReadOnly>
+              </Field>
+            ) : (
+              <Field label="วิธีการชำระเงิน" className="lg:col-span-2" group="radiogroup" error={fe.errors.paymentType}>
+                <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+                  {PAYMENT_METHODS.map((p) => (
+                    <label key={p} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <Radio name="payment" checked={payment === p} onChange={() => setPayment(p)} />
+                      {p}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
             <Field
               label="จำนวนเงินที่ชำระ (บาท)"
               error={fe.errors.paymentAmount || (overpaid ? overpaidMessage(net) : undefined)}
@@ -471,7 +496,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 )}
               </div>
             </Field>
-            <Field label="หมายเหตุ" wide error={fe.errors.remark}>
+            <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
               <Textarea rows={2} maxLength={100} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
             {!readOnly && (
@@ -481,9 +506,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 wide
                 group="radiogroup"
                 hint={
-                  initial?.approveId === 3
-                    ? 'ใบนี้ถูกส่งกลับแก้ไข — แก้แล้วเลือก "ส่งขออนุมัติ" เพื่อส่งให้อนุมัติอีกครั้ง'
-                    : undefined
+                  !canSubmit
+                    ? `${SUBMIT_CREATOR_ONLY} — บันทึกแล้วสถานะคงเดิม`
+                    : initial?.approveId === 3
+                      ? 'ใบนี้ถูกส่งกลับแก้ไข — แก้แล้วเลือก "ส่งขออนุมัติ" เพื่อส่งให้อนุมัติอีกครั้ง'
+                      : undefined
                 }
               >
                 <div className="flex flex-wrap gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
@@ -492,7 +519,12 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                     { k: true, l: 'ส่งขออนุมัติ' },
                   ].map((a) => (
                     <label key={a.l} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <Radio name="so-action" checked={submit === a.k} onChange={() => setSubmit(a.k)} />
+                      <Radio
+                        name="so-action"
+                        checked={submit === a.k}
+                        onChange={() => setSubmit(a.k)}
+                        disabled={!canSubmit}
+                      />
                       {a.l}
                     </label>
                   ))}

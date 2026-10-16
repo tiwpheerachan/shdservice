@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { hardNavigate, toLogin, SESSION_EXPIRED_EVENT } from '@/lib/navigation';
 import { useMe } from '@/lib/use-me';
+import { landingPath } from '@/app/landing';
 
 /**
  * Client-side authorization watchdog. The server layout only re-checks approval
@@ -21,11 +22,14 @@ import { useMe } from '@/lib/use-me';
 export function AccessGuard() {
   const pathname = usePathname();
   const router = useRouter();
-  const { canPath } = useAccess();
+  const { canPath, isAdmin, role, grants, email } = useAccess();
   const { push } = useToast();
 
   // Page-level permission (app_config `view`; a create page also needs `add`): a user who types a URL
-  // they may not open is sent to their landing page ("/" picks it by role) — and told why, not silently.
+  // they may not open is sent to their landing page — and told why, not silently. The landing page is
+  // picked HERE from the same (client) grants: "/" picks it from the DB's grants, and after an admin
+  // changed this role mid-session the two disagreed → "/" sent the user to a page this guard denied →
+  // back to "/" forever. A target the client grants also deny (only the guide) → full reload, fresh grants.
   // (AppShell does not render that page, so it fires no API call first.) The API
   // enforces the same grants on every write regardless.
   React.useEffect(() => {
@@ -37,8 +41,10 @@ export function AccessGuard() {
       title: `ไม่มีสิทธิ์เข้าหน้า ${page?.item?.title ?? page?.group.title ?? pathname}`,
       desc: 'ขอสิทธิ์ได้จากผู้ดูแลระบบ',
     });
-    router.replace('/');
-  }, [pathname, canPath, router, push]);
+    const to = landingPath({ isAdmin, userType: role }, grants);
+    if (canPath(to.replace(/\?.*/, ''))) router.replace(to);
+    else hardNavigate('/');
+  }, [pathname, canPath, router, push, isAdmin, role, grants]);
 
   // still signed in / still approved? — read from /api/sso/me, which never extends the session
   // (so 30 min without activity really ends it). Every minute while the tab is visible, and at once
@@ -51,8 +57,12 @@ export function AccessGuard() {
   React.useEffect(() => {
     if (me.unauthorized)
       toLogin({ signedOut: me.signedOut }); // expired / signed out on another device / ออกจากระบบ in another tab
-    else if (me.approved === false) hardNavigate('/pending'); // approval revoked → reload into the pending page
-  }, [me.unauthorized, me.signedOut, me.approved]);
+    else if (me.approved === false)
+      hardNavigate('/pending'); // approval revoked → reload into the pending page
+    // someone else signed in in another tab (same cookie) → this page still shows the previous user's
+    // data and grants: start clean as the new user
+    else if (me.user && email && me.user.email.toLowerCase() !== email.toLowerCase()) hardNavigate('/');
+  }, [me.unauthorized, me.signedOut, me.approved, me.user, email]);
 
   // a save refused for an expired session / a form with typed data when the session ran out
   // (lib/navigation sessionExpired): the page stays as it is — sign in again in another tab

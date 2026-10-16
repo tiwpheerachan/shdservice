@@ -4,6 +4,8 @@ import { db } from '@/db/client';
 import { job, product, saleOutHd } from '@/db/schema';
 import { handle, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
 import { rateLimit } from '@/server/rate-limit';
+import { AS } from '@/server/services/sale-orders';
+import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { getDocumentProfile, setDocumentProfileLogo } from '@/server/services/document-profiles';
 import { getShippingProfile, setShippingProfileLogo } from '@/server/services/shipping-profiles';
 import {
@@ -112,10 +114,21 @@ export const POST = handle(async (req: NextRequest) => {
     }
     case 'sale-order-slip': {
       const [row] = await db
-        .select({ old: saleOutHd.slipFileName })
+        .select({
+          old: saleOutHd.slipFileName,
+          approve: saleOutHd.approveStatusId,
+          status: saleOutHd.recordStatus,
+          createdBy: saleOutHd.documentCreateBy,
+        })
         .from(saleOutHd)
         .where(eq(saleOutHd.saleOutHdNo, id));
       if (!row) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
+      // an approved / denied / cancelled order is final: its slip is the evidence, not to be swapped (and the old one deleted)
+      if (row.approve === AS.APPROVED || row.approve === AS.DENIED || row.status === 'DELETED')
+        throw new HttpError(409, 'ใบสั่งขายนี้อนุมัติ ปฏิเสธ หรือยกเลิกแล้ว — เปลี่ยนสลิปไม่ได้');
+      // … and a waiting one is its creator's (or System Admin's), as editing it is (saveSaleOrder)
+      if (row.approve === AS.WAIT && !me.isAdmin && row.createdBy !== me.userId)
+        throw new HttpError(403, WAITING_CREATOR_ONLY);
       const path = filePath.saleOrderSlip(id, sys);
       await uploadFile(path, body);
       await db.update(saleOutHd).set({ slipFileName: path }).where(eq(saleOutHd.saleOutHdNo, id));

@@ -12,6 +12,13 @@ export const normalizePhone = (v: unknown) =>
     .replace(/[\u2013\u2014]/g, '-')
     .trim();
 
+/** "+66 89 999 3466" → "089 999 3466": numbers are kept 0-prefixed, so a search or duplicate check on
+ *  "0899993466" finds them — applied to a new / changed phone only (an untouched legacy value stays as it is) */
+export const localPhone = (v: string) => v.replace(/(^|[/,]\s*)\+?66[\s-]*(?=[1-9])/g, '$10');
+/** the same number written both ways (digits only): 0899993466 ↔ 66899993466 */
+export const phoneDigitVariants = (d: string) =>
+  d.length < 6 ? [d] : d.startsWith('0') ? [d, '66' + d.slice(1)] : d.startsWith('66') ? [d, '0' + d.slice(2)] : [d];
+
 /** Thai national ID / tax ID: 13 digits whose last one is the mod-11 check digit */
 export function isThaiTaxId(v: string): boolean {
   if (!/^\d{13}$/.test(v)) return false;
@@ -21,7 +28,6 @@ export function isThaiTaxId(v: string): boolean {
 }
 /** a tax id as typed → what is stored: spaces / dashes dropped */
 export const taxIdDigits = (v: unknown) => String(v ?? '').replace(/[\s-]/g, '');
-const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 /**
  * one or more phone numbers: digits / spaces / dashes / "/" between numbers, each number 9–11 digits
  * (02-123-4567, 081-234-5678, +66 81 234 5678). The digit groups are read left to right into numbers;
@@ -101,7 +107,9 @@ export function customerSchema(prev?: CustomerPrev | null) {
 
         const phone = normalizePhone(v.phone);
         if (phoneRequired && !phone) bad('phone', 'ต้องระบุเบอร์โทรศัพท์');
-        else if (phone && !same('phone', v.phone, digits)) {
+        // unchanged = the same text (separators and all): comparing digits only let "-" become "ไม่มีเบอร์"
+        // and "081abc2345678" pass as the stored "081-234-5678"
+        else if (phone && !same('phone', v.phone, normalizePhone)) {
           if (!phoneFormatOk(phone)) bad('phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (เบอร์ละ 9–10 หลัก หลายเบอร์คั่นด้วย /)');
           else if (phone.length > 50) bad('phone', 'เบอร์โทรศัพท์ยาวเกิน 50 ตัวอักษร');
           else if (!prev && isIndividual(v.type) && !hasThaiMobile(phone))

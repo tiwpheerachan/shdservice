@@ -235,7 +235,7 @@ export function useDashboard(range: DashRange = {}) {
 }
 
 /* ---- lookups added for the real backend ---- */
-export type Staff = { id: number; name: string; userType: string };
+export type Staff = { id: number; name: string; userType: string; takesJobs: boolean };
 /** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
   useTable<Staff>('staff', undefined, 'exclude', usedAs ? { usedAs } : {}, TTL_MASTER);

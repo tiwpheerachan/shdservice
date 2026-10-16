@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
@@ -22,13 +23,26 @@ import { ExportButton } from '@/components/shared/export-button';
 
 type Filters = { no: string; customer: string; from: string; to: string; code: string; sales: string; approve: string };
 const NO_FILTER: Filters = { no: '', customer: '', from: '', to: '', code: '', sales: '', approve: '' };
+const WAITING = 'รออนุมัติ'; // approve_status 2 (its approve_name_th — the list filters by that name)
 
-export default function SaleOrderPage() {
+function SaleOrderList() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/sale/orders');
   const { data: USERS } = useStaff();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const showWaiting = () => {
+    setDraft((f) => ({ ...f, approve: WAITING }));
+    setFilters((f) => ({ ...f, approve: WAITING }));
+  };
+  // deep link /sale/orders?pending=1 (landing / bell) → รออนุมัติ only; read on every URL change, adjusted while
+  // rendering (a link to this page from this page does not remount it)
+  const pending = useSearchParams().get('pending') === '1';
+  const [pendingSeen, setPendingSeen] = React.useState(false);
+  if (pending !== pendingSeen) {
+    setPendingSeen(pending);
+    if (pending) showWaiting();
+  }
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   const {
     rows: SALE_ORDERS,
@@ -131,6 +145,9 @@ export default function SaleOrderPage() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
+            <Button size="sm" variant="outline" onClick={showWaiting} aria-pressed={filters.approve === WAITING}>
+              {WAITING}
+            </Button>
             <ExportButton
               run={() =>
                 exportXlsx('sale_orders', {
@@ -213,5 +230,13 @@ export default function SaleOrderPage() {
         server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
       />
     </>
+  );
+}
+
+export default function SaleOrderPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <SaleOrderList />
+    </React.Suspense>
   );
 }

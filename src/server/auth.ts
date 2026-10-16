@@ -8,7 +8,16 @@ import { appConfig, appUser } from '@/db/schema';
 import { verifySession, SESSION_COOKIE, type SessionUser } from '@/lib/session';
 import { logError, requestId } from '@/lib/log';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
-import { ADMIN_USER_TYPE, checkGrant, type Action, type Grant, type GrantMap, type Module } from '@/lib/modules';
+import {
+  ADMIN_USER_TYPE,
+  checkGrant,
+  checkRight,
+  type Action,
+  type Grant,
+  type GrantMap,
+  type Module,
+  type Right,
+} from '@/lib/modules';
 
 /** The signed-in person, resolved against app_user (the single user table). */
 export type CurrentUser = {
@@ -57,7 +66,13 @@ export async function findAppUserByEmail(email: string) {
  * bounds what a direct SQL edit can lag by.
  * ------------------------------------------------------------------ */
 type AppUserRow = NonNullable<Awaited<ReturnType<typeof findAppUserByEmail>>>;
-const userCache = new Map<string, { at: number; row: AppUserRow }>();
+// on globalThis: the build loads /api routes and pages in separate module copies — one cache per process,
+// so an admin write (which clears it) is seen by pages too (same reason as src/server/cache.ts)
+const g = globalThis as typeof globalThis & {
+  __shdUserCache?: Map<string, { at: number; row: AppUserRow }>;
+  __shdGrantCache?: Map<string, { at: number; grants: GrantMap }>;
+};
+const userCache = (g.__shdUserCache ??= new Map<string, { at: number; row: AppUserRow }>());
 const USER_TTL = 10_000;
 
 export function invalidateUserCache(email?: string) {
@@ -140,7 +155,7 @@ export async function userFromCookies(): Promise<CurrentUser | null> {
 /* ------------------------------------------------------------------ *
  * Permissions (app_config) — cached per user_type for 60 s.
  * ------------------------------------------------------------------ */
-const cache = new Map<string, { at: number; grants: GrantMap }>();
+const cache = (g.__shdGrantCache ??= new Map<string, { at: number; grants: GrantMap }>());
 const TTL = 60_000;
 
 export async function grantsForUserType(userType: string | null): Promise<GrantMap> {
@@ -174,6 +189,28 @@ export function invalidateGrantCache() {
 export async function can(user: CurrentUser, module: Module | null, action: Action) {
   if (user.isAdmin) return true;
   return checkGrant(false, await grantsForUserType(user.userType), module, action);
+}
+
+/** Special right (สิทธิ์พิเศษ — app_config row `right`, can_view) of this user's role. */
+export async function hasRight(user: Pick<CurrentUser, 'isAdmin' | 'userType'>, right: Right): Promise<boolean> {
+  return checkRight(user.isAdmin, await grantsForUserType(user.userType), right);
+}
+
+/** The same for another user by id (an assignee, who saves a job) — their role as stored in app_user. */
+export async function userHasRight(userId: number, right: Right): Promise<boolean> {
+  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, userId)).limit(1);
+  const userType = u?.t?.trim() || null;
+  return hasRight({ isAdmin: userType === ADMIN_USER_TYPE, userType }, right);
+}
+
+/** The roles ticked for a right (an implicit System Admin hold is not a row) — assignee list, messages. */
+export async function rolesWithRight(right: Right): Promise<string[]> {
+  const rows = await db
+    .select({ t: appConfig.userType })
+    .from(appConfig)
+    .where(and(eq(appConfig.moduleName, right), eq(appConfig.canView, true)))
+    .orderBy(appConfig.userType);
+  return rows.map((r) => r.t?.trim() ?? '').filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ *

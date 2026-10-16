@@ -10,7 +10,7 @@ export const POST = handle(async (req: NextRequest) => {
   const body = await readJson<SaleOrderInput>(req);
   const user = await requireCan(req, 'Sale Order', body.no ? 'edit' : 'add');
   return idempotent(req, user.userId, async () => {
-    const order = await saveSaleOrder(body, user.userId);
+    const order = await saveSaleOrder(body, user);
     return NextResponse.json({ ok: true, order }, { status: body.no ? 200 : 201 });
   });
 });

@@ -19,12 +19,17 @@ import { LRUCache } from 'lru-cache';
 type Box = { v: unknown; at: number };
 type Loader = () => Promise<unknown>;
 
-const store = new LRUCache<string, Box, Loader>({
+// ONE store per process, on globalThis: the build loads route handlers (/api) and pages through separate
+// module runtimes (.next/server/chunks vs chunks/ssr), so a module-level store existed twice — a write
+// through /api invalidated only the API's copy and a page (the brand list) kept serving its own for up to
+// a TTL (persona QA: a new brand missing from the list / search for 20–40 s).
+const g = globalThis as typeof globalThis & { __shdCache?: LRUCache<string, Box, Loader> };
+const store = (g.__shdCache ??= new LRUCache<string, Box, Loader>({
   max: 500,
   ttl: 60_000, // default; every call passes its own
   allowStale: true,
   fetchMethod: async (_key, _stale, { context }) => ({ v: await context(), at: Date.now() }),
-});
+}));
 
 export const TTL_MASTER = 60_000;
 export const TTL_STATIC = 60 * 60_000; // provinces & co. — never edited through the app

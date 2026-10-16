@@ -31,7 +31,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user.approved) redirect('/pending');
 
   // a failed grants read must not look like "no access" (→ /pending): let it reach app/error.tsx
-  const grants = user.isAdmin ? {} : await grantsForUserType(user.userType);
+  // (System Admin's too: Job Take is the one right an admin holds only when ticked — checkRight)
+  const grants = await grantsForUserType(user.userType);
 
   return (
     <AccessProvider

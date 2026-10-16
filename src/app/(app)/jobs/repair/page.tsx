@@ -37,10 +37,18 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg } from '@/lib/api';
-import { partsNotIssuedMsg, repairActionSchema, REOPEN_ADMIN_ONLY } from '@/lib/validation/job';
+import {
+  partCharge,
+  partsNotIssuedMsg,
+  partsWaitingMsg,
+  repairActionSchema,
+  REOPEN_LOCKED,
+} from '@/lib/validation/job';
 
 /** ซ่อมเสร็จ / ซ่อมเสร็จ (ชำระเงินแล้ว) — refused while a part requested from stock is not issued (setStatus) */
 const REPAIRED = ['ซ่อมเสร็จ', 'ซ่อมเสร็จ (ชำระเงินแล้ว)'];
+/** ลูกค้าไม่ซ่อม / ไม่พบอาการเสีย — refused the same way, the part line has to be cancelled first (setStatus) */
+const NO_REPAIR = ['ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)', 'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)'];
 /** a line not ticked เบิก: priced in the quotation only, stock is not asked for it */
 const QUOTE_ONLY = 'เสนอ (ยังไม่เบิก)';
 
@@ -57,6 +65,7 @@ type Line = {
   bQuote: boolean;
   bQty: number;
   status: string;
+  total?: number; // the stored line total (what the job is charged for it)
   locked?: boolean; // already issued / returned — read-only
   waiting?: boolean; // requested from stock (เบิก) and not all issued yet
 };
@@ -73,10 +82,12 @@ function RepairForm() {
     onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt } = useJobForm();
-  const act = useWorkflowErrors();
+  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
-  const { can } = useAccess();
-  const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (System Admin may change them)
+  const { can, has } = useAccess();
+  const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (Job Money After Close may change them)
+  // a closed job keeps its status unless the role has Job Reopen (setStatus refuses it otherwise)
+  const reopenLock = form.statusGroup === 'Finished' && !has('Job Reopen') ? REOPEN_LOCKED : undefined;
   const [lines, setLines] = React.useState<Line[]>([]);
   const [detail, setDetail] = React.useState({
     engineerSymptom: '',
@@ -116,6 +127,7 @@ function RepairForm() {
         bQuote: p.isQuotationB,
         bQty: p.requestQtyB,
         status: p.status,
+        total: p.total,
         locked: p.statusId !== 1 || p.granted > 0,
         waiting: p.statusId === 1 && p.isSpecial && p.requested > p.granted,
       })),
@@ -151,8 +163,14 @@ function RepairForm() {
     setSaving(true);
     try {
       // product / other-info sections shown on this screen are saved too
-      adopt(await saveCommonSections(job.no, form, canEdit));
-      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, body);
+      const common = await saveCommonSections(job.no, form, canEdit);
+      adopt(common);
+      // the version as of now: someone else's save since the page loaded → 409 (reload) instead of
+      // silently cancelling the part requests they added
+      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
+        ...body,
+        version: common.version ?? form.version,
+      });
       setJob(d.job);
       push({ kind: 'success', title: 'บันทึกงานซ่อมเรียบร้อย', desc: `${d.job.no} · ${d.job.status}` });
     } catch (e) {
@@ -188,17 +206,31 @@ function RepairForm() {
 
   // part-line rule errors ("parts.<row>.a.qty" …) — listed under the table by row number
   const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
+  // the quotation (ยอดเสนอราคา) — not the bill: a เสนอ-only line is quoted, not charged
   const totalA = lines.reduce((s, l) => s + (l.aQuote ? l.price * l.aQty : 0), 0);
   const totalB = lines.reduce((s, l) => s + (l.bQuote ? l.price * l.bQty : 0), 0);
-  // the server refuses the change to ซ่อมเสร็จ while these are not issued — say so before saving
+  const chargeOf = (l: Line) => partCharge({ pick: l.aPick, quote: l.aQuote, qty: l.aQty }, l.price);
+  // what the job charges (ค่าอะไหล่ in the summary) = what saveRepair stores: the stored total while no line
+  // changed; otherwise issued / returned lines keep their stored amount, the others เบิก + เสนอ only
+  const linesEdited = !!saved && JSON.stringify(lines) !== JSON.stringify(saved.lines);
+  const charged = linesEdited
+    ? lines.reduce((s, l) => s + (l.locked ? (l.total ?? 0) : chargeOf(l)), 0)
+    : (job?.partsCost ?? 0);
+  // the server refuses the change to ซ่อมเสร็จ / ไม่ซ่อม while these are not issued — say so before saving
   const notIssued = lines.filter((l) => (l.locked ? l.waiting : l.aPick && l.aQty > 0));
+  const statusChange = detail.status !== job?.status && notIssued.length > 0;
   const partsBlock =
-    REPAIRED.includes(detail.status) && detail.status !== job?.status && notIssued.length
+    statusChange && REPAIRED.includes(detail.status)
       ? partsNotIssuedMsg(notIssued)
-      : undefined;
-  // a closed job keeps its status (System Admin may re-open it: setStatus); otherwise its own one comes first
+      : statusChange && NO_REPAIR.includes(detail.status) && !NO_REPAIR.includes(job?.status ?? '')
+        ? partsWaitingMsg(notIssued, detail.status)
+        : undefined;
+  /** column เป็นเงิน of แบบ A: the line's charge — a quoted line not ticked เบิก is not charged */
+  const amountA = (l: Line) =>
+    l.aQuote && !l.aPick && l.aQty > 0 ? 'ไม่คิดเงิน' : baht(l.locked ? (l.total ?? 0) : chargeOf(l));
+  // a closed job keeps its status (Job Reopen may re-open it: setStatus); otherwise its own one comes first
   const statusOptions =
-    lock && job
+    reopenLock && job
       ? [job.status]
       : job && !REPAIR_STATUS_OPTIONS.includes(job.status)
         ? [job.status, ...REPAIR_STATUS_OPTIONS]
@@ -353,7 +385,7 @@ function RepairForm() {
                         }}
                         className="h-8 w-16 px-1.5 text-xs"
                       />
-                      <span className="num ml-auto">{baht(quote ? l.price * qty : 0)}</span>
+                      <span className="num ml-auto">{k === 'a' ? amountA(l) : baht(quote ? l.price * qty : 0)}</span>
                     </div>
                   );
                 })}
@@ -365,10 +397,10 @@ function RepairForm() {
             {lines.length > 0 && (
               <li className="flex justify-between bg-muted/50 px-3 py-2 text-xs font-semibold">
                 <span>
-                  รวมแบบ A <span className="num text-primary">{baht(totalA)}</span>
+                  ยอดเสนอราคา แบบ A <span className="num text-primary">{baht(totalA)}</span>
                 </span>
                 <span>
-                  รวมแบบ B <span className="num text-primary">{baht(totalB)}</span>
+                  ยอดเสนอราคา แบบ B <span className="num text-primary">{baht(totalB)}</span>
                 </span>
               </li>
             )}
@@ -462,7 +494,7 @@ function RepairForm() {
                           className="h-7 w-14 px-1.5 text-xs"
                         />
                       </td>
-                      <td className="num px-2 py-2 text-right">{baht(l.aQuote ? l.price * l.aQty : 0)}</td>
+                      <td className="num px-2 py-2 text-right">{amountA(l)}</td>
 
                       <td className="border-l border-border px-2 py-2 text-center">
                         <Checkbox
@@ -512,11 +544,11 @@ function RepairForm() {
                 <tfoot>
                   <tr className="bg-muted/50 font-semibold">
                     <td colSpan={7} className="px-2 py-2 text-right text-xs">
-                      รวมแบบ A
+                      ยอดเสนอราคา แบบ A
                     </td>
                     <td className="num px-2 py-2 text-right text-primary">{baht(totalA)}</td>
                     <td colSpan={3} className="px-2 py-2 text-right text-xs">
-                      รวมแบบ B
+                      ยอดเสนอราคา แบบ B
                     </td>
                     <td className="num px-2 py-2 text-right text-primary">{baht(totalB)}</td>
                     <td colSpan={2} />
@@ -589,12 +621,7 @@ function RepairForm() {
                 }}
               />
             </Field>
-            <Field
-              label="สถานะงานซ่อม"
-              required
-              error={act.errors.status ?? partsBlock}
-              hint={lock ? REOPEN_ADMIN_ONLY : undefined}
-            >
+            <Field label="สถานะงานซ่อม" required error={act.errors.status ?? partsBlock} hint={reopenLock}>
               <SearchSelect
                 value={detail.status}
                 onChange={(v) => {
@@ -609,7 +636,7 @@ function RepairForm() {
           </FieldGrid>
         </Section>
 
-        <CostSummary partsTotal={totalA} action={act} />
+        <CostSummary partsTotal={charged} action={act} />
         <OtherInfoSection />
         <AttachmentSection jobNo={job?.no} />
         <JobHistorySection job={job} />

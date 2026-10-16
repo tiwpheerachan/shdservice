@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySession, SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S } from '@/lib/session';
+import { verifySession, SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S, seenUserId } from '@/lib/session';
 import { resolveUser, HttpError } from '@/server/auth';
 
 export const runtime = 'nodejs';
@@ -14,14 +14,19 @@ export async function GET(request: NextRequest) {
     ? await resolveUser(session).catch((e) => (e instanceof HttpError && e.status === 503 ? e : null))
     : null;
   if (user instanceof HttpError) return NextResponse.json({ error: user.message }, { status: 503 });
-  // no session cookie AND no os_seen marker = this browser signed out (logout clears both) → the other
-  // open tabs go to /login?bye=1, not "expired" with their page as `next`; an idle expiry keeps os_seen
+  // no session cookie AND os_seen is not a user id ('0' = ออกจากระบบ, or none) = this browser signed out →
+  // the other open tabs go to /login?bye=1, not "expired" with their page as `next`; an idle expiry keeps
+  // os_seen = the user id
   if (!session || !user)
     return NextResponse.json(
       {
         user: null,
+        // why, for the /login note (lib/navigation toLogin): a cookie that still verifies but is refused =
+        // signed out on another device (logout bumps session_version) or the account's email changed;
+        // otherwise the 30-min idle timeout (or the 12-h cap)
+        reason: session ? 'elsewhere' : 'expired',
         ...(!request.cookies.get(SESSION_COOKIE)?.value &&
-          !request.cookies.get(SEEN_COOKIE)?.value && { signedOut: true }),
+          !seenUserId(request.cookies.get(SEEN_COOKIE)?.value) && { signedOut: true }),
       },
       { status: 401 },
     );

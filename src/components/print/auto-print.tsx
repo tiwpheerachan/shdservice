@@ -3,8 +3,24 @@
 import * as React from 'react';
 import { Printer, X } from 'lucide-react';
 
-/** Print toolbar (hidden on paper) + auto-open the print dialog once fonts are ready. */
+/** the widest sheet (A4 / A5 landscape = 210 mm ≈ 794 px) + a little room */
+const SHEET_PX = 820;
+
+/**
+ * Print toolbar (hidden on paper) + auto-open the print dialog once fonts are ready.
+ * On a phone the 210 mm sheet is scaled down to the screen (screen only — the print stays A4 / A5).
+ */
 export function AutoPrint() {
+  React.useEffect(() => {
+    const fit = () =>
+      document.documentElement.style.setProperty(
+        '--sheet-zoom',
+        String(Math.min(1, document.documentElement.clientWidth / SHEET_PX)),
+      );
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
   React.useEffect(() => {
     const t = setTimeout(() => {
       if (new URLSearchParams(window.location.search).get('auto') !== '0') window.print();
@@ -30,6 +46,7 @@ export function AutoPrint() {
           <X className="h-4 w-4" /> ปิด
         </button>
       </div>
+      <style>{'@media screen { .print-root { zoom: var(--sheet-zoom, 1); } }'}</style>
     </div>
   );
 }

@@ -6,7 +6,14 @@ import { db } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
 import { ADMIN_USER_TYPE } from '@/lib/modules';
-import { findAppUserByEmail, fullName, HttpError, invalidateGrantCache, invalidateUserCache } from '@/server/auth';
+import {
+  findAppUserByEmail,
+  fullName,
+  HttpError,
+  invalidateGrantCache,
+  invalidateUserCache,
+  rolesWithRight,
+} from '@/server/auth';
 
 /** After any app_user write: the staff dropdown and the per-request user lookup must see it now. */
 function userChanged(email?: string | null) {
@@ -224,10 +231,12 @@ export async function staffOrKeep(
  * adds the people who have left but are still on jobs (engineer) / sale orders (sales), labelled
  * "(ไม่ใช้งานแล้ว)", so old periods can still be filtered by them.
  */
-export function listStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; name: string; userType: string }[]> {
+type StaffRow = { id: number; name: string; userType: string; takesJobs: boolean };
+/** `takesJobs`: the role has Job Take — offered in มอบหมายงานนี้ให้ (the cache is dropped when permissions are saved) */
+export function listStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
   return cached(usedAs ? `staff:${usedAs}` : 'staff', TTL_MASTER, () => loadStaff(usedAs));
 }
-async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; name: string; userType: string }[]> {
+async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
   const used =
     usedAs === 'engineer'
       ? sql`${appUser.userId} IN (SELECT engineer_id FROM job)`
@@ -246,10 +255,12 @@ async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<{ id: number; n
     .from(appUser)
     .where(or(eq(appUser.recordStatus, RS.ACTIVE), used))
     .orderBy(asc(appUser.firstName), asc(appUser.lastName));
+  const takers = new Set(await rolesWithRight('Job Take'));
   return rows.map((r) => ({
     id: r.id,
     name: (fullName(r.first, r.last) || r.username || `#${r.id}`) + (r.status === RS.ACTIVE ? '' : ' (ไม่ใช้งานแล้ว)'),
     userType: r.userType?.trim() ?? '',
+    takesJobs: takers.has(r.userType?.trim() ?? ''),
   }));
 }
 
@@ -279,11 +290,18 @@ export async function userPrev(id: unknown): Promise<{ username: string | null; 
   return row ?? null;
 }
 
-/** An admin cannot lock themselves out: their own account is never disabled, deleted or given another role. */
-export function refuseSelf(userId: number, actorId: number) {
-  if (userId === actorId)
-    throw new HttpError(409, 'เปลี่ยนบทบาท ถอนสิทธิ์ หรือลบบัญชีของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน');
+/** An admin cannot lock themselves out: their own account is never disabled, deleted, given another role,
+ *  or another email / username (sign-in finds the account by email). */
+export function refuseSelf(
+  userId: number,
+  actorId: number,
+  msg = 'เปลี่ยนบทบาท ถอนสิทธิ์ หรือลบบัญชีของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน',
+) {
+  if (userId === actorId) throw new HttpError(409, msg);
 }
+
+/** a deleted user comes back only through กู้คืน (setUserDeleted → INACTIVE), never straight to Active */
+export const DELETED_USER_MSG = 'ผู้ใช้นี้ถูกลบ — กู้คืนก่อน';
 
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
 export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
@@ -300,6 +318,12 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   if (Number.isFinite(targetId) && !before) throw new HttpError(404, 'user not found');
   if (before && (rs !== RS.ACTIVE || userType !== (before.userType?.trim() || null)))
     refuseSelf(before.userId, actorId);
+  // (an empty email / username keeps the stored one — see userValues)
+  const same = (a: string, b: string | null) => a.toLowerCase() === clean(b).toLowerCase();
+  if (before && ((email && !same(email, before.emailAddress)) || (username && !same(username, before.username))))
+    refuseSelf(before.userId, actorId, 'เปลี่ยนอีเมลหรือ Username ของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน');
+  // a stale tab's คืนสิทธิ์ / แก้ไข on a user deleted meanwhile used to set it straight back to ACTIVE
+  if (before?.recordStatus === RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
 
   // the role must be one of the roles (or the one the user already has)
   if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
@@ -574,6 +598,7 @@ export async function savePermissions(
   invalidateGrantCache();
   invalidate('roles');
   invalidate('modules');
+  invalidate('staff'); // takesJobs follows Job Take
   return n;
 }
 

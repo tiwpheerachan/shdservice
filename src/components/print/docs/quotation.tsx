@@ -5,7 +5,7 @@ import { money } from '@/components/print/print-frame';
 import { QUOTATION_VALIDITY } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
-import { maskQuotationForCustomer, quoteExpired } from '@/server/services/tracking';
+import { maskQuotationForCustomer, quoteSignState } from '@/server/services/tracking';
 
 const dmy = (s: string) => {
   // "2026-09-17 16:37" / "2026-09-17" → "17-09-2026" (legacy prints dd-mm-yyyy)
@@ -23,8 +23,9 @@ const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : das
  * ใบเสนอราคา — laid out to match the legacy form (setupdata/receipt/Q2600468_163754.pdf):
  * logomark + company text · bilingual boxed header · full-height item table ·
  * bank details + totals with the amount in Thai words · two signature boxes.
- * `forCustomer` = opened from /track: masked like the tracking page, no staff names, prices kept;
- * past its validity it is stamped หมดอายุแล้ว and no longer asks to be signed and sent back.
+ * `forCustomer` = opened from /track: masked like the tracking page, no staff names, prices kept.
+ * Only a quotation still awaiting the customer's answer asks to be signed and sent back (quoteSignState);
+ * past its validity it is stamped หมดอายุแล้ว — on the staff copy too, which could otherwise be handed over for signing.
  */
 export async function QuotationDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getQuotation(no);
@@ -43,7 +44,8 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
   // label the number by what it is (q.imei = the job's IMEI when there is no job detail)
   const deviceLabel = (j ? [j.imei && 'IMEI', j.serial && 'S/N'].filter(Boolean).join(' / ') : 'IMEI') || 'IMEI / S/N';
   // the same rule as the /track list and status line (services/tracking.ts)
-  const expired = forCustomer && quoteExpired(q.statusId, q.date, j?.statusId ?? null);
+  const sign = quoteSignState(q.statusId, q.date, j?.statusId ?? null);
+  const expired = sign === 'expired';
   const lbl = 'text-neutral-700';
 
   return (
@@ -122,9 +124,12 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                 <span>
                   <span className={lbl}>Tel :</span>&nbsp;&nbsp;<span className="num">{or(c?.phone)}</span>
                 </span>
-                <span>
-                  <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
-                </span>
+                {/* never on the customer copy (masked away) — no empty label either */}
+                {!forCustomer && (
+                  <span>
+                    <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
+                  </span>
+                )}
               </div>
             </td>
             <td className="pad" rowSpan={2}>
@@ -308,29 +313,36 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         <tbody>
           <tr>
             <td className="w-[58%] br sig text-center">
-              {expired ? (
-                <p className="text-[10.5px] font-semibold text-red-600">
-                  ใบเสนอราคานี้หมดอายุแล้ว — กรุณาติดต่อศูนย์บริการเพื่อขอใบเสนอราคาใหม่
-                </p>
-              ) : (
+              {sign === 'sign' ? (
                 <>
                   <p className="text-[10.5px]">
                     กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้{co.email ? 'มาที่' : 'กลับมาที่ศูนย์บริการ'}
                   </p>
                   {co.email && <p className="mt-1">Email : {co.email}</p>}
+                  <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
+                  <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
+                    <span>(</span>
+                    <span>)</span>
+                  </p>
+                  <p className="mt-2">
+                    วันที่{' '}
+                    <span className="inline-block w-[120px] border-b border-black text-center">
+                      &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
+                    </span>
+                  </p>
                 </>
+              ) : (
+                // already answered / no longer answerable: nothing to sign
+                <p className={`mt-6 font-semibold ${expired ? 'text-[10.5px] text-red-600' : 'text-[13px]'}`}>
+                  {sign === 'expired'
+                    ? 'ใบเสนอราคานี้หมดอายุแล้ว — กรุณาติดต่อศูนย์บริการเพื่อขอใบเสนอราคาใหม่'
+                    : sign === 'agreed'
+                      ? `ลูกค้าตกลงซ่อมแล้ว${q.approveDate ? ` ${dmy(q.approveDate)}` : ''}`
+                      : sign === 'declined'
+                        ? 'ลูกค้าไม่ตกลงซ่อม'
+                        : 'ใบเสนอราคานี้ถูกยกเลิกแล้ว'}
+                </p>
               )}
-              <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
-              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
-                <span>(</span>
-                <span>)</span>
-              </p>
-              <p className="mt-2">
-                วันที่{' '}
-                <span className="inline-block w-[120px] border-b border-black text-center">
-                  &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
-                </span>
-              </p>
             </td>
             <td className="sig">
               <p className="text-center font-semibold">
@@ -338,12 +350,16 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                 <br />
                 {co.nameTh}
               </p>
-              <div className="mt-5 flex items-end gap-2">
-                <span className="font-semibold">เสนอราคาโดย :</span>
-                <span className="flex-1 border-b border-black" />
-              </div>
-              {/* a staff name: the staff copy only (masked to "" for the customer) */}
-              {!forCustomer && <p className="mt-1 text-center">( {or(q.createdBy, '—')} )</p>}
+              {/* a staff name: the staff copy only (masked to "" for the customer) — no empty label either */}
+              {!forCustomer && (
+                <>
+                  <div className="mt-5 flex items-end gap-2">
+                    <span className="font-semibold">เสนอราคาโดย :</span>
+                    <span className="flex-1 border-b border-black" />
+                  </div>
+                  <p className="mt-1 text-center">( {or(q.createdBy, '—')} )</p>
+                </>
+              )}
               <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
             </td>
           </tr>

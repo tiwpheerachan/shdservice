@@ -10,6 +10,14 @@ const num = (v: unknown) => Number(v) || 0;
 /** approval refused to the order's own people (System Admin may) — the page says the same */
 export const SELF_APPROVE = 'คุณเป็นผู้สร้างใบสั่งขายนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
 export const SELF_APPROVE_SALES = 'คุณเป็นพนักงานขายของใบนี้ อนุมัติเองไม่ได้ — ให้ผู้มีสิทธิ์อนุมัติคนอื่นทำ';
+/** who may approve / deny / send back a sale order: the special right SO Approve — not any Sale Order edit grant */
+export const NOT_APPROVER = 'บทบาทของคุณไม่มีสิทธิ์อนุมัติใบสั่งขาย (สิทธิ์พิเศษ "อนุมัติใบสั่งขาย" — SO Approve)';
+/** only who keyed the order in (document_create_by) sends it for approval (System Admin may) */
+export const SUBMIT_CREATOR_ONLY = 'ส่งขออนุมัติได้เฉพาะผู้สร้างใบสั่งขาย';
+/** a waiting (2) order: only its creator (or System Admin) edits it (owner decision) — the page is read-only for others */
+export const WAITING_CREATOR_ONLY =
+  'ใบสั่งขายที่รออนุมัติแก้ได้เฉพาะผู้สร้าง — ถ้าต้องแก้ ให้ผู้อนุมัติกด ส่งกลับแก้ไข';
+export const SO_CANCELLED = 'ใบสั่งขายนี้ถูกยกเลิกแล้ว';
 export const overpaidMessage = (total: number) =>
   `จำนวนเงินที่ชำระมากกว่ายอดรวม (${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท)`;
 

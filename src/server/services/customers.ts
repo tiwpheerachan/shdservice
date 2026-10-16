@@ -12,7 +12,15 @@ import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
-import { customerSchema, conflictErrors, normalizePhone, taxIdDigits, withPrefix } from '@/lib/validation/customer';
+import {
+  customerSchema,
+  conflictErrors,
+  localPhone,
+  normalizePhone,
+  phoneDigitVariants,
+  taxIdDigits,
+  withPrefix,
+} from '@/lib/validation/customer';
 import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 
@@ -116,14 +124,9 @@ const SORT = {
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
-// "+66 89 999 3466" typed → also "0899993466" (numbers are stored 0-prefixed)
+// "+66 89 999 3466" typed → also "0899993466", and "0899993466" also finds a stored "+66 89 999 3466"
 const phoneHas = (digits: string) =>
-  or(
-    sql`${phoneDigits} LIKE ${'%' + digits + '%'}`,
-    digits.length >= 6 && digits.startsWith('66')
-      ? sql`${phoneDigits} LIKE ${'%0' + digits.slice(2) + '%'}`
-      : undefined,
-  );
+  or(...phoneDigitVariants(digits).map((d) => sql`${phoneDigits} LIKE ${'%' + d + '%'}`));
 
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
@@ -300,7 +303,7 @@ export async function findCustomerConflicts(
     checks.push({
       field: 'phone',
       value: phone,
-      cond: sql`regexp_replace(coalesce(${customer.phoneNumber},''), '\\D', '', 'g') = ${phone}`,
+      cond: or(...phoneDigitVariants(phone).map((d) => sql`${phoneDigits} = ${d}`))!, // +66 … = 0 …
     });
   if (email)
     checks.push({ field: 'email', value: email, cond: sql`lower(trim(coalesce(${customer.email},''))) = ${email}` });
@@ -344,17 +347,43 @@ export async function findCustomerConflicts(
   return out;
 }
 
+/** The columns a save writes from the form, cleaned (phone / one-line address / status apart). */
+function columnsOf(i: CustomerInput) {
+  const taxId = taxIdDigits(i.taxId);
+  return {
+    customerName: clean(i.name),
+    // digits only; a legacy value nobody changed (not 13 digits) is kept as it was
+    customerCardId: /^\d{13}$/.test(taxId) ? taxId : clean(i.taxId),
+    customerType: clean(i.type) || 'Normal',
+    isCustomerOnline: i.online !== false,
+    customerAddress1: clean(i.address1),
+    customerAddress2: clean(i.address2),
+    cityId: i.cityId ?? -1,
+    districtId: i.districtId ?? -1,
+    // the postal code is NOT checked against mt_sub_district.postal_code: the master is wrong for many
+    // ตำบล (every Mueang Chiang Mai one says 50000; real 50200 / 50300) — the form only hints at a difference
+    subDistrictId: i.subDistrictId ?? -1,
+    postalCode: clean(i.postalCode),
+    email: clean(i.email).toLowerCase(),
+    lineId: clean(i.line),
+    usePriceGroup: PRICE_GROUP_VALUE[clean(i.priceGroup)] ?? (clean(i.priceGroup) || 'Retail'),
+  };
+}
+/** the parts customer_address is built from */
+const ADDRESS_PARTS = ['customerAddress1', 'customerAddress2', 'cityId', 'districtId', 'subDistrictId', 'postalCode'];
+
 /** Create/update a customer. New codes come from running "Customer" (C00001). */
 export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
   const prev = i.code ? await getCustomerByCode(i.code) : null;
   // same rules as the form (lib/validation/customer); unchanged legacy values still save
   assertValid(customerSchema(prev), i);
   const name = clean(i.name);
-  const phone = clean(normalizePhone(i.phone));
+  // an untouched phone is kept exactly as stored; a new / changed one is cleaned and written 0-prefixed
+  const phone =
+    prev && normalizePhone(prev.phone) === normalizePhone(i.phone)
+      ? prev.phone
+      : localPhone(clean(normalizePhone(i.phone)));
   const taxId = taxIdDigits(i.taxId);
-  // the postal code is NOT checked against mt_sub_district.postal_code: the master is wrong for many
-  // ตำบล (every Mueang Chiang Mai one says 50000; real 50200 / 50300) — the form only hints at a difference
-  const subDistrictId = i.subDistrictId ?? -1;
 
   // uniqueness: block a NEW customer that reuses phone / email / tax id; on edit only
   // the fields that actually change are checked (legacy data already holds duplicates)
@@ -375,44 +404,52 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
 
   return db.transaction(async (tx) => {
     // cleaned values (customerSchema checked their length against the columns — nothing is cut)
-    const values = {
-      customerName: name,
-      // digits only; a legacy value nobody changed (not 13 digits) is kept as it was
-      customerCardId: /^\d{13}$/.test(taxId) ? taxId : clean(i.taxId),
-      customerType: clean(i.type) || 'Normal',
-      isCustomerOnline: i.online !== false,
-      customerAddress: await composeAddress(tx, { ...i, address1: clean(i.address1), address2: clean(i.address2) }),
-      customerAddress1: clean(i.address1),
-      customerAddress2: clean(i.address2),
-      cityId: i.cityId ?? -1,
-      districtId: i.districtId ?? -1,
-      subDistrictId,
-      postalCode: clean(i.postalCode),
-      phoneNumber: phone,
-      email: clean(i.email).toLowerCase(),
-      lineId: clean(i.line),
-      usePriceGroup: PRICE_GROUP_VALUE[clean(i.priceGroup)] ?? (clean(i.priceGroup) || 'Retail'),
-      ...statusStamp(fromUiStatus(i.status), byUserId),
-    };
+    const cols = { ...columnsOf(i), phoneNumber: phone };
+    const address = () =>
+      composeAddress(tx, { ...i, address1: cols.customerAddress1, address2: cols.customerAddress2 });
+    const status = fromUiStatus(i.status);
     if (i.code) {
       const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for('update');
-      if (before) assertVersion(i.version, before.rowVersion);
-      const [row] = await tx.update(customer).set(values).where(eq(customer.customerCode, i.code)).returning();
-      if (!row) throw new HttpError(404, 'customer not found');
+      if (!before) throw new HttpError(404, 'customer not found');
+      assertVersion(i.version, before.rowVersion);
+      // "never worse": only what really changes is written. The stored row goes through the same cleaning
+      // as the form (which shows a legacy address-only row's address in บรรทัด 1) — equal → the stored value
+      // stays as it is (a legacy trailing space); saved unchanged = no UPDATE, no audit, no row_version bump
+      const shown = toCustomer(before);
+      const was: Record<string, unknown> = {
+        ...columnsOf({ ...shown, address1: shown.address1 || shown.address }),
+        phoneNumber: shown.phone,
+      };
+      const set: Partial<typeof customer.$inferInsert> = Object.fromEntries(
+        Object.entries(cols).filter(([k, v]) => v !== was[k]),
+      );
+      // the one-line address is re-built only when one of its parts changes (a legacy one stays as typed)
+      if (ADDRESS_PARTS.some((k) => k in set)) set.customerAddress = await address();
+      if (uiStatus(before.recordStatus) !== uiStatus(status)) Object.assign(set, statusStamp(status, byUserId));
+      if (!Object.keys(set).length) return shown;
+      const [row] = await tx.update(customer).set(set).where(eq(customer.customerId, before.customerId)).returning();
       await audit(tx, byUserId, {
         action: 'UPDATE',
         module: 'Customer',
         entity: 'customer',
         key: i.code,
         summary: `แก้ไขลูกค้า ${name}`,
-        changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
+        changes: diff(before as Record<string, unknown>, set as Record<string, unknown>),
       });
-      return toCustomer(row);
+      return toCustomer(row!);
     }
     const code = await nextRunningNo(tx, 'Customer');
     const [row] = await tx
       .insert(customer)
-      .values({ ...values, customerCode: code, createdDate: nowThai(), createBy: byUserId, faxNumber: '' })
+      .values({
+        ...cols,
+        customerAddress: await address(),
+        ...statusStamp(status, byUserId),
+        customerCode: code,
+        createdDate: nowThai(),
+        createBy: byUserId,
+        faxNumber: '',
+      })
       .returning();
     if (!row) throw new Error('customer insert returned no row');
     await audit(tx, byUserId, {

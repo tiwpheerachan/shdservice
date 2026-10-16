@@ -57,7 +57,7 @@ function OutsourceForm() {
     onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt, set } = useJobForm();
-  const act = useWorkflowErrors();
+  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const [tab, setTab] = React.useState('device');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({

@@ -15,7 +15,7 @@ import { TEST_DATABASE_URL, assertLocal } from './db-url.mts';
 
 export async function seed(db: { query(text: string): Promise<unknown> }): Promise<void> {
   await db.query(`
-    TRUNCATE job_status, customer, job, job_log, quotation_hd, app_config, app_user,
+    TRUNCATE job_status, customer, job, job_log, quotation_hd, quotation_dt, app_config, app_user,
       track_ticket, track_rate, track_block, track_event, track_session, track_otp, track_doc_ticket RESTART IDENTITY;
 
     INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active) VALUES

@@ -526,33 +526,36 @@ export function TrackOtp({
                   disabled={busy}
                   className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-accent/40 disabled:opacity-60"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="num text-sm font-semibold">{r.no}</span>
-                      <span className="truncate text-sm">{r.brandModel || '—'}</span>
-                    </p>
-                    <p className="mt-0.5 text-2xs text-muted-foreground">
-                      {r.deviceRef && <span className="num">S/N {r.deviceRef} · </span>}
-                      รับเครื่อง <span className="num">{r.receivedDate || '—'}</span>
-                      {r.closedDate && (
-                        <>
-                          {' · '}ปิดงาน <span className="num">{r.closedDate}</span>
-                        </>
+                  {/* a long status ("ใบเสนอราคาหมดอายุแล้ว — …") wraps onto its own line instead of squeezing the details */}
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <div className="min-w-[12rem] flex-1">
+                      <p className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="num text-sm font-semibold">{r.no}</span>
+                        <span className="truncate text-sm">{r.brandModel || '—'}</span>
+                      </p>
+                      <p className="mt-0.5 text-2xs text-muted-foreground">
+                        {r.deviceRef && <span className="num">S/N {r.deviceRef} · </span>}
+                        รับเครื่อง <span className="num">{r.receivedDate || '—'}</span>
+                        {r.closedDate && (
+                          <>
+                            {' · '}ปิดงาน <span className="num">{r.closedDate}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        'rounded-full px-2.5 py-0.5 text-2xs font-medium',
+                        r.cancelled
+                          ? 'bg-danger-soft text-danger'
+                          : tab === 'history'
+                            ? 'bg-success-soft text-success'
+                            : 'bg-primary-soft text-primary',
                       )}
-                    </p>
+                    >
+                      {r.stepLabel}
+                    </span>
                   </div>
-                  <span
-                    className={cn(
-                      'shrink-0 rounded-full px-2.5 py-0.5 text-2xs font-medium',
-                      r.cancelled
-                        ? 'bg-danger-soft text-danger'
-                        : tab === 'history'
-                          ? 'bg-success-soft text-success'
-                          : 'bg-primary-soft text-primary',
-                    )}
-                  >
-                    {r.stepLabel}
-                  </span>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </li>

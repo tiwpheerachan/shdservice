@@ -34,8 +34,11 @@ import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import {
+  closePaymentEdited,
   closeSchema,
   jobBalance,
+  partsWaitingMsg,
+  refundDateOf,
   OUTSOURCE_NOT_BACK,
   STATUS_CLOSED_TRACKED,
   STATUS_CLOSED_WAIT_TRACKING,
@@ -55,10 +58,10 @@ function CloseForm() {
     onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
   });
   const { s: form, reset, adopt } = useJobForm();
-  const act = useWorkflowErrors();
+  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
   const confirm = useConfirm();
-  const lock = useMoneyLock(); // a closed job: the payment stays as recorded (System Admin may change it)
+  const lock = useMoneyLock(); // a closed job: the payment stays as recorded (Job Money After Close may change it)
   const [tab, setTab] = React.useState('product');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
@@ -67,6 +70,9 @@ function CloseForm() {
     payDate: '',
     payNo: '',
     payDetail: '',
+    refType: '',
+    refAmount: '',
+    refDate: '',
     returnType: '',
     returnDate: '',
     courier: '',
@@ -83,6 +89,9 @@ function CloseForm() {
     payDate: 'payment.date',
     payNo: 'payment.no',
     payDetail: 'payment.detail',
+    refType: 'refund.type',
+    refAmount: 'refund.amount',
+    refDate: 'refund.date',
     returnType: 'return.type',
     courier: 'return.detail',
     returnDetail: 'return.detail',
@@ -121,9 +130,18 @@ function CloseForm() {
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
   // still at the out-source vendor → the server refuses the close; say so before the user fills the form
   const outsourceOut = !!job?.outsource.some((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
+  // a part requested from stock (เบิก) not issued yet → the server refuses a close of an open job (setStatus)
+  const waiting = job?.parts.filter((p) => p.statusId === 1 && p.isSpecial && p.requested > p.granted) ?? [];
+  const partsWait =
+    waiting.length && job?.statusGroup !== 'Finished' && d.status ? partsWaitingMsg(waiting, d.status) : undefined;
   const deposit = job?.depositCost ?? 0;
+  // the payment is sent only when the user edited it (never on a locked job) — otherwise the stored one stays
+  const paid = closePaymentEdited(d, saved, !!lock);
   // paying less than due is allowed but never silent: shown here and confirmed at save
-  const bal = jobBalance(net, deposit, Number(d.payAmount || 0));
+  const bal = jobBalance(net, deposit, paid ? Number(d.payAmount || 0) : (job?.payment.amount ?? 0));
+  // money already given back (a swap/refund job stores it as a negative payment): shown as it is, no payment inputs
+  // — the hidden fields stay as loaded, so a save sends no payment and the refund is kept
+  const refunded = job && job.payment.amount < 0 && bal.refund === 0 ? job.payment : null;
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -137,6 +155,11 @@ function CloseForm() {
       payDate: payDateOf(job.payment.detail), // kept as it is on a re-save
       payNo: job.payment.no,
       payDetail: job.payment.detail,
+      // a deposit given back is stored as a negative payment ("คืนมัดจำ <date>"); none yet → the full refund, today
+      refType: job.payment.amount < 0 ? job.payment.type : '',
+      refAmount:
+        job.payment.amount < 0 ? String(-job.payment.amount) : job.depositRefund > 0 ? String(job.depositRefund) : '',
+      refDate: refundDateOf(job.payment.detail) || today,
       returnType: job.return.type,
       returnDate: job.return.date ? job.return.date.slice(0, 10) : today,
       // saved as "<courier> · <note>": its own head first ("ไปรษณีย์ไทย · …" is not the shorter "ไปรษณีย์")
@@ -157,19 +180,21 @@ function CloseForm() {
   // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
-    // the payment goes only when it differs from the one stored: untouched = kept as it is (a legacy
-    // amount without a method too); the amount due filled in above = asked for its method
     const p = job.payment;
-    const paid =
-      d.payType !== p.type ||
-      Number(d.payAmount || 0) !== p.amount ||
-      d.payNo !== p.no ||
-      d.payDetail !== p.detail ||
-      d.payDate !== payDateOf(p.detail);
+    // deposit more than the total: a refund instead of a payment — asked while none is recorded, sent when edited
+    const refundOn = bal.refund > 0 && !lock;
+    const refundNeeded = refundOn && p.amount === 0;
+    const refundEdited = (['refType', 'refAmount', 'refDate'] as const).some((k) => d[k] !== saved?.[k]);
     const body = {
-      payment: paid
-        ? { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail }
-        : undefined,
+      // only what the user edited (closePaymentEdited): untouched = the stored payment / refund stays as it is
+      payment:
+        paid && bal.refund === 0
+          ? { type: d.payType, amount: d.payAmount, date: d.payDate, no: d.payNo, detail: d.payDetail }
+          : undefined,
+      refund:
+        refundNeeded || (refundOn && refundEdited)
+          ? { type: d.refType, amount: d.refAmount, date: d.refDate }
+          : undefined,
       return: {
         type: d.returnType,
         date: d.returnDate,
@@ -182,16 +207,22 @@ function CloseForm() {
     };
     const canEdit = can('Job Management', 'edit');
     // the receipt / parcel no as loaded: an unchanged legacy value still passes
-    if (!act.check(closeSchema({ payNo: saved?.payNo, tracking: saved?.tracking }), body, canEdit)) {
-      if (paid && !d.payType) setTab('payment'); // the method is asked on the payment tab
+    const prev = {
+      payNo: saved?.payNo,
+      tracking: saved?.tracking,
+      refund: { max: bal.refund, required: refundNeeded },
+    };
+    if (!act.check(closeSchema(prev), body, canEdit)) {
+      if ((paid && !d.payType) || body.refund || refundNeeded) setTab('payment'); // asked on the payment tab
       return;
     }
+    if (partsWait) return push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: partsWait });
     if (
       bal.outstanding > 0 &&
       (job.statusGroup !== 'Finished' || paid) &&
       !(await confirm({
         title: `ลูกค้าค้างชำระ ${baht(bal.outstanding)} บาท — ยืนยันปิดงาน?`,
-        description: `ยอดที่ต้องชำระ ${baht(bal.due)} บาท · รับชำระ ${baht(Number(d.payAmount || 0))} บาท — ใบส่งคืนสินค้าจะพิมพ์บรรทัด "ค้างชำระ"`,
+        description: `ยอดที่ต้องชำระ ${baht(bal.due)} บาท · รับชำระ ${baht(bal.due - bal.outstanding)} บาท — ใบส่งคืนสินค้าจะพิมพ์บรรทัด "ค้างชำระ"`,
         confirmLabel: 'ยืนยันปิดงาน',
       }))
     )
@@ -342,82 +373,128 @@ function CloseForm() {
                   )}
                 </ul>
               </div>
-              <FieldGrid cols={2}>
-                <Field label="วิธีการชำระเงิน" required={bal.due > 0} error={act.errors['payment.type']} hint={lock}>
-                  <Select
-                    value={d.payType}
-                    disabled={!!lock}
-                    onChange={(e) => upd({ payType: e.target.value, payDate: d.payDate || thaiToday() })}
+              {bal.refund > 0 ? (
+                <FieldGrid cols={2}>
+                  <Field label="วิธีการคืนเงินมัดจำ" required error={act.errors['refund.type']} hint={lock}>
+                    <Select value={d.refType} disabled={!!lock} onChange={(e) => upd({ refType: e.target.value })}>
+                      <option value="">- - เลือก - -</option>
+                      {JOB_PAYMENT_METHODS.map((p) => (
+                        <option key={p}>{p}</option>
+                      ))}
+                      {d.refType && !JOB_PAYMENT_METHODS.includes(d.refType) && <option>{d.refType}</option>}
+                    </Select>
+                  </Field>
+                  <Field
+                    label="จำนวนเงินที่คืน (บาท)"
+                    required
+                    error={act.errors['refund.amount']}
+                    hint={`ไม่เกิน ${baht(bal.refund)} บาท`}
                   >
-                    <option value="">- - เลือก - -</option>
-                    {JOB_PAYMENT_METHODS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                    {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
-                  </Select>
-                </Field>
-                <Field label="จำนวนเงินที่ชำระ (บาท)" error={act.errors['payment.amount']}>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={d.payAmount}
-                    disabled={!!lock}
-                    onChange={(e) => upd({ payAmount: e.target.value })}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="num text-right"
-                  />
-                </Field>
-                <Field label="วันที่ชำระเงิน" error={act.errors['payment.date']}>
-                  <Input
-                    type="date"
-                    value={d.payDate}
-                    disabled={!!lock}
-                    onChange={(e) => upd({ payDate: e.target.value })}
-                  />
-                </Field>
-                <Field label="เลขที่ใบเสร็จ" error={act.errors['payment.no']}>
-                  <Input
-                    className="num"
-                    maxLength={50}
-                    value={d.payNo}
-                    disabled={!!lock}
-                    onChange={(e) => upd({ payNo: e.target.value })}
-                  />
-                </Field>
-                <Field label="สลิปหลักฐานการชำระ" wide>
-                  <div className="flex items-center gap-2">
                     <Input
-                      type="file"
-                      className="h-9 py-1.5 text-xs"
-                      accept=".jpg,.jpeg,.png,.webp,.pdf"
-                      disabled={!job}
-                      onChange={(e) => onPickSlip(e.target.files?.[0])}
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={bal.refund}
+                      inputMode="decimal"
+                      value={d.refAmount}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ refAmount: e.target.value })}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="num text-right"
                     />
-                    {slip && (
-                      <a
-                        href={fileUrl(slip)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="shrink-0 text-xs text-primary hover:underline"
-                      >
-                        ดูสลิป
-                      </a>
-                    )}
-                  </div>
-                </Field>
-                <Field label="หมายเหตุ" wide error={act.errors['payment.detail']}>
-                  <Textarea
-                    rows={2}
-                    maxLength={100}
-                    value={d.payDetail}
-                    disabled={!!lock}
-                    onChange={(e) => upd({ payDetail: e.target.value })}
-                  />
-                </Field>
-              </FieldGrid>
+                  </Field>
+                  <Field label="วันที่คืนเงิน" required error={act.errors['refund.date']}>
+                    <Input
+                      type="date"
+                      value={d.refDate}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ refDate: e.target.value })}
+                    />
+                  </Field>
+                </FieldGrid>
+              ) : refunded ? (
+                <p role="status" className="self-start rounded-lg border border-border p-4 text-sm font-medium">
+                  คืนเงินแล้ว <span className="num">{baht(-refunded.amount)}</span> บาท
+                  {refunded.type || refunded.no ? ` (${[refunded.type, refunded.no].filter(Boolean).join(', ')})` : ''}
+                </p>
+              ) : (
+                <FieldGrid cols={2}>
+                  <Field label="วิธีการชำระเงิน" required={bal.due > 0} error={act.errors['payment.type']} hint={lock}>
+                    <Select
+                      value={d.payType}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ payType: e.target.value, payDate: d.payDate || thaiToday() })}
+                    >
+                      <option value="">- - เลือก - -</option>
+                      {JOB_PAYMENT_METHODS.map((p) => (
+                        <option key={p}>{p}</option>
+                      ))}
+                      {d.payType && !JOB_PAYMENT_METHODS.includes(d.payType) && <option>{d.payType}</option>}
+                    </Select>
+                  </Field>
+                  <Field label="จำนวนเงินที่ชำระ (บาท)" error={act.errors['payment.amount']}>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={d.payAmount}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ payAmount: e.target.value })}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="num text-right"
+                    />
+                  </Field>
+                  <Field label="วันที่ชำระเงิน" error={act.errors['payment.date']}>
+                    <Input
+                      type="date"
+                      value={d.payDate}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ payDate: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="เลขที่ใบเสร็จ" error={act.errors['payment.no']}>
+                    <Input
+                      className="num"
+                      maxLength={50}
+                      value={d.payNo}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ payNo: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="สลิปหลักฐานการชำระ" wide>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        className="h-9 py-1.5 text-xs"
+                        accept=".jpg,.jpeg,.png,.webp,.pdf"
+                        disabled={!job}
+                        onChange={(e) => onPickSlip(e.target.files?.[0])}
+                      />
+                      {slip && (
+                        <a
+                          href={fileUrl(slip)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 text-xs text-primary hover:underline"
+                        >
+                          ดูสลิป
+                        </a>
+                      )}
+                    </div>
+                  </Field>
+                  <Field label="หมายเหตุ" wide error={act.errors['payment.detail']}>
+                    <Textarea
+                      rows={2}
+                      maxLength={100}
+                      value={d.payDetail}
+                      disabled={!!lock}
+                      onChange={(e) => upd({ payDetail: e.target.value })}
+                    />
+                  </Field>
+                </FieldGrid>
+              )}
             </div>
           </Section>
         )}
@@ -503,7 +580,7 @@ function CloseForm() {
               label="โปรดระบุ สถานะงาน"
               required
               wide
-              error={act.errors.status ?? (outsourceOut ? OUTSOURCE_NOT_BACK : undefined)}
+              error={act.errors.status ?? (outsourceOut ? OUTSOURCE_NOT_BACK : partsWait)}
               hint={
                 d.status === STATUS_CLOSED_WAIT_TRACKING && d.tracking.trim()
                   ? `มีหมายเลขพัสดุแล้ว — บันทึกเป็น "${STATUS_CLOSED_TRACKED}"`

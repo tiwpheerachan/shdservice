@@ -204,6 +204,20 @@
       "when": 1757900028000,
       "tag": "0028_round2_status_name_cs_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1757900029000,
+      "tag": "0029_round5_sale_order_view_account_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1757900030000,
+      "tag": "0030_special_rights",
+      "breakpoints": true
     }
   ]
 }

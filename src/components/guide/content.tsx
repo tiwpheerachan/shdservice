@@ -41,15 +41,16 @@ import {
   QrCode,
 } from 'lucide-react';
 import { P, UI, Code, Kbd, Steps, Bullets, Fields, Note, Sub, Status, Flow } from './blocks';
+import { RIGHTS, type Right } from '@/lib/modules';
 
 /* ------------------------------------------------------------------ *
  * คู่มือการใช้งาน OneService — เนื้อหาทั้งหมดอยู่ที่นี่
  * เขียนสำหรับผู้ใช้ทั่วไป (ช่าง / CS / สต๊อก / ฝ่ายขาย / ผู้ดูแล)
- * ไม่ใช้ศัพท์เทคนิค · หัวข้อในกลุ่มที่ติด adminOnly จะเห็นเฉพาะ System Admin
+ * ไม่ใช้ศัพท์เทคนิค · หัวข้อในกลุ่มที่ติด adminOnly จะเห็นเฉพาะ System Admin · ติด right = เห็นเมื่อมีสิทธิ์พิเศษนั้น
  * ------------------------------------------------------------------ */
 
 export type Topic = { id: string; title: string; icon: LucideIcon; body: React.ReactNode };
-export type TopicGroup = { id: string; title: string; adminOnly?: boolean; topics: Topic[] };
+export type TopicGroup = { id: string; title: string; adminOnly?: boolean; right?: Right; topics: Topic[] };
 
 export const GUIDE: TopicGroup[] = [
   /* ================================================================ */
@@ -254,7 +255,11 @@ export const GUIDE: TopicGroup[] = [
                 ไม่มีสิทธิ์ <UI>เพิ่ม / แก้ไข / ลบ</UI> → เห็นข้อมูลได้ แต่ปุ่มบันทึก/แก้/ลบ จะหายไป
               </li>
               <li>
-                <UI>ข้อมูลระบบ</UI> และ <UI>รายงาน</UI> ใช้ได้เฉพาะ System Admin (ยกเว้นคู่มือหน้านี้ ทุกคนเปิดได้)
+                <UI>ข้อมูลระบบ</UI> ใช้ได้เฉพาะ System Admin (ยกเว้นคู่มือหน้านี้ ทุกคนเปิดได้)
+              </li>
+              <li>
+                บางเรื่องเป็น <UI>สิทธิ์พิเศษ</UI> แยกต่างหาก ผู้ดูแลติ๊กให้บทบาทที่หน้า สิทธิการใช้งาน (System Admin
+                มีทุกข้อเสมอ ยกเว้น รับงานซ่อม): {Object.values(RIGHTS).join(' · ')}
               </li>
             </Bullets>
             <Fields
@@ -1320,7 +1325,7 @@ export const GUIDE: TopicGroup[] = [
   {
     id: 'reports',
     title: 'รายงาน',
-    adminOnly: true,
+    right: 'Report',
     topics: [
       {
         id: 'reports-all',
@@ -1329,8 +1334,9 @@ export const GUIDE: TopicGroup[] = [
         body: (
           <>
             <P>
-              เมนู <UI>รายงาน</UI> (System Admin) ทุกฉบับใช้แบบเดียวกัน: ตั้งตัวกรองด้านบน → กด ค้นหา → ตัวเลขสรุป (KPI)
-              และตาราง → ปุ่ม <UI>Excel</UI> ได้ทุกแถวตามตัวกรอง · ปุ่ม <UI>PDF</UI> เปิดหน้าต่างพิมพ์
+              เมนู <UI>รายงาน</UI> (บทบาทที่มีสิทธิ์พิเศษ เปิดหน้ารายงาน) ทุกฉบับใช้แบบเดียวกัน: ตั้งตัวกรองด้านบน → กด
+              ค้นหา → ตัวเลขสรุป (KPI) และตาราง → ปุ่ม <UI>Excel</UI> ได้ทุกแถวตามตัวกรอง · ปุ่ม <UI>PDF</UI>{' '}
+              เปิดหน้าต่างพิมพ์
             </P>
             <Fields
               head={['รายงาน', 'ตอบคำถามว่า']}
@@ -1413,7 +1419,14 @@ export const GUIDE: TopicGroup[] = [
                 เลือกบทบาทด้านบน → ติ๊กสิ่งที่ทำได้ในแต่ละกลุ่ม → <UI>บันทึก</UI>
               </li>
               <li>"ดู" เป็นพื้นฐาน — ถ้าไม่ติ๊กดู เมนูจะหายไปทั้งกลุ่ม แม้จะติ๊กเพิ่ม/แก้ไว้</li>
-              <li>System Admin ทำได้ทุกอย่างเสมอ ไม่ต้องตั้ง</li>
+              <li>
+                System Admin ทำได้ทุกอย่างเสมอ ไม่ต้องตั้ง (ยกเว้น รับงานซ่อม — ติ๊กเมื่อผู้ดูแลรับงานซ่อมเองด้วย)
+              </li>
+              <li>
+                ส่วน <UI>สิทธิ์พิเศษ</UI> ใต้ตาราง: ติ๊กหนึ่งช่องต่อเรื่อง เช่น อนุมัติใบสั่งขาย, รับงานซ่อม
+                (มีชื่อในช่อง มอบหมายงาน), เปิดงานที่ปิดแล้ว, แก้ช่องเงินหลังปิดงาน, เห็นราคาทุน, เปิดหน้ารายงาน, ส่งออก
+                Excel
+              </li>
               <li>มีผลกับผู้ใช้ที่กำลังใช้อยู่ภายในไม่เกิน 1 นาที</li>
             </Bullets>
             <P>

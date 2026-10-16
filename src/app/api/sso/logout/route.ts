@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE, SEEN_COOKIE, verifySession } from '@/lib/session';
+import { SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S, SIGNED_OUT_SEEN, verifySession } from '@/lib/session';
 import { appOrigin, isRouterFetch } from '@/lib/sso';
 import { bumpSessionVersion } from '@/server/auth';
 import { logError } from '@/lib/log';
@@ -27,6 +27,14 @@ export async function GET(request: NextRequest) {
   }
   const res = NextResponse.redirect(new URL('/login?bye=1', appOrigin(request)));
   res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
-  res.cookies.set(SEEN_COOKIE, '', { path: '/', maxAge: 0 });
+  // os_seen '0' = "this browser signed out": other tabs' /me answers signedOut (→ /login?bye=1), the proxy
+  // shows no "expired" note, and the callback drops any `next` page made after this (a reload, a 401)
+  res.cookies.set(SEEN_COOKIE, SIGNED_OUT_SEEN, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SEEN_TTL_S,
+  });
   return res;
 }

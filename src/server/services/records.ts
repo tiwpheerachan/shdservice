@@ -1,6 +1,6 @@
 import 'server-only';
 import { invalidate } from '@/server/cache';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appUser, customer, job, jobLog, product, quotationHd, saleOutHd } from '@/db/schema';
 import type { Module } from '@/lib/modules';
@@ -10,6 +10,8 @@ import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
 import { RS, statusStamp, type RecordStatus } from '@/server/record-status';
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from './masters';
 import { productsChanged } from './stock';
+import { AS } from './sale-orders';
+import { DELETED_USER_MSG } from './users';
 
 export type RecordTable =
   | 'users'
@@ -43,6 +45,7 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
 };
 
 const JOB_STATUS_CANCELLED = 0;
+const JOB_STATUS_NEW = 1;
 
 /**
  * Set record_status (ACTIVE / INACTIVE / DELETED) on any entity. Nothing is ever
@@ -50,8 +53,9 @@ const JOB_STATUS_CANCELLED = 0;
  * reports still agree:
  *   masters / customers / products / quotations → is_active
  *   users → is_active + deleted
- *   jobs → DELETED also sets job_status 0 "ยกเลิกข้อมูล" (+ job_log), as the old app did
- *   sale orders → document_status + cancel stamp
+ *   jobs → DELETED also sets job_status 0 "ยกเลิกข้อมูล" (+ job_log), as the old app did; restoring
+ *          puts back the last status before that (job_log; none → 1 งานใหม่, as the old app did) + job_log
+ *   sale orders → document_status + cancel stamp (an approved one — stock issued — cannot be cancelled)
  * Restoring a DELETED row is done in SQL only (by decision) — the API still
  * accepts ACTIVE so the existing users-page restore button keeps working.
  */
@@ -123,6 +127,8 @@ export async function setRecordStatus(
     case 'models':
       return setModelStatus(String(id), rs, byUserId);
     case 'users':
+      // out of DELETED only through กู้คืน (users.ts setUserDeleted → INACTIVE)
+      if (old === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
       await db
         .update(appUser)
         .set({ ...stamp, deleted: rs === RS.DELETED })
@@ -164,46 +170,66 @@ export async function setRecordStatus(
           .from(job)
           .where(eq(job.jobNo, String(id)));
         if (!cur) throw new HttpError(404, 'job not found');
+        // restored → the status it had before it was deleted (a job left on 0 "ยกเลิกข้อมูล" matched no list)
+        let back: number | null = null;
+        if (rs !== RS.DELETED && old === RS.DELETED && cur.st === JOB_STATUS_CANCELLED) {
+          const [prev] = await tx
+            .select({ st: jobLog.jobStatusId })
+            .from(jobLog)
+            .where(and(eq(jobLog.jobNo, String(id)), ne(jobLog.jobStatusId, JOB_STATUS_CANCELLED)))
+            .orderBy(desc(jobLog.jobLogId))
+            .limit(1);
+          back = prev?.st ?? JOB_STATUS_NEW;
+        }
+        const st = rs === RS.DELETED ? JOB_STATUS_CANCELLED : back;
         await tx
           .update(job)
-          .set({
-            ...statusStamp(rs, byUserId, false),
-            ...(rs === RS.DELETED ? { jobStatusId: JOB_STATUS_CANCELLED } : {}),
-          })
+          .set({ ...statusStamp(rs, byUserId, false), ...(st !== null ? { jobStatusId: st } : {}) })
           .where(eq(job.jobNo, String(id)));
-        if (rs === RS.DELETED && cur.st !== JOB_STATUS_CANCELLED) {
-          await tx.insert(jobLog).values({
-            jobNo: String(id),
-            jobStatusId: JOB_STATUS_CANCELLED,
-            jobLogDate: nowThai(),
-            jobActionBy: byUserId,
-          });
+        if (st !== null && st !== cur.st) {
+          await tx
+            .insert(jobLog)
+            .values({ jobNo: String(id), jobStatusId: st, jobLogDate: nowThai(), jobActionBy: byUserId });
         }
         await log(tx);
       });
       return;
     }
     case 'sale_orders':
-      await db
-        .update(saleOutHd)
-        .set(
-          rs === RS.DELETED
-            ? {
-                ...statusStamp(rs, byUserId, false),
-                documentStatus: false,
-                documentCancelDate: nowThai(),
-                documentCancelBy: byUserId,
-              }
-            : {
-                ...statusStamp(rs, byUserId, false),
-                documentStatus: true,
-                documentCancelDate: SENTINEL_TS,
-                documentCancelBy: -1,
-                documentCancelRemark: '',
-              },
-        )
-        .where(eq(saleOutHd.saleOutHdNo, String(id)));
-      await log();
+      await db.transaction(async (tx) => {
+        // locked: an approval running now finishes first (approveSaleOrder locks the same row)
+        const [cur] = await tx
+          .select({ ap: saleOutHd.approveStatusId })
+          .from(saleOutHd)
+          .where(eq(saleOutHd.saleOutHdNo, String(id)))
+          .for('update');
+        if (!cur) throw new HttpError(404, 'sale order not found');
+        if (rs === RS.DELETED && cur.ap === AS.APPROVED)
+          throw new HttpError(
+            409,
+            'ใบสั่งขายนี้อนุมัติแล้ว ตัดสต็อกไปแล้ว — ยกเลิกไม่ได้ ต้องรับคืนสินค้าเข้าสต็อกก่อน',
+          );
+        await tx
+          .update(saleOutHd)
+          .set(
+            rs === RS.DELETED
+              ? {
+                  ...statusStamp(rs, byUserId, false),
+                  documentStatus: false,
+                  documentCancelDate: nowThai(),
+                  documentCancelBy: byUserId,
+                }
+              : {
+                  ...statusStamp(rs, byUserId, false),
+                  documentStatus: true,
+                  documentCancelDate: SENTINEL_TS,
+                  documentCancelBy: -1,
+                  documentCancelRemark: '',
+                },
+          )
+          .where(eq(saleOutHd.saleOutHdNo, String(id)));
+        await log(tx);
+      });
       return;
   }
 }

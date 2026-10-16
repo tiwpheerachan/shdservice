@@ -180,9 +180,9 @@ export default function InventoryPage() {
             ))}
           </Select>
         </Field>
-        <Field label="รหัสอะไหล่">
+        <Field label="รหัส / ชื่ออะไหล่">
           <Input
-            placeholder="P02534"
+            placeholder="P02534 หรือ ชื่ออะไหล่"
             className="num"
             value={draft.code}
             onChange={(e) => setD('code', e.target.value)}

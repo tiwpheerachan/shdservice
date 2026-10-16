@@ -187,10 +187,12 @@ export async function GET(request: NextRequest) {
     sv: sessionVersion,
   };
 
-  // os_seen = who last used this browser (set by /api/sso/me): a `next` left by someone else's expired
-  // session is dropped, so a shared PC never opens the previous person's page
-  const seen = request.cookies.get(SEEN_COOKIE)?.value ?? '';
-  const next = /^\d+$/.test(seen) && seen !== String(userId) ? DEFAULT_AFTER_LOGIN : nextFromState;
+  // os_seen = who last used this browser (set by /api/sso/me; '0' after ออกจากระบบ): a `next` left by
+  // someone else's session — or made after a sign-out (a reload, a 401 in another tab) — is dropped, so a
+  // shared PC never opens the previous person's page. No os_seen at all (a browser that never signed in
+  // here, e.g. a link opened on a new PC) keeps it: nobody used this browser before.
+  const seen = request.cookies.get(SEEN_COOKIE)?.value;
+  const next = seen === undefined || seen === String(userId) ? nextFromState : DEFAULT_AFTER_LOGIN;
   const res = NextResponse.redirect(new URL(next, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.

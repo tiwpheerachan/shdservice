@@ -21,11 +21,14 @@ export class ApiError extends Error {
   }
 }
 
-let refreshing: Promise<boolean> | null = null;
-async function tryRefresh(): Promise<boolean> {
+/** renewed, or why not (the 401's `reason` — /login says "signed out elsewhere" vs "idle") */
+let refreshing: Promise<{ ok: boolean; reason?: string }> | null = null;
+async function tryRefresh(): Promise<{ ok: boolean; reason?: string }> {
   refreshing ??= fetch('/api/sso/refresh', { cache: 'no-store' })
-    .then((r) => r.ok)
-    .catch(() => false)
+    .then(async (r) =>
+      r.ok ? { ok: true } : { ok: false, reason: ((await r.json().catch(() => null)) as { reason?: string })?.reason },
+    )
+    .catch(() => ({ ok: false }))
     .finally(() => setTimeout(() => (refreshing = null), 1000));
   return refreshing;
 }
@@ -45,9 +48,14 @@ export function onApiWrite(fn: () => void) {
  *  session-expired dialog (throws either way) */
 async function authedFetch(url: string, init: RequestInit): Promise<Response> {
   let res = await fetch(url, { cache: 'no-store', ...init });
-  if (res.status === 401 && (await tryRefresh())) res = await fetch(url, { cache: 'no-store', ...init });
+  let reason: string | undefined;
   if (res.status === 401) {
-    if ((init.method ?? 'GET').toUpperCase() === 'GET') toLogin();
+    const r = await tryRefresh();
+    reason = r.reason;
+    if (r.ok) res = await fetch(url, { cache: 'no-store', ...init });
+  }
+  if (res.status === 401) {
+    if ((init.method ?? 'GET').toUpperCase() === 'GET') toLogin({ reason });
     else sessionExpired();
     throw new ApiError(401, 'เซสชันหมดอายุ — เข้าสู่ระบบใหม่ในแท็บใหม่ แล้วกดบันทึกอีกครั้ง');
   }

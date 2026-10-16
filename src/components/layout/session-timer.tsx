@@ -26,7 +26,7 @@ export function SessionTimer() {
     try {
       const r = await fetch('/api/sso/refresh', { cache: 'no-store' });
       if (r.status === 401) {
-        toLogin();
+        toLogin({ reason: ((await r.json().catch(() => null)) as { reason?: string } | null)?.reason });
         return;
       }
       await reloadMe();

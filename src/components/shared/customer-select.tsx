@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import { type Customer } from '@/data/mock';
 import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
-import { cn, SEARCH_MIN_CHARS } from '@/lib/utils';
+import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';
 import {
   CustomerFields,
   ConflictNotice,
@@ -296,7 +296,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               autoFocus
               value={q}
               onValueChange={setQ}
-              placeholder="พิมพ์อย่างน้อย 2 ตัวอักษร…"
+              placeholder={`${SEARCH_MIN_HINT}…`}
               className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
             />
             {loading ? (

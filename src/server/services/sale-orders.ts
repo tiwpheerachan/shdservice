@@ -1,11 +1,11 @@
 import 'server-only';
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import { db } from '@/db/client';
+import { db, type Tx } from '@/db/client';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
 import type { SaleOrder } from '@/data/mock';
-import { HttpError, fullName, grantsForUserType, type CurrentUser } from '@/server/auth';
-import { ADMIN_USER_TYPE, checkGrant } from '@/lib/modules';
+import { HttpError, fullName, hasRight, rolesWithRight, type CurrentUser } from '@/server/auth';
+import { ADMIN_USER_TYPE } from '@/lib/modules';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
@@ -17,15 +17,19 @@ import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
 import {
   cleanTracking,
+  NOT_APPROVER,
   overpaidMessage,
   saleOrderSchema,
   SELF_APPROVE,
   SELF_APPROVE_SALES,
+  SO_CANCELLED,
+  SUBMIT_CREATOR_ONLY,
+  WAITING_CREATOR_ONLY,
 } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
 import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
-import { listRoles, staffOrKeep } from './users';
+import { staffOrKeep } from './users';
 
 /** approve_status ids */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
@@ -201,13 +205,31 @@ export type SaleOrderDetail = SaleOrder & {
   createdById: number;
   /** document_create_by + sale_out_by — neither may decide on the order (System Admin may) */
   creatorIds: number[];
-  /** a waiting order: the roles that may decide on it (app_config Sale Order edit; System Admin always may) */
+  /** a waiting order: the roles that may decide on it (ticked SO Approve; System Admin always may, not listed) */
   approverRoles: string[];
   /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
   documentProfileId: number;
-  /** sale_out_hd.row_version (drizzle/0026) — the edit page sends it back with its save */
+  /** row_version + newest line id (versionOf) — the edit page sends it back with its save / decision */
   version: number;
+  /** sale_out_by — the edit form picks the salesperson by id (a name may have changed or left) */
+  salesId: number;
 };
+
+const linesOf = (x: Tx, no: string) =>
+  x
+    .select()
+    .from(saleOutDt)
+    .where(eq(saleOutDt.saleOutHdNo, no))
+    .orderBy(asc(saleOutDt.listNo), asc(saleOutDt.saleOutDtId));
+
+/**
+ * The version an edit / approval sends back: row_version + the newest line id. A line-only edit
+ * re-inserts the lines (new, higher ids) and may leave the header as it was, so row_version alone let
+ * two line edits overwrite each other and an approval issue stock for lines it never showed. Both
+ * parts only grow, so any save moves the sum.
+ */
+const versionOf = (rowVersion: number, lines: { saleOutDtId: number }[]) =>
+  rowVersion + Math.max(0, ...lines.map((l) => l.saleOutDtId));
 
 export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> {
   const [r] = await base().where(eq(saleOutHd.saleOutHdNo, no)).limit(1);
@@ -262,20 +284,16 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(made?.first, made?.last),
     createdById: hd.documentCreateBy ?? 0,
-    approverRoles: hd.approveStatusId === AS.WAIT ? await saleOrderApprovers() : [],
+    approverRoles:
+      hd.approveStatusId === AS.WAIT ? (await rolesWithRight('SO Approve')).filter((r) => r !== ADMIN_USER_TYPE) : [],
     creatorIds: [hd.documentCreateBy, hd.saleOutBy].filter((x): x is number => (x ?? 0) > 0),
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
-    version: hd.rowVersion,
+    version: versionOf(
+      hd.rowVersion,
+      dts.map((x) => x.d),
+    ),
+    salesId: hd.saleOutBy ?? 0,
   };
-}
-
-/** roles other than System Admin that may approve (Sale Order edit) — for "รออนุมัติจาก: …" */
-async function saleOrderApprovers(): Promise<string[]> {
-  const roles = (await listRoles()).filter((r) => r !== ADMIN_USER_TYPE);
-  const ok = await Promise.all(
-    roles.map(async (r) => checkGrant(false, await grantsForUserType(r), 'Sale Order', 'edit')),
-  );
-  return roles.filter((_, i) => ok[i]);
 }
 
 export type SaleOrderInput = {
@@ -292,12 +310,16 @@ export type SaleOrderInput = {
   remark?: string;
   fee?: number | string;
   tracking?: string;
-  submit?: boolean; // true → รออนุมัติ, false → กำลังดำเนินการจัดทำ
+  submit?: boolean; // true → รออนุมัติ, false → กำลังดำเนินการจัดทำ (an edit by anyone but the creator keeps the status)
   /** row_version the edit page loaded: another save since → 409; absent = no check */
   version?: number;
 };
 
-export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promise<SaleOrderDetail> {
+export async function saveSaleOrder(
+  i: SaleOrderInput,
+  by: Pick<CurrentUser, 'userId' | 'isAdmin'>,
+): Promise<SaleOrderDetail> {
+  const byUserId = by.userId;
   const [cur] = i.no
     ? await db
         .select({
@@ -332,26 +354,22 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     .where(inArray(product.productCode, codes));
   const byCode = new Map(prods.map((p) => [p.code ?? '', p]));
 
-  const lines = i.lines
+  const input = i.lines
     .filter((l) => str(l.code))
-    .map((l, idx) => {
+    .map((l) => {
       const p = byCode.get(str(l.code));
-      const isService = l.type === 'Service' || (!p && !!l.name);
+      // a service only when no product has the code: a real part sent as 'Service' skipped the approval's stock issue
+      const isService = !p && (l.type === 'Service' || !!str(l.name));
       if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
-      const qty = Math.max(1, Math.trunc(num(l.qty) || 1));
-      const price = l.price !== undefined && l.price !== '' ? num(l.price) : num(p?.retail);
       return {
-        listNo: idx + 1,
         p,
         isService,
         code: str(l.code),
         name: str(l.name) || p?.name || '',
-        qty,
-        price,
-        amount: Math.round(qty * price * 100) / 100,
+        qty: Math.max(1, Math.trunc(num(l.qty) || 1)),
+        price: l.price !== undefined && l.price !== '' ? num(l.price) : undefined,
       };
     });
-  const totalBase = lines.reduce((s, l) => s + l.amount, 0);
   const approveId = i.submit === false ? AS.DRAFT : AS.WAIT;
 
   const no = await db.transaction(async (tx) => {
@@ -360,6 +378,49 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
     // edit — lock: an approval running now must finish first, so the APPROVED check below sees it
     const [prev] = no ? await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update') : [];
     if (no && !prev) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    const old = prev ? await linesOf(tx, no!) : [];
+    // a line the user left as it was keeps its stored row (price, cost snapshot, id): an unchanged legacy
+    // order is never re-priced from today's product; a changed / new line takes the request's price
+    const rows = input.map((l, idx) => {
+      const o = old[idx];
+      const sameCode = !!o && str(o.productCode) === l.code;
+      const price = l.price ?? (sameCode ? num(o.saleOutPrice) : num(l.p?.retail));
+      const amount = Math.round(l.qty * price * 100) / 100;
+      const type = l.isService ? 'Service' : 'SparePart';
+      if (
+        sameCode &&
+        o.saleOutQuantity === l.qty &&
+        num(o.saleOutPrice) === price &&
+        str(o.productType) === type &&
+        (!l.isService || str(o.remarkDt) === l.name.slice(0, 100).trim())
+      ) {
+        return { kept: true, row: { ...o, saleOutDtId: undefined } };
+      }
+      return {
+        kept: false,
+        row: {
+          productId: l.p?.id ?? null,
+          storeLocationId: 1,
+          conditionId: 1,
+          serialNo: '',
+          capitalPrice: money(num(l.p?.capital)),
+          wholesalePrice: money(num(l.p?.wholesale)),
+          retailPrice: money(num(l.p?.retail)),
+          saleOutPrice: money(price),
+          saleOutQuantity: l.qty,
+          amountDt: money(amount),
+          remarkDt: l.isService ? l.name.slice(0, 100) : '',
+          onhandItemId: l.p?.itemId ?? null,
+          productType: type,
+          documentCreditNoteNo: '',
+          productCode: l.code.slice(0, 50),
+          pickInventoryNo: '',
+          returnInventoryNo: '',
+        },
+      };
+    });
+    const linesChanged = !prev || old.length !== rows.length || rows.some((r) => !r.kept);
+    const totalBase = Math.round(rows.reduce((s, r) => s + num(r.row.amountDt), 0) * 100) / 100;
     // the edit form sends neither fee nor tracking: left out → the order keeps its own (a save used to wipe them)
     const fee = i.fee !== undefined ? num(i.fee) : num(prev?.feeAmount);
     const net = Math.round((totalBase + fee) * 100) / 100;
@@ -369,13 +430,20 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       i.paymentAmount !== undefined && i.paymentAmount !== null && i.paymentAmount !== '' ? num(i.paymentAmount) : null;
     if (paid !== null && paid > net)
       throw new HttpError(400, overpaidMessage(net), { fields: { paymentAmount: overpaidMessage(net) } });
+    // the customer snapshot (name / address / phone as printed) is taken when the customer is picked — an
+    // edit that keeps the customer keeps the order's own copy
+    const custChanged = !prev || str(prev.customerCode) !== cust.code;
     const hdValues = {
-      customerId: cust.id,
-      customerCode: cust.code,
-      customerCardId: cust.taxId,
-      customerName: cust.name,
-      customerAddress: cust.address.slice(0, 500),
-      customerPhoneNumber: cust.phone,
+      ...(custChanged
+        ? {
+            customerId: cust.id,
+            customerCode: cust.code,
+            customerCardId: cust.taxId,
+            customerName: cust.name,
+            customerAddress: cust.address.slice(0, 500),
+            customerPhoneNumber: cust.phone,
+          }
+        : {}),
       totalBaseAmount: money(totalBase),
       vatRat: '0.00',
       vatAmount: '0.00',
@@ -389,24 +457,53 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
       ...(i.tracking !== undefined || !prev ? { deliveryTrackingNo: cleanTracking(i.tracking) } : {}),
     };
     if (no && prev) {
-      assertVersion(i.version, prev.rowVersion);
+      assertVersion(i.version, versionOf(prev.rowVersion, old));
+      if (prev.recordStatus === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} แก้ไขไม่ได้`);
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
       if (prev.approveStatusId === AS.DENIED) throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว แก้ไขไม่ได้');
+      // only the creator sends it for approval (else an approver submits someone's draft and approves it)
+      const own = by.isAdmin || prev.documentCreateBy === byUserId;
+      // … and only the creator edits it while it waits: an approver could change it (the salesperson, a
+      // price) and approve what the creator never sent (owner decision)
+      if (!own && prev.approveStatusId === AS.WAIT) throw new HttpError(403, WAITING_CREATOR_ONLY);
+      if (!own && approveId === AS.WAIT && prev.approveStatusId !== AS.WAIT)
+        throw new HttpError(403, SUBMIT_CREATOR_ONLY);
       const upd = {
         ...hdValues,
-        approveStatusId: approveId,
+        // a sent-back (3) order saved without "ส่งขออนุมัติ" stays sent back (its reason still shows)
+        approveStatusId: !own
+          ? prev.approveStatusId
+          : approveId === AS.DRAFT && prev.approveStatusId === AS.REJECT
+            ? AS.REJECT
+            : approveId,
         saleOutBy: salesId, // document_create_by stays the one who keyed the order in
       };
-      await tx.update(saleOutHd).set(upd).where(eq(saleOutHd.saleOutHdNo, no));
-      await tx.delete(saleOutDt).where(eq(saleOutDt.saleOutHdNo, no));
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Sale Order',
-        entity: 'sale_out_hd',
-        key: no,
-        summary: `แก้ไขใบสั่งขาย · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
-        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>),
-      });
+      // only what changed is written — an unchanged save writes nothing (no audit, no row_version bump)
+      const changes = diff(prev as Record<string, unknown>, upd as Record<string, unknown>) ?? {};
+      const keys = Object.keys(changes) as (keyof typeof upd)[];
+      if (keys.length)
+        await tx
+          .update(saleOutHd)
+          .set(Object.fromEntries(keys.map((k) => [k, upd[k]])))
+          .where(eq(saleOutHd.saleOutHdNo, no));
+      // diff() reads digit strings as numbers: the log keeps a phone / tax id as typed (leading 0)
+      for (const k of ['customerPhoneNumber', 'customerCardId'] as const)
+        if (changes[k]) changes[k] = [prev[k] ?? '', upd[k] ?? ''];
+      if (linesChanged) {
+        await tx.delete(saleOutDt).where(eq(saleOutDt.saleOutHdNo, no));
+        const line = (r: { productCode: string | null; saleOutQuantity: number; saleOutPrice: string | null }) =>
+          `${r.productCode} x${r.saleOutQuantity} @${num(r.saleOutPrice)}`;
+        changes.lines = [old.map(line), rows.map((r) => line(r.row))];
+      }
+      if (keys.length || linesChanged)
+        await audit(tx, byUserId, {
+          action: 'UPDATE',
+          module: 'Sale Order',
+          entity: 'sale_out_hd',
+          key: no,
+          summary: `แก้ไขใบสั่งขาย · ${rows.length} รายการ · ${net.toFixed(2)} บาท`,
+          changes,
+        });
     } else {
       const profile = await issuingProfile(i.documentProfileId);
       no = await nextRunningNo(tx, 'SaleOrder');
@@ -415,7 +512,7 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         module: 'Sale Order',
         entity: 'sale_out_hd',
         key: no,
-        summary: `สร้างใบสั่งขาย · ${cust.code} ${cust.name} · ${lines.length} รายการ · ${net.toFixed(2)} บาท`,
+        summary: `สร้างใบสั่งขาย · ${cust.code} ${cust.name} · ${rows.length} รายการ · ${net.toFixed(2)} บาท`,
       });
       await tx.insert(saleOutHd).values({
         ...hdValues,
@@ -441,49 +538,33 @@ export async function saveSaleOrder(i: SaleOrderInput, byUserId: number): Promis
         deliveryDate: SENTINEL_TS,
       });
     }
-    await tx.insert(saleOutDt).values(
-      lines.map((l) => ({
-        saleOutHdNo: no!,
-        listNo: l.listNo,
-        productId: l.p?.id ?? null,
-        storeLocationId: 1,
-        conditionId: 1,
-        serialNo: '',
-        capitalPrice: money(num(l.p?.capital)),
-        wholesalePrice: money(num(l.p?.wholesale)),
-        retailPrice: money(num(l.p?.retail)),
-        saleOutPrice: money(l.price),
-        saleOutQuantity: l.qty,
-        amountDt: money(l.amount),
-        remarkDt: l.isService ? l.name.slice(0, 100) : '',
-        onhandItemId: l.p?.itemId ?? null,
-        productType: l.isService ? 'Service' : 'SparePart',
-        documentCreditNoteNo: '',
-        productCode: l.code.slice(0, 50),
-        pickInventoryNo: '',
-        returnInventoryNo: '',
-      })),
-    );
+    // lines are re-written only when they changed (a rewrite gives them new, higher ids — see versionOf)
+    if (linesChanged)
+      await tx.insert(saleOutDt).values(rows.map((r, idx) => ({ ...r.row, saleOutHdNo: no!, listNo: idx + 1 })));
     return no!;
   });
   return (await getSaleOrder(no))!;
 }
 
-export { SELF_APPROVE, SELF_APPROVE_SALES };
+export { SELF_APPROVE, SELF_APPROVE_SALES, NOT_APPROVER, SUBMIT_CREATOR_ONLY };
 export const REASON_REQUIRED = 'ต้องระบุเหตุผล';
 
 /**
  * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy
  * data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล just stamp the decision (with a required reason).
- * Only a waiting (2) order can be decided, and not by its creator (owner decision 2026-10-15; System Admin may).
+ * Only a role with the special right SO Approve decides (System Admin always), only a waiting (2) order, not its creator or
+ * salesperson (owner decisions 2026-10-15; System Admin may).
  */
 export async function approveSaleOrder(
   no: string,
   decision: 'approve' | 'deny' | 'reject',
   remark: string,
-  by: Pick<CurrentUser, 'userId' | 'isAdmin'>,
+  by: Pick<CurrentUser, 'userId' | 'isAdmin' | 'userType'>,
+  /** the version the approver's screen shows: the creator saved since → 409, the approver looks again */
+  version?: unknown,
 ): Promise<SaleOrderDetail> {
   const byUserId = by.userId;
+  if (!(await hasRight(by, 'SO Approve'))) throw new HttpError(403, NOT_APPROVER);
   const statusId = decision === 'approve' ? AS.APPROVED : decision === 'deny' ? AS.DENIED : AS.REJECT;
   const reason = clean(remark);
   if (decision !== 'approve' && !reason)
@@ -491,12 +572,14 @@ export async function approveSaleOrder(
   await db.transaction(async (tx) => {
     const [hd] = await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update');
     if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    if (hd.recordStatus === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} อนุมัติหรือเปลี่ยนสถานะไม่ได้`);
     // 4 / 5 are final (approve_status.is_can_edit = f) — checked under the row lock, so two clicks can't both pass
     if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, 'อนุมัติไปแล้ว');
     if (hd.approveStatusId === AS.DENIED)
       throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว อนุมัติหรือเปลี่ยนสถานะไม่ได้');
     if (hd.approveStatusId !== AS.WAIT)
       throw new HttpError(409, 'ใบสั่งขายยังไม่ได้ส่งขออนุมัติ — ผู้สร้างต้องบันทึกแบบ "ส่งขออนุมัติ" ก่อน');
+    assertVersion(version, versionOf(hd.rowVersion, await linesOf(tx, no)));
     if (!by.isAdmin && hd.documentCreateBy === byUserId) throw new HttpError(403, SELF_APPROVE);
     if (!by.isAdmin && hd.saleOutBy === byUserId) throw new HttpError(403, SELF_APPROVE_SALES);
     await tx

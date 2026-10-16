@@ -169,10 +169,9 @@ export const QuotationForm = React.forwardRef<
   const openedAt = useMountTime();
 
   // the job's parts flagged "เสนอ" in the repair screen, from set A or set B (= the quotation type)
-  const fillQuoted = (j: JobDetail, t: 'A' | 'B') => {
-    const quoted = quotedParts(j.parts, t);
-    if (quoted.length) setLines(quoted.map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
-  };
+  // always replaced — switching A → B with nothing quoted in B used to keep A's lines on a B quotation
+  const fillQuoted = (j: JobDetail, t: 'A' | 'B') =>
+    setLines(quotedParts(j.parts, t).map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
   // a job → customer + device info (+ its quoted parts become lines)
   const applyJob = React.useCallback(
     async (j: JobDetail, withParts: boolean) => {

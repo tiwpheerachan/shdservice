@@ -1,4 +1,7 @@
+import { cookies } from 'next/headers';
 import { safeNext } from '@/lib/sso';
+import { SESSION_COOKIE, verifySession } from '@/lib/session';
+import { resolveUser } from '@/server/auth';
 import { COMPANY } from '@/lib/company';
 import { LogIn, ShieldCheck } from 'lucide-react';
 import { Logo } from '@/components/shared/logo';
@@ -26,13 +29,23 @@ const ERRORS: Record<string, string> = {
   user_conflict: 'สร้างบัญชีไม่สำเร็จ — แจ้งผู้ดูแลระบบ (รหัส user_conflict)',
 };
 
+/** the session cookie still verifies but the server refuses it — signed out on another device (logout
+ *  bumps session_version) or the account's email changed. The app layout's redirect only says expired=1,
+ *  so it is told apart here; DB down → not known, the plain "expired" note. */
+async function refusedElsewhere() {
+  const s = await verifySession((await cookies()).get(SESSION_COOKIE)?.value);
+  return !!s && (await resolveUser(s).catch(() => undefined)) === null;
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; bye?: string; expired?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; bye?: string; expired?: string; reason?: string }>;
 }) {
   const sp = await searchParams;
   const next = safeNext(sp.next);
+  // ?reason=elsewhere from /api/sso/me|refresh (lib/navigation toLogin); ออกจากระบบ here (?bye=1) wins
+  const elsewhere = !sp.bye && (sp.reason === 'elsewhere' || (!!sp.expired && (await refusedElsewhere())));
   // only known codes are shown — never echo a URL parameter back onto the page
   const err = sp.error ? (ERRORS[sp.error] ?? 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') : null;
 
@@ -51,10 +64,17 @@ export default async function LoginPage({
             </p>
           </div>
 
-          {sp.expired && !sp.bye && (
+          {elsewhere ? (
             <p className="animate-element rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs text-warning">
-              เซสชันหมดอายุเนื่องจากไม่มีการใช้งานเกิน 30 นาที กรุณาเข้าสู่ระบบอีกครั้ง
+              คุณออกจากระบบจากอุปกรณ์อื่นแล้ว หรือผู้ดูแลระบบแก้ไขบัญชีของคุณ — กรุณาเข้าสู่ระบบใหม่
             </p>
+          ) : (
+            sp.expired &&
+            !sp.bye && (
+              <p className="animate-element rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs text-warning">
+                เซสชันหมดอายุเนื่องจากไม่มีการใช้งานเกิน 30 นาที กรุณาเข้าสู่ระบบอีกครั้ง
+              </p>
+            )
           )}
           {sp.bye && (
             <p className="animate-element rounded-xl border border-border bg-muted/50 px-3 py-2 text-center text-xs text-muted-foreground">

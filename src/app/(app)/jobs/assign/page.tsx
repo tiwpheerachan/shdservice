@@ -20,13 +20,14 @@ import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { apiFieldErrors } from '@/lib/use-form-errors';
 import { isFilterActive } from '@/lib/utils';
+import { NOT_ENGINEER } from '@/lib/validation/job';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
 export default function AssignPage() {
   const { push } = useToast();
   const ask = useConfirm();
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
-  const { name: CURRENT_TECH, userId, can } = useAccess();
+  const { name: CURRENT_TECH, userId, has, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
@@ -329,7 +330,12 @@ export default function AssignPage() {
           <Button size="sm" variant="outline" onClick={() => setPicked(new Set())} disabled={picked.size === 0}>
             ล้างการเลือก
           </Button>
-          {can('Job Assign', 'edit') ? (
+          {!has('Job Take') ? (
+            // only a role with Job Take takes jobs (the API refuses anyone else)
+            <span role="note" className="text-xs font-medium text-warning">
+              {NOT_ENGINEER} — ดูรายการได้อย่างเดียว
+            </span>
+          ) : can('Job Assign', 'edit') ? (
             <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
               <UserCheck className="h-3.5 w-3.5" />
               <span className="sm:hidden">ยืนยันรับงาน</span>

@@ -11,17 +11,17 @@ import { GUIDE, type TopicGroup } from './content';
  * คู่มือการใช้งาน — หัวข้อซ้าย (ติดขอบบนขณะเลื่อน) / การ์ดเนื้อหาขวา
  * · หัวข้อที่กำลังอ่านถูกไฮไลต์ตามตำแหน่งเลื่อน (IntersectionObserver)
  * · ช่องค้นหากรองตามชื่อหัวข้อ / ชื่อกลุ่ม
- * · กลุ่มที่ติด adminOnly แสดงเฉพาะ System Admin
+ * · กลุ่มที่ติด adminOnly แสดงเฉพาะ System Admin · ติด right แสดงเมื่อมีสิทธิ์พิเศษนั้น
  * · จอเล็ก: หัวข้อกลายเป็น dropdown กระโดดไปหัวข้อ
  */
 export function Guide() {
-  const { isAdmin } = useAccess();
+  const { isAdmin, has } = useAccess();
   const [q, setQ] = React.useState('');
   const [active, setActive] = React.useState<string>('');
   const navRef = React.useRef<HTMLElement>(null);
 
   const groups = React.useMemo<TopicGroup[]>(() => {
-    const visible = GUIDE.filter((g) => !g.adminOnly || isAdmin);
+    const visible = GUIDE.filter((g) => (!g.adminOnly || isAdmin) && (!g.right || has(g.right)));
     const term = q.trim().toLowerCase();
     if (!term) return visible;
     return visible
@@ -30,7 +30,7 @@ export function Guide() {
         topics: g.topics.filter((t) => t.title.toLowerCase().includes(term) || g.title.toLowerCase().includes(term)),
       }))
       .filter((g) => g.topics.length > 0);
-  }, [isAdmin, q]);
+  }, [isAdmin, has, q]);
   const total = groups.reduce((n, g) => n + g.topics.length, 0);
 
   // highlight the topic nearest the top of the viewport

@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import { useApi, useModels, useColors, useCategories, useManufacturers } from '@/data/db';
 import type { Product } from '@/data/mock';
 import { int } from '@/lib/utils';
-import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
+import { postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { useAccess } from '@/lib/use-access';
 import { productSchema } from '@/lib/validation/admin';
@@ -94,8 +94,8 @@ export function ProductDetailModal({
   const { data: COLORS } = useColors();
   const { data: CATEGORIES } = useCategories();
   const { data: MANUFACTURERS } = useManufacturers();
-  // ราคาทุน: System Admin / Product edit only — the API leaves it out for everyone else, so hide the field too
-  const seeCost = useAccess().can('Product', 'edit');
+  // ราคาทุน: Product Cost only — the API leaves it out for everyone else, so hide the field too
+  const seeCost = useAccess().has('Product Cost');
 
   const ro = mode === 'view';
   const code = product?.sysCode ?? '';
@@ -209,7 +209,19 @@ export function ProductDetailModal({
       onSave?.(d.row);
       onClose();
     } catch (e) {
-      if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (isStale(e) && detailKey)
+        // saved by someone else since this form opened: "โหลดใหม่" re-reads this product into the open dialog
+        // (a page reload lost the list's search and filters)
+        push({
+          kind: 'error',
+          title: errMsg(e),
+          desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง',
+          action: {
+            label: 'โหลดใหม่',
+            onClick: () => void loaded.mutate().then(() => setFilledFor('')),
+          },
+        });
+      else if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }

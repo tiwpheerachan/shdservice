@@ -18,6 +18,10 @@ export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 // never on the callback redirect — see the single-Set-Cookie note there).
 export const SEEN_COOKIE = 'os_seen';
 export const SEEN_TTL_S = 30 * 24 * 60 * 60;
+/** os_seen after ออกจากระบบ: "this browser signed out" (a user id otherwise) */
+export const SIGNED_OUT_SEEN = '0';
+/** os_seen holds a real user id (not missing, not SIGNED_OUT_SEEN) */
+export const seenUserId = (v: string | undefined) => (v && /^[1-9]\d*$/.test(v) ? v : null);
 
 export type SessionUser = {
   email: string;

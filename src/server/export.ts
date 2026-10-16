@@ -1,7 +1,7 @@
 import 'server-only';
 import ExcelJS from 'exceljs';
 import type { NextRequest } from 'next/server';
-import { HttpError, requireAdmin, requireCan, requireUser, type CurrentUser } from '@/server/auth';
+import { hasRight, HttpError, requireAdmin, requireCan, type CurrentUser } from '@/server/auth';
 import { parsePageQuery } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
 import type { Module } from '@/lib/modules';
@@ -35,7 +35,7 @@ const MASTER_COLS: Col[] = [
   { key: 'status', header: 'สถานะ', width: 10 },
 ];
 
-const SPECS: Record<string, { title: string; module: Module | null | 'any'; cols: Col[] }> = {
+const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] }> = {
   users: {
     title: 'ผู้ใช้ระบบ',
     module: null,
@@ -103,8 +103,9 @@ const SPECS: Record<string, { title: string; module: Module | null | 'any'; cols
       { key: 'amount', header: 'รวมสุทธิ', width: 12, money: true },
       { key: 'paymentType', header: 'วิธีชำระ', width: 12 },
       { key: 'paymentAmount', header: 'ยอดชำระ', width: 12, money: true },
+      { key: 'refund', header: 'คืนเงิน', width: 12, money: true },
       { key: 'deposit', header: 'มัดจำ', width: 12, money: true },
-      { key: 'outstanding', header: 'ค้างชำระ', width: 12, money: true }, // jobBalance — who still owes
+      { key: 'outstanding', header: 'ค้างชำระ', width: 12, money: true }, // jobBalance — closed jobs only
     ],
   },
   quotations: {
@@ -178,7 +179,7 @@ const SPECS: Record<string, { title: string; module: Module | null | 'any'; cols
   },
   issued_lines: {
     title: 'รายงานเบิกจ่ายอะไหล่',
-    module: 'any',
+    module: 'Report',
     cols: [
       { key: 'doc', header: 'เลขเอกสาร', width: 14 },
       { key: 'date', header: 'วันที่', width: 18 },
@@ -247,7 +248,14 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
         filters: customerFiltersFromQuery(f),
       }) as unknown as Row[];
     case 'jobs':
-      return listJobs({ ...filtersFromQuery(f), q: p.q, limit: MAX_ROWS }) as unknown as Row[];
+      // ยอดชำระ = money taken (≥ 0); a refund (stored as a negative payment) is its own คืนเงิน column;
+      // ค้างชำระ only on a closed job — an open one is not billed yet
+      return (await listJobs({ ...filtersFromQuery(f), q: p.q, limit: MAX_ROWS })).map((j) => ({
+        ...j,
+        paymentAmount: Math.max(0, j.paymentAmount ?? 0),
+        refund: Math.max(0, -(j.paymentAmount ?? 0)),
+        outstanding: j.statusGroup === 'Finished' ? j.outstanding : 0,
+      })) as unknown as Row[];
     case 'quotations':
       return listQuotations({
         status: f.status,
@@ -333,12 +341,9 @@ async function loadRows(req: NextRequest, resource: string, user: CurrentUser): 
 export async function exportXlsx(req: NextRequest, resource: string): Promise<{ buffer: Buffer; filename: string }> {
   const spec = SPECS[resource];
   if (!spec) throw new HttpError(404, `unknown export: ${resource}`);
-  const user =
-    spec.module === null
-      ? await requireAdmin(req)
-      : spec.module === 'any'
-        ? await requireUser(req)
-        : await requireCan(req, spec.module, 'view');
+  const user = spec.module === null ? await requireAdmin(req) : await requireCan(req, spec.module, 'view');
+  // ส่งออก Excel is its own special right on top of seeing the list
+  if (!(await hasRight(user, 'Export'))) throw new HttpError(403, 'ไม่มีสิทธิ์ส่งออก Excel (สิทธิ์พิเศษ Export)');
   const rows = await loadRows(req, resource, user);
   // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
   const cols =

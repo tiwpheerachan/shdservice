@@ -78,9 +78,12 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
         <p>
           <span className="text-neutral-500">อาการเสียอื่น ๆ:</span> {j.symptomOther || '—'}
         </p>
-        <p>
-          <span className="text-neutral-500">หมายเหตุ:</span> {j.remark || '—'}
-        </p>
+        {/* staff's own note (job_remark) — the staff copy only */}
+        {!forCustomer && (
+          <p>
+            <span className="text-neutral-500">หมายเหตุ:</span> {j.remark || '—'}
+          </p>
+        )}
       </Box>
 
       <Box title="ประเภทงาน / ค่าใช้จ่ายเบื้องต้น">

@@ -67,9 +67,12 @@ const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpires
 export type { PublicJob, TrackStepKey } from '@/lib/track-public';
 export { TRACK_STEPS } from '@/lib/track-public';
 
-/** 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere) */
-function stepOf(statusId: number, group: string): TrackStepKey | null {
-  if (statusId === JS.CANCELLED || statusId === JS.REPAIR_CANCELLED || group === 'Cancel') return null;
+/**
+ * 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere).
+ * ลูกค้าไม่ตกลงซ่อม (6) is not a cancelled job: the device still goes back (group Repaired → "ซ่อมเสร็จ" step, own label).
+ */
+export function stepOf(statusId: number, group: string): TrackStepKey | null {
+  if (statusId === JS.CANCELLED || group === 'Cancel') return null;
   if (statusId === JS.NEW) return 'received';
   if (
     statusId === JS.WAIT_PARTS ||
@@ -87,8 +90,16 @@ function stepOf(statusId: number, group: string): TrackStepKey | null {
  * The current status in words the customer can act on — the 5 steps merge some of them.
  * `lastQuote` = the job's latest sent quotation: past its validity, "รอคำตอบจากคุณ" would ask for an answer it can no longer take.
  */
-function statusLabel(statusId: number, step: TrackStepKey | null, lastQuote?: LastQuote): string {
+export function statusLabel(statusId: number, step: TrackStepKey | null, lastQuote?: LastQuote): string {
   if (!step) return 'ยกเลิกรายการ';
+  // the "ซ่อมเสร็จ" step also holds outcomes that are not a repair
+  if (statusId === JS.REPAIR_CANCELLED) return 'ไม่ซ่อม — รอส่งคืน/รับคืนเครื่อง';
+  if (statusId === JS.REPAIRED_NO_FAULT) return 'ตรวจแล้วไม่พบอาการเสีย — เตรียมส่งคืน';
+  if (statusId === JS.SWAP_ISSUED) return 'เปลี่ยนเครื่องใหม่ — เตรียมส่งคืน';
+  if (statusId === JS.REFUND_PAID) return 'คืนเงินแล้ว';
+  if (statusId === JS.CLOSED_REFUND) return 'คืนเงินแล้ว — ปิดงาน';
+  // รับคืนเข้าสต๊อกแล้ว: the device was taken in for a swap / refund (next: 18 or 19)
+  if (statusId === JS.RETURNED_TO_STOCK) return 'รับเครื่องเข้าคลังแล้ว — รอเปลี่ยนเครื่องหรือคืนเงิน';
   if (statusId === JS.QUOTED && lastQuote && quoteExpired(lastQuote.st, lastQuote.at, statusId))
     return `ใบเสนอราคา${QUOTE_EXPIRED_TEXT}`;
   if (statusId === JS.QUOTED) return 'รอคำตอบจากคุณ (ใบเสนอราคา)';
@@ -109,6 +120,18 @@ const QUOTE_VALID_DAYS = parseInt(QUOTATION_VALIDITY, 10) || 7;
 /** a sent quotation the customer can no longer answer: พ้นกำหนด (8), or sent (2) and past its validity / the job says so */
 export const quoteExpired = (st: number | null | undefined, at: string | null, jobStatusId: number | null) =>
   st === 8 || (st === 2 && (fmtDate(at) < addDays(today(), -QUOTE_VALID_DAYS) || jobStatusId === JS.QUOTE_EXPIRED));
+
+/**
+ * What the quotation's "ตกลงซ่อมโดย" box shows (staff and customer copies): the sign-and-return request only
+ * while the customer can still answer — sent (2; a draft 1 is what staff hand over) and not expired.
+ */
+export function quoteSignState(st: number | null | undefined, at: string | null, jobStatusId: number | null) {
+  if (quoteExpired(st, at, jobStatusId)) return 'expired' as const;
+  if (st === 3 || st === 6 || st === 9) return 'agreed' as const;
+  if (st === 4) return 'declined' as const;
+  if (st === 5) return 'cancelled' as const;
+  return 'sign' as const;
+}
 
 /** the job's latest quotation the customer was sent (statuses as CUSTOMER_QUOTATION_STATUSES) — status + date */
 type LastQuote = { st: number; at: string } | null;
@@ -135,7 +158,8 @@ export const inProgressForCustomer = (statusId: number | null, group: string | n
 const COMPANY =
   /บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน|มหาชน|^ร้าน|มูลนิธิ|สมาคม|สหกรณ์|\b(?:co|ltd|inc|corp|plc)\b\.?|\b(?:company|limited|corporation)\b/i;
 const COMPANY_PREFIX = /^(?:บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน(?:จำกัด|สามัญ)?|ร้าน|มูลนิธิ|สมาคม|สหกรณ์)\s*/;
-const TITLE = /^(?:คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.|(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))\s*/i;
+// "นาย.อัครพล" (a dot typed after the title) → the title and the dot go
+const TITLE = /^(?:(?:คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)[.\s]*|(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))/i;
 /**
  * "C43600 คุณสมชาย ใจดี 081…" → "คุณ สมช…" (one title, never "คุณ คุณ…");
  * a company keeps its kind, no "คุณ": "บริษัท เอบีซี จำกัด" → "บริษัท เอบ…", "ABC Co., Ltd." → "ABC…"
@@ -160,11 +184,25 @@ export const maskPhone = (v: string) => {
   const d = (v ?? '').replace(/\D/g, '');
   return d.length >= 4 ? `•••-•••-${d.slice(-4)}` : '';
 };
-/** no house number / street: from the ตำบล (แขวง / อำเภอ / เขต / จังหวัด) on, else the postcode alone */
+/** a phone / id number: 6+ digits, maybe split by "-" or spaces */
+const DIGIT_RUN = /\d(?:[\s-]?\d){5,}/g;
+/** a 5-digit number on its own (not part of "99/12345" or a longer number) */
+const POSTCODE = /(?<![\d/])\d{5}(?![\d/])/g;
+/**
+ * No house number / street: from the ตำบล (แขวง / อำเภอ / เขต / จังหวัด) up to the first postcode, else
+ * the postcode alone. Whatever follows the postcode ("… จ.เชียงราย 57000 โทร 095-4104532 …") is cut,
+ * and a digit run before it (a phone typed in the middle) is scrubbed.
+ */
 export const maskAddress = (v: string) => {
   const s = (v ?? '').trim();
   const i = s.search(/(?:^|\s)(?:ต\.|ตำบล|แขวง|อ\.|อำเภอ|เขต|จ\.|จังหวัด)/);
-  return i >= 0 ? s.slice(i).trim() : (/(\d{5})\s*$/.exec(s)?.[1] ?? '');
+  if (i < 0) return [...s.matchAll(POSTCODE)].at(-1)?.[0] ?? '';
+  const rest = s.slice(i);
+  const zip = [...rest.matchAll(POSTCODE)][0];
+  const head = (zip ? rest.slice(0, zip.index) : rest)
+    .replace(DIGIT_RUN, ' ')
+    .replace(/(?:โทร(?:ศัพท์)?|tel|มือถือ|เบอร์)\.?\s*:?\s*$/i, '');
+  return `${head} ${zip?.[0] ?? ''}`.replace(/\s+/g, ' ').trim();
 };
 const maskCustomer = <C extends { name: string; address: string; phone: string }>(c: C) => ({
   name: maskName(c.name),
@@ -188,6 +226,13 @@ export function maskJobForCustomer(j: JobDetail): JobDetail {
     customerDetail: maskName(j.customerDetail),
     imei: maskRef(j.imei),
     serial: maskRef(j.serial),
+    so: maskRef(j.so), // marketplace order no. — like the serial
+    // the words /track uses, not the internal status ("อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว")
+    status: statusLabel(j.statusId, stepOf(j.statusId, j.statusGroup?.trim() ?? '')),
+    // free text typed by staff — internal notes / staff names ("คืนเงินนอกระบบ"); the return keeps its type + tracking no.
+    remark: '',
+    engineerRemark: '',
+    return: { ...j.return, detail: '' },
     engineerId: 0,
     engineer: '',
     createBy: 0,
@@ -441,10 +486,17 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const waitedFor = [was(JS.WAIT_QUOTE, JS.QUOTED, JS.QUOTE_EXPIRED) && 'ใบเสนอราคา', was(JS.WAIT_PARTS) && 'รออะไหล่']
     .filter(Boolean)
     .join(' · ');
+  // "ซ่อมเสร็จ" also holds ไม่ซ่อม / ไม่พบอาการเสีย / เปลี่ยนเครื่อง / คืนเงิน — once passed, say which
+  const lastRepaired = logs.findLast((l) => stepOf(l.statusId ?? -1, l.group?.trim() ?? '') === 'repaired');
+  const repairedAs = lastRepaired ? statusLabel(lastRepaired.statusId ?? -1, 'repaired') : '';
+  const passedAs: Partial<Record<TrackStepKey, string>> = {
+    waiting: waitedFor,
+    repaired: repairedAs === TRACK_STEPS.find((s) => s.key === 'repaired')!.label ? '' : repairedAs,
+  };
 
   const order = TRACK_STEPS.map((s) => s.key);
   const history = [...seen.entries()]
-    .map(([key, at]) => ({ key, at, ...(key === 'waiting' && waitedFor ? { label: waitedFor } : {}) }))
+    .map(([key, at]) => ({ key, at, ...(passedAs[key] ? { label: passedAs[key] } : {}) }))
     .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 
   return {

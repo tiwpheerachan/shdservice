@@ -47,10 +47,10 @@ import { pageSaleOrders, listSaleOrders } from '@/server/services/sale-orders';
  * Resources holding customer / document data: which screens may read them ("view"
  * on any one of the modules). Lists the screens that actually call each one, so a
  * form that reads across modules (e.g. stock pick → sale orders) keeps working.
- * "admin" = only the System-Admin report pages use it. Anything not listed is a
+ * Report = only the report pages use it (special right Report). Anything not listed is a
  * lookup (statuses, masters, staff names, product catalog) open to every approved user.
  */
-const READ_ACCESS: Record<string, readonly Module[] | 'admin'> = {
+const READ_ACCESS: Record<string, readonly Module[]> = {
   customers: ['Customer'],
   jobs: JOB_MODULES,
   job_stats: ['Job Management'],
@@ -58,11 +58,11 @@ const READ_ACCESS: Record<string, readonly Module[] | 'admin'> = {
   quotations: ['Quotation'],
   sale_orders: ['Sale Order', 'Product Pick Stock'],
   movements: ['Product Onhand', 'Product Receive Stock', 'Product Pick Stock'],
-  issued_lines: 'admin',
-  issued_stats: 'admin',
-  job_summary: 'admin',
-  quotation_summary: 'admin',
-  sale_order_summary: 'admin',
+  issued_lines: ['Report'],
+  issued_stats: ['Report'],
+  job_summary: ['Report'],
+  quotation_summary: ['Report'],
+  sale_order_summary: ['Report'],
 };
 
 /**
@@ -100,8 +100,7 @@ export async function readResource(req: NextRequest, resource: string): Promise<
   }
 
   const access = Object.hasOwn(READ_ACCESS, resource) ? READ_ACCESS[resource] : undefined;
-  if (access === 'admin') await requireAdmin(req);
-  else if (access) await requireView(req, access);
+  if (access) await requireView(req, access);
   else await requireUser(req);
 
   if (isSimpleKind(resource)) return listSimple(resource, deleted);

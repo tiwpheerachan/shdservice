@@ -11,6 +11,7 @@
  * Rows it writes (movements, sale orders, job_log, audit) stay behind for inspection.
  */
 import assert from 'node:assert/strict';
+import { readFileSync as readFile } from 'node:fs';
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, assertLocal } from '../tests/db-url.mts';
@@ -65,6 +66,9 @@ const U = {
   pending: { id: 9105, email: 'td-pending@example.invalid', type: null, status: 'ACTIVE' },
   inactive: { id: 9106, email: 'td-inactive@example.invalid', type: 'TD Customer Viewer', status: 'INACTIVE' },
   seller: { id: 9107, email: 'td-seller@example.invalid', type: 'TD Seller', status: 'ACTIVE' },
+  manager: { id: 9108, email: 'td-manager@example.invalid', type: 'Manager', status: 'ACTIVE' }, // SO approver
+  seller2: { id: 9109, email: 'td-seller2@example.invalid', type: 'TD Seller', status: 'ACTIVE' }, // another CS
+  engineer: { id: 9110, email: 'td-engineer@example.invalid', type: 'Engineer', status: 'ACTIVE' }, // takes jobs (R4)
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
 const SV = 3; // every fixture user's session_version — a cookie must carry exactly this
@@ -83,6 +87,13 @@ const JOB_OUT_CLOSED = 'TDJ0009'; // legacy: already closed with an open send ro
 async function seed() {
   const users = Object.values(U);
   await pool.query(`
+    -- the Model series must start past the codes already in the table (a fresh or reused test DB may lag)
+    INSERT INTO running_no (running_type, company_id, branch_id, prefix, pyear, pmonth, pday, number, length_year, length_month, length_number)
+      SELECT 'Model', 0, 0, 'MD', 0, 0, 0, 0, 0, 0, 5 WHERE NOT EXISTS (SELECT 1 FROM running_no WHERE running_type = 'Model');
+    UPDATE running_no SET number = greatest(number, coalesce((SELECT max(substring(model_code FROM 3)::int) FROM model WHERE model_code ~ '^MD[0-9]+$'), 0))
+     WHERE running_type = 'Model';
+    -- a fresh test DB has no job types; the job-creating tests take the first one
+    INSERT INTO job_type (job_type_name, is_active) VALUES ('TD งานซ่อม', true) ON CONFLICT (job_type_name) DO NOTHING;
     DELETE FROM app_config WHERE user_type LIKE 'TD %';
     INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
       ('TD Job Clerk', 'Job Management', false, true, false, true),
@@ -90,6 +101,13 @@ async function seed() {
       ('TD Customer Viewer', 'Customer', false, false, false, true),
       ('TD Picker', 'Product Pick Stock', true, false, false, true),
       ('TD Seller', 'Sale Order', true, true, false, true);
+    INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+      VALUES ('Manager', 'Sale Order', true, true, true, true)  -- as in the live data (only Manager / System Admin approve)
+      ON CONFLICT (user_type, module_name) DO UPDATE SET can_insert = true, can_edit = true, can_view = true;
+    -- special rights as migration 0030 seeds them: only Manager approves, Engineers take jobs
+    INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+      VALUES ('Manager', 'SO Approve', false, false, false, true), ('Engineer', 'Job Take', false, false, false, true)
+      ON CONFLICT (user_type, module_name) DO UPDATE SET can_view = true;
 
     DELETE FROM app_user WHERE user_id BETWEEN 9100 AND 9199 OR email_address LIKE 'td-%@example.invalid';
     INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
@@ -141,6 +159,8 @@ async function seed() {
     INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
       VALUES ('${JOB_PARTS}', 'TDP3', '', 1, false, true, 15, 1, now(), 9101, 0, 0);
   `);
+  // the rest of 0030 (ส่งออก Excel for every role, the TD ones included — they were just inserted)
+  await pool.query(readFile('drizzle/0030_special_rights.sql', 'utf8'));
   // test:running-no deletes the Inventory-In series and restarts it from 0 — the WHI numbers then
   // collide with the movements earlier runs of this script left in inventory_hd (unique inventory_no).
   // Make sure this year's rows exist, then move them past the highest number already used.
@@ -746,14 +766,15 @@ try {
   });
   await test('customer: stale version → 409, name unchanged', async () => {
     const v = await version('customer', sql`customer_code = ${CUSTOMER}`);
-    const save = async (name: string, ver: number) =>
+    const save = async (name: string, ver: number, line = '') =>
       customerPOST(
         await request('/api/customers', U.admin, {
           method: 'POST',
-          body: { code: CUSTOMER, name, phone: '02-000-0000', version: ver },
+          body: { code: CUSTOMER, name, phone: '02-000-0000', line, version: ver },
         }),
       );
-    assert.equal((await save('ลูกค้า ทดสอบโดเมน', v)).status, 200);
+    // a real change moves the version (a save that changes nothing keeps it — Round 6)
+    assert.equal((await save('ลูกค้า ทดสอบโดเมน', v, `td-${crypto.randomUUID().slice(0, 8)}`)).status, 200);
     assert.equal((await save('TD ชื่อทับ', v)).status, 409);
     const [c] = (
       await db.execute<{ n: string }>(sql`SELECT customer_name AS n FROM customer WHERE customer_code = ${CUSTOMER}`)
@@ -1442,7 +1463,8 @@ try {
       const r = await fieldsOf(updateJob(JOB_LEGACY, await asLoaded(JOB_LEGACY), U.admin.id));
       assert.equal(r.status, 200, JSON.stringify(r.fields ?? r));
       const j = await row(JOB_LEGACY);
-      assert.deepEqual([j.so, j.serial, j.tracking], ['SO 12', 'SN เสียหาย', 'ไรเดอร์มาส่ง'], 'kept (only cleaned)');
+      // R5 "never worse": a value equal to the stored one once cleaned keeps the stored text (no re-cleaning)
+      assert.deepEqual([j.so, j.serial, j.tracking], ['so 12', 'SN เสียหาย', 'ไรเดอร์มาส่ง'], 'kept as stored');
     });
     await test('J: changing them to new junk → 400 under each field, nothing saved', async () => {
       const base = await asLoaded(JOB_LEGACY);
@@ -1821,7 +1843,7 @@ try {
   {
     const { markPartsIssued, listJobs } = await import('@/server/services/jobs');
     const { invalidate } = await import('@/server/cache');
-    const { OUTSOURCE_STATUS_ONLY, RECEIVE_DATE_REQUIRED, TRACKING_REQUIRED } = await import('@/lib/validation/job');
+    const { OUTSOURCE_STATUS_ONLY, RECEIVE_DATE_REQUIRED, STATUS_CLOSE_ONLY } = await import('@/lib/validation/job');
     const job = (no: string, status: number, customer = `${CUSTOMER} ลูกค้า ทดสอบโดเมน`) =>
       `('${no}', ${status}, 9001, '${customer}', 'Model TD', now(), current_date, '1900-01-01')`;
     // เบิก 1, nothing issued
@@ -1868,8 +1890,9 @@ try {
       // the reverse: no parcel no. stored → 8 refused from the close screen and from the others
       const close = await fieldsOf(closeJob('TDJ0207', { status: await statusName(8), return: input }, U.admin.id));
       assert.deepEqual([close.status, Object.keys(close.fields ?? {})], [400, ['return.tracking']]);
+      // R5: the repair page cannot close a job at all (only ปิดงาน closes)
       const repair = await fieldsOf(saveRepair('TDJ0207', { status: await statusName(8) }, U.admin.id));
-      assert.deepEqual([repair.status, repair.fields], [400, { status: TRACKING_REQUIRED }]);
+      assert.deepEqual([repair.status, repair.fields], [400, { status: STATUS_CLOSE_ONLY }]);
       assert.equal((await jobRow('TDJ0207')).s, 5);
     });
     await test('R1 jobs: ซ่อมเสร็จ refused while a เบิก part is not issued; เสนอ-only and a job already at 5 save', async () => {
@@ -2096,11 +2119,11 @@ try {
 
     await test('R2 SO: the creator cannot approve / deny / send back their own order (403); a draft cannot be decided (409); System Admin may', async () => {
       await setStock(P.a.code, 10);
-      // TD Seller (Sale Order add + edit) creates and submits — as salesperson and as the one who keyed it in
-      for (const salesId of [U.seller.id, U.admin.id]) {
-        const own = await createSO(U.seller, salesId, true);
+      // a Manager (an approver) creates and submits — as salesperson and as the one who keyed it in
+      for (const salesId of [U.manager.id, U.admin.id]) {
+        const own = await createSO(U.manager, salesId, true);
         for (const d of ['approve', 'deny', 'reject']) {
-          const r = await decideAs(U.seller, own, d, 'TD reason');
+          const r = await decideAs(U.manager, own, d, 'TD reason');
           assert.deepEqual([r.status, r.body.error], [403, SELF_APPROVE], `${d} (sales ${salesId})`);
         }
         assert.equal(await approveIdOf(own), 2, 'still waiting');
@@ -2110,10 +2133,10 @@ try {
       const draft = await createSO(U.admin, U.admin.id, false);
       assert.equal((await decideAs(U.admin, draft, 'approve')).status, 409);
       const back = await createSO(U.admin, U.admin.id, true);
-      assert.equal((await decideAs(U.seller, back, 'reject', 'TD fix the price')).status, 200, 'another approver');
+      assert.equal((await decideAs(U.manager, back, 'reject', 'TD fix the price')).status, 200, 'another approver');
       assert.equal((await decideAs(U.admin, back, 'approve')).status, 409, 'sent back = not waiting');
-      // someone else (TD Seller on an admin-made order) approves; System Admin approves its own
-      assert.equal((await decideAs(U.seller, await createSO(U.admin, U.admin.id, true), 'approve')).status, 200);
+      // someone else (a Manager on an admin-made order) approves; System Admin approves its own
+      assert.equal((await decideAs(U.manager, await createSO(U.admin, U.admin.id, true), 'approve')).status, 200);
       assert.equal((await decideAs(U.admin, await createSO(U.admin, U.admin.id, true), 'approve')).status, 200);
       assert.equal((await qty(P.a.code)).remain, 8);
     });
@@ -2497,32 +2520,32 @@ try {
       assert.deepEqual([after.remark, after.repairDetail, after.depositCost], ['TD R2 note', 'TD R2', 600]);
     });
     await test('R2 jobs: taking a job someone else has → 409 unless takeOver (assign + edit); edit assign = NEW → 2 + log', async () => {
-      const r = await fieldsOf(assignJobs(['TDJ0303'], U.clerk.id, U.clerk.id));
+      const r = await fieldsOf(assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id));
       assert.equal(r.status, 409);
       assert.match(r.message ?? '', /มีผู้รับงานแล้ว/);
-      await assignJobs(['TDJ0303'], U.clerk.id, U.clerk.id, true);
+      await assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id, true);
       const eng = async (no: string) =>
         (
           await db.execute<{ e: number; s: number }>(
             sql`SELECT engineer_id AS e, job_status_id AS s FROM job WHERE job_no = ${no}`,
           )
         ).rows[0];
-      assert.deepEqual({ ...(await eng('TDJ0303')) }, { e: U.clerk.id, s: 2 });
+      assert.deepEqual({ ...(await eng('TDJ0303')) }, { e: U.engineer.id, s: 2 });
       const dueDate = (await getJob('TDJ0304'))!.dueDate;
-      const input = { customerCode: CUSTOMER, dueDate, engineerId: U.clerk.id };
+      const input = { customerCode: CUSTOMER, dueDate, engineerId: U.engineer.id };
       assert.equal((await fieldsOf(updateJob('TDJ0304', input, U.clerk.id))).status, 409);
       assert.deepEqual({ ...(await eng('TDJ0304')) }, { e: U.admin.id, s: 1 }, 'unchanged');
       await updateJob('TDJ0304', { ...input, takeOver: true }, U.clerk.id);
-      assert.deepEqual({ ...(await eng('TDJ0304')) }, { e: U.clerk.id, s: 2 });
+      assert.deepEqual({ ...(await eng('TDJ0304')) }, { e: U.engineer.id, s: 2 });
       assert.deepEqual(await logRows('TDJ0304'), [2]);
       // nobody on it yet: no question, and the edit screen moves it like /jobs/assign does
       const free = await getJob('TDJ0305');
       await updateJob(
         'TDJ0305',
-        { customerCode: CUSTOMER, dueDate: free!.dueDate, engineerId: U.clerk.id },
+        { customerCode: CUSTOMER, dueDate: free!.dueDate, engineerId: U.engineer.id },
         U.clerk.id,
       );
-      assert.deepEqual({ ...(await eng('TDJ0305')) }, { e: U.clerk.id, s: 2 });
+      assert.deepEqual({ ...(await eng('TDJ0305')) }, { e: U.engineer.id, s: 2 });
       assert.deepEqual(await logRows('TDJ0305'), [2]);
     });
     await test('R2 jobs: walk-in (หน้าร้าน) opens without SO no. / SO date / expire date; another channel → 400 for those', async () => {
@@ -2703,30 +2726,31 @@ try {
             { params: Promise.resolve({ no }) },
           ),
         );
-      assert.deepEqual([(await approve(U.seller, bySeller)).body.error], [SELF_APPROVE]);
-      const forSeller = noOf(await so(U.admin, U.seller.id));
-      const r = await approve(U.seller, forSeller);
+      // R4: self-approval is checked on an approver (Manager) — CS may not approve at all
+      assert.deepEqual([(await approve(U.manager, noOf(await so(U.manager, U.admin.id)))).body.error], [SELF_APPROVE]);
+      const forManager = noOf(await so(U.admin, U.manager.id));
+      const r = await approve(U.manager, forManager);
       assert.deepEqual([r.status, r.body.error], [403, SELF_APPROVE_SALES]);
       // an edit by someone else keeps who keyed it in; the salesperson changes
       assert.equal((await so(U.admin, U.seller.id, { no: bySeller })).status, 200);
       assert.deepEqual([(await hdOf(bySeller)).c, (await hdOf(bySeller)).s], [U.seller.id, U.seller.id]);
     });
 
-    await test('R3 SO: a waiting order names the roles that may approve (Sale Order edit); a draft none; 3 reads ส่งกลับแก้ไข (+ its filter)', async () => {
+    await test('R3 SO: a waiting order names the roles that may approve (R4: Manager); a draft none; 3 reads ส่งกลับแก้ไข (+ its filter)', async () => {
       await pool.query(`
         INSERT INTO approve_status (approve_status_id, approve_name_th)
           SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ'), (2, 'รออนุมัติ'), (3, 'แก้ไขข้อมูล'), (4, 'อนุมัติแล้ว'), (5, 'ปฏิเสธ')) v(id, name)
            WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id)`);
       const waiting = (await getSaleOrder(noOf(await so(U.admin, U.admin.id))))!;
-      assert.ok(waiting.approverRoles.includes('TD Seller'), waiting.approverRoles.join());
-      assert.ok(!waiting.approverRoles.includes('TD Job Clerk'), 'Job Management only');
-      assert.ok(!waiting.approverRoles.includes('System Admin'), 'always may — not listed');
+      // the roles ticked SO Approve (R6; seeded: Manager), not the Sale Order edit grant (TD Seller has it);
+      // System Admin always may — not listed
+      assert.deepEqual(waiting.approverRoles, ['Manager']);
       const draft = (await getSaleOrder(noOf(await so(U.admin, U.admin.id, { submit: false }))))!;
       assert.deepEqual(draft.approverRoles, []);
       const back = noOf(await so(U.admin, U.admin.id));
       const r = await json(
         await soApprovePOST(
-          await request(`/api/sale-orders/${back}/approve`, U.seller, {
+          await request(`/api/sale-orders/${back}/approve`, U.manager, {
             method: 'POST',
             body: { decision: 'reject', remark: 'TD fix' },
           }),
@@ -2873,7 +2897,7 @@ try {
   console.log('\nRound 3 — jobs (closed-job status / เสนอ-only parts / out-source receive / close / export / phone)');
   {
     const { saveSwapRefund, markPartsIssued, listJobs } = await import('@/server/services/jobs');
-    const { REOPEN_ADMIN_ONLY, returnDetailOf } = await import('@/lib/validation/job');
+    const { REOPEN_LOCKED, returnDetailOf } = await import('@/lib/validation/job');
     const { exportXlsx } = await import('@/server/export');
     const ExcelJS = (await import('exceljs')).default;
     const job = (no: string, status: number, customer = `${CUSTOMER} ลูกค้า ทดสอบโดเมน`) =>
@@ -2896,7 +2920,7 @@ try {
       assert.deepEqual([(await jobRow('TDJ0401')).s, await logRows('TDJ0401')], [20, []]);
       // picking an open status by mistake: refused on every path (setStatus), nothing written
       const repair = await fieldsOf(saveRepair('TDJ0401', { status: s5, repairDetail: 'TD R3 x' }, U.clerk.id));
-      assert.deepEqual([repair.status, repair.fields], [409, { status: REOPEN_ADMIN_ONLY }]);
+      assert.deepEqual([repair.status, repair.fields], [409, { status: REOPEN_LOCKED }]);
       const swap = await fieldsOf(saveSwapRefund('TDJ0401', { status: s2, newSerial: 'TDR3SERIAL' }, U.clerk.id));
       assert.equal(swap.status, 409);
       const s14 = await statusName(14);
@@ -2964,6 +2988,1767 @@ try {
       assert.ok(await found({ phone: '+66899993466' }), 'phone filter');
       assert.ok(await found({ q: '0899993466' }), 'the 0 form still works');
       assert.ok(!(await found({ q: '+66899993467' })), 'another number');
+    });
+  }
+  // ── Round 4: sale orders ──
+  console.log('\nRound 4 — sale orders');
+  {
+    const { NOT_APPROVER, SUBMIT_CREATOR_ONLY } = await import('@/server/services/sale-orders');
+    const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
+    const post = async (u: TestUser, body: Record<string, unknown>) =>
+      json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
+    const save = (u: TestUser, submit: boolean, no?: string) =>
+      post(u, { no, customerCode: CUSTOMER, salesId: U.admin.id, submit, lines: [{ code: P.a.code, qty: 1 }] });
+    const create = async (u: TestUser, submit: boolean) => {
+      const r = await save(u, submit);
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return (r.body.order as { no: string }).no;
+    };
+    const decide = async (u: TestUser, no: string, decision: string) =>
+      json(
+        await soApprovePOST(
+          await request(`/api/sale-orders/${no}/approve`, u, {
+            method: 'POST',
+            body: { decision, remark: 'TD R4' },
+          }),
+          { params: Promise.resolve({ no }) },
+        ),
+      );
+    const statusOfSO = async (no: string) =>
+      (
+        await db.execute<{ s: number }>(
+          sql`SELECT approve_status_id AS s FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
+        )
+      ).rows[0].s;
+
+    await test("R4 SO: only Manager / System Admin decide — CS (Sale Order edit) on another CS's order → 403, stock untouched; Manager → 200", async () => {
+      await setStock(P.a.code, 10);
+      const no = await create(U.seller, true); // keyed in by one CS (salesperson: admin) …
+      for (const d of ['approve', 'deny', 'reject']) {
+        const r = await decide(U.seller2, no, d); // … decided by another CS
+        assert.deepEqual([r.status, r.body.error], [403, NOT_APPROVER], d);
+      }
+      assert.equal(await statusOfSO(no), 2, 'still waiting');
+      assert.equal((await qty(P.a.code)).remain, 10, 'nothing went out');
+      const ok = await decide(U.manager, no, 'approve');
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.equal((await qty(P.a.code)).remain, 9);
+    });
+
+    await test('R4 SO: only the creator sends it for approval — someone else 403 (a plain save keeps the status); creator / System Admin 200', async () => {
+      const draft = await create(U.seller, false);
+      const r = await save(U.manager, true, draft); // an approver submits someone's draft …
+      assert.deepEqual([r.status, r.body.error], [403, SUBMIT_CREATOR_ONLY]);
+      assert.equal(await statusOfSO(draft), 1);
+      assert.equal((await save(U.manager, false, draft)).status, 200, 'an edit without submit');
+      assert.equal(await statusOfSO(draft), 1, 'kept');
+      assert.equal((await save(U.seller, true, draft)).status, 200, 'the creator');
+      assert.equal(await statusOfSO(draft), 2);
+      // R5 owner decision: a waiting order is edited only by its creator (System Admin may)
+      const waiting = await save(U.manager, false, draft);
+      assert.deepEqual(
+        [waiting.status, waiting.body.error],
+        [403, WAITING_CREATOR_ONLY],
+        'a waiting order: creator only',
+      );
+      assert.equal(await statusOfSO(draft), 2, '… stays waiting');
+      const other = await create(U.seller, false);
+      assert.equal((await save(U.admin, true, other)).status, 200, 'System Admin');
+      assert.equal(await statusOfSO(other), 2);
+    });
+  }
+  // ── Round 4: jobs ──
+  console.log('\nRound 4 — jobs (charged parts / deposit refund / who may take a job)');
+  {
+    const { listStaff } = await import('@/server/services/users');
+    const { NOT_ENGINEER, REFUND_REQUIRED, partCharge, refundDateOf } = await import('@/lib/validation/job');
+    const job = (no: string, status: number, eng = 0) =>
+      `('${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', ${eng})`;
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_id)
+        VALUES ${job('TDJ0501', 2, U.engineer.id)}, ${job('TDJ0502', 5)}, ${job('TDJ0503', 1)};
+      UPDATE job SET deposit_cost = 500, service_cost = 300, spare_part_total_cost = 0, job_total_cost = 300,
+                     job_payment_type = '', job_payment_amount = 0 WHERE job_no = 'TDJ0502';`);
+
+    await test('R4 jobs: only เบิก lines are charged — เบิก 200 + เสนอ-only 250 → 200; ticking เบิก on the second → 450', async () => {
+      await setStock(P.a.code, 10);
+      await setStock(P.b.code, 10);
+      const line = (code: string, price: number, pick: boolean, logId?: number) => ({
+        logId,
+        code,
+        unitPrice: price,
+        a: { pick, quote: true, qty: 1 },
+        b: { pick: false, quote: false, qty: 0 },
+      });
+      const status = (await getJob('TDJ0501'))!.status;
+      await saveRepair(
+        'TDJ0501',
+        { status, parts: [line(P.a.code, 200, true), line(P.b.code, 250, false)] },
+        U.engineer.id,
+      );
+      let j = (await getJob('TDJ0501'))!;
+      assert.deepEqual([j.partsCost, j.totalCost], [200, 200]);
+      const id = (code: string) => j.parts.find((p) => p.code === code)!.logId;
+      const parts = [line(P.a.code, 200, true, id(P.a.code)), line(P.b.code, 250, true, id(P.b.code))];
+      await saveRepair('TDJ0501', { status: j.status, parts }, U.engineer.id);
+      j = (await getJob('TDJ0501'))!;
+      assert.deepEqual([j.partsCost, j.totalCost], [450, 450]);
+      // the repair page's ค่าอะไหล่ uses the same rule
+      assert.equal(partCharge({ pick: false, quote: true, qty: 1 }, 250), 0);
+      assert.equal(partCharge({ pick: true, quote: true, qty: 2 }, 250), 500);
+    });
+
+    await test('R4 jobs: deposit 500 > total 300 → the close asks for the refund (400 under refund.*, ≤ 200), stored as −200 "คืนมัดจำ <date>"', async () => {
+      const s20 = await statusName(20);
+      const back = { type: 'ลูกค้ามารับเอง', date: '2026-10-15' };
+      const none = await fieldsOf(closeJob('TDJ0502', { status: s20, return: back }, U.clerk.id));
+      assert.deepEqual([none.status, none.fields], [400, { 'refund.type': REFUND_REQUIRED }]);
+      const refund = { type: 'เงินสด', amount: 250, date: '2026-10-15' };
+      const over = await fieldsOf(closeJob('TDJ0502', { status: s20, return: back, refund }, U.clerk.id));
+      assert.deepEqual([over.status, Object.keys(over.fields ?? {})], [400, ['refund.amount']]);
+      assert.equal((await jobRow('TDJ0502')).s, 5, 'not closed');
+      const ok = await fieldsOf(
+        closeJob('TDJ0502', { status: s20, return: back, refund: { ...refund, amount: 200 } }, U.clerk.id),
+      );
+      assert.equal(ok.status, 200, JSON.stringify(ok));
+      const j = (await getJob('TDJ0502'))!;
+      assert.deepEqual(
+        [j.statusId, j.payment.type, j.payment.amount, j.payment.detail, j.outstanding, j.depositRefund],
+        [20, 'เงินสด', -200, 'คืนมัดจำ 2026-10-15', 0, 200],
+      );
+      assert.equal(refundDateOf(j.payment.detail), '2026-10-15', 'the date the return note prints');
+      // closed: the money is locked — a re-save is not asked for the refund again, and cannot change it
+      assert.equal((await fieldsOf(closeJob('TDJ0502', { status: s20, return: back }, U.clerk.id))).status, 200);
+      const again = { status: s20, return: back, refund: { ...refund, amount: 100 } };
+      assert.equal((await fieldsOf(closeJob('TDJ0502', again, U.clerk.id))).status, 409);
+      assert.equal((await getJob('TDJ0502'))!.payment.amount, -200);
+    });
+
+    await test('R4 jobs: only an Engineer / Head Engineer takes a job (400 under engineerId; the current one re-saved passes); history: who gave it to whom', async () => {
+      // the มอบหมายงานนี้ให้ picker = the staff list filtered by Job Take (Engineer has it: 0030)
+      const offered = (await listStaff()).filter((u) => u.takesJobs).map((u) => u.id);
+      assert.ok(offered.includes(U.engineer.id) && !offered.includes(U.clerk.id), 'engineers only');
+      const assign = await fieldsOf(assignJobs(['TDJ0503'], U.clerk.id, U.admin.id));
+      assert.deepEqual([assign.status, assign.fields], [400, { engineerId: NOT_ENGINEER }]);
+      const j = (await getJob('TDJ0503'))!;
+      // what the edit form sends back (warrantyMonth too: a stored 0 counts as filled once saved)
+      const input = { customerCode: CUSTOMER, dueDate: j.dueDate, warrantyMonth: j.warrantyMonth };
+      const edit = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: U.clerk.id }, U.admin.id));
+      assert.deepEqual([edit.status, edit.fields], [400, { engineerId: NOT_ENGINEER }]);
+      const assigned = async () => (await getJob('TDJ0503'))!.history.find((h) => h.action === 'ASSIGN')?.summary;
+      await assignJobs(['TDJ0503'], U.engineer.id, U.admin.id);
+      assert.equal(await assigned(), 'TD td-admin มอบหมายงานให้ TD td-engineer');
+      // an old job on someone who is not an engineer: saved again unchanged → still fine
+      await pool.query(`UPDATE job SET engineer_id = ${U.clerk.id} WHERE job_no = 'TDJ0503'`);
+      const kept = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: U.clerk.id }, U.admin.id));
+      assert.equal(kept.status, 200, JSON.stringify(kept));
+      // the edit / repair picker takes it over → the history names both
+      await updateJob('TDJ0503', { ...input, engineerId: U.engineer.id, takeOver: true }, U.admin.id);
+      assert.equal(await assigned(), 'TD td-admin เปลี่ยนผู้รับงานจาก TD td-clerk เป็น TD td-engineer');
+    });
+  }
+  // ── Round 4: landing page + notification bell ──
+  console.log('\nRound 4 — landing page + bell (sale orders waiting for approval)');
+  {
+    const { GET: pendingGET } = await import('@/app/api/alerts/sale-orders-pending/route');
+    const { landingPath } = await import('@/app/landing');
+    const { grantsForUserType } = await import('@/server/auth');
+    const { NOT_APPROVER } = await import('@/lib/validation/sale-order');
+    const waitingOrder = async (u: TestUser, salesId: number) => {
+      const body = { customerCode: CUSTOMER, salesId, submit: true, lines: [{ code: P.a.code, qty: 1 }] };
+      const r = await json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return (r.body.order as { no: string }).no;
+    };
+    const pending = async (u: TestUser) => json(await pendingGET(await request('/api/alerts/sale-orders-pending', u)));
+    const nosOf = (body: Record<string, unknown>) => (body.items as { no: string }[]).map((i) => i.no);
+
+    await test('R4 bell: Manager gets the waiting sale orders minus the ones they created / sell; System Admin all; CS → 403', async () => {
+      const others = await waitingOrder(U.seller, U.admin.id); // newest first, so these three lead the list
+      const created = await waitingOrder(U.manager, U.admin.id);
+      const sold = await waitingOrder(U.seller, U.manager.id);
+      const m = await pending(U.manager);
+      assert.equal(m.status, 200, JSON.stringify(m.body));
+      const nos = nosOf(m.body);
+      assert.ok(nos.includes(others), 'someone else’s waiting order is listed');
+      assert.ok(!nos.includes(created), 'not the one the Manager keyed in (approveSaleOrder refuses it)');
+      assert.ok(!nos.includes(sold), 'not the one the Manager is the salesperson of');
+      assert.ok((m.body.total as number) >= nos.length);
+      const item = (m.body.items as { no: string; amount: number; createdBy: string }[]).find((i) => i.no === others)!;
+      assert.ok(item.amount > 0 && item.createdBy, JSON.stringify(item));
+      const a = await pending(U.admin);
+      assert.equal(a.status, 200);
+      for (const no of [others, created, sold]) assert.ok(nosOf(a.body).includes(no), `System Admin sees ${no}`);
+      const cs = await pending(U.seller); // Sale Order view + edit, not an approver
+      assert.deepEqual([cs.status, cs.body.error], [403, NOT_APPROVER]);
+    });
+
+    await test('R4 landing: Manager with Sale Order view → /sale/orders?pending=1; System Admin / CS unchanged', async () => {
+      const at = async (u: TestUser) => {
+        const cu = await userOf(u);
+        return landingPath(cu, cu.isAdmin ? {} : await grantsForUserType(cu.userType));
+      };
+      assert.equal(await at(U.manager), '/sale/orders?pending=1');
+      assert.equal(await at(U.admin), '/jobs/dashboard', 'System Admin keeps the dashboard');
+      assert.equal(await at(U.seller), '/sale/orders', 'a CS: the first menu page it may open, as before');
+      assert.equal(landingPath({ isAdmin: false, userType: 'Manager' }, {}), '/admin/guide', 'no Sale Order view');
+    });
+  }
+  // ── Round 5: customer /track + print documents ──
+  console.log('\nRound 5 — customer /track + print documents');
+  {
+    const tracking = await import('@/server/services/tracking');
+    // TDJ0391 comes from the Round 3 /track block
+
+    await test('R5 track: masking — address cut at the postcode (no trailing phone), "นาย." title, companies', async () => {
+      assert.equal(
+        tracking.maskAddress(
+          '256 หมู่15 ต.รอบเวียง อ.เมือง จ.เชียงราย 57000 โทร 095-4104532 ( ร.17 พัน.3) ต.รอบเวียง 57000',
+        ),
+        'ต.รอบเวียง อ.เมือง จ.เชียงราย 57000',
+      );
+      assert.equal(
+        tracking.maskAddress('26/126 ต.ในเมือง อ.เมือง จ.พิษณุโลก 65000 เบอร์โทร 0814747040'),
+        'ต.ในเมือง อ.เมือง จ.พิษณุโลก 65000',
+      );
+      assert.equal(
+        tracking.maskAddress('12 ต.บ้านไร่ โทร 081-234-5678 จ.ราชบุรี'),
+        'ต.บ้านไร่ โทร จ.ราชบุรี',
+        'no postcode',
+      );
+      assert.equal(tracking.maskAddress('99/1 ซ.สุขใจ กรุงเทพ 10310 0812345678'), '10310', 'no ตำบล: postcode only');
+      assert.equal(
+        tracking.maskAddress('99/1 ซ.สุขใจ แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพมหานคร 10310'),
+        'แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพมหานคร 10310',
+        'a clean address is unchanged',
+      );
+      assert.equal(tracking.maskName('นาย.อัครพล ใจดี'), 'คุณ อัค…');
+      assert.equal(tracking.maskName('น.ส.สมหญิง'), 'คุณ สมห…');
+      assert.equal(tracking.maskName('บริษัท เอบีซี จำกัด'), 'บริษัท เอบ…');
+      assert.equal(tracking.maskName('ร้านสมใจโมบาย'), 'ร้าน สมใ…');
+    });
+    await test('R5 track docs: customer copy drops job remark / engineer remark / return detail; SO masked; /track status words', async () => {
+      const staff = (await getJob('TDJ0391'))!;
+      const j = tracking.maskJobForCustomer({
+        ...staff,
+        statusId: 14,
+        statusGroup: 'Pending',
+        status: 'อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว',
+        remark: 'ลูกค้าโวยวาย',
+        engineerRemark: 'พี่บอมเช็คแล้ว',
+        so: '240915ABCD1234',
+        return: { ...staff.return, type: 'ส่งพัสดุ', tracking: 'TH123', detail: 'คืนเงินนอกระบบ' },
+      });
+      assert.deepEqual(
+        [j.remark, j.engineerRemark, j.return.detail, j.return.type, j.return.tracking, j.so],
+        ['', '', '', 'ส่งพัสดุ', 'TH123', '••••1234'],
+      );
+      assert.equal(j.status, 'กำลังตรวจสอบ / ซ่อม', 'not the internal status name');
+    });
+    await test('R5 track: status words for 6 / 17 / 18 / 19 / 22 — 6 is not "ยกเลิกรายการ"; every id 0–24 has one', async () => {
+      // job_status_group as in the legacy dump; every other id is Pending
+      const group: Record<number, string> = { 0: 'Cancel' };
+      for (const id of [5, 6, 9, 18, 19, 22]) group[id] = 'Repaired';
+      for (const id of [7, 8, 20, 21, 23, 24]) group[id] = 'Finished';
+      const label = (id: number) => tracking.statusLabel(id, tracking.stepOf(id, group[id] ?? 'Pending'));
+      assert.equal(label(6), 'ไม่ซ่อม — รอส่งคืน/รับคืนเครื่อง');
+      assert.notEqual(tracking.stepOf(6, 'Repaired'), null, 'not cancelled');
+      assert.equal(tracking.inProgressForCustomer(6, 'Repaired'), true, 'listed under กำลังดำเนินการ');
+      assert.equal(label(17), 'รับเครื่องเข้าคลังแล้ว — รอเปลี่ยนเครื่องหรือคืนเงิน');
+      assert.equal(label(18), 'เปลี่ยนเครื่องใหม่ — เตรียมส่งคืน');
+      assert.equal(label(19), 'คืนเงินแล้ว');
+      assert.equal(label(22), 'ตรวจแล้วไม่พบอาการเสีย — เตรียมส่งคืน');
+      for (let id = 0; id <= 24; id++) {
+        assert.ok(label(id), `status ${id} has words`);
+        assert.equal(tracking.stepOf(id, group[id] ?? 'Pending') === null, id === 0, `only 0 is cancelled (${id})`);
+      }
+    });
+    await test('R5 quotation sign block: only a sent, unexpired quotation asks to be signed', async () => {
+      const today = (await import('@/lib/dates')).today();
+      const s = tracking.quoteSignState;
+      assert.deepEqual(
+        [s(2, today, 4), s(1, today, 13), s(2, '2001-04-10', 4), s(8, today, 16), s(2, today, 16)],
+        ['sign', 'sign', 'expired', 'expired', 'expired'],
+      );
+      assert.deepEqual([s(3, today, 12), s(6, today, 12), s(9, today, 3)], ['agreed', 'agreed', 'agreed']);
+      assert.deepEqual([s(4, today, 6), s(5, today, 2)], ['declined', 'cancelled']);
+    });
+  }
+  // ── Round 5: auth + admin ──
+  console.log('\nRound 5 — sign-out marker, own email, deleted users, cancel / restore, bell, migration 0029');
+  {
+    const { GET: callbackGET } = await import('@/app/api/sso/callback/route');
+    const { GET: logoutGET } = await import('@/app/api/sso/logout/route');
+    const { GET: meGET } = await import('@/app/api/sso/me/route');
+    const { proxy } = await import('@/proxy');
+    const { SSO } = await import('@/lib/sso');
+    const { upsertUser, setUserDeleted } = await import('@/server/services/users');
+    const { POST: usersPOST } = await import('@/app/api/admin/users/route');
+    const { POST: recordsPOST } = await import('@/app/api/admin/records/route');
+    const { GET: pendingGET } = await import('@/app/api/alerts/sale-orders-pending/route');
+    const { invalidateGrantCache, grantsForUserType } = await import('@/server/auth');
+    const { canViewPath } = await import('@/lib/modules');
+    const { readFileSync } = await import('node:fs');
+    const records = async (u: TestUser, body: Record<string, unknown>) =>
+      json(await recordsPOST(await request('/api/admin/records', u, { method: 'POST', body })));
+
+    await test('R5 sign-out: logout leaves os_seen=0 → /me signedOut, proxy adds no "expired", callback keeps `next` only for the same user', async () => {
+      const out = await logoutGET(await request('/api/sso/logout', null));
+      assert.equal(out.cookies.get('os_seen')?.value, '0');
+      const me = await json(await meGET(await request('/api/sso/me', null, { headers: { cookie: 'os_seen=0' } })));
+      assert.deepEqual([me.status, me.body.signedOut], [401, true]);
+      const login = async (seen: string) =>
+        new URL(
+          (await proxy(await request('/jobs/list', null, { headers: { cookie: `os_seen=${seen}` } }))).headers.get(
+            'location',
+          )!,
+        );
+      assert.equal((await login('0')).searchParams.get('expired'), null, 'signed out, not expired');
+      assert.equal((await login(String(U.clerk.id))).searchParams.get('expired'), '1', 'a real idle expiry');
+
+      const state = `${crypto.randomUUID()}|/jobs/list`;
+      const realFetch = globalThis.fetch;
+      const secret = process.env.SSO_CLIENT_SECRET;
+      process.env.SSO_CLIENT_SECRET = 'td-secret';
+      // the central SSO's verify answers for U.clerk; nothing else is reachable
+      globalThis.fetch = (async (input: RequestInfo | URL) =>
+        String(input instanceof Request ? input.url : input) === SSO.verifyUrl
+          ? Response.json({ email: U.clerk.email, name: 'TD td-clerk', sub: 'td-sub' })
+          : new Response('', { status: 404 })) as typeof fetch;
+      try {
+        const after = async (seen?: string) => {
+          const cookie = [`os_state=${state}`, ...(seen === undefined ? [] : [`os_seen=${seen}`])].join('; ');
+          const url = `/api/sso/callback?code=td-code&state=${encodeURIComponent(state)}`;
+          const r = await callbackGET(await request(url, null, { headers: { cookie } }));
+          assert.equal(r.status, 307, `redirect (${seen})`);
+          const to = new URL(r.headers.get('location')!);
+          return to.pathname + to.search;
+        };
+        assert.equal(await after('0'), '/', 'a `next` made after ออกจากระบบ is dropped');
+        assert.equal(await after(String(U.admin.id)), '/', "someone else's page is dropped");
+        assert.equal(await after(String(U.clerk.id)), '/jobs/list', 'the same person goes back to their page');
+        assert.equal(await after(), '/jobs/list', 'a browser nobody used before keeps the link it was opened with');
+      } finally {
+        globalThis.fetch = realFetch;
+        if (secret === undefined) delete process.env.SSO_CLIENT_SECRET;
+        else process.env.SSO_CLIENT_SECRET = secret;
+      }
+    });
+
+    await test('R5 admin users: your own email / username cannot be changed (409, row unchanged); the same email in other case / spaces saves', async () => {
+      const row = async () =>
+        (await db.execute(sql`SELECT email_address, username FROM app_user WHERE user_id = ${U.admin.id}`)).rows[0];
+      const before = await row();
+      const self = { id: String(U.admin.id), name: 'TD td-admin', role: 'System Admin', status: 'Active' };
+      assert.equal(await statusOf(upsertUser({ ...self, email: 'td-other@example.invalid' }, U.admin.id)), 409);
+      assert.equal(await statusOf(upsertUser({ ...self, username: 'td-admin-renamed' }, U.admin.id)), 409);
+      assert.deepEqual(await row(), before);
+      assert.equal(
+        await statusOf(upsertUser({ ...self, email: `  ${U.admin.email.toUpperCase()} ` }, U.admin.id)),
+        200,
+      );
+    });
+
+    await test('R5 admin users: a DELETED user never goes straight back to Active (users API → 409; records → กู้คืน = INACTIVE)', async () => {
+      const id = U.inactive.id;
+      const rs = async () =>
+        (await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM app_user WHERE user_id = ${id}`)).rows[0]
+          .rs;
+      await setUserDeleted(id, true, U.admin.id);
+      const body = { id: String(id), name: 'TD td-inactive', role: 'TD Customer Viewer', status: 'Active' };
+      const api = await json(await usersPOST(await request('/api/admin/users', U.admin, { method: 'POST', body })));
+      assert.deepEqual([api.status, api.body.error], [409, 'ผู้ใช้นี้ถูกลบ — กู้คืนก่อน']);
+      assert.equal(await rs(), 'DELETED');
+      assert.equal(
+        (await records(U.admin, { table: 'users', id, status: 'INACTIVE' })).status,
+        409,
+        'not around กู้คืน',
+      );
+      assert.equal(await rs(), 'DELETED');
+      const back = await records(U.admin, { table: 'users', id, status: 'ACTIVE' });
+      assert.deepEqual([back.status, back.body.status], [200, 'INACTIVE']);
+      assert.equal(await rs(), 'INACTIVE');
+    });
+
+    await test('R5 records: an approved sale order (stock issued) cannot be cancelled; a waiting one can', async () => {
+      await setStock(P.a.code, 10);
+      const order = async () => {
+        const body = {
+          customerCode: CUSTOMER,
+          salesId: U.seller.id,
+          submit: true,
+          lines: [{ code: P.a.code, qty: 1 }],
+        };
+        const r = await json(await soPOST(await request('/api/sale-orders', U.seller, { method: 'POST', body })));
+        assert.equal(r.status, 201, JSON.stringify(r.body));
+        return (r.body.order as { no: string }).no;
+      };
+      const approved = await order();
+      const ok = await soApprovePOST(
+        await request(`/api/sale-orders/${approved}/approve`, U.admin, {
+          method: 'POST',
+          body: { decision: 'approve' },
+        }),
+        { params: Promise.resolve({ no: approved }) },
+      );
+      assert.equal(ok.status, 200);
+      const cancel = await records(U.admin, { table: 'sale_orders', id: approved, status: 'DELETED' });
+      assert.equal(cancel.status, 409, JSON.stringify(cancel.body));
+      const [hd] = (
+        await db.execute<{ rs: string; doc: boolean }>(
+          sql`SELECT record_status AS rs, document_status AS doc FROM sale_out_hd WHERE sale_out_hd_no = ${approved}`,
+        )
+      ).rows;
+      assert.deepEqual(hd, { rs: 'ACTIVE', doc: true });
+      const waiting = await order();
+      assert.equal((await records(U.admin, { table: 'sale_orders', id: waiting, status: 'DELETED' })).status, 200);
+    });
+
+    await test('R5 records: restoring a deleted job puts back its status before the delete (job_log), else 1 งานใหม่', async () => {
+      await pool.query(`
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+          VALUES ('TDJ0551', 5, 9001, '${CUSTOMER}', 'Model TD', now(), current_date, '1900-01-01'),
+                 ('TDJ0552', 2, 9001, '${CUSTOMER}', 'Model TD', now(), current_date, '1900-01-01');
+        INSERT INTO job_log (job_no, job_status_id, job_log_date, job_action_by)
+          VALUES ('TDJ0551', 1, now() - interval '2 days', ${U.admin.id}), ('TDJ0551', 5, now() - interval '1 day', ${U.admin.id});`);
+      const state = async (no: string) =>
+        (
+          await db.execute<{ st: number; rs: string; log: string }>(sql`
+            SELECT j.job_status_id AS st, j.record_status AS rs,
+                   (SELECT string_agg(job_status_id::text, ',' ORDER BY job_log_id) FROM job_log l WHERE l.job_no = j.job_no) AS log
+              FROM job j WHERE j.job_no = ${no}`)
+        ).rows[0];
+      for (const no of ['TDJ0551', 'TDJ0552']) await setRecordStatus('jobs', no, 'DELETED', U.admin.id);
+      assert.equal((await state('TDJ0551')).st, 0);
+      for (const no of ['TDJ0551', 'TDJ0552']) await setRecordStatus('jobs', no, 'ACTIVE', U.admin.id);
+      assert.deepEqual(await state('TDJ0551'), { st: 5, rs: 'ACTIVE', log: '1,5,0,5' });
+      assert.deepEqual(await state('TDJ0552'), { st: 1, rs: 'ACTIVE', log: '0,1' }, 'no history → งานใหม่');
+    });
+
+    await test('R5 bell: the waiting-orders list needs Sale Order EDIT (as approving does) — a view-only Manager → 403', async () => {
+      const pending = async () =>
+        (await pendingGET(await request('/api/alerts/sale-orders-pending', U.manager))).status;
+      assert.equal(await pending(), 200);
+      await pool.query(
+        `UPDATE app_config SET can_edit = false WHERE user_type = 'Manager' AND module_name = 'Sale Order'`,
+      );
+      invalidateGrantCache();
+      try {
+        assert.equal(await pending(), 403);
+      } finally {
+        await pool.query(
+          `UPDATE app_config SET can_edit = true WHERE user_type = 'Manager' AND module_name = 'Sale Order'`,
+        );
+        invalidateGrantCache();
+      }
+    });
+
+    await test('R5 migration 0029: Account / Audit may view sale orders (list + edit page), nothing more; a bigger grant is kept; re-runnable', async () => {
+      const file = readFileSync('drizzle/0029_round5_sale_order_view_account_audit.sql', 'utf8');
+      await pool.query(`
+        DELETE FROM app_config WHERE user_type = 'Account' AND module_name = 'Sale Order';
+        INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+          VALUES ('Audit', 'Sale Order', false, true, false, false)
+          ON CONFLICT (user_type, module_name) DO UPDATE SET can_insert = false, can_edit = true, can_delete = false, can_view = false;`);
+      const state = async () =>
+        (
+          await pool.query(`SELECT user_type t, can_insert i, can_edit e, can_delete d, can_view v FROM app_config
+                             WHERE module_name = 'Sale Order' AND user_type IN ('Account', 'Audit') ORDER BY 1`)
+        ).rows;
+      const want = [
+        { t: 'Account', i: false, e: false, d: false, v: true },
+        { t: 'Audit', i: false, e: true, d: false, v: true },
+      ];
+      await pool.query(file);
+      assert.deepEqual(await state(), want);
+      await pool.query(file);
+      assert.deepEqual(await state(), want, 'second run changes nothing');
+      invalidateGrantCache();
+      const g = await grantsForUserType('Account');
+      for (const p of ['/sale/orders', '/sale/orders/edit']) assert.equal(canViewPath(false, g, p), true, p);
+      assert.equal(canViewPath(false, g, '/sale/orders/new'), false);
+    });
+  }
+  // ── Round 5: sale orders + quotations + customers + stock ──
+  console.log('\nRound 5 — sale orders + quotations + customers + stock');
+  {
+    const { getSaleOrder } = await import('@/server/services/sale-orders');
+    const { WAITING_CREATOR_ONLY, SO_CANCELLED, SELF_APPROVE_SALES } = await import('@/lib/validation/sale-order');
+    const { issueForSaleOrder } = await import('@/server/services/stock');
+    const { getQuotation: loadQuotation } = await import('@/server/services/quotations');
+    const { listCustomers, findCustomerConflicts } = await import('@/server/services/customers');
+    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const { POST: uploadPOST } = await import('@/app/api/upload/route');
+    type Order = {
+      no: string;
+      version: number;
+      salesId: number;
+      lines: { code: string; qty: number; price: number }[];
+    };
+    const post = async (u: TestUser, body: Record<string, unknown>) =>
+      json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
+    const newSO = async (u: TestUser, extra: Record<string, unknown> = {}) => {
+      const r = await post(u, {
+        customerCode: CUSTOMER,
+        salesId: u.id,
+        submit: true,
+        lines: [{ code: P.a.code, qty: 1, price: 100 }],
+        ...extra,
+      });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return r.body.order as Order;
+    };
+    const decide = async (u: TestUser, no: string, body: Record<string, unknown>) =>
+      json(
+        await soApprovePOST(await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body }), {
+          params: Promise.resolve({ no }),
+        }),
+      );
+    const hdOf = async (no: string) =>
+      (
+        await db.execute<{ s: number; by: number; rv: number; rs: string }>(
+          sql`SELECT approve_status_id AS s, sale_out_by AS by, row_version AS rv, record_status AS rs
+                FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
+        )
+      ).rows[0];
+    const dtOf = async (no: string) =>
+      (
+        await db.execute<{ id: number; code: string; q: number; p: string; retail: string; type: string; ln: number }>(
+          sql`SELECT sale_out_dt_id AS id, product_code AS code, sale_out_quantity AS q, sale_out_price AS p,
+                     retail_price AS retail, product_type AS type, list_no AS ln
+                FROM sale_out_dt WHERE sale_out_hd_no = ${no} ORDER BY list_no, sale_out_dt_id`,
+        )
+      ).rows;
+    const errOf = async (p: Promise<unknown>) => {
+      try {
+        await p;
+        return '';
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    };
+
+    await test('R5 SO: a waiting order is edited only by its creator — Manager changing the salesperson / another CS the price → 403, nothing saved; creator / System Admin 200', async () => {
+      const o = await newSO(U.seller, { salesId: U.manager.id }); // keyed in by a CS, sold by the Manager
+      const edit = (u: TestUser, salesId: number, price: number) =>
+        post(u, {
+          no: o.no,
+          customerCode: CUSTOMER,
+          salesId,
+          submit: true,
+          lines: [{ code: P.a.code, qty: 1, price }],
+        });
+      const byManager = await edit(U.manager, U.seller2.id, 100); // the Manager moves the sale off himself …
+      assert.deepEqual([byManager.status, byManager.body.error], [403, WAITING_CREATOR_ONLY]);
+      const byOtherCS = await edit(U.seller2, U.manager.id, 1); // another CS: 100 → 1
+      assert.deepEqual([byOtherCS.status, byOtherCS.body.error], [403, WAITING_CREATOR_ONLY]);
+      assert.deepEqual([(await hdOf(o.no)).by, (await dtOf(o.no))[0].p], [U.manager.id, '100.00'], 'nothing saved');
+      // … so he still cannot approve his own sale
+      assert.equal((await decide(U.manager, o.no, { decision: 'approve' })).body.error, SELF_APPROVE_SALES);
+      assert.equal((await edit(U.seller, U.manager.id, 90)).status, 200, 'the creator');
+      assert.equal((await hdOf(o.no)).s, 2, 'still waiting');
+      assert.equal((await edit(U.admin, U.manager.id, 80)).status, 200, 'System Admin');
+    });
+
+    await test('R5 SO: an approval with the version on screen — the creator changed qty 1 → 8 since → 409, nothing issued; the current version → 200', async () => {
+      await setStock(P.a.code, 10);
+      const o = await newSO(U.seller);
+      const onScreen = (await getSaleOrder(o.no))!.version; // the Manager opens it
+      const changed = await post(U.seller, {
+        no: o.no,
+        version: onScreen,
+        customerCode: CUSTOMER,
+        salesId: U.seller.id,
+        submit: true,
+        lines: [{ code: P.a.code, qty: 8, price: 100 }],
+      });
+      assert.equal(changed.status, 200, JSON.stringify(changed.body));
+      const stale = await decide(U.manager, o.no, { decision: 'approve', version: onScreen });
+      assert.deepEqual([stale.status, stale.body.details], [409, { stale: true }]);
+      assert.deepEqual([(await hdOf(o.no)).s, (await qty(P.a.code)).remain], [2, 10], 'still waiting, nothing out');
+      const now = (changed.body.order as Order).version;
+      const ok = await decide(U.manager, o.no, { decision: 'approve', version: now });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.equal((await qty(P.a.code)).remain, 2, 'the 8 the Manager saw');
+    });
+
+    await test('R5 SO: a cancelled (DELETED) order cannot be edited, approved or issued (409), stock untouched', async () => {
+      await setStock(P.a.code, 10);
+      const o = await newSO(U.admin);
+      await db.execute(sql`UPDATE sale_out_hd SET record_status = 'DELETED' WHERE sale_out_hd_no = ${o.no}`);
+      const edit = await post(U.admin, {
+        no: o.no,
+        customerCode: CUSTOMER,
+        salesId: U.admin.id,
+        submit: true,
+        lines: [{ code: P.a.code, qty: 2, price: 100 }],
+      });
+      assert.equal(edit.status, 409);
+      assert.match(String(edit.body.error), new RegExp(SO_CANCELLED));
+      const approve = await decide(U.admin, o.no, { decision: 'approve' });
+      assert.equal(approve.status, 409);
+      assert.match(String(approve.body.error), new RegExp(SO_CANCELLED));
+      // an approved order cancelled by SQL / an old path: no stock goes out for it
+      await db.execute(sql`UPDATE sale_out_hd SET approve_status_id = 4 WHERE sale_out_hd_no = ${o.no}`);
+      assert.match(await errOf(issueForSaleOrder({ soNo: o.no, payTo: 'TD' }, U.admin.id)), /ยกเลิก/);
+      assert.deepEqual([(await dtOf(o.no))[0].q, (await qty(P.a.code)).remain], [1, 10]);
+    });
+
+    await test('R5 products: the edit version (a hash over ราคาทุน) only goes to who may see the cost', async () => {
+      const get = async (u: TestUser) =>
+        json(
+          await productGET(await request(`/api/products/${P.a.code}`, u), {
+            params: Promise.resolve({ code: P.a.code }),
+          }),
+        );
+      const viewer = (await get(U.viewer)).body.product as { version?: number; capitalPrice?: number };
+      assert.deepEqual([viewer.version, viewer.capitalPrice], [undefined, undefined]);
+      const admin = (await get(U.admin)).body.product as { version?: number };
+      assert.equal(typeof admin.version, 'number');
+    });
+
+    await test('R5 SO: a line-only edit (same total, header unchanged) moves the version — a second tab on the old one → 409', async () => {
+      const o = await newSO(U.admin, {
+        submit: false,
+        lines: [
+          { code: P.a.code, qty: 1, price: 100 },
+          { code: P.b.code, qty: 1, price: 200 },
+        ],
+      });
+      const rv = (await hdOf(o.no)).rv;
+      const edit = (lines: unknown[]) =>
+        post(U.admin, {
+          no: o.no,
+          version: o.version,
+          customerCode: CUSTOMER,
+          salesId: U.admin.id,
+          submit: false,
+          lines,
+        });
+      const a = await edit([
+        { code: P.a.code, qty: 1, price: 100 },
+        { code: P.c.code, qty: 1, price: 200 },
+      ]);
+      assert.equal(a.status, 200, JSON.stringify(a.body));
+      assert.equal((await hdOf(o.no)).rv, rv, 'the header row did not change (row_version alone missed it)');
+      assert.notEqual((a.body.order as Order).version, o.version);
+      const b = await edit([
+        { code: P.a.code, qty: 2, price: 100 },
+        { code: P.b.code, qty: 1, price: 200 },
+      ]);
+      assert.deepEqual([b.status, b.body.details], [409, { stale: true }]);
+      assert.deepEqual(
+        (await dtOf(o.no)).map((d) => [d.code, d.q]),
+        [
+          [P.a.code, 1],
+          [P.c.code, 1],
+        ],
+      );
+    });
+
+    await test('R5 quotation: a line-only edit moves the version — a second tab on the old one → 409, the first edit stays', async () => {
+      const line = {
+        itemType: 'SparePart' as const,
+        code: P.a.code,
+        qty: 1,
+        unit: 'ชิ้น',
+        unitPrice: 100,
+        discount: 0,
+      };
+      const base = { customerCode: CUSTOMER, jobNo: JOB_QUOTE, contactName: 'TD', remark: 'TD R5 q' };
+      const q = await saveQuotation(
+        { ...base, lines: [{ ...line, detail: 'TD one', discountPercent: 0 }] },
+        U.admin.id,
+      );
+      const a = await saveQuotation(
+        { ...base, no: q.no, version: q.version, lines: [{ ...line, detail: 'TD two', discountPercent: 0 }] },
+        U.admin.id,
+      );
+      assert.notEqual(a.version, q.version);
+      assert.equal(
+        await statusOf(
+          saveQuotation(
+            { ...base, no: q.no, version: q.version, lines: [{ ...line, detail: 'TD three', discountPercent: 0 }] },
+            U.admin.id,
+          ),
+        ),
+        409,
+      );
+      assert.equal((await loadQuotation(q.no))!.lines[0].detail, 'TD two');
+    });
+
+    await test('R5 SO: saving a LEGACY order unchanged writes nothing — same line ids / prices / list_no, header, status 3, no audit; a customer change logs the phone as text', async () => {
+      const no = 'TDS5001';
+      await pool.query(`
+        DELETE FROM sale_out_dt WHERE sale_out_hd_no = '${no}';
+        DELETE FROM sale_out_hd WHERE sale_out_hd_no = '${no}';
+        DELETE FROM customer WHERE customer_code = 'TDC501';
+        INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9501, 'TDC501', 'TD R5 ลูกค้าใหม่', '0980882117');
+        INSERT INTO sale_out_hd (sale_out_hd_no, document_type, document_create_date, document_create_by, document_status, customer_id,
+                                 customer_code, customer_card_id, customer_name, customer_address, customer_phone_number, customer_fax_number,
+                                 total_base_amount, vat_rat, vat_amount, total_amount, rounding_amount, fee_amount, net_amount, remark_hd,
+                                 is_sale_out, sale_out_date, sale_out_by, reference_no, payment_type, payment_amount, approve_status_id,
+                                 approve_date, approve_by, approve_remark, delivery_tracking_no, delivery_date)
+          VALUES ('${no}', 'SaleOrder', '2023-01-05 10:00', ${U.seller.id}, true, 9001, '${CUSTOMER}', '', 'ลูกค้า (ชื่อตอนขาย)',
+                  'ที่อยู่ตอนขาย 2023', '', '', 1500, 0, 0, 1500, 0, 0, 1500, 'TD legacy ', true, '2023-01-05 10:00', ${U.seller.id}, '',
+                  'โอนเงิน', 1500, 3, '2023-01-06', ${U.manager.id}, 'TD แก้ราคา', '', '1900-01-01');
+        INSERT INTO sale_out_dt (sale_out_hd_no, list_no, product_id, store_location_id, condition_id, serial_no, capital_price,
+                                 wholesale_price, retail_price, sale_out_price, sale_out_quantity, amount_dt, remark_dt, onhand_item_id,
+                                 product_type, document_credit_note_no, product_code, pick_inventory_no, return_inventory_no)
+          VALUES ('${no}', 0, ${P.a.id}, 1, 1, '', 900, 1200, 1500, 1500, 1, 1500, '', ${P.a.id}, 'SparePart', '', '${P.a.code}', '', '');`);
+      const hdRow = async () =>
+        (await db.execute(sql`SELECT * FROM sale_out_hd WHERE sale_out_hd_no = ${no}`)).rows[0] as Record<
+          string,
+          unknown
+        >;
+      const before = { hd: await hdRow(), dt: await dtOf(no) };
+      const loaded = (await getSaleOrder(no))!;
+      assert.equal(loaded.salesId, U.seller.id, 'the edit form picks the salesperson by id');
+      // what the edit form sends back for it (sale-order-form payloadOf)
+      const form = {
+        no,
+        version: loaded.version,
+        customerCode: loaded.customerCode,
+        salesId: loaded.salesId,
+        lines: loaded.lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
+        paymentType: loaded.paymentType,
+        paymentAmount: String(loaded.paymentAmount),
+        slip: '',
+        remark: loaded.remark,
+        submit: false,
+      };
+      // audit_log is append-only: count only what this save writes
+      const [{ mark }] = (
+        await db.execute<{ mark: number }>(sql`SELECT coalesce(max(id), 0)::int AS mark FROM audit_log`)
+      ).rows;
+      const r = await post(U.admin, form);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual(await dtOf(no), before.dt, 'line ids, retail 1500, list_no 0 kept');
+      assert.deepEqual(await hdRow(), before.hd, 'header untouched (snapshot, remark, status 3, row_version)');
+      const [{ n }] = (
+        await db.execute<{ n: number }>(
+          sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} AND id > ${mark}`,
+        )
+      ).rows;
+      assert.equal(n, 0, 'no audit row');
+      // the user picks another customer: its snapshot is taken, the log keeps the phone's leading 0
+      const moved = await post(U.admin, { ...form, customerCode: 'TDC501' });
+      assert.equal(moved.status, 200, JSON.stringify(moved.body));
+      const changes = (await lastChanges('sale_out_hd', no))!;
+      assert.deepEqual(changes.customerPhoneNumber, ['', '0980882117']);
+      assert.deepEqual((await dtOf(no))[0].id, before.dt[0].id, 'lines still untouched');
+      await pool.query(`UPDATE sale_out_hd SET customer_code = '${CUSTOMER}' WHERE sale_out_hd_no = '${no}'`); // seed cleanup
+    });
+
+    await test('R5 SO: a real product sent as type Service is still a product line — the approval issues it', async () => {
+      await setStock(P.a.code, 10);
+      const o = await newSO(U.admin, { lines: [{ code: P.a.code, qty: 1, price: 100, type: 'Service', name: 'TD' }] });
+      assert.equal((await dtOf(o.no))[0].type, 'SparePart');
+      assert.equal((await decide(U.admin, o.no, { decision: 'approve' })).status, 200);
+      assert.equal((await qty(P.a.code)).remain, 9);
+    });
+
+    await test('R5 SO: no slip upload on an approved / denied order (409), the stored slip stays', async () => {
+      const sharp = (await import('sharp')).default;
+      const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } })
+        .png()
+        .toBuffer();
+      const upload = async (no: string) => {
+        const fd = new FormData();
+        fd.set('kind', 'sale-order-slip');
+        fd.set('id', no);
+        fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
+        const req = new NextRequest('https://svc.example.test/api/upload', {
+          method: 'POST',
+          headers: { cookie: await cookieFor(U.admin), 'user-agent': 'test-domain' },
+          body: fd,
+        });
+        return (await uploadPOST(req)).status;
+      };
+      await setStock(P.a.code, 10);
+      for (const decision of ['approve', 'deny']) {
+        const o = await newSO(U.seller);
+        await db.execute(
+          sql`UPDATE sale_out_hd SET slip_file_name = ${`sale-orders/${o.no}/slip/old.png`} WHERE sale_out_hd_no = ${o.no}`,
+        );
+        assert.equal((await decide(U.admin, o.no, { decision, remark: 'TD' })).status, 200, decision);
+        assert.equal(await upload(o.no), 409, decision);
+        const [hd] = (
+          await db.execute<{ f: string }>(
+            sql`SELECT slip_file_name AS f FROM sale_out_hd WHERE sale_out_hd_no = ${o.no}`,
+          )
+        ).rows;
+        assert.equal(hd.f, `sale-orders/${o.no}/slip/old.png`);
+      }
+    });
+
+    await test('R5 customers: a stored "+66 89 …" is found by "089…" and a new "089…" is a duplicate of it; a new +66 number is saved 0-prefixed', async () => {
+      const local = `08${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`; // a mobile nobody has
+      await pool.query(`
+        DELETE FROM customer WHERE customer_code = 'TDC502';
+        INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status)
+          VALUES (9502, 'TDC502', 'TD R5 +66', '+66 ${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}', 'ACTIVE');`);
+      assert.ok(
+        (await listCustomers({ q: local })).some((c) => c.code === 'TDC502'),
+        'search box',
+      );
+      assert.ok(
+        (await listCustomers({ filters: { phone: local } })).some((c) => c.code === 'TDC502'),
+        'phone filter',
+      );
+      assert.ok(
+        (await findCustomerConflicts({ phone: local })).some((c) => c.code === 'TDC502'),
+        'duplicate check',
+      );
+      const dup = await json(
+        await customerPOST(
+          await request('/api/customers', U.admin, {
+            method: 'POST',
+            body: { name: 'TD R5 ซ้ำ', phone: `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}` },
+          }),
+        ),
+      );
+      assert.equal(dup.status, 409, JSON.stringify(dup.body));
+      await pool.query(`DELETE FROM customer WHERE customer_code = 'TDC502'`);
+      const fresh = await json(
+        await customerPOST(
+          await request('/api/customers', U.admin, {
+            method: 'POST',
+            body: { name: 'TD R5 +66 ใหม่', phone: `+66 ${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}` },
+          }),
+        ),
+      );
+      assert.equal(fresh.status, 201, JSON.stringify(fresh.body));
+      assert.equal(
+        (fresh.body.row as { phone: string }).phone,
+        `0${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}`,
+      );
+    });
+
+    await test('R5 customers: an "unchanged" phone is the same text — "-" → "ไม่มีเบอร์" and "081abc2345678" for "081-234-5678" → 400; the same text saves and is kept as is', async () => {
+      await pool.query(`
+        DELETE FROM customer WHERE customer_code = 'TDC503';
+        INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, customer_type, record_status)
+          VALUES (9503, 'TDC503', 'TD R5 เบอร์เก่า', '-', 'Normal', 'ACTIVE');`);
+      const save = async (phone: string) =>
+        json(
+          await customerPOST(
+            await request('/api/customers', U.admin, {
+              method: 'POST',
+              body: { code: 'TDC503', name: 'TD R5 เบอร์เก่า', phone },
+            }),
+          ),
+        );
+      assert.equal((await save('ไม่มีเบอร์')).status, 400);
+      assert.equal((await save('-')).status, 200, 'the legacy "-" itself still saves');
+      await pool.query(`UPDATE customer SET phone_number = '081-234-5678 ' WHERE customer_code = 'TDC503'`);
+      assert.equal((await save('081abc2345678')).status, 400);
+      assert.equal((await save('081-234-5678')).status, 200);
+      const [c] = (
+        await db.execute<{ p: string }>(sql`SELECT phone_number AS p FROM customer WHERE customer_code = 'TDC503'`)
+      ).rows;
+      assert.equal(c.p, '081-234-5678 ', 'kept as stored');
+    });
+
+    await test('R5 stock: a part returned from a CLOSED job goes back on the shelf; the job’s parts / total cost stay as billed', async () => {
+      await pool.query(`
+        DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJ0571';
+        DELETE FROM job WHERE job_no = 'TDJ0571';
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date,
+                         job_closed_date, service_cost, service_tool_cost, delivery_cost, carton_box_cost, spare_part_total_cost, job_total_cost)
+          VALUES ('TDJ0571', 20, 9001, '${CUSTOMER}', 'Model TD', now(), current_date, now(), 50, 0, 0, 0, 200, 250);
+        INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special,
+                                              request_qty, spare_part_unit_price, spare_part_total_price, order_status_id,
+                                              request_date, request_by, grant_qty, return_qty)
+          VALUES ('TDJ0571', '${P.a.code}', '', 1, true, true, 2, 100, 200, 3, now(), 9101, 2, 0);`);
+      await setStock(P.a.code, 10);
+      const [line] = (await getJob('TDJ0571'))!.parts;
+      await returnFromJob({ jobNo: 'TDJ0571', lines: [{ logId: line.logId, qty: 1 }] }, U.admin.id);
+      const [j] = (
+        await db.execute<{ p: string; t: string }>(
+          sql`SELECT spare_part_total_cost AS p, job_total_cost AS t FROM job WHERE job_no = 'TDJ0571'`,
+        )
+      ).rows;
+      assert.deepEqual([Number(j.p), Number(j.t)], [200, 250], 'money of a closed job is locked');
+      assert.equal((await qty(P.a.code)).remain, 11, 'back on the shelf');
+    });
+  }
+  // ── Round 5: jobs ──
+  console.log(
+    '\nRound 5 — jobs (refund kept at close / locked close / parts before close / status paths / never worse)',
+  );
+  {
+    const { invalidate } = await import('@/server/cache');
+    const { saveSwapRefund } = await import('@/server/services/jobs');
+    const {
+      closePaymentEdited,
+      swapRefundOf,
+      STATUS_CLOSE_ONLY,
+      STATUS_DELETE_ONLY,
+      EDIT_STATUS_ONLY,
+      REPAIR_STATUS_ONLY,
+      SWAP_STATUS_OPTIONS,
+    } = await import('@/lib/validation/job');
+    const { exportXlsx } = await import('@/server/export');
+    const ExcelJS = (await import('exceljs')).default;
+    const job = (no: string, status: number) =>
+      `('${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', 0)`;
+    const waitingLine = (no: string) => `('${no}', '${P.a.code}', '', 1, true, true, 1, 1, now(), ${U.admin.id}, 0, 0)`;
+    await pool.query(`
+      INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
+        SELECT * FROM (VALUES (19, 'อยู่ระหว่างดำเนินการ - เบิกจ่ายเงินแล้ว', 19, 'Repaired', true),
+                              (22, 'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)', 22, 'Repaired', true)) v(id, name, ord, grp, act)
+         WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_id)
+        VALUES ${job('TDJ0601', 19)}, ${job('TDJ0602', 7)}, ${job('TDJ0603', 5)}, ${job('TDJ0604', 7)}, ${job('TDJ0605', 2)},
+               ${job('TDJ0606', 2)}, ${job('TDJ0607', 2)}, ${job('TDJ0608', 2)}, ${job('TDJ0609', 24)}, ${job('TDJ0610', 2)},
+               ${job('TDJ0611', 19)}, ${job('TDJ0612', 5)}, ${job('TDJ0613', 2)}, ${job('TDJ0614', 1)}, ${job('TDJ0615', 20)};
+      -- a swap refund (Swap / Refund page): a negative payment "Refund <date>" + its "ยอดเงินคืน" line
+      UPDATE job SET job_payment_type = 'โอนเงินเข้าบัญชี', job_payment_amount = -500, job_payment_detail = 'Refund 2026-10-10',
+                     swap_refund_detail = 'ยอดเงินคืน: 500.00' WHERE job_no IN ('TDJ0601', 'TDJ0611');
+      UPDATE job SET service_cost = 1000, spare_part_total_cost = 0, job_total_cost = 1000 WHERE job_no IN ('TDJ0602', 'TDJ0612');
+      -- legacy: a parts cost with no part rows behind it
+      UPDATE job SET spare_part_total_cost = 2000, job_total_cost = 2000 WHERE job_no = 'TDJ0606';
+      -- a deposit given back at the close
+      UPDATE job SET deposit_cost = 500, job_payment_type = 'เงินสด', job_payment_amount = -500,
+                     job_payment_detail = 'คืนมัดจำ 2026-10-01' WHERE job_no = 'TDJ0615';
+      -- legacy texts with stray spaces, a total that does not add up, nobody recorded as "ส่งคืนโดย"
+      UPDATE job SET engineer_repair_detail = 'ได้รับสินค้าไม่ครบ ', product_model_detail = 'White ',
+                     product_symptom_other = ' อาการเปิดไม่ติด', product_sale_out_shop_name = 'DDpai ', job_reference_no = 'so 12',
+                     product_sale_out_channel = 'SHOPEE', job_reception_type = 'Carry-In', service_cost = 300,
+                     spare_part_total_cost = 2000, job_total_cost = 999, job_payment_type = 'เงินสด', job_payment_amount = 999,
+                     job_payment_detail = 'ชำระ 2026-10-01', return_customer_type = 'ลูกค้ามารับเอง',
+                     job_return_date = '2026-10-01 14:22:00', return_customer_detail = '', return_customer_tracking_no = '',
+                     job_return_by = -1 WHERE job_no = 'TDJ0609';
+      INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
+        VALUES ${waitingLine('TDJ0603')}, ${waitingLine('TDJ0604')};`);
+    invalidate('jobstatus'); // 19 / 22 above, by name
+    const back = { type: 'ลูกค้ามารับเอง', date: '2026-10-15' };
+    const line = (code: string, qty: number, logId?: number) => ({
+      logId,
+      code,
+      unitPrice: 100,
+      a: { pick: true, quote: true, qty },
+      b: { pick: false, quote: false, qty: 0 },
+    });
+
+    await test('R5 H1: a swap refund (−500) survives the close — the page sends no payment, the server never wipes it', async () => {
+      // what the close page pre-fills for it: the method / note, no amount (a negative one is not put in the box)
+      const loaded = {
+        payType: 'โอนเงินเข้าบัญชี',
+        payAmount: '',
+        payDate: '',
+        payNo: '',
+        payDetail: 'Refund 2026-10-10',
+      };
+      assert.equal(closePaymentEdited({ ...loaded }, loaded, false), false, 'untouched → no payment block');
+      assert.equal(closePaymentEdited({ ...loaded, payType: 'เงินสด' }, loaded, false), true, 'edited → sent');
+      // what the page used to send ({ type, amount: '' }): the refund is not replaced by "0.00"
+      const pay = { type: 'โอนเงินเข้าบัญชี', amount: '' };
+      const r = await fieldsOf(
+        closeJob('TDJ0601', { status: await statusName(20), payment: pay, return: back }, U.admin.id),
+      );
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const j = (await getJob('TDJ0601'))!;
+      assert.deepEqual([j.statusId, j.payment.amount, j.payment.detail], [20, -500, 'Refund 2026-10-10']);
+    });
+
+    await test('R5 H2: a closed job with ค้างชำระ gets its parcel no. later (non-admin): no payment asked or sent', async () => {
+      const j = (await getJob('TDJ0602'))!;
+      assert.equal(j.outstanding, 1000);
+      // the page pre-fills the amount due; on a money-locked job nothing is ever sent
+      const loaded = { payType: '', payAmount: String(j.amountDue), payDate: '', payNo: '', payDetail: '' };
+      assert.equal(closePaymentEdited(loaded, loaded, true), false);
+      assert.equal(closePaymentEdited({ ...loaded, payType: 'เงินสด' }, loaded, true), false, 'locked');
+      const ret = { ...back, type: 'บริษัทขนส่งเอกชน', tracking: 'TH987654321TH' };
+      const r = await fieldsOf(closeJob('TDJ0602', { status: await statusName(7), return: ret }, U.clerk.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const k = (await getJob('TDJ0602'))!;
+      assert.deepEqual([k.statusId, k.payment.amount, k.outstanding], [8, 0, 1000]);
+    });
+
+    await test('R5 H3: close / ยกเลิกซ่อม refused while a เบิก line waits (400 naming it); legacy closed job not blocked', async () => {
+      const close = await fieldsOf(closeJob('TDJ0603', { status: await statusName(20), return: back }, U.admin.id));
+      assert.equal(close.status, 400);
+      assert.ok(String((close.fields as { status?: string })?.status).includes(P.a.code), JSON.stringify(close));
+      const declined = await fieldsOf(saveRepair('TDJ0603', { status: await statusName(6) }, U.admin.id));
+      assert.equal(declined.status, 400);
+      assert.ok(String((declined.fields as { status?: string })?.status).includes(P.a.code));
+      assert.deepEqual([(await jobRow('TDJ0603')).s, await logRows('TDJ0603')], [5, []]);
+      // legacy: already closed (7) with a line still waiting — the parcel no. added later moves it to 8
+      const ret = { ...back, type: 'บริษัทขนส่งเอกชน', tracking: 'TH123456789TH' };
+      const late = await fieldsOf(closeJob('TDJ0604', { status: await statusName(7), return: ret }, U.admin.id));
+      assert.equal(late.status, 200, JSON.stringify(late));
+      assert.equal((await jobRow('TDJ0604')).s, 8);
+      // the line cancelled on the repair page → the close goes through
+      await saveRepair('TDJ0603', { status: await statusName(5), parts: [] }, U.admin.id);
+      const ok = await fieldsOf(closeJob('TDJ0603', { status: await statusName(20), return: back }, U.admin.id));
+      assert.equal(ok.status, 200, JSON.stringify(ok));
+    });
+
+    await test('R5 H4: only ปิดงาน closes — repair / swap / edit refuse a closed status or ยกเลิกข้อมูล; each page its own list', async () => {
+      const [s0, s5, s14, s20] = [await statusName(0), await statusName(5), await statusName(14), await statusName(20)];
+      const err = async (p: Promise<unknown>) => {
+        const r = await fieldsOf(p);
+        return [r.status, r.fields];
+      };
+      assert.deepEqual(await err(saveRepair('TDJ0605', { status: s20 }, U.engineer.id)), [
+        400,
+        { status: STATUS_CLOSE_ONLY },
+      ]);
+      assert.deepEqual(await err(saveRepair('TDJ0605', { status: s14 }, U.engineer.id)), [
+        400,
+        { status: REPAIR_STATUS_ONLY },
+      ]);
+      const swap = { newSerial: 'TDR5SWAP01' };
+      assert.deepEqual(await err(saveSwapRefund('TDJ0605', { ...swap, status: s20 }, U.admin.id)), [
+        400,
+        { status: STATUS_CLOSE_ONLY },
+      ]);
+      assert.deepEqual(await err(saveSwapRefund('TDJ0605', { ...swap, status: s0 }, U.admin.id)), [
+        400,
+        { status: STATUS_DELETE_ONLY },
+      ]);
+      const j = (await getJob('TDJ0605'))!;
+      const edit = {
+        customerCode: CUSTOMER,
+        jobType: j.jobType,
+        dueDate: j.dueDate,
+        warrantyMonth: j.warrantyMonth,
+        status: s5,
+      };
+      assert.deepEqual(await err(updateJob('TDJ0605', edit, U.admin.id)), [400, { status: EDIT_STATUS_ONLY }]);
+      assert.deepEqual([(await jobRow('TDJ0605')).s, await logRows('TDJ0605')], [2, []]);
+      // the Swap / Refund page offers the same list the server takes
+      assert.ok(!SWAP_STATUS_OPTIONS.includes('ปิดงาน (Complete)') && !SWAP_STATUS_OPTIONS.includes('ยกเลิกข้อมูล'));
+      assert.ok(SWAP_STATUS_OPTIONS.includes('ซ่อมเสร็จ'));
+    });
+
+    await test('R5 M2: a repair save that adds / changes no part line keeps the legacy parts cost (2,000, no part rows)', async () => {
+      const j = (await getJob('TDJ0606'))!;
+      await saveRepair('TDJ0606', { status: j.status, parts: [], repairDetail: 'TD R5 M2' }, U.admin.id);
+      const k = (await getJob('TDJ0606'))!;
+      assert.deepEqual([k.partsCost, k.totalCost, k.repairDetail], [2000, 2000, 'TD R5 M2']);
+    });
+
+    await test('R5 M3: a stale repair page (old version) → 409, the part request added since is not cancelled', async () => {
+      await setStock(P.a.code, 10);
+      const loaded = (await getJob('TDJ0607'))!;
+      // someone else adds a part request after this page loaded
+      await saveRepair(
+        'TDJ0607',
+        { status: loaded.status, parts: [line(P.a.code, 1)], version: loaded.version },
+        U.engineer.id,
+      );
+      const stale = await fieldsOf(
+        saveRepair('TDJ0607', { status: loaded.status, parts: [], version: loaded.version }, U.admin.id),
+      );
+      assert.equal(stale.status, 409);
+      assert.deepEqual(
+        (await getJob('TDJ0607'))!.parts.map((p) => p.statusId),
+        [1],
+        'still requested',
+      );
+    });
+
+    await test('R5 M4: correcting the vendor / send date of a trip already back updates that row (no open row; close works)', async () => {
+      const [s14, s15] = [await statusName(14), await statusName(15)];
+      await saveOutsource('TDJ0608', { send: { to: 'TD Vendor R5', date: '2026-10-10' }, status: s14 }, U.admin.id);
+      const receive = { from: 'TD Vendor R5', date: '2026-10-12', by: U.admin.id };
+      await saveOutsource('TDJ0608', { receive, status: s15 }, U.admin.id);
+      // what the page sends once the trip is back: the send block (corrected) + the receive block
+      const fix = { send: { to: 'TD Vendor R5b', date: '2026-10-11' }, receive: { ...receive, from: 'TD Vendor R5b' } };
+      const r = await fieldsOf(saveOutsource('TDJ0608', { ...fix, status: s15 }, U.admin.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const rows = (
+        await db.execute<{ st: string; vendor: string; d: string }>(sql`
+          SELECT send_status AS st, send_to_name AS vendor, to_char(send_date, 'YYYY-MM-DD') AS d
+            FROM job_send_forward_dt WHERE job_no = 'TDJ0608'`)
+      ).rows;
+      assert.deepEqual(rows, [{ st: 'รับเครื่องซ่อมแล้ว', vendor: 'TD Vendor R5b', d: '2026-10-11' }]);
+      assert.equal((await jobRow('TDJ0608')).s, 15);
+      const close = await fieldsOf(closeJob('TDJ0608', { status: await statusName(20), return: back }, U.admin.id));
+      assert.equal(close.status, 200, JSON.stringify(close));
+    });
+
+    await test('R5 M5: a deposit refund (คืนมัดจำ) does not open Swap / Refund in Refund mode; a swap save keeps it', async () => {
+      const j = (await getJob('TDJ0615'))!;
+      assert.equal(j.payment.amount, -500);
+      assert.equal(swapRefundOf(j.swap.detail), '', 'not a swap refund');
+      assert.equal(swapRefundOf('ยอดเงินคืน: 500.00'), '500.00');
+      // saved in Swap mode by a non-admin on the closed job: 200, the deposit refund untouched
+      const swap = { status: j.status, newSerial: 'TDR5SWAP02', swapDate: '2026-10-15' };
+      const r = await fieldsOf(saveSwapRefund('TDJ0615', swap, U.clerk.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const k = (await getJob('TDJ0615'))!;
+      assert.deepEqual([k.payment.amount, k.payment.detail], [-500, 'คืนมัดจำ 2026-10-01']);
+    });
+
+    await test('R5 P-M1: a legacy job saved unchanged on /jobs/repair and /jobs/close changes nothing (row, version, history)', async () => {
+      const snapshot = async () => ({
+        row: (await db.execute<{ j: unknown }>(sql`SELECT to_jsonb(job) AS j FROM job WHERE job_no = 'TDJ0609'`))
+          .rows[0].j,
+        trail: (
+          await db.execute<{ a: number; l: number; s: number }>(sql`
+            SELECT (SELECT count(*)::int FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0609') AS a,
+                   (SELECT count(*)::int FROM job_log WHERE job_no = 'TDJ0609') AS l,
+                   (SELECT count(*)::int FROM job_symptom WHERE job_no = 'TDJ0609') AS s`)
+        ).rows[0],
+      });
+      const before = await snapshot();
+      const j = (await getJob('TDJ0609'))!;
+      // /jobs/repair: the shared sections (PATCH, fromJob → toJobInput) as loaded, then its own action
+      const common = {
+        customerCode: CUSTOMER,
+        jobType: j.jobType,
+        jobTypeDetail: j.jobTypeDetail,
+        isBounce: j.isBounce,
+        so: j.so,
+        channel: j.channel,
+        shopName: j.shopName,
+        saleOrderDate: j.saleOrderDate,
+        warrantyMonth: j.warrantyMonth,
+        expireDate: j.expireDate,
+        warranty: j.warranty,
+        productType: j.productType,
+        imei: j.imei,
+        serial: j.serial,
+        brand: j.brand,
+        modelCode: j.modelCode,
+        modelDetail: j.modelDetail,
+        receptionDate: j.receptionDate,
+        receptionTrackingNo: j.receptionTrackingNo,
+        receptionShipper: j.receptionShipper,
+        receptionType: j.receptionType,
+        equipment: j.equipment,
+        fault: j.fault,
+        symptoms: j.symptoms,
+        symptomOther: j.symptomOther,
+        remark: j.remark,
+        serviceCost: j.serviceCost,
+        toolCost: j.toolCost,
+        deliveryCost: j.deliveryCost,
+        boxCost: j.boxCost,
+        estimateCost: j.estimateCost ? String(j.estimateCost) : '',
+        depositCost: j.depositCost ? String(j.depositCost) : '',
+        engineerId: j.engineerId,
+        dueDate: j.dueDate,
+        version: j.version,
+      };
+      const edit = await fieldsOf(updateJob('TDJ0609', common, U.admin.id));
+      assert.equal(edit.status, 200, JSON.stringify(edit));
+      const repair = {
+        status: j.status,
+        repairDetail: j.repairDetail,
+        engineerRemark: j.engineerRemark,
+        engineerSymptom: j.engineerSymptom,
+        newSerial: '',
+        serviceCost: j.serviceCost,
+        toolCost: j.toolCost,
+        deliveryCost: j.deliveryCost,
+        boxCost: j.boxCost,
+        parts: [],
+        version: j.version,
+      };
+      const rep = await fieldsOf(saveRepair('TDJ0609', repair, U.admin.id));
+      assert.equal(rep.status, 200, JSON.stringify(rep));
+      // /jobs/close "ยืนยันปิดงาน": the return info as loaded, no payment edited
+      const ret = {
+        type: j.return.type,
+        date: j.return.date.slice(0, 10),
+        courier: '',
+        tracking: '',
+        detail: j.return.detail,
+      };
+      const close = await fieldsOf(closeJob('TDJ0609', { status: j.status, return: ret }, U.admin.id));
+      assert.equal(close.status, 200, JSON.stringify(close));
+      const after = await snapshot();
+      assert.deepEqual(after.row, before.row, 'no column changed (texts, totals, ส่งคืนโดย, row_version)');
+      assert.deepEqual({ ...after.trail }, { ...before.trail }, 'no audit / job_log / job_symptom rows');
+    });
+
+    await test('R5 P-M1 / L5: an assignment writes one history row (ASSIGN only); clearing it unassigns ("ยกเลิกผู้รับงาน")', async () => {
+      const rowsSince = async (id: number) =>
+        (
+          await db.execute<{ action: string; summary: string }>(sql`
+            SELECT action, summary FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0610' AND id > ${id} ORDER BY id`)
+        ).rows.map((r) => ({ ...r }));
+      const last = async () =>
+        (await db.execute<{ id: number }>(sql`SELECT coalesce(max(id), 0)::int AS id FROM audit_log`)).rows[0].id;
+      const j = (await getJob('TDJ0610'))!;
+      // what the edit form sends back (it always carries the reception date)
+      const input = {
+        customerCode: CUSTOMER,
+        jobType: j.jobType,
+        dueDate: j.dueDate,
+        warrantyMonth: j.warrantyMonth,
+        receptionDate: j.receptionDate,
+      };
+      let id = await last();
+      await updateJob('TDJ0610', { ...input, engineerId: U.engineer.id }, U.admin.id);
+      assert.deepEqual(await rowsSince(id), [
+        { action: 'ASSIGN', summary: 'TD td-admin มอบหมายงานให้ TD td-engineer' },
+      ]);
+      id = await last();
+      await updateJob('TDJ0610', { ...input, engineerId: 0 }, U.admin.id);
+      const cleared = await rowsSince(id);
+      assert.deepEqual(cleared[0], { action: 'ASSIGN', summary: 'TD td-admin ยกเลิกผู้รับงาน TD td-engineer' });
+      // R6: nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (its own STATUS row)
+      assert.deepEqual(
+        cleared.map((r) => r.action),
+        ['ASSIGN', 'STATUS'],
+      );
+      assert.equal((await getJob('TDJ0610'))!.engineerId, 0);
+    });
+
+    await test('R5 L2: job Excel — ยอดชำระ never negative, a refund in คืนเงิน, ค้างชำระ only on a closed job', async () => {
+      const { buffer } = await exportXlsx(await request('/api/export/jobs?q=TDJ061', U.admin), 'jobs');
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+      const ws = wb.worksheets[0]!;
+      const head = (ws.getRow(1).values as unknown[]).slice(1);
+      const rows = Array.from({ length: ws.rowCount - 1 }, (_, n) => (ws.getRow(n + 2).values as unknown[]).slice(1));
+      const money = (no: string) => {
+        const r = rows.find((x) => x[head.indexOf('เลขที่งาน')] === no)!;
+        return ['ยอดชำระ', 'คืนเงิน', 'ค้างชำระ'].map((h) => r[head.indexOf(h)]);
+      };
+      assert.deepEqual(money('TDJ0611'), [0, 500, 0], 'swap refund −500');
+      assert.deepEqual(money('TDJ0612'), [0, 0, 0], 'open job (1,000 unpaid): not billed yet');
+    });
+
+    await test('R5 L4: re-booking a pending line moves the booking of the row’s own part, not the code the page sent', async () => {
+      await setStock(P.a.code, 10);
+      await setStock(P.b.code, 10);
+      await saveRepair(
+        'TDJ0613',
+        { status: (await getJob('TDJ0613'))!.status, parts: [line(P.a.code, 1)] },
+        U.admin.id,
+      );
+      const j = (await getJob('TDJ0613'))!;
+      const [a0, b0] = [(await qty(P.a.code)).booking, (await qty(P.b.code)).booking];
+      await saveRepair('TDJ0613', { status: j.status, parts: [line(P.b.code, 2, j.parts[0]!.logId)] }, U.admin.id);
+      assert.deepEqual([(await qty(P.a.code)).booking - a0, (await qty(P.b.code)).booking - b0], [1, 0]);
+    });
+
+    await test('R5 L6: an Engineer taking a new job through the repair save moves it to อยู่ระหว่างดำเนินการ (+ job_log)', async () => {
+      const j = (await getJob('TDJ0614'))!;
+      await saveRepair('TDJ0614', { status: j.status, repairDetail: 'TD R5 L6' }, U.engineer.id);
+      const [r] = (
+        await db.execute<{ e: number; s: number }>(
+          sql`SELECT engineer_id AS e, job_status_id AS s FROM job WHERE job_no = 'TDJ0614'`,
+        )
+      ).rows;
+      assert.deepEqual({ ...r }, { e: U.engineer.id, s: 2 });
+      assert.deepEqual(await logRows('TDJ0614'), [2]);
+      const actions = (await getJob('TDJ0614'))!.history.map((h) => h.action);
+      assert.ok(actions.includes('ASSIGN') && actions.includes('STATUS'), actions.join(','));
+    });
+  }
+  // ── Round 6: session messages ──
+  console.log('\nRound 6 — session messages');
+  {
+    const { GET: meGET } = await import('@/app/api/sso/me/route');
+    const { GET: refreshGET } = await import('@/app/api/sso/refresh/route');
+    await test('R6 session: a stale session_version (signed out on another device) → 401 reason "elsewhere", an idle-expired cookie → "expired"', async () => {
+      const me = await json(await meGET(await request('/api/sso/me', U.admin, { sv: SV - 1 })));
+      assert.deepEqual([me.status, me.body.reason, me.body.signedOut], [401, 'elsewhere', undefined]);
+      const rf = await refreshGET(await request('/api/sso/refresh', U.admin, { sv: SV - 1 }));
+      assert.deepEqual([rf.status, ((await rf.json()) as { reason?: string }).reason], [401, 'elsewhere']);
+      assert.equal(rf.cookies.get(SESSION_COOKIE), undefined, 'the dead cookie is kept — /login reads it');
+      const now = Date.now();
+      const idle = await signSession({
+        email: U.admin.email,
+        name: U.admin.email,
+        exp: now - 1000,
+        iat: now - 31 * 60_000,
+        sv: SV,
+      });
+      const headers = { cookie: `${SESSION_COOKIE}=${idle}; os_seen=${U.admin.id}` };
+      const meIdle = await json(await meGET(await request('/api/sso/me', null, { headers })));
+      assert.deepEqual([meIdle.status, meIdle.body.reason, meIdle.body.signedOut], [401, 'expired', undefined]);
+      const rfIdle = await refreshGET(await request('/api/sso/refresh', null, { headers }));
+      assert.deepEqual([rfIdle.status, ((await rfIdle.json()) as { reason?: string }).reason], [401, 'expired']);
+    });
+  }
+  // ── Round 6: jobs + quotation → job status ──
+  console.log('\nRound 6 — jobs (a quotation moves its job / รับงานเอง / no engineer → งานใหม่)');
+  {
+    const { invalidate } = await import('@/server/cache');
+    const tracking = await import('@/server/services/tracking');
+    const job = (no: string, status: number, eng = 0) =>
+      `('${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', ${eng})`;
+    // the quotation form wants J + 7 digits: J99007xx (not cleaned by seed — cleaned here)
+    await pool.query(`
+      INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
+        SELECT * FROM (VALUES (3, 'อยู่ระหว่างการซ่อม - รออะไหล่', 3, 'Pending', true),
+                              (4, 'อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า', 4, 'Pending', true),
+                              (10, 'อยู่ระหว่างการซ่อม - เบิกจ่ายอะไหล่ครบแล้ว', 10, 'Pending', true),
+                              (11, 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่', 11, 'Pending', true),
+                              (12, 'อยู่ระหว่างการซ่อม - ลูกค้าตกลงซ่อม', 12, 'Pending', true),
+                              (13, 'อยู่ระหว่างการซ่อม - รอเสนอราคา', 13, 'Pending', true),
+                              (16, 'อยู่ระหว่างการซ่อม - พ้นกำหนดเสนอราคา', 16, 'Pending', true)) v(id, name, ord, grp, act)
+         WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+      INSERT INTO quotation_status (quotation_status_id, quotation_status_name)
+        SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (2, 'เสนอราคาแล้ว'), (3, 'ลูกค้าตกลงซ่อม'), (4, 'ลูกค้าไม่ตกลงซ่อม'),
+                              (5, 'ยกเลิกใบเสนอราคา'), (6, 'ลูกค้าตกลงซ่อม รอชำระเงิน'), (8, 'พ้นกำหนดเสนอราคา'),
+                              (9, 'ลูกค้าตกลงซ่อม รออะไหล่')) v(id, name)
+         WHERE NOT EXISTS (SELECT 1 FROM quotation_status s WHERE s.quotation_status_id = v.id);
+      DELETE FROM job_log WHERE job_no LIKE 'J99007%';
+      DELETE FROM quotation_dt WHERE quotation_no IN (SELECT quotation_no FROM quotation_hd WHERE reference_job_no LIKE 'J99007%');
+      DELETE FROM quotation_hd WHERE reference_job_no LIKE 'J99007%';
+      DELETE FROM job WHERE job_no LIKE 'J99007%';
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_id)
+        VALUES ${job('J9900701', 1)}, ${job('J9900702', 2)}, ${job('J9900703', 13)}, ${job('J9900704', 16)},
+               ${job('J9900705', 10)}, ${job('J9900706', 20)}, ${job('J9900707', 4)},
+               ${job('TDJ0701', 1)}, ${job('TDJ0702', 1)}, ${job('TDJ0703', 11, U.engineer.id)};`);
+    invalidate('jobstatus');
+    invalidate('quotationstatus');
+    const quote = (jobNo: string, status: string, prev?: { no: string; version: number }) =>
+      saveQuotation(
+        { customerCode: CUSTOMER, jobNo, contactName: 'TD', remark: 'TD R6 q', lines: [], status, ...prev },
+        U.admin.id,
+      );
+    const statusIdOf = async (no: string) => (await getJob(no))!.statusId;
+
+    await test('R6 quotation → job: sent → 4, agreed (3 / 6) → 12, agreed waiting parts → 3; history says why; never back / never a later or closed job', async () => {
+      // 1 งานใหม่ → เสนอราคาแล้ว → 4, with the reason in the history line + job_log
+      let q = await quote('J9900701', 'เสนอราคาแล้ว');
+      let j = (await getJob('J9900701'))!;
+      assert.equal(j.statusId, 4);
+      assert.equal(j.history[0].summary, `เปลี่ยนสถานะงาน → ${j.status} · ตามใบเสนอราคา ${q.no} : เสนอราคาแล้ว`);
+      assert.deepEqual(await logRows('J9900701'), [4]);
+      // /track: waiting for the customer's answer
+      assert.equal(tracking.statusLabel(4, tracking.stepOf(4, 'Pending')), 'รอคำตอบจากคุณ (ใบเสนอราคา)');
+      // saved again with the same status: the job is not touched (no job_log, no history row)
+      const histBefore = j.history.length;
+      q = await quote('J9900701', 'เสนอราคาแล้ว', { no: q.no, version: q.version });
+      assert.deepEqual([await logRows('J9900701'), (await getJob('J9900701'))!.history.length], [[4], histBefore]);
+      // → ลูกค้าตกลงซ่อม → 12
+      q = await quote('J9900701', 'ลูกค้าตกลงซ่อม', { no: q.no, version: q.version });
+      j = (await getJob('J9900701'))!;
+      assert.equal(j.statusId, 12);
+      assert.ok(j.history[0].summary.endsWith(`ตามใบเสนอราคา ${q.no} : ลูกค้าตกลงซ่อม`), j.history[0].summary);
+      // → ตกลงซ่อม รออะไหล่ → 3
+      q = await quote('J9900701', 'ลูกค้าตกลงซ่อม รออะไหล่', { no: q.no, version: q.version });
+      assert.equal(await statusIdOf('J9900701'), 3);
+      // never backwards: sent again / declined leave 3
+      q = await quote('J9900701', 'เสนอราคาแล้ว', { no: q.no, version: q.version });
+      q = await quote('J9900701', 'ลูกค้าไม่ตกลงซ่อม', { no: q.no, version: q.version });
+      assert.deepEqual([await statusIdOf('J9900701'), await logRows('J9900701')], [3, [4, 12, 3]]);
+
+      // the other earlier statuses move too
+      await quote('J9900702', 'ลูกค้าตกลงซ่อม รอชำระเงิน'); // 2 → 12
+      await quote('J9900703', 'เสนอราคาแล้ว'); // 13 → 4
+      await quote('J9900704', 'ลูกค้าตกลงซ่อม รออะไหล่'); // 16 → 3
+      // further along (10) / closed (20): never moved
+      await quote('J9900705', 'ลูกค้าตกลงซ่อม');
+      await quote('J9900706', 'ลูกค้าตกลงซ่อม');
+      // declined / cancelled / expired: no automatic change
+      for (const st of ['ลูกค้าไม่ตกลงซ่อม', 'ยกเลิกใบเสนอราคา', 'พ้นกำหนดเสนอราคา']) await quote('J9900707', st);
+      const now = await Promise.all(
+        ['J9900702', 'J9900703', 'J9900704', 'J9900705', 'J9900706', 'J9900707'].map(statusIdOf),
+      );
+      assert.deepEqual(now, [12, 4, 3, 10, 20, 4]);
+      for (const no of ['J9900705', 'J9900706', 'J9900707']) assert.deepEqual(await logRows(no), [], no);
+    });
+
+    await test('R6 jobs: an engineer taking a job on the repair page → "X รับงานเอง"; no engineer on อยู่ระหว่างดำเนินการ → งานใหม่ (+ job_log), not on a later status', async () => {
+      await saveRepair('TDJ0701', { status: (await getJob('TDJ0701'))!.status, repairDetail: 'TD R6' }, U.engineer.id);
+      const took = (await getJob('TDJ0701'))!.history.find((h) => h.action === 'ASSIGN')?.summary;
+      assert.equal(took, 'TD td-engineer รับงานเอง');
+
+      const input = async (no: string) => {
+        const j = (await getJob(no))!;
+        return {
+          customerCode: CUSTOMER,
+          jobType: j.jobType,
+          dueDate: j.dueDate,
+          warrantyMonth: j.warrantyMonth,
+          receptionDate: j.receptionDate,
+        };
+      };
+      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: U.engineer.id }, U.admin.id);
+      assert.equal(await statusIdOf('TDJ0702'), 2);
+      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: 0 }, U.admin.id);
+      const j = (await getJob('TDJ0702'))!;
+      assert.deepEqual([j.statusId, j.engineerId, await logRows('TDJ0702')], [1, 0, [2, 1]]);
+      assert.ok(j.history[0].summary.endsWith(' · ไม่มีผู้รับงาน'), j.history[0].summary);
+      // a job further along keeps its status when the engineer is cleared
+      await updateJob('TDJ0703', { ...(await input('TDJ0703')), engineerId: 0 }, U.admin.id);
+      assert.deepEqual([await statusIdOf('TDJ0703'), await logRows('TDJ0703')], [11, []]);
+    });
+  }
+  // ── Round 6: customers + products + sale-order slip ──
+  console.log('\nRound 6 — customers + products + sale-order slip');
+  {
+    const { getCustomerByCode } = await import('@/server/services/customers');
+    const { saveProduct, getProduct } = await import('@/server/services/stock');
+    const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
+    const { POST: uploadPOST } = await import('@/app/api/upload/route');
+    // audit_log is append-only (drizzle/0006): rows of earlier runs stay — only the ones after `since` count
+    const lastAuditId = async () =>
+      Number((await db.execute<{ m: number }>(sql`SELECT coalesce(max(id), 0) AS m FROM audit_log`)).rows[0]!.m);
+    const auditOf = async (entity: string, key: string, since: number) =>
+      (
+        await db.execute<{ changes: Record<string, unknown> | null }>(
+          sql`SELECT changes FROM audit_log WHERE entity = ${entity} AND entity_key = ${key} AND id > ${since} ORDER BY id`,
+        )
+      ).rows.map((r) => r.changes);
+
+    await test('R6 customers: a legacy customer saved unchanged (trailing spaces, a one-line / composed address) → row identical, no audit; a Line change writes only that', async () => {
+      await pool.query(`
+        DELETE FROM customer WHERE customer_id IN (9661, 9662) OR customer_code IN ('TDC661', 'TDC662');
+        INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, customer_address, customer_address1,
+                              customer_address2, city_id, district_id, sub_district_id, postal_code, email, line_id,
+                              customer_card_id, customer_type, is_customer_online, use_price_group, record_status) VALUES
+          (9661, 'TDC661', 'TD R6 ร้านเก่า ', '038-111222 ', '98 ม.4 ต.ดอนหัวฬ่อ อ.เมือง จ.ชลบุรี 20000  ', NULL, NULL,
+           NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ACTIVE'),
+          (9662, 'TDC662', 'TD R6 คอนโด', '+66 82 504 4564', 'ห้อง 101 ( คอนโด ),  แขวงบางนาใต้ เขตบางนา จ.กรุงเทพมหานคร 10260',
+           'ห้อง 101 ( คอนโด ),', '', 10, 980, 7583, '10260', '', '', '', 'Normal', true, 'Retail', 'ACTIVE');`);
+      const since = await lastAuditId();
+      const rowOf = async (code: string) =>
+        (
+          await db.execute<{ r: Record<string, unknown> }>(
+            sql`SELECT to_jsonb(c) AS r FROM customer c WHERE customer_code = ${code}`,
+          )
+        ).rows[0]!.r;
+      // what the edit form sends back (customer-form.tsx toCustomerForm: an address-only row shows it in บรรทัด 1)
+      const form = async (code: string) => {
+        const c = (await getCustomerByCode(code))!;
+        return { ...c, address1: c.address1 || c.address, address: undefined, id: undefined };
+      };
+      const save = async (body: Record<string, unknown>) =>
+        (await customerPOST(await request('/api/customers', U.admin, { method: 'POST', body }))).status;
+      for (const code of ['TDC661', 'TDC662']) {
+        const before = await rowOf(code);
+        assert.equal(await save(await form(code)), 200, code);
+        assert.deepEqual(
+          await rowOf(code),
+          before,
+          `${code} unchanged (no trim, no re-built address, no stamp, row_version kept)`,
+        );
+        assert.deepEqual(await auditOf('customer', code, since), [], `${code} no audit row`);
+      }
+      assert.equal(await save({ ...(await form('TDC662')), line: 'td-r6' }), 200);
+      const r = await rowOf('TDC662');
+      assert.deepEqual(
+        [r.line_id, r.customer_address, r.status_changed_at, r.row_version],
+        ['td-r6', 'ห้อง 101 ( คอนโด ),  แขวงบางนาใต้ เขตบางนา จ.กรุงเทพมหานคร 10260', null, 1],
+      );
+      assert.deepEqual(await auditOf('customer', 'TDC662', since), [{ lineId: ['', 'td-r6'] }]);
+    });
+
+    await test('R6 products: a product saved unchanged writes nothing (no status stamp, no audit); a price change logs only it, with the real old value', async () => {
+      await pool.query(`
+        DELETE FROM product_model WHERE product_id = 9661;
+        DELETE FROM product_none_serial WHERE product_id = 9661 OR item_id = 9661;
+        DELETE FROM product WHERE product_id = 9661 OR product_code = 'TDP661';
+        INSERT INTO product (product_id, product_code, product_name, product_name_en, product_vender_code, record_status)
+          VALUES (9661, 'TDP661', 'TD R6 อะไหล่เก่า ', 'Old  part ', '', 'ACTIVE');
+        INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking,
+                                         quantity_remain, retail_price, capital_price, wholesale_price)
+          VALUES (9661, 9661, 0, 0, 0, 0, 5.00, 0.00, 4.00);`);
+      const since = await lastAuditId();
+      const rowOf = async () =>
+        (
+          await db.execute<{ r: Record<string, unknown> & { n: Record<string, unknown> } }>(
+            sql`SELECT to_jsonb(p) || jsonb_build_object('n', (SELECT to_jsonb(n) FROM product_none_serial n
+                  WHERE n.product_id = p.product_id)) AS r FROM product p WHERE product_id = 9661`,
+          )
+        ).rows[0]!.r;
+      // what the product dialog sends back (product-detail-modal.tsx)
+      const form = async () => {
+        const p = (await getProduct('TDP661'))!;
+        return {
+          sysCode: p.sysCode,
+          mfgCode: p.mfgCode,
+          name: p.name,
+          nameEn: p.nameEn ?? '',
+          nameCn: p.nameCn ?? '',
+          description: p.description ?? '',
+          category: p.category,
+          brand: p.brand,
+          capitalPrice: p.capitalPrice ? String(p.capitalPrice) : '',
+          wholesalePrice: p.wholesalePrice ? String(p.wholesalePrice) : '',
+          price: p.price ? String(p.price) : '',
+          forModelColor: p.forModelColor ?? '',
+          status: p.status,
+          ubRepairOnly: p.ubRepairOnly,
+          models: p.models,
+          version: p.version,
+        };
+      };
+      const before = await rowOf();
+      await saveProduct(await form(), U.admin.id);
+      assert.deepEqual(await rowOf(), before, 'unchanged');
+      assert.deepEqual(await auditOf('product', 'TDP661', since), [], 'no audit row');
+      await saveProduct({ ...(await form()), price: '6' }, U.admin.id);
+      const r = await rowOf();
+      assert.deepEqual([r.n.retail_price, r.status_changed_at, r.product_name], [6, null, 'TD R6 อะไหล่เก่า ']);
+      assert.deepEqual(await auditOf('product', 'TDP661', since), [{ retailPrice: [5, 6] }]);
+    });
+
+    await test('R6 SO slip: on a waiting order only its creator / System Admin pass the guard (others 403 like an edit); a cancelled one → 409', async () => {
+      const sharp = (await import('sharp')).default;
+      const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } })
+        .png()
+        .toBuffer();
+      const upload = async (u: TestUser, no: string) => {
+        const fd = new FormData();
+        fd.set('kind', 'sale-order-slip');
+        fd.set('id', no);
+        fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
+        const req = new NextRequest('https://svc.example.test/api/upload', {
+          method: 'POST',
+          headers: { cookie: await cookieFor(u), 'user-agent': 'test-domain' },
+          body: fd,
+        });
+        const r = await uploadPOST(req);
+        return { status: r.status, error: ((await r.json()) as { error?: string }).error };
+      };
+      await setStock(P.a.code, 10);
+      const created = await json(
+        await soPOST(
+          await request('/api/sale-orders', U.seller, {
+            method: 'POST',
+            body: {
+              customerCode: CUSTOMER,
+              salesId: U.seller.id,
+              submit: true,
+              lines: [{ code: P.a.code, qty: 1, price: 100 }],
+            },
+          }),
+        ),
+      );
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const no = (created.body.order as { no: string }).no;
+      for (const u of [U.seller2, U.manager])
+        assert.deepEqual(await upload(u, no), { status: 403, error: WAITING_CREATOR_ONLY }, u.email);
+      // no storage in the test env: past the guard the upload stops at 503 "ระบบจัดเก็บไฟล์ยังไม่ได้ตั้งค่า"
+      const env = { url: process.env.NEXT_PUBLIC_SUPABASE_URL, key: process.env.SUPABASE_SECRET_KEY };
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.SUPABASE_SECRET_KEY;
+      try {
+        assert.deepEqual([(await upload(U.seller, no)).status, (await upload(U.admin, no)).status], [503, 503]);
+      } finally {
+        if (env.url !== undefined) process.env.NEXT_PUBLIC_SUPABASE_URL = env.url;
+        if (env.key !== undefined) process.env.SUPABASE_SECRET_KEY = env.key;
+      }
+      await db.execute(sql`UPDATE sale_out_hd SET record_status = 'DELETED' WHERE sale_out_hd_no = ${no}`);
+      assert.equal((await upload(U.admin, no)).status, 409, 'cancelled');
+    });
+  }
+  // ── Round 6: special rights ──
+  console.log('\nRound 6 — special rights (app_config rows instead of role names in code) + migration 0030');
+  {
+    const { savePermissions, listStaff } = await import('@/server/services/users');
+    const { getSaleOrder } = await import('@/server/services/sale-orders');
+    const { overdueAlerts } = await import('@/server/services/alerts');
+    const { NOT_APPROVER } = await import('@/lib/validation/sale-order');
+    const { NOT_ENGINEER, REOPEN_LOCKED } = await import('@/lib/validation/job');
+    const { hasRight, invalidateGrantCache, grantsForUserType } = await import('@/server/auth');
+    const { canViewPath } = await import('@/lib/modules');
+    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const { GET: exportGET } = await import('@/app/api/export/[resource]/route');
+    // the permissions page's save (POST /api/admin/permissions → savePermissions): it must take effect at once
+    const tick = (role: string, menu: string, view: boolean) =>
+      savePermissions([{ role, menu, add: false, edit: false, del: false, view }], U.admin.id);
+    const job = (no: string, status: number) =>
+      `('${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01')`;
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+        VALUES ${job('TDJ0801', 1)}, ${job('TDJ0802', 1)}, ${job('TDJ0803', 20)};
+      UPDATE job SET service_cost = 300, spare_part_total_cost = 0, job_total_cost = 300,
+                     job_payment_type = 'เงินสด', job_payment_amount = 300 WHERE job_no = 'TDJ0803';`);
+
+    await test('R6 SO Approve: ticked for a CS-like role → it approves another’s order (and is named as approver); unticked for Manager → 403', async () => {
+      await setStock(P.a.code, 10);
+      const create = async () => {
+        const body = {
+          customerCode: CUSTOMER,
+          salesId: U.seller.id,
+          submit: true,
+          lines: [{ code: P.a.code, qty: 1 }],
+        };
+        const r = await json(await soPOST(await request('/api/sale-orders', U.seller, { method: 'POST', body })));
+        assert.equal(r.status, 201, JSON.stringify(r.body));
+        return (r.body.order as { no: string }).no;
+      };
+      const approve = async (u: TestUser, no: string) =>
+        json(
+          await soApprovePOST(
+            await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body: { decision: 'approve' } }),
+            { params: Promise.resolve({ no }) },
+          ),
+        );
+      const no = await create();
+      assert.deepEqual(
+        [(await approve(U.seller2, no)).status, (await getSaleOrder(no))!.approverRoles],
+        [403, ['Manager']],
+      );
+      await tick('TD Seller', 'SO Approve', true);
+      try {
+        assert.deepEqual((await getSaleOrder(no))!.approverRoles, ['Manager', 'TD Seller']);
+        const ok = await approve(U.seller2, no); // created + sold by U.seller, decided by another TD Seller
+        assert.equal(ok.status, 200, JSON.stringify(ok.body));
+        assert.equal((await qty(P.a.code)).remain, 9);
+        await tick('Manager', 'SO Approve', false);
+        const r = await approve(U.manager, await create());
+        assert.deepEqual([r.status, r.body.error], [403, NOT_APPROVER]);
+      } finally {
+        await tick('TD Seller', 'SO Approve', false);
+        await tick('Manager', 'SO Approve', true);
+      }
+    });
+
+    await test('R6 Job Take: the assignee list + assertAssignee follow the right (clerk role ticked → takes a job; Engineer unticked → 400); Overdue All widens the bell', async () => {
+      const offered = async () => (await listStaff()).filter((u) => u.takesJobs).map((u) => u.id);
+      const scope = async (u: TestUser) => (await overdueAlerts(await userOf(u))).scope;
+      assert.ok(!(await offered()).includes(U.clerk.id));
+      assert.equal((await fieldsOf(assignJobs(['TDJ0801'], U.clerk.id, U.admin.id))).status, 400);
+      assert.deepEqual([await scope(U.engineer), await scope(U.clerk)], ['mine', 'all']);
+      await tick('TD Job Clerk', 'Job Take', true);
+      try {
+        assert.ok((await offered()).includes(U.clerk.id), 'offered at once: the save drops the staff cache');
+        assert.equal((await fieldsOf(assignJobs(['TDJ0801'], U.clerk.id, U.admin.id))).status, 200);
+        assert.equal(await scope(U.clerk), 'mine', 'a job taker sees their own overdue jobs');
+        await tick('TD Job Clerk', 'Overdue All', true);
+        assert.equal(await scope(U.clerk), 'all', 'unless also Overdue All (Head Engineer)');
+        await tick('Engineer', 'Job Take', false);
+        assert.ok(!(await offered()).includes(U.engineer.id));
+        const r = await fieldsOf(assignJobs(['TDJ0802'], U.engineer.id, U.admin.id));
+        assert.deepEqual([r.status, r.fields], [400, { engineerId: NOT_ENGINEER }]);
+      } finally {
+        await tick('TD Job Clerk', 'Job Take', false);
+        await tick('TD Job Clerk', 'Overdue All', false);
+        await tick('Engineer', 'Job Take', true);
+      }
+    });
+
+    await test('R6 Job Money After Close / Job Reopen: a non-admin role with the right edits money on a closed job / re-opens it', async () => {
+      const [s20, s5] = [await statusName(20), await statusName(5)];
+      const money = () => fieldsOf(saveRepair('TDJ0803', { status: s20, serviceCost: 999 }, U.clerk.id));
+      assert.equal((await money()).status, 409);
+      const reopen = await fieldsOf(saveRepair('TDJ0803', { status: s5 }, U.clerk.id));
+      assert.deepEqual([reopen.status, reopen.fields], [409, { status: REOPEN_LOCKED }]);
+      try {
+        await tick('TD Job Clerk', 'Job Money After Close', true);
+        assert.equal((await money()).status, 200);
+        assert.deepEqual([(await getJob('TDJ0803'))!.serviceCost, (await jobRow('TDJ0803')).s], [999, 20]);
+        await tick('TD Job Clerk', 'Job Reopen', true);
+        assert.equal((await fieldsOf(saveRepair('TDJ0803', { status: s5 }, U.clerk.id))).status, 200);
+        assert.equal((await jobRow('TDJ0803')).s, 5);
+      } finally {
+        await tick('TD Job Clerk', 'Job Money After Close', false);
+        await tick('TD Job Clerk', 'Job Reopen', false);
+      }
+    });
+
+    await test('R6 Product Cost: the product API returns ราคาทุน only to a role with the right (Product edit no longer decides)', async () => {
+      await db.execute(sql`UPDATE product_none_serial SET capital_price = 55.00 WHERE product_id = ${P.a.id}`);
+      const cost = async () =>
+        (
+          (
+            await json(
+              await productGET(await request(`/api/products/${P.a.code}`, U.seller), {
+                params: Promise.resolve({ code: P.a.code }),
+              }),
+            )
+          ).body.product as { capitalPrice?: number }
+        ).capitalPrice;
+      await savePermissions([{ role: 'TD Seller', menu: 'Product', add: false, edit: true, del: false, view: true }]);
+      try {
+        assert.equal(await cost(), undefined, 'Product edit alone');
+        await tick('TD Seller', 'Product Cost', true);
+        assert.equal(await cost(), 55);
+      } finally {
+        await tick('TD Seller', 'Product Cost', false);
+        await pool.query(`DELETE FROM app_config WHERE user_type = 'TD Seller' AND module_name = 'Product'`);
+        invalidateGrantCache();
+      }
+    });
+
+    await test('R6 Report / Export: report data + pages follow Report; the export route follows Export', async () => {
+      const exportAs = async (u: TestUser) =>
+        (
+          await exportGET(await request('/api/export/customers', u), {
+            params: Promise.resolve({ resource: 'customers' }),
+          })
+        ).status;
+      const pages = async () => canViewPath(false, await grantsForUserType('TD Customer Viewer'), '/reports/open-job');
+      assert.deepEqual([await readData('job_summary', U.viewer), await pages()], [403, false]);
+      await tick('TD Customer Viewer', 'Report', true);
+      try {
+        assert.deepEqual([await readData('job_summary', U.viewer), await pages()], [200, true]);
+        assert.equal(await exportAs(U.viewer), 200, 'Customer view + Export (seeded for every role)');
+        await tick('TD Customer Viewer', 'Export', false);
+        assert.equal(await exportAs(U.viewer), 403);
+      } finally {
+        await tick('TD Customer Viewer', 'Report', false);
+        await tick('TD Customer Viewer', 'Export', true);
+      }
+    });
+
+    await test('R6 migration 0030: seeds the rights as the rules were; re-run changes nothing; a removed right stays removed', async () => {
+      const file = readFile('drizzle/0030_special_rights.sql', 'utf8');
+      await pool.query(`
+        DELETE FROM app_config WHERE user_type IN ('Head Engineer', 'TD Cost Role');
+        INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+          VALUES ('TD Cost Role', 'Product', false, true, false, true), ('Head Engineer', 'Job Repair', true, true, true, true);
+        UPDATE app_config SET can_view = false WHERE user_type = 'TD Customer Viewer' AND module_name = 'Export';`);
+      const roles = `'Manager', 'Engineer', 'Head Engineer', 'TD Cost Role', 'TD Customer Viewer'`;
+      const state = async () =>
+        (
+          await pool.query<{ t: string; m: string; i: boolean; e: boolean; d: boolean; v: boolean }>(
+            `SELECT user_type t, module_name m, can_insert i, can_edit e, can_delete d, can_view v FROM app_config
+              WHERE user_type IN (${roles}) AND module_name IN ('SO Approve', 'Job Take', 'Overdue All', 'Job Reopen',
+                    'Job Money After Close', 'Product Cost', 'Report', 'Export')
+                AND (can_view OR module_name = 'Export')`, // earlier tests leave unticked rows behind
+          )
+        ).rows
+          .map((r) => `${r.t}:${r.m}:${r.i ? 'I' : '-'}${r.e ? 'E' : '-'}${r.d ? 'D' : '-'}${r.v ? 'V' : '-'}`)
+          .sort();
+      try {
+        await pool.query(file);
+        const once = await state();
+        assert.deepEqual(once, [
+          'Engineer:Export:---V',
+          'Engineer:Job Take:---V',
+          'Head Engineer:Export:---V',
+          'Head Engineer:Job Take:---V',
+          'Head Engineer:Overdue All:---V',
+          'Manager:Export:---V',
+          'Manager:SO Approve:---V',
+          'TD Cost Role:Export:---V',
+          'TD Cost Role:Product Cost:---V',
+          'TD Customer Viewer:Export:----', // unticked by the business: not given back
+        ]);
+        await pool.query(file);
+        assert.deepEqual(await state(), once, 'second run changes nothing');
+        const granted = await pool.query(
+          `SELECT 1 FROM app_config WHERE module_name IN ('Job Reopen', 'Job Money After Close', 'Report') AND can_view`,
+        );
+        assert.equal(granted.rowCount, 0, 'System Admin only (implicit) — no role row');
+        invalidateGrantCache();
+        const as = (userType: string) => ({ isAdmin: userType === 'System Admin', userType });
+        assert.deepEqual(
+          [
+            await hasRight(as('Manager'), 'SO Approve'),
+            await hasRight(as('Engineer'), 'Job Take'),
+            await hasRight(as('Engineer'), 'Overdue All'),
+            await hasRight(as('Head Engineer'), 'Overdue All'),
+            await hasRight(as('TD Cost Role'), 'Product Cost'),
+            await hasRight(as('System Admin'), 'Job Reopen'),
+            await hasRight(as('System Admin'), 'Job Take'),
+          ],
+          [true, true, false, true, true, true, false],
+        );
+      } finally {
+        await pool.query(`
+          DELETE FROM app_config WHERE user_type = 'TD Cost Role';
+          UPDATE app_config SET can_view = true WHERE user_type = 'TD Customer Viewer' AND module_name = 'Export';`);
+        invalidateGrantCache();
+      }
     });
   }
 } finally {

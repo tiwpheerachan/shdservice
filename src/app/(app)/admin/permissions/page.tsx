@@ -12,25 +12,17 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { ROLES, type Permission } from '@/data/mock';
-import { usePermissions, useRoles, useModules } from '@/data/db';
+import { usePermissions, useRoles } from '@/data/db';
 import { postJson } from '@/lib/api';
+import { PAGE_MODULES, RIGHTS, type Right } from '@/lib/modules';
 
-// เมนูงาน (module) และบทบาท (user_type) มาจากตาราง app_config ของระบบเดิม
-// — ค่า fallback ด้านล่างใช้เฉพาะระหว่างโหลด
-const FALLBACK_MENUS = [
-  'Job Management',
-  'Job Assign',
-  'Job Repair',
-  'Job Closing',
-  'Product',
-  'Product Onhand',
-  'Product Receive Stock',
-  'Product Pick Stock',
-  'Customer',
-  'Quotation',
-  'Sale Order',
-];
+// บทบาท (user_type) มาจากตาราง app_config — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
+// (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว app_config ชื่อ RIGHTS
+// เก็บใน can_view
+const MENUS: readonly string[] = PAGE_MODULES;
+const RIGHT_NAMES = Object.keys(RIGHTS) as Right[];
 const FALLBACK_ROLES = ROLES.filter((r) => r !== 'รออนุมัติ');
 
 type Key = string; // `${role}::${menu}`
@@ -50,10 +42,8 @@ export default function PermissionsPage() {
   const confirm = useConfirm();
   const { data: perms, loading, refetch } = usePermissions();
   const { data: dbRoles } = useRoles();
-  const { data: dbModules } = useModules();
   const ASSIGNABLE_ROLES = dbRoles.length ? dbRoles : FALLBACK_ROLES;
   const firstRole = ASSIGNABLE_ROLES[0] ?? ROLES[0]; // FALLBACK_ROLES is never empty
-  const MENUS = dbModules.length ? dbModules : FALLBACK_MENUS;
   // the editable grant grid, rebuilt from the DB rows whenever they change (loaded / after a save)
   // — adjusted while rendering, not in an effect pass
   const [map, setMap] = React.useState<Record<Key, Cell>>(() => buildMap(perms));
@@ -81,11 +71,12 @@ export default function PermissionsPage() {
   // ticked but not saved: switching role used to drop these edits without a word
   const FIELDS = ['add', 'edit', 'del', 'view'] as const;
   const savedMap = React.useMemo(() => buildMap(perms), [perms]);
-  const dirty = MENUS.some((menu) => {
+  const dirty = [...MENUS, ...RIGHT_NAMES].some((menu) => {
     const saved = savedMap[keyOf(role, menu)];
     const now = cellOf(role, menu);
     return FIELDS.some((f) => now[f] !== !!saved?.[f]);
   });
+  useUnsavedChanges(dirty); // a sidebar link / closing the tab asks first, as on every form
   const pickRole = async (v: string) => {
     if (v !== role && dirty) {
       const ok = await confirm({
@@ -118,7 +109,7 @@ export default function PermissionsPage() {
   const save = async () => {
     setSaving(true);
     try {
-      const items = MENUS.map((menu) => ({ role, menu, ...cellOf(role, menu) }));
+      const items = [...MENUS, ...RIGHT_NAMES].map((menu) => ({ role, menu, ...cellOf(role, menu) }));
       await postJson('/api/admin/permissions', { items }); // 401 → refresh + retry → /login (api.ts)
       // the API checks the new grants on the very next request (cache dropped on save); menus and
       // buttons of someone already signed in follow on their next page load (the grants ride the layout)
@@ -174,7 +165,7 @@ export default function PermissionsPage() {
     <>
       <PageHeader
         title="สิทธิการใช้งาน"
-        description="กำหนดสิทธิ์เพิ่ม / แก้ไข / ลบ / ดูข้อมูล แยกตามบทบาทและเมนูงาน"
+        description="กำหนดสิทธิ์เพิ่ม / แก้ไข / ลบ / ดูข้อมูล แยกตามบทบาทและเมนูงาน และสิทธิ์พิเศษของแต่ละบทบาท"
         actions={
           <Button size="sm" onClick={save} disabled={saving}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -226,6 +217,33 @@ export default function PermissionsPage() {
           </span>
         }
       />
+
+      <section className="surface flex flex-col gap-3 p-4" aria-labelledby="special-rights">
+        <div>
+          <h2 id="special-rights" className="text-sm font-semibold">
+            สิทธิ์พิเศษ
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            เรื่องที่ไม่ได้ผูกกับเมนูใดเมนูหนึ่ง — ติ๊ก = บทบาท {role} ทำได้ · System Admin มีทุกข้อเสมอ ยกเว้น
+            รับงานซ่อม (ติ๊กเมื่อให้มีชื่อในช่องมอบหมายงาน) · บันทึกพร้อมตารางด้านบน
+          </p>
+        </div>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {RIGHT_NAMES.map((r, i) => (
+            <li key={r} className="flex items-start gap-2">
+              <Checkbox
+                id={`right-${i}`}
+                className="mt-0.5"
+                checked={cellOf(role, r).view}
+                onChange={() => toggle(r, 'view')}
+              />
+              <label htmlFor={`right-${i}`} className="cursor-pointer text-sm">
+                {RIGHTS[r]} <span className="text-xs text-muted-foreground">({r})</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </section>
     </>
   );
 }

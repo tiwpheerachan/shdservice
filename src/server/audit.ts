@@ -83,7 +83,8 @@ const norm = (v: unknown): unknown => {
   if (v === undefined || v === null) return null;
   if (typeof v === 'string') {
     const t = v.trim();
-    if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t); // numeric strings from pg
+    // numeric strings from pg → numbers ("500.00" = 500); a leading 0 (phone, tax id, code) stays text
+    if (/^-?\d+(\.\d+)?$/.test(t) && !/^-?0\d/.test(t)) return Number(t);
     return t;
   }
   return v;

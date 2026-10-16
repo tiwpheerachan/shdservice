@@ -31,17 +31,17 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: NextRequest) {
   const current = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!current) return NextResponse.json({ user: null }, { status: 401 });
+  // `reason` = why, for the /login note (same as /api/sso/me)
+  if (!current) return NextResponse.json({ user: null, reason: 'expired' }, { status: 401 });
 
   // the user row + session version decide — never the flags baked into the cookie
   // DB unreachable (503) must not sign anyone out: keep the cookie, the client retries later
   const u = await resolveUser(current).catch((e) => (e instanceof HttpError && e.status === 503 ? e : null));
   if (u instanceof HttpError) return NextResponse.json({ error: u.message }, { status: 503 });
-  if (!u) {
-    const res = NextResponse.json({ user: null }, { status: 401 });
-    res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
-    return res;
-  }
+  // signed out on another device (session_version bumped) / email changed. The dead cookie is KEPT: it
+  // never matches again (the version only goes up) and lapses on its own at `exp` — meanwhile every check
+  // (/me, the app layout → /login) still sees it and says "signed out elsewhere", not "idle 30 min"
+  if (!u) return NextResponse.json({ user: null, reason: 'elsewhere' }, { status: 401 });
   const role = u.role;
   const approved = u.approved;
 
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     } else if (active === false) {
       log.warn('sso central session inactive', { userId: u.userId, mode });
       if (mode === 'enforce') {
-        const res = NextResponse.json({ user: null }, { status: 401 });
+        const res = NextResponse.json({ user: null, reason: 'elsewhere' }, { status: 401 });
         res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
         return res;
       }

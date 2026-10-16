@@ -1,7 +1,16 @@
 'use client';
 
 import * as React from 'react';
-import { checkGrant, canViewPath, moduleForPath, type Action, type GrantMap, type Module } from '@/lib/modules';
+import {
+  checkGrant,
+  checkRight,
+  canViewPath,
+  moduleForPath,
+  type Action,
+  type GrantMap,
+  type Module,
+  type Right,
+} from '@/lib/modules';
 
 export type AccessValue = {
   userId: number;
@@ -36,6 +45,8 @@ export function useAccess() {
     () => ({
       ...v,
       can: (module: Module | null, action: Action) => checkGrant(v.isAdmin, v.grants, module, action),
+      /** a special right (สิทธิ์พิเศษ: SO Approve, Job Take, …) — the API checks the same */
+      has: (right: Right) => checkRight(v.isAdmin, v.grants, right),
       canPath: (pathname: string) => canViewPath(v.isAdmin, v.grants, pathname),
       /** a menu link: the page's `view`, plus the action it exists for (เปิดงานใหม่ = add, แก้ไข… = edit) */
       canLink: (l: { href: string; need?: Action }) =>

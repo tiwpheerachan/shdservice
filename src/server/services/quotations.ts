@@ -12,7 +12,7 @@ import { orderBy, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/se
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
-import { getJob } from './jobs';
+import { followQuotation, getJob } from './jobs';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
 import { computeTotals, quotationSchema } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
@@ -220,9 +220,15 @@ export type QuotationDetail = Quotation & {
   /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
   createdByPhone: string;
   createdByEmail: string;
-  /** quotation_hd.row_version (drizzle/0026) — the edit page sends it back with its save */
+  /** row_version + newest line id (versionOf) — the edit page sends it back with its save */
   version: number;
 };
+
+/** row_version + the newest line id: a line-only edit re-inserts the lines (new, higher ids) without moving
+ *  row_version (same as sale orders' versionOf). ponytail: lines saved empty drop the id part — a stale
+ *  version could only match again if row_version grew by exactly that id. */
+const versionOf = (rowVersion: number, lines: { quotationDtId: number }[]) =>
+  rowVersion + Math.max(0, ...lines.map((l) => l.quotationDtId));
 
 export async function getQuotation(no: string): Promise<QuotationDetail | null> {
   const [r] = await base().where(eq(quotationHd.quotationNo, no)).limit(1);
@@ -277,7 +283,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     createdByPhone: creator?.phone ?? '',
     createdByEmail: creator?.email ?? '',
-    version: hd.rowVersion,
+    version: versionOf(hd.rowVersion, dts),
   };
 }
 
@@ -351,7 +357,23 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         undefined)
       : undefined;
 
+  const dtRows = lines.map((l) => ({
+    lineNumber: l.lineNumber,
+    itemType: l.itemType ?? 'SparePart',
+    itemCode: str(l.code).slice(0, 50),
+    itemDetail: clean(l.detail),
+    quantity: String(l.qty),
+    unit: (str(l.unit) || 'หน่วย').slice(0, 10),
+    unitPrice: l.unitPrice.toFixed(2),
+    unitPriceDiscount: l.discount.toFixed(2),
+    totalPrice: l.total.toFixed(2),
+    unitPriceDiscountPercent: num(l.discountPercent).toFixed(2),
+  }));
+
+  const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
   const no = await db.transaction(async (tx) => {
+    let linesChanged = true;
+    let statusChanged = true; // a new quotation, or another status than the stored one
     const values = {
       customerCode: cust.code,
       customerContactName: clean(i.contactName),
@@ -378,7 +400,15 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     if (no) {
       const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for('update');
       if (!prev) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + no);
-      assertVersion(i.version, prev.rowVersion);
+      const old = await tx
+        .select()
+        .from(quotationDt)
+        .where(eq(quotationDt.quotationNo, no))
+        .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
+      assertVersion(i.version, versionOf(prev.rowVersion, old));
+      // lines are re-written only when they changed (same value read the same way as the audit diff:
+      // "100" = "100.00", trimmed) — an unchanged save keeps the rows, their ids and the version
+      linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);
       const upd = {
         ...values,
         customerApproveDate:
@@ -387,17 +417,16 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
       };
       await tx.update(quotationHd).set(upd).where(eq(quotationHd.quotationNo, no));
-      await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
-      const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
+      if (linesChanged) await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
+      statusChanged = prev.quotationStatusId !== statusId;
       await audit(tx, byUserId, {
-        action: prev.quotationStatusId !== statusId ? 'STATUS' : 'UPDATE',
+        action: statusChanged ? 'STATUS' : 'UPDATE',
         module: 'Quotation',
         entity: 'quotation_hd',
         key: no,
-        summary:
-          prev.quotationStatusId !== statusId
-            ? `สถานะใบเสนอราคา → ${statusName}`
-            : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
+        summary: statusChanged
+          ? `สถานะใบเสนอราคา → ${statusName}`
+          : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
         changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, {
           skip: ['customerApproveDate'],
         }),
@@ -422,27 +451,16 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         summary: `สร้างใบเสนอราคา · งาน ${values.referenceJobNo || '-'} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
       });
     }
-    if (lines.length) {
-      await tx.insert(quotationDt).values(
-        lines.map((l) => ({
-          quotationNo: no!,
-          lineNumber: l.lineNumber,
-          itemType: l.itemType ?? 'SparePart',
-          itemCode: str(l.code).slice(0, 50),
-          itemDetail: clean(l.detail),
-          quantity: String(l.qty),
-          unit: (str(l.unit) || 'หน่วย').slice(0, 10),
-          unitPrice: l.unitPrice.toFixed(2),
-          unitPriceDiscount: l.discount.toFixed(2),
-          totalPrice: l.total.toFixed(2),
-          unitPriceDiscountPercent: num(l.discountPercent).toFixed(2),
-        })),
-      );
-    }
-    // customer agreed → remember the approved quotation on the job (no status sync — decided 2026-09-15)
+    if (linesChanged && dtRows.length)
+      await tx.insert(quotationDt).values(dtRows.map((r) => ({ ...r, quotationNo: no! })));
+    // customer agreed → remember the approved quotation on the job
     if (AGREED.has(statusId) && values.referenceJobNo) {
       await tx.update(job).set({ quotationNoApproved: no }).where(eq(job.jobNo, values.referenceJobNo));
     }
+    // sent / agreed moves the job forward (owner 2026-10-16) — only when the status was set now: an unchanged
+    // re-save never touches the job
+    if (statusChanged && values.referenceJobNo)
+      await followQuotation(tx, values.referenceJobNo, no!, statusId, statusName, byUserId);
     return no!;
   });
   return (await getQuotation(no))!;

@@ -83,7 +83,7 @@ function EditJobForm() {
         <CustomerSection />
         <JobOpenSection jobNo={job?.no} status={job?.status ?? 'อยู่ระหว่างดำเนินการ'} />
         <ProductSection variant="open" />
-        <OtherInfoSection directory={false} />
+        <OtherInfoSection />
         <AttachmentSection jobNo={job?.no} />
         {job?.no && <TrackLink jobNo={job.no} />}
         <JobHistorySection job={job} />

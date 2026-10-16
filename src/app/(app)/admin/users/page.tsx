@@ -597,11 +597,31 @@ export default function UsersPage() {
           <Field label="ชื่อ-สกุล" required error={fe.errors.name}>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
-          <Field label="อีเมล" error={fe.errors.email}>
-            <Input type="email" maxLength={100} value={form.email} onChange={(e) => set('email', e.target.value)} />
+          {/* your own email / username: sign-in finds the account by email — changing it locks you out */}
+          <Field
+            label="อีเมล"
+            error={fe.errors.email}
+            hint={isMe(form) ? 'เปลี่ยนอีเมลของตัวเองไม่ได้ (ใช้เข้าสู่ระบบ)' : undefined}
+          >
+            <Input
+              type="email"
+              maxLength={100}
+              value={form.email}
+              onChange={(e) => set('email', e.target.value)}
+              disabled={isMe(form)}
+            />
           </Field>
-          <Field label="Username" error={fe.errors.username}>
-            <Input maxLength={50} value={form.username} onChange={(e) => set('username', e.target.value)} />
+          <Field
+            label="Username"
+            error={fe.errors.username}
+            hint={isMe(form) ? 'เปลี่ยน Username ของตัวเองไม่ได้' : undefined}
+          >
+            <Input
+              maxLength={50}
+              value={form.username}
+              onChange={(e) => set('username', e.target.value)}
+              disabled={isMe(form)}
+            />
           </Field>
           <Field label="รหัสพนักงาน / Lark ID" error={fe.errors.code}>
             <Input maxLength={50} value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="—" />

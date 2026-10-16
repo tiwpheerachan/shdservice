@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { FileX } from 'lucide-react';
 import { clientIp, ipBucket } from '@/lib/client-ip';
 import { TRACK_MSG } from '@/lib/track-public';
@@ -72,6 +73,12 @@ function Refused({ text }: { text: string }) {
     <div className="mx-auto max-w-md rounded-lg bg-white p-6 text-center text-sm text-neutral-600 shadow-sm">
       <FileX className="mx-auto mb-3 h-9 w-9 text-neutral-400" />
       {text}
+      <Link
+        href="/track"
+        className="mx-auto mt-4 flex h-10 w-fit items-center rounded-lg bg-neutral-900 px-4 font-medium text-white"
+      >
+        ไปหน้าติดตามงาน
+      </Link>
     </div>
   );
 }

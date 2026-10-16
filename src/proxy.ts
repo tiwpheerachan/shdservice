@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE, SEEN_COOKIE } from '@/lib/session';
+import { SESSION_COOKIE, SEEN_COOKIE, seenUserId } from '@/lib/session';
 import { originAuthMode, originAuthOk, originAuthSecret } from '@/lib/origin-auth';
 import { THEME_SCRIPT } from '@/lib/theme-script-source';
 import { appOrigin } from '@/lib/sso';
@@ -130,8 +130,8 @@ export async function proxy(request: NextRequest) {
   // that auto-forwards to a Google sign-in is exactly what phishing kits do, and
   // Google Web Risk flagged the site for it (2026-09-18). The user clicks the
   // button on /login; only that click starts the SSO flow.
-  // A browser that HAD a session (os_seen marker) gets an "expired" note.
-  const expired = !!request.cookies.get(SEEN_COOKIE)?.value;
+  // A browser that HAD a session (os_seen = a user id) gets an "expired" note; not after ออกจากระบบ ('0').
+  const expired = !!seenUserId(request.cookies.get(SEEN_COOKIE)?.value);
   const to = request.nextUrl.clone();
   const full = path + request.nextUrl.search;
   to.pathname = '/login';

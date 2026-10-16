@@ -22,12 +22,12 @@ import {
   storeLocation,
 } from '@/db/schema';
 import type { Movement, Product } from '@/data/mock';
-import { HttpError, can, fullName, type CurrentUser } from '@/server/auth';
+import { HttpError, fullName, hasRight, type CurrentUser } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
-import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
+import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 
 export type DeletedMode = StatusMode;
@@ -126,10 +126,11 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
   };
 }
 
-/** ราคาทุน: System Admin and roles that may edit products only (owner 2026-10-15). The product API and
- *  the Excel export leave it out for everyone else — the screens only mirror that. */
-export const canSeeCost = (u: CurrentUser) => can(u, 'Product', 'edit');
-export const withoutCost = <T extends Product>(p: T): T => ({ ...p, capitalPrice: undefined });
+/** ราคาทุน: the special right Product Cost (System Admin always). The product API and the Excel export
+ *  leave it out for everyone else — the screens only mirror that. */
+export const canSeeCost = (u: CurrentUser) => hasRight(u, 'Product Cost');
+/** ราคาทุน left out — and the edit `version`: productVersion hashes the cost, so the hash would give it away */
+export const withoutCost = <T extends Product>(p: T): T => ({ ...p, capitalPrice: undefined, version: undefined });
 
 const productQuery = (x: Tx | typeof db = db) =>
   x
@@ -273,6 +274,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
   if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
 
   const code = await db.transaction(async (tx) => {
+    const status = fromUiStatus(i.status);
     const values = {
       productVenderCode: cleanMfgCode(i.mfgCode),
       productName: name,
@@ -281,43 +283,70 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       productDescription: clean(i.description),
       categoryId: cat?.id ?? 1,
       manufacturerId: mfg?.id ?? null,
-      ...statusStamp(fromUiStatus(i.status), byUserId),
       isUbRepairOnly: !!i.ubRepairOnly,
       forModelColor: clean(i.forModelColor),
     };
+    // on-hand row (prices live here)
+    let prices = {
+      capitalPrice: i.capitalPrice !== undefined ? money(num(i.capitalPrice)) : undefined,
+      wholesalePrice: i.wholesalePrice !== undefined ? money(num(i.wholesalePrice)) : undefined,
+      retailPrice: i.price !== undefined ? money(num(i.price)) : undefined,
+    };
+    let models = i.models ? modelCodes : undefined;
     let productId: number;
     let code = i.sysCode;
     if (code) {
       const [before] = await tx.select().from(product).where(eq(product.productCode, code)).for('update');
-      const [loaded] = before ? await productQuery(tx).where(eq(product.productId, before.productId)) : [];
-      if (loaded) assertVersion(i.version, productVersion(loaded, await modelsOf(tx, before!.productId)));
-      const [row] = await tx
-        .update(product)
-        .set(values)
-        .where(eq(product.productCode, code))
-        .returning({ id: product.productId });
-      if (!row) throw new HttpError(404, 'product not found');
-      productId = row.id;
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Product',
-        entity: 'product',
-        key: code,
-        summary: `แก้ไขอะไหล่ ${name}`,
-        changes: diff(
-          before as Record<string, unknown>,
-          { ...values, retailPrice: i.price, capitalPrice: i.capitalPrice, wholesalePrice: i.wholesalePrice } as Record<
-            string,
-            unknown
-          >,
-        ),
-      });
+      if (!before) throw new HttpError(404, 'product not found');
+      productId = before.productId;
+      const [loaded] = await productQuery(tx).where(eq(product.productId, productId));
+      const oldModels = await modelsOf(tx, productId);
+      assertVersion(i.version, productVersion(loaded!, oldModels));
+      // "never worse": only what really changes is written — a value equal to the stored one once both are
+      // cleaned keeps the stored one (a legacy trailing space); saved unchanged = no write, no audit row
+      const same: Record<string, boolean> = {
+        productVenderCode: values.productVenderCode === cleanMfgCode(before.productVenderCode),
+        productName: values.productName === clean(before.productName),
+        productNameEn: values.productNameEn === clean(before.productNameEn),
+        productNameCn: values.productNameCn === clean(before.productNameCn),
+        productDescription: values.productDescription === clean(before.productDescription),
+        categoryId: clean(i.category) === clean(loaded!.category), // the form sends the names it showed
+        manufacturerId: clean(i.brand) === clean(loaded!.brand),
+        isUbRepairOnly: values.isUbRepairOnly === !!before.isUbRepairOnly,
+        forModelColor: values.forModelColor === clean(before.forModelColor),
+      };
+      const set: Partial<typeof product.$inferInsert> = Object.fromEntries(
+        Object.entries(values).filter(([k]) => !same[k]),
+      );
+      if (uiStatus(before.recordStatus) !== uiStatus(status)) Object.assign(set, statusStamp(status, byUserId));
+      const was = { capitalPrice: loaded!.capital, wholesalePrice: loaded!.wholesale, retailPrice: loaded!.retail };
+      prices = {
+        capitalPrice: num(prices.capitalPrice) !== num(was.capitalPrice) ? prices.capitalPrice : undefined,
+        wholesalePrice: num(prices.wholesalePrice) !== num(was.wholesalePrice) ? prices.wholesalePrice : undefined,
+        retailPrice: num(prices.retailPrice) !== num(was.retailPrice) ? prices.retailPrice : undefined,
+      };
+      if (models && [...models].sort().join('\n') === [...oldModels].sort().join('\n')) models = undefined;
+      if (Object.keys(set).length) await tx.update(product).set(set).where(eq(product.productId, productId));
+      const changes = diff(
+        { ...before, ...was, models: oldModels } as Record<string, unknown>,
+        { ...set, ...prices, models } as Record<string, unknown>,
+      );
+      if (changes)
+        await audit(tx, byUserId, {
+          action: 'UPDATE',
+          module: 'Product',
+          entity: 'product',
+          key: code,
+          summary: `แก้ไขอะไหล่ ${name}`,
+          changes,
+        });
     } else {
       code = await nextRunningNo(tx, 'Product');
       const [row] = await tx
         .insert(product)
         .values({
           ...values,
+          ...statusStamp(status, byUserId),
           productCode: code,
           isSerialControl: false,
           pictrueFileName: '',
@@ -330,23 +359,24 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
         .returning({ id: product.productId });
       if (!row) throw new Error('product insert returned no row');
       productId = row.id;
+      await audit(tx, byUserId, {
+        action: 'CREATE',
+        module: 'Product',
+        entity: 'product',
+        key: code,
+        summary: `เพิ่มอะไหล่ ${name}`,
+      });
     }
 
-    // on-hand row (prices live here)
-    const prices = {
-      capitalPrice: i.capitalPrice !== undefined ? money(num(i.capitalPrice)) : undefined,
-      wholesalePrice: i.wholesalePrice !== undefined ? money(num(i.wholesalePrice)) : undefined,
-      retailPrice: i.price !== undefined ? money(num(i.price)) : undefined,
-    };
     const [onhand] = await tx
       .select({ id: productNoneSerial.itemId })
       .from(productNoneSerial)
       .where(eq(productNoneSerial.productId, productId));
+    const priceSent = Object.values(prices).some((v) => v !== undefined);
     if (onhand) {
-      // no price sent (an API call with names only) → nothing to set: drizzle refuses an empty SET
-      if (Object.values(prices).some((v) => v !== undefined))
-        await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
-    } else {
+      // no price changed / sent (an API call with names only) → nothing to set: drizzle refuses an empty SET
+      if (priceSent) await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
+    } else if (!i.sysCode || priceSent) {
       await tx.insert(productNoneSerial).values({
         productId,
         storeLocationId: STORE_LOCATION_ID,
@@ -366,19 +396,11 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       });
     }
 
-    if (i.models) {
+    if (models) {
       await tx.delete(productModel).where(eq(productModel.productId, productId));
-      if (modelCodes.length) await tx.insert(productModel).values(modelCodes.map((c) => ({ productId, modelCode: c })));
+      if (models.length) await tx.insert(productModel).values(models.map((c) => ({ productId, modelCode: c })));
     }
-    if (!i.sysCode)
-      await audit(tx, byUserId, {
-        action: 'CREATE',
-        module: 'Product',
-        entity: 'product',
-        key: code!,
-        summary: `เพิ่มอะไหล่ ${name}`,
-      });
-    return code!;
+    return code;
   });
   productsChanged();
   return (await getProduct(code))!;
@@ -663,12 +685,19 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
   });
 }
 
-/** job.spare_part_total_cost = the job's charged part lines (cancelled ones excluded) */
+/** job.spare_part_total_cost = the job's charged part lines (cancelled ones and เสนอ-only lines excluded —
+ *  only parts ticked เบิก are charged, owner 2026-10-15; same rule as partCharge in validation/job.ts) */
 export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
   const [sum] = await tx
     .select({ s: sql<string>`coalesce(sum(${jobOrderSparePartLog.sparePartTotalPrice}),0)` })
     .from(jobOrderSparePartLog)
-    .where(and(eq(jobOrderSparePartLog.jobNo, jobNo), ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED)));
+    .where(
+      and(
+        eq(jobOrderSparePartLog.jobNo, jobNo),
+        ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED),
+        eq(jobOrderSparePartLog.isSpecial, true),
+      ),
+    );
   return num(sum?.s);
 }
 
@@ -936,7 +965,14 @@ export async function returnFromJob(
         byUserId,
       );
       let costs: Record<string, string> = {};
-      if (j) {
+      // a closed job's money is locked (its bill is out): the return moves stock, not the job's costs
+      const [st] = j
+        ? await tx
+            .select({ group: jobStatus.jobStatusGroup })
+            .from(jobStatus)
+            .where(eq(jobStatus.jobStatusId, j.jobStatusId ?? -1))
+        : [];
+      if (j && st?.group?.trim() !== 'Finished') {
         const parts = await partsTotalOf(tx, i.jobNo);
         const rest = num(j.serviceCost) + num(j.serviceToolCost) + num(j.deliveryCost) + num(j.cartonBoxCost);
         costs = { sparePartTotalCost: money(parts), jobTotalCost: money(parts + rest) };
@@ -1023,11 +1059,12 @@ export async function issueForSaleOrder(
     // only an APPROVED order may take stock out (the UI filters, the API must too: a pick on a
     // waiting order, then an edit + approve, used to take the stock out twice)
     const [hd] = await t
-      .select({ approve: saleOutHd.approveStatusId })
+      .select({ approve: saleOutHd.approveStatusId, status: saleOutHd.recordStatus })
       .from(saleOutHd)
       .where(eq(saleOutHd.saleOutHdNo, i.soNo))
       .for('update');
     if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + i.soNo);
+    if (hd.status === RS.DELETED) throw new HttpError(409, 'ใบสั่งขายนี้ถูกยกเลิกแล้ว จ่ายสินค้าไม่ได้');
     if (hd.approve !== SO_APPROVED) throw new HttpError(409, 'ใบสั่งขายยังไม่ได้รับอนุมัติ จ่ายสินค้าไม่ได้');
     const dts = await t
       .select()
@@ -1440,8 +1477,10 @@ function movementWhere(f: MovementFilters) {
       : undefined,
     f.doc ? ilike(inventoryHd.inventoryNo, `%${f.doc}%`) : undefined,
     f.ref ? ilike(inventoryHd.referenceDocumentNo, `%${f.ref}%`) : undefined,
+    // รหัสอะไหล่ filter: the code, or a part whose Thai / English / Chinese name has the words
     f.code
-      ? sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and d.item_code ilike ${'%' + f.code + '%'})`
+      ? sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and (d.item_code ilike ${'%' + f.code.trim() + '%'}
+          or d.item_code in (select ${product.productCode} from ${product} where ${nameLike(f.code.trim())})))`
       : undefined,
     from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,

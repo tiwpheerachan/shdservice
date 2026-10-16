@@ -18,7 +18,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
 };
 
-/** a value as people read it: empty / the legacy 1900-01-01 "no date" → —, yes/no in Thai */
+/** a value as people read it: empty / the legacy 1900-01-01 "no date" → —, yes/no in Thai, a date without its 00:00:00 */
 const fmt = (v: unknown) =>
   v === null || v === undefined || v === '' || String(v).startsWith('1900-01-01')
     ? '—'
@@ -28,7 +28,7 @@ const fmt = (v: unknown) =>
         : 'ไม่ใช่'
       : typeof v === 'object'
         ? JSON.stringify(v)
-        : String(v);
+        : String(v).replace(/^(\d{4}-\d{2}-\d{2}) 00:00:00$/, '$1'); // a date-only field stored as a timestamp
 
 /**
  * ประวัติการแก้ไขของงาน — audit_log rows for this job (who / when / what changed),
