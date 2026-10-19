@@ -62,15 +62,15 @@ export const int = (v: unknown, d = 0): number => {
   const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10);
   return Number.isFinite(n) ? n : d;
 };
+export const SENTINEL_TS = '1900-01-01 00:00:00';
 /** Date input ("YYYY-MM-DD" | "") → timestamp string or the legacy sentinel. */
 export const dateOrSentinel = (v: unknown): string => {
   const s = str(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s)
     ? s.slice(0, 10) + (s.length > 10 ? s.slice(10, 19).replace('T', ' ') : ' 00:00:00')
-    : '1900-01-01 00:00:00';
+    : SENTINEL_TS;
 };
 export const dateOrNull = (v: unknown): string | null => {
   const s = str(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 };
-export const SENTINEL_TS = '1900-01-01 00:00:00';

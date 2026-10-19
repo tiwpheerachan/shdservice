@@ -5,6 +5,7 @@ import type { Module } from '@/lib/modules';
 import { pageAudit, listAudit, auditModules } from '@/server/audit';
 import { clampInt, parsePageQuery, searchOf, type Page } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from '@/server/services/masters';
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from '@/server/services/users';
 import { listCustomers, pageCustomers, listProvinces, customerFiltersFromQuery } from '@/server/services/customers';
@@ -18,7 +19,7 @@ import {
   pageMovements,
   pageIssuedLines,
   issuedStats,
-  type ProductFilters,
+  productFiltersFromQuery,
   jobsWithPendingParts,
   jobsWithReturnableParts,
 } from '@/server/services/stock';
@@ -40,8 +41,13 @@ import {
   symptomStats,
   modelSymptoms,
 } from '@/server/services/jobs';
-import { pageQuotations, listQuotations, quotationStatuses } from '@/server/services/quotations';
-import { pageSaleOrders, listSaleOrders } from '@/server/services/sale-orders';
+import {
+  pageQuotations,
+  listQuotations,
+  quotationStatuses,
+  quotationFiltersFromQuery,
+} from '@/server/services/quotations';
+import { pageSaleOrders, listSaleOrders, saleOrderFiltersFromQuery } from '@/server/services/sale-orders';
 
 /**
  * Resources holding customer / document data: which screens may read them ("view"
@@ -94,7 +100,9 @@ export async function readResource(
       key: p.f.key,
       action: p.f.action,
     };
-    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit: clampInt(sp.get('limit'), 500, 20000) });
+    return paged
+      ? pageAudit(p, f)
+      : listAudit({ ...f, q: p.q, limit: clampInt(sp.get('limit'), 500, MAX_EXPORT_ROWS) });
   }
   if (resource === 'users' || resource === 'permissions' || resource === 'roles' || resource === 'modules') {
     await requireAdmin(req);
@@ -150,37 +158,10 @@ export async function readResource(
     }
     case 'products': {
       if (sp.get('fields') === 'lite') return listProductsLite(p.q);
-      const pf: ProductFilters = {
-        mode: deleted,
-        status: p.f.status,
-        sysCode: p.f.sysCode,
-        mfgCode: p.f.mfgCode,
-        name: p.f.name,
-        brand: p.f.brand,
-        category: p.f.category,
-        creator: p.f.creator,
-        date: p.f.date,
-        model: p.f.model,
-        stock: p.f.stock === 'in' || p.f.stock === 'low' || p.f.stock === 'out' ? p.f.stock : undefined,
-      };
-      return paged ? pageProducts(p, pf) : listProducts({ deleted, q: p.q });
+      return paged ? pageProducts(p, productFiltersFromQuery(p.f, deleted)) : listProducts({ deleted, q: p.q });
     }
-    case 'product_stats': {
-      const pf: ProductFilters = {
-        mode: deleted,
-        status: p.f.status,
-        sysCode: p.f.sysCode,
-        mfgCode: p.f.mfgCode,
-        name: p.f.name,
-        brand: p.f.brand,
-        category: p.f.category,
-        creator: p.f.creator,
-        date: p.f.date,
-        model: p.f.model,
-        stock: p.f.stock === 'in' || p.f.stock === 'low' || p.f.stock === 'out' ? p.f.stock : undefined,
-      };
-      return [await productStats(p.q, pf)];
-    }
+    case 'product_stats':
+      return [await productStats(p.q, productFiltersFromQuery(p.f, deleted))];
     case 'customers':
       return paged
         ? pageCustomers(p, deleted, customerFiltersFromQuery(p.f))
@@ -198,7 +179,7 @@ export async function readResource(
             to: p.f.to,
             category: p.f.category,
             code: p.f.code || p.q,
-            limit: clampInt(sp.get('limit'), 5000, 20000),
+            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
           });
     case 'issued_stats':
       return [await issuedStats(p.q, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })];
@@ -218,67 +199,28 @@ export async function readResource(
     case 'job_summary':
       return [await jobReportSummary(filtersFromQuery(p.f), p.q)];
     case 'quotation_summary':
-      return [
-        await quotationReportSummary(
-          { status: p.f.status, from: p.f.from, to: p.f.to, deleted, jobNo: p.f.jobNo, type: p.f.type },
-          p.q,
-        ),
-      ];
+      return [await quotationReportSummary(quotationFiltersFromQuery(p.f, deleted), p.q)];
     case 'sale_order_summary':
-      return [
-        await saleOrderReportSummary(
-          { approve: p.f.approve, from: p.f.from, to: p.f.to, sales: p.f.sales, deleted },
-          p.q,
-        ),
-      ];
+      return [await saleOrderReportSummary(saleOrderFiltersFromQuery(p.f, deleted), p.q)];
     case 'jobs':
       return paged
         ? pageJobs(p, filtersFromQuery(p.f))
-        : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: clampInt(sp.get('limit'), 5000, 20000) });
+        : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS) });
     case 'quotations':
       return paged
-        ? pageQuotations(p, {
-            status: p.f.status,
-            from: p.f.from,
-            to: p.f.to,
-            deleted,
-            jobNo: p.f.jobNo,
-            type: p.f.type,
-            warranty: p.f.warranty,
-            brand: p.f.brand,
-          })
+        ? pageQuotations(p, quotationFiltersFromQuery(p.f, deleted))
         : listQuotations({
-            status: p.f.status,
-            from: p.f.from,
-            to: p.f.to,
-            deleted,
-            jobNo: p.f.jobNo,
+            ...quotationFiltersFromQuery(p.f, deleted),
             q: p.q,
-            limit: clampInt(sp.get('limit'), 5000, 20000),
+            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
           });
     case 'sale_orders':
       return paged
-        ? pageSaleOrders(p, {
-            approve: p.f.approve,
-            from: p.f.from,
-            to: p.f.to,
-            sales: p.f.sales,
-            no: p.f.no,
-            customer: p.f.customer,
-            code: p.f.code,
-            deleted,
-          })
+        ? pageSaleOrders(p, saleOrderFiltersFromQuery(p.f, deleted))
         : listSaleOrders({
-            approve: p.f.approve,
-            from: p.f.from,
-            to: p.f.to,
-            sales: p.f.sales,
-            no: p.f.no,
-            customer: p.f.customer,
-            code: p.f.code,
-            deleted,
+            ...saleOrderFiltersFromQuery(p.f, deleted),
             q: p.q,
-            limit: clampInt(sp.get('limit'), 5000, 20000),
+            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
           });
     case 'dashboard':
       return [await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })];

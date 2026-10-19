@@ -5,6 +5,7 @@ import { job, product, saleOutHd } from '@/db/schema';
 import { handle, parseForm, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
 import { upload } from '@/server/contract/misc';
 import { rateLimit } from '@/server/rate-limit';
+import { audit } from '@/server/audit';
 import { AS } from '@/server/services/sale-orders';
 import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { getDocumentProfile, setDocumentProfileLogo } from '@/server/services/document-profiles';
@@ -101,7 +102,17 @@ export const POST = handle(async (req: NextRequest) => {
       if (!row) throw new HttpError(404, 'ไม่พบรหัสอะไหล่ ' + id);
       const path = filePath.productImage(id, sys);
       await uploadFile(path, body);
-      await db.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
+      await db.transaction(async (tx) => {
+        await tx.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
+        await audit(tx, me.userId, {
+          action: 'UPDATE',
+          module: 'Product',
+          entity: 'product',
+          key: id,
+          summary: `เปลี่ยนรูปอะไหล่ ${id}`,
+          changes: { pictrueFileName: [row.old, sys] },
+        });
+      });
       if (row.old) await removeFile(resolvePath(row.old, (f) => filePath.productImage(id, f)));
       return NextResponse.json({ ok: true, path, file: sys });
     }
@@ -124,7 +135,17 @@ export const POST = handle(async (req: NextRequest) => {
         throw new HttpError(403, WAITING_CREATOR_ONLY);
       const path = filePath.saleOrderSlip(id, sys);
       await uploadFile(path, body);
-      await db.update(saleOutHd).set({ slipFileName: path }).where(eq(saleOutHd.saleOutHdNo, id));
+      await db.transaction(async (tx) => {
+        await tx.update(saleOutHd).set({ slipFileName: path }).where(eq(saleOutHd.saleOutHdNo, id));
+        await audit(tx, me.userId, {
+          action: 'UPDATE',
+          module: 'Sale Order',
+          entity: 'sale_out_hd',
+          key: id,
+          summary: `แนบสลิปใบสั่งขาย ${id}`,
+          changes: { slipFileName: [row.old, path] },
+        });
+      });
       // only ever delete this order's own slip folder (a stored path is data, not a command)
       if (row.old && row.old.startsWith(`sale-orders/${id}/slip/`)) await removeFile(row.old);
       return NextResponse.json({ ok: true, path, file: sys });
@@ -134,7 +155,17 @@ export const POST = handle(async (req: NextRequest) => {
       if (!row) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + id);
       const path = filePath.jobSlip(id, sys);
       await uploadFile(path, body);
-      await db.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
+      await db.transaction(async (tx) => {
+        await tx.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
+        await audit(tx, me.userId, {
+          action: 'UPDATE',
+          module: 'Job Closing',
+          entity: 'job',
+          key: id,
+          summary: `แนบสลิปชำระเงินงาน ${id}`,
+          changes: { jobPaymentSlipFileName: [row.old, path] },
+        });
+      });
       if (row.old && row.old.startsWith(`jobs/${id}/slip/`)) await removeFile(row.old);
       return NextResponse.json({ ok: true, path, file: sys });
     }

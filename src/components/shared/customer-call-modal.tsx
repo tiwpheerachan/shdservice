@@ -234,7 +234,7 @@ export function CustomerCallModal({
                             </td>
                             <td className="num px-3 py-2 text-right tabular-nums">{baht(j.amount)}</td>
                             <td className="px-3 py-2">
-                              <StatusBadge status={j.status} />
+                              <StatusBadge status={j.status} group={j.statusGroup} />
                             </td>
                           </tr>
                         ))

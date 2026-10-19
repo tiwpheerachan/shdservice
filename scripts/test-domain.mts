@@ -2059,7 +2059,9 @@ try {
         const rows = (list.body as { rows: Record<string, unknown>[] }).rows;
         assert.ok(rows.length > 0 && rows.every((r) => !('capitalPrice' in r)), 'list JSON');
         const sheet = async (u: TestUser) => {
-          const { buffer } = await exportXlsx(await request(`/api/export/products?sysCode=${P.a.code}`, u), 'products');
+          const buffer = await new Response(
+            (await exportXlsx(await request(`/api/export/products?sysCode=${P.a.code}`, u), 'products')).stream,
+          ).arrayBuffer();
           const wb = new ExcelJS.Workbook();
           await wb.xlsx.load(buffer as unknown as ArrayBuffer);
           const ws = wb.worksheets[0]!;
@@ -2566,6 +2568,10 @@ try {
       const r = await fieldsOf(assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id));
       assert.equal(r.status, 409);
       assert.match(r.message ?? '', /มีผู้รับงานแล้ว/);
+      // audit_log is append-only (rows of earlier runs stay): look only at what this assign writes
+      const [{ since }] = (
+        await db.execute<{ since: number }>(sql`SELECT coalesce(max(id), 0) AS since FROM audit_log`)
+      ).rows;
       await assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id, true);
       const eng = async (no: string) =>
         (
@@ -2574,6 +2580,20 @@ try {
           )
         ).rows[0];
       assert.deepEqual({ ...(await eng('TDJ0303')) }, { e: U.engineer.id, s: 2 });
+      // the batched NEW → 2 writes what setStatus does: one job_log row + ASSIGN then STATUS in the history
+      assert.deepEqual(await logRows('TDJ0303'), [2]);
+      const trail = await db.execute<{ action: string; changes: unknown }>(
+        sql`SELECT action, changes FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0303' AND id > ${since} ORDER BY id`,
+      );
+      assert.deepEqual(
+        trail.rows.map((r) => ({ ...r })),
+        [
+          { action: 'ASSIGN', changes: { engineerId: [U.admin.id, U.engineer.id] } },
+          { action: 'STATUS', changes: { jobStatusId: [1, 2] } },
+        ],
+      );
+      const statusRow = (await getJob('TDJ0303'))!.history.find((h) => h.action === 'STATUS');
+      assert.equal(statusRow?.summary, `เปลี่ยนสถานะงาน → ${(await statusName(2)).trim()}`);
       const dueDate = (await getJob('TDJ0304'))!.dueDate;
       const input = { customerCode: CUSTOMER, dueDate, engineerId: U.engineer.id };
       assert.equal((await fieldsOf(updateJob('TDJ0304', input, U.clerk.id))).status, 409);
@@ -2668,10 +2688,11 @@ try {
       const label = (no: string) => active.find((r) => r.no === no)?.stepLabel;
       assert.deepEqual([label('TDJ0392'), label('TDJ0393')], [expired, 'รอคำตอบจากคุณ (ใบเสนอราคา)']);
       // the document opened from /track uses the same rule (stamp, no sign-and-return)
+      const { quoteExpired } = await import('@/lib/quote-expiry');
       const q = (await getQuotation('TDQ0392'))!;
-      assert.equal(tracking.quoteExpired(q.statusId, q.date, q.job?.statusId ?? null), true);
+      assert.equal(quoteExpired(q.statusId, q.date, q.job?.statusId ?? null), true);
       const fresh = (await getQuotation('TDQ0393'))!;
-      assert.equal(tracking.quoteExpired(fresh.statusId, fresh.date, fresh.job?.statusId ?? null), false);
+      assert.equal(quoteExpired(fresh.statusId, fresh.date, fresh.job?.statusId ?? null), false);
     });
     await test('R3 track: "พร้อมให้มารับที่ศูนย์" (24) stays under กำลังดำเนินการ until collected; a shipped job is history', async () => {
       const { active, history } = await tracking.listJobsForCustomers([9281]);
@@ -3016,7 +3037,9 @@ try {
       assert.equal((await getJob('TDJ0404'))!.return.detail, 'ไปรษณีย์ไทย · TD R3');
     });
     await test('R3 jobs: the job list Excel has มัดจำ and ค้างชำระ (1,300 − deposit 300 − paid 500 = 500)', async () => {
-      const { buffer } = await exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs');
+      const buffer = await new Response(
+        (await exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs')).stream,
+      ).arrayBuffer();
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = wb.worksheets[0]!;
@@ -4245,7 +4268,9 @@ try {
     });
 
     await test('R5 L2: job Excel — ยอดชำระ never negative, a refund in คืนเงิน, ค้างชำระ only on a closed job', async () => {
-      const { buffer } = await exportXlsx(await request('/api/export/jobs?q=TDJ061', U.admin), 'jobs');
+      const buffer = await new Response(
+        (await exportXlsx(await request('/api/export/jobs?q=TDJ061', U.admin), 'jobs')).stream,
+      ).arrayBuffer();
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = wb.worksheets[0]!;

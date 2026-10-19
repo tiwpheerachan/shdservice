@@ -1,4 +1,5 @@
 import 'server-only';
+import { PassThrough, Readable } from 'node:stream';
 import ExcelJS from 'exceljs';
 import type { NextRequest } from 'next/server';
 import { hasRight, HttpError, parseQuery, requireAdmin, requireCan, type CurrentUser } from '@/server/auth';
@@ -9,26 +10,35 @@ import { noRight, type Module } from '@/lib/modules';
 import { listSimple, isSimpleKind, listSymptoms, listModels } from '@/server/services/masters';
 import { listSystemUsers } from '@/server/services/users';
 import { listCustomers, customerFiltersFromQuery } from '@/server/services/customers';
-import { canSeeCost, pageProducts, listMovements, listIssuedLines, type ProductFilters } from '@/server/services/stock';
+import {
+  canSeeCost,
+  pageProducts,
+  listMovements,
+  listIssuedLines,
+  productFiltersFromQuery,
+} from '@/server/services/stock';
 import { listAudit } from '@/server/audit';
 import { listJobs, filtersFromQuery } from '@/server/services/jobs';
-import { listQuotations } from '@/server/services/quotations';
-import { listSaleOrders } from '@/server/services/sale-orders';
+import { listQuotations, quotationFiltersFromQuery } from '@/server/services/quotations';
+import { listSaleOrders, saleOrderFiltersFromQuery } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
 import { fieldLabel } from '@/lib/field-labels';
+import { logError } from '@/lib/log';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
 /**
  * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
  * uses — the URL query is the one the page's hooks send to /api/data/<resource>.
  * Runs on the server, capped at MAX_ROWS so a runaway range cannot exhaust memory
- * (the workbook is built in memory on a 512 MB instance). Every list function caps
+ * (the rows are loaded in memory on a 512 MB instance; the file itself is streamed). Every list function caps
  * at the same 20k, so a capped file is detectable — and it says so: a note row at
  * the end and "-partial" in the file name, never a silently short file.
  */
-const MAX_ROWS = 20_000;
+const MAX_ROWS = MAX_EXPORT_ROWS;
 
 type Col = { key: string; header: string; width?: number; num?: boolean; money?: boolean };
-type Row = Record<string, unknown>;
+/** a row of any list: read by column key, so every list function's own type fits without a cast */
+type Row = object;
 
 const MASTER_COLS: Col[] = [
   { key: 'id', header: 'ID', width: 8 },
@@ -229,10 +239,10 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
     const term = p.q.trim().toLowerCase();
     return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!f.status || r.status === f.status));
   };
-  if (isSimpleKind(resource)) return masterFilter(await listSimple(resource, mode)) as unknown as Row[];
+  if (isSimpleKind(resource)) return masterFilter(await listSimple(resource, mode));
   switch (resource) {
     case 'symptoms':
-      return masterFilter(await listSymptoms(mode)) as unknown as Row[];
+      return masterFilter(await listSymptoms(mode));
     case 'models':
       return (await listModels(mode)).filter(
         (m) =>
@@ -240,16 +250,16 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
           (!f.code || m.code.toLowerCase().includes(f.code.toLowerCase())) &&
           (!f.name || m.name.toLowerCase().includes(f.name.toLowerCase())) &&
           (!f.status || m.status === f.status),
-      ) as unknown as Row[];
+      );
     case 'users':
-      return listSystemUsers(mode) as unknown as Row[];
+      return listSystemUsers(mode);
     case 'customers':
       return listCustomers({
         q: p.q,
         deleted: mode,
         limit: MAX_ROWS,
         filters: customerFiltersFromQuery(f),
-      }) as unknown as Row[];
+      });
     case 'jobs':
       // ยอดชำระ = money taken (≥ 0); a refund (stored as a negative payment) is its own คืนเงิน column;
       // ค้างชำระ only on a closed job — an open one is not billed yet
@@ -258,51 +268,20 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         paymentAmount: Math.max(0, j.paymentAmount ?? 0),
         refund: Math.max(0, -(j.paymentAmount ?? 0)),
         outstanding: j.statusGroup === 'Finished' ? j.outstanding : 0,
-      })) as unknown as Row[];
+      }));
     case 'quotations':
-      return listQuotations({
-        status: f.status,
-        from: f.from,
-        to: f.to,
-        type: f.type,
-        warranty: f.warranty,
-        brand: f.brand,
-        jobNo: f.jobNo,
-        deleted: mode,
-        q: p.q,
-        limit: MAX_ROWS,
-      }) as unknown as Row[];
+      return listQuotations({ ...quotationFiltersFromQuery(f, mode), q: p.q, limit: MAX_ROWS });
     case 'sale_orders':
-      return listSaleOrders({
-        approve: f.approve,
-        from: f.from,
-        to: f.to,
-        sales: f.sales,
-        no: f.no,
-        customer: f.customer,
-        code: f.code,
-        deleted: mode,
-        q: p.q,
-        limit: MAX_ROWS,
-      }) as unknown as Row[];
-    case 'products': {
+      return listSaleOrders({ ...saleOrderFiltersFromQuery(f, mode), q: p.q, limit: MAX_ROWS });
+    case 'products':
       // same filters as the products list / stock report tables (category, brand, stock state, …)
-      const pf: ProductFilters = {
-        mode,
-        status: f.status,
-        sysCode: f.sysCode,
-        mfgCode: f.mfgCode,
-        name: f.name,
-        brand: f.brand,
-        category: f.category,
-        creator: f.creator,
-        date: f.date,
-        model: f.model,
-        stock: f.stock === 'in' || f.stock === 'low' || f.stock === 'out' ? f.stock : undefined,
-      };
-      return (await pageProducts({ ...p, page: 1, pageSize: MAX_ROWS }, pf, await canSeeCost(user)))
-        .rows as unknown as Row[];
-    }
+      return (
+        await pageProducts(
+          { ...p, page: 1, pageSize: MAX_ROWS },
+          productFiltersFromQuery(f, mode),
+          await canSeeCost(user),
+        )
+      ).rows;
     case 'movements':
       return listMovements({
         q: p.q,
@@ -313,7 +292,7 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         doc: f.doc,
         ref: f.ref,
         limit: MAX_ROWS,
-      }) as unknown as Row[];
+      });
     case 'issued_lines':
       return listIssuedLines({
         from: f.from,
@@ -321,7 +300,7 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         category: f.category,
         code: f.code || p.q,
         limit: MAX_ROWS,
-      }) as unknown as Row[];
+      });
     case 'audit_log':
       return (
         await listAudit({
@@ -342,58 +321,102 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
               .map(([k, [a, b]]) => `${fieldLabel(k)}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`)
               .join('; ')
           : '',
-      })) as unknown as Row[];
+      }));
   }
   throw new HttpError(404, `unknown export: ${resource}`);
 }
 
-/** `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data). */
+/** One export at a time per process: a second concurrent one answers 429 instead of doubling the memory. */
+let exporting = false;
+
+/**
+ * `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data).
+ * The workbook is streamed (exceljs WorkbookWriter, inline strings): 20k rows × 24 Thai columns run in a ~90 MB
+ * heap, rows included, where the in-memory Workbook ran out of 400 MB. The slot is freed once the file is
+ * written or the client goes away.
+ */
 export async function exportXlsx(
   req: NextRequest,
   resource: string,
   query: Record<string, unknown> = parseQuery(req, exportOperation),
-): Promise<{ buffer: Buffer; filename: string }> {
+): Promise<{ stream: ReadableStream<Uint8Array>; filename: string }> {
   const spec = SPECS[resource];
   if (!spec) throw new HttpError(404, `unknown export: ${resource}`);
   const user = spec.module === null ? await requireAdmin(req) : await requireCan(req, spec.module, 'view');
   // ส่งออก Excel is its own special right on top of seeing the list
   if (!(await hasRight(user, 'Export'))) throw new HttpError(403, noRight('Export'));
-  const rows = await loadRows(searchOf(query), resource, user);
-  // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
-  const cols =
-    resource === 'products' && !(await canSeeCost(user))
-      ? spec.cols.filter((c) => c.key !== 'capitalPrice')
-      : spec.cols;
+  if (exporting) throw new HttpError(429, 'มีการส่งออกอยู่ กรุณาลองใหม่อีกครั้ง', { retryAfter: 10 });
+  exporting = true;
+  let rows: Row[];
+  let cols: Col[];
+  try {
+    rows = await loadRows(searchOf(query), resource, user);
+    // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
+    cols =
+      resource === 'products' && !(await canSeeCost(user))
+        ? spec.cols.filter((c) => c.key !== 'capitalPrice')
+        : spec.cols;
+  } catch (e) {
+    exporting = false;
+    throw e;
+  }
 
-  const wb = new ExcelJS.Workbook();
+  // ponytail: no backpressure into the writer — a slow client buffers the zipped file (a few MB at 20k rows)
+  // so the slot never waits on the network
+  const out = new PassThrough({ highWaterMark: 64 * 1024 * 1024 });
+  const release = () => (exporting = false);
+  const gone = new Promise<void>((resolve) => out.once('close', resolve)); // done, or the client went away
+  void gone.then(release);
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true, useSharedStrings: false });
   wb.creator = 'OneService';
   wb.created = new Date();
   const ws = wb.addWorksheet(spec.title.slice(0, 31), { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws.columns = cols.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 16 }));
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF9' } };
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } }; // written on ws.commit()
+  // number formats on the column itself: a streamed cell takes its column's style when it is created
+  ws.columns = cols.map((c) => ({
+    header: c.header,
+    key: c.key,
+    width: c.width ?? 16,
+    style: c.money ? { numFmt: '#,##0.00' } : c.num ? { numFmt: '#,##0' } : {},
+  }));
+  const head = ws.getRow(1);
+  head.font = { bold: true };
+  head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF9' } };
+  head.commit();
 
   const truncated = rows.length >= MAX_ROWS;
-  for (const r of rows.slice(0, MAX_ROWS)) {
-    const out: Row = {};
-    for (const c of cols) {
-      const v = r[c.key];
-      out[c.key] = c.money || c.num ? Number(v ?? 0) : (v ?? '');
+  void (async () => {
+    let n = 0;
+    for (const r of rows.slice(0, MAX_ROWS)) {
+      if (out.destroyed) return; // client went away: stop (the zip would never finish and pin the rows)
+      const line: Record<string, unknown> = {};
+      for (const c of cols) {
+        const v = (r as Record<string, unknown>)[c.key];
+        line[c.key] = c.money || c.num ? Number(v ?? 0) : (v ?? '');
+      }
+      ws.addRow(line).commit();
+      // let the zip stream drain now and then, or every row's XML waits in memory until the loop ends
+      if (++n % 500 === 0) await new Promise(setImmediate);
     }
-    ws.addRow(out);
-  }
-  for (const c of cols) {
-    if (c.money) ws.getColumn(c.key).numFmt = '#,##0.00';
-    else if (c.num) ws.getColumn(c.key).numFmt = '#,##0';
-  }
-  if (truncated) {
-    const note = ws.addRow([
-      `⚠ แสดง ${MAX_ROWS.toLocaleString('en-US')} แถวแรกเท่านั้น — กรองช่วงวันที่/เงื่อนไขให้แคบลงเพื่อได้ข้อมูลครบ`,
-    ]);
-    note.font = { bold: true, color: { argb: 'FFB45309' } };
-  }
-  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    if (truncated) {
+      const note = ws.addRow([
+        `⚠ แสดง ${MAX_ROWS.toLocaleString('en-US')} แถวแรกเท่านั้น — กรองช่วงวันที่/เงื่อนไขให้แคบลงเพื่อได้ข้อมูลครบ`,
+      ]);
+      note.font = { bold: true, color: { argb: 'FFB45309' } };
+      note.commit();
+    }
+    ws.commit();
+    release(); // every row is in the zip — freed before the client can finish reading, so a next export never races it
+    await Promise.race([wb.commit(), gone]);
+  })()
+    .catch((e) => {
+      logError(e, 'export failed mid-stream', { resource }, req);
+      out.destroy(e instanceof Error ? e : new Error(String(e)));
+    })
+    .finally(release);
   const stamp = today(); // Thai calendar date in the file name
-  return { buffer, filename: `${resource}-${stamp}${truncated ? '-partial' : ''}.xlsx` };
+  return {
+    stream: Readable.toWeb(out) as ReadableStream<Uint8Array>,
+    filename: `${resource}-${stamp}${truncated ? '-partial' : ''}.xlsx`,
+  };
 }

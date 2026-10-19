@@ -48,7 +48,7 @@ export default function PendingPage() {
 
   React.useEffect(() => {
     if (preview) return;
-    const id = setInterval(check, 15000);
+    const id = setInterval(() => !document.hidden && void check(), 15000); // not while the tab is hidden
     return () => clearInterval(id);
   }, [check, preview]);
 
@@ -61,16 +61,10 @@ export default function PendingPage() {
           <div className="animate-element animate-delay-100 flex items-center gap-4">
             <span className="relative grid h-14 w-14 shrink-0 place-items-center">
               {/* soft brand glow */}
-              <span
-                className="absolute inset-0 rounded-2xl opacity-40 blur-lg"
-                style={{ background: 'linear-gradient(135deg,#43a6f8,#55d5a1)' }}
-              />
+              <span className="bg-brand absolute inset-0 rounded-2xl opacity-40 blur-lg" />
               {/* pulsing ring */}
               <span className="absolute inset-0 animate-ping rounded-2xl bg-primary/15" />
-              <span
-                className="relative grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg ring-1 ring-inset ring-white/20"
-                style={{ background: 'linear-gradient(135deg,#43a6f8,#55d5a1)' }}
-              >
+              <span className="relative grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg ring-1 ring-inset ring-white/20 bg-brand">
                 <Clock className="h-7 w-7" />
               </span>
             </span>
@@ -88,7 +82,6 @@ export default function PendingPage() {
           {me && (
             <div className="animate-element animate-delay-300 flex items-center gap-3 rounded-2xl border border-border bg-muted/40 p-3">
               {me.avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={me.avatar}
                   alt={me.name}
@@ -116,8 +109,7 @@ export default function PendingPage() {
             <button
               onClick={check}
               disabled={checking}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90 disabled:opacity-60"
-              style={{ background: 'linear-gradient(90deg,#43a6f8,#55d5a1)' }}
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand hover:opacity-90 disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
               ตรวจสอบสถานะการอนุมัติ

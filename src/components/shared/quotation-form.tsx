@@ -13,7 +13,7 @@ import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea, NumberInput, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions, withCurrent } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
-import { useApi, useProducts } from '@/data/db';
+import { useApi, useProducts, useQuotationStatuses } from '@/data/db';
 import { QUOTATION_STATUS_OPTIONS, type Customer } from '@/data/mock';
 import { baht } from '@/lib/utils';
 import { api, errMsg, qs } from '@/lib/api';
@@ -93,6 +93,18 @@ export type QuotationFormHandle = {
   fromApi: (err: unknown) => boolean;
 };
 
+// quotation_status names (DB) → badge tone (list + report)
+export const QUOTATION_TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'neutral'> = {
+  รอเสนอราคา: 'warning',
+  เสนอราคาแล้ว: 'info',
+  ลูกค้าตกลงซ่อม: 'success',
+  'ลูกค้าตกลงซ่อม รอชำระเงิน': 'success',
+  'ลูกค้าตกลงซ่อม รออะไหล่': 'success',
+  ลูกค้าไม่ตกลงซ่อม: 'danger',
+  พ้นกำหนดเสนอราคา: 'danger',
+  ยกเลิกใบเสนอราคา: 'neutral',
+};
+
 /** non-stock line the quotation may carry (legacy SVD0001 = delivery charge, kept out of spare_part_amount) */
 const DELIVERY_EXTRA: ExtraItem[] = [{ code: 'SVD0001', name: 'ค่าขนส่ง' }];
 
@@ -134,6 +146,7 @@ export const QuotationForm = React.forwardRef<
   const [vatRate, setVatRate] = React.useState(initial?.vatRate ?? 0);
   const [remark, setRemark] = React.useState(initial?.remark ?? '');
   const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
+  const { data: STATUSES } = useQuotationStatuses();
   const [customer, setCustomer] = React.useState<Customer | null>(initial?.customerDetail ?? null);
   const [contact, setContact] = React.useState(initial?.contactName ?? '');
   const [jobRef, setJobRef] = React.useState(initial?.jobRef ?? '');
@@ -569,7 +582,10 @@ export const QuotationForm = React.forwardRef<
                   const note = jobNoteOf(v);
                   if (note) push({ kind: 'info', title: 'บันทึกได้ แต่สถานะงานจะไม่เปลี่ยน', desc: note });
                 }}
-                options={withCurrent(strOptions(QUOTATION_STATUS_OPTIONS), status)}
+                options={withCurrent(
+                  strOptions(STATUSES.length ? STATUSES.map((x) => x.name) : QUOTATION_STATUS_OPTIONS),
+                  status,
+                )}
               />
             </Field>
             {initial && (

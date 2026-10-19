@@ -208,18 +208,13 @@ export const useProductsPage = (params: PageParams, mode: DeletedMode = 'exclude
 export type ProductStats = { total: number; qty: number; value: number; low: number; out: number; noPrice: number };
 export const useProductStats = (params: Params = {}, mode: DeletedMode = 'exclude') =>
   useTable<ProductStats>('product_stats', undefined, mode, params);
-export const useMovements = (params: Params = {}) => useTable<Movement>('movements', undefined, 'exclude', params);
 export const useMovementsPage = (params: PageParams) => usePagedTable<Movement>('movements', params);
-/** Recent customers (server caps the list); pass { q } to search the whole table. */
-export const useCustomers = (params: Params = {}) => useTable<Customer>('customers', undefined, 'exclude', params);
 export const useCustomersPage = (params: PageParams, deleted: DeletedMode = 'exclude') =>
   usePagedTable<Customer>('customers', params, deleted);
 /** Server-filtered job list (reports, dropdowns). Use useJobsPage for the big list. */
 export const useJobs = (params: Params = {}) => useTable<Job>('jobs', undefined, 'exclude', params);
 export const useJobsPage = (params: PageParams) => usePagedTable<Job>('jobs', params);
-export const useQuotations = (params: Params = {}) => useTable<Quotation>('quotations', undefined, 'exclude', params);
 export const useQuotationsPage = (params: PageParams) => usePagedTable<Quotation>('quotations', params);
-export const useSaleOrders = (params: Params = {}) => useTable<SaleOrder>('sale_orders', undefined, 'exclude', params);
 export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>('sale_orders', params);
 
 /** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT is a live snapshot (date-independent, but follows `type`) */
@@ -243,7 +238,6 @@ export type Staff = { id: number; name: string; userType: string; takesJobs: boo
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
   useTable<Staff>('staff', undefined, 'exclude', usedAs ? { usedAs } : {}, TTL_MASTER);
 export const useRoles = () => useTable<string>('roles', undefined, 'exclude', {}, TTL_MASTER);
-export const useModules = () => useTable<string>('modules', undefined, 'exclude', {}, TTL_MASTER);
 export const useProvinces = () =>
   useTable<{ id: number; name: string }>('provinces', undefined, 'exclude', {}, TTL_MASTER);
 export const useJobStatuses = () =>
@@ -254,6 +248,9 @@ export const useJobStatuses = () =>
     {},
     TTL_MASTER,
   );
+/** quotation_status (id, name) — status dropdowns / filters */
+export const useQuotationStatuses = () =>
+  useTable<{ id: number; name: string }>('quotation_statuses', undefined, 'exclude', {}, TTL_MASTER);
 export const useVendors = () => useTable<string>('vendors', undefined, 'exclude', {}, TTL_MASTER);
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
 export const useJobTypeDetails = () => useTable<string>('job_type_details', undefined, 'exclude', {}, TTL_MASTER);
@@ -290,8 +287,6 @@ export type IssuedLine = Movement & {
   priceBasis: string;
   value: number;
 };
-export const useIssuedLines = (params: Params = {}) =>
-  useTable<IssuedLine>('issued_lines', undefined, 'exclude', params);
 export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLine>('issued_lines', params);
 /** net of returns; `todayPriced` = lines valued at today's price (no price stored) */
 export type IssuedStats = { lines: number; qty: number; value: number; todayPriced: number; top: string };

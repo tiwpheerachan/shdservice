@@ -438,6 +438,3 @@ function pgCode(e: unknown): string | undefined {
   }
   return undefined;
 }
-
-// re-export for convenience in services
-export { and };

@@ -5,22 +5,12 @@ import { ReportView, type ReportValues } from '@/components/shared/report-view';
 import type { ServerTableState } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { QUOTATION_STATUS_OPTIONS, type Quotation } from '@/data/mock';
-import { useQuotationsPage, useQuotationSummary } from '@/data/db';
+import { useQuotationsPage, useQuotationStatuses, useQuotationSummary } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
-
-const TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'neutral'> = {
-  รอเสนอราคา: 'warning',
-  เสนอราคาแล้ว: 'info',
-  ลูกค้าตกลงซ่อม: 'success',
-  'ลูกค้าตกลงซ่อม รอชำระเงิน': 'success',
-  'ลูกค้าตกลงซ่อม รออะไหล่': 'success',
-  ลูกค้าไม่ตกลงซ่อม: 'danger',
-  พ้นกำหนดเสนอราคา: 'danger',
-  ยกเลิกใบเสนอราคา: 'neutral',
-};
+import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
 
 const columns: Column<Quotation>[] = [
   {
@@ -75,6 +65,7 @@ export default function Page() {
     dir: table.sort?.dir,
   };
   const { data: sum } = useQuotationSummary({ ...filters, q: table.q });
+  const { data: STATUSES } = useQuotationStatuses();
   const {
     rows: QUOTATIONS,
     total: totalRows,
@@ -93,7 +84,12 @@ export default function Page() {
         { kind: 'date', key: 'from', label: 'วันที่สร้าง (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่สร้าง (ถึง)', value: f.to },
         { kind: 'select', key: 'type', label: 'ประเภท', options: ['ALL', 'Type A (Normal)', 'Type B (VIP)'] },
-        { kind: 'select', key: 'status', label: 'สถานะ', options: ['ทั้งหมด', ...QUOTATION_STATUS_OPTIONS] },
+        {
+          kind: 'select',
+          key: 'status',
+          label: 'สถานะ',
+          options: ['ทั้งหมด', ...(STATUSES.length ? STATUSES.map((x) => x.name) : QUOTATION_STATUS_OPTIONS)],
+        },
       ]}
       onApply={setF}
       onExport={() => exportXlsx('quotations', { ...filters, q: table.q })}

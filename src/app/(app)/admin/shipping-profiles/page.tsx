@@ -142,7 +142,6 @@ export default function ShippingProfilesPage() {
         <div className="flex items-center gap-2">
           <span className="grid h-7 w-12 place-items-center overflow-hidden rounded bg-white ring-1 ring-border">
             {r.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={r.logoUrl}
                 alt=""
@@ -289,7 +288,6 @@ export default function ShippingProfilesPage() {
             <div className="flex items-center gap-3">
               <div className="grid h-12 w-28 place-items-center rounded-md border border-border bg-white">
                 {editing?.logoUrl || pendingUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={pendingUrl || editing?.logoUrl} alt="" className="max-h-10 max-w-[100px] object-contain" />
                 ) : (
                   <Truck className="h-5 w-5 text-muted-foreground" />

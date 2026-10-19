@@ -1,8 +1,8 @@
 import 'server-only';
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { clientIp, ipBucket } from '@/lib/client-ip';
-import { hmac } from './track-guard';
+import { clientIp } from '@/lib/client-ip';
+import { hit, ipKeyOf } from './track-guard';
 
 /** every tracking response: never cached anywhere (spec §P, §AE) */
 const NO_STORE = { 'Cache-Control': 'no-store', Pragma: 'no-cache' };
@@ -17,11 +17,14 @@ export function trackCtx(req: NextRequest) {
   const ip = clientIp(req.headers);
   return {
     ip,
-    ipKey: hmac(`ip:${ipBucket(ip)}`),
+    ipKey: ipKeyOf(ip),
     ua: req.headers.get('user-agent') ?? '',
     requestId: randomUUID(),
   };
 }
+
+/** the signed-in customer's routes (/api/track/me*): 30 requests a minute per IP */
+export const meIpOk = (ipKey: string) => hit('me_ip_min', ipKey, 30, 60);
 
 /** small JSON body only (no field is ever longer than a few hundred chars) — routes read it with parseTrackBody */
 export async function readSmallJson(req: NextRequest): Promise<Record<string, unknown>> {

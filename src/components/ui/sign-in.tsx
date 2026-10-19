@@ -38,12 +38,3 @@ export function AuthSplit({
     </div>
   );
 }
-
-/** Small frosted card for the hero panel. */
-export function HeroCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="animate-element animate-delay-500 w-full max-w-sm rounded-3xl border border-white/20 bg-white/10 p-5 text-white backdrop-blur-xl">
-      {children}
-    </div>
-  );
-}

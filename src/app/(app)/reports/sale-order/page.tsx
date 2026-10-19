@@ -10,14 +10,7 @@ import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
-
-const TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
-  รออนุมัติ: 'warning',
-  อนุมัติแล้ว: 'success',
-  ปฏิเสธ: 'danger',
-  ส่งกลับแก้ไข: 'danger',
-  กำลังดำเนินการจัดทำ: 'info',
-};
+import { SO_TONE as TONE } from '@/components/shared/sale-order-form';
 
 const columns: Column<SaleOrder>[] = [
   { key: 'no', header: 'SO No.', width: '120px', cell: (r) => <span className="num font-medium">{r.no}</span> },

@@ -3,26 +3,23 @@
 // (i.e. not PENDING_ROLE) and their account is Active.
 
 export const PENDING_ROLE = 'รออนุมัติ';
-export const ADMIN_ROLE = 'System Admin';
 
 /**
  * Owner emails become System Admin when their app_user row has no role yet — a
  * bootstrap so a fresh DB always has an admin. An admin can still change or
- * disable an owner later. Production reads OWNER_EMAILS (comma-separated) only;
- * the built-in list applies to dev / test databases.
+ * disable an owner later. Read from OWNER_EMAILS (comma-separated) in every
+ * environment — none set = no owner (dev: put yours in .env.development.local;
+ * the e2e server sets its own, tests/e2e/support/env.ts).
  */
-const DEFAULT_OWNERS = [
-  'the.dataverse@shd-technology.co.th',
-  'tiw.pheerachan@shd-technology.co.th',
-  'safe.sun@shd-technology.co.th',
-];
-
 export function ownerEmails(): string[] {
-  const fromEnv = (process.env.OWNER_EMAILS || '')
-    .split(/[,\s]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return Array.from(new Set([...(process.env.NODE_ENV === 'production' ? [] : DEFAULT_OWNERS), ...fromEnv]));
+  return Array.from(
+    new Set(
+      (process.env.OWNER_EMAILS || '')
+        .split(/[,\s]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
 }
 
 export function isOwner(email: string): boolean {

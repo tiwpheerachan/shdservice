@@ -9,7 +9,7 @@ import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { modelNameOptions } from '@/components/shared/model-picker';
 import { RowActions } from '@/components/shared/row-actions';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, PAGE_SIZES, type Column, type ServerTableState } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { StatusBadge, Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
@@ -22,7 +22,7 @@ const CustomerCallModal = dynamic(
   () => import('@/components/shared/customer-call-modal').then((m) => m.CustomerCallModal),
   { ssr: false },
 );
-import { WARRANTY_OPTIONS, type Job, type Customer } from '@/data/mock';
+import { TAT_BUCKET_LABEL, WARRANTY_OPTIONS, type Job, type Customer } from '@/data/mock';
 import {
   useJobsPage,
   useJobTypes,
@@ -126,16 +126,8 @@ const toParams = (f: Filters) => ({
 });
 
 /** dashboard TAT buckets (keys match the dashboard's TatKey) */
-const TAT_BUCKET: Record<string, string> = {
-  d13: '1–3 วัน',
-  d47: '4–7 วัน',
-  d814: '8–14 วัน',
-  d1530: '15–30 วัน',
-  over30: 'เกิน 30 วัน',
-  total: 'ทุกช่วงวัน',
-};
+const TAT_BUCKET: Record<string, string> = { ...TAT_BUCKET_LABEL, total: 'ทุกช่วงวัน' };
 type TatSource = { bucket: string; status: string; type: string };
-const PAGE_SIZES = [10, 25, 50, 100];
 
 /**
  * The list in the URL (filters, table, dashboard chip) — written as it changes, read on load, so a refresh keeps
@@ -397,7 +389,7 @@ export default function JobListPage() {
       minWidth: COL_MIN_WIDTH.status,
       cell: (r) => (
         <span className="flex flex-wrap items-center gap-1">
-          <StatusBadge status={r.status} wrap />
+          <StatusBadge status={r.status} group={r.statusGroup} wrap />
           {r.isBounce && (
             <Badge tone="warning" className="px-1.5">
               งานเด้ง

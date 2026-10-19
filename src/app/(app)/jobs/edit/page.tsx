@@ -17,7 +17,7 @@ import {
   AttachmentSection,
   FormActions,
   VIEW_ONLY,
-  JobFormProvider,
+  JobScreen,
   useJobForm,
   fromJob,
   toJobInput,
@@ -33,11 +33,7 @@ import { useAccess } from '@/lib/use-access';
 function EditJobForm() {
   const { push } = useToast();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
-  const { jobNo, job, loading, error, find, setJob } = useJob({
-    onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
-    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
-  });
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
   const { can } = useAccess();
@@ -156,10 +152,8 @@ function EditJobForm() {
 
 export default function EditJobPage() {
   return (
-    <JobFormProvider>
-      <React.Suspense fallback={null}>
-        <EditJobForm />
-      </React.Suspense>
-    </JobFormProvider>
+    <JobScreen>
+      <EditJobForm />
+    </JobScreen>
   );
 }

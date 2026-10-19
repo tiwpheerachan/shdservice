@@ -158,6 +158,19 @@ export function Field({
   );
 }
 
+/** a dropdown whose list failed to load says so — not a silent empty list — with a retry (inside its Field) */
+export function LookupError({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  if (!error) return null;
+  return (
+    <p role="alert" className="mt-1 text-2xs text-danger">
+      โหลดรายการไม่สำเร็จ{' '}
+      <button type="button" onClick={onRetry} className="font-medium underline underline-offset-2 hover:no-underline">
+        ลองใหม่
+      </button>
+    </p>
+  );
+}
+
 export function FieldGrid({
   cols = 4,
   className,

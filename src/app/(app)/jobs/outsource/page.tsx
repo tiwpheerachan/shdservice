@@ -13,7 +13,7 @@ import {
   AttachmentSection,
   FormActions,
   VIEW_ONLY,
-  JobFormProvider,
+  JobScreen,
   useJobForm,
   fromJob,
   saveCommonSections,
@@ -26,7 +26,9 @@ import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { JOB_STATUS_OPTIONS } from '@/data/mock';
-import { useVendors, useStaff } from '@/data/db';
+import { useVendors, useStaff, useJobStatuses } from '@/data/db';
+import { JS } from '@/lib/status-ids';
+import { SEND_STATUS } from '@/lib/outsource-status';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
@@ -38,7 +40,8 @@ import { outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/j
 // ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
 const OTHER = 'อื่นๆ (ระบุ)';
 /** the statuses this page sets (saveOutsource refuses others; the job's own status is kept as an option) */
-const OUTSOURCE_STATUSES = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source'));
+const OUTSOURCE_IDS: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED];
+const OUTSOURCE_FALLBACK = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source')); // until job_statuses loads
 /** receiving back needs its date (saveOutsource says the same) */
 const receiveSchema = outsourceActionSchema.refine((v) => !!v.receive?.date, {
   path: ['receive', 'date'],
@@ -49,13 +52,13 @@ function OutsourceForm() {
   const { push } = useToast();
   const { data: VENDORS } = useVendors();
   const { data: STAFF } = useStaff();
+  const { data: JOB_STATUSES } = useJobStatuses();
+  const outsourceStatuses = JOB_STATUSES.length
+    ? JOB_STATUSES.filter((x) => OUTSOURCE_IDS.includes(x.id)).map((x) => x.name)
+    : OUTSOURCE_FALLBACK;
   const { userId: meId, can } = useAccess();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
-  const { jobNo, job, loading, error, find, setJob } = useJob({
-    onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
-    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
-  });
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const [tab, setTab] = React.useState('device');
@@ -128,10 +131,10 @@ function OutsourceForm() {
 
   const go = (v: string) => find(v);
 
-  const open = job?.outsource.find((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
+  const open = job?.outsource.find((o) => o.status === SEND_STATUS.SENT);
   // already received: saving again sends the receive block too (its note / date / person may be edited) —
   // a legacy row received without a date is saved as before (send block only)
-  const back = !open && job?.outsource.at(-1)?.status === 'รับเครื่องซ่อมแล้ว' && !!d.recvDate;
+  const back = !open && job?.outsource.at(-1)?.status === SEND_STATUS.RECEIVED && !!d.recvDate;
 
   // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
@@ -339,9 +342,9 @@ function OutsourceForm() {
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
                 options={strOptions(
-                  job && !OUTSOURCE_STATUSES.includes(job.status)
-                    ? [job.status, ...OUTSOURCE_STATUSES]
-                    : OUTSOURCE_STATUSES,
+                  job && !outsourceStatuses.includes(job.status)
+                    ? [job.status, ...outsourceStatuses]
+                    : outsourceStatuses,
                 )}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />
@@ -366,10 +369,8 @@ function OutsourceForm() {
 
 export default function OutsourcePage() {
   return (
-    <JobFormProvider>
-      <React.Suspense fallback={null}>
-        <OutsourceForm />
-      </React.Suspense>
-    </JobFormProvider>
+    <JobScreen>
+      <OutsourceForm />
+    </JobScreen>
   );
 }

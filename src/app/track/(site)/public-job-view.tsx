@@ -172,7 +172,6 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               <div className="flex flex-wrap items-center gap-3">
                 <span className="grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-white ring-1 ring-border">
                   {j.courier?.logoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={j.courier.logoUrl}
                       alt={j.courier.name}

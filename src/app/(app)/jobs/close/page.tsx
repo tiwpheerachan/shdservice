@@ -10,7 +10,7 @@ import {
   ProductSection,
   FormActions,
   VIEW_ONLY,
-  JobFormProvider,
+  JobScreen,
   useJobForm,
   fromJob,
   saveCommonSections,
@@ -30,6 +30,7 @@ import { baht } from '@/lib/utils';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
+import { SEND_STATUS } from '@/lib/outsource-status';
 import { PrintButton } from '@/components/shared/print-button';
 import { postJson, errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
@@ -55,11 +56,7 @@ function CloseForm() {
   const { data: SHIPPERS } = useShippers();
   const { data: SHIPPING } = useShippingProfiles();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
-  const { jobNo, job, loading, error, find, setJob } = useJob({
-    onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
-    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
-  });
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
@@ -132,7 +129,7 @@ function CloseForm() {
   ];
   const net = SUMMARY.reduce((s, x) => s + x.v, 0);
   // still at the out-source vendor → the server refuses the close; say so before the user fills the form
-  const outsourceOut = !!job?.outsource.some((o) => o.status === 'ส่งเครื่องซ่อมแล้ว');
+  const outsourceOut = !!job?.outsource.some((o) => o.status === SEND_STATUS.SENT);
   // a part requested from stock (เบิก) not issued yet → the server refuses a close of an open job (setStatus)
   const waiting = job?.parts.filter((p) => p.statusId === 1 && p.isSpecial && p.requested > p.granted) ?? [];
   const partsWait =
@@ -652,10 +649,8 @@ function CloseForm() {
 
 export default function ClosePage() {
   return (
-    <JobFormProvider>
-      <React.Suspense fallback={null}>
-        <CloseForm />
-      </React.Suspense>
-    </JobFormProvider>
+    <JobScreen>
+      <CloseForm />
+    </JobScreen>
   );
 }

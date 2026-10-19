@@ -1,9 +1,10 @@
 import 'server-only';
 import { invalidate } from '@/server/cache';
 import { and, desc, eq, ne } from 'drizzle-orm';
-import { db } from '@/db/client';
+import { db, type Tx } from '@/db/client';
 import { appUser, customer, job, jobLog, product, quotationHd, saleOutHd } from '@/db/schema';
 import type { Module } from '@/lib/modules';
+import { JS } from '@/lib/status-ids';
 import { HttpError, invalidateUserCache } from '@/server/auth';
 import { audit } from '@/server/audit';
 import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
@@ -12,6 +13,7 @@ import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from 
 import { productsChanged } from './stock';
 import { AS } from './sale-orders';
 import { DELETED_USER_MSG } from './users';
+import { jobNotFound, logStatus } from './jobs';
 
 export type RecordTable =
   | 'users'
@@ -44,9 +46,6 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
   sale_orders: 'Sale Order',
 };
 
-const JOB_STATUS_CANCELLED = 0;
-const JOB_STATUS_NEW = 1;
-
 /**
  * Set record_status (ACTIVE / INACTIVE / DELETED) on any entity. Nothing is ever
  * hard-deleted. The legacy flag each table used before is mirrored so the old
@@ -74,41 +73,35 @@ export async function setRecordStatus(
     quotations: ['quotation_hd', 'Quotation'],
     sale_orders: ['sale_out_hd', 'Sale Order'],
   };
-  // the record_status before this change — the audit keeps [old, new], not [null, new]
-  const OLD: Partial<Record<RecordTable, () => Promise<{ rs: string }[]>>> = {
-    users: () =>
-      db
+  // the record_status before this change (read in the change's transaction) — the audit keeps [old, new], not [null, new]
+  const OLD: Partial<Record<RecordTable, (tx: Tx) => Promise<{ rs: string }[]>>> = {
+    users: (tx) =>
+      tx
         .select({ rs: appUser.recordStatus })
         .from(appUser)
-        .where(eq(appUser.userId, Number(id))),
-    products: () =>
-      db
+        .where(eq(appUser.userId, Number(id)))
+        .for('update'),
+    products: (tx) =>
+      tx
         .select({ rs: product.recordStatus })
         .from(product)
-        .where(eq(product.productCode, String(id))),
-    customers: () =>
-      db
+        .where(eq(product.productCode, String(id)))
+        .for('update'),
+    customers: (tx) =>
+      tx
         .select({ rs: customer.recordStatus })
         .from(customer)
-        .where(eq(customer.customerCode, String(id))),
-    jobs: () =>
-      db
-        .select({ rs: job.recordStatus })
-        .from(job)
-        .where(eq(job.jobNo, String(id))),
-    quotations: () =>
-      db
+        .where(eq(customer.customerCode, String(id)))
+        .for('update'),
+    quotations: (tx) =>
+      tx
         .select({ rs: quotationHd.recordStatus })
         .from(quotationHd)
-        .where(eq(quotationHd.quotationNo, String(id))),
-    sale_orders: () =>
-      db
-        .select({ rs: saleOutHd.recordStatus })
-        .from(saleOutHd)
-        .where(eq(saleOutHd.saleOutHdNo, String(id))),
+        .where(eq(quotationHd.quotationNo, String(id)))
+        .for('update'),
   };
-  const old = (await OLD[table]?.())?.[0]?.rs ?? null;
-  const log = async (w: Parameters<typeof audit>[0] = db) => {
+  const oldOf = async (tx: Tx) => (await OLD[table]?.(tx))?.[0]?.rs ?? null;
+  const log = async (w: Tx, old: string | null) => {
     const e = ENTITY[table];
     if (!e) return;
     await audit(w, byUserId, {
@@ -127,71 +120,81 @@ export async function setRecordStatus(
     case 'models':
       return setModelStatus(String(id), rs, byUserId);
     case 'users':
-      // out of DELETED only through กู้คืน (users.ts setUserDeleted → INACTIVE)
-      if (old === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
-      await db
-        .update(appUser)
-        .set({ ...stamp, deleted: rs === RS.DELETED })
-        .where(eq(appUser.userId, Number(id)));
+      await db.transaction(async (tx) => {
+        const old = await oldOf(tx);
+        // out of DELETED only through กู้คืน (users.ts setUserDeleted → INACTIVE)
+        if (old === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
+        await tx
+          .update(appUser)
+          .set({ ...stamp, deleted: rs === RS.DELETED })
+          .where(eq(appUser.userId, Number(id)));
+        await log(tx, old);
+      });
       invalidateUserCache();
       invalidate('staff');
-      await log();
       return;
     case 'products':
-      await db
-        .update(product)
-        .set(
-          rs === RS.DELETED
-            ? { ...stamp, cancelDate: nowThai(), cancelBy: byUserId }
-            : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: '' },
-        )
-        .where(eq(product.productCode, String(id)));
+      await db.transaction(async (tx) => {
+        const old = await oldOf(tx);
+        await tx
+          .update(product)
+          .set(
+            rs === RS.DELETED
+              ? { ...stamp, cancelDate: nowThai(), cancelBy: byUserId }
+              : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: '' },
+          )
+          .where(eq(product.productCode, String(id)));
+        await log(tx, old);
+      });
       productsChanged();
-      await log();
       return;
     case 'customers':
-      await db
-        .update(customer)
-        .set(stamp)
-        .where(eq(customer.customerCode, String(id)));
-      await log();
+      await db.transaction(async (tx) => {
+        const old = await oldOf(tx);
+        await tx
+          .update(customer)
+          .set(stamp)
+          .where(eq(customer.customerCode, String(id)));
+        await log(tx, old);
+      });
       return;
     case 'quotations':
-      await db
-        .update(quotationHd)
-        .set(stamp)
-        .where(eq(quotationHd.quotationNo, String(id)));
-      await log();
+      await db.transaction(async (tx) => {
+        const old = await oldOf(tx);
+        await tx
+          .update(quotationHd)
+          .set(stamp)
+          .where(eq(quotationHd.quotationNo, String(id)));
+        await log(tx, old);
+      });
       return;
     case 'jobs': {
       await db.transaction(async (tx) => {
+        // locked like the job workflows (lockJob): a save running now finishes first
         const [cur] = await tx
-          .select({ st: job.jobStatusId })
+          .select({ st: job.jobStatusId, rs: job.recordStatus })
           .from(job)
-          .where(eq(job.jobNo, String(id)));
-        if (!cur) throw new HttpError(404, 'job not found');
+          .where(eq(job.jobNo, String(id)))
+          .for('update');
+        if (!cur) throw jobNotFound(String(id));
         // restored → the status it had before it was deleted (a job left on 0 "ยกเลิกข้อมูล" matched no list)
         let back: number | null = null;
-        if (rs !== RS.DELETED && old === RS.DELETED && cur.st === JOB_STATUS_CANCELLED) {
+        if (rs !== RS.DELETED && cur.rs === RS.DELETED && cur.st === JS.CANCELLED) {
           const [prev] = await tx
             .select({ st: jobLog.jobStatusId })
             .from(jobLog)
-            .where(and(eq(jobLog.jobNo, String(id)), ne(jobLog.jobStatusId, JOB_STATUS_CANCELLED)))
+            .where(and(eq(jobLog.jobNo, String(id)), ne(jobLog.jobStatusId, JS.CANCELLED)))
             .orderBy(desc(jobLog.jobLogId))
             .limit(1);
-          back = prev?.st ?? JOB_STATUS_NEW;
+          back = prev?.st ?? JS.NEW;
         }
-        const st = rs === RS.DELETED ? JOB_STATUS_CANCELLED : back;
+        const st = rs === RS.DELETED ? JS.CANCELLED : back;
         await tx
           .update(job)
           .set({ ...statusStamp(rs, byUserId, false), ...(st !== null ? { jobStatusId: st } : {}) })
           .where(eq(job.jobNo, String(id)));
-        if (st !== null && st !== cur.st) {
-          await tx
-            .insert(jobLog)
-            .values({ jobNo: String(id), jobStatusId: st, jobLogDate: nowThai(), jobActionBy: byUserId });
-        }
-        await log(tx);
+        if (st !== null && st !== cur.st) await logStatus(tx, String(id), st, byUserId);
+        await log(tx, cur.rs);
       });
       return;
     }
@@ -199,11 +202,11 @@ export async function setRecordStatus(
       await db.transaction(async (tx) => {
         // locked: an approval running now finishes first (approveSaleOrder locks the same row)
         const [cur] = await tx
-          .select({ ap: saleOutHd.approveStatusId })
+          .select({ ap: saleOutHd.approveStatusId, rs: saleOutHd.recordStatus })
           .from(saleOutHd)
           .where(eq(saleOutHd.saleOutHdNo, String(id)))
           .for('update');
-        if (!cur) throw new HttpError(404, 'sale order not found');
+        if (!cur) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
         if (rs === RS.DELETED && cur.ap === AS.APPROVED)
           throw new HttpError(
             409,
@@ -228,7 +231,7 @@ export async function setRecordStatus(
                 },
           )
           .where(eq(saleOutHd.saleOutHdNo, String(id)));
-        await log(tx);
+        await log(tx, cur.rs);
       });
       return;
   }

@@ -179,7 +179,6 @@ export default function DocumentProfilesPage() {
       width: '160px',
       cell: (r) => (
         <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={r.logoUrl}
             alt=""
@@ -387,7 +386,6 @@ export default function DocumentProfilesPage() {
             <div className="flex items-center gap-3">
               <div className="grid h-14 w-40 place-items-center rounded-md border border-border bg-white">
                 {editing || pendingUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={pendingUrl || editing?.logoUrl} alt="" className="max-h-12 max-w-[150px] object-contain" />
                 ) : (
                   <Building2 className="h-6 w-6 text-muted-foreground" />

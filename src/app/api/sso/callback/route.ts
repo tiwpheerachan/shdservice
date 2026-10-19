@@ -134,9 +134,10 @@ export const GET = checked(async (request: NextRequest) => {
   // `user`/`profile` object can exist without one (e.g. phone-only Lark accounts)
   const email = str(identity.email).trim() || str(u.email).trim();
   if (!email) {
-    console.error(
-      `[sso] no email in verify response; top-level keys: ${JSON.stringify(Object.keys(identity))} user keys: ${JSON.stringify(Object.keys(u ?? {}))}`,
-    );
+    logError('no email in verify response', 'sso callback refused', {
+      topKeys: Object.keys(identity),
+      userKeys: Object.keys(u ?? {}),
+    });
     return fail(request, 'no_email');
   }
 

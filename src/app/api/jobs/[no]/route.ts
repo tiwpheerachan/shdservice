@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handle, parseBody, parseParams, requireCan, HttpError, requireView, JOB_MODULES } from '@/server/auth';
+import { handle, parseBody, parseParams, requireCan, requireView, JOB_MODULES } from '@/server/auth';
 import { jobGet, jobUpdate } from '@/server/contract/jobs';
-import { getJob, updateJob, type JobInput } from '@/server/services/jobs';
+import { getJob, jobNotFound, updateJob, type JobInput } from '@/server/services/jobs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, [...JOB_MODULES, 'Quotation']);
   const { no } = await parseParams(ctx, jobGet);
   const job = await getJob(decodeURIComponent(no).trim().toUpperCase());
-  if (!job) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + no);
+  if (!job) throw jobNotFound(no);
   return NextResponse.json({ job });
 });
 

@@ -1,7 +1,10 @@
 import 'server-only';
 import { cached } from '@/server/cache';
 import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from 'drizzle-orm';
+import type { PgSelect } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
+import { QS } from '@/lib/status-ids';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
 import type { Quotation } from '@/data/mock';
 import { HttpError, fullName } from '@/server/auth';
@@ -19,16 +22,7 @@ import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 
 /** quotation_status ids (from the dump) */
-export const QS = {
-  WAIT: 1,
-  SENT: 2,
-  AGREED: 3,
-  DECLINED: 4,
-  CANCELLED: 5,
-  AGREED_WAIT_PAY: 6,
-  EXPIRED: 8,
-  AGREED_WAIT_PARTS: 9,
-} as const;
+export { QS };
 const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
 
 /** UI type labels ↔ legacy quotation_type values */
@@ -96,15 +90,18 @@ function toQuotation(r: ListRow): Quotation {
   };
 }
 
-const base = () =>
-  db
-    .select(listSelect)
-    .from(quotationHd)
+/** The list's joins — the list, its count and the report KPI (reports.ts) all take them, so quotationWhere
+ *  never names a table one of them lacks (a count does not pay for the creator: Postgres drops an unused
+ *  left join on a primary key). */
+export const withQuotationJoins = <T extends PgSelect>(q: T) =>
+  q
     .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
     .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
     .leftJoin(appUser, eq(appUser.userId, quotationHd.createBy));
+
+const base = () => withQuotationJoins(db.select(listSelect).from(quotationHd).$dynamic());
 
 const SORT = {
   no: quotationHd.quotationNo,
@@ -126,6 +123,18 @@ export type QuotationFilters = {
   warranty?: string;
   brand?: string;
 };
+
+/** The page's query (?status=&brand=…) as filters — the list, its report KPI and the export all read it here. */
+export const quotationFiltersFromQuery = (f: Record<string, string>, deleted: StatusMode): QuotationFilters => ({
+  status: f.status,
+  from: f.from,
+  to: f.to,
+  deleted,
+  jobNo: f.jobNo,
+  type: f.type,
+  warranty: f.warranty,
+  brand: f.brand,
+});
 
 export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
@@ -160,14 +169,7 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
   const w = quotationWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
-    db
-      .select({ total: count() })
-      .from(quotationHd)
-      .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
-      .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
-      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
-      .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
-      .where(w),
+    withQuotationJoins(db.select({ total: count() }).from(quotationHd).$dynamic()).where(w),
     base()
       .where(w)
       .orderBy(...orderBy(p.sort, SORT, [desc(quotationHd.createDate), desc(quotationHd.quotationHdId)]))
@@ -181,7 +183,7 @@ export async function listQuotations(f: QuotationFilters & { q?: string; limit?:
   const rows = await base()
     .where(quotationWhere(f.q ?? '', f))
     .orderBy(desc(quotationHd.createDate))
-    .limit(Math.min(f.limit ?? 5000, 20000));
+    .limit(Math.min(f.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toQuotation);
 }
 
@@ -231,25 +233,27 @@ const versionOf = (rowVersion: number, lines: { quotationDtId: number }[]) =>
   rowVersion + Math.max(0, ...lines.map((l) => l.quotationDtId));
 
 export async function getQuotation(no: string): Promise<QuotationDetail | null> {
-  const [r] = await base().where(eq(quotationHd.quotationNo, no)).limit(1);
+  // the list row, the whole header and the creator's contact in one read; the lines alongside
+  const [[r], dts] = await Promise.all([
+    withQuotationJoins(
+      db
+        .select({ ...listSelect, hd: quotationHd, creatorPhone: appUser.phoneNo, creatorEmail: appUser.emailAddress })
+        .from(quotationHd)
+        .$dynamic(),
+    )
+      .where(eq(quotationHd.quotationNo, no))
+      .limit(1),
+    db
+      .select()
+      .from(quotationDt)
+      .where(eq(quotationDt.quotationNo, no))
+      .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId)),
+  ]);
   if (!r) return null;
-  const [hd] = await db.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).limit(1);
-  if (!hd) return null; // deleted between the two reads
-  const dts = await db
-    .select()
-    .from(quotationDt)
-    .where(eq(quotationDt.quotationNo, no))
-    .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
-  const [cust, jb, [creator]] = await Promise.all([
+  const { hd } = r;
+  const [cust, jb] = await Promise.all([
     hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
     hd.referenceJobNo ? getJob(hd.referenceJobNo) : null,
-    hd.createBy
-      ? db
-          .select({ phone: appUser.phoneNo, email: appUser.emailAddress })
-          .from(appUser)
-          .where(eq(appUser.userId, hd.createBy))
-          .limit(1)
-      : Promise.resolve([undefined]),
   ]);
   return {
     ...toQuotation(r),
@@ -281,8 +285,8 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     netAmount: num(hd.netAmount),
     approveRemark: hd.customerApproveRemark ?? '',
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
-    createdByPhone: creator?.phone ?? '',
-    createdByEmail: creator?.email ?? '',
+    createdByPhone: r.creatorPhone ?? '',
+    createdByEmail: r.creatorEmail ?? '',
     version: versionOf(hd.rowVersion, dts),
   };
 }
@@ -319,10 +323,10 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     : [];
   assertValid(quotationSchema(i.no ? (before?.jobNo ?? '') : undefined), i);
   const jobNo = cleanCode(i.jobNo); // stored upper-case
-  if (jobNo) {
-    const [found] = await db.select({ no: job.jobNo }).from(job).where(eq(job.jobNo, jobNo)).limit(1);
-    if (!found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
-  }
+  const [found] = jobNo
+    ? await db.select({ profileId: job.documentProfileId }).from(job).where(eq(job.jobNo, jobNo)).limit(1)
+    : [];
+  if (jobNo && !found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
   const cust = await getCustomerByCode(str(i.customerCode));
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   const lines = (i.lines ?? [])
@@ -351,11 +355,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
   // a quotation raised from a job is issued under the job's profile unless the user picked another
-  const jobProfileId =
-    !i.no && jobNo
-      ? ((await db.select({ p: job.documentProfileId }).from(job).where(eq(job.jobNo, jobNo)).limit(1))[0]?.p ??
-        undefined)
-      : undefined;
+  const jobProfileId = !i.no ? (found?.profileId ?? undefined) : undefined;
 
   const dtRows = lines.map((l) => ({
     lineNumber: l.lineNumber,
@@ -471,5 +471,3 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   });
   return (await getQuotation(no))!;
 }
-
-export { sql };

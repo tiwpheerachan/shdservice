@@ -2,10 +2,14 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowRight, TriangleAlert } from 'lucide-react';
+import { ArrowRight, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { jobTone, type Tone } from '@/components/ui/badge';
+import { TAT_BUCKET_LABEL } from '@/data/mock';
 import { SearchSelect } from '@/components/shared/search-select';
-import { useDashboard, useJobs, useJobTypes } from '@/data/db';
+import { useDashboard, useJobs, useJobStatuses, useJobTypes } from '@/data/db';
 import { int, cn } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { useAccess } from '@/lib/use-access';
@@ -18,10 +22,42 @@ const TONE: Record<string, string> = {
   total: 'bg-primary',
 };
 
-function tatBand(status: string) {
-  if (/เสร็จ|ปิดงาน|ส่งคืน|Complete/i.test(status)) return 'bg-success';
-  if (/เบิก|ซ่อม|out-?source/i.test(status)) return 'bg-info';
-  return 'bg-warning';
+/* a job status's dot / band — the same colour as its StatusBadge (jobTone) */
+const TONE_BG: Record<Tone, string> = {
+  neutral: 'bg-muted-foreground/40',
+  primary: 'bg-primary',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger: 'bg-danger',
+  info: 'bg-info',
+};
+
+/** a panel's failed read — same look as DataTable's error row */
+function LoadFailed({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="px-5 py-10 text-center">
+      <TriangleAlert className="mx-auto mb-2 h-7 w-7 text-destructive/70" aria-hidden />
+      <p className="text-sm font-medium text-destructive">โหลดข้อมูลไม่สำเร็จ</p>
+      <p className="mt-1 text-xs text-muted-foreground/80">{error}</p>
+      <Button variant="outline" size="sm" type="button" className="mt-3" onClick={onRetry}>
+        <RotateCcw className="h-3.5 w-3.5" />
+        ลองใหม่
+      </Button>
+    </div>
+  );
+}
+
+/** first load: placeholder rows that keep a table's height */
+function SkeletonRows({ rows, cols }: { rows: number; cols: number }) {
+  return Array.from({ length: rows }, (_, i) => (
+    <tr key={i} className="border-b border-border/60 last:border-0" aria-busy>
+      {Array.from({ length: cols }, (_, j) => (
+        <td key={j} className={cn('py-3', j === 0 ? 'pl-5 pr-3' : 'px-3')}>
+          <Skeleton className={cn('h-3.5', j === 0 ? 'w-10' : i % 2 ? 'w-3/5' : 'w-4/5')} />
+        </td>
+      ))}
+    </tr>
+  ));
 }
 
 /* ---- section shell: flat card, hairline header ---- */
@@ -146,12 +182,15 @@ export default function DashboardPage() {
               : '';
 
   // one request for every panel (was four in parallel, each computing the whole dashboard)
-  const { data: DASH } = useDashboard(range);
+  const { data: dashData, loading: dashLoading, error: dashError, refetch: retryDash } = useDashboard(range);
+  const DASH = dashError ? null : dashData; // no stale range's numbers under an error
+  const dashFirstLoad = dashLoading && !DASH;
+  const { data: STATUSES } = useJobStatuses(); // status → group, for the TAT row colour
   const DASH_GROUPS = DASH?.groups ?? [];
   const TAT_ROWS = DASH?.tat ?? [];
   const MONTHLY = DASH?.monthly ?? [];
   const TOP_SYMPTOMS = DASH?.topSymptoms ?? [];
-  const { data: JOBS } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
+  const { data: JOBS, loading: jobsLoading, error: jobsError, refetch: retryJobs } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
   const granularity = DASH?.granularity ?? 'month';
   const rangeText =
     (!range.from && !range.to ? 'ทั้งหมด' : `${thai(range.from) || 'เริ่มต้น'} – ${thai(range.to) || 'วันนี้'}`) +
@@ -174,13 +213,10 @@ export default function DashboardPage() {
     }),
     { d13: 0, d47: 0, d814: 0, d1530: 0, over30: 0, total: 0 },
   );
-  const dayCols = [
-    { k: 'd13' as const, label: '1–3 วัน' },
-    { k: 'd47' as const, label: '4–7 วัน' },
-    { k: 'd814' as const, label: '8–14 วัน' },
-    { k: 'd1530' as const, label: '15–30 วัน' },
-    { k: 'over30' as const, label: 'เกิน 30 วัน' },
-  ];
+  const dayCols = (Object.keys(TAT_BUCKET_LABEL) as (keyof typeof TAT_BUCKET_LABEL)[]).map((k) => ({
+    k,
+    label: TAT_BUCKET_LABEL[k],
+  }));
 
   /* monthly line chart geometry */
   const W = 640,
@@ -284,7 +320,25 @@ export default function DashboardPage() {
           below and the bell count every open job now, so the numbers differ on purpose */}
       <section className="space-y-2" aria-label="สรุปงานที่เปิดในช่วงวันที่เลือก">
         <p className="text-xs text-muted-foreground">งานที่เปิดในช่วงวันที่เลือก ({rangeText})</p>
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+        {dashError && (
+          <div className="rounded-xl border border-border bg-card">
+            <LoadFailed error={dashError} onRetry={retryDash} />
+          </div>
+        )}
+        <div
+          className={cn(
+            'grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4',
+            dashError && 'hidden',
+          )}
+        >
+          {dashFirstLoad &&
+            Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="space-y-3 bg-card p-5" aria-busy>
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-7 w-16" />
+                <Skeleton className="h-[3px] w-full" />
+              </div>
+            ))}
           {DASH_GROUPS.map((g) => (
             <Link
               key={g.key}
@@ -338,11 +392,24 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
+              {dashFirstLoad && <SkeletonRows rows={6} cols={8} />}
+              {dashError && (
+                <tr>
+                  <td colSpan={8}>
+                    <LoadFailed error={dashError} onRetry={retryDash} />
+                  </td>
+                </tr>
+              )}
               {tat.map((r, i) => (
                 <tr key={r.status} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
                   <td className="py-2.5 pl-5">
                     <span className="flex items-center gap-2.5">
-                      <span className={cn('h-3.5 w-[3px] rounded-full', tatBand(r.status))} />
+                      <span
+                        className={cn(
+                          'h-3.5 w-[3px] rounded-full',
+                          TONE_BG[jobTone(r.status, STATUSES.find((s) => s.id === r.statusId)?.group)],
+                        )}
+                      />
                       <span className="num text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                     </span>
                   </td>
@@ -510,30 +577,29 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {JOBS.slice(0, 6).map((j) => {
-                const done = /เสร็จ|ปิดงาน/.test(j.status);
-                const fresh = j.status === 'งานใหม่';
-                return (
-                  <tr key={j.no} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
-                    <td className="num py-2.5 pl-5 font-medium text-primary">{j.no}</td>
-                    <td className="num py-2.5 text-xs text-muted-foreground">{j.openDate}</td>
-                    <td className="max-w-[220px] truncate py-2.5 pr-3">{j.customer}</td>
-                    <td className="hidden py-2.5 pr-3 md:table-cell">{j.brandModel}</td>
-                    <td className="hidden py-2.5 pr-3 text-muted-foreground lg:table-cell">{j.owner}</td>
-                    <td className="py-2.5 pr-5">
-                      <span className="inline-flex items-center gap-1.5 text-xs">
-                        <span
-                          className={cn(
-                            'h-1.5 w-1.5 rounded-full',
-                            done ? 'bg-success' : fresh ? 'bg-info' : 'bg-warning',
-                          )}
-                        />
-                        {j.status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+              {jobsLoading && JOBS.length === 0 && <SkeletonRows rows={6} cols={6} />}
+              {jobsError && (
+                <tr>
+                  <td colSpan={6}>
+                    <LoadFailed error={jobsError} onRetry={retryJobs} />
+                  </td>
+                </tr>
+              )}
+              {(jobsError ? [] : JOBS.slice(0, 6)).map((j) => (
+                <tr key={j.no} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
+                  <td className="num py-2.5 pl-5 font-medium text-primary">{j.no}</td>
+                  <td className="num py-2.5 text-xs text-muted-foreground">{j.openDate}</td>
+                  <td className="max-w-[220px] truncate py-2.5 pr-3">{j.customer}</td>
+                  <td className="hidden py-2.5 pr-3 md:table-cell">{j.brandModel}</td>
+                  <td className="hidden py-2.5 pr-3 text-muted-foreground lg:table-cell">{j.owner}</td>
+                  <td className="py-2.5 pr-5">
+                    <span className="inline-flex items-center gap-1.5 text-xs">
+                      <span className={cn('h-1.5 w-1.5 rounded-full', TONE_BG[jobTone(j.status, j.statusGroup)])} />
+                      {j.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

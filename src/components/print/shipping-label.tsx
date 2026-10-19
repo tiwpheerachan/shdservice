@@ -52,7 +52,6 @@ export function ShippingLabel({
       </div>
       <div className="so-sheet text-[12.5px] leading-[1.35]">
         <div className="so-frame">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={profile.logoUrl} alt={profile.code} className="absolute left-[4mm] top-[3.5mm] h-[8mm] w-auto" />
           <span className="num absolute right-[6mm] top-[3.5mm] text-[14px]">{docNo}</span>
 

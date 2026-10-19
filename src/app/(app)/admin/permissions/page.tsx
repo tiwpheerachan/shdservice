@@ -25,13 +25,14 @@ import {
   type Module,
   type Right,
 } from '@/lib/modules';
+import { PENDING_ROLE } from '@/lib/access';
 
 // บทบาท (user_type) มาจากตาราง app_config — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
 // (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว app_config ชื่อ RIGHTS
 // เก็บใน can_view
 const MENUS: readonly string[] = PAGE_MODULES;
 const RIGHT_NAMES = Object.keys(RIGHTS) as Right[];
-const FALLBACK_ROLES = ROLES.filter((r) => r !== 'รออนุมัติ');
+const FALLBACK_ROLES = ROLES.filter((r) => r !== PENDING_ROLE);
 
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;

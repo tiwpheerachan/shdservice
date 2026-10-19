@@ -21,10 +21,13 @@ import {
 } from 'drizzle-orm';
 import { alias, unionAll } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '@/db/client';
+import { JOB_GROUP, JS, STORE_LOCATION_ID } from '@/lib/status-ids';
+import { SEND_STATUS } from '@/lib/outsource-status';
 import {
   appUser,
   documentAttach,
   job,
+  jobCallLog,
   jobLog,
   jobOrderSparePartLog,
   jobSendForwardDt,
@@ -42,7 +45,7 @@ import type { Job } from '@/data/mock';
 import { HttpError, fullName, hasRight, userHasRight } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
-import { audit, actorName, diff, auditFor, type AuditRow } from '@/server/audit';
+import { audit, actorName, diff, auditFor, type AuditEntry, type AuditRow } from '@/server/audit';
 import { orderBy, likeEscape, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import {
   dateOrNull,
@@ -100,40 +103,20 @@ import { cleanTracking } from '@/lib/validation';
 import { callLogSchema } from '@/lib/validation/stock';
 import { assertValid } from '@/server/validate';
 import { clean, cleanCode, cleanText, summary, type FieldErrors } from '@/lib/validation';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
 /* ------------------------------------------------------------------ *
  * Status constants (job_status.job_status_id) — verified against the dump
  * ------------------------------------------------------------------ */
-export const JS = {
-  CANCELLED: 0,
-  NEW: 1,
-  IN_PROGRESS: 2,
-  WAIT_PARTS: 3,
-  QUOTED: 4,
-  REPAIRED: 5,
-  REPAIR_CANCELLED: 6,
-  CLOSED_WAIT_TRACKING: 7,
-  CLOSED_TRACKED: 8,
-  REPAIRED_PAID: 9,
-  PARTS_ISSUED: 10,
-  PARTS_REQUESTED: 11,
-  CUSTOMER_AGREED: 12,
-  WAIT_QUOTE: 13,
-  OUTSOURCE_SENT: 14,
-  OUTSOURCE_RECEIVED: 15,
-  QUOTE_EXPIRED: 16,
-  RETURNED_TO_STOCK: 17,
-  SWAP_ISSUED: 18,
-  REFUND_PAID: 19,
-  COMPLETE: 20,
-  CLOSED_REFUND: 21,
-  REPAIRED_NO_FAULT: 22,
-  CLOSED_OUTSOURCE: 23,
-  CLOSED_WAIT_PICKUP: 24,
-} as const;
+export { JS };
 
-const REPAIRED_GROUP = 'Repaired';
-const FINISHED_GROUP = 'Finished';
+const REPAIRED_GROUP = JOB_GROUP.REPAIRED;
+const FINISHED_GROUP = JOB_GROUP.FINISHED;
+
+/** kpiGroup of a status id column (the CASE stays literal SQL: a bound value would differ between SELECT and GROUP BY) */
+function groupOf(id: typeof job.jobStatusId | typeof jobStatus.jobStatusId) {
+  return sql<string>`(case when ${id} = ${sql.raw(String(JS.REPAIR_CANCELLED))} then '${sql.raw(JOB_GROUP.CANCEL)}' else ${jobStatus.jobStatusGroup} end)`;
+}
 
 /**
  * The status group the dashboard cards / KPI links / report counts use: job_status_group, except
@@ -141,7 +124,7 @@ const FINISHED_GROUP = 'Finished';
  * nothing was repaired — counts as Cancel. (Cancel's own status 0 = soft-deleted, hidden everywhere.)
  * Needs job_status joined.
  */
-export const kpiGroup = sql<string>`(case when ${job.jobStatusId} = ${sql.raw(String(JS.REPAIR_CANCELLED))} then 'Cancel' else ${jobStatus.jobStatusGroup} end)`;
+export const kpiGroup = groupOf(job.jobStatusId);
 
 const eng = alias(appUser, 'eng');
 const opener = alias(appUser, 'opener');
@@ -186,26 +169,47 @@ async function statusGroup(id: number) {
   return (await jobStatuses()).find((r) => r.id === id)?.group ?? '';
 }
 
-/** Insert a job_log row — call on EVERY status change (legacy invariant). */
-export async function logStatus(tx: Tx, jobNo: string, statusId: number, byUserId: number) {
-  await tx.insert(jobLog).values({ jobNo, jobStatusId: statusId, jobLogDate: nowThai(), jobActionBy: byUserId });
+async function statusName(id: number) {
+  return (await jobStatuses()).find((r) => r.id === id)?.name ?? String(id);
 }
 
+/** Insert a job_log row (one per job) — call on EVERY status change (legacy invariant). */
+export async function logStatus(tx: Tx, jobNos: string | string[], statusId: number, byUserId: number) {
+  const at = nowThai();
+  const list = Array.isArray(jobNos) ? jobNos : [jobNos];
+  if (list.length)
+    await tx
+      .insert(jobLog)
+      .values(list.map((jobNo) => ({ jobNo, jobStatusId: statusId, jobLogDate: at, jobActionBy: byUserId })));
+}
+
+/** the STATUS history row of a status change (setStatus, assignJobs) */
+const statusEntry = (jobNo: string, name: string, from: number | null, to: number, why?: string): AuditEntry => ({
+  action: 'STATUS',
+  module: 'Job Management',
+  entity: 'job',
+  key: jobNo,
+  summary: `เปลี่ยนสถานะงาน → ${name}${why ? ` · ${why}` : ''}`,
+  changes: { jobStatusId: [from, to] },
+});
+
+export const jobNotFound = (jobNo: string) => new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+
 /**
- * Lock the job row for this transaction and return its CURRENT status. Every job write
+ * Lock the job row for this transaction and return it as it is NOW. Every job write
  * calls it first: two people saving/closing the same job then run one after the other,
  * and setStatus compares against the status as it is now — not a read from before the
  * other save committed (duplicate job_log rows, lost parts totals).
  */
-async function lockJob(tx: Tx, jobNo: string): Promise<number | null> {
-  const [r] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
-  if (!r) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
-  return r.status;
+async function lockJob(tx: Tx, jobNo: string): Promise<JobRow> {
+  const [r] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
+  if (!r) throw jobNotFound(jobNo);
+  return r;
 }
 
 /** an out-source send not yet recorded as received (saveOutsource's open row) */
 const outsourceOpen = (jobNo: string) =>
-  and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, 'ส่งเครื่องซ่อมแล้ว'));
+  and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, SEND_STATUS.SENT));
 
 /** Stamp job_repaired_date/by only while it is still the 1900 sentinel (never repaired-stamped). */
 async function stampRepairedIfMissing(tx: Tx, jobNo: string, at: string, byUserId: number) {
@@ -248,7 +252,7 @@ async function setStatus(
   if (current === statusId) return false;
   const group = await statusGroup(statusId);
   const fromGroup = current == null ? '' : await statusGroup(current);
-  const name = (await jobStatuses()).find((r) => r.id === statusId)?.name ?? String(statusId);
+  const name = await statusName(statusId);
   // a closed job back to an open status (a re-save picking the first status in the list did that by accident)
   if (fromGroup === FINISHED_GROUP && group !== FINISHED_GROUP && !(await userHasRight(byUserId, 'Job Reopen')))
     throw new HttpError(409, REOPEN_LOCKED, { fields: { status: REOPEN_LOCKED } });
@@ -294,14 +298,7 @@ async function setStatus(
     .set({ jobStatusId: statusId, ...extra })
     .where(eq(job.jobNo, jobNo));
   await logStatus(tx, jobNo, statusId, byUserId);
-  await audit(tx, byUserId, {
-    action: 'STATUS',
-    module: 'Job Management',
-    entity: 'job',
-    key: jobNo,
-    summary: `เปลี่ยนสถานะงาน → ${name}${why ? ` · ${why}` : ''}`,
-    changes: { jobStatusId: [current ?? null, statusId] },
-  });
+  await audit(tx, byUserId, statusEntry(jobNo, name, current ?? null, statusId, why));
   return true;
 }
 
@@ -316,7 +313,7 @@ export async function followQuotation(
 ) {
   const target = QUOTE_MOVES_BY_ID[quotationStatusId]; // the rule lives in src/lib/quote-job.ts (the page shares it)
   if (target === undefined) return false;
-  const current = await lockJob(tx, jobNo);
+  const current = (await lockJob(tx, jobNo)).jobStatusId;
   const from = QUOTE_STEP[current ?? -1];
   if (from === undefined || from >= QUOTE_STEP[target]!) return false;
   return setStatus(tx, jobNo, target, byUserId, current, `ตามใบเสนอราคา ${quotationNo} : ${quotationStatus}`);
@@ -511,10 +508,17 @@ const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
  * it scan every job (~105 ms vs ~6 ms on 2026-09-28). The status list stays live (no app cache).
  * Works with or without job_status joined.
  */
-export const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
+const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .select({ id: jobStatus.jobStatusId })
   .from(jobStatus)
-  .where(notInArray(jobStatus.jobStatusGroup, ['Finished', 'Cancel']))}))`;
+  .where(notInArray(jobStatus.jobStatusGroup, [JOB_GROUP.FINISHED, JOB_GROUP.CANCEL]))}))`;
+
+/** kpiGroup = `group`, written like isOpenJob (the status ids first, then ix_job_status): through the join it scanned every job */
+const inKpiGroup = (group: string) =>
+  sql`${job.jobStatusId} = ANY(ARRAY(${db
+    .select({ id: jobStatus.jobStatusId })
+    .from(jobStatus)
+    .where(eq(groupOf(jobStatus.jobStatusId), group))}))`;
 
 /**
  * Overdue = still open, and its real due date (effectiveDue) is before today. isOpenJob narrows to
@@ -556,7 +560,7 @@ export function jobWhere(q: string, f: JobFilters) {
       : undefined,
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
     f.statusId !== undefined ? eq(job.jobStatusId, f.statusId) : undefined,
-    f.statusGroup ? eq(kpiGroup, f.statusGroup) : undefined,
+    f.statusGroup ? inKpiGroup(f.statusGroup) : undefined,
     f.open ? isOpenJob : undefined,
     f.overdue ? overdueWhere : undefined,
     f.type ? eq(jobType.jobTypeName, f.type) : undefined,
@@ -584,7 +588,7 @@ export function jobWhere(q: string, f: JobFilters) {
       : undefined,
     f.closable
       ? or(
-          eq(jobStatus.jobStatusGroup, 'Repaired'),
+          eq(jobStatus.jobStatusGroup, JOB_GROUP.REPAIRED),
           inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]),
         )
       : undefined,
@@ -684,7 +688,7 @@ export async function listJobs(f: JobFilters & { q?: string; limit?: number } = 
   const rows = await baseQuery()
     .where(jobWhere(f.q ?? '', f))
     .orderBy(desc(job.jobCreateDate), desc(job.jobNo))
-    .limit(Math.min(f.limit ?? 5000, 20000));
+    .limit(Math.min(f.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toJob);
 }
 
@@ -1164,15 +1168,25 @@ async function assignSummary(tx: Tx, byUserId: number, from: number, to: number)
 }
 
 /** one ASSIGN row in the job history (สร้าง / แก้ไขงาน / บันทึกซ่อม / รับมอบหมายงาน) */
-async function auditAssign(tx: Tx, byUserId: number, jobNo: string, from: number, to: number, module: string) {
-  await audit(tx, byUserId, {
+async function assignEntry(
+  tx: Tx,
+  byUserId: number,
+  jobNo: string,
+  from: number,
+  to: number,
+  module: string,
+): Promise<AuditEntry> {
+  return {
     action: 'ASSIGN',
     module,
     entity: 'job',
     key: jobNo,
     summary: await assignSummary(tx, byUserId, from, to),
     changes: { engineerId: [from, to] },
-  });
+  };
+}
+async function auditAssign(tx: Tx, byUserId: number, jobNo: string, from: number, to: number, module: string) {
+  await audit(tx, byUserId, await assignEntry(tx, byUserId, jobNo, from, to, module));
 }
 
 /**
@@ -1198,45 +1212,57 @@ const symptomFirst = (mine?: SQL) => [
  * `jobNo` = the job being edited (its symptoms win a duplicate name: symptomFirst)
  */
 async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string) {
-  const [jt] = i.jobType
-    ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(nameIs(jobType.jobTypeName, i.jobType)).limit(1)
-    : [];
-  const [pt] = i.productType
-    ? await db
-        .select({ id: productType.productTypeId })
-        .from(productType)
-        .where(nameIs(productType.productTypeName, i.productType))
-        .limit(1)
-    : [];
-  const [mf] = i.brand
-    ? await db
-        .select({ id: manufacturer.manufacturerId })
-        .from(manufacturer)
-        .where(nameIs(manufacturer.manufacturerName, i.brand))
-        .limit(1)
-    : [];
-  const [md] = i.modelCode
-    ? await db
-        .select({ id: model.modelId, name: model.modelName, mfg: model.manufacturerId })
-        .from(model)
-        .where(nameIs(model.modelCode, i.modelCode))
-        .limit(1)
-    : [];
   const names = (i.symptoms ?? []).map((s) => str(s)).filter(Boolean);
-  const syms = names.length
-    ? await db
-        .select({ id: symptom.symptomId, name: sql<string>`${trimmed(symptom.symptomName)}` })
-        .from(symptom)
-        .where(inArray(trimmed(symptom.symptomName), names))
-        .orderBy(
-          ...symptomFirst(
-            jobNo
-              ? sql`${symptom.symptomId} in (select ${jobSymptom.symptomId} from ${jobSymptom} where ${jobSymptom.jobNo} = ${jobNo}
+  const shipper = clean(i.receptionShipper);
+  const newShipper = !!shipper && shipper !== clean(prevShipper); // a legacy free-text name may stay as it is
+  // the master lookups are independent: side by side
+  const [[jt], [pt], [mf], [md], syms, [sp]] = await Promise.all([
+    i.jobType
+      ? db.select({ id: jobType.jobTypeId }).from(jobType).where(nameIs(jobType.jobTypeName, i.jobType)).limit(1)
+      : [],
+    i.productType
+      ? db
+          .select({ id: productType.productTypeId })
+          .from(productType)
+          .where(nameIs(productType.productTypeName, i.productType))
+          .limit(1)
+      : [],
+    i.brand
+      ? db
+          .select({ id: manufacturer.manufacturerId })
+          .from(manufacturer)
+          .where(nameIs(manufacturer.manufacturerName, i.brand))
+          .limit(1)
+      : [],
+    i.modelCode
+      ? db
+          .select({ id: model.modelId, name: model.modelName, mfg: model.manufacturerId })
+          .from(model)
+          .where(nameIs(model.modelCode, i.modelCode))
+          .limit(1)
+      : [],
+    names.length
+      ? db
+          .select({ id: symptom.symptomId, name: sql<string>`${trimmed(symptom.symptomName)}` })
+          .from(symptom)
+          .where(inArray(trimmed(symptom.symptomName), names))
+          .orderBy(
+            ...symptomFirst(
+              jobNo
+                ? sql`${symptom.symptomId} in (select ${jobSymptom.symptomId} from ${jobSymptom} where ${jobSymptom.jobNo} = ${jobNo}
                   union select ${job.productSymptomId} from ${job} where ${job.jobNo} = ${jobNo})`
-              : undefined,
-          ),
-        )
-    : [];
+                : undefined,
+            ),
+          )
+      : [],
+    newShipper
+      ? db
+          .select({ id: shippingProfile.id })
+          .from(shippingProfile)
+          .where(and(nameIs(shippingProfile.nameTh, shipper), sql`${shippingProfile.deletedAt} is null`))
+          .limit(1)
+      : [],
+  ]);
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
   // a name that was sent but is not in the list used to be saved as id 0 — refuse it under its field
   const fields: FieldErrors = {};
@@ -1245,15 +1271,7 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
   if (i.modelCode && !md) fields.modelCode = `ไม่พบรุ่น "${i.modelCode}" ในรายการ`;
   const unknown = names.filter((n) => !syms.some((s) => s.name === n));
   if (unknown.length) fields.symptoms = `ไม่พบอาการเสีย "${unknown.join('", "')}" ในรายการ`;
-  const shipper = clean(i.receptionShipper);
-  if (shipper && shipper !== clean(prevShipper)) {
-    const [sp] = await db
-      .select({ id: shippingProfile.id })
-      .from(shippingProfile)
-      .where(and(nameIs(shippingProfile.nameTh, shipper), sql`${shippingProfile.deletedAt} is null`))
-      .limit(1);
-    if (!sp) fields.receptionShipper = 'บริษัทขนส่งต้องเลือกจากโปรไฟล์บริษัทขนส่ง';
-  }
+  if (newShipper && !sp) fields.receptionShipper = 'บริษัทขนส่งต้องเลือกจากโปรไฟล์บริษัทขนส่ง';
   if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
   return {
     jobTypeId: jt?.id,
@@ -1442,11 +1460,16 @@ async function writeSymptoms(tx: Tx, jobNo: string, ids: number[]) {
  * placeholders count as empty), `check` = its values (an unchanged legacy value passes the format
  * rules) and its open date.
  */
-async function jobNow(
-  jobNo: string,
-): Promise<{ keep: JobRequiredKey[]; check: JobCheck; shipper: string | null } | null> {
+async function jobNow(jobNo: string): Promise<{
+  keep: JobRequiredKey[];
+  check: JobCheck;
+  shipper: string | null;
+  status: number | null;
+  due: string | null;
+} | null> {
   const [r] = await db
     .select({
+      status: job.jobStatusId,
       customerId: job.customerId,
       jobTypeId: job.jobTypeId,
       so: job.jobReferenceNo,
@@ -1493,8 +1516,23 @@ async function jobNow(
     receptionTrackingNo: txt(r.receptionTrackingNo),
     receptionType: txt(r.receptionType),
   };
-  return { keep: filledRequired(prev), check: { prev, openDate: fmtDate(r.opened) }, shipper: r.shipper };
+  return {
+    keep: filledRequired(prev),
+    check: { prev, openDate: fmtDate(r.opened) },
+    shipper: r.shipper,
+    status: r.status,
+    due: r.due,
+  };
 }
+
+/** job.customer_detail: "code name phone", as the legacy app stores it */
+const customerDetailOf = (c: { code: string; name: string; phone: string }) =>
+  `${c.code} ${c.name} ${c.phone}`.trim().slice(0, 200);
+/** the legacy defaults of an empty ช่องทางการขาย / ประเภทการรับเครื่อง */
+const NO_CHANNEL = 'ยังไม่ระบุ';
+const NO_RECEPTION_TYPE = 'ไม่ระบุ';
+/** job.branch_id — the one branch (สำนักงานใหญ่): the legacy app writes 1 on every job, there is no branch picker */
+const BRANCH_ID = 1;
 
 export async function createJob(i: JobInput, byUserId: number): Promise<JobDetail> {
   assertValid(jobSchema(), i); // a new job: every required field (400 with every failing field under its box)
@@ -1514,9 +1552,9 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       jobNo: no,
       documentProfileId: profile.id,
       companyId: profile.id,
-      branchId: 1,
+      branchId: BRANCH_ID,
       customerId: cust.id,
-      customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200),
+      customerDetail: customerDetailOf(cust),
       customerDueDate: dateOrSentinel(i.dueDate),
       dueDateSetByUser: true, // required on a new job — the user picked it
       jobCreateDate: now,
@@ -1568,11 +1606,11 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       sparePartReplace: '',
       productWarranty: clean(i.warranty),
       quotationNoApproved: '',
-      productSaleOutChannel: clean(i.channel) || 'ยังไม่ระบุ',
+      productSaleOutChannel: clean(i.channel) || NO_CHANNEL,
       productSaleOrderDate: dateOrNull(i.saleOrderDate),
       productWarrantyMonth: int(i.warrantyMonth, 0),
       productExpireDate: dateOrNull(i.expireDate),
-      jobReceptionType: clean(i.receptionType) || 'ไม่ระบุ',
+      jobReceptionType: clean(i.receptionType) || NO_RECEPTION_TYPE,
       jobReceptionDate: dateOrNull(i.receptionDate) ?? now.slice(0, 10),
       jobReceptionTrackingNo: cleanTracking(i.receptionTrackingNo),
       jobReceptionShipper: clean(i.receptionShipper).slice(0, 50), // a profile name (≤ 200) — safety net
@@ -1601,23 +1639,18 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
 }
 
 export async function updateJob(jobNo: string, i: JobInput, byUserId: number): Promise<JobDetail> {
-  const [cur] = await db
-    .select({ status: job.jobStatusId, custId: job.customerId, due: effectiveDueText })
-    .from(job)
-    .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const was = await jobNow(jobNo);
-  assertValid(jobSchema(was?.keep, was?.check), i); // never worse than it is now
+  if (!was) throw jobNotFound(jobNo);
+  assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
   const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
-  const lk = await lookups(i, was?.shipper, jobNo);
+  const lk = await lookups(i, was.shipper, jobNo);
   const c = costFields(i);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  await assertPageStatus(newStatus, cur.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
+  await assertPageStatus(newStatus, was.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
   const engineerId = i.engineerId !== undefined ? int(i.engineerId, 0) : undefined;
 
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
-    if (!existing) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+    const existing = await lockJob(tx, jobNo);
     assertVersion(i.version, existing.rowVersion);
     // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
     const prevEng = existing.engineerId ?? 0;
@@ -1631,11 +1664,11 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
     const values = {
       // the customer text is rebuilt only when the customer changes (its phone may have changed since)
       ...(cust && cust.id !== existing.customerId
-        ? { customerId: cust.id, customerDetail: `${cust.code} ${cust.name} ${cust.phone}`.trim().slice(0, 200) }
+        ? { customerId: cust.id, customerDetail: customerDetailOf(cust) }
         : {}),
       // the due date is written (and becomes "picked by a user") only when it was changed: saving
       // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
-      ...(i.dueDate !== undefined && str(i.dueDate) !== (cur.due ?? '')
+      ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
         ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
         : {}),
       ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
@@ -1665,11 +1698,11 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
       jobRemark: cleanText(i.remark),
       ...(engineerId !== undefined ? { engineerId } : {}),
       productWarranty: clean(i.warranty),
-      productSaleOutChannel: orBlank(i.channel, 'ยังไม่ระบุ', existing.productSaleOutChannel),
+      productSaleOutChannel: orBlank(i.channel, NO_CHANNEL, existing.productSaleOutChannel),
       productSaleOrderDate: dateOrNull(i.saleOrderDate),
       productWarrantyMonth: int(i.warrantyMonth, 0),
       productExpireDate: dateOrNull(i.expireDate),
-      jobReceptionType: orBlank(i.receptionType, 'ไม่ระบุ', existing.jobReceptionType),
+      jobReceptionType: orBlank(i.receptionType, NO_RECEPTION_TYPE, existing.jobReceptionType),
       jobReceptionDate: dateOrNull(i.receptionDate),
       jobReceptionTrackingNo: cleanTracking(i.receptionTrackingNo),
       jobReceptionShipper: clean(i.receptionShipper).slice(0, 50), // a profile name (≤ 200) — safety net
@@ -1704,7 +1737,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
       const key = (ids: (number | null)[]) => [...ids].sort().join(',');
       if (key(now) !== key(lk.symIds)) await writeSymptoms(tx, jobNo, lk.symIds);
     }
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing?.jobStatusId ?? null);
+    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing.jobStatusId);
     // assigned here = the same as /jobs/assign: a new job moves to อยู่ระหว่างดำเนินการ (+ job_log)
     if (assigning && (newStatus ?? existing.jobStatusId) === JS.NEW)
       await setStatus(tx, jobNo, JS.IN_PROGRESS, byUserId, JS.NEW);
@@ -1738,7 +1771,7 @@ export async function assignJobs(
     if (!rows.length) return;
     const taken = rows.filter((r) => (r.eng ?? 0) > 0 && r.eng !== engineerId);
     if (taken.length && !takeOver) throw await takeOverError(taken.map((r) => ({ no: r.no, eng: r.eng ?? 0 })));
-    // one UPDATE + one audit INSERT for the whole batch; only NEW jobs also change status
+    // one UPDATE for the whole batch; only NEW jobs also change status
     await tx
       .update(job)
       .set({ engineerId })
@@ -1748,9 +1781,20 @@ export async function assignJobs(
           rows.map((r) => r.no),
         ),
       );
+    // NEW → IN_PROGRESS stays inside Pending: none of setStatus's checks / stamps apply, so the batch writes
+    // what setStatus would per job — one UPDATE, one job_log INSERT, its STATUS rows in the one audit INSERT
+    const fresh = rows.filter((r) => r.status === JS.NEW).map((r) => r.no);
+    if (fresh.length) {
+      await tx.update(job).set({ jobStatusId: JS.IN_PROGRESS }).where(inArray(job.jobNo, fresh));
+      await logStatus(tx, fresh, JS.IN_PROGRESS, byUserId);
+    }
+    const entries: AuditEntry[] = [];
     for (const r of rows)
-      if ((r.eng ?? 0) !== engineerId) await auditAssign(tx, byUserId, r.no, r.eng ?? 0, engineerId, 'Job Assign');
-    for (const r of rows) if (r.status === JS.NEW) await setStatus(tx, r.no, JS.IN_PROGRESS, byUserId, r.status);
+      if ((r.eng ?? 0) !== engineerId)
+        entries.push(await assignEntry(tx, byUserId, r.no, r.eng ?? 0, engineerId, 'Job Assign'));
+    const name = await statusName(JS.IN_PROGRESS);
+    entries.push(...fresh.map((no) => statusEntry(no, name, JS.NEW, JS.IN_PROGRESS)));
+    await audit(tx, byUserId, entries);
     n = rows.length;
   });
   return n;
@@ -1815,7 +1859,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     .select({ status: job.jobStatusId, eng: job.engineerId, es: job.engineerSymptomId })
     .from(job)
     .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+  if (!cur) throw jobNotFound(jobNo);
   const [es] = i.engineerSymptom
     ? await db
         .select({ id: symptom.symptomId })
@@ -1832,9 +1876,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
   const meTakes = !(cur.eng && cur.eng > 0) && (await userHasRight(byUserId, 'Job Take'));
 
   await db.transaction(async (tx) => {
-    const status = await lockJob(tx, jobNo);
-    const [j] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
-    if (!j) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo); // locked by lockJob above — cannot vanish
+    const j = await lockJob(tx, jobNo);
+    const status = j.jobStatusId;
     // a page loaded before someone else's save would cancel the part requests added since (it sends the lines it knows)
     assertVersion(i.version, j.rowVersion);
     const locked = await moneyLocked(status, byUserId);
@@ -1934,7 +1977,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
           jobNo,
           sparePartCode: str(p.code),
           sparePartSerialNo: '',
-          stockId: 1,
+          stockId: STORE_LOCATION_ID,
           ...values,
           orderStatusId: PART.REQUESTED,
           requestDate: nowThai(),
@@ -1979,7 +2022,7 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     const toWrite = locked ? keepMoney(j, changed) : changed;
     if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     // the take-over has its own ASSIGN row
-    const changes = diff(j as unknown as Record<string, unknown>, toWrite as Record<string, unknown>, {
+    const changes = diff(j as Record<string, unknown>, toWrite as Record<string, unknown>, {
       skip: ['engineerId'],
     });
     if (changes || partsChanged)
@@ -2044,7 +2087,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     .select({ status: job.jobStatusId, es: job.engineerSymptomId })
     .from(job)
     .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+  if (!cur) throw jobNotFound(jobNo);
   const [es] = i.engineerSymptom
     ? await db
         .select({ id: symptom.symptomId })
@@ -2071,7 +2114,8 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   const receiveBy = await staffOrKeep(i.receive?.by, lastRow?.receiveBy, 'receive.by', byUserId);
 
   await db.transaction(async (tx) => {
-    const status = await lockJob(tx, jobNo);
+    const before = await lockJob(tx, jobNo);
+    const status = before.jobStatusId;
     const open = await tx
       .select()
       .from(jobSendForwardDt)
@@ -2087,8 +2131,6 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       ...(i.symptomOther !== undefined ? { productSymptomOther: clean(i.symptomOther) } : {}),
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
     };
-    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
-    if (!before) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo); // locked by lockJob above
     const fields = changedOnly(before, asked);
     if (Object.keys(fields).length) await tx.update(job).set(fields).where(eq(job.jobNo, jobNo));
     // the latest send row: the open one, or the one already back (its fields saved again after the receive)
@@ -2100,7 +2142,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           .where(eq(jobSendForwardDt.jobNo, jobNo))
           .orderBy(desc(jobSendForwardDt.id))
           .limit(1);
-    const back = last?.sendStatus === 'รับเครื่องซ่อมแล้ว';
+    const back = last?.sendStatus === SEND_STATUS.RECEIVED;
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Job Repair',
@@ -2155,7 +2197,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
           receiveBy,
           receiveDetail: cleanText(i.receive.detail),
-          sendStatus: 'รับเครื่องซ่อมแล้ว',
+          sendStatus: SEND_STATUS.RECEIVED,
         })
         .where(eq(jobSendForwardDt.id, open[0].id));
       // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
@@ -2200,7 +2242,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           receiveDate: SENTINEL_TS,
           receiveBy: -1,
           receiveDetail: '',
-          sendStatus: 'ส่งเครื่องซ่อมแล้ว',
+          sendStatus: SEND_STATUS.SENT,
         });
       }
       if (!again) target ??= JS.OUTSOURCE_SENT;
@@ -2297,7 +2339,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     })
     .from(job)
     .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+  if (!cur) throw jobNotFound(jobNo);
   const sw = parseSwap(cur.detail ?? '');
   assertValid(
     swapRefundSchema({
@@ -2322,8 +2364,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i.detail ? `รายละเอียด: ${clean(i.detail)}` : '',
   ].filter(Boolean);
   await db.transaction(async (tx) => {
-    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
-    if (!before) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+    const before = await lockJob(tx, jobNo);
     const swapValues = {
       ...(i.inspection !== undefined ? { engineerRepairDetail: cleanText(i.inspection) } : {}),
       swapRefundDetail: lines.join('\n'),
@@ -2354,7 +2395,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
             : 'บันทึก Swap / เปลี่ยนเครื่อง',
         changes,
       });
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before.jobStatusId ?? null);
+    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before.jobStatusId);
   });
   return (await getJob(jobNo))!;
 }
@@ -2391,7 +2432,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     })
     .from(job)
     .where(eq(job.jobNo, jobNo));
-  if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+  if (!cur) throw jobNotFound(jobNo);
   // deposit more than the total: the refund is asked for while nothing is recorded yet (a closed job's
   // money is locked — it keeps what it has)
   const back = jobBalance(num(cur.total), num(cur.deposit), 0).refund;
@@ -2401,9 +2442,8 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
   // "รอลงเลขที่พัสดุ" + a parcel no. typed now = it is in: the guide's path (close as 7, add the no. later)
   if (newStatus === JS.CLOSED_WAIT_TRACKING && cleanTracking(i.return?.tracking)) newStatus = JS.CLOSED_TRACKED;
   await db.transaction(async (tx) => {
-    const status = await lockJob(tx, jobNo);
-    const [before] = await tx.select().from(job).where(eq(job.jobNo, jobNo));
-    if (!before) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo); // locked by lockJob above
+    const before = await lockJob(tx, jobNo);
+    const status = before.jobStatusId;
     const pay = i.payment ?? {};
     const ret = i.return ?? {};
     // a refund stored as a negative payment (Swap/Refund, คืนมัดจำ) is never wiped by a payment of nothing
@@ -2644,26 +2684,21 @@ async function computeDashboard(from: string, to: string, type = '') {
       .limit(8),
   ]);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
+  // keyed by the group (= the card's `sub`)
   const G: Record<
     string,
-    {
-      key: string;
-      label: string;
-      sub: string;
-      tone: 'primary' | 'warning' | 'info' | 'success' | 'danger';
-      ord: number;
-    }
+    { key: string; label: string; tone: 'primary' | 'warning' | 'info' | 'success' | 'danger'; ord: number }
   > = {
-    Pending: { key: 'pending', label: 'งานระหว่างดำเนินการ', sub: 'Pending', tone: 'warning', ord: 1 },
-    Repaired: { key: 'repaired', label: 'ซ่อมเสร็จ / รอปิดงาน', sub: 'Repaired', tone: 'info', ord: 2 },
-    Finished: { key: 'finished', label: 'ปิดงานแล้ว', sub: 'Finished', tone: 'success', ord: 3 },
+    [JOB_GROUP.PENDING]: { key: 'pending', label: 'งานระหว่างดำเนินการ', tone: 'warning', ord: 1 },
+    [JOB_GROUP.REPAIRED]: { key: 'repaired', label: 'ซ่อมเสร็จ / รอปิดงาน', tone: 'info', ord: 2 },
+    [JOB_GROUP.FINISHED]: { key: 'finished', label: 'ปิดงานแล้ว', tone: 'success', ord: 3 },
     // = ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม) — see kpiGroup
-    Cancel: { key: 'cancel', label: 'ยกเลิก / ลูกค้าไม่ซ่อม', sub: 'Cancel', tone: 'danger', ord: 4 },
+    [JOB_GROUP.CANCEL]: { key: 'cancel', label: 'ยกเลิก / ลูกค้าไม่ซ่อม', tone: 'danger', ord: 4 },
   };
   const dashGroups = Object.entries(G)
     .map(([g, meta]) => {
       const n = Number(groups.find((x) => x.group === g)?.n ?? 0);
-      return { ...meta, jobs: n, percent: Math.round((n / total) * 1000) / 10 };
+      return { ...meta, sub: g, jobs: n, percent: Math.round((n / total) * 1000) / 10 };
     })
     .sort((a, b) => a.ord - b.ord);
 
@@ -2753,13 +2788,10 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
   return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? '').trim(), count: Number(x.n) }));
 }
 
-export { eq };
-
 /* ------------------------------------------------------------------ *
  * Call log (job_call_log)
  * ------------------------------------------------------------------ */
 export async function listCallLogs(jobNo: string) {
-  const { jobCallLog } = await import('@/db/schema');
   const rows = await db
     .select({
       id: jobCallLog.jobCallLogId,
@@ -2776,7 +2808,6 @@ export async function listCallLogs(jobNo: string) {
 }
 
 export async function addCallLog(jobNo: string, detail: string, byUserId: number) {
-  const { jobCallLog } = await import('@/db/schema');
   assertValid(callLogSchema, { detail }); // ≤ 200 = the column: a longer note is refused, not cut
   const text = clean(detail);
   await db.transaction(async (tx) => {
@@ -2816,7 +2847,7 @@ async function loadJobStats() {
     if (r.id === JS.NEW) fresh += n;
     else if (r.id === JS.REPAIR_CANCELLED)
       declined += n; // ลูกค้าไม่ซ่อม: neither repaired nor in progress (kpiGroup)
-    else if (r.group === 'Finished' || r.group === 'Repaired') done += n;
+    else if (r.group === JOB_GROUP.FINISHED || r.group === JOB_GROUP.REPAIRED) done += n;
   }
   return { total, fresh, done, progress: total - fresh - done - declined };
 }

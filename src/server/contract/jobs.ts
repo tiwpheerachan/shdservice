@@ -273,14 +273,14 @@ export const trackLinkGet = defineOperation({
   tags,
   summary: "The customer's tracking link: its state, and the URL only when this call issued the first one",
   description:
-    'Job Management view. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.',
+    'Job Management view reads the state. The first link is issued (and audited) only for a caller who also has Job Management edit. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.',
   params: jobNo,
   responses: {
     200: jsonResponse(
       'State of the link.',
       z.object({
         url: s.meta({ description: '"" unless this call issued the job\'s first link.' }),
-        ready: z.boolean().meta({ description: 'Public tracking is configured (Turnstile + base URL).' }),
+        ready: z.boolean().meta({ description: 'Always true (kept for older clients; every job can be tracked).' }),
         status: LinkStatus,
       }),
     ),

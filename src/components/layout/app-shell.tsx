@@ -10,6 +10,7 @@ import { usePathname } from 'next/navigation';
 import { useAccess } from '@/lib/use-access';
 import { useLocalStorage } from '@/lib/use-client';
 import { useUnsavedChangesGuard } from '@/lib/use-unsaved-changes';
+import { today } from '@/lib/dates';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -62,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
         <footer className="border-t border-border px-4 py-3 text-2xs text-muted-foreground no-print">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2">
-            <span>© 2026 SHD Technology Co., Ltd. — Service Management System</span>
+            <span>© {today().slice(0, 4)} SHD Technology Co., Ltd. — Service Management System</span>
             <span className="num">v1.0.0</span>
           </div>
         </footer>

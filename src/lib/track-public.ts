@@ -96,4 +96,5 @@ export const TRACK_MSG = {
   sessionExpired: 'หมดเวลา กรุณายืนยันเบอร์โทรด้วย OTP อีกครั้ง',
   docFail: 'เปิดเอกสารไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
   signedOut: 'ออกจากระบบแล้ว',
+  notFound: 'ไม่พบรายการ',
 } as const;

@@ -10,7 +10,7 @@ import { CustomerSelect } from './customer-select';
 import { ProfileSelect } from './profile-select';
 import { Attachments, type AttachmentsHandle } from './attachments';
 import { Button } from '@/components/ui/button';
-import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Field, FieldGrid, LookupError, ReadOnly } from '@/components/ui/field';
 import { Input, Select, Textarea, Radio, Checkbox } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm';
@@ -320,6 +320,15 @@ const errorKey = (k: keyof JobFormState): string => (k === 'customer' ? 'custome
 
 const FormCtx = React.createContext<Ctx | null>(null);
 
+/** a job screen's page: the form state + the Suspense useJob's useSearchParams needs */
+export function JobScreen({ children }: { children: React.ReactNode }) {
+  return (
+    <JobFormProvider>
+      <React.Suspense fallback={null}>{children}</React.Suspense>
+    </JobFormProvider>
+  );
+}
+
 export function JobFormProvider({ initial, children }: { initial?: JobFormState; children: React.ReactNode }) {
   const [s, setS] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
   // the form as last loaded / saved — anything else on screen is an unsaved edit
@@ -585,10 +594,12 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
 export function MainSymptomField() {
   const { s, set, errors } = useJobForm();
   const { data: MODELS } = useModels();
-  const { data: SYMPTOMS } = useSymptoms();
-  const { data: SYMPTOM_STATS } = useSymptomStats();
+  const { data: SYMPTOMS, error: symptomsError, refetch: retrySymptoms } = useSymptoms();
+  const { data: SYMPTOM_STATS, error: statsError, refetch: retryStats } = useSymptomStats();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
   const symptoms = s.symptoms;
+  // the picker reads the stats, else the plain list — empty only when both failed
+  const listError = SYMPTOM_STATS.length || SYMPTOMS.length ? null : (statsError ?? symptomsError);
   return (
     <Field
       label="อาการเสียหลัก (มาตรฐาน)"
@@ -612,6 +623,13 @@ export function MainSymptomField() {
             : 'อาการที่พบบ่อย'
         }
       />
+      <LookupError
+        error={listError}
+        onRetry={() => {
+          retryStats();
+          retrySymptoms();
+        }}
+      />
     </Field>
   );
 }
@@ -631,9 +649,9 @@ export function ProductSection({
   variant?: 'full' | 'open' | 'repair';
 }) {
   const { s, set, patch, errors, incomplete } = useJobForm();
-  const { data: PRODUCT_TYPES } = useProductTypes();
-  const { data: MANUFACTURERS } = useManufacturers();
-  const { data: MODELS } = useModels();
+  const { data: PRODUCT_TYPES, error: typesError, refetch: retryTypes } = useProductTypes();
+  const { data: MANUFACTURERS, error: brandsError, refetch: retryBrands } = useManufacturers();
+  const { data: MODELS, error: modelsError, refetch: retryModels } = useModels();
 
   // models of the chosen brand first (still allows any model)
   const modelOptions = React.useMemo(() => {
@@ -782,6 +800,7 @@ export function ProductSection({
         )}
         searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
       />
+      <LookupError error={brandsError} onRetry={retryBrands} />
     </Field>
   );
   const modelField = (
@@ -792,6 +811,7 @@ export function ProductSection({
         fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
         onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
       />
+      <LookupError error={modelsError} onRetry={retryModels} />
     </Field>
   );
   const modelDetailField = (
@@ -993,6 +1013,7 @@ export function ProductSection({
               s.productType,
             )}
           />
+          <LookupError error={typesError} onRetry={retryTypes} />
         </Field>
 
         {imeiField}
@@ -1302,22 +1323,5 @@ export function FormActions({
         </Button>
       )}
     </div>
-  );
-}
-
-export function ConfirmCheckbox({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked?: boolean;
-  onChange?: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-      <Checkbox checked={checked} onChange={(e) => onChange?.(e.target.checked)} />
-      {label}
-    </label>
   );
 }

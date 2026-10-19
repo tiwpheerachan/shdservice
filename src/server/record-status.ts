@@ -34,9 +34,6 @@ export function statusFilter(col: PgColumn, mode: StatusMode): SQL | undefined {
   }
 }
 
-export const isRecordStatus = (v: unknown): v is RecordStatus =>
-  v === RS.ACTIVE || v === RS.INACTIVE || v === RS.DELETED;
-
 /** UI "Active" / "Inactive" label ("Inactive" also covers DELETED rows in the trash view). */
 export const uiStatus = (rs: string | null | undefined): 'Active' | 'Inactive' =>
   rs === RS.ACTIVE || rs == null ? 'Active' : 'Inactive';

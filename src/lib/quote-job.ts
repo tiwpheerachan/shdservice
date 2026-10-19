@@ -1,3 +1,5 @@
+import { JS, QS } from '@/lib/status-ids';
+
 /**
  * A quotation saved as sent / agreed moves its job forward, never back (owner 2026-10-16). The one copy of the
  * rule: followQuotation (src/server/services/jobs.ts) applies it, the quotation page says when it won't.
@@ -5,10 +7,10 @@
 /** [quotation_status id, its name, the job_status id it moves the job to]; any other status leaves the job alone
  *  (declined / cancelled / expired / waiting) */
 const MOVES: [number, string, number][] = [
-  [2, 'เสนอราคาแล้ว', 4], // → เสนอราคาแล้ว
-  [3, 'ลูกค้าตกลงซ่อม', 12], // → ลูกค้าตกลงซ่อม
-  [6, 'ลูกค้าตกลงซ่อม รอชำระเงิน', 12],
-  [9, 'ลูกค้าตกลงซ่อม รออะไหล่', 3], // → รออะไหล่
+  [QS.SENT, 'เสนอราคาแล้ว', JS.QUOTED], // → เสนอราคาแล้ว
+  [QS.AGREED, 'ลูกค้าตกลงซ่อม', JS.CUSTOMER_AGREED], // → ลูกค้าตกลงซ่อม
+  [QS.AGREED_WAIT_PAY, 'ลูกค้าตกลงซ่อม รอชำระเงิน', JS.CUSTOMER_AGREED],
+  [QS.AGREED_WAIT_PARTS, 'ลูกค้าตกลงซ่อม รออะไหล่', JS.WAIT_PARTS], // → รออะไหล่
 ];
 /** quotation status name → job_status id (the page has the name) */
 export const QUOTE_MOVES: Partial<Record<string, number>> = Object.fromEntries(MOVES.map(([, name, to]) => [name, to]));
@@ -19,7 +21,15 @@ export const QUOTE_MOVES_BY_ID: Partial<Record<number, number>> = Object.fromEnt
 /** job_status id → how far it is in the quotation part of the flow (new / in progress 0, waiting for a quote /
  *  quote expired 1, quoted 2, customer agreed 3, waiting for parts 4); only a job at a smaller step moves. Any
  *  other status (repair under way, parts, out-source, repaired, closed, cancelled) is never moved by a quotation. */
-export const QUOTE_STEP: Partial<Record<number, number>> = { 1: 0, 2: 0, 13: 1, 16: 1, 4: 2, 12: 3, 3: 4 };
+export const QUOTE_STEP: Partial<Record<number, number>> = {
+  [JS.NEW]: 0,
+  [JS.IN_PROGRESS]: 0,
+  [JS.WAIT_QUOTE]: 1,
+  [JS.QUOTE_EXPIRED]: 1,
+  [JS.QUOTED]: 2,
+  [JS.CUSTOMER_AGREED]: 3,
+  [JS.WAIT_PARTS]: 4,
+};
 
 /** "the job stays where it is" note for a quotation saved as `status`; '' when it moves (or is already there) */
 export function quoteJobNote(status: string, job: { no: string; statusId: number; status: string } | null) {

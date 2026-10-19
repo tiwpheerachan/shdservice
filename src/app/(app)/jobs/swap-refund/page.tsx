@@ -13,7 +13,7 @@ import {
   AttachmentSection,
   FormActions,
   VIEW_ONLY,
-  JobFormProvider,
+  JobScreen,
   useJobForm,
   fromJob,
   saveCommonSections,
@@ -37,11 +37,7 @@ import { parseSwap, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '
 function SwapRefundForm() {
   const { push } = useToast();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
-  const { jobNo, job, loading, error, find, setJob } = useJob({
-    onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
-    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
-  });
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, adopt, set } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
@@ -343,10 +339,8 @@ function SwapRefundForm() {
 
 export default function SwapRefundPage() {
   return (
-    <JobFormProvider>
-      <React.Suspense fallback={null}>
-        <SwapRefundForm />
-      </React.Suspense>
-    </JobFormProvider>
+    <JobScreen>
+      <SwapRefundForm />
+    </JobScreen>
   );
 }

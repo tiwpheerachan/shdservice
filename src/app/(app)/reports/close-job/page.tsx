@@ -75,7 +75,7 @@ const columns: Column<Job>[] = [
     key: 'status',
     header: 'สถานะงาน',
     minWidth: COL_MIN_WIDTH.status,
-    cell: (r) => <StatusBadge status={r.status} wrap />,
+    cell: (r) => <StatusBadge status={r.status} group={r.statusGroup} wrap />,
   },
 ];
 

@@ -2056,7 +2056,7 @@
           "Jobs"
         ],
         "summary": "The customer's tracking link: its state, and the URL only when this call issued the first one",
-        "description": "Job Management view. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.",
+        "description": "Job Management view reads the state. The first link is issued (and audited) only for a caller who also has Job Management edit. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.",
         "parameters": [
           {
             "schema": {
@@ -2083,7 +2083,7 @@
                     },
                     "ready": {
                       "type": "boolean",
-                      "description": "Public tracking is configured (Turnstile + base URL)."
+                      "description": "Always true (kept for older clients; every job can be tracked)."
                     },
                     "status": {
                       "$ref": "#/components/schemas/LinkStatus"
@@ -11303,7 +11303,7 @@
             }
           },
           "429": {
-            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "description": "Too many exports from this user in the window, or another export is still being written (one at a time per server) — `details.retryAfter` seconds to wait.",
             "content": {
               "application/json": {
                 "schema": {

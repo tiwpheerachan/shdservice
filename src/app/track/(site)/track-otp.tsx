@@ -24,6 +24,7 @@ import {
 } from '@/lib/track-public';
 import { Input, Select } from '@/components/ui/input';
 import { PublicJobView } from './public-job-view';
+import { Countdown, useNow, useSessionClock } from './session-clock';
 import { cn } from '@/lib/utils';
 
 /**
@@ -38,8 +39,6 @@ type Step = 'phone' | 'code' | 'list' | 'detail';
 type Tab = 'active' | 'history';
 
 const SESSION_HEADER = 'x-track-session';
-const ACTIVE_WINDOW_MS = 60_000; // "using the page" = input in the last minute
-const KEEPALIVE_WHEN_LEFT_MS = 5.5 * 60_000;
 /** job list rows per page (each tab keeps its own page, also across opening a job and coming back) */
 const PAGE_SIZE = 5;
 
@@ -77,11 +76,6 @@ async function call<T>(path: string, init: RequestInit & { session?: string } = 
 
 const EMPTY_CODE: string[] = Array(OTP_LENGTH).fill('');
 
-const mmss = (ms: number) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-};
-
 export function TrackOtp({
   getToken,
   verifying,
@@ -113,10 +107,7 @@ export function TrackOtp({
   });
   const [job, setJob] = React.useState<PublicJob | null>(null);
   const [expiresAt, setExpiresAt] = React.useState(0);
-  const [now, setNow] = React.useState(() => Date.now());
   const session = React.useRef<string | null>(null);
-  const lastInput = React.useRef(0); // stamped on mount below (no Date.now() during render)
-  const lastKeepalive = React.useRef(0);
 
   const signOut = React.useCallback((message = '') => {
     const s = session.current;
@@ -133,45 +124,22 @@ export function TrackOtp({
     setStep('phone');
   }, []);
 
-  /* ---------- clock, activity, keepalive ---------- */
-  React.useEffect(() => {
-    lastInput.current = Date.now();
-    const mark = () => (lastInput.current = Date.now());
-    const evts = ['pointerdown', 'keydown', 'scroll', 'touchstart'] as const;
-    evts.forEach((e) => window.addEventListener(e, mark, { passive: true }));
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      evts.forEach((e) => window.removeEventListener(e, mark));
-      clearInterval(tick);
-    };
-  }, []);
-
-  // the session runs out exactly at expiresAt — one timer, re-armed whenever a keepalive moves it
-  React.useEffect(() => {
-    if (!expiresAt) return;
-    const t = setTimeout(
-      () => {
-        if (session.current) signOut(TRACK_MSG.sessionExpired);
-      },
-      Math.max(0, expiresAt - Date.now()),
-    );
-    return () => clearTimeout(t);
-  }, [expiresAt, signOut]);
-
-  React.useEffect(() => {
-    if (!session.current || !expiresAt || now >= expiresAt) return;
-    // in use and running low → ask the server for more time (it caps at 60 min from sign-in)
-    const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
-    if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {
-      lastKeepalive.current = now;
+  /* ---------- clock, activity, keepalive (session-clock.tsx) ---------- */
+  const markActive = useSessionClock(
+    expiresAt,
+    () => {
+      if (session.current) signOut(TRACK_MSG.sessionExpired);
+    },
+    () => {
+      if (!session.current) return;
       void call<{ expiresAt?: string }>('/api/track/me/keepalive', { method: 'POST', session: session.current }).then(
         ({ status, d }) => {
           if (status === 401) signOut(TRACK_MSG.sessionExpired);
           else if (d.expiresAt) setExpiresAt(Date.parse(d.expiresAt));
         },
       );
-    }
-  }, [now, expiresAt, signOut]);
+    },
+  );
 
   /* ---------- actions ---------- */
   const requestCode = async (e?: React.FormEvent) => {
@@ -227,7 +195,7 @@ export function TrackOtp({
       });
       if (!d.ok || !d.session) throw new Error(d.error ?? TRACK_MSG.otpFail);
       session.current = d.session;
-      lastInput.current = Date.now();
+      markActive();
       if (d.expiresAt) setExpiresAt(Date.parse(d.expiresAt));
       await loadList(d.session);
     } catch (err) {
@@ -277,7 +245,6 @@ export function TrackOtp({
     'inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 
   if (step === 'phone' || step === 'code') {
-    const waitMs = resendAt - now;
     return (
       <div className="surface mx-auto max-w-md p-6">
         <h1 className="text-lg font-semibold tracking-tight">ติดตามสถานะงานซ่อม</h1>
@@ -349,14 +316,7 @@ export function TrackOtp({
               <button type="button" onClick={() => signOut()} className="text-muted-foreground hover:text-foreground">
                 เปลี่ยนเบอร์
               </button>
-              <button
-                type="button"
-                onClick={() => void requestCode()}
-                disabled={busy || verifying || waitMs > 0}
-                className="font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
-              >
-                {waitMs > 0 ? `ขอรหัสใหม่ได้ใน ${Math.ceil(waitMs / 1000)} วินาที` : 'ขอรหัสใหม่'}
-              </button>
+              <ResendButton resendAt={resendAt} disabled={busy || verifying} onClick={() => void requestCode()} />
             </div>
           </div>
         )}
@@ -372,8 +332,7 @@ export function TrackOtp({
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5">
-        <Timer className="h-3.5 w-3.5" /> เหลือเวลา{' '}
-        <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
+        <Timer className="h-3.5 w-3.5" /> เหลือเวลา <Countdown to={expiresAt} />
         <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่</span>
       </span>
       <button
@@ -390,7 +349,7 @@ export function TrackOtp({
   const openDoc = async (d: { kind: string; ref: string }) => {
     const s = session.current;
     if (!s || !job) return {};
-    lastInput.current = Date.now();
+    markActive();
     const { status, d: r } = await call<{ url?: string }>('/api/track/doc', {
       method: 'POST',
       session: s,
@@ -720,5 +679,20 @@ function OtpBoxes({
         />
       ))}
     </div>
+  );
+}
+
+/** ขอรหัสใหม่ — its own 1-second clock, so the countdown does not re-render the whole page */
+function ResendButton({ resendAt, disabled, onClick }: { resendAt: number; disabled: boolean; onClick: () => void }) {
+  const waitMs = resendAt - useNow();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || waitMs > 0}
+      className="font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+    >
+      {waitMs > 0 ? `ขอรหัสใหม่ได้ใน ${Math.ceil(waitMs / 1000)} วินาที` : 'ขอรหัสใหม่'}
+    </button>
   );
 }

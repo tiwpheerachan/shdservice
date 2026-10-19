@@ -1,23 +1,13 @@
 import 'server-only';
-import { count, eq, sql } from 'drizzle-orm';
+import { count, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { withStatementTimeout, type Tx } from '@/db/client';
-import {
-  appUser,
-  approveStatus,
-  customer,
-  job,
-  jobStatus,
-  jobType,
-  quotationHd,
-  quotationStatus,
-  saleOutHd,
-  symptom,
-} from '@/db/schema';
+import { appUser, job, jobStatus, jobType, quotationHd, saleOutHd, symptom } from '@/db/schema';
+import { AS, JS, QS } from '@/lib/status-ids';
 import { num } from '@/server/mappers/format';
 import { jobWhere, kpiGroup, type JobFilters } from './jobs';
-import { quotationWhere, type QuotationFilters } from './quotations';
-import { saleOrderWhere, type SaleOrderFilters } from './sale-orders';
+import { quotationWhere, withQuotationJoins, type QuotationFilters } from './quotations';
+import { saleOrderWhere, withSaleOrderJoins, type SaleOrderFilters } from './sale-orders';
 
 /**
  * KPI tiles for the report screens — computed in one query over the SAME
@@ -30,8 +20,8 @@ async function jobBase(tx: Tx, f: JobFilters, q = '') {
   return tx
     .select({
       total: count(),
-      fresh: sql<string>`count(*) filter (where ${job.jobStatusId} = 1)`,
-      // ลูกค้าไม่ซ่อม (status 6) is not a successful repair — kpiGroup counts it as Cancel
+      fresh: sql<string>`count(*) filter (where ${job.jobStatusId} = ${JS.NEW})`,
+      // ลูกค้าไม่ซ่อม (JS.REPAIR_CANCELLED) is not a successful repair — kpiGroup counts it as Cancel
       done: sql<string>`count(*) filter (where ${kpiGroup} in ('Repaired','Finished'))`,
       amount: sql<string>`coalesce(sum(${job.jobTotalCost}),0)`,
       paid: sql<string>`coalesce(sum(${job.jobPaymentAmount}) filter (where ${job.jobPaymentAmount} > 0),0)`,
@@ -81,21 +71,21 @@ export async function jobReportSummary(f: JobFilters, q = '') {
 }
 
 export async function quotationReportSummary(f: QuotationFilters, q = '') {
+  const agreed = inArray(quotationHd.quotationStatusId, [QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
   const [r] = await withStatementTimeout((tx) =>
-    tx
-      .select({
-        total: count(),
-        agreed: sql<string>`count(*) filter (where ${quotationHd.quotationStatusId} in (3,6,9))`,
-        // มูลค่ารวม leaves out cancelled quotations (5 ยกเลิกใบเสนอราคา); the card shows that amount apart
-        amount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} is distinct from 5),0)`,
-        cancelledAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} = 5),0)`,
-        agreedAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} in (3,6,9)),0)`,
-      })
-      .from(quotationHd)
-      .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
-      .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
-      .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
-      .where(quotationWhere(q, f)),
+    withQuotationJoins(
+      tx
+        .select({
+          total: count(),
+          agreed: sql<string>`count(*) filter (where ${agreed})`,
+          // มูลค่ารวม leaves out cancelled quotations (QS.CANCELLED ยกเลิกใบเสนอราคา); the card shows that amount apart
+          amount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} is distinct from ${QS.CANCELLED}),0)`,
+          cancelledAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} = ${QS.CANCELLED}),0)`,
+          agreedAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${agreed}),0)`,
+        })
+        .from(quotationHd)
+        .$dynamic(),
+    ).where(quotationWhere(q, f)),
   );
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   return {
@@ -108,20 +98,19 @@ export async function quotationReportSummary(f: QuotationFilters, q = '') {
 }
 
 export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
-  const creator = alias(appUser, 'creator');
   const [r] = await withStatementTimeout((tx) =>
-    tx
-      .select({
-        total: count(),
-        approved: sql<string>`count(*) filter (where ${saleOutHd.approveStatusId} = 4)`,
-        // ยอดขายรวม = approved orders only (4 อนุมัติแล้ว); waiting / rejected / denied are shown apart
-        amount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} = 4),0)`,
-        notApprovedAmount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} is distinct from 4),0)`,
-      })
-      .from(saleOutHd)
-      .leftJoin(creator, eq(creator.userId, saleOutHd.saleOutBy)) // the salesperson (document_create_by = who keyed it in)
-      .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
-      .where(saleOrderWhere(q, f)),
+    withSaleOrderJoins(
+      tx
+        .select({
+          total: count(),
+          approved: sql<string>`count(*) filter (where ${saleOutHd.approveStatusId} = ${AS.APPROVED})`,
+          // ยอดขายรวม = approved orders only (AS.APPROVED อนุมัติแล้ว); waiting / rejected / denied are shown apart
+          amount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} = ${AS.APPROVED}),0)`,
+          notApprovedAmount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} is distinct from ${AS.APPROVED}),0)`,
+        })
+        .from(saleOutHd)
+        .$dynamic(),
+    ).where(saleOrderWhere(q, f)),
   );
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
   const approved = num(r.approved);

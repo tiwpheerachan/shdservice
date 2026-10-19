@@ -37,6 +37,20 @@ export default defineConfig([
   },
   // the one place allowed to do date arithmetic
   { files: ['src/lib/dates.ts'], rules: { 'no-restricted-syntax': 'off' } },
+  // plain <img> on purpose: nothing uses next/image (/_next/image is switched off, next.config.mjs) —
+  // print/PDF pages must render the image as-is, /api/files answers with a short-lived signed URL
+  // (logos, product photos, slips), avatars come from Lark, and the brand logos are static files
+  {
+    files: [
+      'src/components/print/**',
+      'src/components/shared/{logo,people-picker,product-detail-modal}.tsx',
+      'src/components/layout/topbar.tsx',
+      'src/app/track/**',
+      'src/app/pending/page.tsx',
+      'src/app/(app)/admin/{users,shipping-profiles,document-profiles}/page.tsx',
+    ],
+    rules: { '@next/next/no-img-element': 'off' },
+  },
   // last: formatting belongs to Prettier (npm run format) — turn off ESLint's style rules
   prettier,
 ]);

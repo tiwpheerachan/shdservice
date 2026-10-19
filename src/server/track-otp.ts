@@ -1,11 +1,24 @@
 import 'server-only';
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { and, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { customer, trackOtp, trackSession } from '@/db/schema';
 import { RS } from '@/server/record-status';
 import { OTP_LENGTH, OTP_PATTERN } from '@/lib/track-public';
-import { hmac, sha256, normalizeUa, logEvent, hit, block, isBlocked, dbNow, dbNowPlus } from './track-guard';
+import {
+  hmac,
+  sha256,
+  normalizeUa,
+  logEvent,
+  hit,
+  block,
+  isBlocked,
+  dbNow,
+  dbNowPlus,
+  ipKeyOf,
+  newToken,
+  TOKEN_SHAPE,
+} from './track-guard';
 import { checkOtpSms, printDevOtp, requestOtpSms, smsProvider } from './sms';
 import { logError } from '@/lib/log';
 import { ipBucket } from '@/lib/client-ip';
@@ -25,28 +38,26 @@ import { ipBucket } from '@/lib/client-ip';
  *  - session: 15 min, activity keeps ≥ 5 min left, never past 60 min from sign-in;
  *    the token lives only in page memory (leaving the page = a new OTP)
  */
-export const OTP_TTL_SEC = 300;
-export const OTP_MAX_ATTEMPTS = 5;
-export const OTP_RESEND_SEC = 60;
-export const OTP_PER_PHONE_HOUR = 3;
+const OTP_TTL_SEC = 300;
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_RESEND_SEC = 60;
+const OTP_PER_PHONE_HOUR = 3;
 /**
  * A 4-digit code: 15 guesses/h was 360/day per target → daily caps + a lock after many misses.
  * Counted per number+IP first, so someone who knows a customer's number cannot lock THAT
  * customer out from their own IP (review 2026-10-14); the per-number ceilings are higher and
  * only bite a guesser spread over many IPs (≤ 30 guesses/day = 0.3% per day).
  */
-export const OTP_PER_PHONE_DAY = 8; // per number + IP
-export const OTP_PER_PHONE_DAY_ALL = 20; // per number, any IP
-export const OTP_FAILS_PER_PHONE_DAY = 15; // per number + IP → that IP is locked out of the number
-export const OTP_FAILS_PER_PHONE_DAY_ALL = 30; // per number, any IP → the number is locked
-export const OTP_PHONE_LOCK_MIN = 24 * 60;
+const OTP_PER_PHONE_DAY = 8; // per number + IP
+const OTP_PER_PHONE_DAY_ALL = 20; // per number, any IP
+const OTP_FAILS_PER_PHONE_DAY = 15; // per number + IP → that IP is locked out of the number
+const OTP_FAILS_PER_PHONE_DAY_ALL = 30; // per number, any IP → the number is locked
+const OTP_PHONE_LOCK_MIN = 24 * 60;
 /** company-wide SMS spend cap (SMS pumping / a list of customer numbers) — real sends only */
-export const OTP_SMS_PER_HOUR = 200;
-export const SESSION_START_MIN = 15;
-export const SESSION_EXTEND_MIN = 5;
-export const SESSION_MAX_MIN = 60;
-
-const OPAQUE = /^[A-Za-z0-9_-]{43}$/;
+const OTP_SMS_PER_HOUR = 200;
+const SESSION_START_MIN = 15;
+const SESSION_EXTEND_MIN = 5;
+const SESSION_MAX_MIN = 60;
 
 /* ------------------------------------------------------------------ *
  * phone numbers
@@ -61,7 +72,7 @@ export function normalizePhone(input: unknown): string | null {
 }
 
 /** 0812345678 → 08x-xxx-5678 (what the page shows back) */
-export const maskPhone = (p: string) => `${p.slice(0, 2)}x-xxx-${p.slice(-4)}`;
+const maskOtpPhone = (p: string) => `${p.slice(0, 2)}x-xxx-${p.slice(-4)}`;
 
 const phoneKey = (phone10: string) => hmac(`phone:${phone10}`);
 
@@ -102,64 +113,70 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   const phone = normalizePhone(phoneInput);
   if (!phone) return { ok: false, reason: 'invalid' };
   const key = phoneKey(phone);
+  const ipHash = ipKeyOf(ip); // the route's c.ipKey: one request logs one hash
 
-  // resend cooldown (1 per minute) + 3 per hour per number, counted for EVERY number
-  // both counters always count (no short-circuit), exactly like the two separate upserts before
-  const coolOk = await hit('otp_phone_min', key, 1, OTP_RESEND_SEC);
-  const hourOk = await hit('otp_phone_hour', key, OTP_PER_PHONE_HOUR, 3600);
+  // resend cooldown (1 per minute) + 3 per hour per number, counted for EVERY number; every counter
+  // always counts (no short-circuit) — independent upserts / reads, so side by side
   const ipKey = hmac(`phone-ip:${key}:${ipBucket(ip)}`); // one hash (varchar(128)) · IPv6 per /64, like the other limits
-  const dayOk = await hit('otp_phone_day', ipKey, OTP_PER_PHONE_DAY, 86400);
-  const dayAllOk = await hit('otp_phone_day_all', key, OTP_PER_PHONE_DAY_ALL, 86400);
-  if (
-    !coolOk ||
-    !hourOk ||
-    !dayOk ||
-    !dayAllOk ||
-    (await isBlocked(`phone:${key}`)) ||
-    (await isBlocked(`phone:${ipKey}`))
-  ) {
-    logEvent('otp_rate_limited', { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
+  const [coolOk, hourOk, dayOk, dayAllOk, blocked, ipBlocked] = await Promise.all([
+    hit('otp_phone_min', key, 1, OTP_RESEND_SEC),
+    hit('otp_phone_hour', key, OTP_PER_PHONE_HOUR, 3600),
+    hit('otp_phone_day', ipKey, OTP_PER_PHONE_DAY, 86400),
+    hit('otp_phone_day_all', key, OTP_PER_PHONE_DAY_ALL, 86400),
+    isBlocked(`phone:${key}`),
+    isBlocked(`phone:${ipKey}`),
+  ]);
+  if (!coolOk || !hourOk || !dayOk || !dayAllOk || blocked || ipBlocked) {
+    logEvent('otp_rate_limited', { ipHash, requestId: requestIdForLog });
     return { ok: false, reason: 'rate' };
   }
 
-  const requestId = randomBytes(32).toString('base64url');
+  const requestId = newToken();
   const ids = await customerIdsForPhone(phone);
-  // over the company-wide cap: answer exactly as usual, just don't send (and say so in the log)
-  if (ids.length && !(await hit('otp_sms_global_hour', 'all', OTP_SMS_PER_HOUR, 3600))) {
-    logEvent('otp_sms_global_cap', { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
-  } else if (ids.length) {
-    const rh = sha256(requestId);
-    // development `log` mode makes its own code; ThaiBulkSMS makes the real one
-    const own = smsProvider() === 'log' ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0') : null;
-    // a new code replaces any unused one for this number
-    await db
-      .update(trackOtp)
-      .set({ consumedAt: dbNow })
-      .where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
-    await db.insert(trackOtp).values({
-      requestHash: rh,
-      phoneHash: key,
-      customerIds: ids,
-      codeHash: own ? codeHash(requestId, own) : null,
-      issuedIp: ip,
-      expiresAt: dbNowPlus(OTP_TTL_SEC),
-    });
-    logEvent('otp_sent', { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
-    if (own) printDevOtp(phone, own);
-    // after the response is decided: the SMS round-trip must not reveal "this is a customer" by timing
-    else
-      void requestOtpSms(phone).then(async (token) => {
-        if (!token) return logEvent('otp_send_failed', { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
-        await db
-          .update(trackOtp)
-          .set({ providerToken: token })
-          .where(eq(trackOtp.requestHash, rh))
-          .catch((e) => logError(e, 'track_otp token not saved'));
-      });
-  } else {
-    logEvent('otp_unknown_phone', { ipHash: hmac(`ip:${ip}`), requestId: requestIdForLog });
-  }
-  return { ok: true, requestId, masked: maskPhone(phone), expiresIn: OTP_TTL_SEC, resendIn: OTP_RESEND_SEC };
+  // after the response is decided: the OTP row and the SMS must not reveal "this is a customer" by timing —
+  // a customer's request and a stranger's do the same awaited work before the answer
+  if (ids.length)
+    void issueOtp(phone, key, ids, requestId, ip, ipHash, requestIdForLog).catch((e) =>
+      logError(e, 'track_otp not issued'),
+    );
+  else logEvent('otp_unknown_phone', { ipHash, requestId: requestIdForLog });
+  return { ok: true, requestId, masked: maskOtpPhone(phone), expiresIn: OTP_TTL_SEC, resendIn: OTP_RESEND_SEC };
+}
+
+/** a customer number's OTP: the row (replacing any unused one) + the SMS — runs after requestOtp answered */
+async function issueOtp(
+  phone: string,
+  key: string,
+  ids: number[],
+  requestId: string,
+  ip: string,
+  ipHash: string,
+  requestIdForLog?: string,
+) {
+  // over the company-wide cap: the answer was the usual one, just don't send (and say so in the log)
+  if (!(await hit('otp_sms_global_hour', 'all', OTP_SMS_PER_HOUR, 3600)))
+    return logEvent('otp_sms_global_cap', { ipHash, requestId: requestIdForLog });
+  const rh = sha256(requestId);
+  // development `log` mode makes its own code; ThaiBulkSMS makes the real one
+  const own = smsProvider() === 'log' ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0') : null;
+  // a new code replaces any unused one for this number
+  await db
+    .update(trackOtp)
+    .set({ consumedAt: dbNow })
+    .where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
+  await db.insert(trackOtp).values({
+    requestHash: rh,
+    phoneHash: key,
+    customerIds: ids,
+    codeHash: own ? codeHash(requestId, own) : null,
+    issuedIp: ip,
+    expiresAt: dbNowPlus(OTP_TTL_SEC),
+  });
+  logEvent('otp_sent', { ipHash, requestId: requestIdForLog });
+  if (own) return printDevOtp(phone, own);
+  const token = await requestOtpSms(phone);
+  if (!token) return logEvent('otp_send_failed', { ipHash, requestId: requestIdForLog });
+  await db.update(trackOtp).set({ providerToken: token }).where(eq(trackOtp.requestHash, rh));
 }
 
 /**
@@ -173,9 +190,10 @@ export async function verifyOtp(
   ip: string,
   ua: string,
 ): Promise<{ token: string; expiresAt: string } | null> {
-  if (typeof requestId !== 'string' || !OPAQUE.test(requestId)) return null;
+  if (typeof requestId !== 'string' || !TOKEN_SHAPE.test(requestId)) return null;
   if (typeof code !== 'string' || !OTP_PATTERN.test(code)) return null;
   const rh = sha256(requestId);
+  const ipHash = ipKeyOf(ip);
   const [tried] = await db
     .update(trackOtp)
     .set({ attempts: sql`${trackOtp.attempts} + 1` })
@@ -197,12 +215,12 @@ export async function verifyOtp(
     const allOk = await hit('otp_fail_phone_day_all', tried.phoneHash, OTP_FAILS_PER_PHONE_DAY_ALL, 86400);
     if (!ipOk) await block(`phone:${ipKey}`, OTP_PHONE_LOCK_MIN);
     if (!allOk) await block(`phone:${tried.phoneHash}`, OTP_PHONE_LOCK_MIN);
-    if (!ipOk || !allOk) logEvent('otp_phone_locked', { ipHash: hmac(`ip:${ip}`), result: allOk ? 'ip' : 'number' });
+    if (!ipOk || !allOk) logEvent('otp_phone_locked', { ipHash, result: allOk ? 'ip' : 'number' });
     return null;
   };
   if (tried.providerToken) {
     const answer = await checkOtpSms(tried.providerToken, code);
-    if (answer === 'error') logEvent('otp_check_failed', { ipHash: hmac(`ip:${ip}`) });
+    if (answer === 'error') logEvent('otp_check_failed', { ipHash });
     if (answer === 'wrong') return wrong();
     if (answer !== 'ok') return null;
   } else if (tried.codeHash) {
@@ -218,7 +236,7 @@ export async function verifyOtp(
   if (!row) return null;
 
   await db.delete(trackSession).where(lt(trackSession.maxExpiresAt, dbNow)); // housekeeping
-  const token = randomBytes(32).toString('base64url');
+  const token = newToken();
   const [s] = await db
     .insert(trackSession)
     .values({
@@ -251,7 +269,7 @@ export async function touchSession(
   ua: string,
   active: boolean,
 ): Promise<CustomerSession | null> {
-  if (typeof token !== 'string' || !OPAQUE.test(token)) return null;
+  if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return null;
   const [row] = await db
     .update(trackSession)
     .set({
@@ -281,6 +299,6 @@ export async function touchSession(
 }
 
 export async function endSession(token: unknown): Promise<void> {
-  if (typeof token !== 'string' || !OPAQUE.test(token)) return;
+  if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return;
   await db.delete(trackSession).where(eq(trackSession.tokenHash, sha256(token)));
 }

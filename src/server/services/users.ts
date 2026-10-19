@@ -1,7 +1,7 @@
-import { audit, diff } from '@/server/audit';
 import 'server-only';
+import { audit, diff } from '@/server/audit';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
@@ -14,18 +14,16 @@ import {
   invalidateUserCache,
   rolesWithRight,
 } from '@/server/auth';
+import type { User, Permission } from '@/data/mock';
+import { nowThai, fmtDateTime } from '@/server/mappers/format';
+import { clean } from '@/lib/validation';
+import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 
 /** After any app_user write: the staff dropdown and the per-request user lookup must see it now. */
 function userChanged(email?: string | null) {
   invalidate('staff');
   invalidateUserCache(email ?? undefined);
 }
-import type { User, Permission } from '@/data/mock';
-import { nowThai, fmtDateTime } from '@/server/mappers/format';
-import { clean } from '@/lib/validation';
-import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
-
-const DEFAULT_APPROVED_TYPE = 'Customer Service';
 
 function splitName(name: string): { first: string; last: string } {
   const [head, ...rest] = name.trim().split(/\s+/).filter(Boolean);
@@ -376,55 +374,61 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       avatar: input.avatar || undefined,
       username: username || undefined,
     };
-    const [row] = await db.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
-    if (!row) throw new HttpError(404, 'user not found');
-    userChanged(row.emailAddress);
-    // recordStatus stays in the diff: disable / re-enable is what an audit must show
-    const changes = diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
-      skip: ['deleted', 'isActive'],
-    });
-    // saved with nothing changed (e.g. opening your own account and pressing บันทึก) → no audit line
-    if (changes)
-      await audit(db, actorId, {
-        ...userAuditLine(
-          fullName(first, last),
-          { userType: before.userType?.trim() || null, rs: before.recordStatus },
-          { userType, rs },
-        ),
-        module: 'Admin',
-        entity: 'app_user',
-        key: targetId,
-        changes,
+    const row = await db.transaction(async (tx) => {
+      const [row] = await tx.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
+      if (!row) throw new HttpError(404, 'user not found');
+      // recordStatus stays in the diff: disable / re-enable is what an audit must show
+      const changes = diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
+        skip: ['deleted', 'isActive'],
       });
+      // saved with nothing changed (e.g. opening your own account and pressing บันทึก) → no audit line
+      if (changes)
+        await audit(tx, actorId, {
+          ...userAuditLine(
+            fullName(first, last),
+            { userType: before.userType?.trim() || null, rs: before.recordStatus },
+            { userType, rs },
+          ),
+          module: 'Admin',
+          entity: 'app_user',
+          key: targetId,
+          changes,
+        });
+      return row;
+    });
+    userChanged(row.emailAddress);
     return { user: toUser(row), created: false };
   }
 
-  const [row] = await db
-    .insert(appUser)
-    .values({
-      username: (username || (email ? email.split('@')[0] : first) || 'user').slice(0, 50),
-      password: '',
-      firstName: first,
-      lastName: last,
-      userType,
-      ...statusStamp(rs, actorId),
-      emailAddress: email || null,
-      phoneNo: phone || null,
-      larkId: clean(input.code) || null,
-      department: clean(input.branch) || null,
-      title: input.title || null,
-      avatar: input.avatar || null,
-    })
-    .returning();
-  if (!row) throw new Error('app_user insert returned no row');
-  userChanged(row.emailAddress);
-  await audit(db, actorId, {
-    action: 'CREATE',
-    module: 'Admin',
-    entity: 'app_user',
-    key: row.userId,
-    summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || '-'} · สิทธิ์ ${userType ?? PENDING_ROLE}`,
+  const row = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(appUser)
+      .values({
+        username: (username || (email ? email.split('@')[0] : first) || 'user').slice(0, 50),
+        password: '',
+        firstName: first,
+        lastName: last,
+        userType,
+        ...statusStamp(rs, actorId),
+        emailAddress: email || null,
+        phoneNo: phone || null,
+        larkId: clean(input.code) || null,
+        department: clean(input.branch) || null,
+        title: input.title || null,
+        avatar: input.avatar || null,
+      })
+      .returning();
+    if (!row) throw new Error('app_user insert returned no row');
+    await audit(tx, actorId, {
+      action: 'CREATE',
+      module: 'Admin',
+      entity: 'app_user',
+      key: row.userId,
+      summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || '-'} · สิทธิ์ ${userType ?? PENDING_ROLE}`,
+    });
+    return row;
   });
+  userChanged(row.emailAddress);
   return { user: toUser(row), created: true };
 }
 
@@ -448,56 +452,38 @@ export function userAuditLine(
   return { action: 'UPDATE', summary: `แก้ไขข้อมูลผู้ใช้ ${name} · สิทธิ์ ${role}` };
 }
 
-/** One-click approve: first real role + Active. */
-export async function approveUser(userId: number, role?: string, actorId = 0): Promise<User> {
-  const [old] = await db.select({ type: appUser.userType }).from(appUser).where(eq(appUser.userId, userId));
-  const [row] = await db
-    .update(appUser)
-    .set({ userType: role?.trim() || DEFAULT_APPROVED_TYPE, ...statusStamp(RS.ACTIVE, actorId), deleted: false })
-    .where(eq(appUser.userId, userId))
-    .returning();
-  if (!row) throw new HttpError(404, 'user not found');
-  userChanged(row.emailAddress);
-  await audit(db, actorId, {
-    action: 'APPROVE',
-    module: 'Admin',
-    entity: 'app_user',
-    key: userId,
-    summary: `อนุมัติผู้ใช้ ${fullName(row.firstName, row.lastName)} → ${row.userType}`,
-    changes: { userType: [old?.type ?? null, row.userType] },
-  });
-  return toUser(row);
-}
-
 /**
  * ลบ / กู้คืน. A restored user comes back INACTIVE: restoring must never re-open an account whose access
  * was revoked before it was deleted — the admin gives access back with คืนสิทธิ์ (upsertUser, audited).
  */
 export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
   if (deleted) refuseSelf(userId, actorId);
-  const [old] = await db
-    .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName })
-    .from(appUser)
-    .where(eq(appUser.userId, userId));
-  if (!old) throw new HttpError(404, 'user not found');
-  // only a deleted user is restored — "restore" on a live account would have switched it off
-  if (!deleted && old.rs !== RS.DELETED)
-    throw new HttpError(409, 'ผู้ใช้นี้ไม่ได้อยู่ในรายการที่ลบ — เปิดใช้งานด้วยปุ่ม คืนสิทธิ์');
-  const who = fullName(old.first, old.last) || `#${userId}`;
-  const rs = deleted ? RS.DELETED : RS.INACTIVE;
-  await db
-    .update(appUser)
-    .set({ ...statusStamp(rs, actorId), deleted })
-    .where(eq(appUser.userId, userId));
-  userChanged();
-  await audit(db, actorId, {
-    action: deleted ? 'DELETE' : 'STATUS',
-    module: 'Admin',
-    entity: 'app_user',
-    key: userId,
-    summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who} (ยังปิดการใช้งาน)`,
-    changes: { recordStatus: [old.rs, rs] },
+  await db.transaction(async (tx) => {
+    const [old] = await tx
+      .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName })
+      .from(appUser)
+      .where(eq(appUser.userId, userId))
+      .for('update');
+    if (!old) throw new HttpError(404, 'user not found');
+    // only a deleted user is restored — "restore" on a live account would have switched it off
+    if (!deleted && old.rs !== RS.DELETED)
+      throw new HttpError(409, 'ผู้ใช้นี้ไม่ได้อยู่ในรายการที่ลบ — เปิดใช้งานด้วยปุ่ม คืนสิทธิ์');
+    const who = fullName(old.first, old.last) || `#${userId}`;
+    const rs = deleted ? RS.DELETED : RS.INACTIVE;
+    await tx
+      .update(appUser)
+      .set({ ...statusStamp(rs, actorId), deleted })
+      .where(eq(appUser.userId, userId));
+    await audit(tx, actorId, {
+      action: deleted ? 'DELETE' : 'STATUS',
+      module: 'Admin',
+      entity: 'app_user',
+      key: userId,
+      summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who} (ยังปิดการใช้งาน)`,
+      changes: { recordStatus: [old.rs, rs] },
+    });
   });
+  userChanged();
 }
 
 /* ------------------------------------------------------------------ *
@@ -611,5 +597,3 @@ export async function savePermissions(
   invalidate('staff'); // takesJobs follows Job Take
   return n;
 }
-
-export { desc };

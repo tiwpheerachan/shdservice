@@ -14,7 +14,7 @@ import {
   AttachmentSection,
   FormActions,
   VIEW_ONLY,
-  JobFormProvider,
+  JobScreen,
   useJobForm,
   fromJob,
   saveCommonSections,
@@ -23,7 +23,7 @@ import {
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { Badge, type Tone } from '@/components/ui/badge';
-import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Field, FieldGrid, LookupError, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea, Checkbox, NumberInput } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { REPAIR_STATUS_OPTIONS } from '@/data/mock';
@@ -73,15 +73,13 @@ type Line = {
 
 function RepairForm() {
   const { push } = useToast();
-  const { data: PRODUCTS } = useProducts();
-  const { data: SYMPTOMS } = useSymptoms();
-  const { data: SYMPTOM_STATS } = useSymptomStats();
+  const { data: PRODUCTS, error: productsError, refetch: retryProducts } = useProducts();
+  const { data: SYMPTOMS, error: symptomsError, refetch: retrySymptoms } = useSymptoms();
+  const { data: SYMPTOM_STATS, error: statsError, refetch: retryStats } = useSymptomStats();
+  // the symptom picker reads the stats, else the plain list — empty only when both failed
+  const symptomListError = SYMPTOM_STATS.length || SYMPTOMS.length ? null : (statsError ?? symptomsError);
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
-  const { jobNo, job, loading, error, find, setJob } = useJob({
-    onRecord: (j) => prefill(j),
-    onLoaded: (j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no }),
-    onMissing: (no) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: no }),
-  });
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, adopt } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
@@ -324,6 +322,7 @@ function RepairForm() {
                 placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
                 className="sm:max-w-xl"
               />
+              <LookupError error={productsError} onRetry={retryProducts} />
             </div>
           )}
           {/* phone: one card per line (the 14-column table does not fit) — the same fields, desktop keeps the table */}
@@ -583,6 +582,13 @@ function RepairForm() {
                 suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
                 placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
               />
+              <LookupError
+                error={symptomListError}
+                onRetry={() => {
+                  retryStats();
+                  retrySymptoms();
+                }}
+              />
             </Field>
             <Field label="วิธีการซ่อม" className="lg:col-span-2" error={act.errors.repairDetail}>
               <Textarea
@@ -674,10 +680,8 @@ function RepairForm() {
 
 export default function RepairPage() {
   return (
-    <JobFormProvider>
-      <React.Suspense fallback={null}>
-        <RepairForm />
-      </React.Suspense>
-    </JobFormProvider>
+    <JobScreen>
+      <RepairForm />
+    </JobScreen>
   );
 }

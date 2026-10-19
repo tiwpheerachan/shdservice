@@ -69,12 +69,12 @@ export default function UsersPage() {
         ? [
             ...dbRoles.filter((x) => x !== ADMIN_USER_TYPE),
             ...dbRoles.filter((x) => x === ADMIN_USER_TYPE),
-            'รออนุมัติ',
+            PENDING_ROLE,
           ]
         : ROLES,
     [dbRoles],
   );
-  const pendingCount = USERS.filter((u) => u.role === 'รออนุมัติ').length;
+  const pendingCount = USERS.filter((u) => u.role === PENDING_ROLE).length;
 
   // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
   type UserFilter = { name: string; username: string; role: string; status: '' | 'Active' | 'Inactive' };
@@ -92,10 +92,10 @@ export default function UsersPage() {
         (!filter.status || u.status === filter.status),
     );
   }, [USERS, filter]);
-  // auto-refresh so users who just signed in (pending) show up without a reload
+  // auto-refresh so users who just signed in (pending) show up without a reload — not while the tab is hidden
   React.useEffect(() => {
     if (view !== 'active') return;
-    const id = setInterval(() => refetch(), 25000);
+    const id = setInterval(() => !document.hidden && refetch(), 25000);
     return () => clearInterval(id);
   }, [refetch, view]);
   const [open, setOpen] = React.useState(false);
@@ -282,7 +282,6 @@ export default function UsersPage() {
       cell: (r) => (
         <div className="flex items-center gap-2.5">
           {r.avatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={r.avatar}
               alt={r.name}
@@ -309,7 +308,7 @@ export default function UsersPage() {
       key: 'role',
       header: 'ประเภทผู้ใช้งาน / สิทธิ์',
       cell: (r) =>
-        r.role === 'รออนุมัติ' ? (
+        r.role === PENDING_ROLE ? (
           <Badge tone="warning" dot>
             {r.role}
           </Badge>
@@ -349,7 +348,7 @@ export default function UsersPage() {
       width: '100px',
       // a pending sign-up (no role yet) is Active in the table but cannot use anything — say so
       cell: (r) =>
-        r.role === 'รออนุมัติ' ? (
+        r.role === PENDING_ROLE ? (
           <Badge tone="warning" dot>
             รออนุมัติ
           </Badge>
@@ -378,7 +377,7 @@ export default function UsersPage() {
           </div>
         ) : (
           <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
-            {r.role === 'รออนุมัติ' ? (
+            {r.role === PENDING_ROLE ? (
               <button
                 disabled={busyId === r.id}
                 onClick={() => approveNow(r)}
@@ -540,7 +539,7 @@ export default function UsersPage() {
             placeholder="- - เลือกบทบาท - -"
             value={approveRole}
             onChange={setApproveRole}
-            options={strOptions(ROLE_OPTIONS.filter((x) => x !== 'รออนุมัติ'))}
+            options={strOptions(ROLE_OPTIONS.filter((x) => x !== PENDING_ROLE))}
           />
         </Field>
       </Modal>
@@ -576,7 +575,6 @@ export default function UsersPage() {
         {(form.avatar || form.name) && (
           <div className="mb-4 flex items-center gap-3 rounded-lg border border-border bg-card p-3">
             {form.avatar ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={form.avatar}
                 alt={form.name}

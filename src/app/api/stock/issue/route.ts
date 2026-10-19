@@ -6,6 +6,7 @@ import { issueForJob, issueForSaleOrder, issueOther, returnFromJob } from '@/ser
 import { markPartsIssued } from '@/server/services/jobs';
 import { listStaff } from '@/server/services/users';
 import { cleanCode } from '@/lib/validation';
+import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,13 +19,11 @@ export const POST = handle(async (req: NextRequest) => {
   );
 });
 
-/** จ่ายให้ / รับคืนจาก: the pick page's list — the good-stock store or a current staff member */
-const STORE_RECIPIENT = 'คลังสินค้าดี';
-
 async function issue(req: NextRequest, userId: number) {
   const body = await parseBody(req, stockIssue); // issueSchema
   const b = { ...body, ref: cleanCode(body.ref), remark: body.remark ?? undefined };
-  if (b.payTo !== STORE_RECIPIENT && !(await listStaff()).some((s) => s.name === b.payTo)) {
+  // จ่ายให้ / รับคืนจาก: the pick page's list — the good-stock store or a current staff member
+  if (b.payTo !== STORE_LOCATION_NAME && !(await listStaff()).some((s) => s.name === b.payTo)) {
     const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือก${b.type === 'return' ? 'ผู้คืน' : 'ผู้รับ'}จากรายการ`;
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { payTo: msg } });
   }

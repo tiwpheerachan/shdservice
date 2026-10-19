@@ -1,4 +1,5 @@
 import 'server-only';
+import { logError } from '@/lib/log';
 
 /**
  * The SMS behind the /track OTP — one small adapter so the provider is a configuration choice.
@@ -68,10 +69,10 @@ export async function requestOtpSms(phone10: string): Promise<string | null> {
     const { status, d } = await post('request', { msisdn: phone10 });
     if (status === 200 && d.status === 'success' && typeof d.token === 'string' && d.token && d.token.length <= 128)
       return d.token;
-    console.error('[sms:thaibulksms] otp request failed', status, why(d));
+    logError(why(d), 'sms:thaibulksms otp request failed', { status });
     return null;
   } catch (e) {
-    console.error('[sms:thaibulksms] otp request failed', e instanceof Error ? e.name : 'error');
+    logError(e, 'sms:thaibulksms otp request failed');
     return null;
   }
 }
@@ -84,13 +85,13 @@ export async function checkOtpSms(token: string, code: string): Promise<'ok' | '
     if (status === 400) {
       // a wrong / expired code is an everyday answer; anything else (app not found, bad key…) is a setup problem
       if (!/^code is /i.test(d.errors?.[0]?.message ?? ''))
-        console.error('[sms:thaibulksms] otp verify refused', status, why(d));
+        logError(why(d), 'sms:thaibulksms otp verify refused', { status });
       return 'wrong';
     }
-    console.error('[sms:thaibulksms] otp verify failed', status, why(d));
+    logError(why(d), 'sms:thaibulksms otp verify failed', { status });
     return 'error';
   } catch (e) {
-    console.error('[sms:thaibulksms] otp verify failed', e instanceof Error ? e.name : 'error');
+    logError(e, 'sms:thaibulksms otp verify failed');
     return 'error';
   }
 }

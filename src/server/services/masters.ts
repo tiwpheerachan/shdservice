@@ -1,14 +1,14 @@
 import 'server-only';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { category, color, jobType, manufacturer, model, productType, symptom, runningNo } from '@/db/schema';
+import { category, color, jobType, manufacturer, model, productType, symptom } from '@/db/schema';
 import type { MasterRow, Symptom, Model } from '@/data/mock';
 import { HttpError } from '@/server/auth';
 import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
-import { count, desc, ilike, or } from 'drizzle-orm';
+import { productsChanged } from './stock';
 import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import {
   RS,
@@ -190,32 +190,40 @@ export async function saveSimple(
   }
 
   if (input.id && before) {
-    await db
-      .update(d.table)
-      .set(values)
-      .where(eq(d.id, Number(input.id)));
-    await audit(db, byUserId, {
-      action: 'UPDATE',
-      module: 'Admin',
-      entity: kind,
-      key: input.id,
-      summary: `แก้ไข ${kind}: ${name}`,
-      changes: diff(before as Record<string, unknown>, values),
+    await db.transaction(async (tx) => {
+      await tx
+        .update(d.table)
+        .set(values)
+        .where(eq(d.id, Number(input.id)));
+      await audit(tx, byUserId, {
+        action: 'UPDATE',
+        module: 'Admin',
+        entity: kind,
+        key: input.id!,
+        summary: `แก้ไข ${kind}: ${name}`,
+        changes: diff(before as Record<string, unknown>, values),
+      });
     });
     invalidate(`master:${kind}:`);
+    // the picker list shows category / brand names, the model list brand names
+    if (kind === 'categories' || kind === 'manufacturers') productsChanged();
+    if (kind === 'manufacturers') invalidate('master:models:');
     // "all": an edit may just have set the row INACTIVE
     const saved = (await listSimple(kind, 'all')).find((r) => r.id === input.id);
     if (!saved) throw new Error(`${kind} #${input.id} not found after update`);
     return saved;
   }
-  const [row] = await db.insert(d.table).values(values).returning({ id: d.id });
-  if (!row) throw new Error(`${kind} insert returned no row`);
-  await audit(db, byUserId, {
-    action: 'CREATE',
-    module: 'Admin',
-    entity: kind,
-    key: row.id,
-    summary: `เพิ่ม ${kind}: ${name}`,
+  const row = await db.transaction(async (tx) => {
+    const [row] = await tx.insert(d.table).values(values).returning({ id: d.id });
+    if (!row) throw new Error(`${kind} insert returned no row`);
+    await audit(tx, byUserId, {
+      action: 'CREATE',
+      module: 'Admin',
+      entity: kind,
+      key: row.id,
+      summary: `เพิ่ม ${kind}: ${name}`,
+    });
+    return row;
   });
   invalidate(`master:${kind}:`);
   const created = (await listSimple(kind, 'all')).find((r) => r.id === String(row.id));
@@ -226,18 +234,21 @@ export async function saveSimple(
 /** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
 export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
-  const [old] = await db.select({ rs: d.active }).from(d.table).where(eq(d.id, id));
-  await db
-    .update(d.table)
-    .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
-    .where(eq(d.id, id));
-  await audit(db, byUserId, {
-    action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
-    module: 'Admin',
-    entity: kind,
-    key: id,
-    summary: `${kind} #${id} → ${rs}`,
-    changes: { recordStatus: [old?.rs ?? null, rs] },
+  await db.transaction(async (tx) => {
+    const [old] = await tx.select({ rs: d.active }).from(d.table).where(eq(d.id, id)).for('update');
+    if (!old) throw new HttpError(404, `ไม่พบรายการ ${kind} #${id}`);
+    await tx
+      .update(d.table)
+      .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
+      .where(eq(d.id, id));
+    await audit(tx, byUserId, {
+      action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
+      module: 'Admin',
+      entity: kind,
+      key: id,
+      summary: `${kind} #${id} → ${rs}`,
+      changes: { recordStatus: [old.rs ?? null, rs] },
+    });
   });
   invalidate(`master:${kind}:`);
 }
@@ -301,44 +312,51 @@ export async function saveSymptom(
       .limit(1);
     if (dup) throw duplicate({ name: dup.name, ref: dup.id, rs: dup.rs });
   }
-  let id: number;
-  if (input.id) {
-    id = Number(input.id);
-    await db.update(symptom).set(values).where(eq(symptom.symptomId, id));
-    await audit(db, byUserId, {
-      action: 'UPDATE',
-      module: 'Admin',
-      entity: 'symptom',
-      key: id,
-      summary: `แก้ไขอาการเสีย: ${name}`,
-      changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
-    });
-  } else {
-    const [row] = await db.insert(symptom).values(values).returning({ id: symptom.symptomId });
+  const id = await db.transaction(async (tx) => {
+    if (input.id) {
+      const id = Number(input.id);
+      await tx.update(symptom).set(values).where(eq(symptom.symptomId, id));
+      await audit(tx, byUserId, {
+        action: 'UPDATE',
+        module: 'Admin',
+        entity: 'symptom',
+        key: id,
+        summary: `แก้ไขอาการเสีย: ${name}`,
+        changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
+      });
+      return id;
+    }
+    const [row] = await tx.insert(symptom).values(values).returning({ id: symptom.symptomId });
     if (!row) throw new Error('symptom insert returned no row');
-    id = row.id;
-    await audit(db, byUserId, {
+    await audit(tx, byUserId, {
       action: 'CREATE',
       module: 'Admin',
       entity: 'symptom',
-      key: id,
+      key: row.id,
       summary: `เพิ่มอาการเสีย: ${name}`,
     });
-  }
+    return row.id;
+  });
   invalidate('master:symptoms:');
   return (await listSymptoms('exclude')).find((r) => r.id === String(id))!;
 }
 
 export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
-  const [old] = await db.select({ rs: symptom.recordStatus }).from(symptom).where(eq(symptom.symptomId, id));
-  await db.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
-  await audit(db, byUserId, {
-    action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
-    module: 'Admin',
-    entity: 'symptom',
-    key: id,
-    summary: `อาการเสีย #${id} → ${rs}`,
-    changes: { recordStatus: [old?.rs ?? null, rs] },
+  await db.transaction(async (tx) => {
+    const [old] = await tx
+      .select({ rs: symptom.recordStatus })
+      .from(symptom)
+      .where(eq(symptom.symptomId, id))
+      .for('update');
+    await tx.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
+    await audit(tx, byUserId, {
+      action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
+      module: 'Admin',
+      entity: 'symptom',
+      key: id,
+      summary: `อาการเสีย #${id} → ${rs}`,
+      changes: { recordStatus: [old?.rs ?? null, rs] },
+    });
   });
   invalidate('master:symptoms:');
 }
@@ -453,23 +471,27 @@ export async function saveModel(
 }
 
 export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
-  const [old] = await db.select({ rs: model.recordStatus }).from(model).where(eq(model.modelCode, code));
-  await db
-    .update(model)
-    .set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() })
-    .where(eq(model.modelCode, code));
-  await audit(db, byUserId, {
-    action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
-    module: 'Admin',
-    entity: 'model',
-    key: code,
-    summary: `รุ่นสินค้า ${code} → ${rs}`,
-    changes: { recordStatus: [old?.rs ?? null, rs] },
+  await db.transaction(async (tx) => {
+    const [old] = await tx
+      .select({ rs: model.recordStatus })
+      .from(model)
+      .where(eq(model.modelCode, code))
+      .for('update');
+    await tx
+      .update(model)
+      .set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() })
+      .where(eq(model.modelCode, code));
+    await audit(tx, byUserId, {
+      action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
+      module: 'Admin',
+      entity: 'model',
+      key: code,
+      summary: `รุ่นสินค้า ${code} → ${rs}`,
+      changes: { recordStatus: [old?.rs ?? null, rs] },
+    });
   });
   invalidate('master:models:');
 }
-
-export { runningNo };
 
 /* ------------------------------------------------------------------ *
  * Paged models (รุ่นสินค้า — 1.1k rows)

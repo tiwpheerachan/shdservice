@@ -83,7 +83,7 @@ CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push �
 ### ผู้ใช้ / สิทธิ์
 - login ผ่าน Central SSO เหมือนเดิม → จับคู่กับ `app_user` ด้วยอีเมล (สร้างแถวใหม่แบบรออนุมัติถ้าไม่พบ)
 - บทบาท = `app_user.user_type` · สิทธิ์เมนู = `app_config` (user_type × module × add/edit/del/view) — บังคับใช้ที่ API ทุก route ที่เขียน และซ่อนเมนู/ปุ่มใน UI
-- หน้า **ข้อมูลระบบ** และ **รายงาน** ใช้ได้เฉพาะ System Admin · owner emails ใน `src/lib/access.ts` / `OWNER_EMAILS` เป็น System Admin เสมอ
+- หน้า **ข้อมูลระบบ** และ **รายงาน** ใช้ได้เฉพาะ System Admin · อีเมลใน env `OWNER_EMAILS` (คั่นด้วย comma, ทุก environment — dev ตั้งใน `.env.development.local`) เป็น System Admin เสมอ
 
 รายละเอียด business rule ที่อนุมานจากข้อมูลจริง (สถานะงาน, สต๊อก, ใบเสนอราคา, ใบสั่งขาย) อยู่ใน [`docs/backend-rebase-plan.md`](docs/backend-rebase-plan.md)
 
@@ -151,7 +151,7 @@ src/
 │   │                           # Tabs, Modal, Toast, Field, DataTable
 │   ├── layout/                 # AppShell, Sidebar, Topbar, ThemeToggle,
 │   │                           # SessionTimer, CommandPalette
-│   └── shared/                 # PageHeader, Section, FilterBar, StatCard,
+│   └── shared/                 # PageHeader, Section, FilterBar,
 │                               # MasterTable, JobForm, QuotationForm,
 │                               # SaleOrderForm, ReportView, Attachments
 ├── lib/                        # utils, nav, modules (permission map), api (fetch), use-access, use-job

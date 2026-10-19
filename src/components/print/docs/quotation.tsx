@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import { getQuotation } from '@/server/services/quotations';
 import { AutoPrint } from '@/components/print/auto-print';
 import { money } from '@/components/print/print-frame';
-import { QUOTATION_VALIDITY } from '@/lib/company';
+import { QUOTE_VALID_DAYS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { maskQuotationForCustomer, quoteSignState } from '@/server/services/tracking';
@@ -80,7 +80,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
 
       {/* ── company header ── */}
       <header className="flex items-start gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
           <p className="text-[14px] font-bold">{co.nameTh}</p>
@@ -183,7 +182,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                     </td>
                     <td className="pad text-center">
                       <p className="font-semibold">กำหนดยืนยันราคา</p>
-                      <p className="mt-0.5">Validity date : {QUOTATION_VALIDITY}</p>
+                      <p className="mt-0.5">Validity date : {QUOTE_VALID_DAYS} Days</p>
                     </td>
                   </tr>
                 </tbody>

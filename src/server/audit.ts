@@ -1,6 +1,7 @@
 import 'server-only';
 import { and, desc, eq, gte, ilike, lte, or, sql, count } from 'drizzle-orm';
 import { db, type Tx } from '@/db/client';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, auditLog } from '@/db/schema';
 import { fullName } from '@/server/auth';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
@@ -211,7 +212,7 @@ export async function listAudit(f: AuditFilters & { q?: string; limit?: number }
     .from(auditLog)
     .where(auditWhere(f.q ?? '', f))
     .orderBy(desc(auditLog.id))
-    .limit(Math.min(f.limit ?? 1000, 20000));
+    .limit(Math.min(f.limit ?? 1000, MAX_EXPORT_ROWS));
   return rows.map(toRow);
 }
 

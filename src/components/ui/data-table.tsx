@@ -18,6 +18,9 @@ import { Input, Select } from './input';
 import { Skeleton } from './skeleton';
 import { Button } from './button';
 
+/** the page-size choices (also what a ?size= in a shared job-list link may be) */
+export const PAGE_SIZES = [10, 25, 50, 100];
+
 export type Column<T> = {
   key: string;
   header: React.ReactNode;
@@ -383,7 +386,7 @@ export function DataTable<T extends Record<string, unknown>>({
             className="h-8 w-28 text-xs"
             aria-label="จำนวนต่อหน้า"
           >
-            {[10, 25, 50, 100].map((n) => (
+            {PAGE_SIZES.map((n) => (
               <option key={n} value={n}>
                 {n} รายการ
               </option>

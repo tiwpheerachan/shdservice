@@ -22,6 +22,7 @@ import {
   withPrefix,
 } from '@/lib/validation/customer';
 import { clean } from '@/lib/validation';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { assertValid } from '@/server/validate';
 
 export type DeletedMode = StatusMode;
@@ -105,7 +106,7 @@ export async function listCustomers(
     .from(customer)
     .where(customerWhere(q, deleted, filters))
     .orderBy(desc(customer.customerId))
-    .limit(Math.min(limit, 20000)); // 20k = the Excel export cap (src/server/export.ts)
+    .limit(Math.min(limit, MAX_EXPORT_ROWS));
   return rows.map((r) => toCustomer(r));
 }
 
@@ -131,7 +132,8 @@ const phoneHas = (digits: string) =>
 /**
  * Name as clean() writes it — invisible characters dropped, any whitespace run (NBSP too) → one space: ~1,050
  * legacy names hold double spaces / zero-width marks and never matched an ilike of the typed name (audit 2026-10).
- * ponytail: seq scan (~50 ms on 43k rows) — an expression trigram index on exactly this expression makes it ~0.1 ms.
+ * Backed by the expression trigram index gin_customer_name_clean (drizzle/0034) — keep the two character-for-character
+ * identical, or the search falls back to a seq scan of 43k rows.
  */
 const nameText = sql`regexp_replace(regexp_replace(${customer.customerName}, '[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]', '', 'g'), '[\\s\\u00A0]+', ' ', 'g')`;
 
@@ -228,26 +230,30 @@ export type CustomerInput = {
   version?: number;
 };
 
+/** mt_city.city_id of กรุงเทพมหานคร: แขวง / เขต and no จ. prefix */
+const BANGKOK_CITY_ID = 10;
+
 /** Build the legacy single-line address from the parts (what the old app did). */
 async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
+  const bkk = i.cityId === BANGKOK_CITY_ID;
   const parts: string[] = [str(i.address1), str(i.address2)];
   if (i.subDistrictId && i.subDistrictId > 0) {
     const [sd] = await tx
       .select({ n: mtSubDistrict.nameTh })
       .from(mtSubDistrict)
       .where(eq(mtSubDistrict.subDistrictId, i.subDistrictId));
-    if (sd) parts.push(withPrefix(i.cityId === 10 ? 'แขวง' : 'ต.', sd.n));
+    if (sd) parts.push(withPrefix(bkk ? 'แขวง' : 'ต.', sd.n));
   }
   if (i.districtId && i.districtId > 0) {
     const [d] = await tx
       .select({ n: mtDistrict.nameTh })
       .from(mtDistrict)
       .where(eq(mtDistrict.districtId, i.districtId));
-    if (d) parts.push(withPrefix(i.cityId === 10 ? 'เขต' : 'อ.', d.n));
+    if (d) parts.push(withPrefix(bkk ? 'เขต' : 'อ.', d.n));
   }
   if (i.cityId && i.cityId > 0) {
     const [c] = await tx.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, i.cityId));
-    if (c) parts.push(withPrefix(i.cityId === 10 ? '' : 'จ.', c.n));
+    if (c) parts.push(withPrefix(bkk ? '' : 'จ.', c.n));
   }
   parts.push(str(i.postalCode));
   return parts.filter(Boolean).join(' ').slice(0, 200);
@@ -322,37 +328,39 @@ export async function findCustomerConflicts(
       cond: sql`regexp_replace(coalesce(${customer.customerCardId},''), '\\D', '', 'g') = ${taxId}`,
     });
   if (!checks.length) return [];
-  const out: CustomerConflict[] = [];
-  for (const c of checks) {
-    const rows = await db
-      .select({
-        code: customer.customerCode,
-        name: customer.customerName,
-        phone: customer.phoneNumber,
-        email: customer.email,
-        taxId: customer.customerCardId,
-      })
-      .from(customer)
-      .where(
-        and(
-          c.cond,
-          sql`${customer.recordStatus} <> 'DELETED'`,
-          excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
-        ),
-      )
-      .limit(5);
-    for (const r of rows)
-      out.push({
-        field: c.field,
-        value: c.value,
-        code: r.code ?? '',
-        name: r.name ?? '',
-        phone: r.phone ?? '',
-        email: r.email ?? '',
-        taxId: r.taxId ?? '',
-      });
-  }
-  return out;
+  // one query per field, in parallel
+  const found = await Promise.all(
+    checks.map((c) =>
+      db
+        .select({
+          code: customer.customerCode,
+          name: customer.customerName,
+          phone: customer.phoneNumber,
+          email: customer.email,
+          taxId: customer.customerCardId,
+        })
+        .from(customer)
+        .where(
+          and(
+            c.cond,
+            sql`${customer.recordStatus} <> 'DELETED'`,
+            excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
+          ),
+        )
+        .limit(5),
+    ),
+  );
+  return checks.flatMap((c, k) =>
+    found[k]!.map((r) => ({
+      field: c.field,
+      value: c.value,
+      code: r.code ?? '',
+      name: r.name ?? '',
+      phone: r.phone ?? '',
+      email: r.email ?? '',
+      taxId: r.taxId ?? '',
+    })),
+  );
 }
 
 /** The columns a save writes from the form, cleaned (phone / one-line address / status apart). */
@@ -497,5 +505,3 @@ export async function listSubDistricts(districtId: number) {
     .where(eq(mtSubDistrict.districtId, districtId))
     .orderBy(asc(mtSubDistrict.nameTh));
 }
-
-export { sql };

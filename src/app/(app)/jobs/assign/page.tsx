@@ -207,7 +207,7 @@ export default function AssignPage() {
       key: 'status',
       header: 'สถานะงาน',
       minWidth: COL_MIN_WIDTH.status,
-      cell: (r) => <StatusBadge status={r.status} wrap />,
+      cell: (r) => <StatusBadge status={r.status} group={r.statusGroup} wrap />,
     },
   ];
 

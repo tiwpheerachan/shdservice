@@ -1,4 +1,3 @@
-import { COMPANY } from '@/lib/company';
 import type { DocumentProfile } from '@/server/services/document-profiles';
 import { AutoPrint } from './auto-print';
 
@@ -10,32 +9,21 @@ export function PrintFrame({
   title,
   docNo,
   meta,
-  company,
+  company: co,
   children,
 }: {
   title: string;
   docNo: string;
   meta: { label: string; value: string }[];
-  /** ออกเอกสารในนาม — falls back to the static COMPANY block */
-  company?: Pick<DocumentProfile, 'code' | 'nameTh' | 'nameEn' | 'address' | 'phone' | 'email' | 'taxId' | 'logoUrl'>;
+  /** ออกเอกสารในนาม (profileForDocument) */
+  company: Pick<DocumentProfile, 'code' | 'nameTh' | 'nameEn' | 'address' | 'phone' | 'email' | 'taxId' | 'logoUrl'>;
   children: React.ReactNode;
 }) {
-  const co = company ?? {
-    code: 'SHD',
-    nameTh: COMPANY.nameTh,
-    nameEn: COMPANY.nameEn,
-    address: COMPANY.address,
-    phone: COMPANY.phone,
-    email: COMPANY.email,
-    taxId: COMPANY.taxId,
-    logoUrl: COMPANY.logoMark,
-  };
   return (
     <div className="print-page">
       <AutoPrint />
       <header className="flex items-start justify-between gap-6 border-b-2 border-black pb-3">
         <div className="flex items-start gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={co.logoUrl} alt={co.code} className="h-10 w-auto" />
           <div className="text-[11px] leading-snug">
             <p className="text-sm font-semibold">{co.nameTh}</p>

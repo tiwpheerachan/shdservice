@@ -12,15 +12,8 @@ export const baht = (n: number) => n.toLocaleString('th-TH', { minimumFractionDi
 
 export const int = (n: number) => n.toLocaleString('th-TH');
 
-export const pct = (n: number) =>
-  `${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-
 export function fmtDateTime(s: string) {
   return s;
-}
-
-export function slugTitle(s: string) {
-  return s.replace(/-/g, ' ');
 }
 
 /**

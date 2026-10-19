@@ -79,7 +79,6 @@ export function PeoplePicker({
     return (
       <div className={cn('flex h-9 items-center gap-2 rounded-md border border-input bg-card px-2.5', className)}>
         {value.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={value.avatar} alt={value.name} className="h-6 w-6 shrink-0 rounded-full object-cover" />
         ) : (
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft text-2xs font-semibold text-primary">
@@ -174,7 +173,6 @@ export function PeoplePicker({
                     )}
                   >
                     {p.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={p.avatar}
                         alt={p.name}

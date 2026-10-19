@@ -15,13 +15,19 @@ import { IDEMPOTENCY } from '@/server/contract/common';
  * created nothing, so its key is released and the same submit may be sent again.
  * No header → `fn` runs exactly as before.
  */
+let lastPurge = 0;
+
 export async function idempotent(req: NextRequest, userId: number, fn: () => Promise<Response>): Promise<Response> {
   // trimmed; over 100 → 400 "Idempotency-Key ยาวเกินไป" (the header as src/server/contract declares it)
   const key = parseHeaders(req, IDEMPOTENCY)['Idempotency-Key'];
   if (!key) return fn();
   const route = `${req.method} ${req.nextUrl.pathname}`.slice(0, 200);
 
-  await db.execute(sql`DELETE FROM idempotency_key WHERE created_at < now() - interval '24 hours'`); // purge as we go
+  // purge as we go — at most once a minute per process, not on every keyed POST
+  if (Date.now() - lastPurge > 60_000) {
+    lastPurge = Date.now();
+    await db.execute(sql`DELETE FROM idempotency_key WHERE created_at < now() - interval '24 hours'`);
+  }
   // claim the key; a claim left unfinished > 2 min (the process died mid-request) may be taken over
   const claimed = await db.execute(sql`
     INSERT INTO idempotency_key (user_id, key, route) VALUES (${userId}, ${key}, ${route})

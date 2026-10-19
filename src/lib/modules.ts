@@ -106,9 +106,6 @@ export function isAdminOnlyPath(pathname: string): boolean {
 export type Grant = { add: boolean; edit: boolean; del: boolean; view: boolean };
 export type GrantMap = Partial<Record<string, Grant>>;
 
-export const NO_GRANT: Grant = { add: false, edit: false, del: false, view: false };
-export const FULL_GRANT: Grant = { add: true, edit: true, del: true, view: true };
-
 /** Pure check used on both sides. `grants` is keyed by module name. */
 export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | null, action: Action): boolean {
   if (isAdmin) return true;

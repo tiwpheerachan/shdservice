@@ -199,7 +199,7 @@ export function JobSearch({
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
-                  <StatusBadge status={j.status} />
+                  <StatusBadge status={j.status} group={j.statusGroup} />
                   <span className="num mt-0.5 block text-2xs text-muted-foreground">{j.openDate}</span>
                 </span>
               </CommandPrimitive.Item>

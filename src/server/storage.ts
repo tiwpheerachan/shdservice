@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isoDateTime } from '@/lib/dates';
 import { HttpError } from '@/server/http-error';
+import { logError } from '@/lib/log';
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -171,13 +172,18 @@ export async function uploadFile(path: string, file: File | Blob, contentType?: 
 
 export async function signedUrl(path: string, seconds = 600): Promise<string | null> {
   const { data, error } = await storage().from(BUCKET).createSignedUrl(path, seconds);
-  if (error) return null;
+  if (error) {
+    logError(error, 'storage signedUrl failed');
+    return null;
+  }
   return data.signedUrl;
 }
 
 export async function removeFile(path: string): Promise<void> {
-  await storage()
+  // a leftover object is not worth failing the save that replaced it — logged, then dropped
+  const { error } = await storage()
     .from(BUCKET)
     .remove([path])
-    .catch(() => undefined);
+    .catch((e: unknown) => ({ error: e }));
+  if (error) logError(error, 'storage removeFile failed');
 }

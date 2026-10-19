@@ -16,6 +16,7 @@ import { postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { useAccess } from '@/lib/use-access';
 import { productSchema } from '@/lib/validation/admin';
+import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 
 export type ProductMode = 'view' | 'edit' | 'add';
 
@@ -252,7 +253,7 @@ export function ProductDetailModal({
   const onhandRows = [
     {
       sn: '-',
-      loc: 'คลังสินค้าดี',
+      loc: STORE_LOCATION_NAME,
       cond: 'สินค้าใหม่',
       income: p.received ?? p.onhand,
       outcome: p.issued ?? 0,
@@ -293,7 +294,6 @@ export function ProductDetailModal({
             <p className="text-xs font-medium text-muted-foreground">Part Image</p>
             <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
               {image && brokenImage !== image ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={fileUrl(image)}
                   alt={p.name}

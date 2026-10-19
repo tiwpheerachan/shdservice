@@ -312,6 +312,15 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [ ] **ลูกค้า**: Excel ส่งออกได้สูงสุด 20,000 จาก 43,540 ราย (เพิ่มเพดานหรือ CSV) · ประวัติลูกค้ามีแค่งาน ไม่มีใบเสนอราคา/ใบสั่งขาย
 - [x] ⚠️ ความปลอดภัย: ทุกงานยังเก็บ `track_token` ดิบ → ล้างแล้วด้วย `drizzle/0033` (ดูด้านบน)
 
+## คุณภาพโค้ด: hard code / ไม่มีประสิทธิภาพ (2026-10-19 — ตรวจทั้งโปรเจกต์ 3 ส่วน แล้วแก้ หนัก → กลาง → เล็ก)
+
+ตรวจแล้ว: tsc · eslint · npm test · test:db บน test DB ใหม่ 3 รอบติด (166/205/84) · migrate `--reset` · e2e 5/5 (build ใหม่, `/login` `/track` เป็น dynamic) · prod `jit=off` อยู่แล้ว (ข้อ JIT ช้าเฉพาะ dev ไม่ต้องแก้)
+
+- [x] **หนัก** — Excel export เป็น stream (20k แถวเดิม OOM ใต้ heap 400 MB → ~88 MB) + ส่งออกได้ทีละไฟล์ต่อ server (429) · ป้ายสถานะงานสีตามกลุ่ม (เดิมเทา 20/23 สถานะ) · หน้า master ไม่กลืน error เป็นตารางว่าง · Dashboard มีโหลด/error · มอบหมายงานเป็นชุด (เดิม ~2,000 query ต่อ 500 งาน)
+- [x] **กลาง** — รหัสสถานะรวมที่ `src/lib/status-ids.ts` (แทนเลขเปล่าใน reports/stock/sale-orders/quote-expiry/quote-job/tracking) · หน้าติดตามงาน/login ใช้โปรไฟล์ผู้ออกเอกสาร (company.ts เหลือแค่ค่าสำรอง) · ตัวกรองต่อหมวดสร้างที่เดียว (แก้ KPI ใบเสนอราคา error 500 เมื่อกรองยี่ห้อ, list/summary ที่ทิ้งตัวกรอง) · บันทึก+audit ใน transaction เดียว (master, ผู้ใช้, กู้คืนข้อมูล) + อัปโหลดสลิป/รูปมี audit · กู้คืนงานล็อกแถว · ตัวกรองกลุ่มสถานะใช้ index (17 → 0.65 ms) · สต๊อกล็อก+อัปเดตทุกบรรทัดในคำสั่งเดียว · หน้ารายละเอียดใบสั่งขาย/ใบเสนอราคา/อะไหล่ query ขนาน · OTP เวลาตอบเท่ากันทั้งเบอร์ลูกค้า/ไม่ใช่ · GET ลิงก์ติดตามออกลิงก์ใหม่เฉพาะผู้มีสิทธิ์แก้ไข + audit · ตัวเลือกสถานะมาจาก DB
+- [x] **เล็ก** — ลบโค้ด/ไฟล์ที่ไม่ใช้ (shadcn ชุดซ้ำ, export ใน mock.ts 11 ตัว, hook 6 ตัว, approveUser, logo-source.png ฯลฯ) · ค่าคงที่ที่ซ้ำ (เพดาน export `src/lib/export-limit.ts`, ชื่อคลัง, สถานะส่งซ่อมนอก `src/lib/outsource-status.ts`, ข้อความ "ไม่พบหมายเลขงาน", ขนาดหน้า, ป้าย TAT) · log แทน console/catch เงียบ · cache ล้างหลัง commit · ตัวจับเวลา session หน้าลูกค้าใช้ hook เดียว + ไม่ re-render ทุกวินาที · poll หยุดเมื่อซ่อนแท็บ · ปีใน footer · a11y ปุ่มย่อเมนู · owner อ่านจาก `OWNER_EMAILS` อย่างเดียว (dev ตั้งใน `.env.development.local`)
+- [ ] **เลื่อนไว้ (รื้อใหญ่ เสี่ยง ไม่เปลี่ยนพฤติกรรม)** — แยก component ยักษ์ (RepairForm, CloseForm, UsersPage, ProductDetailModal, QuotationForm, JobListPage, ProductSection, TrackOtp) · hook ตารางกลางแทน boilerplate 14 หน้า · เปลี่ยนชื่อ `mock.ts` → types/options · ProductPicker ค้นฝั่ง server (ทำเมื่อแคตตาล็อกโตขึ้น) · ชนิด input ของ service จาก contract (ต้องรองรับ null ทั่ว service) · แยก saveRepair/saveOutsource
+
 ## จุดแข็งที่มีอยู่แล้ว (ห้าม regress)
 
 - Session: HMAC cookie, idle 30 นาที + absolute 12 ชม., `session_version` logout ทุกเครื่อง, role/status อ่านจาก DB ทุก request (DB ล่ม = 503 ไม่ trust cookie)

@@ -224,7 +224,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     updatedAt: nowThai(),
   };
 
-  return db.transaction(async (tx) => {
+  const saved = await db.transaction(async (tx) => {
     // the short code is what dropdowns show — unique among LIVE profiles (a deleted one frees its code)
     const others = await tx
       .select()
@@ -268,9 +268,10 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
       summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์ผู้ออกเอกสาร ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
-    invalidate('docprofiles:');
     return toProfile(row);
   });
+  invalidate('docprofiles:'); // after the commit — dropped inside, a read in between would cache the old row again
+  return saved;
 }
 
 export async function setDocumentProfileLogo(id: number, logoPath: string, byUserId: number): Promise<void> {

@@ -109,7 +109,6 @@ export const isStale = (e: unknown) =>
   e instanceof ApiError && e.status === 409 && (e.details as { stale?: boolean } | undefined)?.stale === true;
 
 export const patchJson = json('PATCH');
-export const putJson = json('PUT');
 export const del = <T = unknown>(url: string) => api<T>(url, { method: 'DELETE' });
 
 /** Build a query string, skipping empty values. */

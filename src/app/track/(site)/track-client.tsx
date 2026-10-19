@@ -6,6 +6,7 @@ import { Clock, Loader2, Search, ShieldCheck, Timer } from 'lucide-react';
 import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from '@/lib/track-public';
 import { PublicJobView } from './public-job-view';
 import { TrackOtp } from './track-otp';
+import { Countdown, useSessionClock } from './session-clock';
 
 /**
  * Browser side of customer tracking. Both entry points start behind the same gate:
@@ -278,18 +279,9 @@ export function TrackClient(props: Props) {
 }
 
 /**
- * The job shown from a link, with the link's countdown. While the customer is using the page
- * (input in the last minute) and < 5.5 min are left, the keepalive keeps ≥ 5 min on the clock
- * (server cap: 60 min from the first open). At zero the data is taken off the screen.
+ * The job shown from a link, with the link's countdown — kept alive while in use (session-clock.tsx,
+ * server cap: 60 min from the first open). At zero the data is taken off the screen.
  */
-const ACTIVE_WINDOW_MS = 60_000;
-const KEEPALIVE_WHEN_LEFT_MS = 5.5 * 60_000;
-const mmss = (ms: number) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return s >= 3600
-    ? `${Math.floor(s / 3600)} ชม. ${Math.floor((s % 3600) / 60)} นาที`
-    : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-};
 
 function LinkResult({
   job,
@@ -304,41 +296,12 @@ function LinkResult({
   onExpiresAt: (ms: number) => void;
   onExpired: () => void;
 }) {
-  const [now, setNow] = React.useState(() => Date.now());
-  const lastInput = React.useRef(0); // stamped on mount below (no Date.now() during render)
-  const lastKeepalive = React.useRef(0);
-
-  React.useEffect(() => {
-    lastInput.current = Date.now();
-    const mark = () => (lastInput.current = Date.now());
-    const evts = ['pointerdown', 'keydown', 'scroll', 'touchstart'] as const;
-    evts.forEach((e) => window.addEventListener(e, mark, { passive: true }));
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      evts.forEach((e) => window.removeEventListener(e, mark));
-      clearInterval(tick);
-    };
-  }, []);
-
-  // the link runs out exactly at expiresAt — one timer, re-armed whenever a keepalive moves it
-  React.useEffect(() => {
-    if (!expiresAt) return;
-    const t = setTimeout(onExpired, Math.max(0, expiresAt - Date.now()));
-    return () => clearTimeout(t);
-  }, [expiresAt, onExpired]);
-
-  // in use and running low → ask the server for more time (it caps at 60 min from the first open)
-  React.useEffect(() => {
-    if (!expiresAt || now >= expiresAt) return;
-    const inUse = now - lastInput.current < ACTIVE_WINDOW_MS;
-    if (inUse && expiresAt - now < KEEPALIVE_WHEN_LEFT_MS && now - lastKeepalive.current > 30_000) {
-      lastKeepalive.current = now;
-      void post('/api/track/link/keepalive', { linkToken }).then((d) => {
-        if (d.reason === 'link') onExpired();
-        else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
-      });
-    }
-  }, [now, expiresAt, linkToken, onExpired, onExpiresAt]);
+  useSessionClock(expiresAt, onExpired, () => {
+    void post('/api/track/link/keepalive', { linkToken }).then((d) => {
+      if (d.reason === 'link') onExpired();
+      else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
+    });
+  });
 
   // documents: the link itself authorises them (the server ignores any job no from here)
   const openDoc = React.useCallback(
@@ -354,8 +317,7 @@ function LinkResult({
     <div className="space-y-3">
       {expiresAt > 0 && (
         <p className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted-foreground">
-          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา{' '}
-          <span className="num font-medium text-foreground">{mmss(expiresAt - now)}</span>
+          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา <Countdown to={expiresAt} />
           <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
         </p>
       )}

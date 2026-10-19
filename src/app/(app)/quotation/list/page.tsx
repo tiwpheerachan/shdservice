@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from '@/data/mock';
-import { useQuotationsPage, useManufacturers, useTable } from '@/data/db';
+import { useQuotationsPage, useManufacturers, useQuotationStatuses } from '@/data/db';
 import { baht, isFilterActive } from '@/lib/utils';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
@@ -21,18 +21,7 @@ import { quoteExpired } from '@/lib/quote-expiry';
 import { cleanCode } from '@/lib/validation';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 import { ExportButton } from '@/components/shared/export-button';
-
-// quotation_status names (DB) → badge tone
-const TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'neutral'> = {
-  รอเสนอราคา: 'warning',
-  เสนอราคาแล้ว: 'info',
-  ลูกค้าตกลงซ่อม: 'success',
-  'ลูกค้าตกลงซ่อม รอชำระเงิน': 'success',
-  'ลูกค้าตกลงซ่อม รออะไหล่': 'success',
-  ลูกค้าไม่ตกลงซ่อม: 'danger',
-  พ้นกำหนดเสนอราคา: 'danger',
-  ยกเลิกใบเสนอราคา: 'neutral',
-};
+import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
 
 type Filters = {
   no: string;
@@ -65,7 +54,7 @@ export default function QuotationListPage() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/quotation/list');
   const { data: MANUFACTURERS } = useManufacturers();
   // every status in quotation_status (the fixed list is only the fallback while it loads)
-  const { data: STATUSES } = useTable<{ id: number; name: string }>('quotation_statuses');
+  const { data: STATUSES } = useQuotationStatuses();
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));

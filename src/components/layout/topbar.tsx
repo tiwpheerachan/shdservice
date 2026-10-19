@@ -100,7 +100,6 @@ export function Topbar({
 
       <div className="ml-1 flex items-center gap-2 border-l border-border pl-2 sm:pl-3">
         {me?.avatar && !avatarError ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={me.avatar}
             alt={me.name}

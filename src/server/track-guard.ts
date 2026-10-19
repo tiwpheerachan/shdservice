@@ -4,6 +4,7 @@ import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { trackBlock, trackEvent, trackRate, trackTicket } from '@/db/schema';
 import { logError } from '@/lib/log';
+import { ipBucket } from '@/lib/client-ip';
 
 /**
  * Security plumbing for the public tracking flow (drizzle/0014):
@@ -18,7 +19,7 @@ import { logError } from '@/lib/log';
  *  - Turnstile fails CLOSED: no secret, timeout, network error, odd reply → no ticket
  */
 
-export const TICKET_TTL_SEC = 180;
+const TICKET_TTL_SEC = 180;
 
 /** the database clock — every expiry is compared in Postgres, never against the app server's clock */
 export const dbNow = sql`now()`;
@@ -44,7 +45,15 @@ function logSecret(): string {
 /** HMAC-SHA256 (hex) — correlates the same IP / link without storing it */
 export const hmac = (v: string) => createHmac('sha256', logSecret()).update(v).digest('hex');
 
+/** the HMAC of an IP's rate bucket (IPv6 → its /64) — the rate-limit key and the ipHash every track log line carries */
+export const ipKeyOf = (ip: string) => hmac(`ip:${ipBucket(ip)}`);
+
 export const normalizeUa = (ua: string | null | undefined) => (ua ?? '').trim().replace(/\s+/g, ' ').slice(0, 512);
+
+/** a link token / ticket / OTP request id / session token: 32 random bytes (256 bits), base64url */
+export const newToken = () => randomBytes(32).toString('base64url');
+/** the shape of one — anything else is refused before a query */
+export const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 
 /* ------------------------------------------------------------------ *
  * rate limits + blocks
@@ -147,13 +156,11 @@ export async function verifyTurnstile(
  * one-time tickets
  * ------------------------------------------------------------------ */
 
-const TICKET_SHAPE = /^[A-Za-z0-9_-]{43}$/;
-
 /** issue a 3-minute, single-use ticket bound to one job + IP + User-Agent */
 export async function issueTicket(jobNo: string, ip: string, ua: string): Promise<string> {
   // expired rows go on every issue (indexed on expires_at — cheap at this volume)
   await db.delete(trackTicket).where(lt(trackTicket.expiresAt, dbNow));
-  const raw = randomBytes(32).toString('base64url'); // 256 bits
+  const raw = newToken();
   await db.insert(trackTicket).values({
     tokenHash: sha256(raw),
     jobNo,
@@ -170,7 +177,7 @@ export async function issueTicket(jobNo: string, ip: string, ua: string): Promis
  * (the caller must not tell which).
  */
 export async function consumeTicket(raw: unknown, ip: string, ua: string): Promise<string | null> {
-  if (typeof raw !== 'string' || !TICKET_SHAPE.test(raw)) return null;
+  if (typeof raw !== 'string' || !TOKEN_SHAPE.test(raw)) return null;
   const [r] = await db
     .delete(trackTicket)
     .where(

@@ -94,7 +94,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
     updatedAt: nowThai(),
   };
 
-  return db.transaction(async (tx) => {
+  const saved = await db.transaction(async (tx) => {
     const others = await tx
       .select()
       .from(shippingProfile)
@@ -124,9 +124,10 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
       summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์บริษัทขนส่ง ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
-    invalidate('shippers:');
     return toProfile(row);
   });
+  invalidate('shippers:'); // after the commit — dropped inside, a read in between would cache the old row again
+  return saved;
 }
 
 /** soft delete — jobs already shipped keep pointing at the row so old links still work */

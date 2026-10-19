@@ -12,9 +12,8 @@ import { thaiYear } from '@/server/mappers/format';
  * Must be called inside the same transaction as the insert that uses the number
  * (an advisory lock per series + FOR UPDATE on the row, so concurrent callers never share a value).
  *
- * Job / Quotation / SaleOrder run one series per issuing profile ("ออกเอกสารในนาม",
- * drizzle/0007): `company_id` = document_profile.id and the prefix comes from the
- * profile (SHD = 1 keeps the legacy J / Q / SO). Everything else is one series.
+ * Every type is ONE series with its default prefix (J / Q / SO / WHI / …); the issuing profile
+ * ("ออกเอกสารในนาม") never changes the number — see COMPANY_ROWS below.
  */
 export type RunningType =
   'Job' | 'Quotation' | 'SaleOrder' | 'Inventory-In' | 'Inventory-Out' | 'Customer' | 'Product' | 'Model';
@@ -48,7 +47,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   // insert a fresh row and both hand out …00001. Released at commit/rollback.
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`running_no:${type}:${year}`}))`);
 
-  // lock the row for this type(+profile)+year (or the type's single row for non-yearly)
+  // lock the row for this type+year (or the type's single row for non-yearly)
   const sameSeries = and(
     eq(runningNo.runningType, type),
     companyId === null ? undefined : eq(runningNo.companyId, companyId),

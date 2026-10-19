@@ -433,6 +433,8 @@ export const exportXlsx = defineOperation({
     ...BAD_DATE,
     ...SIGNED_IN,
     404: errorResponse('Unknown resource.'),
-    ...RATE_LIMITED,
+    429: errorResponse(
+      'Too many exports from this user in the window, or another export is still being written (one at a time per server) — `details.retryAfter` seconds to wait.',
+    ),
   },
 });

@@ -1,5 +1,4 @@
 import 'server-only';
-import { randomBytes } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd, trackDocTicket, trackSession } from '@/db/schema';
@@ -8,6 +7,7 @@ import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
 import { today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
 import type { Customer } from '@/data/mock';
+import { JOB_GROUP, QS } from '@/lib/status-ids';
 import { JS, effectiveDueText, type JobDetail } from './jobs';
 import type { QuotationDetail } from './quotations';
 import { getShippingProfile, trackUrlFor } from './shipping-profiles';
@@ -20,7 +20,7 @@ import {
   type TrackStepKey,
 } from '@/lib/track-public';
 import { logError } from '@/lib/log';
-import { sha256 } from '@/server/track-guard';
+import { newToken, sha256, TOKEN_SHAPE } from '@/server/track-guard';
 
 /**
  * Public customer tracking — the ONLY code path that serves job data without a
@@ -43,16 +43,14 @@ import { sha256 } from '@/server/track-guard';
  *    address, no full IMEI/serial, no technician, no internal remarks
  */
 
-/** true = only jobs that already have a quotation can be tracked (currently: every job) */
-const QUOTATION_REQUIRED = false;
 /** a link nobody has opened yet lives this long from issue (drizzle/0016) */
-export const LINK_UNOPENED_HOURS = 24;
+const LINK_UNOPENED_HOURS = 24;
 /** after the first customer open, the link lives this much longer */
-export const LINK_OPEN_MINUTES = 15;
+const LINK_OPEN_MINUTES = 15;
 /** while the customer is using the page, the keepalive keeps at least this much on the clock … */
-export const LINK_EXTEND_MINUTES = 5;
+const LINK_EXTEND_MINUTES = 5;
 /** … but never past this long from the first open (same rule as the phone + OTP session) */
-export const LINK_MAX_MINUTES = 60;
+const LINK_MAX_MINUTES = 60;
 
 /*
  * Link lifetime, evaluated in Postgres so the clocks never disagree:
@@ -64,15 +62,12 @@ const linkExpiresAt = sql<string>`CASE WHEN ${job.trackOpenedAt} IS NOT NULL
     ELSE ${linkIssuedAt} + make_interval(hours => ${LINK_UNOPENED_HOURS}) END`;
 const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpiresAt} > now())`;
 
-export type { PublicJob, TrackStepKey } from '@/lib/track-public';
-export { TRACK_STEPS } from '@/lib/track-public';
-
 /**
  * 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere).
  * ลูกค้าไม่ตกลงซ่อม (6) is not a cancelled job: the device still goes back (group Repaired → "ซ่อมเสร็จ" step, own label).
  */
 export function stepOf(statusId: number, group: string): TrackStepKey | null {
-  if (statusId === JS.CANCELLED || group === 'Cancel') return null;
+  if (statusId === JS.CANCELLED || group === JOB_GROUP.CANCEL) return null;
   if (statusId === JS.NEW) return 'received';
   if (
     statusId === JS.WAIT_PARTS ||
@@ -81,8 +76,8 @@ export function stepOf(statusId: number, group: string): TrackStepKey | null {
     statusId === JS.QUOTE_EXPIRED
   )
     return 'waiting';
-  if (group === 'Repaired') return 'repaired';
-  if (group === 'Finished') return 'returned';
+  if (group === JOB_GROUP.REPAIRED) return 'repaired';
+  if (group === JOB_GROUP.FINISHED) return 'returned';
   return 'diagnosing';
 }
 
@@ -114,7 +109,6 @@ export function statusLabel(statusId: number, step: TrackStepKey | null, lastQuo
 }
 const QUOTE_EXPIRED_TEXT = 'หมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่';
 const DUE_PASSED_TEXT = 'เลยกำหนดเดิม — ศูนย์จะแจ้งวันใหม่';
-export { quoteExpired };
 
 /**
  * What the quotation's "ตกลงซ่อมโดย" box shows (staff and customer copies): the sign-and-return request only
@@ -122,17 +116,27 @@ export { quoteExpired };
  */
 export function quoteSignState(st: number | null | undefined, at: string | null, jobStatusId: number | null) {
   if (quoteExpired(st, at, jobStatusId)) return 'expired' as const;
-  if (st === 3 || st === 6 || st === 9) return 'agreed' as const;
-  if (st === 4) return 'declined' as const;
-  if (st === 5) return 'cancelled' as const;
+  if (st === QS.AGREED || st === QS.AGREED_WAIT_PAY || st === QS.AGREED_WAIT_PARTS) return 'agreed' as const;
+  if (st === QS.DECLINED) return 'declined' as const;
+  if (st === QS.CANCELLED) return 'cancelled' as const;
   return 'sign' as const;
 }
 
-/** the job's latest quotation the customer was sent (statuses as CUSTOMER_QUOTATION_STATUSES) — status + date */
+/** quotations the customer has been sent: sent / accepted / declined / lapsed — never a draft (1) or a cancelled one (5) */
+const CUSTOMER_QUOTATION_STATUSES: number[] = [
+  QS.SENT,
+  QS.AGREED,
+  QS.DECLINED,
+  QS.AGREED_WAIT_PAY,
+  QS.EXPIRED,
+  QS.AGREED_WAIT_PARTS,
+];
+
+/** the job's latest quotation the customer was sent (CUSTOMER_QUOTATION_STATUSES) — status + date */
 type LastQuote = { st: number; at: string } | null;
 const lastQuote = sql<LastQuote>`(SELECT json_build_object('st', q.quotation_status_id, 'at', to_char(q.create_date, 'YYYY-MM-DD'))
     FROM quotation_hd q WHERE q.reference_job_no = ${job.jobNo} AND q.record_status <> ${RS.DELETED}
-      AND q.quotation_status_id IN (2, 3, 4, 6, 8, 9) ORDER BY q.create_date DESC LIMIT 1)`;
+      AND q.quotation_status_id = ANY(${sql.param(CUSTOMER_QUOTATION_STATUSES)}) ORDER BY q.create_date DESC LIMIT 1)`;
 
 /** วันที่รับเครื่อง — ONE source for the header, the timeline and the documents' date (a legacy 1900 → opened) */
 const receivedOf = (r: { receivedDate: string | null; createDate: string | null }) =>
@@ -145,7 +149,7 @@ export const receivedDateOf = (j: Pick<JobDetail, 'receptionDate' | 'createDate'
 export const inProgressForCustomer = (statusId: number | null, group: string | null) => {
   const g = group?.trim() ?? '';
   if (statusId === JS.CLOSED_WAIT_PICKUP || statusId === JS.CLOSED_WAIT_TRACKING) return true;
-  return g !== 'Finished' && g !== 'Cancel';
+  return g !== JOB_GROUP.FINISHED && g !== JOB_GROUP.CANCEL;
 };
 
 /* masking — what /track and the documents opened from it show instead of the real value */
@@ -258,10 +262,6 @@ export function maskQuotationForCustomer(q: QuotationDetail): QuotationDetail {
   };
 }
 
-export function newToken() {
-  return randomBytes(32).toString('base64url');
-}
-
 /** what the DB holds for a link (drizzle/0025) — same digest as the migration's backfill */
 export const tokenHash = (token: string) => sha256(token).toString('hex');
 
@@ -306,9 +306,6 @@ type Row = Awaited<ReturnType<typeof base>>[number];
  * Documents (the sheet itself: app/track/doc/[ticket], one-time ticket from /api/track/doc)
  * ------------------------------------------------------------------ */
 
-/** quotations the customer has been sent: sent / accepted / declined / lapsed — never a draft (1) or a cancelled one (5) */
-const CUSTOMER_QUOTATION_STATUSES = [2, 3, 4, 6, 8, 9];
-
 /**
  * The documents of one job, in timeline order:
  *   ใบรับงานซ่อม (every job) · ใบเสนอราคา (each sent quotation) · ใบส่งคืนสินค้า (once the job is closed)
@@ -349,7 +346,7 @@ async function docsFor(row: {
     const label = `ใบเสนอราคา ${no}${expired ? ` · ${QUOTE_EXPIRED_TEXT}` : ''}`;
     if (no) docs.push({ kind: 'quotation', ref: no, label, date: fmtDate(q.at), step: 'waiting' });
   }
-  if (row.group?.trim() === 'Finished' && !isSentinelDate(row.closedDate)) {
+  if (row.group?.trim() === JOB_GROUP.FINISHED && !isSentinelDate(row.closedDate)) {
     docs.push({
       kind: 'return',
       ref: row.no,
@@ -412,7 +409,7 @@ export async function issueDocLink(
 /** the document a link names, or null: bad shape / unknown / expired / its session or link no longer live */
 export async function docForLink(raw: unknown): Promise<{ jobNo: string; kind: string; ref: string } | null> {
   return quiet(async () => {
-    if (typeof raw !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw)) return null;
+    if (typeof raw !== 'string' || !TOKEN_SHAPE.test(raw)) return null;
     const [t] = await db
       .select({
         jobNo: trackDocTicket.jobNo,
@@ -438,16 +435,6 @@ export async function docForLink(raw: unknown): Promise<{ jobNo: string; kind: s
           .limit(1);
     return link ? { jobNo: t.jobNo, kind: t.kind, ref: t.ref } : null;
   });
-}
-
-/** does this job have a quotation the customer could be holding? */
-async function hasQuotation(jobNo: string) {
-  const [row] = await db
-    .select({ n: sql<number>`1` })
-    .from(quotationHd)
-    .where(and(eq(quotationHd.referenceJobNo, jobNo), ne(quotationHd.recordStatus, RS.DELETED)))
-    .limit(1);
-  return !!row;
 }
 
 async function toPublic(row: Row): Promise<PublicJob> {
@@ -545,7 +532,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
 export async function jobNoForLink(token: string): Promise<string | null> {
   return quiet(async () => {
     const t = (token ?? '').trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null; // wrong shape → no query at all
+    if (!TOKEN_SHAPE.test(t)) return null; // wrong shape → no query at all
     // looked up by its hash: a near-miss token has an unrelated hash, so timing reveals nothing about it
     const [row] = await db
       .select({ no: job.jobNo, recordStatus: job.recordStatus, live: linkLive })
@@ -554,7 +541,6 @@ export async function jobNoForLink(token: string): Promise<string | null> {
       .limit(1);
     // the link's own lifetime replaces the 90-days-after-close rule: 1 day unopened, 15 min after opening
     if (!row || row.recordStatus === RS.DELETED || !row.live) return null;
-    if (QUOTATION_REQUIRED && !(await hasQuotation(row.no))) return null;
     return row.no;
   });
 }
@@ -587,7 +573,7 @@ export async function linkExpiry(jobNo: string): Promise<string | null> {
 export async function extendLink(token: string): Promise<string | null> {
   return quiet(async () => {
     const t = (token ?? '').trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(t)) return null;
+    if (!TOKEN_SHAPE.test(t)) return null;
     const [r] = await db
       .update(job)
       .set({
@@ -626,9 +612,9 @@ export type LinkStatus = {
 export async function linkStatus(jobNo: string): Promise<LinkStatus> {
   const [r] = await db
     .select({
-      issuedAt: sql<string | null>`to_char(${linkIssuedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
-      openedAt: sql<string | null>`to_char(${job.trackOpenedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
-      expiresAt: sql<string | null>`to_char((${linkExpiresAt}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      issuedAt: isoUtc(linkIssuedAt),
+      openedAt: isoUtc(sql`${job.trackOpenedAt}`),
+      expiresAt: isoUtc(linkExpiresAt),
       live: linkLive,
     })
     .from(job)
@@ -663,7 +649,15 @@ export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
  * ------------------------------------------------------------------ */
 
 /** how far back "ประวัติ" goes (finished + cancelled jobs) */
-export const HISTORY_YEARS = 2;
+const HISTORY_YEARS = 2;
+
+/** customer ids from a session, as integers */
+const cleanIds = (customerIds: number[]) => customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
+/** a job number as the customer may type it ("j2612088 ") → "J2612088"; null when it cannot be one */
+const jobNoOf = (v: unknown) => {
+  const no = (typeof v === 'string' ? v : '').trim().toUpperCase();
+  return /^[A-Z]{1,6}\d{5,}$/.test(no) ? no : null;
+};
 
 /**
  * Every job of these customers: still in progress, plus finished / cancelled ones from the
@@ -672,7 +666,7 @@ export const HISTORY_YEARS = 2;
 export async function listJobsForCustomers(
   customerIds: number[],
 ): Promise<{ active: PublicJobSummary[]; history: PublicJobSummary[] }> {
-  const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
+  const ids = cleanIds(customerIds);
   if (!ids.length) return { active: [], history: [] };
   const rows = await db
     .select({
@@ -696,7 +690,7 @@ export async function listJobsForCustomers(
         inArray(job.customerId, ids),
         ne(job.recordStatus, RS.DELETED),
         // in progress, or closed / cancelled within the history window (1900-01-01 = "not closed" in the legacy DB)
-        sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN ('Finished','Cancel')
+        sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN (${JOB_GROUP.FINISHED}, ${JOB_GROUP.CANCEL})
           OR CASE WHEN ${job.jobClosedDate} > '1901-01-01' THEN ${job.jobClosedDate} ELSE ${job.jobCreateDate} END
              >= (now() AT TIME ZONE 'Asia/Bangkok') - make_interval(years => ${HISTORY_YEARS}))`,
       ),
@@ -726,10 +720,9 @@ export async function listJobsForCustomers(
 /** one job's (masked) detail — only when it belongs to these customers and is not deleted */
 export async function publicJobForCustomers(jobNo: string, customerIds: number[]): Promise<PublicJob | null> {
   return quiet(async () => {
-    const no = (jobNo ?? '').trim().toUpperCase();
-    if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
-    const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
-    if (!ids.length) return null;
+    const no = jobNoOf(jobNo);
+    const ids = cleanIds(customerIds);
+    if (!no || !ids.length) return null;
     const [row] = await base(and(eq(job.jobNo, no), inArray(job.customerId, ids)));
     if (!row || row.recordStatus === RS.DELETED) return null;
     return toPublic(row);
@@ -739,10 +732,9 @@ export async function publicJobForCustomers(jobNo: string, customerIds: number[]
 /** the job number, only when that job belongs to these customers and is not deleted */
 export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): Promise<string | null> {
   return quiet(async () => {
-    const no = (typeof jobNo === 'string' ? jobNo : '').trim().toUpperCase();
-    if (!/^[A-Z]{1,6}\d{5,}$/.test(no)) return null;
-    const ids = customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
-    if (!ids.length) return null;
+    const no = jobNoOf(jobNo);
+    const ids = cleanIds(customerIds);
+    if (!no || !ids.length) return null;
     const [row] = await db
       .select({ no: job.jobNo })
       .from(job)
@@ -785,10 +777,4 @@ export async function rotateToken(jobNo: string): Promise<string> {
   const token = newToken();
   await db.update(job).set(issue(token)).where(eq(job.jobNo, jobNo));
   return token;
-}
-
-/** is tracking available for this job yet? (drives the back-office UI) */
-export async function trackingReady(jobNo: string): Promise<boolean> {
-  if (!QUOTATION_REQUIRED) return true;
-  return hasQuotation(jobNo);
 }

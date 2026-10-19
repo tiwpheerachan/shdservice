@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types + static option lists used by the UI.
+ * Shared TypeScript types + static option lists (no mock data — the name is historical).
  *
  * All DATA comes from the legacy database (see src/server/services/*); this
  * file no longer holds demo rows. The core fields of each type are what the
@@ -237,6 +237,15 @@ export type TatRow = {
   over30: number;
 };
 
+/** TAT age buckets (TatRow keys) — dashboard column headers + the job list's "from the dashboard" note */
+export const TAT_BUCKET_LABEL = {
+  d13: '1–3 วัน',
+  d47: '4–7 วัน',
+  d814: '8–14 วัน',
+  d1530: '15–30 วัน',
+  over30: 'เกิน 30 วัน',
+} as const;
+
 export type MonthlyRow = { m: string; open: number; close: number };
 
 export type TopSymptom = { name: string; count: number };
@@ -335,9 +344,6 @@ export const QUOTATION_STATUS_OPTIONS: [string, ...string[]] = [
   'ลูกค้าตกลงซ่อม รออะไหล่',
 ];
 
-/* สถานะอนุมัติใบสั่งขาย */
-export const SALE_APPROVE_OPTIONS = ['รออนุมัติ', 'อนุมัติ', 'ไม่อนุมัติ', 'กำลังดำเนินการจัดทำ'];
-
 /* Sale Channel (ช่องทางขาย) — ตรงกับระบบจริง */
 export const CHANNELS = [
   'ยังไม่ระบุ',
@@ -355,7 +361,6 @@ export const CHANNELS = [
 
 export const WARRANTY_OPTIONS = ['IN', 'OUT'];
 export const RECEIVE_METHODS: [string, ...string[]] = ['Walk-In', 'Carry-In', 'Onsite', 'ไม่ระบุ'];
-export const COURIERS = ['Kerry Express', 'Flash Express', 'J&T Express', 'ไปรษณีย์ไทย', 'DHL', 'อื่นๆ'];
 
 /* วิธีการส่งคืนสินค้า (5) */
 export const RETURN_METHODS = ['ลูกค้ามารับเอง', 'ส่งไปรษณีย์', 'บริษัทขนส่งเอกชน', 'พนักงานจัดส่ง', 'ไม่ต้องส่งคืน'];
@@ -365,12 +370,6 @@ export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
 export const JOB_PAYMENT_METHODS: [string, ...string[]] = ['เงินโอน', 'เงินสด', 'บัตรเครดิต'];
 
-/* ค่าบริการการซ่อม (ค่าคงที่ให้เลือก) */
-export const SERVICE_FEES = [0, 98, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
-
-/* คลังสินค้า */
-export const WAREHOUSES = ['คลังสินค้าดี', 'คลังสินค้าเสีย']; // = store_location
-
 /* ประเภทเอกสารสต๊อก */
 export const STOCK_MOVE_TYPES = [
   'รับเข้า',
@@ -379,26 +378,11 @@ export const STOCK_MOVE_TYPES = [
   'จ่ายออกตามใบสั่งขาย',
   'จ่ายออกอื่นๆ',
 ];
-export const STOCK_RECEIVE_TYPES = ['รับเข้า', 'รับคืนจากการเบิก'];
 export const STOCK_PICK_TYPES = [
   'จ่ายออกตามงานซ่อม',
   'จ่ายออกตามใบสั่งขาย',
   'จ่ายออกอื่นๆ',
   'รับคืนจากการเบิก', // inventory_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
-];
-
-/* หมวดหมู่อะไหล่ (ตรงกับระบบจริง) */
-export const PART_CATEGORIES = [
-  'จอ',
-  'ด้ามจับ',
-  'บอดี้',
-  'แบตเตอรี่',
-  'มอเตอร์ดูดฝุ่น',
-  'มอเตอร์หัวแปรง',
-  'เมนบอร์ด',
-  'อแดปเตอร์',
-  'อะไหล่เกรดบี',
-  'ยังไม่ระบุ',
 ];
 
 /* ลูกค้า */
@@ -409,16 +393,5 @@ export const PRICE_GROUPS: [string, ...string[]] = [
   'ขายส่ง (Wholesale Price)',
   'ราคาพิเศษ (Special Price)',
 ];
-
-/* ส่วนลด & ภาษี (หน้าเสนอราคา) */
-export const DISCOUNT_TYPES = ['ไม่มีส่วนลด', 'ส่วนลดรวม', 'ส่วนลดค่าบริการ', 'ส่วนลดค่าอะไหล่'];
-export const DISCOUNT_UNITS = ['บาท', '%'];
-export const VAT_RATES = [0, 7];
-
-/* Serial Control */
-export const SERIAL_CONTROL = ['True', 'False'];
-
-/* ช่าง / ผู้รับซ่อมต่อ ดึงจาก DB (useStaff / useVendors) — ค่า placeholder ตัวแรกของ dropdown */
-export const TECHNICIAN_PLACEHOLDER = '- - ยังไม่ระบุ - -';
 
 /* จังหวัด/อำเภอ/ตำบล ดึงจาก mt_city / mt_district / mt_sub_district (useProvinces, /api/address) */

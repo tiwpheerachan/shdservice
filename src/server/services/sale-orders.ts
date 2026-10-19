@@ -1,7 +1,9 @@
 import 'server-only';
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
+import { alias, type PgSelect } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '@/db/client';
+import { AS, CONDITION_ID, ITEM_UNIT, STORE_LOCATION_ID } from '@/lib/status-ids';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
 import type { SaleOrder } from '@/data/mock';
 import { HttpError, fullName, hasRight, rolesWithRight, type CurrentUser } from '@/server/auth';
@@ -32,10 +34,9 @@ import { assertValid } from '@/server/validate';
 import { staffOrKeep } from './users';
 
 /** approve_status ids */
-export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
+export { AS };
 
-// พนักงานขาย = sale_out_by (document_create_by = who keyed the order in). The SQL alias stays
-// 'creator': reports.ts joins its own 'creator' for saleOrderWhere's name filter
+// พนักงานขาย = sale_out_by (document_create_by = who keyed the order in)
 const seller = alias(appUser, 'creator');
 const approver = alias(appUser, 'approver');
 
@@ -88,13 +89,16 @@ function toSaleOrder(r: ListRow): SaleOrder {
   };
 }
 
-const base = () =>
-  db
-    .select(listSelect)
-    .from(saleOutHd)
+/** The list's joins — the list, its count and the report KPI (reports.ts) all take them, so saleOrderWhere
+ *  never names a table one of them lacks (a count does not pay for the approver: Postgres drops an unused
+ *  left join on a primary key). */
+export const withSaleOrderJoins = <T extends PgSelect>(q: T) =>
+  q
     .leftJoin(seller, eq(seller.userId, saleOutHd.saleOutBy))
     .leftJoin(approver, eq(approver.userId, saleOutHd.approveBy))
     .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId));
+
+const base = () => withSaleOrderJoins(db.select(listSelect).from(saleOutHd).$dynamic());
 
 const SORT = {
   no: saleOutHd.saleOutHdNo,
@@ -119,6 +123,18 @@ export type SaleOrderFilters = {
   /** a part / accessory code on one of the order's lines */
   code?: string;
 };
+
+/** The page's query (?approve=&no=…) as filters — the list, its report KPI and the export all read it here. */
+export const saleOrderFiltersFromQuery = (f: Record<string, string>, deleted: StatusMode): SaleOrderFilters => ({
+  approve: f.approve,
+  from: f.from,
+  to: f.to,
+  sales: f.sales,
+  no: f.no,
+  customer: f.customer,
+  code: f.code,
+  deleted,
+});
 
 export function saleOrderWhere(q: string, f: SaleOrderFilters) {
   const term = q.trim();
@@ -165,12 +181,7 @@ export async function pageSaleOrders(p: PageQuery, f: SaleOrderFilters): Promise
   const w = saleOrderWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
-    db
-      .select({ total: count() })
-      .from(saleOutHd)
-      .leftJoin(seller, eq(seller.userId, saleOutHd.saleOutBy))
-      .leftJoin(approveStatus, eq(approveStatus.approveStatusId, saleOutHd.approveStatusId))
-      .where(w),
+    withSaleOrderJoins(db.select({ total: count() }).from(saleOutHd).$dynamic()).where(w),
     base()
       .where(w)
       .orderBy(...orderBy(p.sort, SORT, [desc(saleOutHd.documentCreateDate), desc(saleOutHd.saleOutHdId)]))
@@ -184,7 +195,7 @@ export async function listSaleOrders(f: SaleOrderFilters & { q?: string; limit?:
   const rows = await base()
     .where(saleOrderWhere(f.q ?? '', f))
     .orderBy(desc(saleOutHd.documentCreateDate))
-    .limit(Math.min(f.limit ?? 5000, 20000));
+    .limit(Math.min(f.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toSaleOrder);
 }
 
@@ -263,25 +274,36 @@ const versionOf = (rowVersion: number, lines: { saleOutDtId: number }[]) =>
   rowVersion + Math.max(0, ...lines.map((l) => l.saleOutDtId));
 
 export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> {
-  const [r] = await base().where(eq(saleOutHd.saleOutHdNo, no)).limit(1);
+  // the list row and the whole header in one read; the lines alongside
+  const [[r], dts] = await Promise.all([
+    withSaleOrderJoins(
+      db
+        .select({ ...listSelect, hd: saleOutHd })
+        .from(saleOutHd)
+        .$dynamic(),
+    )
+      .where(eq(saleOutHd.saleOutHdNo, no))
+      .limit(1),
+    db
+      .select({ d: saleOutDt, name: product.productName })
+      .from(saleOutDt)
+      .leftJoin(product, eq(product.productId, saleOutDt.productId))
+      .where(eq(saleOutDt.saleOutHdNo, no))
+      .orderBy(asc(saleOutDt.listNo), asc(saleOutDt.saleOutDtId)),
+  ]);
   if (!r) return null;
-  const [hd] = await db.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).limit(1);
-  if (!hd) return null; // deleted between the two reads
-  const dts = await db
-    .select({ d: saleOutDt, name: product.productName })
-    .from(saleOutDt)
-    .leftJoin(product, eq(product.productId, saleOutDt.productId))
-    .where(eq(saleOutDt.saleOutHdNo, no))
-    .orderBy(asc(saleOutDt.listNo), asc(saleOutDt.saleOutDtId));
-  const cust = hd.customerCode ? await getCustomerByCode(hd.customerCode) : null;
-  const { subDistrict, district, province } = await addressNames(cust);
-  const [made] =
+  const { hd } = r;
+  const [cust, [made], approverRoles] = await Promise.all([
+    hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
     (hd.documentCreateBy ?? 0) > 0
-      ? await db
+      ? db
           .select({ first: appUser.firstName, last: appUser.lastName })
           .from(appUser)
           .where(eq(appUser.userId, hd.documentCreateBy!))
-      : [];
+      : [],
+    hd.approveStatusId === AS.WAIT ? rolesWithRight('SO Approve') : [],
+  ]);
+  const { subDistrict, district, province } = await addressNames(cust);
   return {
     ...toSaleOrder(r),
     customerDetail: {
@@ -304,7 +326,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       name: lineName(name, d),
       type: (d.productType as 'SparePart' | 'Service') ?? 'SparePart',
       qty: d.saleOutQuantity,
-      unit: 'Pcs.',
+      unit: ITEM_UNIT,
       price: num(d.saleOutPrice),
       amount: num(d.amountDt),
       picked: d.pickInventoryNo ?? '',
@@ -315,8 +337,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(made?.first, made?.last),
     createdById: hd.documentCreateBy ?? 0,
-    approverRoles:
-      hd.approveStatusId === AS.WAIT ? (await rolesWithRight('SO Approve')).filter((r) => r !== ADMIN_USER_TYPE) : [],
+    approverRoles: approverRoles.filter((r) => r !== ADMIN_USER_TYPE),
     creatorIds: [hd.documentCreateBy, hd.saleOutBy].filter((x): x is number => (x ?? 0) > 0),
     documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
     version: versionOf(
@@ -431,8 +452,8 @@ export async function saveSaleOrder(
         kept: false,
         row: {
           productId: l.p?.id ?? null,
-          storeLocationId: 1,
-          conditionId: 1,
+          storeLocationId: STORE_LOCATION_ID,
+          conditionId: CONDITION_ID,
           serialNo: '',
           capitalPrice: money(num(l.p?.capital)),
           wholesalePrice: money(num(l.p?.wholesale)),
@@ -677,8 +698,4 @@ export async function setTracking(no: string, tracking: string, byUserId: number
     });
   });
   return (await getSaleOrder(no))!;
-}
-
-export async function approveStatuses() {
-  return db.select().from(approveStatus).orderBy(asc(approveStatus.approveStatusId));
 }

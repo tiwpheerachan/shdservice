@@ -1,8 +1,9 @@
 import { cookies } from 'next/headers';
-import { safeNext } from '@/lib/sso';
+import { safeNext, SSO_ORIGIN } from '@/lib/sso';
 import { SESSION_COOKIE, verifySession } from '@/lib/session';
 import { resolveUser } from '@/server/auth';
 import { COMPANY } from '@/lib/company';
+import { listDocumentProfiles } from '@/server/services/document-profiles';
 import { LogIn, ShieldCheck } from 'lucide-react';
 import { Logo } from '@/components/shared/logo';
 import { AuthSplit } from '@/components/ui/sign-in';
@@ -48,6 +49,8 @@ export default async function LoginPage({
   const elsewhere = !sp.bye && (sp.reason === 'elsewhere' || (!!sp.expired && (await refusedElsewhere())));
   // only known codes are shown — never echo a URL parameter back onto the page
   const err = sp.error ? (ERRORS[sp.error] ?? 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') : null;
+  // who runs this site: the default document profile admins edit; COMPANY when there is none / the DB is down
+  const co = (await listDocumentProfiles().catch(() => [])).find((p) => p.isDefault) ?? COMPANY;
 
   return (
     <main className="auth-page">
@@ -91,8 +94,7 @@ export default async function LoginPage({
           <a
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
             rel="nofollow"
-            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(90deg,#43a6f8,#55d5a1)' }}
+            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand hover:opacity-90"
           >
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO
@@ -100,17 +102,17 @@ export default async function LoginPage({
 
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            ยืนยันตัวตนผ่านระบบกลางของบริษัท (sso.shd-technology.co.th) — ระบบนี้ไม่ขอรหัสผ่านของคุณ
+            ยืนยันตัวตนผ่านระบบกลางของบริษัท ({new URL(SSO_ORIGIN).host}) — ระบบนี้ไม่ขอรหัสผ่านของคุณ
           </p>
 
           {/* who runs this site — a plain statement of identity for people (and reviewers) landing here */}
           <div className="animate-element animate-delay-400 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground">
-              {COMPANY.nameTh} · {COMPANY.nameEn}
+              {co.nameTh} · {co.nameEn}
             </p>
-            <p>{COMPANY.address}</p>
+            <p>{co.address}</p>
             <p>
-              โทร {COMPANY.phone} · เว็บไซต์{' '}
+              โทร {co.phone} · เว็บไซต์{' '}
               <a href="https://shd-technology.co.th" className="underline" rel="noopener">
                 shd-technology.co.th
               </a>

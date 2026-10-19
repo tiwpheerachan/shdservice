@@ -94,7 +94,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
 
       {/* ── company header ── */}
       <header className="flex items-start gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
           <p className="text-[14px] font-bold">{co.nameTh}</p>

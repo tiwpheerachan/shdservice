@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { JOB_GROUP } from '@/lib/status-ids';
 
 export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -58,28 +59,29 @@ const isEmpty = (c: React.ReactNode): boolean =>
   (typeof c === 'string' && c.trim() === '') ||
   (Array.isArray(c) && c.every(isEmpty));
 
-const JOB_TONE: Record<string, Tone> = {
-  งานใหม่: 'info',
-  อยู่ระหว่างดำเนินการ: 'warning',
-  รอลูกค้าตอบกลับ: 'warning',
-  รออะไหล่: 'warning',
-  รออนุมัติ: 'warning',
-  'ส่งซ่อม Out-Source': 'info',
-  ซ่อมเสร็จ: 'success',
-  ปิดงาน: 'success',
-  ส่งคืนลูกค้าแล้ว: 'success',
-  อนุมัติ: 'success',
-  ยกเลิก: 'danger',
-  ไม่อนุมัติ: 'danger',
-  Active: 'success',
-  Inactive: 'neutral',
-  Cancel: 'danger',
-};
+/** a job status's colour, from its job_status_group — the dashboard KPI cards' colours (server
+ *  computeDashboard). "ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)" (6) counts as Cancel, like the server's kpiGroup. */
+export function jobTone(status: string, group?: string): Tone {
+  if (status.startsWith('ยกเลิกซ่อม')) return 'danger';
+  if (status === 'งานใหม่') return 'primary'; // new job stands out from the rest of Pending
+  switch (group?.trim()) {
+    case JOB_GROUP.PENDING:
+      return 'warning';
+    case JOB_GROUP.REPAIRED:
+      return 'info';
+    case JOB_GROUP.FINISHED:
+      return 'success';
+    case JOB_GROUP.CANCEL:
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
 
-/** `wrap` (table columns): a long status ("อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่") takes 2 lines */
-export function StatusBadge({ status, wrap }: { status: string; wrap?: boolean }) {
+/** `group` = the row's statusGroup; `wrap` (table columns): a long status ("อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่") takes 2 lines */
+export function StatusBadge({ status, group, wrap }: { status: string; group?: string; wrap?: boolean }) {
   return (
-    <Badge tone={JOB_TONE[status] ?? 'neutral'} dot wrap={wrap}>
+    <Badge tone={jobTone(status, group)} dot wrap={wrap}>
       {status}
     </Badge>
   );

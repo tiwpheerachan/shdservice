@@ -18,6 +18,7 @@ import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { issueSchema } from '@/lib/validation/stock';
+import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 /** รับคืนจากการเบิก is by job: a WHO document no. (or a job nothing went out to) has nothing to return */
@@ -101,7 +102,7 @@ export default function PickPage() {
   const refOptions =
     kind === 'job' ? PENDING_JOB_NOS : kind === 'return' ? RETURNABLE_JOB_NOS : kind === 'sale' ? SALE_ORDERS : [];
   const isReturn = kind === 'return';
-  const RECIPIENTS = React.useMemo(() => ['คลังสินค้าดี', ...STAFF.map((s) => s.name)], [STAFF]);
+  const RECIPIENTS = React.useMemo(() => [STORE_LOCATION_NAME, ...STAFF.map((s) => s.name)], [STAFF]);
 
   // another document type → its reference and lines start over (the change event does it)
   const changeDocType = (t: string) => {

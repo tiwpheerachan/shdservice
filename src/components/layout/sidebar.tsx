@@ -121,10 +121,7 @@ export function Sidebar({
           )}
         >
           {collapsed ? (
-            <div
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-xs ring-1 ring-inset ring-white/15"
-              style={{ background: 'linear-gradient(135deg,#43a6f8,#55d5a1)' }}
-            >
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-xs ring-1 ring-inset ring-white/15 bg-brand">
               <Check className="h-5 w-5" strokeWidth={3} />
             </div>
           ) : (
@@ -260,6 +257,8 @@ export function Sidebar({
         <div className="shrink-0 border-t border-sidebar-border p-2.5">
           <button
             onClick={onToggleCollapse}
+            aria-label={collapsed ? 'ขยายเมนู' : 'ย่อเมนู'}
+            title={collapsed ? 'ขยายเมนู' : undefined}
             className={cn(
               'hidden w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex',
               collapsed && 'justify-center',

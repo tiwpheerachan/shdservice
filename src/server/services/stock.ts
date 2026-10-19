@@ -1,8 +1,24 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count as countFn,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '@/db/client';
+import { AS, CONDITION_ID, INV, ITEM_UNIT, JS, PART, STORE_LOCATION_ID, STORE_LOCATION_NAME } from '@/lib/status-ids';
 import {
   appUser,
   category,
@@ -25,31 +41,26 @@ import type { Movement, Product } from '@/data/mock';
 import { HttpError, fullName, hasRight, type CurrentUser } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { nextRunningNo } from '@/db/running-no';
-import { audit, diff } from '@/server/audit';
+import { audit, diff, type AuditEntry } from '@/server/audit';
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
+import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { assertValid } from '@/server/validate';
+import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
+import { clean, cleanCode, summary } from '@/lib/validation';
 
 export type DeletedMode = StatusMode;
 
 /** The legacy system runs a single warehouse / condition and no serial control. */
-export const STORE_LOCATION_ID = 1;
-export const CONDITION_ID = 1;
-export const ITEM_UNIT = 'Pcs.';
-
-/** inventory_type ids */
-export const INV = {
-  RECEIVE: 1, // รับเข้า
-  RETURN_FROM_JOB: 2, // รับคืนจากการเบิก
-  OUT_JOB: 3, // จ่ายออกตามงานซ่อม
-  OUT_SALE: 4, // จ่ายออกตามใบสั่งขาย
-  OUT_OTHER: 5, // จ่ายออกอื่นๆ
-} as const;
-
-/** job_order_spare_part_log.order_status_id */
-export const PART = { REQUESTED: 1, RETURN_REQUESTED: 2, GRANTED: 3, CANCELLED: 4, RETURNED: 5 } as const;
-/** sale_out_hd.approve_status_id "อนุมัติ" (sale-orders.ts AS.APPROVED — not imported: that module imports this one) */
-const SO_APPROVED = 4;
+export { CONDITION_ID, INV, ITEM_UNIT, PART, STORE_LOCATION_ID };
+/** inventory_dt.stock_type_id — the legacy app wrote 1 on every line (no stock_type table; every row holds 1) */
+const STOCK_TYPE_ID = 1;
+/** category 1 = ยังไม่ระบุ: a product saved without a category (product.category_id is NOT NULL in the legacy app) */
+const UNSPECIFIED_CATEGORY_ID = 1;
+/** ใกล้หมด = 1..LOW_STOCK on hand (the products filter and the stock KPI) */
+const LOW_STOCK = 3;
 
 /* ------------------------------------------------------------------ *
  * Products
@@ -95,10 +106,7 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
   return {
     stockRemark: r.stockRemark ?? '',
     cancelRemark: r.cancelRemark ?? '',
-    cancelDate:
-      r.cancelDate && !r.cancelDate.startsWith('1899') && !r.cancelDate.startsWith('1900')
-        ? fmtDateTime(r.cancelDate)
-        : '',
+    cancelDate: fmtDateTime(r.cancelDate), // '' for the 1900-01-01 sentinel (isSentinelDate)
     cancelBy: canceller ?? '',
     sysCode: r.sysCode ?? '',
     mfgCode: r.mfgCode ?? '',
@@ -194,17 +202,15 @@ function productVersion(r: ProductRow, models: string[]): number {
 export async function getProduct(code: string): Promise<(Product & { models: string[]; version: number }) | null> {
   const [r] = await productQuery().where(eq(product.productCode, code)).limit(1);
   if (!r) return null;
-  const [creator] = r.createBy
-    ? await db.select({ f: appUser.firstName, l: appUser.lastName }).from(appUser).where(eq(appUser.userId, r.createBy))
-    : [];
-  const [canceller] =
-    r.cancelBy && r.cancelBy > 0
-      ? await db
-          .select({ f: appUser.firstName, l: appUser.lastName })
-          .from(appUser)
-          .where(eq(appUser.userId, r.cancelBy))
+  const nameOf = (userId: number | null) =>
+    userId && userId > 0
+      ? db.select({ f: appUser.firstName, l: appUser.lastName }).from(appUser).where(eq(appUser.userId, userId))
       : [];
-  const models = await modelsOf(db, r.id!);
+  const [[creator], [canceller], models] = await Promise.all([
+    nameOf(r.createBy),
+    nameOf(r.cancelBy),
+    modelsOf(db, r.id!),
+  ]);
   return {
     ...toProduct(r, creator ? fullName(creator.f, creator.l) : '', canceller ? fullName(canceller.f, canceller.l) : ''),
     models,
@@ -281,7 +287,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       productNameEn: clean(i.nameEn),
       productNameCn: clean(i.nameCn),
       productDescription: clean(i.description),
-      categoryId: cat?.id ?? 1,
+      categoryId: cat?.id ?? UNSPECIFIED_CATEGORY_ID,
       manufacturerId: mfg?.id ?? null,
       isUbRepairOnly: !!i.ubRepairOnly,
       forModelColor: clean(i.forModelColor),
@@ -412,32 +418,84 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
  *   available = cumulative received, used = cumulative issued,
  *   booking   = requested-not-yet-granted, remain = available - used
  * ------------------------------------------------------------------ */
-async function adjustQty(
-  tx: Tx,
-  productId: number,
-  d: { available?: number; used?: number; booking?: number },
-  opts: { allowNegative?: boolean } = {},
-) {
+type QtyDelta = { available?: number; used?: number; booking?: number };
+type StockRow = typeof productNoneSerial.$inferSelect;
+
+const noStockRow = (productId: number) => new HttpError(400, `ไม่มีข้อมูลสต๊อกของสินค้า #${productId}`);
+
+/** The counters after a delta — the one rule adjustQty and stockMove share. */
+function nextQty(row: StockRow, d: QtyDelta) {
+  return {
+    quantityAvailable: (row.quantityAvailable ?? 0) + (d.available ?? 0),
+    quantityUsed: (row.quantityUsed ?? 0) + (d.used ?? 0),
+    quantityBooking: Math.max(0, (row.quantityBooking ?? 0) + (d.booking ?? 0)),
+    // apply the delta to remain (a few legacy rows drifted from available-used; keep their numbers)
+    quantityRemain: (row.quantityRemain ?? 0) + (d.available ?? 0) - (d.used ?? 0),
+  };
+}
+
+/** 409 "สต๊อก X ไม่พอ (คงเหลือ N)" — N = what the row held before this line. */
+async function notEnough(tx: Tx, productId: number, remain: number | null) {
+  const [p] = await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId));
+  return new HttpError(409, `สต๊อก ${p?.code ?? `#${productId}`} ไม่พอ (คงเหลือ ${remain ?? 0})`);
+}
+
+async function adjustQty(tx: Tx, productId: number, d: QtyDelta, opts: { allowNegative?: boolean } = {}) {
   const [row] = await tx
     .select()
     .from(productNoneSerial)
     .where(eq(productNoneSerial.productId, productId))
     .for('update');
-  if (!row) throw new HttpError(400, `ไม่มีข้อมูลสต๊อกของสินค้า #${productId}`);
-  const available = (row.quantityAvailable ?? 0) + (d.available ?? 0);
-  const used = (row.quantityUsed ?? 0) + (d.used ?? 0);
-  const booking = Math.max(0, (row.quantityBooking ?? 0) + (d.booking ?? 0));
-  // apply the delta to remain (a few legacy rows drifted from available-used; keep their numbers)
-  const remain = (row.quantityRemain ?? 0) + (d.available ?? 0) - (d.used ?? 0);
-  if (remain < 0 && !opts.allowNegative) {
-    const [p] = await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId));
-    throw new HttpError(409, `สต๊อก ${p?.code ?? `#${productId}`} ไม่พอ (คงเหลือ ${row.quantityRemain ?? 0})`);
-  }
-  await tx
-    .update(productNoneSerial)
-    .set({ quantityAvailable: available, quantityUsed: used, quantityBooking: booking, quantityRemain: remain })
-    .where(eq(productNoneSerial.itemId, row.itemId));
-  return remain;
+  if (!row) throw noStockRow(productId);
+  const next = nextQty(row, d);
+  if (next.quantityRemain < 0 && !opts.allowNegative) throw await notEnough(tx, productId, row.quantityRemain);
+  await tx.update(productNoneSerial).set(next).where(eq(productNoneSerial.itemId, row.itemId));
+  return next.quantityRemain;
+}
+
+/**
+ * adjustQty for a whole movement: ONE select locks every stock row it touches, in product_id order
+ * (line-by-line locking in request order let two movements over the same parts deadlock → 500);
+ * adjust() applies a line in memory with adjustQty's rules (same 400 / 409, never below zero, a later
+ * line sees an earlier one) and flush() writes every changed row in ONE update.
+ */
+async function stockMove(tx: Tx, productIds: number[]) {
+  const rows = productIds.length
+    ? await tx
+        .select()
+        .from(productNoneSerial)
+        .where(inArray(productNoneSerial.productId, productIds))
+        .orderBy(asc(productNoneSerial.productId), asc(productNoneSerial.itemId))
+        .for('update')
+    : [];
+  const byProduct = new Map<number, StockRow>();
+  for (const r of rows) if (r.productId != null && !byProduct.has(r.productId)) byProduct.set(r.productId, r);
+  const changed = new Set<StockRow>();
+  return {
+    async adjust(productId: number, d: QtyDelta) {
+      const row = byProduct.get(productId);
+      if (!row) throw noStockRow(productId);
+      const next = nextQty(row, d);
+      if (next.quantityRemain < 0) throw await notEnough(tx, productId, row.quantityRemain);
+      Object.assign(row, next);
+      changed.add(row);
+    },
+    async flush() {
+      if (!changed.size) return;
+      const values = sql.join(
+        [...changed].map(
+          (r) =>
+            sql`(${r.itemId}::int, ${r.quantityAvailable}::int, ${r.quantityUsed}::int, ${r.quantityBooking}::int, ${r.quantityRemain}::int)`,
+        ),
+        sql`, `,
+      );
+      await tx.execute(sql`
+        update product_none_serial s
+           set quantity_available = v.a, quantity_used = v.u, quantity_booking = v.b, quantity_remain = v.r
+          from (values ${values}) as v(id, a, u, b, r)
+         where s.item_id = v.id`);
+    },
+  };
 }
 
 async function productsByCode(tx: Tx, codes: string[]) {
@@ -449,19 +507,10 @@ async function productsByCode(tx: Tx, codes: string[]) {
   return new Map(rows.map((r) => [r.code ?? '', { id: r.id, name: r.name ?? '' }]));
 }
 
-/**
- * Lock the stock rows a write is about to change, all at once in product_id order, before any
- * adjustQty (which then re-locks rows this tx already holds). Locking line by line in request
- * order let two movements touching the same parts in opposite order deadlock (→ 500).
- */
+/** stockMove's lock alone, for a write that then calls adjustQty itself (jobs.ts): adjustQty re-locks rows
+ *  this tx already holds, so the product_id order holds. */
 async function lockStock(tx: Tx, productIds: number[]) {
-  if (!productIds.length) return;
-  await tx
-    .select({ id: productNoneSerial.itemId })
-    .from(productNoneSerial)
-    .where(inArray(productNoneSerial.productId, productIds))
-    .orderBy(asc(productNoneSerial.productId), asc(productNoneSerial.itemId))
-    .for('update');
+  await stockMove(tx, productIds);
 }
 
 /** The picker list (listProductsLite) shows names + on-hand: drop it after a product / stock write
@@ -499,7 +548,7 @@ async function insertMovement(
       itemQuantity: l.qty.toFixed(4),
       itemUnit: ITEM_UNIT,
       storeLocationId: STORE_LOCATION_ID,
-      stockTypeId: 1,
+      stockTypeId: STOCK_TYPE_ID,
       receiveInventoryNo: '',
     })),
   );
@@ -508,45 +557,39 @@ async function insertMovement(
 
 export type StockLine = { code: string; qty: number };
 
-/** รับเข้าอะไหล่ → WHI (type 1), available += qty. */
-export async function receiveStock(
-  i: { date?: string; poRef?: string | null; supplier?: string | null; remark?: string | null; lines: StockLine[] },
+/** รับเข้า / จ่ายออกอื่นๆ: the same movement by product code, one counter apart. */
+async function moveByCode(
+  input: StockLine[],
+  empty: string,
+  counter: 'available' | 'used',
+  h: Parameters<typeof insertMovement>[1],
+  entry: (total: number, lines: StockLine[]) => Pick<AuditEntry, 'action' | 'module' | 'summary'>,
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
-  const lines = i.lines.filter((l) => l.qty > 0);
-  if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนรับเข้า');
+  const lines = input.filter((l) => l.qty > 0);
+  if (!lines.length) throw new HttpError(400, empty);
   return db
     .transaction(async (tx) => {
       const map = await productsByCode(
         tx,
         lines.map((l) => l.code),
       );
-      await lockStock(
+      const stock = await stockMove(
         tx,
         [...map.values()].map((p) => p.id),
       );
       for (const l of lines) {
         const p = map.get(l.code);
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
-        await adjustQty(tx, p.id, { available: l.qty });
+        await stock.adjust(p.id, { [counter]: l.qty });
       }
-      // receiveSchema: supplier ≤ 40 + remark ≤ 47 → fits inventory_remark varchar(100)
-      const remark = [clean(i.supplier) ? `Supplier: ${clean(i.supplier)}` : '', clean(i.remark)]
-        .filter(Boolean)
-        .join(' · ');
-      const no = await insertMovement(
-        tx,
-        { typeId: INV.RECEIVE, ref: i.poRef ?? '', remark, date: i.date },
-        lines,
-        byUserId,
-      );
+      await stock.flush();
+      const no = await insertMovement(tx, h, lines, byUserId);
       const total = lines.reduce((s, l) => s + l.qty, 0);
       await audit(tx, byUserId, {
-        action: 'RECEIVE',
-        module: 'Product Receive Stock',
+        ...entry(total, lines),
         entity: 'inventory_hd',
         key: no,
-        summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${cleanCode(i.poRef)}` : ''}`,
         changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] },
       });
       return { no, total };
@@ -554,41 +597,46 @@ export async function receiveStock(
     .finally(productsChanged);
 }
 
+/** รับเข้าอะไหล่ → WHI (type 1), available += qty. */
+export async function receiveStock(
+  i: { date?: string; poRef?: string | null; supplier?: string | null; remark?: string | null; lines: StockLine[] },
+  byUserId: number,
+): Promise<{ no: string; total: number }> {
+  // receiveSchema: supplier ≤ 40 + remark ≤ 47 → fits inventory_remark varchar(100)
+  const remark = [clean(i.supplier) ? `Supplier: ${clean(i.supplier)}` : '', clean(i.remark)]
+    .filter(Boolean)
+    .join(' · ');
+  return moveByCode(
+    i.lines,
+    'ยังไม่ได้ระบุจำนวนรับเข้า',
+    'available',
+    { typeId: INV.RECEIVE, ref: i.poRef ?? '', remark, date: i.date },
+    (total, lines) => ({
+      action: 'RECEIVE',
+      module: 'Product Receive Stock',
+      summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${cleanCode(i.poRef)}` : ''}`,
+    }),
+    byUserId,
+  );
+}
+
 /** จ่ายออกอื่นๆ → WHO (type 5). */
 export async function issueOther(
   i: { payTo: string; remark?: string; lines: StockLine[] },
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
-  const lines = i.lines.filter((l) => l.qty > 0);
-  if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนจ่ายออก');
-  return db
-    .transaction(async (tx) => {
-      const map = await productsByCode(
-        tx,
-        lines.map((l) => l.code),
-      );
-      await lockStock(
-        tx,
-        [...map.values()].map((p) => p.id),
-      );
-      for (const l of lines) {
-        const p = map.get(l.code);
-        if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
-        await adjustQty(tx, p.id, { used: l.qty });
-      }
-      const no = await insertMovement(tx, { typeId: INV.OUT_OTHER, outTo: i.payTo, remark: i.remark }, lines, byUserId);
-      const total = lines.reduce((s, l) => s + l.qty, 0);
-      await audit(tx, byUserId, {
-        action: 'ISSUE',
-        module: 'Product Pick Stock',
-        entity: 'inventory_hd',
-        key: no,
-        summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`,
-        changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] },
-      });
-      return { no, total };
-    })
-    .finally(productsChanged);
+  return moveByCode(
+    i.lines,
+    'ยังไม่ได้ระบุจำนวนจ่ายออก',
+    'used',
+    { typeId: INV.OUT_OTHER, outTo: i.payTo, remark: i.remark },
+    (total) => ({
+      action: 'ISSUE',
+      module: 'Product Pick Stock',
+      summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`,
+    }),
+    byUserId,
+  );
 }
 
 /* ---- job spare-part requests (ใบเบิก) ---- */
@@ -702,10 +750,19 @@ export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
   return num(sum?.s);
 }
 
-/** job_status ids of a closed or cancelled job (jobs.ts JS — not imported: that module imports this one):
- *  0 ยกเลิกข้อมูล · 6 ยกเลิกซ่อม · 7 / 8 / 20 / 21 / 23 / 24 ปิดงาน ·
- *  22 ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out (owner 2026-10-15) */
-export const JOB_CLOSED_STATUSES = [0, 6, 7, 8, 20, 21, 22, 23, 24];
+/** job_status ids of a closed or cancelled job: ยกเลิกข้อมูล · ยกเลิกซ่อม · ปิดงาน (7 / 8 / 20 / 21 / 23 / 24) ·
+ *  ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out (owner 2026-10-15) */
+export const JOB_CLOSED_STATUSES: number[] = [
+  JS.CANCELLED,
+  JS.REPAIR_CANCELLED,
+  JS.CLOSED_WAIT_TRACKING,
+  JS.CLOSED_TRACKED,
+  JS.COMPLETE,
+  JS.CLOSED_REFUND,
+  JS.REPAIRED_NO_FAULT,
+  JS.CLOSED_OUTSOURCE,
+  JS.CLOSED_WAIT_PICKUP,
+];
 
 /** No part goes out to a closed / cancelled job (returns from it stay allowed). In a transaction the
  *  job row is share-locked first (job → request rows → stock, the order the repair save locks in). */
@@ -751,7 +808,7 @@ export async function issueForJob(
         tx,
         reqs.map((r) => r.sparePartCode ?? ''),
       );
-      await lockStock(
+      const stock = await stockMove(
         tx,
         [...map.values()].map((p) => p.id),
       );
@@ -765,7 +822,7 @@ export async function issueForJob(
         if (l.qty > need) throw new HttpError(400, `จ่ายเกินจำนวนที่ขอ (${r.sparePartCode})`);
         const p = map.get(r.sparePartCode ?? '');
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
-        await adjustQty(tx, p.id, { used: l.qty, booking: -l.qty });
+        await stock.adjust(p.id, { used: l.qty, booking: -l.qty });
         const granted = (r.grantQty ?? 0) + l.qty;
         await tx
           .update(jobOrderSparePartLog)
@@ -778,6 +835,7 @@ export async function issueForJob(
           .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
         mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
       }
+      await stock.flush();
       const no = await insertMovement(
         tx,
         { typeId: INV.OUT_JOB, ref: i.jobNo, outTo: i.payTo, remark: i.remark },
@@ -928,7 +986,7 @@ export async function returnFromJob(
         tx,
         reqs.map((r) => r.sparePartCode ?? ''),
       );
-      await lockStock(
+      const stock = await stockMove(
         tx,
         [...map.values()].map((p) => p.id),
       );
@@ -942,7 +1000,7 @@ export async function returnFromJob(
         if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
         const p = map.get(r.sparePartCode ?? '');
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
-        await adjustQty(tx, p.id, { used: -l.qty });
+        await stock.adjust(p.id, { used: -l.qty });
         const returned = (r.returnQty ?? 0) + l.qty;
         await tx
           .update(jobOrderSparePartLog)
@@ -959,6 +1017,7 @@ export async function returnFromJob(
           .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
         mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
       }
+      await stock.flush();
       const no = await insertMovement(
         tx,
         { typeId: INV.RETURN_FROM_JOB, ref: i.jobNo, outTo: i.from, remark: i.remark },
@@ -1015,7 +1074,7 @@ export async function saleOrdersToPick(limit = 300): Promise<string[]> {
     .from(saleOutHd)
     .innerJoin(saleOutDt, eq(saleOutDt.saleOutHdNo, saleOutHd.saleOutHdNo))
     .where(
-      and(eq(saleOutHd.approveStatusId, SO_APPROVED), statusFilter(saleOutHd.recordStatus, 'exclude'), soLineToPick),
+      and(eq(saleOutHd.approveStatusId, AS.APPROVED), statusFilter(saleOutHd.recordStatus, 'exclude'), soLineToPick),
     )
     .orderBy(desc(saleOutHd.saleOutHdNo))
     .limit(limit);
@@ -1066,14 +1125,14 @@ export async function issueForSaleOrder(
       .for('update');
     if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + i.soNo);
     if (hd.status === RS.DELETED) throw new HttpError(409, 'ใบสั่งขายนี้ถูกยกเลิกแล้ว จ่ายสินค้าไม่ได้');
-    if (hd.approve !== SO_APPROVED) throw new HttpError(409, 'ใบสั่งขายยังไม่ได้รับอนุมัติ จ่ายสินค้าไม่ได้');
+    if (hd.approve !== AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายยังไม่ได้รับอนุมัติ จ่ายสินค้าไม่ได้');
     const dts = await t
       .select()
       .from(saleOutDt)
       .where(and(eq(saleOutDt.saleOutHdNo, i.soNo), ne(saleOutDt.productType, 'Service')))
       .for('update');
     const want = i.lines ? new Map(i.lines.map((l) => [l.dtId, l.qty])) : null;
-    await lockStock(
+    const stock = await stockMove(
       t,
       dts.flatMap((d) => (!d.pickInventoryNo && d.productId ? [d.productId] : [])),
     );
@@ -1085,10 +1144,11 @@ export async function issueForSaleOrder(
       if (qty <= 0) continue;
       if (qty > d.saleOutQuantity) throw new HttpError(400, `จ่ายเกินจำนวนในใบสั่งขาย (${d.productCode})`);
       if (!d.productId) throw new HttpError(400, `รายการ ${d.productCode} ไม่มี product_id`);
-      await adjustQty(t, d.productId, { used: qty });
+      await stock.adjust(d.productId, { used: qty });
       mv.push({ code: d.productCode ?? '', qty });
       picked.push(d.saleOutDtId);
     }
+    await stock.flush();
     if (!mv.length) {
       // approving the order issued it already — say so instead of a bare "nothing to issue"
       const done = [...new Set(dts.map((d) => d.pickInventoryNo).filter(Boolean))];
@@ -1168,10 +1228,10 @@ export async function listMovements(opts: MovementFilters & { limit?: number } =
     .leftJoin(storeLocation, eq(storeLocation.storeLocationId, STORE_LOCATION_ID))
     .where(movementWhere(opts))
     .orderBy(desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId))
-    .limit(Math.min(limit, 20000)); // 20k = the Excel export cap (src/server/export.ts)
+    .limit(Math.min(limit, MAX_EXPORT_ROWS));
   return rows.map((r) => {
     const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
-    const wh = r.loc ?? 'คลังสินค้าดี';
+    const wh = r.loc ?? STORE_LOCATION_NAME;
     return {
       doc: r.doc ?? '',
       type: r.type ?? '',
@@ -1261,18 +1321,13 @@ export async function listIssuedLines(opts: IssuedFilters & { limit?: number } =
   const rows = await issuedBase()
     .where(issuedWhere('', opts))
     .orderBy(desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId))
-    .limit(Math.min(opts.limit ?? 5000, 20000));
+    .limit(Math.min(opts.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toIssued);
 }
 
 /* ------------------------------------------------------------------ *
  * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
  * ------------------------------------------------------------------ */
-import { count as countFn } from 'drizzle-orm';
-import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
-import { assertValid } from '@/server/validate';
-import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
-import { clean, cleanCode, summary } from '@/lib/validation';
 
 /** other products that already carry this vendor code — a warning on save, not a block (legacy has pairs) */
 export async function productsWithMfgCode(mfgCode: string, exceptSysCode: string): Promise<string[]> {
@@ -1299,6 +1354,21 @@ export type ProductFilters = {
   stock?: 'in' | 'low' | 'out'; // มีสินค้า / ใกล้หมด / หมด
   model?: string; // model_code — parts usable with that model (product_model)
 };
+
+/** The page's query (?category=&stock=…) as filters — the list, its KPI and the export all read it here. */
+export const productFiltersFromQuery = (f: Record<string, string>, mode: DeletedMode): ProductFilters => ({
+  mode,
+  status: f.status,
+  sysCode: f.sysCode,
+  mfgCode: f.mfgCode,
+  name: f.name,
+  brand: f.brand,
+  category: f.category,
+  creator: f.creator,
+  date: f.date,
+  model: f.model,
+  stock: f.stock === 'in' || f.stock === 'low' || f.stock === 'out' ? f.stock : undefined,
+});
 
 const creatorUser = alias(appUser, 'product_creator');
 
@@ -1328,8 +1398,8 @@ function productWhere(q: string, f: ProductFilters) {
     f.model
       ? sql`exists (select 1 from product_model pm where pm.product_id = ${product.productId} and pm.model_code = ${f.model})`
       : undefined,
-    f.stock === 'in' ? sql`coalesce(${productNoneSerial.quantityRemain},0) > 3` : undefined,
-    f.stock === 'low' ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3` : undefined,
+    f.stock === 'in' ? sql`coalesce(${productNoneSerial.quantityRemain},0) > ${LOW_STOCK}` : undefined,
+    f.stock === 'low' ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and ${LOW_STOCK}` : undefined,
     f.stock === 'out' ? sql`coalesce(${productNoneSerial.quantityRemain},0) <= 0` : undefined,
   );
 }
@@ -1396,7 +1466,7 @@ export async function productStats(q: string, f: ProductFilters) {
       total: countFn(),
       qty: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0)),0)`,
       value: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0) * coalesce(${productNoneSerial.retailPrice},0)),0)`,
-      low: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3)`,
+      low: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) between 1 and ${LOW_STOCK})`,
       out: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) <= 0)`,
       // in stock but no retail price: left out of value — the page says how many
       noPrice: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) > 0 and coalesce(${productNoneSerial.retailPrice},0) = 0)`,
@@ -1530,7 +1600,7 @@ export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<P
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
-  const wh = 'คลังสินค้าดี';
+  const wh = STORE_LOCATION_NAME;
   return {
     rows: rows.map((r) => {
       const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
@@ -1624,7 +1694,7 @@ function toIssued(r: Awaited<ReturnType<typeof issuedBase>>[number]) {
     type: r.type ?? '',
     ref: r.ref ?? '',
     by: fullName(r.byFirst, r.byLast),
-    from: 'คลังสินค้าดี',
+    from: STORE_LOCATION_NAME,
     to: r.ref ?? '',
     remark: '',
     code: r.code ?? '',
