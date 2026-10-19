@@ -10,21 +10,25 @@ import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
 import { useServerTable } from '@/lib/use-server-table';
-import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
+import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 
 const columns: Column<Job>[] = [
   { key: 'no', header: 'เลขที่งาน', width: '130px', cell: (r) => <span className="num font-medium">{r.no}</span> },
   {
     key: 'repairedDate',
     header: 'วันที่ซ่อม',
-    width: '140px',
-    cell: (r) => <span className="num text-xs">{r.repairedDate}</span>,
+    width: '110px',
+    cell: (r) => <DateTimeCell value={r.repairedDate} />,
   },
   {
     key: 'customer',
     header: 'ลูกค้า',
     minWidth: COL_MIN_WIDTH.customer,
-    cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span>,
+    cell: (r) => (
+      <span className="line-clamp-1 max-w-[200px]" title={r.customer}>
+        {r.customer}
+      </span>
+    ),
   },
   brandModelColumn(),
   {

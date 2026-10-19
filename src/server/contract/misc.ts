@@ -42,7 +42,7 @@ export const files = defineOperation({
   security: SESSION_OR_NONE,
   summary: 'Open a stored file by its storage path (a short-lived signed URL)',
   description:
-    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user.',
+    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403.',
   query: z.object({
     path: z
       .string({ error: PATH_REQUIRED })
@@ -73,7 +73,7 @@ export const upload = defineOperation({
   tags: ['Files'],
   summary: 'Upload a product image, a payment slip or a profile logo',
   description:
-    "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit; profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
+    "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
   form: z.object({
     kind: choice(['product-image', 'sale-order-slip', 'job-slip', 'profile-logo', 'shipper-logo']).meta({
       description: 'Anything else → 400 "unknown kind" (after the file checks).',
@@ -102,7 +102,9 @@ export const upload = defineOperation({
     ...SIGNED_IN,
     400: errorResponse('Not multipart, no file / id, or an unknown kind.'),
     ...notFound('No such product / order / job / profile.'),
-    409: errorResponse('The sale order is approved, denied or cancelled — its slip cannot change.'),
+    409: errorResponse(
+      'The sale order is approved, denied or cancelled, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.',
+    ),
     413: errorResponse('File over 10 MB, or an image over 40 megapixels.'),
     415: errorResponse('Not an allowed file type (checked against the bytes).'),
     ...RATE_LIMITED,
@@ -169,7 +171,11 @@ export const ssoLogin = defineOperation({
     next: s.optional().meta({ description: 'Where to land afterwards (a same-site path).' }),
     prompt: choice(['login']).meta({ description: 'Anything else is ignored.' }),
   }),
-  responses: { 307: redirect('To the SSO authorize page (sets the `os_state` cookie), or to /login.') },
+  responses: {
+    307: redirect(
+      'To the SSO authorize page (sets the `__Host-os_state` cookie — `os_state` outside production), or to /login.',
+    ),
+  },
 });
 
 export const ssoCallback = defineOperation({

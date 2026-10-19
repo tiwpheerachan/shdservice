@@ -34,6 +34,14 @@ export const chargeOf = (l: Line) => partCharge({ pick: l.aPick, quote: l.aQuote
 export const planOf = (l: Line, k: 'a' | 'b') =>
   k === 'a' ? { pick: l.aPick, quote: l.aQuote, qty: l.aQty } : { pick: l.bPick, quote: l.bQuote, qty: l.bQty };
 
+/** ticking เบิก / เสนอ of a plan with no Qty starts it at 1 (as a new line's แบบ A) — ticked at 0 it would save nothing */
+export function tickPlan(l: Line, k: 'a' | 'b', f: 'pick' | 'quote'): Partial<Line> {
+  const p = planOf(l, k);
+  const n = { ...p, [f]: !p[f] };
+  if (n[f] && !(n.qty > 0)) n.qty = 1;
+  return k === 'a' ? { aPick: n.pick, aQuote: n.quote, aQty: n.qty } : { bPick: n.pick, bQuote: n.quote, bQty: n.qty };
+}
+
 /** the quotation (ยอดเสนอราคา) of แบบ A / B — not the bill: a เสนอ-only line is quoted, not charged */
 export const quoteTotal = (lines: Line[], k: 'a' | 'b') =>
   lines.reduce((s, l) => {

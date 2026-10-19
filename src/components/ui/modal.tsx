@@ -5,6 +5,10 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+/** what the dialog opens on: its first field to fill (Radix alone would focus the close button) */
+const FIELD =
+  'input:not([type=hidden]):not([disabled]):not([readonly]), select:not([disabled]), textarea:not([disabled]):not([readonly]), [role=combobox]:not([disabled])';
+
 /**
  * App modal — same props/look as before, now a Radix Dialog underneath
  * (focus trap, Esc, scroll lock, aria-modal, focus restore on close).
@@ -32,6 +36,7 @@ export function Modal({
     lg: 'max-w-2xl',
     xl: 'max-w-4xl',
   }[size];
+  const body = React.useRef<HTMLDivElement>(null);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && onClose()}>
@@ -40,6 +45,14 @@ export function Modal({
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
           <DialogPrimitive.Content
             // a click on a toast (its "โหลดใหม่" / close) is not a click outside: the dialog stays open
+            onOpenAutoFocus={(e) => {
+              const first = [...(body.current?.querySelectorAll<HTMLElement>(FIELD) ?? [])].find(
+                (el) => el.getClientRects().length > 0, // not a display:none file input
+              );
+              if (!first) return; // no field (a confirm, a view): Radix's default
+              e.preventDefault();
+              first.focus();
+            }}
             onInteractOutside={(e) => {
               if (e.target instanceof Element && e.target.closest('[data-sonner-toaster]')) e.preventDefault();
             }}
@@ -66,7 +79,9 @@ export function Modal({
                 <X className="h-4 w-4" />
               </DialogPrimitive.Close>
             </div>
-            <div className="max-h-[65vh] overflow-y-auto px-5 py-4">{children}</div>
+            <div ref={body} className="max-h-[65vh] overflow-y-auto px-5 py-4">
+              {children}
+            </div>
             {footer && (
               <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/40 px-5 py-3">
                 {footer}

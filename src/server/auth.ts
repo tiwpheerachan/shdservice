@@ -244,6 +244,15 @@ const ACTION_TH: Record<Action, string> = { add: 'เพิ่ม', edit: 'แ�
 
 /** Every job screen — a job (and its calls/attachments) is readable from any of them. */
 export const JOB_MODULES: readonly Module[] = ['Job Management', 'Job Assign', 'Job Repair', 'Job Closing'];
+/** Every product / stock screen — the product detail and its picture are readable from any of them. */
+export const PRODUCT_MODULES: readonly Module[] = [
+  'Product',
+  'Product Onhand',
+  'Product Receive Stock',
+  'Product Pick Stock',
+];
+/** A sale order (and its slip): its own screen, and stock pick, which issues against it. */
+export const SALE_ORDER_READERS: readonly Module[] = ['Sale Order', 'Product Pick Stock'];
 
 /** True when the user may view at least one of `modules` (screens that legitimately read the data). */
 export async function canViewAny(user: CurrentUser, modules: readonly Module[]) {
@@ -410,7 +419,7 @@ export async function parseBody<S extends z.ZodType>(req: NextRequest, op: Decla
   return parsePart(op, 'body', op.body, await readJson(req));
 }
 
-/** The small JSON body of the public /track routes: over 8 KB, not JSON or not an object reads as `{}`. */
+/** The small JSON body of the public /track routes: over 8 KB throws BodyTooLarge (→ 413); not JSON or not an object reads as `{}`. */
 export async function parseTrackBody<S extends z.ZodType>(
   req: NextRequest,
   op: Declares<'body', S>,

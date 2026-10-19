@@ -2,14 +2,16 @@ import { Pool } from 'pg';
 import { DATABASE_URL, E2E_ROLE, STAFF_EMAIL } from './env';
 
 /** one row, unless a row with the first column's value exists; id = max + 1 (the other seeds insert
- * explicit ids without moving the identity sequence, so a default id could collide). SQL literals. */
+ * explicit ids without moving the identity sequence, so a default id could collide). SQL literals.
+ * The sequence is then moved past it — or the next app insert (test:domain's saveModel) collides. */
 function ensure(table: string, id: string, row: Record<string, string>): string {
   const [first] = Object.entries(row);
   if (!first) throw new Error(`ensure(${table}): empty row`);
   const [key, value] = first;
   return `INSERT INTO ${table} (${id}, ${Object.keys(row).join(', ')})
     SELECT n.id, ${Object.values(row).join(', ')} FROM (SELECT coalesce(max(${id}), 0) + 1 AS id FROM ${table}) n
-    WHERE NOT EXISTS (SELECT 1 FROM ${table} WHERE ${key} = ${value});`;
+    WHERE NOT EXISTS (SELECT 1 FROM ${table} WHERE ${key} = ${value});
+    SELECT setval(pg_get_serial_sequence('${table}', '${id}'), (SELECT max(${id}) FROM ${table}));`;
 }
 
 /**

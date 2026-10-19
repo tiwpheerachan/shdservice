@@ -1,6 +1,8 @@
 // Central SSO endpoints (SHD). client_id is public; the API key that authorizes
 // the verify call is server-only (CENTRAL_API_KEY).
 // SSO_ORIGIN exists for the e2e tests' fake SSO (tests/e2e) — production leaves it unset.
+import { hostCookie } from './session';
+
 export const SSO_ORIGIN = (process.env.SSO_ORIGIN || 'https://sso.shd-technology.co.th').replace(/\/+$/, '');
 export const SSO = {
   clientId: process.env.SSO_CLIENT_ID || 'cli_6e53e9248bcff7fb',
@@ -37,7 +39,7 @@ export async function centralSessionActive(
   }
 }
 
-export const STATE_COOKIE = 'os_state';
+export const STATE_COOKIE = hostCookie('os_state');
 /** os_state holds the last few login states (newest first), separated by this. */
 export const STATE_SEP = ';';
 export const MAX_STATES = 5;

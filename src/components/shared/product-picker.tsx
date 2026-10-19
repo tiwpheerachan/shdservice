@@ -202,8 +202,7 @@ export function ProductPicker({
             )}
             {!typedEnough ? (
               <p className="px-3 py-5 text-center text-xs text-muted-foreground">
-                พิมพ์อย่างน้อย {MIN_CHARS} ตัวอักษร — ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้
-                เพื่อกรองต่อ)
+                พิมพ์อย่างน้อย {MIN_CHARS} ตัวอักษร — ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้ เพื่อกรองต่อ)
               </p>
             ) : found.error && !loading ? (
               <p role="alert" className="px-3 py-5 text-center text-sm text-danger">

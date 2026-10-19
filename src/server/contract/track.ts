@@ -30,6 +30,7 @@ const TrackError = z
 const fail = (description: string) => jsonResponse(description, TrackError);
 const limited = fail('Rate limited (per IP / link / number) — `Retry-After` on most.');
 const broken = fail('Unexpected error — the same message as the ordinary failure.');
+const tooLarge = fail('Body over 8 KB — refused by Content-Length before it is read, or while streaming.');
 /** a text field as the routes read it: a string, cut at `max`; anything else as "" */
 const text = (max: number) =>
   z
@@ -60,6 +61,7 @@ export const trackSession = defineOperation({
     ),
     403: fail('Captcha failed, or no link token.'),
     410: fail('The link expired, was replaced, or never existed (`reason: "link"`).'),
+    413: tooLarge,
     429: limited,
     503: fail('Turnstile could not be reached.'),
   },
@@ -77,6 +79,7 @@ export const trackData = defineOperation({
   responses: {
     200: jsonResponse('The job, masked.', z.object({ ok: z.literal(true), job: PublicJob })),
     401: fail('Ticket unknown, used, expired, or from another IP / browser (`retry: true`).'),
+    413: tooLarge,
     429: limited,
   },
 });
@@ -104,6 +107,7 @@ export const trackDoc = defineOperation({
     401: fail('The session expired (`reason: "session"`).'),
     404: fail('Not yours, does not exist, or not issued to customers — all the same.'),
     410: fail('The link expired (`reason: "link"`).'),
+    413: tooLarge,
     429: limited,
     500: broken,
   },
@@ -120,6 +124,7 @@ export const trackLinkKeepalive = defineOperation({
   responses: {
     200: jsonResponse('New expiry.', z.object({ ok: z.literal(true), expiresAt: s })),
     410: fail('The link is no longer live.'),
+    413: tooLarge,
     429: limited,
     500: broken,
   },
@@ -214,6 +219,7 @@ export const trackOtpRequest = defineOperation({
     ),
     400: fail('Not a 10-digit mobile number.'),
     403: fail('Captcha failed (`reason: "captcha"`).'),
+    413: tooLarge,
     429: limited,
     500: broken,
     503: fail('The OTP service is not configured, or Turnstile could not be reached.'),
@@ -226,7 +232,8 @@ export const trackOtpVerify = defineOperation({
   tags,
   security: PUBLIC,
   summary: 'Check the SMS code → a customer session token',
-  description: 'Wrong, expired, used, or too many tries all read the same. Keep the token in page memory only.',
+  description:
+    "Wrong, expired, used, or too many tries all read the same, and every answer takes at least 800 ms — a customer's number and anyone else's (a decoy OTP) cannot be told apart. Keep the token in page memory only.",
   body: z.object({
     requestId: opaque('From POST /track/otp/request.'),
     code: z
@@ -238,6 +245,7 @@ export const trackOtpVerify = defineOperation({
   responses: {
     200: jsonResponse('Signed in.', z.object({ ok: z.literal(true), session: s, expiresAt: s })),
     401: fail('Wrong / expired code.'),
+    413: tooLarge,
     429: limited,
     500: broken,
   },

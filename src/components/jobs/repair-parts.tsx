@@ -9,7 +9,7 @@ import { Checkbox, NumberInput } from '@/components/ui/input';
 import type { PickableProduct } from '@/lib/product-match';
 import type { FieldErrors } from '@/lib/validation';
 import { baht } from '@/lib/utils';
-import { type Line, amountA, partTone, planOf, quoteTotal, statusOf } from './repair-lines';
+import { type Line, amountA, partTone, planOf, quoteTotal, statusOf, tickPlan } from './repair-lines';
 
 type Action = { errors: FieldErrors; clear: (key: string) => void };
 type RowProps = {
@@ -120,7 +120,10 @@ function PartCards({ lines, lock, act, upd, remove }: RowProps) {
                     aria-label={`เบิก แบบ ${T} ${l.code}`}
                     checked={pick}
                     disabled={off}
-                    onChange={() => upd(l.id, k === 'a' ? { aPick: !pick } : { bPick: !pick })}
+                    onChange={() => {
+                      upd(l.id, tickPlan(l, k, 'pick'));
+                      act.clear(`parts.${i}.${k}.qty`);
+                    }}
                   />
                   เบิก
                 </label>
@@ -129,7 +132,10 @@ function PartCards({ lines, lock, act, upd, remove }: RowProps) {
                     aria-label={`เสนอ แบบ ${T} ${l.code}`}
                     checked={quote}
                     disabled={off}
-                    onChange={() => upd(l.id, k === 'a' ? { aQuote: !quote } : { bQuote: !quote })}
+                    onChange={() => {
+                      upd(l.id, tickPlan(l, k, 'quote'));
+                      act.clear(`parts.${i}.${k}.qty`);
+                    }}
                   />
                   เสนอ
                 </label>
@@ -188,7 +194,10 @@ function PlanCells({
           aria-label={`เบิก แบบ ${T} ${l.code}`}
           checked={pick}
           disabled={l.locked || !!lock}
-          onChange={() => upd(l.id, k === 'a' ? { aPick: !pick } : { bPick: !pick })}
+          onChange={() => {
+            upd(l.id, tickPlan(l, k, 'pick'));
+            act.clear(`parts.${i}.${k}.qty`);
+          }}
         />
       </td>
       <td className="px-2 py-2 text-center">
@@ -196,7 +205,10 @@ function PlanCells({
           aria-label={`เสนอ แบบ ${T} ${l.code}`}
           checked={quote}
           disabled={l.locked || !!lock}
-          onChange={() => upd(l.id, k === 'a' ? { aQuote: !quote } : { bQuote: !quote })}
+          onChange={() => {
+            upd(l.id, tickPlan(l, k, 'quote'));
+            act.clear(`parts.${i}.${k}.qty`);
+          }}
         />
       </td>
       <td className="px-2 py-2">

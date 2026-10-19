@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac, isBlocked, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx } from '@/server/track-http';
+import { bodyTooLarge, BodyTooLarge, trackJson, trackCtx } from '@/server/track-http';
 import { touchSession } from '@/server/track-otp';
 import { findDoc, issueDocLink, jobNoForCustomers, jobNoForLink } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
@@ -62,6 +62,7 @@ export const POST = checked(async (req: NextRequest) => {
     logEvent('doc_ticket_issued', { ipHash: c.ipKey, jobNo, result: doc.kind, requestId: c.requestId });
     return trackJson({ ok: true, url: `/track/doc/${ticket}` });
   } catch (e) {
+    if (e instanceof BodyTooLarge) return bodyTooLarge();
     logError(e, 'track/doc');
     return trackJson({ ok: false, error: TRACK_MSG.docFail }, 500);
   }

@@ -1312,11 +1312,14 @@ const MONEY_COLS = {
 } as const satisfies Partial<Record<keyof JobRow, string>>;
 const MONEY_TEXT = new Set<string>(['jobPaymentType', 'jobPaymentNo', 'jobPaymentDetail']);
 
+/** the job is closed (its status is in the Finished group) */
+export async function jobClosed(statusId: number | null): Promise<boolean> {
+  return (await statusGroup(statusId ?? -1)) === FINISHED_GROUP;
+}
+
 /** closed (Finished) and the user has no Job Money After Close → the job's money may not change */
-async function moneyLocked(statusId: number | null, byUserId: number): Promise<boolean> {
-  return (
-    (await statusGroup(statusId ?? -1)) === FINISHED_GROUP && !(await userHasRight(byUserId, 'Job Money After Close'))
-  );
+export async function moneyLocked(statusId: number | null, byUserId: number): Promise<boolean> {
+  return (await jobClosed(statusId)) && !(await userHasRight(byUserId, 'Job Money After Close'));
 }
 
 /**
@@ -1870,6 +1873,8 @@ function repairStatus(status: JobRow['jobStatusId'], picked: number | undefined,
   return target;
 }
 
+const PART_QTY_REQUIRED = 'ระบุจำนวนที่ต้องการเบิก/เสนอ';
+
 /**
  * Column mapping inferred from the dump: request_qty / is_quotation / is_special
  * (+ the *_b twins) — is_quotation = "เสนอ" (in the quotation), is_special = "เบิก"
@@ -1897,6 +1902,24 @@ async function syncPartLines(
     .from(jobOrderSparePartLog)
     .where(eq(jobOrderSparePartLog.jobNo, jobNo))
     .for('update');
+  // a plan ticked (เบิก / เสนอ) with no quantity is a mistake, never "not used" — refused, not dropped;
+  // a stored line kept as loaded passes (legacy rows may hold a tick with qty 0)
+  const fields: FieldErrors = {};
+  parts.forEach((p, i) => {
+    const e = p.logId ? existing.find((x) => x.jobOrderLogId === p.logId) : undefined;
+    const stored = {
+      a: [e?.isSpecial, e?.isQuotation, e?.requestQty],
+      b: [e?.isSpecialB, e?.isQuotationB, e?.requestQtyB],
+    };
+    for (const k of ['a', 'b'] as const) {
+      const qty = Math.max(0, int(p[k].qty, 0));
+      if (!(p[k].pick || p[k].quote) || qty > 0) continue;
+      const [pick, quote, q] = stored[k];
+      if (e && !!pick === !!p[k].pick && !!quote === !!p[k].quote && (q ?? 0) === qty) continue;
+      fields[`parts.${i}.${k}.qty`] = PART_QTY_REQUIRED;
+    }
+  });
+  if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
   const keep = new Set(parts.map((p) => p.logId).filter((x): x is number => !!x));
   const codes = parts.map((p) => str(p.code)).filter(Boolean);
   // still-pending rows are the only existing ones whose booking can move (cancel / re-book)

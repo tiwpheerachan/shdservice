@@ -97,4 +97,5 @@ export const TRACK_MSG = {
   docFail: 'เปิดเอกสารไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
   signedOut: 'ออกจากระบบแล้ว',
   notFound: 'ไม่พบรายการ',
+  tooLarge: 'ข้อมูลที่ส่งมาใหญ่เกินไป',
 } as const;

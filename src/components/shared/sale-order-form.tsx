@@ -6,7 +6,7 @@ import { Section } from './section';
 import { CustomerSelect } from './customer-select';
 import { ProfileSelect } from './profile-select';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
-import { Input, Textarea, Radio } from '@/components/ui/input';
+import { FileInput, Input, Textarea, Radio } from '@/components/ui/input';
 import { SearchSelect } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
 import { PAYMENT_METHODS } from '@/data/options';
@@ -357,11 +357,10 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
               }
             >
               <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  className="h-9 py-1.5 text-xs"
+                <FileInput
+                  placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
                   accept=".jpg,.jpeg,.png,.webp,.pdf"
-                  onChange={(e) => onPickSlip(e.target.files?.[0])}
+                  onFile={onPickSlip}
                 />
                 {slip.includes('/') && (
                   <a

@@ -1,5 +1,5 @@
 import 'server-only';
-import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { and, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { customer, trackOtp, trackSession } from '@/db/schema';
@@ -30,7 +30,8 @@ import { ipBucket } from '@/lib/client-ip';
  *
  *  - the answer to "send me a code" is the same whether or not the number is a customer;
  *    a real SMS goes out ONLY to numbers in the customer table (no paid SMS to random
- *    numbers — SMS pumping) and the send happens after the response is decided
+ *    numbers — SMS pumping) and the send happens after the response is decided. Any other
+ *    number gets a decoy row (issueDecoy), so checking a code behaves the same too
  *  - the code: ThaiBulkSMS's OTP service makes it, sends it and checks it — the row keeps its token
  *    (useless without the SMS); our 5-try cap comes first. Development `log` mode makes its own
  *    code and keeps only an HMAC of it bound to its request id
@@ -139,8 +140,35 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
     void issueOtp(phone, key, ids, requestId, ip, ipHash, requestIdForLog).catch((e) =>
       logError(e, 'track_otp not issued'),
     );
-  else logEvent('otp_unknown_phone', { ipHash, requestId: requestIdForLog });
+  else {
+    logEvent('otp_unknown_phone', { ipHash, requestId: requestIdForLog });
+    void issueDecoy(key, requestId, ip).catch((e) => logError(e, 'track_otp decoy not stored'));
+  }
   return { ok: true, requestId, masked: maskOtpPhone(phone), expiresIn: OTP_TTL_SEC, resendIn: OTP_RESEND_SEC };
+}
+
+/** a new code replaces any unused one for this number */
+const retireUnused = (key: string) =>
+  db
+    .update(trackOtp)
+    .set({ consumedAt: dbNow })
+    .where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
+
+/**
+ * A number no customer has: a row like a customer's, but for nobody (no customer ids) and with the hash of
+ * a code nobody knows — and no SMS. Its verify then runs the same path as a real one: the try counter,
+ * the wrong-code counters and the number lock all apply, so the answers cannot tell the two apart.
+ */
+async function issueDecoy(key: string, requestId: string, ip: string) {
+  await retireUnused(key);
+  await db.insert(trackOtp).values({
+    requestHash: sha256(requestId),
+    phoneHash: key,
+    customerIds: [],
+    codeHash: randomBytes(32), // the length of a real one — the comparison takes the same branch
+    issuedIp: ip,
+    expiresAt: dbNowPlus(OTP_TTL_SEC),
+  });
 }
 
 /** a customer number's OTP: the row (replacing any unused one) + the SMS — runs after requestOtp answered */
@@ -159,11 +187,7 @@ async function issueOtp(
   const rh = sha256(requestId);
   // development `log` mode makes its own code; ThaiBulkSMS makes the real one
   const own = smsProvider() === 'log' ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0') : null;
-  // a new code replaces any unused one for this number
-  await db
-    .update(trackOtp)
-    .set({ consumedAt: dbNow })
-    .where(and(eq(trackOtp.phoneHash, key), isNull(trackOtp.consumedAt)));
+  await retireUnused(key);
   await db.insert(trackOtp).values({
     requestHash: rh,
     phoneHash: key,
@@ -233,7 +257,7 @@ export async function verifyOtp(
     .set({ consumedAt: dbNow })
     .where(and(eq(trackOtp.requestHash, rh), isNull(trackOtp.consumedAt)))
     .returning({ customerIds: trackOtp.customerIds, phoneHash: trackOtp.phoneHash });
-  if (!row) return null;
+  if (!row?.customerIds.length) return null; // a decoy never matches; never a session for nobody either
 
   await db.delete(trackSession).where(lt(trackSession.maxExpiresAt, dbNow)); // housekeeping
   const token = newToken();

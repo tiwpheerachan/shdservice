@@ -528,7 +528,8 @@ export async function savePermissions(
   await db.transaction(async (tx) => {
     const beforeRows = await tx.select().from(appConfig);
     const beforeMap = new Map(beforeRows.map((r) => [`${r.userType?.trim()}::${r.moduleName?.trim()}`, r]));
-    const changed: Record<string, [unknown, unknown]> = {};
+    /** role → menu → [was, now]: one audit entry per role, keyed by that role */
+    const changed = new Map<string, Record<string, [unknown, unknown]>>();
     // one upsert on ix_user_type_and_module_name (unique (user_type, module_name)) instead of a
     // SELECT + UPDATE/INSERT per row; a pair sent twice keeps its last value (as the loop did)
     const rows = new Map(
@@ -576,18 +577,21 @@ export async function savePermissions(
           : null;
       const was = pack(b);
       const now = pack(values);
-      if (was !== now) changed[it.menu] = [was, now];
+      if (was !== now) {
+        const menus = changed.get(it.role) ?? {};
+        menus[it.menu] = [was, now];
+        changed.set(it.role, menus);
+      }
       n++;
     }
-    const role = items[0]?.role ?? '';
-    if (Object.keys(changed).length) {
+    for (const [role, menus] of changed) {
       await audit(tx, actorId, {
         action: 'UPDATE',
         module: 'Admin',
         entity: 'app_config',
         key: role,
-        summary: `แก้สิทธิ์บทบาท ${role} · ${Object.keys(changed).length} เมนู (V=ดู A=เพิ่ม E=แก้ D=ลบ)`,
-        changes: changed,
+        summary: `แก้สิทธิ์บทบาท ${role} · ${Object.keys(menus).length} เมนู (V=ดู A=เพิ่ม E=แก้ D=ลบ)`,
+        changes: menus,
       });
     }
   });

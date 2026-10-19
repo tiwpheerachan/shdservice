@@ -139,7 +139,8 @@ function CustomersPageInner() {
       key: 'name',
       header: 'ชื่อ-สกุล',
       cell: (r) => (
-        <div className="min-w-0">
+        // a long company name would keep the column (and the table) wide — cut it, the full name on hover
+        <div className="min-w-0 max-w-[320px]" title={r.name}>
           <p className="truncate font-medium">{r.name}</p>
           <p className="num truncate text-2xs text-muted-foreground">เลขผู้เสียภาษี {r.taxId || '—'}</p>
         </div>

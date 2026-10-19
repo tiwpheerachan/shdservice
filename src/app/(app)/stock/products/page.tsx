@@ -204,7 +204,7 @@ export default function ProductsPage() {
     {
       key: 'mfgCode',
       header: 'รหัส (ผู้ผลิต)',
-      hideBelow: 'lg',
+      hideBelow: 'xl',
       cell: (r) => <span className="num text-xs text-muted-foreground">{r.mfgCode}</span>,
     },
     {
@@ -273,7 +273,7 @@ export default function ProductsPage() {
         <div className="flex items-center justify-center gap-1">
           <Button size="sm" variant="outline" onClick={() => setDetail({ product: r, mode: 'view' })}>
             <Eye className="h-3.5 w-3.5" />
-            View
+            ดู
           </Button>
           {canEdit && (
             <Button size="sm" variant="outline" onClick={() => setDetail({ product: r, mode: 'edit' })}>

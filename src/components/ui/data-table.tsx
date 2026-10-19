@@ -59,11 +59,13 @@ export type ServerTable = {
   initial?: { page?: number; sort?: ServerTableState['sort'] };
 };
 
+// sm–lg: the screen (the sidebar only appears at lg). xl: the table's own width — at a 1280px screen the
+// 268px sidebar leaves the table ~960px, so an xl column waits for a 1152px-wide table (@container below)
 const HIDE: Record<string, string> = {
   sm: 'hidden sm:table-cell',
   md: 'hidden md:table-cell',
   lg: 'hidden lg:table-cell',
-  xl: 'hidden xl:table-cell',
+  xl: 'hidden @6xl:table-cell',
   '2xl': 'hidden 2xl:table-cell',
 };
 
@@ -188,7 +190,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const cellPad = dense ? 'px-3 py-1.5' : 'px-3 py-2.5';
 
   return (
-    <div className={cn('surface overflow-hidden', className)}>
+    <div className={cn('surface @container overflow-hidden', className)}>
       {(searchable || toolbar) && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           {searchable ? (

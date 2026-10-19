@@ -145,11 +145,14 @@ function storage() {
   return client.storage;
 }
 
-/** Stored name: Bangkok timestamp + random + the extension of the file's (checked) type. */
+/**
+ * Stored name: Bangkok timestamp + 20 hex of a random UUID (76 random bits — a path is not guessable from
+ * the upload time) + the extension of the file's (checked) type. 39 chars: fits the 50-char name columns.
+ */
 export function systemFileName(type: string): string {
   const ext = EXT[type] ?? '';
   const stamp = isoDateTime(new Date(), { seconds: true }).replace(/\D/g, ''); // Bangkok, whatever the server TZ
-  return `${stamp}${Math.random().toString(36).slice(2, 6)}${ext}`;
+  return `${stamp}${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}${ext}`;
 }
 
 export async function uploadFile(path: string, file: File | Blob, contentType?: string): Promise<void> {

@@ -5,7 +5,16 @@
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-export const SESSION_COOKIE = 'os_session';
+/**
+ * Production cookie names carry the `__Host-` prefix: the browser takes them only Secure, Path=/ and
+ * without Domain, so no sibling subdomain or plain-http page can set or shadow them. Outside production
+ * (http dev, the unit tests) the plain names. Every Set-Cookie of one — a clear too — must send Secure
+ * in production, or the browser drops it. No fallback to the old plain name: a deploy signs everyone
+ * in again once (the old cookie lives ≤ 30 min and nothing reads it).
+ */
+export const hostCookie = (name: string) => (process.env.NODE_ENV === 'production' ? `__Host-${name}` : name);
+
+export const SESSION_COOKIE = hostCookie('os_session');
 // Idle timeout: the timer in the topbar renews the cookie on activity (≤ every
 // 5 min), so an active user never hits this; 30 min without activity → /login.
 export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes

@@ -17,7 +17,8 @@ export const DOCS_ORIGIN = 'https://oneservice-docs.invalid';
 const description = [
   'The API the OneService pages call — for the internal team. Every path is under `/api`.',
   '',
-  '**Sign-in.** The `os_session` cookie, set by `/api/sso/callback` after the central SSO. No API keys:',
+  '**Sign-in.** The `__Host-os_session` cookie (`os_session` outside production), set by `/api/sso/callback`',
+  'after the central SSO. No API keys:',
   'a script calls the API as a signed-in person would. 30 minutes idle (renewed by `/api/sso/refresh`),',
   "12 hours at most; signing out bumps the user's session_version, so every cookie of theirs dies.",
   'Permissions come from the role (app_config): view / add / edit / del per module, plus special rights.',
@@ -61,7 +62,7 @@ const tags = [
 registry.registerComponent('securitySchemes', 'session', {
   type: 'apiKey',
   in: 'cookie',
-  name: 'os_session',
+  name: '__Host-os_session', // os_session outside production (src/lib/session.ts hostCookie)
   description: 'Set by signing in (/api/sso/login). The browser sends it — nothing to paste.',
 });
 

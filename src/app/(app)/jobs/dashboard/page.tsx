@@ -20,6 +20,7 @@ const TONE: Record<string, string> = {
   pending: 'bg-warning',
   repaired: 'bg-info',
   finished: 'bg-success',
+  cancel: 'bg-danger', // the Cancel badges' tone (jobTone)
   total: 'bg-primary',
 };
 
@@ -383,7 +384,7 @@ export default function DashboardPage() {
           <table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-border text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 py-2.5 pl-5 text-left font-medium">#</th>
+                <th className="w-10 py-2.5 pl-5 pr-3 text-left font-medium">#</th>
                 <th className="py-2.5 pr-4 text-left font-medium">สถานะงาน</th>
                 {dayCols.map((c) => (
                   <th key={c.k} className="px-4 py-2.5 text-right font-medium">
@@ -404,7 +405,7 @@ export default function DashboardPage() {
               )}
               {tat.map((r, i) => (
                 <tr key={r.status} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
-                  <td className="py-2.5 pl-5">
+                  <td className="py-2.5 pl-5 pr-3">
                     <span className="flex items-center gap-2.5">
                       <span
                         className={cn(

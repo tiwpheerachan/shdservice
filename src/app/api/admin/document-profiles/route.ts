@@ -1,11 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseBody, parseQuery, requireAdmin } from '@/server/auth';
 import { documentProfileDelete, documentProfileSave } from '@/server/contract/admin';
-import {
-  listDocumentProfiles,
-  saveDocumentProfile,
-  deleteDocumentProfile,
-} from '@/server/services/document-profiles';
+import { listDocumentProfiles, saveDocumentProfile, deleteDocumentProfile } from '@/server/services/document-profiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

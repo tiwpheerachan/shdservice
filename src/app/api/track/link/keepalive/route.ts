@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac } from '@/server/track-guard';
-import { trackJson, trackCtx } from '@/server/track-http';
+import { bodyTooLarge, BodyTooLarge, trackJson, trackCtx } from '@/server/track-http';
 import { extendLink } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
@@ -30,6 +30,7 @@ export const POST = checked(async (req: NextRequest) => {
     if (!expiresAt) return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 410);
     return trackJson({ ok: true, expiresAt });
   } catch (e) {
+    if (e instanceof BodyTooLarge) return bodyTooLarge();
     logError(e, 'track/link/keepalive');
     return trackJson({ ok: false, error: TRACK_MSG.linkExpired, reason: 'link' }, 500);
   }

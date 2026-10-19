@@ -1,11 +1,10 @@
 import 'server-only';
 import type { NextRequest } from 'next/server';
-import { requireAdmin, requireUser, requireView, JOB_MODULES, HttpError } from '@/server/auth';
+import { requireAdmin, requireUser, requireView, JOB_MODULES, SALE_ORDER_READERS, HttpError } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { pageAudit, listAudit, auditModules } from '@/server/audit';
 import { clampInt, parsePageQuery, searchOf, type Page } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
-import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from '@/server/services/masters';
 import { listSystemUsers, listPermissions, listRoles, listModules, listStaff } from '@/server/services/users';
 import { listCustomers, pageCustomers, listProvinces, customerFiltersFromQuery } from '@/server/services/customers';
@@ -62,7 +61,7 @@ const READ_ACCESS: Record<string, readonly Module[]> = {
   job_stats: ['Job Management'],
   dashboard: ['Job Management'],
   quotations: ['Quotation'],
-  sale_orders: ['Sale Order', 'Product Pick Stock'],
+  sale_orders: SALE_ORDER_READERS,
   movements: ['Product Onhand', 'Product Receive Stock', 'Product Pick Stock'],
   issued_lines: ['Report'],
   issued_stats: ['Report'],
@@ -70,6 +69,14 @@ const READ_ACCESS: Record<string, readonly Module[]> = {
   quotation_summary: ['Report'],
   sale_order_summary: ['Report'],
 };
+
+/**
+ * Row cap of every unpaged list here: these answer with view rights alone, so they stay screen-sized
+ * (the UI asks for 6 / 200 at most). A bigger set is the Excel export's (src/server/export.ts calls the
+ * list functions itself with MAX_EXPORT_ROWS), which needs the Export right and streams the file.
+ */
+const LIST_DEFAULT = 200;
+const LIST_MAX = 1000;
 
 /**
  * Read side for the UI hooks in src/data/db.ts. One endpoint per table name the
@@ -86,6 +93,7 @@ export async function readResource(
   const deleted = parseStatusMode(sp.get('deleted'));
   const paged = sp.get('paged') === '1';
   const p = parsePageQuery(sp);
+  const limit = clampInt(sp.get('limit'), LIST_DEFAULT, LIST_MAX);
 
   // admin-only resources
   if (resource === 'audit_log' || resource === 'audit_modules') {
@@ -100,9 +108,7 @@ export async function readResource(
       key: p.f.key,
       action: p.f.action,
     };
-    return paged
-      ? pageAudit(p, f)
-      : listAudit({ ...f, q: p.q, limit: clampInt(sp.get('limit'), 500, MAX_EXPORT_ROWS) });
+    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit });
   }
   if (resource === 'users' || resource === 'permissions' || resource === 'roles' || resource === 'modules') {
     await requireAdmin(req);
@@ -168,7 +174,7 @@ export async function readResource(
         : listCustomers({
             q: p.q,
             deleted,
-            limit: clampInt(sp.get('limit'), 500, 5000),
+            limit,
             filters: customerFiltersFromQuery(p.f),
           });
     case 'issued_lines':
@@ -179,7 +185,7 @@ export async function readResource(
             to: p.f.to,
             category: p.f.category,
             code: p.f.code || p.q,
-            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
+            limit,
           });
     case 'issued_stats':
       return [await issuedStats(p.q, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })];
@@ -194,8 +200,8 @@ export async function readResource(
             code: p.f.code,
             doc: p.f.doc,
             ref: p.f.ref,
-            limit: clampInt(sp.get('limit'), 1000, 5000),
-          }); // JSON stays 5k — 20k is for the Excel export
+            limit,
+          });
     case 'job_summary':
       return [await jobReportSummary(filtersFromQuery(p.f), p.q)];
     case 'quotation_summary':
@@ -203,16 +209,14 @@ export async function readResource(
     case 'sale_order_summary':
       return [await saleOrderReportSummary(saleOrderFiltersFromQuery(p.f, deleted), p.q)];
     case 'jobs':
-      return paged
-        ? pageJobs(p, filtersFromQuery(p.f))
-        : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS) });
+      return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit });
     case 'quotations':
       return paged
         ? pageQuotations(p, quotationFiltersFromQuery(p.f, deleted))
         : listQuotations({
             ...quotationFiltersFromQuery(p.f, deleted),
             q: p.q,
-            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
+            limit,
           });
     case 'sale_orders':
       return paged
@@ -220,7 +224,7 @@ export async function readResource(
         : listSaleOrders({
             ...saleOrderFiltersFromQuery(p.f, deleted),
             q: p.q,
-            limit: clampInt(sp.get('limit'), 5000, MAX_EXPORT_ROWS),
+            limit,
           });
     case 'dashboard':
       return [await dashboard({ from: p.f.from, to: p.f.to, type: p.f.type })];

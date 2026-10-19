@@ -3667,7 +3667,8 @@ try {
             params: Promise.resolve({ code: P.a.code }),
           }),
         );
-      const viewer = (await get(U.viewer)).body.product as { version?: number; capitalPrice?: number };
+      // a product screen's viewer (the product API needs view on one of them)
+      const viewer = (await get(U.picker)).body.product as { version?: number; capitalPrice?: number };
       assert.deepEqual([viewer.version, viewer.capitalPrice], [undefined, undefined]);
       const admin = (await get(U.admin)).body.product as { version?: number };
       assert.equal(typeof admin.version, 'number');
@@ -5046,6 +5047,294 @@ try {
       assert.ok(!(await listCustomers({ q: '%' })).some((c) => c.code === CUSTOMER), 'customer search');
       assert.ok(!(await listCustomers({ filters: { code: '_' } })).some((c) => c.code === CUSTOMER), 'customer code');
     });
+  }
+  // ── Security round (2026-10-19): money lock on the job slip, list caps, restore / attachment / file rights ──
+  console.log('\nSecurity round — job slip, list caps, restore, attachments, files, permissions audit, part qty');
+  {
+    const { invalidateGrantCache } = await import('@/server/auth');
+    const { savePermissions } = await import('@/server/services/users');
+    const { moneyLockedMsg } = await import('@/lib/validation/job');
+    const { POST: uploadPOST } = await import('@/app/api/upload/route');
+    const { POST: recordsPOST } = await import('@/app/api/admin/records/route');
+    const { GET: attachGET, DELETE: attachDELETE } = await import('@/app/api/attachments/[id]/route');
+    const { GET: filesGET } = await import('@/app/api/files/route');
+    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const png = await (
+      await import('sharp')
+    )
+      .default({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } })
+      .png()
+      .toBuffer();
+    /** past every guard the request stops at storage — not configured in tests (503) */
+    const noStorage = async <T,>(fn: () => Promise<T>) => {
+      const env = { url: process.env.NEXT_PUBLIC_SUPABASE_URL, key: process.env.SUPABASE_SECRET_KEY };
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.SUPABASE_SECRET_KEY;
+      try {
+        return await fn();
+      } finally {
+        if (env.url !== undefined) process.env.NEXT_PUBLIC_SUPABASE_URL = env.url;
+        if (env.key !== undefined) process.env.SUPABASE_SECRET_KEY = env.key;
+      }
+    };
+    const jobSlip = async (u: TestUser, no: string) => {
+      const fd = new FormData();
+      fd.set('kind', 'job-slip');
+      fd.set('id', no);
+      fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
+      const r = await uploadPOST(
+        new NextRequest('https://svc.example.test/api/upload', {
+          method: 'POST',
+          headers: { cookie: await cookieFor(u), 'user-agent': 'test-domain' },
+          body: fd,
+        }),
+      );
+      return { status: r.status, error: ((await r.json()) as { error?: string }).error };
+    };
+    const slipOf = async (no: string) =>
+      (await db.execute<{ f: string }>(sql`SELECT job_payment_slip_file_name AS f FROM job WHERE job_no = ${no}`))
+        .rows[0]?.f;
+    await pool.query(`
+      DELETE FROM document_attach WHERE reference_item_code LIKE 'TDJ095%';
+      DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'TDJ095%';
+      DELETE FROM job_log WHERE job_no LIKE 'TDJ095%';
+      DELETE FROM job WHERE job_no LIKE 'TDJ095%' OR job_no LIKE 'TDL%';
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_payment_slip_file_name, record_status) VALUES
+        ('TDJ0951', 20, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, current_date, 'jobs/TDJ0951/slip/old.png', 'ACTIVE'),
+        ('TDJ0952', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', 'jobs/TDJ0952/slip/old.png', 'DELETED'),
+        ('TDJ0953', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '', 'ACTIVE');
+      DELETE FROM app_config WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Closing';
+      INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+        VALUES ('TD Job Clerk', 'Job Closing', false, true, false, true);`);
+    invalidateGrantCache();
+
+    await test('SEC M1 job slip: a closed job needs Job Money After Close (409, the money-lock message); a cancelled job → 409; the stored slip stays', async () => {
+      assert.deepEqual(await jobSlip(U.clerk, 'TDJ0951'), {
+        status: 409,
+        error: moneyLockedMsg('สลิปการชำระเงิน'),
+      });
+      assert.equal((await jobSlip(U.admin, 'TDJ0952')).status, 409, 'cancelled (record DELETED)');
+      assert.deepEqual(
+        [await slipOf('TDJ0951'), await slipOf('TDJ0952')],
+        ['jobs/TDJ0951/slip/old.png', 'jobs/TDJ0952/slip/old.png'],
+      );
+      // System Admin holds Job Money After Close; an open job needs only Job Closing edit → both pass the guards
+      await noStorage(async () =>
+        assert.deepEqual(
+          [(await jobSlip(U.admin, 'TDJ0951')).status, (await jobSlip(U.clerk, 'TDJ0953')).status],
+          [503, 503],
+        ),
+      );
+    });
+
+    await test('SEC M2 /api/data unpaged lists: default 200 rows, never more than 1000 (20k is the Excel export only)', async () => {
+      await pool.query(`
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+          SELECT 'TDL' || lpad(g::text, 4, '0'), 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'
+            FROM generate_series(1, 1005) g;`);
+      try {
+        const rows = async (qs: string) => {
+          const r = await dataGET(await request(`/api/data/jobs?customerCode=${CUSTOMER}${qs}`, U.admin), {
+            params: Promise.resolve({ resource: 'jobs' }),
+          });
+          assert.equal(r.status, 200);
+          return ((await r.json()) as unknown[]).length;
+        };
+        assert.deepEqual([await rows(''), await rows('&limit=20000'), await rows('&limit=6')], [200, 1000, 6]);
+      } finally {
+        await pool.query(`DELETE FROM job WHERE job_no LIKE 'TDL%'`);
+      }
+    });
+
+    await test('SEC L3 restore: out of DELETED needs del (edit alone → 403, row stays DELETED); ACTIVE ↔ INACTIVE needs edit only', async () => {
+      await pool.query(`
+        DELETE FROM customer WHERE customer_id IN (9951, 9952) OR customer_code IN ('TDC951', 'TDC952');
+        INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status) VALUES
+          (9951, 'TDC951', 'ลูกค้า กู้คืน', '02-000-0951', 'DELETED'), (9952, 'TDC952', 'ลูกค้า ปิดใช้', '02-000-0952', 'ACTIVE');
+        INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+          VALUES ('TD Customer Viewer', 'Customer', false, true, false, true)
+          ON CONFLICT (user_type, module_name) DO UPDATE SET can_edit = true, can_delete = false;`);
+      invalidateGrantCache();
+      try {
+        const records = async (u: TestUser, body: Record<string, unknown>) =>
+          json(await recordsPOST(await request('/api/admin/records', u, { method: 'POST', body })));
+        const rsOf = async (code: string) =>
+          (
+            await db.execute<{ rs: string }>(
+              sql`SELECT record_status AS rs FROM customer WHERE customer_code = ${code}`,
+            )
+          ).rows[0]?.rs;
+        const refused = await records(U.viewer, { table: 'customers', id: 'TDC951', status: 'ACTIVE' });
+        assert.equal(refused.status, 403);
+        assert.match(String(refused.body.error), /สิทธิ์ลบ/);
+        assert.equal(await rsOf('TDC951'), 'DELETED');
+        assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'INACTIVE' })).status, 200);
+        assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'ACTIVE' })).status, 200);
+        // TD Job Clerk holds Customer del
+        assert.equal((await records(U.clerk, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 200);
+        assert.equal(await rsOf('TDC951'), 'ACTIVE');
+      } finally {
+        await pool.query(
+          `UPDATE app_config SET can_edit = false WHERE user_type = 'TD Customer Viewer' AND module_name = 'Customer'`,
+        );
+        invalidateGrantCache();
+      }
+    });
+
+    await test('SEC L4 attachments: delete needs Job Management del, is soft (no storage call), and a removed one answers 404', async () => {
+      const [{ id }] = (
+        await db.execute<{ id: number }>(sql`
+          INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name, system_file_name, remark, is_active)
+            VALUES ('Job', 'TDJ0953', 'a.png', 'x.png', '', true) RETURNING document_attach_id AS id`)
+      ).rows;
+      const ctx = { params: Promise.resolve({ id: String(id) }) };
+      const call = async (fn: typeof attachGET, u: TestUser, method: string) =>
+        (await fn(await request(`/api/attachments/${id}`, u, { method }), ctx)).status;
+      // TD Job Clerk: Job Management view + edit, no del
+      assert.equal(await call(attachDELETE, U.clerk, 'DELETE'), 403);
+      await noStorage(async () => {
+        assert.equal(await call(attachGET, U.admin, 'GET'), 503, 'live row: past the checks, at storage');
+        assert.equal(await call(attachDELETE, U.admin, 'DELETE'), 200, 'no storage needed: the file stays');
+        assert.equal(await call(attachGET, U.admin, 'GET'), 404, 'removed');
+        assert.equal(await call(attachDELETE, U.admin, 'DELETE'), 404, 'already removed');
+      });
+      const [row] = (
+        await db.execute<{ rs: string; f: string }>(
+          sql`SELECT record_status AS rs, system_file_name AS f FROM document_attach WHERE document_attach_id = ${id}`,
+        )
+      ).rows;
+      assert.deepEqual(row, { rs: 'DELETED', f: 'x.png' });
+    });
+
+    await test('SEC L5 /api/files: a staff file needs view on its screen (jobs / sale-orders / products); /api/products/:code needs a product screen', async () => {
+      const file = async (u: TestUser | null, path: string) =>
+        (await filesGET(await request(`/api/files?path=${encodeURIComponent(path)}`, u))).status;
+      const J = 'jobs/TDJ0953/slip/a.png';
+      const S = 'sale-orders/SO1/slip/a.png';
+      const P2 = `products/${P.a.code}/a.png`;
+      await noStorage(async () => {
+        // clerk: job screens only · picker: Product Pick Stock (sale orders + products) · viewer: Customer only
+        assert.deepEqual([await file(U.clerk, J), await file(U.clerk, S), await file(U.clerk, P2)], [503, 403, 403]);
+        assert.deepEqual([await file(U.picker, J), await file(U.picker, S), await file(U.picker, P2)], [403, 503, 503]);
+        assert.deepEqual([await file(U.viewer, J), await file(U.viewer, S), await file(U.viewer, P2)], [403, 403, 403]);
+        assert.deepEqual([await file(U.admin, 'other/x.png'), await file(null, J)], [404, 401]);
+      });
+      const product = async (u: TestUser) =>
+        (
+          await productGET(await request(`/api/products/${P.a.code}`, u), {
+            params: Promise.resolve({ code: P.a.code }),
+          })
+        ).status;
+      assert.deepEqual([await product(U.viewer), await product(U.clerk), await product(U.picker)], [403, 403, 200]);
+    });
+
+    await test('SEC L5 storage names: timestamp + 20 random hex, ≤ 50 chars, never repeated', async () => {
+      const { systemFileName } = await import('@/server/storage');
+      const names = Array.from({ length: 50 }, () => systemFileName('image/webp'));
+      assert.equal(new Set(names).size, 50);
+      for (const n of names) assert.match(n, /^\d{14}[0-9a-f]{20}\.webp$/);
+    });
+
+    await test('SEC savePermissions: one audit entry per role in the payload, keyed by that role', async () => {
+      const since = Number(
+        (await db.execute<{ m: number }>(sql`SELECT coalesce(max(id), 0) AS m FROM audit_log`)).rows[0]!.m,
+      );
+      const set = (view: boolean) =>
+        savePermissions(
+          [
+            { role: 'TD Picker', menu: 'Quotation', add: false, edit: false, del: false, view },
+            { role: 'TD Seller', menu: 'Quotation', add: false, edit: false, del: false, view },
+            { role: 'TD Seller', menu: 'Customer', add: false, edit: false, del: false, view },
+          ],
+          U.admin.id,
+        );
+      await set(true);
+      try {
+        const rows = (
+          await db.execute<{ k: string; changes: Record<string, unknown> }>(
+            sql`SELECT entity_key AS k, changes FROM audit_log WHERE entity = 'app_config' AND id > ${since} ORDER BY entity_key`,
+          )
+        ).rows;
+        assert.deepEqual(
+          rows.map((r) => [r.k, Object.keys(r.changes).sort()]),
+          [
+            ['TD Picker', ['Quotation']],
+            ['TD Seller', ['Customer', 'Quotation']],
+          ],
+        );
+      } finally {
+        await pool.query(
+          `DELETE FROM app_config WHERE user_type IN ('TD Picker', 'TD Seller') AND module_name IN ('Quotation', 'Customer')`,
+        );
+        invalidateGrantCache();
+      }
+    });
+
+    await test('SEC migration 0035: TRUNCATE audit_log is refused (append-only)', async () => {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await assert.rejects(c.query('TRUNCATE audit_log'), /append-only/);
+      } finally {
+        await c.query('ROLLBACK');
+        c.release();
+      }
+    });
+
+    await test('SEC repair parts: a plan ticked (เบิก / เสนอ) with qty 0 → 400 under parts.<i>.<a|b>.qty, nothing saved', async () => {
+      const status = (await getJob('TDJ0953'))!.status;
+      const msg = 'ระบุจำนวนที่ต้องการเบิก/เสนอ';
+      const r = await fieldsOf(
+        saveRepair(
+          'TDJ0953',
+          {
+            status,
+            parts: [
+              {
+                code: P.a.code,
+                unitPrice: 100,
+                a: { pick: true, quote: true, qty: 1 },
+                b: { pick: false, quote: false, qty: 0 },
+              },
+              {
+                code: P.b.code,
+                unitPrice: 100,
+                a: { pick: true, quote: false, qty: 0 },
+                b: { pick: false, quote: true, qty: '' },
+              },
+            ],
+          },
+          U.admin.id,
+        ),
+      );
+      assert.deepEqual([r.status, r.fields], [400, { 'parts.1.a.qty': msg, 'parts.1.b.qty': msg }]);
+      assert.deepEqual((await getJob('TDJ0953'))!.parts, [], 'nothing saved');
+      // the same lines with quantities save
+      await saveRepair(
+        'TDJ0953',
+        {
+          status,
+          parts: [
+            {
+              code: P.a.code,
+              unitPrice: 100,
+              a: { pick: true, quote: true, qty: 1 },
+              b: { pick: false, quote: false, qty: 0 },
+            },
+            {
+              code: P.b.code,
+              unitPrice: 100,
+              a: { pick: true, quote: false, qty: 2 },
+              b: { pick: false, quote: true, qty: 1 },
+            },
+          ],
+        },
+        U.admin.id,
+      );
+      assert.equal((await getJob('TDJ0953'))!.parts.length, 2);
+    });
+    await pool.query(`DELETE FROM app_config WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Closing'`);
+    invalidateGrantCache();
   }
 } finally {
   // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next

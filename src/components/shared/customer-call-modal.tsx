@@ -149,12 +149,12 @@ export function CustomerCallModal({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <a href={`tel:${customer.phone.replace(/[^0-9+]/g, '')}`}>
-                <Button size="sm">
+              <Button size="sm" asChild>
+                <a href={`tel:${customer.phone.replace(/[^0-9+]/g, '')}`}>
                   <Phone className="h-3.5 w-3.5" />
                   โทร
-                </Button>
-              </a>
+                </a>
+              </Button>
               <Button size="sm" variant="outline" onClick={copyPhone}>
                 {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? 'คัดลอกแล้ว' : 'คัดลอกเบอร์'}

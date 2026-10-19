@@ -86,7 +86,10 @@ export function apiFieldErrors(err: unknown): FieldErrors | null {
 /** after React has painted the errors: bring the first invalid control into view and focus it */
 export function focusFirstInvalid() {
   requestAnimationFrame(() => {
-    const el = document.querySelector<HTMLElement>('main [aria-invalid="true"], [role="dialog"] [aria-invalid="true"]');
+    // the first one on screen: a phone card layout hidden on desktop (the repair page's part lines) has the same field
+    const el = [
+      ...document.querySelectorAll<HTMLElement>('main [aria-invalid="true"], [role="dialog"] [aria-invalid="true"]'),
+    ].find((e) => e.getClientRects().length > 0);
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.focus({ preventScroll: true });

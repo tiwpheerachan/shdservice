@@ -57,12 +57,15 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
  *   sale orders → document_status + cancel stamp (an approved one — stock issued — cannot be cancelled)
  * Restoring a DELETED row is done in SQL only (by decision) — the API still
  * accepts ACTIVE so the existing users-page restore button keeps working.
+ * `mayRestore` = the caller holds `del` on the module (or is System Admin): taking a row out of DELETED
+ * is the reverse of deleting it, so `edit` alone is refused (checked against the row as locked here).
  */
 export async function setRecordStatus(
   table: RecordTable,
   id: string | number,
   rs: RecordStatus,
   byUserId: number,
+  mayRestore = true,
 ): Promise<void> {
   const stamp = statusStamp(rs, byUserId);
   const ENTITY: Record<string, [string, string]> = {
@@ -101,6 +104,10 @@ export async function setRecordStatus(
         .for('update'),
   };
   const oldOf = async (tx: Tx) => (await OLD[table]?.(tx))?.[0]?.rs ?? null;
+  const refuseRestore = (old: string | null) => {
+    if (old === RS.DELETED && rs !== RS.DELETED && !mayRestore)
+      throw new HttpError(403, `กู้คืนรายการที่ลบแล้วได้เฉพาะผู้มีสิทธิ์ลบใน ${ENTITY[table]?.[1]}`);
+  };
   const log = async (w: Tx, old: string | null) => {
     const e = ENTITY[table];
     if (!e) return;
@@ -136,6 +143,7 @@ export async function setRecordStatus(
     case 'products':
       await db.transaction(async (tx) => {
         const old = await oldOf(tx);
+        refuseRestore(old);
         await tx
           .update(product)
           .set(
@@ -151,6 +159,7 @@ export async function setRecordStatus(
     case 'customers':
       await db.transaction(async (tx) => {
         const old = await oldOf(tx);
+        refuseRestore(old);
         await tx
           .update(customer)
           .set(stamp)
@@ -161,6 +170,7 @@ export async function setRecordStatus(
     case 'quotations':
       await db.transaction(async (tx) => {
         const old = await oldOf(tx);
+        refuseRestore(old);
         await tx
           .update(quotationHd)
           .set(stamp)
@@ -177,6 +187,7 @@ export async function setRecordStatus(
           .where(eq(job.jobNo, String(id)))
           .for('update');
         if (!cur) throw jobNotFound(String(id));
+        refuseRestore(cur.rs);
         // restored → the status it had before it was deleted (a job left on 0 "ยกเลิกข้อมูล" matched no list)
         let back: number | null = null;
         if (rs !== RS.DELETED && cur.rs === RS.DELETED && cur.st === JS.CANCELLED) {
@@ -207,6 +218,7 @@ export async function setRecordStatus(
           .where(eq(saleOutHd.saleOutHdNo, String(id)))
           .for('update');
         if (!cur) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
+        refuseRestore(cur.rs);
         if (rs === RS.DELETED && cur.ap === AS.APPROVED)
           throw new HttpError(
             409,

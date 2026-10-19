@@ -61,7 +61,7 @@ export const GET = checked(async (request: NextRequest) => {
       log.warn('sso central session inactive', { userId: u.userId, mode });
       if (mode === 'enforce') {
         const res = NextResponse.json({ user: null, reason: 'elsewhere' }, { status: 401 });
-        res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
+        res.cookies.set(SESSION_COOKIE, '', { secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 0 });
         return res;
       }
     } else log.warn('sso central session check unavailable', { userId: u.userId });

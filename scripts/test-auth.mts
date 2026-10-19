@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeNext, DEFAULT_AFTER_LOGIN } from '../src/lib/sso.ts';
 import { safePath } from '../src/lib/log.ts';
+import { hostCookie, SESSION_COOKIE } from '../src/lib/session.ts';
 
 const D = DEFAULT_AFTER_LOGIN;
 const cases: [string | null | undefined, string][] = [
@@ -57,6 +58,24 @@ for (const [p, want] of [
   } catch (e) {
     failed++;
     console.log(`  ✗ ${p}: ${(e as Error).message}`);
+  }
+}
+
+console.log('\nCookie names: __Host- in production only');
+{
+  const env = process.env as Record<string, string | undefined>;
+  const was = env.NODE_ENV;
+  try {
+    assert.equal(SESSION_COOKIE, 'os_session', 'outside production (http dev / tests) the plain name');
+    env.NODE_ENV = 'production';
+    assert.equal(hostCookie('os_session'), '__Host-os_session');
+    assert.equal(hostCookie('os_state'), '__Host-os_state');
+    console.log('  ✓ os_session / os_state → __Host- names in production, plain otherwise');
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ ${(e as Error).message}`);
+  } finally {
+    env.NODE_ENV = was;
   }
 }
 

@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { hit, isBlocked, block, consumeTicket, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx } from '@/server/track-http';
+import { bodyTooLarge, BodyTooLarge, trackJson, trackCtx } from '@/server/track-http';
 import { publicJobByNo } from '@/server/services/tracking';
 import { TRACK_MSG } from '@/lib/track-public';
 import { logError } from '@/lib/log';
@@ -54,6 +54,7 @@ export const POST = checked(async (req: NextRequest) => {
     logEvent('ticket_consumed', { ipHash: c.ipKey, jobNo, requestId: c.requestId });
     return trackJson({ ok: true, job });
   } catch (e) {
+    if (e instanceof BodyTooLarge) return bodyTooLarge();
     logError(e, 'track/data');
     return ticketFail();
   }

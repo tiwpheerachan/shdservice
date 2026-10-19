@@ -118,7 +118,7 @@ export const recordStatus = defineOperation({
   tags,
   summary: "Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete — nothing is removed)",
   description:
-    "DELETED needs `del` on the table's module, ACTIVE ↔ INACTIVE `edit` (users and master data: System Admin). Accepts `status`, or the older `deleted` boolean. Restoring a user brings the account back INACTIVE.",
+    "DELETED needs `del` on the table's module, ACTIVE ↔ INACTIVE `edit`, out of DELETED `del` as well (users and master data: System Admin). Accepts `status`, or the older `deleted` boolean. Restoring a user brings the account back INACTIVE.",
   body: z.object({
     // in the order the route always checked them: 400 "id required", then "table not allowed: …"
     id: z

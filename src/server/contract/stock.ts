@@ -38,7 +38,8 @@ export const productGet = defineOperation({
   path: '/products/{code}',
   tags: ['Products'],
   summary: 'A spare part with its stock card (product-detail modal)',
-  description: 'Any approved user. ราคาทุน and `version` only for a role with the special right Product Cost.',
+  description:
+    'View on any product / stock module (Product, Product Onhand, Product Receive Stock, Product Pick Stock). ราคาทุน and `version` only for a role with the special right Product Cost.',
   params: z.object({ code: s.meta({ description: 'รหัสอะไหล่ (system code)' }) }),
   responses: {
     200: jsonResponse(

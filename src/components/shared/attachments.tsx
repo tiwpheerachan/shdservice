@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { api, del, errMsg } from '@/lib/api';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useAccess } from '@/lib/use-access';
 
 type Row = { id: number; name: string; note: string; file?: string; pending?: File };
 
@@ -25,6 +26,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
 ) {
   const { push } = useToast();
   const confirm = useConfirm();
+  // removing a saved file needs Job Management delete (the API refuses others); a queued one is just dropped
+  const canDelete = useAccess().can('Job Management', 'del');
   const [rows, setRows] = React.useState<Row[]>([]);
   const [file, setFile] = React.useState<File | null>(null);
   const [note, setNote] = React.useState('');
@@ -117,7 +120,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
       title: 'ลบไฟล์แนบ?',
       description: (
         <>
-          <span className="font-medium">{r.name}</span> จะถูกลบออกจากงานนี้ — ไฟล์ที่ลบแล้วกู้คืนไม่ได้ ต้องอัปโหลดใหม่
+          <span className="font-medium">{r.name}</span> จะถูกลบออกจากงานนี้ — ถ้าต้องการกลับมาต้องอัปโหลดใหม่
         </>
       ),
       confirmLabel: 'ลบไฟล์',
@@ -201,13 +204,15 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{r.note || '—'}</td>
                   <td className="px-3 py-2 text-center">
-                    <button
-                      onClick={() => remove(r)}
-                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
-                      aria-label="ลบ"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {(r.id < 0 || canDelete) && (
+                      <button
+                        onClick={() => remove(r)}
+                        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
+                        aria-label="ลบ"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))

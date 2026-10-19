@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { hit, verifyTurnstile, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx } from '@/server/track-http';
+import { bodyTooLarge, BodyTooLarge, trackJson, trackCtx } from '@/server/track-http';
 import { requestOtp } from '@/server/track-otp';
 import { smsAvailable } from '@/server/sms';
 import { TRACK_MSG } from '@/lib/track-public';
@@ -55,6 +55,7 @@ export const POST = checked(async (req: NextRequest) => {
       resendIn: r.resendIn,
     });
   } catch (e) {
+    if (e instanceof BodyTooLarge) return bodyTooLarge();
     logError(e, 'track/otp/request');
     return trackJson({ ok: false, error: TRACK_MSG.sessionFail }, 500);
   }

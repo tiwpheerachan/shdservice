@@ -10,7 +10,7 @@ import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
-import { refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
+import { parseSwap, refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -62,6 +62,8 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   // the deposit given back at close (closeJob): a negative payment "คืนมัดจำ <date>"
   const refunded = j.payment.amount < 0 && j.payment.detail.startsWith(REFUND_DETAIL);
   const lbl = 'text-neutral-700';
+  // the serial fitted at repair / swap: the "New S/N: …" line of spare_part_replace ('' on the customer copy: masked)
+  const newSerial = parseSwap(j.sparePartReplace)['New S/N'];
 
   return (
     <div className="print-page qt text-[11.5px] leading-[1.35] text-black">
@@ -152,6 +154,12 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                     <td className="k">IMEI / Serial :</td>
                     <td className="num">{or([j.imei, j.serial].filter(Boolean).join(' / '))}</td>
                   </tr>
+                  {newSerial && (
+                    <tr>
+                      <td className="k">New S/N :</td>
+                      <td className="num">{newSerial}</td>
+                    </tr>
+                  )}
                   <tr>
                     <td className="k">การรับประกัน :</td>
                     <td>{or(warrantyLabel(j.warranty))}</td>

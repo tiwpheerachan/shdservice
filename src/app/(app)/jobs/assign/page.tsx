@@ -197,7 +197,11 @@ export default function AssignPage() {
       key: 'customer',
       header: 'ลูกค้า',
       minWidth: COL_MIN_WIDTH.customer,
-      cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
+      cell: (r) => (
+        <span className="line-clamp-1 max-w-[220px]" title={r.customer}>
+          {r.customer}
+        </span>
+      ),
     },
     {
       key: 'so',

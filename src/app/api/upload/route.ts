@@ -8,6 +8,9 @@ import { rateLimit } from '@/server/rate-limit';
 import { audit } from '@/server/audit';
 import { AS } from '@/server/services/sale-orders';
 import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
+import { moneyLockedMsg } from '@/lib/validation/job';
+import { jobClosed, moneyLocked } from '@/server/services/jobs';
+import { RS } from '@/server/record-status';
 import { getDocumentProfile, setDocumentProfileLogo } from '@/server/services/document-profiles';
 import { getShippingProfile, setShippingProfileLogo } from '@/server/services/shipping-profiles';
 import {
@@ -33,7 +36,7 @@ export const dynamic = 'force-dynamic';
  *   product-image    → product.pictrue_file_name      (products/{code}/{file}; column keeps the file name)
  *   sale-order-slip  → sale_out_hd.slip_file_name     (full path)
  *   job-slip         → job.job_payment_slip_file_name (full path)
- * Replacing a file removes the previous object.
+ * Replacing a file removes the previous object — except a closed job's slip, kept as evidence.
  */
 export const POST = handle(async (req: NextRequest) => {
   // cheap checks first: an anonymous caller must not make us buffer or decode anything
@@ -151,8 +154,15 @@ export const POST = handle(async (req: NextRequest) => {
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'job-slip': {
-      const [row] = await db.select({ old: job.jobPaymentSlipFileName }).from(job).where(eq(job.jobNo, id));
+      const [row] = await db
+        .select({ old: job.jobPaymentSlipFileName, status: job.jobStatusId, rs: job.recordStatus })
+        .from(job)
+        .where(eq(job.jobNo, id));
       if (!row) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + id);
+      if (row.rs === RS.DELETED) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว — เปลี่ยนสลิปไม่ได้');
+      // the slip is part of the job's money: a closed job's needs Job Money After Close, like the payment fields
+      if (await moneyLocked(row.status, me.userId)) throw new HttpError(409, moneyLockedMsg('สลิปการชำระเงิน'));
+      const closed = await jobClosed(row.status);
       const path = filePath.jobSlip(id, sys);
       await uploadFile(path, body);
       await db.transaction(async (tx) => {
@@ -166,7 +176,8 @@ export const POST = handle(async (req: NextRequest) => {
           changes: { jobPaymentSlipFileName: [row.old, path] },
         });
       });
-      if (row.old && row.old.startsWith(`jobs/${id}/slip/`)) await removeFile(row.old);
+      // a closed job's previous slip stays in storage as evidence (the audit line names it)
+      if (!closed && row.old && row.old.startsWith(`jobs/${id}/slip/`)) await removeFile(row.old);
       return NextResponse.json({ ok: true, path, file: sys });
     }
   }

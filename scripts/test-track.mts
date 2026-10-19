@@ -95,6 +95,7 @@ function otpProviderMock(url: string, init?: RequestInit) {
 const { db, pool } = await import('@/db/client');
 await seed(pool);
 const guard = await import('@/server/track-guard');
+const { TRACK_MSG } = await import('@/lib/track-public');
 const { clientIp } = await import('@/lib/client-ip');
 const { originAuthOk } = await import('@/lib/origin-auth');
 const { jobNoForLink, publicJobByNo, rotateToken, ensureToken, linkStatus, findDoc, docForLink } =
@@ -683,14 +684,18 @@ try {
     assert.equal(r.status, 403);
     assert.equal(smsLog.length, before);
   });
-  await test("unknown number → same answer as a customer's, but NO SMS and no OTP row (no SMS pumping)", async () => {
+  await test("unknown number → same answer as a customer's, NO SMS (no SMS pumping); a decoy OTP row for nobody", async () => {
     const before = smsLog.length;
     const r = await otpReq(NOBODY, nextIp());
     assert.equal(r.status, 200);
     assert.ok(r.json.ok && r.json.requestId && r.json.masked);
+    await new Promise((res) => setTimeout(res, 150)); // the row is written after the answer
     assert.equal(smsLog.length, before);
-    const rows = await db.execute(sql`SELECT 1 FROM track_otp WHERE phone_hash = ${guard.hmac(`phone:${NOBODY}`)}`);
-    assert.equal(rows.rows.length, 0);
+    const rows = await db.execute<{ ids: number[]; has_code: boolean; token: string | null }>(
+      sql`SELECT customer_ids AS ids, code_hash IS NOT NULL AS has_code, provider_token AS token
+            FROM track_otp WHERE request_hash = ${guard.sha256(r.json.requestId!)}`,
+    );
+    assert.deepEqual(rows.rows, [{ ids: [], has_code: true, token: null }]);
   });
   let reqId = '';
   await test('customer number → SMS with a 4-digit code; DB keeps only hashes', async () => {
@@ -854,6 +859,44 @@ try {
       const calls = providerCalls.length;
       assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
       assert.equal(providerCalls.length, calls);
+    });
+    await test('provider: a customer and a stranger read the same at verify — 401 + body, ≥ 800 ms, the IP locked after 16 wrong codes', async () => {
+      // one IP per number: 4 OTPs × 5 wrong codes (the 16th locks this IP out of the number, drizzle/0017 rules)
+      const run = async (phone: string) => {
+        const ip = nextIp();
+        const answers = new Set<string>();
+        let slowest = Infinity;
+        for (let round = 0; round < 4; round++) {
+          await clearPhoneLimits(); // the per-number minute / hour caps — not the per number+IP fail counter
+          await db.execute(sql`DELETE FROM track_rate WHERE key = ${guard.ipKeyOf(ip)}`); // 10 verifies/min per IP
+          const r = await otpReq(phone, ip);
+          assert.equal(r.status, 200, `${phone === PHONE ? 'customer' : 'stranger'} round ${round}`);
+          // the row lands after the answer (the customer's once ThaiBulkSMS gave its token)
+          if (phone === PHONE) await providerToken(r.json.requestId!);
+          else
+            for (let i = 0; i < 40 && !(await otpRow(r.json.requestId!)); i++)
+              await new Promise((res) => setTimeout(res, 50));
+          const t0 = Date.now();
+          const tries = await Promise.all(Array.from({ length: 5 }, () => otpVerify(r.json.requestId!, '1111', ip)));
+          slowest = Math.min(slowest, Date.now() - t0);
+          for (const t of tries) answers.add(JSON.stringify(t));
+        }
+        await clearPhoneLimits();
+        const locked = await otpReq(phone, ip);
+        return { answers: [...answers], slowest, locked: JSON.stringify(locked) };
+      };
+      const customer = await run(PHONE);
+      const stranger = await run(NOBODY);
+      assert.deepEqual(customer.answers, [
+        JSON.stringify({ status: 401, json: { ok: false, error: TRACK_MSG.otpFail } }),
+      ]);
+      assert.deepEqual(stranger.answers, customer.answers, 'every wrong code reads the same');
+      assert.ok(
+        customer.slowest >= 790 && stranger.slowest >= 790,
+        `≥ 800 ms (${customer.slowest} / ${stranger.slowest})`,
+      );
+      assert.equal(JSON.parse(customer.locked).status, 429, 'the 16th wrong code locked the IP out of the number');
+      assert.equal(stranger.locked, customer.locked, 'and locks a stranger the same way');
     });
     await test('provider: keys missing → the phone option is closed (503), nothing sent', async () => {
       process.env.THAIBULKSMS_OTP_KEY = '';
@@ -1106,6 +1149,55 @@ try {
       await db.execute(sql`DELETE FROM track_rate WHERE bucket = 'otp_phone_min' AND key IN ${phoneHashes}`);
     }
     assert.deepEqual(codes, [200, 200, 200, 429]);
+  });
+
+  console.log('\nHousekeeping');
+  await test('housekeeping keeps a day counter that is still counting (window began > 2 h ago), drops an ended one', async () => {
+    await db.execute(sql`
+      INSERT INTO track_rate (bucket, key, hits, window_start) VALUES
+        ('otp_fail_phone_day', 'hk-current', 7, now() - interval '20 hours'),
+        ('otp_fail_phone_day', 'hk-ended', 7, now() - interval '26 hours')`);
+    await guard.housekeeping();
+    const left = await db.execute<{ key: string }>(
+      sql`SELECT key FROM track_rate WHERE key IN ('hk-current', 'hk-ended') ORDER BY key`,
+    );
+    assert.deepEqual(
+      left.rows.map((r) => r.key),
+      ['hk-current'],
+    );
+    await db.execute(sql`DELETE FROM track_rate WHERE key = 'hk-current'`);
+  });
+
+  console.log('\nBody size');
+  await test('a /track body over 8 KB → 413 before it is parsed: by Content-Length, and while streaming one without', async () => {
+    const url = 'https://svc.example.test/api/track/data';
+    const big = JSON.stringify({ ticket: 'x'.repeat(9000) });
+    const declared = await dataPOST(
+      new NextRequest(url, {
+        method: 'POST',
+        headers: { ...otpHeaders(nextIp()), 'content-length': String(Buffer.byteLength(big)) },
+        body: big,
+      }),
+    );
+    const chunk = new TextEncoder().encode('x'.repeat(4000));
+    const stream = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        ctl.enqueue(chunk); // endless: refused once past 8 KB, never read to the end
+      },
+    });
+    const chunked = await dataPOST(
+      new NextRequest(url, {
+        method: 'POST',
+        headers: otpHeaders(nextIp()),
+        body: stream,
+        duplex: 'half',
+      } as RequestInit),
+    );
+    for (const r of [declared, chunked])
+      assert.deepEqual([r.status, await r.json()], [413, { ok: false, error: TRACK_MSG.tooLarge }]);
+    // a small body still reads as before (a bad ticket → 401)
+    const small = await dataPOST(req('/api/track/data', { ticket: 'nope' }, nextIp()));
+    assert.equal(small.status, 401);
   });
 
   console.log('\nLogs');

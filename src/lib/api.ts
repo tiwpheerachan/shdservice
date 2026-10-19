@@ -122,7 +122,14 @@ export function qs(params: Record<string, string | number | boolean | undefined 
   return s ? `?${s}` : '';
 }
 
-export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** the message to show for a failed call: a request that never reached the server (offline, DNS) fails with
+ *  a TypeError ("Failed to fetch") — say so in Thai; the server's own refusals (ApiError) keep their message */
+export const errMsg = (e: unknown) =>
+  e instanceof TypeError
+    ? 'เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'
+    : e instanceof Error
+      ? e.message
+      : String(e);
 
 /**
  * Download an .xlsx of a list under the given filters (same params as the data hook).

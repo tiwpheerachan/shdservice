@@ -3,7 +3,7 @@
   "info": {
     "title": "OneService API",
     "version": "1.0.0",
-    "description": "The API the OneService pages call — for the internal team. Every path is under `/api`.\n\n**Sign-in.** The `os_session` cookie, set by `/api/sso/callback` after the central SSO. No API keys:\na script calls the API as a signed-in person would. 30 minutes idle (renewed by `/api/sso/refresh`),\n12 hours at most; signing out bumps the user's session_version, so every cookie of theirs dies.\nPermissions come from the role (app_config): view / add / edit / del per module, plus special rights.\n\n**Writes.** A body is JSON with `Content-Type: application/json` (anything else is 415 — the CSRF rule,\nwith the proxy refusing cross-site writes), at most 1 MB. Uploads are multipart.\n\n**Errors.** `{ \"error\": \"<Thai message>\" }`, plus `details` when there is more: `details.fields` =\n{ field: message } for a failed form rule (400), `details.stale` for an edit someone saved first (409).\nAn unexpected error is a 500 with `ref` — the details are in the server log.\n\n**Idempotency-Key** on create POSTs: the same key again gets the stored answer, never a second document.\n\n**row_version.** Edits send back the `version` they loaded; if the row moved since → 409 `details.stale`.\n\n**Public paths** (no session): `/api/health`, `/api/sso/*`, `/api/track/*` (the customer tracking page,\nfail-closed), and the public logo folders of `/api/files`."
+    "description": "The API the OneService pages call — for the internal team. Every path is under `/api`.\n\n**Sign-in.** The `__Host-os_session` cookie (`os_session` outside production), set by `/api/sso/callback`\nafter the central SSO. No API keys:\na script calls the API as a signed-in person would. 30 minutes idle (renewed by `/api/sso/refresh`),\n12 hours at most; signing out bumps the user's session_version, so every cookie of theirs dies.\nPermissions come from the role (app_config): view / add / edit / del per module, plus special rights.\n\n**Writes.** A body is JSON with `Content-Type: application/json` (anything else is 415 — the CSRF rule,\nwith the proxy refusing cross-site writes), at most 1 MB. Uploads are multipart.\n\n**Errors.** `{ \"error\": \"<Thai message>\" }`, plus `details` when there is more: `details.fields` =\n{ field: message } for a failed form rule (400), `details.stale` for an edit someone saved first (409).\nAn unexpected error is a 500 with `ref` — the details are in the server log.\n\n**Idempotency-Key** on create POSTs: the same key again gets the stored answer, never a second document.\n\n**row_version.** Edits send back the `version` they loaded; if the row moved since → 409 `details.stale`.\n\n**Public paths** (no session): `/api/health`, `/api/sso/*`, `/api/track/*` (the customer tracking page,\nfail-closed), and the public logo folders of `/api/files`."
   },
   "servers": [
     {
@@ -285,7 +285,7 @@
             }
           },
           "404": {
-            "description": "No such attachment, or the file is still on the old system.",
+            "description": "No such attachment (or it was removed), or the file is still on the old system.",
             "content": {
               "application/json": {
                 "schema": {
@@ -311,7 +311,7 @@
           "Jobs"
         ],
         "summary": "Remove an attachment",
-        "description": "Job Management edit. The row and the stored file both go.",
+        "description": "Job Management del. Soft delete: the row is marked DELETED (audited) and no longer listed or opened; the stored file is kept.",
         "parameters": [
           {
             "schema": {
@@ -367,7 +367,7 @@
             }
           },
           "404": {
-            "description": "No such attachment.",
+            "description": "No such attachment, or already removed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3855,7 +3855,7 @@
           "Products"
         ],
         "summary": "A spare part with its stock card (product-detail modal)",
-        "description": "Any approved user. ราคาทุน and `version` only for a role with the special right Product Cost.",
+        "description": "View on any product / stock module (Product, Product Onhand, Product Receive Stock, Product Pick Stock). ราคาทุน and `version` only for a role with the special right Product Cost.",
         "parameters": [
           {
             "schema": {
@@ -5024,7 +5024,7 @@
           "Files"
         ],
         "summary": "Open a stored file by its storage path (a short-lived signed URL)",
-        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user.",
+        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403.",
         "security": [
           {},
           {
@@ -5126,7 +5126,7 @@
           "Files"
         ],
         "summary": "Upload a product image, a payment slip or a profile logo",
-        "description": "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit; profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
+        "description": "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5235,7 +5235,7 @@
             }
           },
           "409": {
-            "description": "The sale order is approved, denied or cancelled — its slip cannot change.",
+            "description": "The sale order is approved, denied or cancelled, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5421,10 +5421,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -5846,10 +5846,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           },
@@ -6420,10 +6420,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -6694,10 +6694,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -7873,10 +7873,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -8539,10 +8539,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -9928,10 +9928,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -10443,10 +10443,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Row cap of the unpaged list."
+              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
             },
             "required": false,
-            "description": "Row cap of the unpaged list.",
+            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
             "name": "limit",
             "in": "query"
           }
@@ -11892,7 +11892,7 @@
           "Admin"
         ],
         "summary": "Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete — nothing is removed)",
-        "description": "DELETED needs `del` on the table's module, ACTIVE ↔ INACTIVE `edit` (users and master data: System Admin). Accepts `status`, or the older `deleted` boolean. Restoring a user brings the account back INACTIVE.",
+        "description": "DELETED needs `del` on the table's module, ACTIVE ↔ INACTIVE `edit`, out of DELETED `del` as well (users and master data: System Admin). Accepts `status`, or the older `deleted` boolean. Restoring a user brings the account back INACTIVE.",
         "requestBody": {
           "required": true,
           "content": {
@@ -13144,7 +13144,7 @@
         ],
         "responses": {
           "307": {
-            "description": "To the SSO authorize page (sets the `os_state` cookie), or to /login.",
+            "description": "To the SSO authorize page (sets the `__Host-os_state` cookie — `os_state` outside production), or to /login.",
             "headers": {
               "Location": {
                 "schema": {
@@ -13427,6 +13427,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited (per IP / link / number) — `Retry-After` on most.",
             "content": {
@@ -13549,6 +13559,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited (per IP / link / number) — `Retry-After` on most.",
             "content": {
@@ -13624,6 +13644,16 @@
           },
           "410": {
             "description": "The link is no longer live.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14057,6 +14087,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited (per IP / link / number) — `Retry-After` on most.",
             "content": {
@@ -14096,7 +14136,7 @@
           "Public tracking"
         ],
         "summary": "Check the SMS code → a customer session token",
-        "description": "Wrong, expired, used, or too many tries all read the same. Keep the token in page memory only.",
+        "description": "Wrong, expired, used, or too many tries all read the same, and every answer takes at least 800 ms — a customer's number and anyone else's (a decoy OTP) cannot be told apart. Keep the token in page memory only.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -14150,6 +14190,16 @@
           },
           "401": {
             "description": "Wrong / expired code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14252,6 +14302,16 @@
           },
           "410": {
             "description": "The link expired, was replaced, or never existed (`reason: \"link\"`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8 KB — refused by Content-Length before it is read, or while streaming.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17658,7 +17718,7 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "os_session",
+        "name": "__Host-os_session",
         "description": "Set by signing in (/api/sso/login). The browser sends it — nothing to paste."
       }
     }

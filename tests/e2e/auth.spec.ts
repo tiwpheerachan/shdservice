@@ -7,7 +7,12 @@ test('an owner signs in through the SSO and lands on the dashboard', async ({ pa
   await expect(page.getByRole('heading', { name: 'ภาพรวมงานบริการ' })).toBeVisible();
   // the session is the app's own httpOnly cookie
   const cookies = await page.context().cookies(APP_ORIGIN);
-  expect(cookies.find((c) => c.name === 'os_session')).toMatchObject({ httpOnly: true });
+  // a production build: the __Host- name (src/lib/session.ts hostCookie) — Secure, Path=/, no Domain
+  expect(cookies.find((c) => c.name === '__Host-os_session')).toMatchObject({
+    httpOnly: true,
+    secure: true,
+    path: '/',
+  });
 });
 
 test('an unknown email waits for approval', async ({ page }) => {

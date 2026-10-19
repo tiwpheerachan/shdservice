@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFieldControl } from './field';
 import { Checkbox as ShadcnCheckbox } from '@/components/shadcn/checkbox';
@@ -19,6 +20,43 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
   },
 );
 Input.displayName = 'Input';
+
+/** a file field in the app's look (Thai text, the chosen file's name) — not the browser's "Choose File / No file chosen" */
+export function FileInput({
+  placeholder = 'เลือกไฟล์',
+  onFile,
+  disabled,
+  ...props
+}: { placeholder?: string; onFile: (f: File | undefined) => void } & Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'onChange' | 'className'
+>) {
+  const field = useFieldControl(props.id);
+  const [name, setName] = React.useState('');
+  return (
+    <label
+      className={cn(
+        'relative flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-within:border-primary focus-within:text-foreground',
+        disabled && 'pointer-events-none opacity-50',
+      )}
+    >
+      <Upload className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{name || placeholder}</span>
+      <input
+        type="file"
+        className="sr-only"
+        disabled={disabled}
+        {...props}
+        {...field}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          setName(f?.name ?? '');
+          onFile(f);
+        }}
+      />
+    </label>
+  );
+}
 
 /**
  * Numeric input tuned for easy data entry:
@@ -137,11 +175,16 @@ export function Checkbox({
   );
 }
 
+/** disabled (view mode) is drawn here: the browser's grey disabled radio looks the same checked or not */
 export function Radio({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       type="radio"
-      className={cn('h-4 w-4 shrink-0 border-input accent-[hsl(var(--primary))] cursor-pointer', className)}
+      className={cn(
+        'h-4 w-4 shrink-0 border-input accent-[hsl(var(--primary))] cursor-pointer',
+        'disabled:appearance-none disabled:rounded-full disabled:border disabled:bg-muted disabled:checked:border-[5px] disabled:checked:border-muted-foreground',
+        className,
+      )}
       {...props}
     />
   );

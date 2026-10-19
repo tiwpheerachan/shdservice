@@ -1,11 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseBody, parseQuery, requireAdmin } from '@/server/auth';
 import { shippingProfileDelete, shippingProfileSave } from '@/server/contract/admin';
-import {
-  listShippingProfiles,
-  saveShippingProfile,
-  deleteShippingProfile,
-} from '@/server/services/shipping-profiles';
+import { listShippingProfiles, saveShippingProfile, deleteShippingProfile } from '@/server/services/shipping-profiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

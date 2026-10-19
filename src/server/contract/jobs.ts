@@ -357,7 +357,7 @@ export const attachmentGet = defineOperation({
   responses: {
     307: redirect('To a short-lived signed URL of the file.'),
     ...SIGNED_IN,
-    ...notFound('No such attachment, or the file is still on the old system.'),
+    ...notFound('No such attachment (or it was removed), or the file is still on the old system.'),
   },
 });
 
@@ -366,7 +366,12 @@ export const attachmentDelete = defineOperation({
   path: '/attachments/{id}',
   tags,
   summary: 'Remove an attachment',
-  description: 'Job Management edit. The row and the stored file both go.',
+  description:
+    'Job Management del. Soft delete: the row is marked DELETED (audited) and no longer listed or opened; the stored file is kept.',
   params: attachmentId,
-  responses: { 200: jsonResponse('Removed.', Ok), ...SIGNED_IN, ...notFound('No such attachment.') },
+  responses: {
+    200: jsonResponse('Removed.', Ok),
+    ...SIGNED_IN,
+    ...notFound('No such attachment, or already removed.'),
+  },
 });

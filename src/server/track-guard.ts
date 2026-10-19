@@ -245,13 +245,16 @@ export function logEvent(
     })
     .then(() => undefined)
     .catch((e) => logError(e, 'track_event'));
-  // ~1 in 200 writes also trims old rows (counters > 2 h, blocks ended, events > 30 days)
+  // ~1 in 200 writes also trims old rows (counters whose window ended, blocks ended, events > 30 days)
   if (Math.random() < 0.005) void housekeeping();
 }
 
-async function housekeeping() {
+/** exported for scripts/test-track.mts */
+export async function housekeeping() {
   try {
-    await db.delete(trackRate).where(lt(trackRate.windowStart, sql`now() - interval '2 hours'`));
+    // the longest window is a day (otp_*_day, started at 00:00 UTC): a row younger than that may still be
+    // counting — trimming at 2 h used to reset the daily caps and the wrong-code lock several times a day
+    await db.delete(trackRate).where(lt(trackRate.windowStart, sql`now() - interval '25 hours'`));
     await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
     await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));
   } catch (e) {

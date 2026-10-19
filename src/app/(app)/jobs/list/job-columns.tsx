@@ -52,7 +52,9 @@ export function jobColumns({
           >
             <Phone className="h-3 w-3" />
           </button>
-          <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>
+          <span className="line-clamp-1 max-w-[220px]" title={r.customer}>
+            {r.customer}
+          </span>
         </span>
       ),
     },

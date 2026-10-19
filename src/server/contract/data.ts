@@ -40,7 +40,10 @@ const ymd = s
   .optional()
   .meta({ format: 'date' });
 const BAD_DATE = { 400: errorResponse('A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.') };
-const limit = s.optional().meta({ description: 'Row cap of the unpaged list.' });
+const limit = s.optional().meta({
+  description:
+    'Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.',
+});
 const flag = choice(['1']);
 /** ?page=&pageSize=&sort=&dir= (src/server/paging.ts parsePageQuery) */
 const PAGING = {

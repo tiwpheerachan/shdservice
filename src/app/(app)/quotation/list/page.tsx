@@ -104,14 +104,18 @@ export default function QuotationListPage() {
       key: 'type',
       header: 'ประเภท',
       width: '130px',
-      hideBelow: 'lg',
+      hideBelow: 'xl',
       cell: (r) => <Badge tone={r.type.includes('VIP') ? 'primary' : 'neutral'}>{r.type}</Badge>,
     },
     {
       key: 'customer',
       header: 'ลูกค้า',
       minWidth: COL_MIN_WIDTH.customer,
-      cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
+      cell: (r) => (
+        <span className="line-clamp-1 max-w-[220px]" title={r.customer}>
+          {r.customer}
+        </span>
+      ),
     },
     {
       key: 'jobRef',

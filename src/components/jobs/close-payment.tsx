@@ -3,7 +3,7 @@
 import { Wallet } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { Field, FieldGrid } from '@/components/ui/field';
-import { Input, Select, Textarea } from '@/components/ui/input';
+import { FileInput, Input, Select, Textarea } from '@/components/ui/input';
 import { JOB_PAYMENT_METHODS } from '@/data/options';
 import { fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
@@ -220,12 +220,11 @@ function PaymentFields({
       </Field>
       <Field label="สลิปหลักฐานการชำระ" wide>
         <div className="flex items-center gap-2">
-          <Input
-            type="file"
-            className="h-9 py-1.5 text-xs"
+          <FileInput
+            placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
             accept=".jpg,.jpeg,.png,.webp,.pdf"
             disabled={!canUpload}
-            onChange={(e) => onPickSlip(e.target.files?.[0])}
+            onFile={onPickSlip}
           />
           {slip && (
             <a

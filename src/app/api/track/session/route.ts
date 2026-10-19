@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { hit, hmac, verifyTurnstile, issueTicket, logEvent } from '@/server/track-guard';
-import { trackJson, trackCtx } from '@/server/track-http';
+import { bodyTooLarge, BodyTooLarge, trackJson, trackCtx } from '@/server/track-http';
 import { jobNoForLink, markLinkOpened, linkExpiry } from '@/server/services/tracking';
 import { userFromRequest, checked, parseTrackBody } from '@/server/auth';
 import { trackSession } from '@/server/contract/track';
@@ -75,6 +75,7 @@ export const POST = checked(async (req: NextRequest) => {
     // the page shows a countdown to this (and extends it while in use: /api/track/link/keepalive)
     return trackJson({ ok: true, ticket, expiresAt: await linkExpiry(jobNo) });
   } catch (e) {
+    if (e instanceof BodyTooLarge) return bodyTooLarge();
     logError(e, 'track/session');
     return fail();
   }
