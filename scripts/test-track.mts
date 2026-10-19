@@ -860,13 +860,13 @@ try {
       assert.equal((await otpVerify(r.json.requestId!, RIGHT_PIN, ip)).status, 401);
       assert.equal(providerCalls.length, calls);
     });
-    await test('provider: a customer and a stranger read the same at verify — 401 + body, ≥ 800 ms, the IP locked after 16 wrong codes', async () => {
-      // one IP per number: 4 OTPs × 5 wrong codes (the 16th locks this IP out of the number, drizzle/0017 rules)
+    await test('provider: a customer and a stranger read the same at verify — 401 + body, ≥ 800 ms, the IP locked after 6 wrong codes', async () => {
+      // one IP per number: 2 OTPs × 3 wrong codes (the 6th locks this IP out of the number — OTP_FAILS_PER_PHONE_DAY = 5)
       const run = async (phone: string) => {
         const ip = nextIp();
         const answers = new Set<string>();
         let slowest = Infinity;
-        for (let round = 0; round < 4; round++) {
+        for (let round = 0; round < 2; round++) {
           await clearPhoneLimits(); // the per-number minute / hour caps — not the per number+IP fail counter
           await db.execute(sql`DELETE FROM track_rate WHERE key = ${guard.ipKeyOf(ip)}`); // 10 verifies/min per IP
           const r = await otpReq(phone, ip);
@@ -877,7 +877,7 @@ try {
             for (let i = 0; i < 40 && !(await otpRow(r.json.requestId!)); i++)
               await new Promise((res) => setTimeout(res, 50));
           const t0 = Date.now();
-          const tries = await Promise.all(Array.from({ length: 5 }, () => otpVerify(r.json.requestId!, '1111', ip)));
+          const tries = await Promise.all(Array.from({ length: 3 }, () => otpVerify(r.json.requestId!, '1111', ip)));
           slowest = Math.min(slowest, Date.now() - t0);
           for (const t of tries) answers.add(JSON.stringify(t));
         }
@@ -895,8 +895,26 @@ try {
         customer.slowest >= 790 && stranger.slowest >= 790,
         `≥ 800 ms (${customer.slowest} / ${stranger.slowest})`,
       );
-      assert.equal(JSON.parse(customer.locked).status, 429, 'the 16th wrong code locked the IP out of the number');
+      assert.equal(JSON.parse(customer.locked).status, 429, 'the 6th wrong code locked the IP out of the number');
       assert.equal(stranger.locked, customer.locked, 'and locks a stranger the same way');
+    });
+    await test('provider: 11 wrong codes spread over 3 IPs lock the NUMBER for every IP (OTP_FAILS_PER_PHONE_DAY_ALL = 10)', async () => {
+      await db.execute(sql`DELETE FROM track_rate WHERE bucket LIKE 'otp_fail_phone_day%'`);
+      await db.execute(sql`DELETE FROM track_block`);
+      // the request caps (cooldown / hour) are cleared between rounds; the per-number wrong-code counter is not
+      const clearRequestCaps = () =>
+        db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes} AND bucket <> 'otp_fail_phone_day_all'`);
+      for (const n of [5, 5, 1]) {
+        const ip = nextIp();
+        await clearRequestCaps();
+        const r = await otpReq(PHONE, ip);
+        assert.equal(r.status, 200);
+        await providerToken(r.json.requestId!);
+        for (let i = 0; i < n; i++) assert.equal((await otpVerify(r.json.requestId!, '1111', ip)).status, 401);
+      }
+      await clearRequestCaps();
+      assert.equal((await otpReq(PHONE, nextIp())).status, 429, 'a fresh IP is refused: the number itself is locked');
+      await db.execute(sql`DELETE FROM track_block`); // the next tests use this number
     });
     await test('provider: keys missing → the phone option is closed (503), nothing sent', async () => {
       process.env.THAIBULKSMS_OTP_KEY = '';

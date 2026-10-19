@@ -44,15 +44,15 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SEC = 60;
 const OTP_PER_PHONE_HOUR = 3;
 /**
- * A 4-digit code: 15 guesses/h was 360/day per target → daily caps + a lock after many misses.
- * Counted per number+IP first, so someone who knows a customer's number cannot lock THAT
- * customer out from their own IP (review 2026-10-14); the per-number ceilings are higher and
- * only bite a guesser spread over many IPs (≤ 30 guesses/day = 0.3% per day).
+ * A 4-digit code (owner: stays 4 digits, 2026-10-19): 15 guesses/h was 360/day per target → daily caps +
+ * a lock after a few misses. Counted per number+IP first, so someone who knows a customer's number cannot
+ * lock THAT customer out from their own IP (review 2026-10-14); the per-number ceiling is higher and only
+ * bites a guesser spread over many IPs (≤ 10 guesses/day = 0.1% per day; it was 30 = 0.3%).
  */
 const OTP_PER_PHONE_DAY = 8; // per number + IP
 const OTP_PER_PHONE_DAY_ALL = 20; // per number, any IP
-const OTP_FAILS_PER_PHONE_DAY = 15; // per number + IP → that IP is locked out of the number
-const OTP_FAILS_PER_PHONE_DAY_ALL = 30; // per number, any IP → the number is locked
+const OTP_FAILS_PER_PHONE_DAY = 5; // per number + IP → that IP is locked out of the number
+const OTP_FAILS_PER_PHONE_DAY_ALL = 10; // per number, any IP → the number is locked
 const OTP_PHONE_LOCK_MIN = 24 * 60;
 /** company-wide SMS spend cap (SMS pumping / a list of customer numbers) — real sends only */
 const OTP_SMS_PER_HOUR = 200;
