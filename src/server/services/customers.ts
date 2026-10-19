@@ -5,7 +5,7 @@ import { orderBy, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from 
 import { db } from '@/db/client';
 import type { Tx } from '@/db/client';
 import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from '@/db/schema';
-import type { Customer } from '@/data/mock';
+import type { Customer } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
@@ -24,6 +24,8 @@ import {
 import { clean } from '@/lib/validation';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { assertValid } from '@/server/validate';
+import type { z } from 'zod';
+import type { customerSave } from '@/server/contract/sales';
 
 export type DeletedMode = StatusMode;
 
@@ -209,26 +211,8 @@ export async function getCustomerById(id: number): Promise<Customer | null> {
   return rows[0] ? toCustomer(rows[0]) : null;
 }
 
-export type CustomerInput = {
-  code?: string;
-  name: string;
-  taxId?: string;
-  type?: string;
-  online?: boolean;
-  address1?: string;
-  address2?: string;
-  cityId?: number;
-  districtId?: number;
-  subDistrictId?: number;
-  postalCode?: string;
-  phone: string;
-  email?: string;
-  line?: string;
-  priceGroup?: string;
-  status?: string;
-  /** row_version the edit form loaded: another save since → 409; absent = no check */
-  version?: number;
-};
+/** the parsed body of POST /api/customers (customerSave in src/server/contract/sales.ts) */
+export type CustomerInput = z.output<typeof customerSave.body>;
 
 /** mt_city.city_id of กรุงเทพมหานคร: แขวง / เขต and no จ. prefix */
 const BANGKOK_CITY_ID = 10;

@@ -5,7 +5,7 @@ import { db, type Tx } from '@/db/client';
 import { AS, CONDITION_ID, ITEM_UNIT, STORE_LOCATION_ID } from '@/lib/status-ids';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
-import type { SaleOrder } from '@/data/mock';
+import type { SaleOrder } from '@/data/types';
 import { HttpError, fullName, hasRight, rolesWithRight, type CurrentUser } from '@/server/auth';
 import { ADMIN_USER_TYPE } from '@/lib/modules';
 import { assertVersion } from '@/server/http-error';
@@ -31,6 +31,8 @@ import {
 import { trackingSchema } from '@/lib/validation/stock';
 import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
+import type { z } from 'zod';
+import type { saleOrderSave } from '@/server/contract/sales';
 import { staffOrKeep } from './users';
 
 /** approve_status ids */
@@ -348,24 +350,12 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
   };
 }
 
-export type SaleOrderInput = {
-  /** ออกเอกสารในนาม (document_profile.id) — new orders only; fixed once numbered */
-  documentProfileId?: number;
-  no?: string;
-  customerCode: string;
-  salesId?: number | string; // app_user id of the salesperson (sale_out_by)
-  lines: { code: string; qty: number; price?: number | string; name?: string; type?: 'SparePart' | 'Service' }[];
-  paymentType?: string;
-  paymentAmount?: number | string;
-  /** ignored: the slip path is written only by /api/upload (a client-sent path could point at any file) */
-  slip?: string;
-  remark?: string;
-  fee?: number | string;
-  tracking?: string;
-  submit?: boolean; // true → รออนุมัติ, false → กำลังดำเนินการจัดทำ (an edit by anyone but the creator keeps the status)
-  /** row_version the edit page loaded: another save since → 409; absent = no check */
-  version?: number;
-};
+/**
+ * The parsed body of POST /api/sale-orders (saleOrderSave in src/server/contract/sales.ts). `slip` is ignored: the
+ * slip path is written only by /api/upload (a client-sent path could point at any file); `submit` true → รออนุมัติ,
+ * false → กำลังดำเนินการจัดทำ (an edit by anyone but the creator keeps the status).
+ */
+export type SaleOrderInput = z.output<typeof saleOrderSave.body>;
 
 export async function saveSaleOrder(
   i: SaleOrderInput,
@@ -390,7 +380,8 @@ export async function saveSaleOrder(
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
   const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
-  const codes = i.lines.map((l) => str(l.code)).filter(Boolean);
+  const lines = i.lines ?? []; // never empty here: saleOrderSchema asks for a line
+  const codes = lines.map((l) => str(l.code)).filter(Boolean);
   const prods = await db
     .select({
       id: product.productId,
@@ -406,7 +397,7 @@ export async function saveSaleOrder(
     .where(inArray(product.productCode, codes));
   const byCode = new Map(prods.map((p) => [p.code ?? '', p]));
 
-  const input = i.lines
+  const input = lines
     .filter((l) => str(l.code))
     .map((l) => {
       const p = byCode.get(str(l.code));

@@ -41,6 +41,7 @@ import {
 import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '../src/lib/validation/stock.ts';
 import { fileProblem } from '../src/server/storage.ts';
 import { clampInt, orderBy, ymd } from '../src/server/paging.ts';
+import { version } from '../src/server/contract/common.ts';
 import { sql } from 'drizzle-orm';
 
 let passed = 0;
@@ -1036,6 +1037,13 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     assert.equal(masterNameKey(' Poco  F5\n'), masterNameKey('POCOF5'), 'duplicates ignore case and spaces');
   });
 }
+
+test('contract `version`: parsed to what assertVersion reads (a number, or none) — a stale / junk one still 409s', () => {
+  const v = (x: unknown) => version.parse(x);
+  assert.deepEqual([v(7), v('7'), v(''), v(null), v(undefined)], [7, 7, undefined, undefined, undefined]);
+  assert.ok(Number.isNaN(v('x')), 'not a 400: assertVersion compares NaN → 409 stale, as before');
+  assert.equal(version.safeParse(true).success, false);
+});
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

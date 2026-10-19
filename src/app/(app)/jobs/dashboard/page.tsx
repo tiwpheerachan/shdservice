@@ -4,10 +4,11 @@ import * as React from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { LookupError } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { jobTone, type Tone } from '@/components/ui/badge';
-import { TAT_BUCKET_LABEL } from '@/data/mock';
+import { TAT_BUCKET_LABEL } from '@/data/options';
 import { SearchSelect } from '@/components/shared/search-select';
 import { useDashboard, useJobs, useJobStatuses, useJobTypes } from '@/data/db';
 import { int, cn } from '@/lib/utils';
@@ -146,7 +147,7 @@ export default function DashboardPage() {
   const [to, setTo] = React.useState(() => today());
   // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
   const [type, setType] = React.useState('');
-  const { data: JOB_TYPES } = useJobTypes();
+  const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
   // a reversed pair finds nothing: say so (as FilterBar does) and keep showing the last range that made sense
   const reversed = !!from && !!to && from > to;
   const [range, setRange] = React.useState({ from, to, type });
@@ -254,6 +255,7 @@ export default function DashboardPage() {
               placeholder="ทุกประเภทงาน"
               emptyLabel="ทุกประเภทงาน"
             />
+            <LookupError error={jobTypesLookup.error} onRetry={jobTypesLookup.refetch} />
           </div>
           {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
           <div className="flex items-center gap-1.5">

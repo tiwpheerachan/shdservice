@@ -13,12 +13,13 @@ import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import type { MasterRow } from '@/data/mock';
+import type { MasterRow } from '@/data/types';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { MASTER_DETAIL_MAX, masterSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
+import { useFilterDraft } from '@/lib/use-filter-draft';
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
 export type MasterKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types' | 'symptoms';
@@ -57,8 +58,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   // filter bar (ชื่อ + สถานะ) — applied on ค้นหา; the lists are small so this is done in the browser
   type MasterFilter = { name: string; status: '' | 'Active' | 'Inactive' };
   const NO_FILTER: MasterFilter = { name: '', status: '' };
-  const [draft, setDraft] = React.useState<MasterFilter>(NO_FILTER);
-  const [filter, setFilter] = React.useState<MasterFilter>(NO_FILTER);
+  const { draft, setD, filters: filter, apply, reset } = useFilterDraft<MasterFilter>(NO_FILTER);
   const visible = React.useMemo(() => {
     const term = filter.name.trim().toLowerCase();
     return rows.filter(
@@ -270,27 +270,16 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilter(draft);
-        }}
-        onReset={() => {
-          setDraft(NO_FILTER);
-          setFilter(NO_FILTER);
-        }}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label={config.nameLabel}>
           <Input
             placeholder={`พิมพ์บางส่วนของ${config.nameLabel}`}
             value={draft.name}
-            onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))}
+            onChange={(e) => setD('name', e.target.value)}
           />
         </Field>
         <Field label="สถานะ">
-          <Select
-            value={draft.status}
-            onChange={(e) => setDraft((f) => ({ ...f, status: e.target.value as MasterFilter['status'] }))}
-          >
+          <Select value={draft.status} onChange={(e) => setD('status', e.target.value as MasterFilter['status'])}>
             <option value="">ทั้งหมด</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>

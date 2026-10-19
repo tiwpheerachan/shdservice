@@ -8,20 +8,48 @@ import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect } from '@/components/shared/search-select';
 import { modelNameOptions } from '@/components/shared/model-picker';
 import { Field } from '@/components/ui/field';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Input, Select } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { type Job } from '@/data/mock';
+import type { Job } from '@/data/types';
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from '@/data/db';
 import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { apiFieldErrors } from '@/lib/use-form-errors';
-import { isFilterActive } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { NOT_ENGINEER } from '@/lib/validation/job';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
+
+// filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
+type AssignFilter = {
+  no: string;
+  ref: string;
+  brand: string;
+  model: string;
+  type: string;
+  customer: string;
+  phone: string;
+  imei: string;
+  dateBy: 'create' | 'reception';
+  from: string;
+  to: string;
+};
+const NO_FILTER: AssignFilter = {
+  no: '',
+  ref: '',
+  brand: '',
+  model: '',
+  type: '',
+  customer: '',
+  phone: '',
+  imei: '',
+  dateBy: 'create',
+  from: '',
+  to: '',
+};
 
 export default function AssignPage() {
   const { push } = useToast();
@@ -29,40 +57,20 @@ export default function AssignPage() {
   // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
   const { name: CURRENT_TECH, userId, has, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  // filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
-  type AssignFilter = {
-    no: string;
-    ref: string;
-    brand: string;
-    model: string;
-    type: string;
-    customer: string;
-    phone: string;
-    imei: string;
-    dateBy: 'create' | 'reception';
-    from: string;
-    to: string;
-  };
-  const NO_FILTER: AssignFilter = {
-    no: '',
-    ref: '',
-    brand: '',
-    model: '',
-    type: '',
-    customer: '',
-    phone: '',
-    imei: '',
-    dateBy: 'create',
-    from: '',
-    to: '',
-  };
-  const [draft, setDraft] = React.useState<AssignFilter>(NO_FILTER);
-  const [filter, setFilter] = React.useState<AssignFilter>(NO_FILTER);
-  const setD = <K extends keyof AssignFilter>(k: K, v: AssignFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const { data: JOB_TYPES } = useJobTypes();
-  const { data: BRANDS } = useManufacturers();
-  const { data: MODELS } = useModels();
+  const {
+    draft,
+    setDraft,
+    setD,
+    filters: filter,
+    apply,
+    reset,
+    narrowed,
+    pageArgs,
+    server,
+  } = useServerTable(NO_FILTER);
+  const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
+  const { data: BRANDS, ...brandsLookup } = useManufacturers();
+  const { data: MODELS, ...modelsLookup } = useModels();
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
@@ -74,10 +82,7 @@ export default function AssignPage() {
     refetch,
     error: loadError,
   } = useJobsPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
+    ...pageArgs,
     unassigned: 1,
     ...filter,
     dateBy: filter.dateBy === 'create' ? '' : filter.dateBy,
@@ -211,11 +216,6 @@ export default function AssignPage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilter(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -231,19 +231,14 @@ export default function AssignPage() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilter(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="เลขที่งาน">
           <Input placeholder="J2612164" className="num" value={draft.no} onChange={(e) => setD('no', e.target.value)} />
         </Field>
         <Field label="เลขคำสั่งซื้อ">
           <Input className="num" value={draft.ref} onChange={(e) => setD('ref', e.target.value)} />
         </Field>
-        <Field label="ยี่ห้อ">
+        <Field label="ยี่ห้อ" lookup={brandsLookup}>
           <SearchSelect
             {...all}
             value={draft.brand}
@@ -252,7 +247,7 @@ export default function AssignPage() {
             searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
           />
         </Field>
-        <Field label="รุ่น">
+        <Field label="รุ่น" lookup={modelsLookup}>
           <SearchSelect
             {...all}
             value={draft.model}
@@ -262,7 +257,7 @@ export default function AssignPage() {
             searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
           />
         </Field>
-        <Field label="ประเภทงาน">
+        <Field label="ประเภทงาน" lookup={jobTypesLookup}>
           <SearchSelect {...all} value={draft.type} onChange={(v) => setD('type', v)} options={JOB_TYPE_OPTIONS} />
         </Field>
         <Field label="ชื่อ-สกุล / รหัสลูกค้า">
@@ -352,8 +347,8 @@ export default function AssignPage() {
       </div>
 
       <DataTable
-        narrowed={isFilterActive(filter, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         columns={columns}
         rows={pool}
         loading={loading}
@@ -367,7 +362,7 @@ export default function AssignPage() {
         footerNote={
           picked.size > 0 ? <span className="font-medium text-primary">· เลือกไว้ {picked.size} งาน</span> : undefined
         }
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
+        server={{ ...server, total }}
       />
     </>
   );

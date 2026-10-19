@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { maxText, moneyField, trackingField } from './index';
 import { isFilled } from './job';
-import { PAYMENT_METHODS } from '@/data/mock';
+import { PAYMENT_METHODS } from '@/data/options';
 import { noRight } from '@/lib/modules';
 
 export { cleanTracking, trackingField } from './index'; // shared with job reception / return tracking

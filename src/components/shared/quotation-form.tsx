@@ -1,21 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { Plus, Trash2, FileText, UserRound, Wrench, Calculator } from 'lucide-react';
+import { Plus, Calculator } from 'lucide-react';
 import { Section } from './section';
-import { CustomerSelect } from './customer-select';
-import { ProductPicker, type ExtraItem } from './product-picker';
-import { ProfileSelect } from './profile-select';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
-import { Input, Textarea, NumberInput, Select } from '@/components/ui/input';
-import { SearchSelect, strOptions, withCurrent } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
-import { useApi, useProducts, useQuotationStatuses } from '@/data/db';
-import { QUOTATION_STATUS_OPTIONS, type Customer } from '@/data/mock';
-import { baht } from '@/lib/utils';
+import { useApi } from '@/data/db';
+import { QUOTATION_STATUS_OPTIONS } from '@/data/options';
+import type { Customer } from '@/data/types';
 import { api, errMsg, qs } from '@/lib/api';
 import type { JobDetail } from '@/lib/use-job';
 import { quoteJobNote } from '@/lib/quote-job';
@@ -24,15 +16,15 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { computeTotals, parseDiscount, quotationSchema, quotedParts } from '@/lib/validation/quotation';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
-
-type Line = {
-  id: number;
-  code: string;
-  name: string;
-  qty: number;
-  price: number;
-  itemType: 'SparePart' | 'Service' | 'Delivery';
-};
+import {
+  QuotationCustomerSection,
+  QuotationDeviceSection,
+  QuotationInfoSection,
+  QuotationTypeSection,
+} from '@/components/quotation/header-sections';
+import { QuotationLineTable } from '@/components/quotation/line-items';
+import { type QuotationLine as Line, lineTotals } from '@/components/quotation/line-totals';
+import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/totals';
 
 /** Shape returned by GET /api/quotations/:no (subset the form uses). */
 export type QuotationLoaded = {
@@ -105,9 +97,6 @@ export const QUOTATION_TONE: Record<string, 'info' | 'warning' | 'success' | 'da
   ยกเลิกใบเสนอราคา: 'neutral',
 };
 
-/** non-stock line the quotation may carry (legacy SVD0001 = delivery charge, kept out of spare_part_amount) */
-const DELIVERY_EXTRA: ExtraItem[] = [{ code: 'SVD0001', name: 'ค่าขนส่ง' }];
-
 export const QuotationForm = React.forwardRef<
   QuotationFormHandle,
   {
@@ -120,7 +109,6 @@ export const QuotationForm = React.forwardRef<
 >(function QuotationForm({ mode, quotationNo, initial, jobNo }, ref) {
   const { push } = useToast();
   const fe = useFormErrors();
-  const { data: PRODUCTS } = useProducts();
   // an existing quotation fills the form when it mounts — the edit page remounts the form (key) for
   // every quotation it loads or saves, so this is the one place the form takes `initial`
   const [type, setType] = React.useState<'A' | 'B'>(() =>
@@ -146,7 +134,6 @@ export const QuotationForm = React.forwardRef<
   const [vatRate, setVatRate] = React.useState(initial?.vatRate ?? 0);
   const [remark, setRemark] = React.useState(initial?.remark ?? '');
   const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
-  const { data: STATUSES } = useQuotationStatuses();
   const [customer, setCustomer] = React.useState<Customer | null>(initial?.customerDetail ?? null);
   const [contact, setContact] = React.useState(initial?.contactName ?? '');
   const [jobRef, setJobRef] = React.useState(initial?.jobRef ?? '');
@@ -234,11 +221,7 @@ export const QuotationForm = React.forwardRef<
   const add = () =>
     setLines((s) => [...s, { id: ++idRef.current + 100, code: '', name: '', qty: 1, price: 0, itemType: 'SparePart' }]);
 
-  const upd = (id: number, patch: Partial<Line>) =>
-    setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
-
-  const partsTotal = lines.filter((l) => l.itemType !== 'Delivery').reduce((s, l) => s + l.qty * l.price, 0);
-  const deliveryTotal = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.qty * l.price, 0);
+  const { parts: partsTotal, delivery: deliveryTotal } = lineTotals(lines);
   // the server's own rules (stored amounts = what the print shows)
   const t = computeTotals({
     parts: partsTotal,
@@ -295,159 +278,42 @@ export const QuotationForm = React.forwardRef<
 
   return (
     <>
-      <Section
-        title="ประเภทใบเสนอราคา"
-        icon={FileText}
-        actions={<Badge tone="primary">{type === 'A' ? 'Type A (Normal)' : 'Type B (VIP)'}</Badge>}
-      >
-        <div className="mb-3 sm:max-w-md">
-          <ProfileSelect
-            value={profileId}
-            onChange={(id, how) => {
-              setProfileId(id);
-              if (how !== 'user') setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
-            }}
-            doc={initial?.no || quotationNo ? { kind: 'quotation', no: initial?.no || quotationNo || '' } : undefined}
-          />
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {(['A', 'B'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                setType(t);
-                // a new quotation from a job: switching A ↔ B quotes that set's parts instead
-                if (mode === 'new' && job && t !== type) fillQuoted(job, t);
-              }}
-              className={
-                'flex-1 rounded-lg border px-4 py-3 text-left transition-colors ' +
-                (type === t ? 'border-primary bg-primary-soft' : 'border-border bg-card hover:border-input')
-              }
-            >
-              <p className={'text-sm font-medium ' + (type === t ? 'text-primary' : '')}>
-                {t === 'A' ? 'Type A (Normal)' : 'Type B (VIP)'}
-              </p>
-              <p className="mt-0.5 text-2xs text-muted-foreground">
-                {t === 'A' ? 'ราคามาตรฐานสำหรับลูกค้าทั่วไป' : 'ราคาพิเศษสำหรับลูกค้า VIP / คู่ค้า'}
-              </p>
-            </button>
-          ))}
-        </div>
-      </Section>
+      <QuotationTypeSection
+        type={type}
+        onType={(t) => {
+          setType(t);
+          // a new quotation from a job: switching A ↔ B quotes that set's parts instead
+          if (mode === 'new' && job && t !== type) fillQuoted(job, t);
+        }}
+        profileId={profileId}
+        onProfile={(id, how) => {
+          setProfileId(id);
+          if (how !== 'user') setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
+        }}
+        docNo={initial?.no || quotationNo}
+      />
 
-      <Section
-        title="ข้อมูลลูกค้า"
-        icon={UserRound}
-        description={
-          customer ? 'ข้อมูลกลางจากตารางลูกค้า (อ่านอย่างเดียว)' : 'เลือก ลูกค้าเดิม เพื่อค้นหา หรือ ลูกค้าใหม่'
-        }
-      >
-        <Field error={fe.errors.customerCode}>
-          <CustomerSelect value={customer} onChange={setCustomer} />
-        </Field>
-        <FieldGrid className="mt-4">
-          <Field label="ชื่อผู้ติดต่อ" className="lg:col-span-2" error={fe.errors.contactName}>
-            <Input maxLength={100} value={contact} onChange={(e) => setContact(e.target.value)} />
-          </Field>
-        </FieldGrid>
-      </Section>
+      <QuotationCustomerSection
+        customer={customer}
+        setCustomer={setCustomer}
+        contact={contact}
+        setContact={setContact}
+        errors={fe.errors}
+      />
 
-      <Section title="ข้อมูลใบเสนอราคา" icon={FileText}>
-        <FieldGrid>
-          <Field label="หมายเลขใบเสนอราคา">
-            <ReadOnly>
-              <span className="num">{quotationNo ?? initial?.no ?? (mode === 'new' ? 'Generate Auto' : '—')}</span>
-            </ReadOnly>
-          </Field>
-          <Field label="วันที่">
-            <ReadOnly>
-              <span className="num">{date || (openedAt ? isoDateTime(openedAt) : '')} น.</span>
-            </ReadOnly>
-          </Field>
-          <Field
-            label="อ้างถึง หมายเลขงานซ่อม"
-            required={mode === 'new' || !!initial?.jobRef?.trim()}
-            error={fe.errors.jobNo}
-          >
-            <div className="flex items-center gap-2">
-              <Input
-                className="num"
-                placeholder="J2612164"
-                maxLength={8}
-                value={jobRef}
-                onChange={(e) => setJobRef(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && loadJob(jobRef, lines.length === 0)}
-                onBlur={() => jobRef && jobRef.toUpperCase() !== job?.no && loadJob(jobRef, lines.length === 0)}
-              />
-              {mode === 'edit' && job?.no && (
-                <Link
-                  href={`/jobs/edit?job=${encodeURIComponent(job.no)}`}
-                  className="shrink-0 text-xs text-primary hover:underline"
-                >
-                  เปิดงาน
-                </Link>
-              )}
-            </div>
-          </Field>
-          <Field label="สถานะงานซ่อม (ปัจจุบัน)">
-            <ReadOnly>
-              <Badge tone="warning" dot>
-                {job?.status ?? '—'}
-              </Badge>
-            </ReadOnly>
-          </Field>
-        </FieldGrid>
-      </Section>
+      <QuotationInfoSection
+        no={quotationNo ?? initial?.no ?? (mode === 'new' ? 'Generate Auto' : '—')}
+        date={date || (openedAt ? isoDateTime(openedAt) : '')}
+        jobRef={jobRef}
+        setJobRef={setJobRef}
+        jobRequired={mode === 'new' || !!initial?.jobRef?.trim()}
+        jobError={fe.errors.jobNo}
+        onLoadJob={() => loadJob(jobRef, lines.length === 0)}
+        job={job}
+        linkJob={mode === 'edit'}
+      />
 
-      <Section title="ข้อมูลเครื่องซ่อม" icon={Wrench}>
-        <FieldGrid>
-          <Field label="เลขคำสั่งซื้อ">
-            <Input className="num" value={job?.so ?? ''} readOnly />
-          </Field>
-          <Field label="หมายเลขอ้างอิง (เลขพัสดุ)">
-            <Input className="num" value={job?.receptionTrackingNo ?? ''} readOnly />
-          </Field>
-          <Field label="เปิดงานวันที่">
-            <Input value={job?.createDate ?? ''} readOnly className="num" />
-          </Field>
-          <Field label="IMEI No.">
-            <Input className="num" value={job?.imei ?? ''} readOnly />
-          </Field>
-          <Field label="ประเภทเครื่องซ่อม">
-            <Input value={job?.productType ?? ''} readOnly />
-          </Field>
-          <Field label="ยี่ห้อ">
-            <Input value={job?.brand ?? ''} readOnly />
-          </Field>
-          <Field label="รุ่น">
-            <Input value={job ? [job.modelCode, job.modelName].filter(Boolean).join(' — ') : ''} readOnly />
-          </Field>
-          <Field label="Warranty">
-            <Input
-              value={
-                job?.warranty === 'IN'
-                  ? 'In Warranty'
-                  : job?.warranty === 'OUT'
-                    ? 'Out Warranty'
-                    : (job?.warranty ?? '')
-              }
-              readOnly
-            />
-          </Field>
-          <Field label="อาการเสีย (มาตรฐาน)" className="lg:col-span-2">
-            <Textarea rows={2} value={job?.symptoms.join(', ') ?? ''} readOnly />
-          </Field>
-          <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-            <Textarea rows={2} value={job?.symptomOther ?? ''} readOnly />
-          </Field>
-          <Field label="จุดตำหนิ" className="lg:col-span-2">
-            <Textarea rows={2} value={job?.fault ?? ''} readOnly />
-          </Field>
-          <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2">
-            <Textarea rows={2} value={job?.equipment ?? ''} readOnly />
-          </Field>
-        </FieldGrid>
-      </Section>
+      <QuotationDeviceSection job={job} />
 
       <Section
         title="รายการอะไหล่และบริการ"
@@ -460,234 +326,48 @@ export const QuotationForm = React.forwardRef<
         }
         bodyClassName="p-0"
       >
-        <div className="table-scroll rounded-none">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 px-3 py-2 text-left">#</th>
-                <th className="w-72 px-3 py-2 text-left">รหัสอะไหล่ / ชื่อ</th>
-                <th className="px-3 py-2 text-left">รายละเอียด</th>
-                <th className="w-20 px-3 py-2 text-right">จำนวน</th>
-                <th className="w-28 px-3 py-2 text-right">ราคา/หน่วย</th>
-                <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
-                <th className="w-16 px-3 py-2 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    ยังไม่มีรายการ
-                  </td>
-                </tr>
-              ) : (
-                lines.map((l, i) => (
-                  <tr key={l.id} className="border-b border-border/70 last:border-0">
-                    <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
-                    <td className="px-3 py-2">
-                      <ProductPicker
-                        products={PRODUCTS}
-                        value={l.code}
-                        fallbackName={l.name}
-                        extras={DELIVERY_EXTRA}
-                        size="sm"
-                        onPick={(p) =>
-                          upd(l.id, {
-                            code: p?.code ?? '',
-                            name: p ? p.name : l.name,
-                            price: p && p.price !== undefined ? p.price : l.price,
-                            itemType: p?.code === 'SVD0001' ? 'Delivery' : 'SparePart',
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Input
-                        aria-invalid={!!fe.errors[`lines.${i}.detail`] || undefined}
-                        maxLength={100}
-                        value={l.name}
-                        onChange={(e) => {
-                          upd(l.id, { name: e.target.value });
-                          fe.clear(`lines.${i}.detail`);
-                        }}
-                        className="h-8 text-xs"
-                        placeholder="รายละเอียดรายการ"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <NumberInput
-                        aria-label={`จำนวน แถว ${i + 1}`}
-                        aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
-                        min={1}
-                        max={9999}
-                        step={1}
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={l.qty}
-                        onChange={(n) => {
-                          upd(l.id, { qty: n });
-                          fe.clear(`lines.${i}.qty`);
-                        }}
-                        className="h-8 text-xs"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <NumberInput
-                        aria-label={`ราคา/หน่วย แถว ${i + 1}`}
-                        aria-invalid={!!fe.errors[`lines.${i}.unitPrice`] || undefined}
-                        step="0.01"
-                        showZero={!!initial}
-                        value={l.price}
-                        onChange={(n) => {
-                          upd(l.id, { price: n });
-                          fe.clear(`lines.${i}.unitPrice`);
-                        }}
-                        className="h-8 text-xs"
-                      />
-                    </td>
-                    <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                        aria-label="ลบ"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <QuotationLineTable
+          lines={lines}
+          setLines={setLines}
+          errors={fe.errors}
+          clear={fe.clear}
+          showZero={!!initial}
+        />
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
-          <FieldGrid cols={2}>
-            <Field label="หมายเหตุ" wide error={fe.errors.remark}>
-              <Textarea
-                rows={4}
-                maxLength={1000}
-                placeholder="เงื่อนไขการเสนอราคา ระยะเวลายืนราคา ฯลฯ"
-                value={remark}
-                onChange={(e) => setRemark(e.target.value)}
-              />
-            </Field>
-            {/* a new sent / agreed status moves the job forward only — say so when this job stays where it is */}
-            <Field label="สถานะใบเสนอราคา" wide hint={jobNoteOf(status) || undefined}>
-              <SearchSelect
-                value={status}
-                onChange={(v) => {
-                  setStatus(v);
-                  const note = jobNoteOf(v);
-                  if (note) push({ kind: 'info', title: 'บันทึกได้ แต่สถานะงานจะไม่เปลี่ยน', desc: note });
-                }}
-                options={withCurrent(
-                  strOptions(STATUSES.length ? STATUSES.map((x) => x.name) : QUOTATION_STATUS_OPTIONS),
-                  status,
-                )}
-              />
-            </Field>
-            {initial && (
-              <>
-                {/* quotation_hd.customer_approve_date — stamped by the server the first time the customer agrees */}
-                <Field label="วันที่ลูกค้าตอบรับ">
-                  <Input readOnly className="num" value={initial.approveDate || '—'} />
-                </Field>
-                <Field label="สร้างโดย">
-                  <Input readOnly value={initial.createdBy || '—'} />
-                </Field>
-              </>
-            )}
-          </FieldGrid>
+          <QuotationStatusFields
+            remark={remark}
+            setRemark={setRemark}
+            status={status}
+            onStatus={(v) => {
+              setStatus(v);
+              const note = jobNoteOf(v);
+              if (note) push({ kind: 'info', title: 'บันทึกได้ แต่สถานะงานจะไม่เปลี่ยน', desc: note });
+            }}
+            jobNote={jobNoteOf(status)}
+            loaded={initial}
+            errors={fe.errors}
+          />
 
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <dl className="space-y-2 text-sm">
-              <Row label="รวมค่าอะไหล่" value={baht(partsTotal)} />
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">ค่าบริการ</dt>
-                <NumberInput
-                  aria-label="ค่าบริการ"
-                  aria-invalid={!!fe.errors.serviceAmount || undefined}
-                  step="0.01"
-                  showZero={!!initial}
-                  value={service}
-                  onChange={(n) => {
-                    setService(n);
-                    fe.clear('serviceAmount');
-                  }}
-                  className="h-8 w-32 text-xs"
-                />
-              </div>
-              {deliveryTotal > 0 && <Row label="ค่าขนส่ง" value={baht(deliveryTotal)} />}
-              <Row label="รวมเป็นเงิน" value={baht(t.sumExclude)} />
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">{discountType === 'ส่วนลดรวม' ? 'ส่วนลด' : discountType}</dt>
-                <div className="flex gap-1">
-                  <NumberInput
-                    aria-label={`ส่วนลด (${discountUnit})`}
-                    aria-invalid={!!fe.errors.discountValue || undefined}
-                    step="0.01"
-                    placeholder="0"
-                    showZero={!!initial}
-                    value={discount}
-                    onChange={(n) => {
-                      setDiscount(n);
-                      fe.clear('discountValue');
-                    }}
-                    className="h-8 w-24 text-xs"
-                  />
-                  <Select
-                    aria-label="หน่วยส่วนลด"
-                    value={discountUnit}
-                    onChange={(e) => {
-                      setDiscountUnit(e.target.value === 'บาท' ? 'บาท' : '%');
-                      fe.clear('discountValue');
-                    }}
-                    className="h-8 w-20 text-xs"
-                  >
-                    <option value="%">%</option>
-                    <option value="บาท">บาท</option>
-                  </Select>
-                </div>
-              </div>
-              <Row label="ส่วนลดเป็นเงิน" value={baht(t.discount)} />
-              <Row label="มูลค่าก่อนภาษี" value={baht(t.totalBase)} />
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
-                {/* 0 or 7 % only (quotation_hd.vat_rate) — a free number let 5 % through */}
-                <Select
-                  aria-label="ภาษีมูลค่าเพิ่ม (%)"
-                  aria-invalid={!!fe.errors.vatRate || undefined}
-                  value={String(vatRate)}
-                  onChange={(e) => {
-                    setVatRate(Number(e.target.value));
-                    fe.clear('vatRate');
-                  }}
-                  className="h-8 w-32 text-xs"
-                >
-                  <option value="0">0</option>
-                  <option value="7">7</option>
-                </Select>
-              </div>
-              <Row label="ภาษีมูลค่าเพิ่ม" value={baht(t.vat)} />
-              <div className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">
-                <dt>รวมเป็นเงินสุทธิ</dt>
-                <dd className="num text-primary">{baht(t.net)} ฿</dd>
-              </div>
-            </dl>
-          </div>
+          <QuotationSummary
+            partsTotal={partsTotal}
+            deliveryTotal={deliveryTotal}
+            t={t}
+            service={service}
+            setService={setService}
+            discountType={discountType}
+            discount={discount}
+            setDiscount={setDiscount}
+            discountUnit={discountUnit}
+            setDiscountUnit={setDiscountUnit}
+            vatRate={vatRate}
+            setVatRate={setVatRate}
+            errors={fe.errors}
+            clear={fe.clear}
+            showZero={!!initial}
+          />
         </div>
       </Section>
     </>
   );
 });
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="num">{value}</dd>
-    </div>
-  );
-}

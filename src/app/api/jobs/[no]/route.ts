@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseBody, parseParams, requireCan, requireView, JOB_MODULES } from '@/server/auth';
 import { jobGet, jobUpdate } from '@/server/contract/jobs';
-import { getJob, jobNotFound, updateJob, type JobInput } from '@/server/services/jobs';
+import { getJob, jobNotFound, updateJob } from '@/server/services/jobs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,6 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, jobUpdate);
   const body = await parseBody(req, jobUpdate);
-  // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
-  const job = await updateJob(decodeURIComponent(no), body as JobInput, user.userId);
+  const job = await updateJob(decodeURIComponent(no), body, user.userId);
   return NextResponse.json({ ok: true, job });
 });

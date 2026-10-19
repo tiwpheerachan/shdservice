@@ -2,7 +2,7 @@
 // They call the drizzle-backed services directly (no HTTP round-trip). A DB error throws on purpose:
 // the page shows (app)/error.tsx instead of an empty list an admin might "fill in" again.
 
-import type { MasterRow, Symptom } from './mock';
+import type { MasterRow, Symptom } from './types';
 
 export type Order = { column: string; ascending?: boolean };
 

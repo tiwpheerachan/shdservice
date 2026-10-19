@@ -8,15 +8,16 @@ import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect } from '@/components/shared/search-select';
 import { RowActions } from '@/components/shared/row-actions';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
-import { type SaleOrder } from '@/data/mock';
+import type { SaleOrder } from '@/data/types';
 import { SO_TONE as TONE } from '@/components/shared/sale-order-form';
 import { useSaleOrdersPage, useStaff } from '@/data/db';
-import { baht, isFilterActive } from '@/lib/utils';
+import { baht } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
 import { ExportButton } from '@/components/shared/export-button';
@@ -27,10 +28,9 @@ const WAITING = 'รออนุมัติ'; // approve_status 2 (its approve_
 
 function SaleOrderList() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/sale/orders');
-  const { data: USERS } = useStaff('sales');
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  const { data: USERS, ...staffLookup } = useStaff('sales');
+  const { draft, setDraft, setD, filters, setFilters, apply, reset, narrowed, table, pageArgs, server } =
+    useServerTable(NO_FILTER);
   const showWaiting = () => {
     setDraft((f) => ({ ...f, approve: WAITING }));
     setFilters((f) => ({ ...f, approve: WAITING }));
@@ -43,7 +43,6 @@ function SaleOrderList() {
     setPendingSeen(pending);
     if (pending) showWaiting();
   }
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   const {
     rows: SALE_ORDERS,
     total,
@@ -51,14 +50,10 @@ function SaleOrderList() {
     error: loadError,
     refetch: retryLoad,
   } = useSaleOrdersPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
+    ...pageArgs,
     no: filters.no,
     customer: filters.customer,
     code: filters.code,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
     from: filters.from,
     to: filters.to,
     sales: filters.sales,
@@ -136,11 +131,6 @@ function SaleOrderList() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilters(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -177,12 +167,7 @@ function SaleOrderList() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilters(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="เลขใบสั่งขาย (SO)">
           <Input
             className="num"
@@ -203,7 +188,7 @@ function SaleOrderList() {
         <Field label="รหัสอะไหล่-อุปกรณ์เสริม">
           <Input className="num" value={draft.code} onChange={(e) => setD('code', e.target.value)} />
         </Field>
-        <Field label="พนักงานขาย">
+        <Field label="พนักงานขาย" lookup={staffLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -224,8 +209,8 @@ function SaleOrderList() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filters, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={SALE_ORDERS}
@@ -233,7 +218,7 @@ function SaleOrderList() {
         error={loadError}
         onRetry={retryLoad}
         rowKey={(r) => r.no}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        server={{ ...server, total }}
       />
     </>
   );

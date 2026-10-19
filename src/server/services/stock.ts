@@ -37,7 +37,7 @@ import {
   saleOutHd,
   storeLocation,
 } from '@/db/schema';
-import type { Movement, Product } from '@/data/mock';
+import type { Movement, Product } from '@/data/types';
 import { HttpError, fullName, hasRight, type CurrentUser } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
@@ -48,6 +48,8 @@ import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode 
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { assertValid } from '@/server/validate';
+import type { z } from 'zod';
+import type { productSave } from '@/server/contract/stock';
 import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
 import { clean, cleanCode, summary } from '@/lib/validation';
 
@@ -155,9 +157,16 @@ const nameLike = (t: string) =>
     ilike(product.productNameEn, likeTerm(t)),
     ilike(product.productNameCn, likeTerm(t)),
   );
-/** free-text search of every product list / picker: system code, vendor part no or any of the names */
+/** free-text search of every product list / picker: system code, vendor part no, any of the names, brand or
+ *  category (the picker types "Dreame" or "มอเตอร์") — every caller joins category + manufacturer */
 const productSearch = (t: string) =>
-  or(ilike(product.productCode, likeTerm(t)), ilike(product.productVenderCode, likeTerm(t)), nameLike(t));
+  or(
+    ilike(product.productCode, likeTerm(t)),
+    ilike(product.productVenderCode, likeTerm(t)),
+    nameLike(t),
+    ilike(manufacturer.manufacturerName, likeTerm(t)),
+    ilike(category.categoryName, likeTerm(t)),
+  );
 
 export async function listProducts(opts: { deleted?: DeletedMode; q?: string } = {}): Promise<Product[]> {
   const { deleted = 'exclude', q = '' } = opts;
@@ -218,25 +227,8 @@ export async function getProduct(code: string): Promise<(Product & { models: str
   };
 }
 
-export type ProductInput = {
-  sysCode?: string;
-  mfgCode?: string;
-  name: string;
-  nameEn?: string;
-  nameCn?: string;
-  description?: string;
-  category?: string;
-  brand?: string;
-  price?: number | string;
-  capitalPrice?: number | string;
-  wholesalePrice?: number | string;
-  status?: string;
-  ubRepairOnly?: boolean;
-  forModelColor?: string;
-  models?: string[];
-  /** `version` from getProduct as the edit form loaded it: another save since → 409; absent = no check */
-  version?: number | string;
-};
+/** the parsed body of POST /api/products (productSave in src/server/contract/stock.ts) */
+export type ProductInput = z.output<typeof productSave.body>;
 
 export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
   // an unchanged legacy vendor code still saves ("never worse"); a new / changed one must be clean
@@ -1494,7 +1486,8 @@ export type ProductLite = Pick<
   'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'status' | 'category' | 'brand'
 >;
 export function listProductsLite(q = ''): Promise<ProductLite[]> {
-  // every form with a part picker loads the whole catalog — memo it; productsChanged() drops it
+  // no term = the whole catalog (stock receive / pick grids); with a term = the picker's server search.
+  // Both memoised; productsChanged() drops every key.
   const term = q.trim();
   return cached(`master:products:lite:${term}`, TTL_MASTER, () => loadProductsLite(term));
 }

@@ -1,4 +1,6 @@
 import 'server-only';
+import type { z } from 'zod';
+import type { documentProfileSave } from '@/server/contract/admin';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { asc, eq, ne, and, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -176,24 +178,8 @@ export async function deleteDocumentProfile(id: number, byUserId: number): Promi
   invalidate('docprofiles:');
 }
 
-export type DocumentProfileInput = {
-  id?: number;
-  code: string;
-  nameTh: string;
-  nameEn?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  phone?: string;
-  email?: string;
-  taxId?: string;
-  bankName?: string;
-  bankAccountType?: string;
-  bankAccountNo?: string;
-  bankAccountName?: string;
-  isDefault?: boolean;
-  isActive?: boolean;
-  sortOrder?: number;
-};
+/** the parsed body of the save route (documentProfileSave in src/server/contract/admin.ts) */
+export type DocumentProfileInput = z.output<typeof documentProfileSave.body>;
 
 /** document-type prefixes are system-wide (see db/running-no.ts) — stored on the row only because the columns are NOT NULL */
 const SYSTEM_PREFIXES = { prefixJob: 'J', prefixQuotation: 'Q', prefixSaleOrder: 'SO' } as const;

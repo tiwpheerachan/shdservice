@@ -1,4 +1,6 @@
 import 'server-only';
+import type { z } from 'zod';
+import type { shippingProfileSave } from '@/server/contract/admin';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { shippingProfile } from '@/db/schema';
@@ -68,15 +70,8 @@ export function trackUrlFor(profile: Pick<ShippingProfile, 'trackUrl'> | null, t
   return profile.trackUrl.replace(/\{no\}/gi, encodeURIComponent(no));
 }
 
-export type ShippingProfileInput = {
-  id?: number;
-  code: string;
-  nameTh: string;
-  nameEn?: string;
-  trackUrl?: string;
-  isActive?: boolean;
-  sortOrder?: number;
-};
+/** the parsed body of the save route (shippingProfileSave in src/server/contract/admin.ts) */
+export type ShippingProfileInput = z.output<typeof shippingProfileSave.body>;
 
 export async function saveShippingProfile(i: ShippingProfileInput, byUserId: number): Promise<ShippingProfile> {
   assertValid(shippingProfileSchema, i); // same rules as the page: errors under code / nameTh / trackUrl (≤ 300)

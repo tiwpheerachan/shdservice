@@ -6,48 +6,34 @@ import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { RowActions } from '@/components/shared/row-actions';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { type Model } from '@/data/mock';
+import type { Model } from '@/data/types';
 import { useModelsPage, useManufacturers } from '@/data/db';
-import { baht, isFilterActive } from '@/lib/utils';
+import { baht } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { modelSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
 
 type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
+// filter bar (applied on ค้นหา) — same params go to the table query and the Excel export
+type ModelFilter = { brand: string; code: string; name: string; status: '' | 'Active' | 'Inactive' };
+const NO_FILTER: ModelFilter = { brand: '', code: '', name: '', status: '' };
 
 export default function ModelsPage() {
   const { push } = useToast();
   // 1.1k models — server-side paging/search (ACTIVE + INACTIVE, DELETED hidden)
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  // filter bar (applied on ค้นหา) — same params go to the table query and the Excel export
-  type ModelFilter = { brand: string; code: string; name: string; status: '' | 'Active' | 'Inactive' };
-  const NO_FILTER: ModelFilter = { brand: '', code: '', name: '', status: '' };
-  const [draft, setDraft] = React.useState<ModelFilter>(NO_FILTER);
-  const [filter, setFilter] = React.useState<ModelFilter>(NO_FILTER);
-  const {
-    rows: MODELS,
-    total,
-    loading,
-    refetch,
-    error: loadError,
-  } = useModelsPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-    ...filter,
-  });
-  const { data: MANUFACTURERS } = useManufacturers();
-  const { data: ALL_BRANDS } = useManufacturers('exclude'); // filter: INACTIVE brands still own models
+  const { draft, setDraft, filters: filter, apply, reset, narrowed, pageArgs, server } = useServerTable(NO_FILTER);
+  const { rows: MODELS, total, loading, refetch, error: loadError } = useModelsPage({ ...pageArgs, ...filter });
+  const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
+  const { data: ALL_BRANDS, ...allBrandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own models
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Model | null>(null);
   const [viewOnly, setViewOnly] = React.useState(false);
@@ -150,11 +136,6 @@ export default function ModelsPage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilter(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -171,13 +152,8 @@ export default function ModelsPage() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilter(draft);
-        }}
-        onReset={resetFilters}
-      >
-        <Field label="ยี่ห้อผู้ผลิต">
+      <FilterBar onSearch={apply} onReset={reset}>
+        <Field label="ยี่ห้อผู้ผลิต" lookup={allBrandsLookup}>
           <SearchSelect
             value={draft.brand}
             onChange={(v) => setDraft((f) => ({ ...f, brand: v }))}
@@ -215,8 +191,8 @@ export default function ModelsPage() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filter, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={MODELS}
@@ -224,7 +200,7 @@ export default function ModelsPage() {
         error={loadError}
         onRetry={refetch}
         rowKey={(r) => r.code}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
+        server={{ ...server, total }}
       />
 
       <Modal
@@ -253,7 +229,7 @@ export default function ModelsPage() {
             <Field label="Model Name" required error={fe.errors.name} hint={`${form.name.length}/50 ตัวอักษร`}>
               <Input value={form.name} maxLength={50} onChange={(e) => set('name', e.target.value)} />
             </Field>
-            <Field label="ยี่ห้อ" required error={fe.errors.brand}>
+            <Field label="ยี่ห้อ" required error={fe.errors.brand} lookup={brandsLookup}>
               <SearchSelect
                 value={form.brand}
                 onChange={(v) => set('brand', v)}

@@ -22,8 +22,9 @@ import { Customer, QuotationDetail, SaleOrderDetail } from './shapes';
 const s = z.string();
 const n = z.number();
 const money = z.union([s, n]);
-const sn = s.nullish();
-const nn = n.nullish();
+/** a field the pages always send as text / a number (never null) */
+const optText = s.optional();
+const optNum = n.optional();
 
 /**
  * saleOrderSchema(prev)'s fields without a stored order: the payment type and parcel no are checked
@@ -42,20 +43,20 @@ export const customerSave = defineOperation({
   invalid: IDEMPOTENCY.invalid,
   body: customerFields
     .extend({
-      code: sn.meta({ description: 'Set = edit that customer.' }),
-      name: sn,
-      taxId: sn,
-      type: sn.meta({ description: '`Normal` = a person.' }),
-      online: z.boolean().nullish(),
-      cityId: nn,
-      districtId: nn,
-      subDistrictId: nn,
-      postalCode: sn,
-      phone: sn,
-      email: sn,
-      line: sn,
-      priceGroup: sn,
-      status: sn,
+      code: optText.meta({ description: 'Set = edit that customer.' }),
+      name: optText,
+      taxId: optText,
+      type: optText.meta({ description: '`Normal` = a person.' }),
+      online: z.boolean().optional(),
+      cityId: optNum,
+      districtId: optNum,
+      subDistrictId: optNum,
+      postalCode: optText,
+      phone: optText,
+      email: optText,
+      line: optText,
+      priceGroup: optText,
+      status: optText,
       version,
     })
     .meta({ id: 'CustomerInput' }),
@@ -108,26 +109,26 @@ export const quotationSave = defineOperation({
   invalid: IDEMPOTENCY.invalid,
   body: quotationFields
     .extend({
-      no: sn.meta({ description: 'Set = edit that quotation.' }),
-      documentProfileId: nn,
-      type: sn,
-      customerCode: sn,
-      jobNo: sn,
+      no: optText.meta({ description: 'Set = edit that quotation.' }),
+      documentProfileId: optNum,
+      type: optText,
+      customerCode: optText,
+      jobNo: optText,
       lines: z
         .array(
           quotationLine.extend({
-            id: nn,
-            itemType: sn.meta({ description: '`SparePart` | `Service` | `Delivery`' }),
-            code: sn,
-            unit: sn,
-            discount: money.nullish(),
-            discountPercent: money.nullish(),
+            id: optNum,
+            itemType: optText.meta({ description: '`SparePart` | `Service` | `Delivery`' }),
+            code: optText,
+            unit: optText,
+            discount: money.optional(),
+            discountPercent: money.optional(),
           }),
         )
         .optional(),
-      discountType: sn,
-      discountUnit: sn.meta({ description: '`บาท` or `%`' }),
-      status: sn,
+      discountType: optText,
+      discountUnit: optText.meta({ description: '`บาท` or `%`' }),
+      status: optText,
       version,
     })
     .meta({ id: 'QuotationInput' }),
@@ -173,15 +174,15 @@ export const saleOrderSave = defineOperation({
         .array(
           saleOrderFields.lines
             .unwrap()
-            .element.extend({ name: sn, type: sn.meta({ description: '`SparePart` | `Service`' }) }),
+            .element.extend({ name: optText, type: optText.meta({ description: '`SparePart` | `Service`' }) }),
         )
         .optional(),
-      paymentType: sn,
-      tracking: sn,
-      documentProfileId: nn,
-      no: sn.meta({ description: 'Set = edit that order.' }),
-      slip: sn,
-      submit: z.boolean().nullish(),
+      paymentType: optText,
+      tracking: optText,
+      documentProfileId: optNum,
+      no: optText.meta({ description: 'Set = edit that order.' }),
+      slip: optText,
+      submit: z.boolean().optional(),
       version,
     })
     .meta({ id: 'SaleOrderInput' }),

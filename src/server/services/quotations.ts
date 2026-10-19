@@ -6,7 +6,7 @@ import { db } from '@/db/client';
 import { QS } from '@/lib/status-ids';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
-import type { Quotation } from '@/data/mock';
+import type { Quotation } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
@@ -20,6 +20,8 @@ import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-
 import { computeTotals, quotationSchema } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
+import type { z } from 'zod';
+import type { quotationSave } from '@/server/contract/sales';
 
 /** quotation_status ids (from the dump) */
 export { QS };
@@ -291,26 +293,8 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   };
 }
 
-export type QuotationInput = {
-  no?: string;
-  /** ออกเอกสารในนาม (document_profile.id) — new quotations only; fixed once numbered */
-  documentProfileId?: number;
-  type?: string; // UI label or legacy value
-  customerCode: string;
-  contactName?: string;
-  jobNo?: string;
-  lines: Omit<QuotationLine, 'lineNumber' | 'total'>[];
-  serviceAmount?: number | string;
-  discountType?: string;
-  discountValue?: number | string; // number in บาท or %
-  discountUnit?: 'บาท' | '%';
-  vatRate?: number | string;
-  remark?: string;
-  status?: string; // name
-  approveRemark?: string;
-  /** row_version the edit page loaded: another save since → 409; absent = no check */
-  version?: number;
-};
+/** the parsed body of POST /api/quotations (quotationSave in src/server/contract/sales.ts) */
+export type QuotationInput = z.output<typeof quotationSave.body>;
 
 export async function saveQuotation(i: QuotationInput, byUserId: number): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one

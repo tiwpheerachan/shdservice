@@ -6,7 +6,8 @@ import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Textarea, Select, Radio } from '@/components/ui/input';
 import { SearchSelect } from './search-select';
 import { Button } from '@/components/ui/button';
-import { type Customer, CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/mock';
+import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/options';
+import type { Customer } from '@/data/types';
 import { TTL_MASTER, useApi, useProvinces } from '@/data/db';
 import { qs } from '@/lib/api';
 import type { FieldErrors } from '@/lib/validation';
@@ -81,20 +82,30 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
 
 /** cascading address lists (mt_city → mt_district → mt_sub_district) */
 export function useAddressLists(cityId: number, districtId: number) {
-  const { data: PROVINCES } = useProvinces();
+  const { data: PROVINCES, ...provinces } = useProvinces();
   // master data: read once, shared by every customer form (5 min cache like the other masters)
-  const { data: d } = useApi<{ rows: Opt[] }>(
+  const { data: d, ...dLoad } = useApi<{ rows: Opt[] }>(
     cityId > 0 ? `/api/address${qs({ level: 'district', city: cityId })}` : null,
     { ttl: TTL_MASTER },
   );
-  const { data: sd } = useApi<{ rows: Opt[] }>(
+  const { data: sd, ...sdLoad } = useApi<{ rows: Opt[] }>(
     districtId > 0 ? `/api/address${qs({ level: 'subdistrict', district: districtId })}` : null,
     { ttl: TTL_MASTER },
   );
   const districts = React.useMemo(() => (cityId > 0 ? (d?.rows ?? []) : []), [cityId, d]);
   const subDistricts = React.useMemo(() => (districtId > 0 ? (sd?.rows ?? []) : []), [districtId, sd]);
   // mt_city -1 is the legacy blank "not set" row — the placeholder row stands for it
-  return { PROVINCES: PROVINCES.filter((p) => p.id > 0), districts, subDistricts };
+  return {
+    PROVINCES: PROVINCES.filter((p) => p.id > 0),
+    districts,
+    subDistricts,
+    /** for each list's <Field lookup> — a failed load says so instead of an empty dropdown */
+    lookups: {
+      provinces,
+      districts: { error: dLoad.error, refetch: () => void dLoad.mutate() },
+      subDistricts: { error: sdLoad.error, refetch: () => void sdLoad.mutate() },
+    },
+  };
 }
 
 /** Server 409 payload when phone / email / tax id already belong to another customer. */
@@ -182,7 +193,7 @@ export function CustomerFields({
     setForm((f) => ({ ...f, [k]: v }));
     clearError?.(k);
   };
-  const { PROVINCES, districts, subDistricts } = useAddressLists(form.cityId, form.districtId);
+  const { PROVINCES, districts, subDistricts, lookups } = useAddressLists(form.cityId, form.districtId);
   // a hint only, never an error — the master's code is wrong for some ตำบล (Mueang Chiang Mai: all 50000)
   const postalHint = subDistricts.find((s) => s.id === form.subDistrictId)?.postal?.trim();
   return (
@@ -250,7 +261,7 @@ export function CustomerFields({
           placeholder="ซอย / ถนน"
         />
       </Field>
-      <Field label="จังหวัด">
+      <Field label="จังหวัด" lookup={lookups.provinces}>
         <SearchSelect
           value={form.cityId > 0 ? String(form.cityId) : ''}
           onChange={(v) => setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1 }))}
@@ -260,7 +271,7 @@ export function CustomerFields({
           searchPlaceholder="พิมพ์ชื่อจังหวัด…"
         />
       </Field>
-      <Field label="เขต / อำเภอ">
+      <Field label="เขต / อำเภอ" lookup={lookups.districts}>
         <SearchSelect
           value={form.districtId > 0 ? String(form.districtId) : ''}
           onChange={(v) => setForm((f) => ({ ...f, districtId: Number(v) || -1, subDistrictId: -1 }))}
@@ -269,7 +280,7 @@ export function CustomerFields({
           searchPlaceholder="พิมพ์ชื่อเขต / อำเภอ…"
         />
       </Field>
-      <Field label="แขวง / ตำบล">
+      <Field label="แขวง / ตำบล" lookup={lookups.subDistricts}>
         <SearchSelect
           value={form.subDistrictId > 0 ? String(form.subDistrictId) : ''}
           onChange={(v) => {

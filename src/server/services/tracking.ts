@@ -6,7 +6,7 @@ import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
 import { today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
-import type { Customer } from '@/data/mock';
+import type { Customer } from '@/data/types';
 import { JOB_GROUP, QS } from '@/lib/status-ids';
 import { JS, effectiveDueText, type JobDetail } from './jobs';
 import type { QuotationDetail } from './quotations';

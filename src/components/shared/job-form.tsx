@@ -4,29 +4,46 @@ import * as React from 'react';
 import { Search, UserRound, ClipboardList, PackageSearch, Coins, Paperclip, TriangleAlert, Lock } from 'lucide-react';
 import { Section } from './section';
 import { SymptomPicker } from './symptom-picker';
-import { ModelPicker } from './model-picker';
-import { SearchSelect, strOptions, withCurrent } from './search-select';
+import { SearchSelect, withCurrent } from './search-select';
 import { CustomerSelect } from './customer-select';
 import { ProfileSelect } from './profile-select';
 import { Attachments, type AttachmentsHandle } from './attachments';
+import {
+  BrandField,
+  ChannelField,
+  ExpireField,
+  ImeiField,
+  ModelDetailField,
+  ModelField,
+  NoteField,
+  ProductTypeField,
+  ReceptionDateField,
+  ReceptionTypeField,
+  SaleDateField,
+  SerialField,
+  ShipperField,
+  ShopPlainField,
+  ShopSuggestField,
+  SoField,
+  TrackingField,
+  WarrantyField,
+  WarrantyMonthField,
+} from '@/components/jobs/product-fields';
 import { Button } from '@/components/ui/button';
-import { Field, FieldGrid, LookupError, ReadOnly } from '@/components/ui/field';
-import { Input, Select, Textarea, Radio, Checkbox } from '@/components/ui/input';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Input, Checkbox } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm';
-import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS, type Customer } from '@/data/mock';
+import { RECEIVE_METHODS } from '@/data/options';
+import type { Customer } from '@/data/types';
 import {
   useJobTypes,
   useJobTypeDetails,
   useSymptomStats,
   useModelSymptoms,
-  useManufacturers,
   useModels,
-  useProductTypes,
   useSymptoms,
   useStaff,
-  useShopNames,
-  useShippingProfiles,
 } from '@/data/db';
 import { baht, cn } from '@/lib/utils';
 import { patchJson, isStale, errMsg } from '@/lib/api';
@@ -40,17 +57,15 @@ import {
   jobSchema,
   filledRequired,
   missingRequired,
-  isRequiredFor,
   jobBalance,
   JOB_FIELD_LABEL,
   MONEY_LOCKED,
-  NO_SERIAL,
   type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
 import type { FieldErrors } from '@/lib/validation';
 import { useMountTime } from '@/lib/use-client';
-import { isoDateTime, today } from '@/lib/dates';
+import { isoDateTime } from '@/lib/dates';
 import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
 
 /* ------------------------------------------------------------------ *
@@ -515,8 +530,8 @@ export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
 /** เปิดงานใหม่ / แก้ไขข้อมูลงาน — status is shown only; it changes through the workflow screens (บันทึกซ่อม / ปิดงาน …). */
 export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: string }) {
   const { s, set, adopt, errors } = useJobForm();
-  const { data: JOB_TYPES } = useJobTypes();
-  const { data: JOB_TYPE_DETAILS } = useJobTypeDetails();
+  const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
+  const { data: JOB_TYPE_DETAILS, ...typeDetailsLookup } = useJobTypeDetails();
   const { name: me } = useAccess();
   const shownStatus = s.status || status || 'งานใหม่';
   // a new job's "วันที่" preview: the moment the screen opened, Thai time (the server stamps the real one)
@@ -550,7 +565,7 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
             </Badge>
           </ReadOnly>
         </Field>
-        <Field label="ประเภทงานหลัก" required error={errors.jobType} className="lg:col-span-2">
+        <Field label="ประเภทงานหลัก" required error={errors.jobType} className="lg:col-span-2" lookup={jobTypesLookup}>
           <SearchSelect
             value={s.jobType}
             onChange={(v) => set('jobType', v)}
@@ -560,7 +575,7 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
             )}
           />
         </Field>
-        <Field label="งานย่อย" className="lg:col-span-2" error={errors.jobTypeDetail}>
+        <Field label="งานย่อย" className="lg:col-span-2" error={errors.jobTypeDetail} lookup={typeDetailsLookup}>
           {/* ค่าที่ใช้ในระบบเดิมทั้ง 24 ค่า (job.job_type_detail) เป็นรายการแนะนำ + พิมพ์ค่าใหม่ได้ */}
           <Input
             list="job-type-detail-options"
@@ -606,6 +621,13 @@ export function MainSymptomField() {
       required
       wide
       error={errors.symptoms}
+      lookup={{
+        error: listError,
+        refetch: () => {
+          retryStats();
+          retrySymptoms();
+        },
+      }}
       hint={
         symptoms.length
           ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก`
@@ -622,13 +644,6 @@ export function MainSymptomField() {
             ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}`
             : 'อาการที่พบบ่อย'
         }
-      />
-      <LookupError
-        error={listError}
-        onRetry={() => {
-          retryStats();
-          retrySymptoms();
-        }}
       />
     </Field>
   );
@@ -648,36 +663,8 @@ export function ProductSection({
   title?: string;
   variant?: 'full' | 'open' | 'repair';
 }) {
-  const { s, set, patch, errors, incomplete } = useJobForm();
-  const { data: PRODUCT_TYPES, error: typesError, refetch: retryTypes } = useProductTypes();
-  const { data: MANUFACTURERS, error: brandsError, refetch: retryBrands } = useManufacturers();
-  const { data: MODELS, error: modelsError, refetch: retryModels } = useModels();
-
-  // models of the chosen brand first (still allows any model)
-  const modelOptions = React.useMemo(() => {
-    const own = MODELS.filter((m) => !s.brand || m.brand === s.brand);
-    return own.length ? own : MODELS;
-  }, [MODELS, s.brand]);
-
-  // Warranty the user has not picked follows the expire date: today or later = IN, passed = OUT
-  const withExpire = (expireDate: string): Partial<JobFormState> =>
-    /^\d{4}-\d{2}-\d{2}$/.test(expireDate) && (!s.warranty || s.warrantyAuto)
-      ? { expireDate, warranty: expireDate >= today() ? 'IN' : 'OUT', warrantyAuto: true }
-      : { expireDate };
-  // expire date = sale order date + warranty months
-  const recalcExpire = (saleDate: string, months: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) return;
-    const m = Number(months) || 0;
-    const d = new Date(saleDate + 'T00:00:00');
-    d.setMonth(d.getMonth() + m);
-    const p = (n: number) => String(n).padStart(2, '0');
-    patch(withExpire(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`));
-  };
-  // walk-in (หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty
-  const needed = (k: JobRequiredKey) => isRequiredFor(k, s.channel);
-
-  const repair = variant === 'repair';
-  const noSerial = s.serial.trim() === NO_SERIAL;
+  const f = useJobForm();
+  const { incomplete } = f;
   // an old job saved before these fields were required: it can still be saved, but say what is missing
   const incompleteNotice = incomplete && incomplete.length > 0 && (
     <p
@@ -691,303 +678,75 @@ export function ProductSection({
       </span>
     </p>
   );
-  const open = variant === 'open';
-  const { data: SHOP_NAMES } = useShopNames();
-  const { data: SHIPPING_PROFILES } = useShippingProfiles();
-
-  const soField = (
-    <Field label="Sale Order No." required={needed('so')} error={errors.so}>
-      <Input
-        placeholder="SO2600760"
-        className="num"
-        maxLength={50}
-        value={s.so}
-        onChange={(e) => set('so', e.target.value)}
-      />
-    </Field>
-  );
-  const channelField = (
-    <Field label={repair ? 'Sale Channel' : 'Channel'} required error={errors.channel}>
-      <SearchSelect
-        value={s.channel}
-        onChange={(v) => set('channel', v)}
-        // "ยังไม่ระบุ" is the legacy "none" (counts as empty) — a legacy job still shows its own value
-        options={withCurrent(strOptions(CHANNELS.filter((c) => c !== 'ยังไม่ระบุ')), s.channel)}
-      />
-    </Field>
-  );
-  const saleDateField = (
-    <Field label="Sale Order Date" required={needed('saleOrderDate')} error={errors.saleOrderDate}>
-      <Input
-        type="date"
-        value={s.saleOrderDate}
-        onChange={(e) => {
-          set('saleOrderDate', e.target.value);
-          recalcExpire(e.target.value, s.warrantyMonth);
-        }}
-      />
-    </Field>
-  );
-  const warrantyMonthField = (
-    <Field label="รับประกัน (เดือน)" required error={errors.warrantyMonth}>
-      <Input
-        type="number"
-        min={0}
-        max={60}
-        inputMode="numeric"
-        value={s.warrantyMonth}
-        onChange={(e) => {
-          set('warrantyMonth', e.target.value);
-          recalcExpire(s.saleOrderDate, e.target.value);
-        }}
-        onFocus={(e) => e.currentTarget.select()}
-        className="num text-right"
-      />
-    </Field>
-  );
-  const expireField = (
-    <Field label="Expire Date" required={needed('expireDate')} error={errors.expireDate}>
-      <Input type="date" value={s.expireDate} onChange={(e) => patch(withExpire(e.target.value))} />
-    </Field>
-  );
-  const warrantyField = (
-    <Field label="Warranty" error={errors.warranty}>
-      <Select value={s.warranty} onChange={(e) => patch({ warranty: e.target.value, warrantyAuto: false })}>
-        <option value="">- - Please Select - -</option>
-        {WARRANTY_OPTIONS.map((w) => (
-          <option key={w}>{w}</option>
-        ))}
-      </Select>
-    </Field>
-  );
-  const imeiField = (
-    <Field label="Imei No." error={errors.imei}>
-      <Input
-        className="num"
-        inputMode="numeric"
-        maxLength={50}
-        placeholder="35xxxxxxxxxxxxx"
-        value={s.imei}
-        onChange={(e) => set('imei', e.target.value)}
-      />
-    </Field>
-  );
-  const serialField = (
-    <Field label="Serial No." required error={errors.serial}>
-      <Input
-        className="num"
-        maxLength={50}
-        placeholder={noSerial ? 'ไม่มี S/N / S/N เสียหาย' : 'SN-XXXXXXXX'}
-        value={noSerial ? '' : s.serial}
-        disabled={noSerial}
-        onChange={(e) => set('serial', e.target.value)}
-      />
-      {/* stored as the legacy "none" marker "-" (NO_SERIAL) — instead of typing a note into the serial */}
-      <label className="mt-1.5 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-        <Checkbox checked={noSerial} onChange={(e) => set('serial', e.target.checked ? NO_SERIAL : '')} />
-        ไม่มี S/N / S/N เสียหาย
-      </label>
-    </Field>
-  );
-  const brandField = (
-    <Field label="ยี่ห้อ" required error={errors.brand}>
-      <SearchSelect
-        value={s.brand}
-        onChange={(v) => set('brand', v)}
-        options={withCurrent(
-          MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })),
-          s.brand,
-        )}
-        searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
-      />
-      <LookupError error={brandsError} onRetry={retryBrands} />
-    </Field>
-  );
-  const modelField = (
-    <Field label="รุ่น" required error={errors.modelCode}>
-      <ModelPicker
-        models={modelOptions}
-        value={s.modelCode}
-        fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
-        onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
-      />
-      <LookupError error={modelsError} onRetry={retryModels} />
-    </Field>
-  );
-  const modelDetailField = (
-    <Field label="รุ่นย่อย (ถ้ามี)" error={errors.modelDetail}>
-      <Input maxLength={200} value={s.modelDetail} onChange={(e) => set('modelDetail', e.target.value)} />
-    </Field>
-  );
-  const equipmentField = (
-    <Field label="อุปกรณ์ (ที่นำส่ง)" className="lg:col-span-2" error={errors.equipment}>
-      <Textarea
-        rows={2}
+  // every layout ends with the same notes + symptoms
+  const notes = (
+    <>
+      <NoteField
+        f={f}
+        k="equipment"
+        label="อุปกรณ์ (ที่นำส่ง)"
         maxLength={100}
         placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง"
-        value={s.equipment}
-        onChange={(e) => set('equipment', e.target.value)}
       />
-    </Field>
-  );
-  const faultField = (
-    <Field label="จุดตำหนิ" className="lg:col-span-2" error={errors.fault}>
-      <Textarea
-        rows={2}
-        maxLength={100}
-        placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ"
-        value={s.fault}
-        onChange={(e) => set('fault', e.target.value)}
-      />
-    </Field>
-  );
-  const symptomsField = <MainSymptomField />;
-  const symptomOtherField = (
-    <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={errors.symptomOther}>
-      <Textarea rows={2} maxLength={200} value={s.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
-    </Field>
-  );
-  const remarkField = (
-    <Field label="หมายเหตุ" className="lg:col-span-2" error={errors.remark}>
-      <Textarea rows={2} maxLength={2000} value={s.remark} onChange={(e) => set('remark', e.target.value)} />
-    </Field>
+      <NoteField f={f} k="fault" label="จุดตำหนิ" maxLength={100} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" />
+      <MainSymptomField />
+      <NoteField f={f} k="symptomOther" label="อาการเสีย (อื่นๆ)" maxLength={200} />
+      <NoteField f={f} k="remark" label="หมายเหตุ" maxLength={2000} />
+    </>
   );
 
-  const shopField = open ? (
-    <Field label="Shop Name" error={errors.shopName}>
-      {/* free text in the legacy data (511 spellings) — the most used names as suggestions, new ones can be typed */}
-      <Input
-        list="shop-name-options"
-        maxLength={100}
-        placeholder="- - เลือกหรือพิมพ์ - -"
-        value={s.shopName}
-        onChange={(e) => set('shopName', e.target.value)}
-      />
-      <datalist id="shop-name-options">
-        {SHOP_NAMES.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
-    </Field>
-  ) : (
-    <Field label="Shop Name" error={errors.shopName}>
-      <Input
-        placeholder="ชื่อร้านค้า"
-        maxLength={100}
-        value={s.shopName}
-        onChange={(e) => set('shopName', e.target.value)}
-      />
-    </Field>
-  );
-  const receptionDateField = (
-    <Field label="วันที่รับเข้า" error={errors.receptionDate}>
-      <Input type="date" value={s.receptionDate} onChange={(e) => set('receptionDate', e.target.value)} />
-    </Field>
-  );
-  const trackingField = (
-    <Field
-      label="เลขพัสดุจากลูกค้า"
-      error={errors.receptionTrackingNo}
-      hint="ไม่มีเลขพัสดุ (ลูกค้า / ไรเดอร์มาส่งเอง) ให้เว้นว่าง แล้วเลือก รับสินค้าเข้าโดย"
-    >
-      <Input
-        className="num"
-        maxLength={50}
-        value={s.receptionTrackingNo}
-        onChange={(e) => set('receptionTrackingNo', e.target.value)}
-      />
-    </Field>
-  );
-  // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value ("F", "flash" …) stays selectable as-is
-  const legacyShipper =
-    s.receptionShipper && !SHIPPING_PROFILES.some((p) => p.nameTh === s.receptionShipper) ? s.receptionShipper : '';
-  // the API accepts a profile name or the job's own legacy value only (no free text)
-  const shipperField = (
-    <Field label="โดยบริษัทขนส่ง" error={errors.receptionShipper}>
-      <Select value={s.receptionShipper} onChange={(e) => set('receptionShipper', e.target.value)}>
-        <option value="">- - Please Select - -</option>
-        {SHIPPING_PROFILES.map((p) => (
-          <option key={p.id} value={p.nameTh}>
-            {p.nameTh}
-          </option>
-        ))}
-        {legacyShipper && <option value={legacyShipper}>{legacyShipper} (ค่าเดิม)</option>}
-      </Select>
-    </Field>
-  );
-  const receptionTypeField = (
-    <Field label="รับสินค้าเข้าโดย" wide group="radiogroup" error={errors.receptionType}>
-      <div className="flex flex-wrap gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
-        {RECEIVE_METHODS.map((m) => (
-          <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
-            <Radio name="receive-method" checked={s.receptionType === m} onChange={() => set('receptionType', m)} />
-            {m}
-          </label>
-        ))}
-      </div>
-    </Field>
-  );
-
-  if (open)
+  if (variant === 'open')
     return (
       <Section title={title} icon={PackageSearch}>
         {incompleteNotice}
         <FieldGrid>
-          {soField}
-          {channelField}
-          {shopField}
-          {saleDateField}
+          <SoField f={f} />
+          <ChannelField f={f} />
+          <ShopSuggestField f={f} />
+          <SaleDateField f={f} />
 
-          {warrantyMonthField}
-          {imeiField}
-          {serialField}
-          {expireField}
+          <WarrantyMonthField f={f} />
+          <ImeiField f={f} />
+          <SerialField f={f} />
+          <ExpireField f={f} />
 
-          {warrantyField}
-          {brandField}
-          {modelField}
-          {modelDetailField}
+          <WarrantyField f={f} />
+          <BrandField f={f} />
+          <ModelField f={f} />
+          <ModelDetailField f={f} />
 
-          {receptionTypeField}
-          {receptionDateField}
-          {trackingField}
-          {shipperField}
+          <ReceptionTypeField f={f} />
+          <ReceptionDateField f={f} />
+          <TrackingField f={f} />
+          <ShipperField f={f} />
           <div className="hidden lg:block" aria-hidden />
 
-          {equipmentField}
-          {faultField}
-          {symptomsField}
-          {symptomOtherField}
-          {remarkField}
+          {notes}
         </FieldGrid>
       </Section>
     );
 
-  if (repair)
+  if (variant === 'repair')
     return (
       <Section title={title} icon={PackageSearch}>
         {incompleteNotice}
         <FieldGrid>
-          {soField}
-          {channelField}
-          {saleDateField}
-          {warrantyMonthField}
+          <SoField f={f} />
+          <ChannelField f={f} repair />
+          <SaleDateField f={f} />
+          <WarrantyMonthField f={f} />
 
-          {imeiField}
-          {serialField}
-          {expireField}
-          {warrantyField}
+          <ImeiField f={f} />
+          <SerialField f={f} />
+          <ExpireField f={f} />
+          <WarrantyField f={f} />
 
-          {brandField}
-          {modelField}
-          {modelDetailField}
+          <BrandField f={f} />
+          <ModelField f={f} />
+          <ModelDetailField f={f} />
           <div className="hidden lg:block" aria-hidden />
 
-          {equipmentField}
-          {faultField}
-          {symptomsField}
-          {symptomOtherField}
-          {remarkField}
+          {notes}
         </FieldGrid>
       </Section>
     );
@@ -996,45 +755,29 @@ export function ProductSection({
     <Section title={title} icon={PackageSearch}>
       {incompleteNotice}
       <FieldGrid>
-        {soField}
-        {channelField}
-        {shopField}
-        {saleDateField}
+        <SoField f={f} />
+        <ChannelField f={f} />
+        <ShopPlainField f={f} />
+        <SaleDateField f={f} />
 
-        {warrantyMonthField}
-        {expireField}
-        {warrantyField}
-        <Field label="ประเภทสินค้า" error={errors.productType}>
-          <SearchSelect
-            value={s.productType}
-            onChange={(v) => set('productType', v)}
-            options={withCurrent(
-              PRODUCT_TYPES.map((p) => ({ value: p.name, label: p.name })),
-              s.productType,
-            )}
-          />
-          <LookupError error={typesError} onRetry={retryTypes} />
-        </Field>
+        <WarrantyMonthField f={f} />
+        <ExpireField f={f} />
+        <WarrantyField f={f} />
+        <ProductTypeField f={f} />
 
-        {imeiField}
-        {serialField}
-        {brandField}
-        {modelField}
+        <ImeiField f={f} />
+        <SerialField f={f} />
+        <BrandField f={f} />
+        <ModelField f={f} />
 
-        {modelDetailField}
-        {receptionDateField}
-        {trackingField}
-        {shipperField}
+        <ModelDetailField f={f} />
+        <ReceptionDateField f={f} />
+        <TrackingField f={f} />
+        <ShipperField f={f} />
 
-        {receptionTypeField}
+        <ReceptionTypeField f={f} />
 
-        {equipmentField}
-        {faultField}
-
-        {symptomsField}
-
-        {symptomOtherField}
-        {remarkField}
+        {notes}
       </FieldGrid>
     </Section>
   );
@@ -1173,7 +916,7 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   const { s, set, patch, errors, loaded } = useJobForm();
   const lock = useMoneyLock();
   const confirm = useConfirm();
-  const { data: STAFF } = useStaff();
+  const { data: STAFF, ...staffLookup } = useStaff();
   // "มอบหมายงานนี้ให้" = job.engineer_id → an active user whose role has Job Take (the API refuses anyone else)
   const staffOptions = React.useMemo(() => {
     const opts = STAFF.filter((st) => st.takesJobs).map((st) => ({
@@ -1239,7 +982,7 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
           />
         </Field>
         {showTech && (
-          <Field label="มอบหมายงานนี้ให้" hint={techHint} error={errors.engineerId}>
+          <Field label="มอบหมายงานนี้ให้" hint={techHint} error={errors.engineerId} lookup={staffLookup}>
             <SearchSelect
               value={s.engineerId ? String(s.engineerId) : ''}
               onChange={(v) => {

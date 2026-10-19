@@ -20,7 +20,7 @@ import type {
   TatRow,
   MonthlyRow,
   TopSymptom,
-} from './mock';
+} from './types';
 
 export type { Order, DeletedMode };
 
@@ -105,8 +105,10 @@ export function useTable<T>(
   deleted: DeletedMode = 'exclude',
   params: Params = {},
   ttl: number = TTL_DEFAULT,
+  /** false = nothing loaded (yet) — e.g. a list only one mode of the screen needs */
+  enabled = true,
 ): TableState<T> {
-  const url = `/api/data/${table}${qs({ deleted, ...params })}`;
+  const url = enabled ? `/api/data/${table}${qs({ deleted, ...params })}` : null;
   const { data, error, isLoading, mutate: revalidate } = useSWR<T[]>(url, fetcher, SWR_OPTS);
   useStaleCheck(url, ttl, revalidate);
 
@@ -200,9 +202,14 @@ export type AuditRow = {
 };
 export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>('audit_log', params, 'all');
 export const useAuditModules = () => useTable<string>('audit_modules', undefined, 'exclude', {}, TTL_MASTER);
-/** Dropdown/picker list: ACTIVE products, lite fields only (code/name/onhand/price/brand/category). */
-export const useProducts = (params: Params = {}) =>
-  useTable<Product>('products', { column: 'sysCode' }, 'active', { fields: 'lite', ...params });
+/** The whole ACTIVE catalog, lite fields only (code/name/onhand/price/brand/category) — for the screens whose
+ *  lines ARE the catalog (รับเข้า, จ่ายออกอื่นๆ). Part pickers search instead: useProductSearch. */
+export const useProducts = (enabled = true) =>
+  useTable<Product>('products', { column: 'sysCode' }, 'active', { fields: 'lite' }, TTL_DEFAULT, enabled);
+/** ACTIVE products (lite rows) whose code / part no / TH·EN·CN name contains `q`, searched on the server;
+ *  '' = nothing loaded. Same rows and cache rules as useProducts (re-read after any write). */
+export const useProductSearch = (q: string, opts: ApiOpts<Product[]> = {}) =>
+  useApi<Product[]>(q ? `/api/data/products${qs({ deleted: 'active', fields: 'lite', q })}` : null, opts);
 export const useProductsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
   usePagedTable<Product & { value: number }>('products', params, mode);
 export type ProductStats = { total: number; qty: number; value: number; low: number; out: number; noPrice: number };

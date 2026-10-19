@@ -6,7 +6,7 @@ import { PageHeader } from './page-header';
 import { FilterBar } from './filter-bar';
 import { DataTable, type Column, type ServerTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
-import { Field } from '@/components/ui/field';
+import { Field, type Lookup } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions } from './search-select';
 import { ExportButton } from './export-button';
@@ -15,7 +15,8 @@ import { cn } from '@/lib/utils';
 export type ReportFilter =
   | { kind: 'text'; key?: string; label: string; placeholder?: string; value?: string }
   | { kind: 'date'; key?: string; label: string; value?: string }
-  | { kind: 'select'; key?: string; label: string; options: string[]; value?: string };
+  /** `lookup`: the hook the options come from — a failed load says so under the dropdown */
+  | { kind: 'select'; key?: string; label: string; options: string[]; value?: string; lookup?: Lookup | Lookup[] };
 
 /** values keyed by filter `key` (or label); "ทั้งหมด" (and the old "Select All" / "ALL" labels) → "" */
 export type ReportValues = Record<string, string>;
@@ -118,7 +119,7 @@ export function ReportView<T extends Record<string, unknown>>({
           const v = values[k] ?? '';
           const set = (x: string) => setValues((s) => ({ ...s, [k]: x }));
           return (
-            <Field key={f.label} label={f.label}>
+            <Field key={f.label} label={f.label} lookup={f.kind === 'select' ? f.lookup : undefined}>
               {f.kind === 'text' && (
                 <Input placeholder={f.placeholder} value={v} onChange={(e) => set(e.target.value)} />
               )}

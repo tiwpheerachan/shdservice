@@ -2,13 +2,13 @@
 
 import * as React from 'react';
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import type { ServerTableState } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { useIssuedLinesPage, useIssuedStats, useCategories, type IssuedLine } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { useServerTable } from '@/lib/use-server-table';
 
 type Row = IssuedLine;
 
@@ -36,17 +36,15 @@ const columns: Column<Row>[] = [
 ];
 
 export default function Page() {
-  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), category: '', code: '' });
+  const {
+    filters: f,
+    setFilters: setF,
+    table,
+    pageArgs,
+    server,
+  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), category: '', code: '' });
   // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ) minus รับคืนจากการเบิก — paged + KPIs on the server
   const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  const pageArgs = {
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-  };
   const { data: sum } = useIssuedStats({ ...filters, q: table.q });
   const {
     rows,
@@ -55,7 +53,7 @@ export default function Page() {
     error: loadError,
     refetch: retryLoad,
   } = useIssuedLinesPage({ ...pageArgs, ...filters });
-  const { data: CATEGORIES } = useCategories();
+  const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   const S = sum[0];
   const qty = S?.qty ?? 0;
   const value = S?.value ?? 0;
@@ -67,7 +65,13 @@ export default function Page() {
       filters={[
         { kind: 'date', key: 'from', label: 'วันที่ (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่ (ถึง)', value: f.to },
-        { kind: 'select', key: 'category', label: 'หมวดหมู่', options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)] },
+        {
+          kind: 'select',
+          key: 'category',
+          label: 'หมวดหมู่',
+          options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)],
+          lookup: categoriesLookup,
+        },
         { kind: 'text', key: 'code', label: 'รหัสอะไหล่', placeholder: 'P02534' },
       ]}
       onApply={setF}
@@ -88,7 +92,7 @@ export default function Page() {
       error={loadError}
       onRetry={retryLoad}
       rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
-      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
+      server={{ ...server, total }}
     />
   );
 }

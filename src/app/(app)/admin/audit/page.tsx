@@ -4,7 +4,7 @@ import * as React from 'react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge, type Tone } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { useAuditPage, useAuditModules, type AuditRow } from '@/data/db';
 import { exportXlsx } from '@/lib/api';
-import { isFilterActive } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { fieldLabel } from '@/lib/field-labels';
 import { ExportButton } from '@/components/shared/export-button';
 
@@ -38,11 +38,10 @@ const fmt = (v: unknown) =>
   v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 
 export default function AuditPage() {
-  const { data: MODULES } = useAuditModules();
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 50, q: '', sort: null });
+  const { data: MODULES, ...modulesLookup } = useAuditModules();
+  const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER, {
+    pageSize: 50,
+  });
   const {
     rows,
     total,
@@ -50,10 +49,7 @@ export default function AuditPage() {
     error: loadError,
     refetch: retryLoad,
   } = useAuditPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
+    ...pageArgs,
     ...filters, // includes q (รายละเอียด / ชื่อผู้ใช้ free text)
   });
   const [detail, setDetail] = React.useState<AuditRow | null>(null);
@@ -106,11 +102,6 @@ export default function AuditPage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilters(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -119,13 +110,7 @@ export default function AuditPage() {
         actions={<ExportButton run={() => exportXlsx('audit_log', { ...filters })} />}
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilters(draft);
-          setTable((t) => ({ ...t, page: 1 }));
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="วันที่ (ตั้งแต่)">
           <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
@@ -135,7 +120,7 @@ export default function AuditPage() {
         <Field label="ผู้ใช้">
           <Input placeholder="ชื่อ หรือ user id" value={draft.user} onChange={(e) => setD('user', e.target.value)} />
         </Field>
-        <Field label="โมดูล">
+        <Field label="โมดูล" lookup={modulesLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -171,8 +156,8 @@ export default function AuditPage() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filters, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={rows}
@@ -182,7 +167,7 @@ export default function AuditPage() {
         onRetry={retryLoad}
         // the table's own page size must match the first query's, or it asks for 25 right after the 50
         pageSize={table.pageSize}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        server={{ ...server, total }}
         emptyText="ยังไม่มีประวัติในช่วงที่เลือก"
       />
 

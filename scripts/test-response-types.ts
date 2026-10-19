@@ -8,7 +8,7 @@
  * send is held to the same schemas at run time (src/server/contract/check.ts, strict in npm run test:db).
  */
 import type { z } from 'zod';
-import type * as Mock from '@/data/mock';
+import type * as Mock from '@/data/types';
 import type { PublicJob as PublicJobType, PublicJobSummary as PublicJobSummaryType } from '@/lib/track-public';
 import type { AuditRow as AuditRowType } from '@/server/audit';
 import type { Page } from '@/server/paging';

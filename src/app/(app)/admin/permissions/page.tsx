@@ -13,7 +13,8 @@ import { Checkbox } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { ROLES, type Permission } from '@/data/mock';
+import { ROLES } from '@/data/options';
+import type { Permission } from '@/data/types';
 import { usePermissions, useRoles } from '@/data/db';
 import { postJson } from '@/lib/api';
 import {

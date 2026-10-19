@@ -1,13 +1,13 @@
 'use client';
 
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import type { ServerTableState } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
-import { type Product } from '@/data/mock';
+import type { Product } from '@/data/types';
 import { useProductsPage, useProductStats, useCategories, useManufacturers } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int, cn } from '@/lib/utils';
 import { exportXlsx } from '@/lib/api';
+import { useServerTable } from '@/lib/use-server-table';
 import * as React from 'react';
 
 type Row = Product & { value: number };
@@ -59,21 +59,19 @@ const columns: Column<Row>[] = [
 ];
 
 export default function Page() {
-  const { data: CATEGORIES } = useCategories();
-  const { data: MANUFACTURERS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
-  const [f, setF] = React.useState<ReportValues>({ category: '', brand: '', stock: '', q: '' });
+  const { data: CATEGORIES, ...categoriesLookup } = useCategories();
+  const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
+  const {
+    filters: f,
+    setFilters: setF,
+    table,
+    pageArgs,
+    server,
+  } = useServerTable<ReportValues>({ category: '', brand: '', stock: '', q: '' });
   const stockKey =
     f.stock === 'มีสินค้า' ? 'in' : f.stock === 'ใกล้หมด (≤3)' ? 'low' : f.stock === 'หมดสต๊อก' ? 'out' : '';
   // ACTIVE products only; filters + KPIs on the server, table paged
   const filters = { category: f.category, brand: f.brand, stock: stockKey, status: 'Active' };
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  const pageArgs = {
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-  };
   const { data: sum } = useProductStats({ ...filters, q: table.q || f.q });
   const {
     rows,
@@ -92,8 +90,20 @@ export default function Page() {
       title="รายงานอะไหล่คงเหลือ"
       description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ"
       filters={[
-        { kind: 'select', key: 'category', label: 'หมวดหมู่', options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)] },
-        { kind: 'select', key: 'brand', label: 'ยี่ห้อ', options: ['ทั้งหมด', ...MANUFACTURERS.map((m) => m.name)] },
+        {
+          kind: 'select',
+          key: 'category',
+          label: 'หมวดหมู่',
+          options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)],
+          lookup: categoriesLookup,
+        },
+        {
+          kind: 'select',
+          key: 'brand',
+          label: 'ยี่ห้อ',
+          options: ['ทั้งหมด', ...MANUFACTURERS.map((m) => m.name)],
+          lookup: brandsLookup,
+        },
         {
           kind: 'select',
           key: 'stock',
@@ -127,7 +137,7 @@ export default function Page() {
       error={loadError}
       onRetry={retryLoad}
       rowKey={(r) => r.sysCode}
-      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
+      server={{ ...server, total }}
     />
   );
 }

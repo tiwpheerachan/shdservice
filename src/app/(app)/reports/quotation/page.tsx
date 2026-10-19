@@ -2,14 +2,15 @@
 
 import * as React from 'react';
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import type { ServerTableState } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
-import { QUOTATION_STATUS_OPTIONS, type Quotation } from '@/data/mock';
+import { QUOTATION_STATUS_OPTIONS } from '@/data/options';
+import type { Quotation } from '@/data/types';
 import { useQuotationsPage, useQuotationStatuses, useQuotationSummary } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { useServerTable } from '@/lib/use-server-table';
 import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
 
 const columns: Column<Quotation>[] = [
@@ -54,16 +55,14 @@ const columns: Column<Quotation>[] = [
 ];
 
 export default function Page() {
-  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: '', status: '' });
+  const {
+    filters: f,
+    setFilters: setF,
+    table,
+    pageArgs,
+    server,
+  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), type: '', status: '' });
   const filters = { from: f.from, to: f.to, status: f.status, type: f.type };
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  const pageArgs = {
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-  };
   const { data: sum } = useQuotationSummary({ ...filters, q: table.q });
   const { data: STATUSES } = useQuotationStatuses();
   const {
@@ -109,7 +108,7 @@ export default function Page() {
       error={loadError}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
-      server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(f) }}
+      server={{ ...server, total: totalRows }}
     />
   );
 }

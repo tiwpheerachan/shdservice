@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clean, type FieldErrors } from './index';
-import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/mock';
+import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/options';
 
 /**
  * Legacy phones carry invisible characters (zero-width space, bidi marks, BOM) and en/em dashes

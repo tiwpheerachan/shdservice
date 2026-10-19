@@ -37,6 +37,6 @@
 ## Consequences
 
 - ช่องในเอกสาร = ช่องที่ API ส่งจริง (ทดสอบแล้ว) · เพิ่ม endpoint มีขั้นตอนตายตัว (AGENTS.md § Adding an API endpoint) และพิธีมากกว่า route เปล่า
-- เพดาน: type ของ input ใน service (`CustomerInput`, `JobInput` …) เก่ากว่าสัญญา — route ส่ง body ที่ parse แล้วด้วย cast แบบ
-  `readJson<T>` เดิม (service อ่าน null เป็น "ไม่มี") · คำขอที่ผิดหลายจุดพร้อมกันโดยตรง (ไม่ผ่านหน้าเว็บ) อาจได้ 400 ของส่วนคงที่ก่อน
+- type ของ input ใน service (`CustomerInput`, `JobInput` …) = `z.output<typeof <operation>.body>` ไม่มี cast (2026-10-19) —
+  สัญญาเปลี่ยน tsc จับได้ทันที · เพดาน: คำขอที่ผิดหลายจุดพร้อมกันโดยตรง (ไม่ผ่านหน้าเว็บ) อาจได้ 400 ของส่วนคงที่ก่อน
   404 / ข้อผิดพลาดของช่องที่ขึ้นกับค่าเดิม · response ที่ test ไม่ได้ยิงถึง (อัปโหลดสำเร็จ, directory search สำเร็จ) ตรวจเฉพาะตอนมีคนใช้ใน dev

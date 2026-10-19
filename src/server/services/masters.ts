@@ -3,7 +3,7 @@ import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { and, asc, count, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { category, color, jobType, manufacturer, model, productType, symptom } from '@/db/schema';
-import type { MasterRow, Symptom, Model } from '@/data/mock';
+import type { MasterRow, Symptom, Model } from '@/data/types';
 import { HttpError } from '@/server/auth';
 import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';

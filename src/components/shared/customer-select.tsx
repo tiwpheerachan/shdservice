@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, useFieldControl } from '@/components/ui/field';
 import { Input, Textarea, Radio } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { type Customer } from '@/data/mock';
+import type { Customer } from '@/data/types';
 import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';

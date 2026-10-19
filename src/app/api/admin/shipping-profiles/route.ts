@@ -5,7 +5,6 @@ import {
   listShippingProfiles,
   saveShippingProfile,
   deleteShippingProfile,
-  type ShippingProfileInput,
 } from '@/server/services/shipping-profiles';
 
 export const runtime = 'nodejs';
@@ -20,8 +19,7 @@ export const GET = handle(async (req: NextRequest) => {
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, shippingProfileSave);
-  // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
-  return NextResponse.json({ row: await saveShippingProfile(body as ShippingProfileInput, me.userId) });
+  return NextResponse.json({ row: await saveShippingProfile(body, me.userId) });
 });
 
 export const DELETE = handle(async (req: NextRequest) => {

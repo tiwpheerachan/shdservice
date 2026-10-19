@@ -2,21 +2,30 @@
 
 import * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
-import { ChevronsUpDown, Package, Search, X } from 'lucide-react';
+import { ChevronsUpDown, Loader2, Package, Search, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
 import { Badge } from '@/components/ui/badge';
 import { MAX_ROWS, matchProducts, type PickableProduct } from '@/lib/product-match';
 import { baht, cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
+import { useProductSearch } from '@/data/db';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
+
+/** shortest word sent to the server — 1 letter would match most of the catalog */
+const MIN_CHARS = 2;
 
 /** Non-stock lines a form may offer (e.g. SVD0001 ค่าขนส่ง) — pinned above the search results. */
 export type ExtraItem = { code: string; name: string; price?: number };
 
 /** What `onPick` hands back — `product` is set for stock items, absent for extras. */
-export type PickedItem<T extends PickableProduct> = { code: string; name: string; price?: number; product?: T };
+export type PickedItem = { code: string; name: string; price?: number; product?: PickableProduct };
 
-export function ProductPicker<T extends PickableProduct>({
-  products,
+/**
+ * Part picker: searches ACTIVE products on the server as you type (debounced, never the whole catalog) and
+ * ranks the answer here — every typed word must appear (code / part no / TH·EN·CN name / brand / category).
+ * The server narrows by the longest word; the last answer stays on screen while the next one loads.
+ */
+export function ProductPicker({
   value,
   onPick,
   extras,
@@ -28,13 +37,12 @@ export function ProductPicker<T extends PickableProduct>({
   clearable = false,
   id,
 }: {
-  products: T[];
   /** selected sysCode (or an extra's code); empty = nothing chosen */
   value?: string;
   /** `null` when cleared */
-  onPick: (item: PickedItem<T> | null) => void;
+  onPick: (item: PickedItem | null) => void;
   extras?: ExtraItem[];
-  /** name to show when `value` is not in `products` any more (inactive product on an old document) */
+  /** name shown for `value` when it was not picked here (a line already on the document — its stored name) */
   fallbackName?: string;
   placeholder?: string;
   size?: 'sm' | 'md';
@@ -49,23 +57,37 @@ export function ProductPicker<T extends PickableProduct>({
   const [q, setQ] = React.useState('');
   const term = q.trim();
 
-  const rows = React.useMemo(() => matchProducts(products, q), [products, q]);
+  // the server matches the longest word against code / part no / names / brand / category (stock.ts productSearch);
+  // the other words narrow the results here with the same matcher
+  const settled = useDebouncedValue(term, 250);
+  const serverTerm = settled.split(/\s+/).reduce((a, w) => (w.length > a.length ? w : a), '');
+  const searchable = serverTerm.length >= MIN_CHARS;
+  const found = useProductSearch(searchable ? serverTerm : '', { keepPrevious: true });
+  const typedEnough = term.split(/\s+/).some((w) => w.length >= MIN_CHARS);
+  const rows = React.useMemo(
+    () => (typedEnough && searchable && !found.error ? matchProducts(found.data ?? [], term) : []),
+    [typedEnough, searchable, found.data, found.error, term],
+  );
+  const loading = typedEnough && (term !== settled || found.validating);
   const extraRows = React.useMemo(() => {
     if (!extras?.length) return [];
     const words = term.toLowerCase().split(/\s+/).filter(Boolean);
     return extras.filter((e) => words.every((w) => `${e.code} ${e.name}`.toLowerCase().includes(w)));
   }, [extras, term]);
 
-  const selected = value ? products.find((p) => p.sysCode === value) : undefined;
-  const selectedExtra = !selected && value ? extras?.find((e) => e.code === value) : undefined;
-  const label = selected?.name ?? selectedExtra?.name ?? fallbackName ?? '';
+  // the name of what was picked here (there is no catalog to look `value` up in)
+  const [picked, setPicked] = React.useState<{ code: string; name: string } | null>(null);
+  const selectedExtra = value ? extras?.find((e) => e.code === value) : undefined;
+  const label =
+    (value && picked?.code === value ? picked.name : undefined) ?? selectedExtra?.name ?? fallbackName ?? '';
 
-  const pick = (item: PickedItem<T> | null) => {
+  const pick = (item: PickedItem | null) => {
+    setPicked(item);
     onPick(item);
     setOpen(false);
     setQ('');
   };
-  const pickProduct = (p: T) => pick({ code: p.sysCode, name: p.name, price: p.price, product: p });
+  const pickProduct = (p: PickableProduct) => pick({ code: p.sysCode, name: p.name, price: p.price, product: p });
   const pickExtra = (e: ExtraItem) => pick({ code: e.code, name: e.name, price: e.price });
 
   const itemCls =
@@ -141,18 +163,22 @@ export function ProductPicker<T extends PickableProduct>({
               placeholder="พิมพ์ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้)…"
               className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
             />
-            {q && (
-              <button
-                type="button"
-                onClick={() => setQ('')}
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="ล้างคำค้น"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="กำลังค้นหา" />
+            ) : (
+              q && (
+                <button
+                  type="button"
+                  onClick={() => setQ('')}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="ล้างคำค้น"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5">
+          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5" aria-busy={loading}>
             {extraRows.length > 0 && (
               <CommandPrimitive.Group
                 heading="บริการ"
@@ -174,18 +200,33 @@ export function ProductPicker<T extends PickableProduct>({
                 ))}
               </CommandPrimitive.Group>
             )}
-            {rows.length === 0 && extraRows.length === 0 && (
-              <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                {products.length === 0 ? 'กำลังโหลดรายการอะไหล่…' : `ไม่พบอะไหล่ที่ตรงกับ "${term}"`}
+            {!typedEnough ? (
+              <p className="px-3 py-5 text-center text-xs text-muted-foreground">
+                พิมพ์อย่างน้อย {MIN_CHARS} ตัวอักษร — ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้
+                เพื่อกรองต่อ)
               </p>
+            ) : found.error && !loading ? (
+              <p role="alert" className="px-3 py-5 text-center text-sm text-danger">
+                ค้นหาอะไหล่ไม่สำเร็จ{' '}
+                <button
+                  type="button"
+                  onClick={() => void found.mutate()}
+                  className="font-medium underline underline-offset-2 hover:no-underline"
+                >
+                  ลองใหม่
+                </button>
+              </p>
+            ) : (
+              rows.length === 0 &&
+              extraRows.length === 0 && (
+                <p className="px-3 py-5 text-center text-sm text-muted-foreground">
+                  {loading ? 'กำลังค้นหา…' : `ไม่พบอะไหล่ที่ตรงกับ "${term}"`}
+                </p>
+              )
             )}
             {rows.length > 0 && (
               <CommandPrimitive.Group
-                heading={
-                  term
-                    ? `อะไหล่ (${rows.length}${rows.length === MAX_ROWS ? '+' : ''} รายการ)`
-                    : 'อะไหล่ — พิมพ์เพื่อค้นหา'
-                }
+                heading={`อะไหล่ (${rows.length}${rows.length === MAX_ROWS ? '+' : ''} รายการ)`}
                 className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
                 {rows.map((p) => (

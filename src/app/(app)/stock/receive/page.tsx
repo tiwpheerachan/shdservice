@@ -13,13 +13,14 @@ import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Select, Textarea, NumberInput } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useProducts, useManufacturers, useCategories } from '@/data/db';
-import { int, isFilterActive } from '@/lib/utils';
+import { int } from '@/lib/utils';
+import { useFilterDraft } from '@/lib/use-filter-draft';
 import { postJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { receiveSchema } from '@/lib/validation/stock';
-import type { Product } from '@/data/mock';
+import type { Product } from '@/data/types';
 
 type Row = {
   sysCode: string;
@@ -53,9 +54,9 @@ export default function ReceivePage() {
   const { push } = useToast();
   const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
   const { name: me } = useAccess();
-  const { data: PRODUCTS, loading, refetch } = useProducts();
-  const { data: BRANDS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
-  const { data: CATEGORIES } = useCategories();
+  const { data: PRODUCTS, loading, error: productsError, refetch } = useProducts();
+  const { data: BRANDS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
+  const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   // every active part is a candidate line (qty typed per line); a fresh product list — loaded, or
   // re-read after a receipt is saved — starts the lines over (adjusted while rendering)
   const [rows, setRows] = React.useState<Row[]>(() => toRows(PRODUCTS));
@@ -68,8 +69,7 @@ export default function ReceivePage() {
   // (the save reads `rows`, not the visible subset) and counted in the footer
   type LineFilter = { code: string; mfgCode: string; name: string; brand: string; category: string };
   const NO_FILTER: LineFilter = { code: '', mfgCode: '', name: '', brand: '', category: '' };
-  const [draft, setDraft] = React.useState<LineFilter>(NO_FILTER);
-  const [filter, setFilter] = React.useState<LineFilter>(NO_FILTER);
+  const { draft, setD, filters: filter, apply, reset: resetFilters, narrowed } = useFilterDraft<LineFilter>(NO_FILTER);
   const has = (v: string, t: string) => !t.trim() || v.toLowerCase().includes(t.trim().toLowerCase());
   const visible = React.useMemo(
     () =>
@@ -180,11 +180,6 @@ export default function ReceivePage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilter(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -253,13 +248,13 @@ export default function ReceivePage() {
         </FieldGrid>
       </Section>
 
-      <FilterBar onSearch={() => setFilter(draft)} onReset={resetFilters}>
+      <FilterBar onSearch={apply} onReset={resetFilters}>
         <Field label="รหัสอะไหล่ (ระบบ)">
           <Input
             placeholder="P00012"
             className="num"
             value={draft.code}
-            onChange={(e) => setDraft((f) => ({ ...f, code: e.target.value }))}
+            onChange={(e) => setD('code', e.target.value)}
           />
         </Field>
         <Field label="รหัสอะไหล่ (ผู้ผลิต)">
@@ -267,32 +262,28 @@ export default function ReceivePage() {
             placeholder="เลข part"
             className="num"
             value={draft.mfgCode}
-            onChange={(e) => setDraft((f) => ({ ...f, mfgCode: e.target.value }))}
+            onChange={(e) => setD('mfgCode', e.target.value)}
           />
         </Field>
         <Field label="ชื่ออะไหล่">
-          <Input
-            placeholder="พิมพ์บางส่วนของชื่อ"
-            value={draft.name}
-            onChange={(e) => setDraft((f) => ({ ...f, name: e.target.value }))}
-          />
+          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD('name', e.target.value)} />
         </Field>
-        <Field label="ยี่ห้อ (ผู้ผลิต)">
+        <Field label="ยี่ห้อ (ผู้ผลิต)" lookup={brandsLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
             value={draft.brand}
-            onChange={(v) => setDraft((f) => ({ ...f, brand: v }))}
+            onChange={(v) => setD('brand', v)}
             options={BRANDS.map((b) => ({ value: b.name, label: b.name }))}
             searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
           />
         </Field>
-        <Field label="หมวดหมู่">
+        <Field label="หมวดหมู่" lookup={categoriesLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
             value={draft.category}
-            onChange={(v) => setDraft((f) => ({ ...f, category: v }))}
+            onChange={(v) => setD('category', v)}
             options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))}
             searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
           />
@@ -305,12 +296,14 @@ export default function ReceivePage() {
         </p>
       )}
       <DataTable
-        narrowed={isFilterActive(filter, NO_FILTER)}
+        narrowed={narrowed}
         onClearFilters={resetFilters}
         searchable={false}
         columns={columns}
         rows={visible}
         loading={loading}
+        error={productsError}
+        onRetry={refetch}
         rowKey={(r) => r.sysCode}
         footerNote={
           <span className="font-medium text-foreground">

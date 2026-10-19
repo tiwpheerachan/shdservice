@@ -158,7 +158,8 @@ src/
 ├── data/
 │   ├── db.ts                   # React hooks → /api/data/<resource> (server paging สำหรับตารางใหญ่)
 │   ├── queries.ts              # server-component getters (master data)
-│   └── mock.ts                 # TYPE + option list เท่านั้น (ไม่มีข้อมูลตัวอย่างแล้ว)
+│   ├── types.ts                # type ของข้อมูลที่หน้าจอ/service ใช้ร่วมกัน
+│   └── options.ts              # รายการตัวเลือกตายตัว (dropdown + validation)
 ├── db/                         # drizzle client / schema / running number
 ├── server/                     # auth + permission, services (business logic), paging
 └── app/api/**                  # route handlers (ทุกการเขียนตรวจสิทธิ์จาก app_config)

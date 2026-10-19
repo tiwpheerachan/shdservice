@@ -14,7 +14,7 @@ import {
   invalidateUserCache,
   rolesWithRight,
 } from '@/server/auth';
-import type { User, Permission } from '@/data/mock';
+import type { User, Permission } from '@/data/types';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseBody, requireCan } from '@/server/auth';
 import { saleOrderSave } from '@/server/contract/sales';
 import { idempotent } from '@/server/idempotency';
-import { saveSaleOrder, type SaleOrderInput } from '@/server/services/sale-orders';
+import { saveSaleOrder } from '@/server/services/sale-orders';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,8 +12,7 @@ export const POST = handle(async (req: NextRequest) => {
   const body = await parseBody(req, saleOrderSave);
   const user = await requireCan(req, 'Sale Order', body.no ? 'edit' : 'add');
   return idempotent(req, user.userId, async () => {
-    // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
-    const order = await saveSaleOrder(body as SaleOrderInput, user);
+    const order = await saveSaleOrder(body, user);
     return NextResponse.json({ ok: true, order }, { status: body.no ? 200 : 201 });
   });
 });

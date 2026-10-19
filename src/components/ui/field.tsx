@@ -60,6 +60,9 @@ export function useFieldControl(ownId?: string, opts: { labelable?: boolean } = 
   };
 }
 
+/** what a lookup hook returns besides its rows (useJobTypes(), useManufacturers(), … — see TableState) */
+export type Lookup = { error: string | null; refetch: () => void };
+
 export function Field({
   label,
   required,
@@ -70,6 +73,7 @@ export function Field({
   children,
   wide,
   group,
+  lookup,
 }: {
   label?: string;
   required?: boolean;
@@ -82,6 +86,8 @@ export function Field({
   wide?: boolean;
   /** the children are options with their own labels (radios / checkboxes) — the label names the group */
   group?: 'radiogroup' | 'group';
+  /** the lookup(s) the control's options come from: a failed load says so under the control, with a retry */
+  lookup?: Lookup | Lookup[];
 }) {
   const auto = React.useId();
   const labelId = `${auto}-label`;
@@ -144,6 +150,7 @@ export function Field({
           children
         )}
       </FieldContext.Provider>
+      {lookup && <LookupError {...lookupState(lookup)} />}
       {hintId && (
         <p id={hintId} className="mt-1 text-2xs text-muted-foreground">
           {hint}
@@ -156,6 +163,12 @@ export function Field({
       )}
     </div>
   );
+}
+
+/** several lookups behind one control: the first failure is shown, retry re-reads every failed one */
+function lookupState(lookup: Lookup | Lookup[]) {
+  const failed = (Array.isArray(lookup) ? lookup : [lookup]).filter((l) => l.error);
+  return { error: failed[0]?.error ?? null, onRetry: () => failed.forEach((l) => l.refetch()) };
 }
 
 /** a dropdown whose list failed to load says so — not a silent empty list — with a retry (inside its Field) */

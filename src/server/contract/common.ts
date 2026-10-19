@@ -150,4 +150,7 @@ export const flag = z.boolean().optional().catch(undefined).meta({ type: 'boolea
 export const version = z
   .union([z.number(), z.string()])
   .nullish()
+  // what assertVersion reads: null / '' = no check, else Number() (a non-numeric string → NaN → 409)
+  .transform((v) => (v == null || v === '' ? undefined : Number(v)))
+  .optional()
   .meta({ description: 'row_version the form loaded (an edit) — 409 `stale` if it moved since; left out = no check.' });

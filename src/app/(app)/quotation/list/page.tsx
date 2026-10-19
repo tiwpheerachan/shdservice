@@ -7,14 +7,16 @@ import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { RowActions } from '@/components/shared/row-actions';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
-import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS, type Quotation } from '@/data/mock';
+import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS } from '@/data/options';
+import type { Quotation } from '@/data/types';
 import { useQuotationsPage, useManufacturers, useQuotationStatuses } from '@/data/db';
-import { baht, isFilterActive } from '@/lib/utils';
+import { baht } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
 import { quoteExpired } from '@/lib/quote-expiry';
@@ -52,13 +54,10 @@ const NO_FILTER: Filters = {
 
 export default function QuotationListPage() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/quotation/list');
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
   // every status in quotation_status (the fixed list is only the fallback while it loads)
   const { data: STATUSES } = useQuotationStatuses();
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
   const textQ = table.q || filters.no || filters.customer || filters.customerCode || filters.imei;
   const {
     rows: PAGE,
@@ -67,13 +66,10 @@ export default function QuotationListPage() {
     error: loadError,
     refetch: retryLoad,
   } = useQuotationsPage({
-    page: table.page,
-    pageSize: table.pageSize,
+    ...pageArgs,
     // one text box rides on q (the API has no own param for no / customer / code / IMEI); the job no is its own (exact)
     q: textQ,
     jobNo: cleanCode(filters.jobNo),
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
     status: filters.status,
     from: filters.from,
     to: filters.to,
@@ -181,11 +177,6 @@ export default function QuotationListPage() {
 
   const total = QUOTATIONS.reduce((s, q) => s + q.amount, 0);
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilters(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -223,12 +214,7 @@ export default function QuotationListPage() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilters(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="หมายเลขใบเสนอราคา">
           <Input className="num" placeholder="Q2600462" value={draft.no} onChange={(e) => setD('no', e.target.value)} />
         </Field>
@@ -259,7 +245,7 @@ export default function QuotationListPage() {
             ))}
           </Select>
         </Field>
-        <Field label="ยี่ห้อ">
+        <Field label="ยี่ห้อ" lookup={brandsLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -287,8 +273,8 @@ export default function QuotationListPage() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filters, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={QUOTATIONS}
@@ -297,7 +283,7 @@ export default function QuotationListPage() {
         onRetry={retryLoad}
         rowKey={(r) => r.no}
         footerNote={<span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>}
-        server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        server={{ ...server, total: totalRows }}
       />
     </>
   );

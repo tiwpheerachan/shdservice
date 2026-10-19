@@ -13,16 +13,17 @@ const ProductDetailModal = dynamic(
   () => import('@/components/shared/product-detail-modal').then((m) => m.ProductDetailModal),
   { ssr: false },
 );
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { type Product } from '@/data/mock';
+import type { Product } from '@/data/types';
 import { useProductsPage, useProductStats, useManufacturers, useCategories, useModels } from '@/data/db';
-import { baht, int, cn, isFilterActive } from '@/lib/utils';
+import { baht, int, cn } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { ExportButton } from '@/components/shared/export-button';
@@ -41,11 +42,12 @@ type Filters = {
   date: string;
   stock: StockFilter;
 };
+/** the list starts on ACTIVE products (INACTIVE on request, DELETED never) — also what ล้างค่า goes back to */
 const NO_FILTER: Filters = {
   sysCode: '',
   mfgCode: '',
   name: '',
-  status: '',
+  status: 'Active',
   brand: '',
   model: '',
   category: '',
@@ -102,9 +104,9 @@ export default function ProductsPage() {
   const { push } = useToast();
   const confirm = useConfirm();
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath('/stock/products');
-  const { data: MANUFACTURERS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
-  const { data: CATEGORIES } = useCategories();
-  const { data: MODELS } = useModels();
+  const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
+  const { data: CATEGORIES, ...categoriesLookup } = useCategories();
+  const { data: MODELS, ...modelsLookup } = useModels();
 
   const [detail, setDetail] = React.useState<{
     product: Product | null;
@@ -114,10 +116,20 @@ export default function ProductsPage() {
   const [modalUsed, setModalUsed] = React.useState(false);
   if (detail && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
 
-  // FilterBar (applied on "ค้นหา")
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>({ ...NO_FILTER, status: 'Active' });
-  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
+  // FilterBar (applied on "ค้นหา") + server-side paging (product table 2.5k rows; INACTIVE shown, DELETED hidden)
+  const {
+    draft,
+    setDraft,
+    setD,
+    filters,
+    setFilters,
+    apply,
+    reset,
+    table,
+    pageArgs,
+    server,
+    narrowed: filtered,
+  } = useServerTable(NO_FILTER);
   // KPI card → stock filter, applied right away and mirrored in the filter bar; same card again = clear
   const pickStock = (v: StockFilter) => {
     const next = filters.stock === v ? '' : v;
@@ -125,10 +137,8 @@ export default function ProductsPage() {
     setFilters((f) => ({ ...f, stock: next }));
   };
 
-  // server-side paging + filters (product table 2.5k rows; INACTIVE shown, DELETED hidden)
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
   // cards follow the applied filters; say so once anything beyond the default (Active only) narrows the list
-  const narrowed = !!table.q.trim() || isFilterActive(filters, { ...NO_FILTER, status: 'Active' });
+  const narrowed = !!table.q.trim() || filtered;
   const query = React.useMemo(() => ({ q: table.q, ...filters }), [table.q, filters]);
   const searched = [table.q, filters.name].map((t) => t.trim().toLowerCase().split(/\s+/).filter(Boolean));
   const nameHit = (n: string) => searched.some((ws) => ws.length > 0 && ws.every((w) => n.toLowerCase().includes(w)));
@@ -138,13 +148,7 @@ export default function ProductsPage() {
     loading,
     refetch,
     error: loadError,
-  } = useProductsPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-    ...query,
-  });
+  } = useProductsPage({ ...pageArgs, ...query });
   const { data: statRows, refetch: refetchStats } = useProductStats(query);
   const stats = statRows[0] ?? { total: 0, qty: 0, low: 0, out: 0, value: 0 };
   const total = stats.total;
@@ -293,11 +297,6 @@ export default function ProductsPage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilters({ ...NO_FILTER, status: 'Active' });
-  };
-
   return (
     <>
       <PageHeader
@@ -351,12 +350,7 @@ export default function ProductsPage() {
         />
       </div>
 
-      <FilterBar
-        onSearch={() => {
-          setFilters(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="รหัสอะไหล่ (ระบบ)">
           <Input
             placeholder="P02534"
@@ -382,7 +376,7 @@ export default function ProductsPage() {
         <Field label="วันที่สร้างรหัสอะไหล่">
           <Input type="date" value={draft.date} onChange={(e) => setD('date', e.target.value)} />
         </Field>
-        <Field label="ยี่ห้อ (ผู้ผลิต)">
+        <Field label="ยี่ห้อ (ผู้ผลิต)" lookup={brandsLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -392,7 +386,7 @@ export default function ProductsPage() {
             searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
           />
         </Field>
-        <Field label="รุ่น" hint="อะไหล่ที่ใช้ได้กับรุ่นนั้น (ตามที่ผูกไว้ในข้อมูลอะไหล่)">
+        <Field label="รุ่น" hint="อะไหล่ที่ใช้ได้กับรุ่นนั้น (ตามที่ผูกไว้ในข้อมูลอะไหล่)" lookup={modelsLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -414,7 +408,7 @@ export default function ProductsPage() {
             <option>Inactive</option>
           </Select>
         </Field>
-        <Field label="หมวดหมู่">
+        <Field label="หมวดหมู่" lookup={categoriesLookup}>
           <SearchSelect
             placeholder="ทั้งหมด"
             emptyLabel="ทั้งหมด"
@@ -436,7 +430,7 @@ export default function ProductsPage() {
 
       <DataTable
         narrowed={narrowed}
-        onClearFilters={resetFilters}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={PRODUCTS}
@@ -444,7 +438,7 @@ export default function ProductsPage() {
         error={loadError}
         onRetry={refetch}
         rowKey={(r) => r.sysCode}
-        server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        server={{ ...server, total: totalRows }}
       />
 
       {modalUsed && (

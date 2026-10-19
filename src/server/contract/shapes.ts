@@ -3,7 +3,7 @@ import { UiStatus } from './common';
 
 /**
  * The records the API answers with, as they travel (JSON): the service types in
- * src/server/services/* and src/data/mock.ts, field by field. Shared by several operations,
+ * src/server/services/* and src/data/types.ts, field by field. Shared by several operations,
  * so each is a named component in the document.
  */
 
@@ -185,7 +185,7 @@ export const JobDetail = z
   })
   .meta({ id: 'JobDetail' });
 
-/** A job as the lists show it (src/data/mock.ts Job). */
+/** A job as the lists show it (src/data/types.ts Job). */
 const jobRow = {
   no: s,
   openDate: s,

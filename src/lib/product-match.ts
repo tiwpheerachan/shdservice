@@ -1,6 +1,6 @@
-import type { Product } from '@/data/mock';
+import type { Product } from '@/data/types';
 
-/** The fields the picker needs — `useProducts()` (lite rows) already carries them. */
+/** The fields the picker needs — the lite product rows (useProductSearch / useProducts) carry them. */
 export type PickableProduct = Pick<
   Product,
   'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'brand' | 'category'

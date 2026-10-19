@@ -1,70 +1,34 @@
 'use client';
 
 import * as React from 'react';
-import { ImageIcon, Search, Upload } from 'lucide-react';
+import { ImageIcon, Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Field, FieldGrid } from '@/components/ui/field';
-import { Input, Textarea, Checkbox, Radio } from '@/components/ui/input';
-import { SearchSelect, withCurrent } from './search-select';
 import { useToast } from '@/components/ui/toast';
-import { useApi, useModels, useColors, useCategories, useManufacturers } from '@/data/db';
-import type { Product } from '@/data/mock';
-import { int } from '@/lib/utils';
+import { useApi, useCategories } from '@/data/db';
+import type { Product } from '@/data/types';
 import { postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { useAccess } from '@/lib/use-access';
 import { productSchema } from '@/lib/validation/admin';
-import { STORE_LOCATION_NAME } from '@/lib/status-ids';
+import {
+  type ProductForm as Form,
+  EMPTY_PRODUCT_FORM as EMPTY_FORM,
+  productFormOf,
+} from '@/components/stock/product-form';
+import {
+  type StockCardRow as Card,
+  ProductColorStatus,
+  ProductFields,
+  ProductLegacyNotes,
+  ProductModelChecklist,
+  ProductStockTables,
+} from '@/components/stock/product-sections';
 
 export type ProductMode = 'view' | 'edit' | 'add';
 
-type Card = {
-  no: string;
-  date: string;
-  type: string;
-  before: number;
-  income: number;
-  outcome: number;
-  after: number;
-  ref: string;
-  remark: string;
-};
 /** `version`: what the save sends back — another save of this product since it loaded → 409 */
 type Detail = Product & { models: string[]; version?: number };
-
-type Form = {
-  mfgCode: string;
-  name: string;
-  nameEn: string;
-  nameCn: string;
-  description: string;
-  category: string;
-  brand: string;
-  capitalPrice: string;
-  wholesalePrice: string;
-  price: string;
-  forModelColor: string;
-  status: string;
-  models: string[];
-};
-
-const EMPTY_FORM: Form = {
-  mfgCode: '',
-  name: '',
-  nameEn: '',
-  nameCn: '',
-  description: '',
-  category: '',
-  brand: '',
-  capitalPrice: '',
-  wholesalePrice: '',
-  price: '',
-  forModelColor: '',
-  status: 'Active',
-  models: [],
-};
 
 const NEW_PRODUCT: Product = {
   sysCode: '',
@@ -91,10 +55,7 @@ export function ProductDetailModal({
   onSave?: (saved: Product) => void;
 }) {
   const { push } = useToast();
-  const { data: MODELS } = useModels();
-  const { data: COLORS } = useColors();
-  const { data: CATEGORIES } = useCategories();
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: CATEGORIES } = useCategories(); // a new part starts in the first หมวดหมู่
   // ราคาทุน: Product Cost only — the API leaves it out for everyone else, so hide the field too
   const seeCost = useAccess().has('Product Cost');
 
@@ -161,22 +122,7 @@ export function ProductDetailModal({
     setFilledFor(session);
     setVersion(d.product.version);
     setImage(d.product.image ?? '');
-    setForm({
-      mfgCode: d.product.mfgCode,
-      name: d.product.name,
-      nameEn: d.product.nameEn ?? '',
-      nameCn: d.product.nameCn ?? '',
-      description: d.product.description ?? '',
-      category: d.product.category,
-      brand: d.product.brand,
-      // a stored 0 shows as 0 (only a new part starts empty); no cost right → no capitalPrice → empty
-      capitalPrice: String(d.product.capitalPrice ?? ''),
-      wholesalePrice: String(d.product.wholesalePrice ?? ''),
-      price: String(d.product.price ?? ''),
-      forModelColor: d.product.forModelColor ?? '',
-      status: d.product.status,
-      models: d.product.models ?? [],
-    });
+    setForm(productFormOf(d.product));
   }
   if (!open && (filledFor || seenSession)) {
     // closed → the next open (even of the same product) starts a new session
@@ -232,37 +178,6 @@ export function ProductDetailModal({
   if (!product && mode !== 'add') return null;
   const p: Product = detail ?? product ?? NEW_PRODUCT;
 
-  // รุ่นสินค้า (~1,200): view = only this part's models; edit = ticked ones first, then what the search
-  // finds — of the chosen ยี่ห้อ only, unless "แสดงทุกยี่ห้อ" is ticked
-  const brandOnly = !allBrands && !!form.brand.trim();
-  const nameOf = new Map(MODELS.map((m) => [m.code, m]));
-  const words = modelQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const modelRows = ro
-    ? form.models.map((c) => nameOf.get(c) ?? { code: c, name: '', brand: '' })
-    : [
-        ...form.models.map((c) => nameOf.get(c) ?? { code: c, name: '', brand: '' }),
-        ...MODELS.filter(
-          (m) =>
-            !form.models.includes(m.code) &&
-            (!brandOnly || m.brand.trim().toLowerCase() === form.brand.trim().toLowerCase()) &&
-            words.every((w) => `${m.code} ${m.name} ${m.brand}`.toLowerCase().includes(w)),
-        ),
-      ];
-
-  // stock on-hand row (single warehouse / condition in the legacy system)
-  const onhandRows = [
-    {
-      sn: '-',
-      loc: STORE_LOCATION_NAME,
-      cond: 'สินค้าใหม่',
-      income: p.received ?? p.onhand,
-      outcome: p.issued ?? 0,
-      reserve: p.reserved ?? 0,
-      avail: p.onhand,
-      status: p.status,
-    },
-  ];
-
   return (
     <Modal
       open={open}
@@ -289,282 +204,32 @@ export function ProductDetailModal({
     >
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[180px_1fr]">
-          {/* image */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Part Image</p>
-            <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
-              {image && brokenImage !== image ? (
-                <img
-                  src={fileUrl(image)}
-                  alt={p.name}
-                  onError={() => setBrokenImage(image)}
-                  className="h-full w-full object-contain"
-                />
-              ) : (
-                <div className="text-center">
-                  <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
-                  <p className="mt-1 text-2xs">NO IMAGE</p>
-                </div>
-              )}
-            </div>
-            {!ro && (
-              <label
-                className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
-                title={code ? 'อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)' : 'บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป'}
-              >
-                <Upload className="h-3.5 w-3.5" /> {uploading ? 'กำลังอัปโหลด…' : 'เลือกไฟล์'}
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/jpeg,image/png,image/webp"
-                  disabled={!code || uploading}
-                  onChange={(e) => onPickImage(e.target.files?.[0])}
-                />
-              </label>
-            )}
-          </div>
+          <PartImage
+            image={image}
+            broken={brokenImage === image}
+            onBroken={() => setBrokenImage(image)}
+            alt={p.name}
+            ro={ro}
+            code={code}
+            uploading={uploading}
+            onPick={onPickImage}
+          />
 
-          {/* fields */}
-          <FieldGrid cols={2}>
-            <Field label="รหัสอะไหล่ (ระบบ)">
-              <Input value={p.sysCode || 'Generate Auto'} readOnly className="num" />
-            </Field>
-            <Field
-              label="รหัสอะไหล่ (ผู้ผลิต)"
-              error={fe.errors.mfgCode}
-              hint={ro ? undefined : 'รหัสเดียว: A-Z 0-9 . _ / - (ไม่มีภาษาไทย ช่องว่าง หรือจุลภาค)'}
-            >
-              <Input
-                value={form.mfgCode}
-                onChange={(e) => set('mfgCode', e.target.value.toUpperCase())}
-                readOnly={ro}
-                maxLength={50}
-                autoCapitalize="characters"
-                spellCheck={false}
-                className="num"
-              />
-            </Field>
-
-            <Field label="ชื่ออะไหล่ (TH)" required wide error={fe.errors.name}>
-              <Input maxLength={500} value={form.name} onChange={(e) => set('name', e.target.value)} readOnly={ro} />
-            </Field>
-            <Field label="ชื่ออะไหล่ (EN)" wide error={fe.errors.nameEn}>
-              <Input
-                maxLength={200}
-                value={form.nameEn}
-                onChange={(e) => set('nameEn', e.target.value)}
-                readOnly={ro}
-              />
-            </Field>
-            <Field label="ชื่ออะไหล่ (CN)" wide error={fe.errors.nameCn}>
-              <Input
-                maxLength={200}
-                value={form.nameCn}
-                onChange={(e) => set('nameCn', e.target.value)}
-                readOnly={ro}
-              />
-            </Field>
-            <Field label="รายละเอียด" wide error={fe.errors.description}>
-              <Input
-                maxLength={200}
-                value={form.description}
-                onChange={(e) => set('description', e.target.value)}
-                placeholder="รายละเอียดเพิ่มเติม"
-                readOnly={ro}
-              />
-            </Field>
-
-            <Field label="หมวดหมู่" error={fe.errors.category}>
-              <SearchSelect
-                value={form.category}
-                onChange={(v) => set('category', v)}
-                options={withCurrent(
-                  CATEGORIES.map((c) => ({ value: c.name, label: c.name })),
-                  form.category,
-                )}
-                disabled={ro}
-                searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
-              />
-            </Field>
-            <Field label="คุม S/N (Serial Control)" group="radiogroup">
-              <div className="flex h-9 items-center gap-4">
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name={`sn-${p.sysCode}`} checked={!!p.serialControl} readOnly disabled /> True
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  {/* controlled: the stored value (False when null), not a defaultChecked lost on re-render */}
-                  <Radio name={`sn-${p.sysCode}`} checked={!p.serialControl} readOnly disabled /> False
-                </label>
-              </div>
-            </Field>
-
-            {seeCost && (
-              <Field label="ราคาทุน (Capital) — บาท" error={fe.errors.capitalPrice}>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={form.capitalPrice}
-                  onChange={(e) => set('capitalPrice', e.target.value)}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly={ro}
-                  className="num text-right"
-                />
-              </Field>
-            )}
-            <Field label="ราคาขายส่ง (Wholesale) — บาท" error={fe.errors.wholesalePrice}>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                value={form.wholesalePrice}
-                onChange={(e) => set('wholesalePrice', e.target.value)}
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
-            <Field label="ราคาขายปลีก (Retail) — บาท" error={fe.errors.price}>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                value={form.price}
-                onChange={(e) => set('price', e.target.value)}
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
-            <Field label="จำนวนคงเหลือ">
-              <Input value={p.onhand} readOnly className="num text-right" />
-            </Field>
-
-            <Field label="ยี่ห้อ (ผู้ผลิต)" wide error={fe.errors.brand}>
-              <SearchSelect
-                value={form.brand}
-                onChange={(v) => set('brand', v)}
-                options={withCurrent(
-                  MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })),
-                  form.brand,
-                )}
-                disabled={ro}
-                searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
-              />
-            </Field>
-          </FieldGrid>
+          <ProductFields form={form} set={set} errors={fe.errors} ro={ro} p={p} seeCost={seeCost} />
         </div>
 
-        {/* product models */}
-        <div>
-          <p className="mb-2 text-sm font-medium">
-            ใช้สำหรับ รุ่นสินค้า{' '}
-            <span className="num text-xs font-normal text-muted-foreground">({form.models.length} รุ่น)</span>
-          </p>
-          {fe.errors.models && <p className="mb-2 text-xs text-danger">{fe.errors.models}</p>}
-          {!ro && (
-            <div className="mb-2 flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <Input
-                type="search"
-                aria-label="ค้นหารุ่นสินค้า"
-                placeholder="พิมพ์รหัสรุ่น ชื่อรุ่น หรือยี่ห้อ…"
-                value={modelQ}
-                onChange={(e) => setModelQ(e.target.value)}
-                className="h-8 max-w-sm"
-              />
-              {form.brand.trim() && (
-                <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
-                  <Checkbox checked={allBrands} onChange={() => setAllBrands((x) => !x)} />
-                  แสดงทุกยี่ห้อ
-                </label>
-              )}
-            </div>
-          )}
-          <div className="grid max-h-72 grid-cols-1 gap-x-4 gap-y-2 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-2 lg:grid-cols-3">
-            {modelRows.map((m) =>
-              ro ? (
-                <span key={m.code} className="flex min-w-0 items-baseline gap-2 text-xs">
-                  <span className="num shrink-0 text-muted-foreground">{m.code}</span>
-                  <span className="truncate">{m.name || '—'}</span>
-                </span>
-              ) : (
-                <label key={m.code} className="flex min-w-0 cursor-pointer items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={form.models.includes(m.code)}
-                    onChange={() =>
-                      set(
-                        'models',
-                        form.models.includes(m.code)
-                          ? form.models.filter((c) => c !== m.code)
-                          : [...form.models, m.code],
-                      )
-                    }
-                  />
-                  <span className="num shrink-0 text-muted-foreground">{m.code}</span>
-                  <span className="truncate" title={m.brand ? `${m.name} · ${m.brand}` : m.name}>
-                    {m.name}
-                  </span>
-                </label>
-              ),
-            )}
-            {modelRows.length === 0 && (
-              <span className="text-xs text-muted-foreground">
-                {ro
-                  ? 'ยังไม่ได้ระบุรุ่นสินค้า'
-                  : MODELS.length === 0
-                    ? 'ไม่มีข้อมูลรุ่นสินค้า'
-                    : brandOnly
-                      ? `ไม่พบรุ่นของยี่ห้อ ${form.brand}${modelQ.trim() ? ` ที่ตรงกับ "${modelQ.trim()}"` : ''} — ติ๊ก แสดงทุกยี่ห้อ`
-                      : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
-              </span>
-            )}
-          </div>
-        </div>
+        <ProductModelChecklist
+          form={form}
+          set={set}
+          errors={fe.errors}
+          ro={ro}
+          modelQ={modelQ}
+          setModelQ={setModelQ}
+          allBrands={allBrands}
+          setAllBrands={setAllBrands}
+        />
 
-        <FieldGrid cols={2}>
-          <Field label="ใช้สำหรับ สีสินค้า">
-            <SearchSelect
-              value={form.forModelColor}
-              onChange={(v) => set('forModelColor', v)}
-              options={withCurrent(
-                COLORS.map((c) => ({ value: c.name, label: c.name })),
-                form.forModelColor,
-              )}
-              disabled={ro}
-              emptyLabel="- - Please Select - -"
-              searchPlaceholder="พิมพ์ชื่อสี…"
-            />
-          </Field>
-          <Field label="สถานะ" group="radiogroup">
-            <div className="flex h-9 items-center gap-4">
-              <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                <Radio
-                  name={`status-${p.sysCode}`}
-                  checked={form.status === 'Active'}
-                  onChange={() => set('status', 'Active')}
-                  disabled={ro}
-                />{' '}
-                Active
-              </label>
-              <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                <Radio
-                  name={`status-${p.sysCode}`}
-                  checked={form.status !== 'Active'}
-                  onChange={() => set('status', 'Inactive')}
-                  disabled={ro}
-                />{' '}
-                Inactive
-              </label>
-            </div>
-          </Field>
-        </FieldGrid>
+        <ProductColorStatus form={form} set={set} ro={ro} sysCode={p.sysCode} />
 
         {mode !== 'add' && (
           <p className="text-2xs text-muted-foreground">
@@ -572,122 +237,65 @@ export function ProductDetailModal({
           </p>
         )}
 
-        {/* legacy read-only notes: stock-adjustment log (product_none_serial.remark) + cancel reason */}
-        {mode !== 'add' && (detail?.stockRemark || detail?.cancelRemark || detail?.cancelDate) && (
-          <FieldGrid cols={2}>
-            {detail?.stockRemark && (
-              <Field label="หมายเหตุสต๊อก (จากระบบเดิม)" wide>
-                <Textarea rows={2} readOnly value={detail.stockRemark} />
-              </Field>
-            )}
-            {(detail?.cancelRemark || detail?.cancelDate) && (
-              <Field label="เหตุผลที่ยกเลิก" wide>
-                <Textarea
-                  rows={2}
-                  readOnly
-                  value={[
-                    detail?.cancelRemark,
-                    detail?.cancelDate
-                      ? `${detail.cancelDate}${detail.cancelBy ? ` · โดย ${detail.cancelBy}` : ''}`
-                      : '',
-                  ]
-                    .filter(Boolean)
-                    .join('\n')}
-                />
-              </Field>
-            )}
-          </FieldGrid>
-        )}
+        {mode !== 'add' && <ProductLegacyNotes detail={detail} />}
 
         {/* view-only stock tables */}
-        {mode === 'view' && (
-          <div className="space-y-4 border-t border-border pt-4">
-            <div>
-              <p className="mb-2 text-sm font-semibold">สินค้าคงเหลือ (Stock Onhand)</p>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                      <th className="w-10 px-3 py-2 text-center">#</th>
-                      <th className="px-3 py-2 text-left">S/N</th>
-                      <th className="px-3 py-2 text-left">สถานที่จัดเก็บ</th>
-                      <th className="px-3 py-2 text-left">สภาพสินค้า</th>
-                      <th className="px-3 py-2 text-right">รับเข้า</th>
-                      <th className="px-3 py-2 text-right">จ่ายออก</th>
-                      <th className="px-3 py-2 text-right">จอง (งานซ่อม)</th>
-                      <th className="px-3 py-2 text-right">คงเหลือ</th>
-                      <th className="px-3 py-2 text-left">สถานะ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {onhandRows.map((r, i) => (
-                      <tr key={i} className="border-b border-border/70 last:border-0">
-                        <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                        <td className="num px-3 py-2">{r.sn}</td>
-                        <td className="px-3 py-2">{r.loc}</td>
-                        <td className="px-3 py-2">{r.cond}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.income)}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.outcome)}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.reserve)}</td>
-                        <td className="num px-3 py-2 text-right font-semibold">{int(r.avail)}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
-                            {r.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+        {mode === 'view' && <ProductStockTables p={p} stockCard={stockCard} />}
+      </div>
+    </Modal>
+  );
+}
 
-            <div>
-              <p className="mb-2 text-sm font-semibold">ประวัติการรับ-จ่าย (Stock Card)</p>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full min-w-[720px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                      <th className="w-10 px-3 py-2 text-center">#</th>
-                      <th className="px-3 py-2 text-left">Movement No.</th>
-                      <th className="px-3 py-2 text-left">วันที่</th>
-                      <th className="px-3 py-2 text-left">ประเภท</th>
-                      <th className="px-3 py-2 text-right">Before</th>
-                      <th className="px-3 py-2 text-right">รับ (+)</th>
-                      <th className="px-3 py-2 text-right">จ่าย (−)</th>
-                      <th className="px-3 py-2 text-right">After</th>
-                      <th className="px-3 py-2 text-left">Ref No.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockCard.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                          ยังไม่มีประวัติการเคลื่อนไหว
-                        </td>
-                      </tr>
-                    ) : (
-                      stockCard.map((m, i) => (
-                        <tr key={i} className="border-b border-border/70 last:border-0">
-                          <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                          <td className="num px-3 py-2 font-medium">{m.no}</td>
-                          <td className="num px-3 py-2 text-xs">{m.date}</td>
-                          <td className="px-3 py-2">{m.type}</td>
-                          <td className="num px-3 py-2 text-right">{int(m.before)}</td>
-                          <td className="num px-3 py-2 text-right text-success">{int(m.income)}</td>
-                          <td className="num px-3 py-2 text-right text-danger">{int(m.outcome)}</td>
-                          <td className="num px-3 py-2 text-right font-semibold">{int(m.after)}</td>
-                          <td className="num px-3 py-2 text-xs text-muted-foreground">{m.ref || '—'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+/** Part Image — the uploaded picture (a placeholder when there is none or it fails to load) + the upload button */
+function PartImage({
+  image,
+  broken,
+  onBroken,
+  alt,
+  ro,
+  code,
+  uploading,
+  onPick,
+}: {
+  image: string;
+  /** this file failed to load once → the placeholder */
+  broken: boolean;
+  onBroken: () => void;
+  alt: string;
+  ro: boolean;
+  /** the part's code — a new part (none yet) is saved before its picture */
+  code: string;
+  uploading: boolean;
+  onPick: (f: File | undefined) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Part Image</p>
+      <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
+        {image && !broken ? (
+          <img src={fileUrl(image)} alt={alt} onError={onBroken} className="h-full w-full object-contain" />
+        ) : (
+          <div className="text-center">
+            <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
+            <p className="mt-1 text-2xs">NO IMAGE</p>
           </div>
         )}
       </div>
-    </Modal>
+      {!ro && (
+        <label
+          className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
+          title={code ? 'อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)' : 'บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป'}
+        >
+          <Upload className="h-3.5 w-3.5" /> {uploading ? 'กำลังอัปโหลด…' : 'เลือกไฟล์'}
+          <input
+            type="file"
+            className="hidden"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={!code || uploading}
+            onChange={(e) => onPick(e.target.files?.[0])}
+          />
+        </label>
+      )}
+    </div>
   );
 }

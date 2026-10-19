@@ -4,16 +4,18 @@ import * as React from 'react';
 import { Eye } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge, type Tone } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { type Movement, STOCK_MOVE_TYPES } from '@/data/mock';
+import { STOCK_MOVE_TYPES } from '@/data/options';
+import type { Movement } from '@/data/types';
 import { useApi, useMovementsPage } from '@/data/db';
-import { int, isFilterActive } from '@/lib/utils';
+import { int } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { exportXlsx } from '@/lib/api';
 import { ExportButton } from '@/components/shared/export-button';
 
@@ -32,11 +34,8 @@ function typeTone(type: string): Tone {
 
 export default function InventoryPage() {
   const { push } = useToast();
-  const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
-  const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
-  const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   // inventory_hd (20k rows) — server-side paging; filters + table search run on the server
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
   const {
     rows: MOVEMENTS,
     total,
@@ -44,11 +43,7 @@ export default function InventoryPage() {
     error: loadError,
     refetch: retryLoad,
   } = useMovementsPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
+    ...pageArgs,
     from: filters.from,
     to: filters.to,
     type: filters.type,
@@ -125,11 +120,6 @@ export default function InventoryPage() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilters(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -152,12 +142,7 @@ export default function InventoryPage() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilters(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="วันที่สร้างเอกสาร (ตั้งแต่)">
           <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
@@ -199,8 +184,8 @@ export default function InventoryPage() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filters, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={MOVEMENTS}
@@ -208,7 +193,7 @@ export default function InventoryPage() {
         error={loadError}
         onRetry={retryLoad}
         rowKey={(r) => r.doc}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filters) }}
+        server={{ ...server, total }}
       />
 
       {/* document line-items modal */}

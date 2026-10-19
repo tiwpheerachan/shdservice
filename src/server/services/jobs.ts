@@ -20,6 +20,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import { alias, unionAll } from 'drizzle-orm/pg-core';
+import type { z } from 'zod';
 import { db, type Tx } from '@/db/client';
 import { JOB_GROUP, JS, STORE_LOCATION_ID } from '@/lib/status-ids';
 import { SEND_STATUS } from '@/lib/outsource-status';
@@ -41,7 +42,7 @@ import {
   shippingProfile,
   symptom,
 } from '@/db/schema';
-import type { Job } from '@/data/mock';
+import type { Job } from '@/data/types';
 import { HttpError, fullName, hasRight, userHasRight } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
@@ -102,6 +103,7 @@ import {
 import { cleanTracking } from '@/lib/validation';
 import { callLogSchema } from '@/lib/validation/stock';
 import { assertValid } from '@/server/validate';
+import type { jobClose, jobCreate, jobOutsource, jobRepair, jobSwapRefund } from '@/server/contract/jobs';
 import { clean, cleanCode, cleanText, summary, type FieldErrors } from '@/lib/validation';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
@@ -194,6 +196,8 @@ const statusEntry = (jobNo: string, name: string, from: number | null, to: numbe
 });
 
 export const jobNotFound = (jobNo: string) => new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+
+type JobRow = typeof job.$inferSelect;
 
 /**
  * Lock the job row for this transaction and return it as it is NOW. Every job write
@@ -703,6 +707,33 @@ export async function recentJobNos(limit = 50): Promise<string[]> {
   return rows.map((r) => r.no);
 }
 
+/** Header chips of the job list — counts over the whole table (a GROUP BY over every job, so 30 s memo
+ *  like the dashboard; job writes have no cache invalidation, the chips may lag by up to 30 s). */
+export function jobStats() {
+  return cached('jobs:stats', 30_000, loadJobStats);
+}
+async function loadJobStats() {
+  const rows = await db
+    .select({ id: job.jobStatusId, group: jobStatus.jobStatusGroup, n: count() })
+    .from(job)
+    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+    .groupBy(job.jobStatusId, jobStatus.jobStatusGroup);
+  let total = 0;
+  let fresh = 0;
+  let done = 0;
+  let declined = 0;
+  for (const r of rows) {
+    if (r.id === JS.CANCELLED) continue; // = DELETED
+    const n = Number(r.n);
+    total += n;
+    if (r.id === JS.NEW) fresh += n;
+    else if (r.id === JS.REPAIR_CANCELLED)
+      declined += n; // ลูกค้าไม่ซ่อม: neither repaired nor in progress (kpiGroup)
+    else if (r.group === JOB_GROUP.FINISHED || r.group === JOB_GROUP.REPAIRED) done += n;
+  }
+  return { total, fresh, done, progress: total - fresh - done - declined };
+}
+
 /* ------------------------------------------------------------------ *
  * Detail
  * ------------------------------------------------------------------ */
@@ -858,7 +889,8 @@ async function readableHistory(rows: AuditRow[]): Promise<AuditRow[]> {
   }));
 }
 
-export async function getJob(jobNo: string): Promise<JobDetail | null> {
+/** the job row + the names its ids point at (getJob) */
+async function jobDetailRow(jobNo: string) {
   const engSym = alias(symptom, 'eng_sym');
   const repairer = alias(appUser, 'repairer');
   const closer = alias(appUser, 'closer');
@@ -897,11 +929,12 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     .leftJoin(closer, eq(closer.userId, job.jobClosedBy))
     .where(eq(job.jobNo, jobNo))
     .limit(1);
-  if (!r) return null;
-  const j = r.j;
-  const bal = jobBalance(num(j.jobTotalCost), num(j.depositCost), num(j.jobPaymentAmount));
+  return r;
+}
 
-  const [cust, syms, fwd, parts, partTotals, atts, logs, history] = await Promise.all([
+/** what hangs off a job (getJob): customer, symptoms, out-source trips, part lines, attachments, status log, history */
+function jobDetailRelated(jobNo: string, j: JobRow) {
+  return Promise.all([
     j.customerId ? getCustomerById(j.customerId) : Promise.resolve(null),
     db
       .select({ id: jobSymptom.symptomId, name: symptom.symptomName })
@@ -956,6 +989,16 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       .orderBy(desc(jobLog.jobLogDate), desc(jobLog.jobLogId)), // newest first, like call log / audit
     auditFor('job', jobNo, 100).then(readableHistory),
   ]);
+}
+
+/** getJob's rows → the JobDetail every job screen reads */
+function toJobDetail(
+  r: NonNullable<Awaited<ReturnType<typeof jobDetailRow>>>,
+  related: Awaited<ReturnType<typeof jobDetailRelated>>,
+): JobDetail {
+  const j = r.j;
+  const bal = jobBalance(num(j.jobTotalCost), num(j.depositCost), num(j.jobPaymentAmount));
+  const [cust, syms, fwd, parts, partTotals, atts, logs, history] = related;
 
   const symptomIds = syms.length
     ? syms.map((s) => s.id)
@@ -1091,55 +1134,18 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
   };
 }
 
+/** A job with everything every job screen shows; null = no such job. */
+export async function getJob(jobNo: string): Promise<JobDetail | null> {
+  const r = await jobDetailRow(jobNo);
+  if (!r) return null;
+  return toJobDetail(r, await jobDetailRelated(jobNo, r.j));
+}
+
 /* ------------------------------------------------------------------ *
  * Create / update (เปิดงานใหม่ / แก้ไขข้อมูลงาน)
  * ------------------------------------------------------------------ */
-export type JobInput = {
-  customerCode: string;
-  /** ออกเอกสารในนาม (document_profile.id) — decides the J-number series; fixed once issued */
-  documentProfileId?: number;
-  jobType: string; // name
-  jobTypeDetail?: string;
-  /** งานเด้ง — สินค้ากลับมาซ่อมซ้ำ (job.is_job_bounce) */
-  isBounce?: boolean;
-  status?: string; // name (edit page only)
-  so?: string;
-  channel?: string;
-  shopName?: string;
-  saleOrderDate?: string;
-  warrantyMonth?: number | string;
-  expireDate?: string;
-  warranty?: string;
-  productType?: string; // name
-  imei?: string;
-  serial?: string;
-  brand?: string; // name
-  modelCode?: string; // model_code
-  modelDetail?: string;
-  color?: string;
-  receptionDate?: string;
-  receptionTrackingNo?: string;
-  receptionShipper?: string;
-  receptionType?: string;
-  equipment?: string;
-  fault?: string;
-  symptoms?: string[]; // names
-  symptomOther?: string;
-  remark?: string;
-  estimateCost?: number | string;
-  depositCost?: number | string;
-  serviceCost?: number | string;
-  toolCost?: number | string;
-  deliveryCost?: number | string;
-  boxCost?: number | string;
-  engineerId?: number | string;
-  engineerName?: string;
-  dueDate?: string;
-  /** row_version the form loaded (updateJob): another save since → 409; absent = no check */
-  version?: number;
-  /** the user confirmed giving a job that has someone else on it to the new engineer (takeOverError) */
-  takeOver?: boolean;
-};
+/** the parsed body of POST /api/jobs and PATCH /api/jobs/{no} (jobCreate / jobUpdate in src/server/contract/jobs.ts) */
+export type JobInput = z.output<typeof jobCreate.body>;
 
 /**
  * มอบหมายงานนี้ให้ (job.engineer_id): an active user whose role has Job Take (สิทธิ์พิเศษ) — checked only
@@ -1291,7 +1297,6 @@ function costFields(i: JobInput) {
   return { service, tool, delivery, box };
 }
 
-type JobRow = typeof job.$inferSelect;
 /** the money a closed job keeps (owner 2026-10-15) → the name its 409 gives */
 const MONEY_COLS = {
   estimateCost: 'ค่าประเมินงานซ่อม',
@@ -1803,30 +1808,8 @@ export async function assignJobs(
 /* ------------------------------------------------------------------ *
  * Repair (บันทึกงานซ่อม) — details, costs, spare-part requests, status
  * ------------------------------------------------------------------ */
-export type PartLineInput = {
-  logId?: number; // existing job_order_spare_part_log row
-  code: string;
-  unitPrice?: number;
-  /** ตาราง A (Normal): เบิก = request from stock, เสนอ = charge in quotation */
-  a: { pick: boolean; quote: boolean; qty: number };
-  /** ตาราง B (VIP) */
-  b: { pick: boolean; quote: boolean; qty: number };
-};
-
-export type RepairInput = {
-  engineerSymptom?: string; // name
-  repairDetail?: string;
-  engineerRemark?: string;
-  newSerial?: string;
-  serviceCost?: number | string;
-  toolCost?: number | string;
-  deliveryCost?: number | string;
-  boxCost?: number | string;
-  parts?: PartLineInput[];
-  status?: string; // name
-  /** row_version the page loaded: another save since → 409 (reload) — a stale page would cancel new part requests */
-  version?: number;
-};
+/** the parsed body of POST /api/jobs/{no}/repair (jobRepair in src/server/contract/jobs.ts) */
+export type RepairInput = z.output<typeof jobRepair.body>;
 
 /**
  * job.spare_part_replace (varchar 300) holds the legacy part list ("มอเตอร์ดูดฝุ่น H11 MAX,H12" — 9,377
@@ -1847,12 +1830,179 @@ function withNewSerial(replace: string | null, serial: string): string {
   return v;
 }
 
+/** บันทึกงานซ่อม's job columns: what the page sent (a cost left out keeps the stored one) + the parts total */
+function repairValues(
+  j: JobRow,
+  i: RepairInput,
+  o: { es: { id: number } | undefined; takes: boolean; partsTotal: number; byUserId: number },
+) {
+  const { es, takes, partsTotal, byUserId } = o;
+  const service = i.serviceCost !== undefined ? num(i.serviceCost) : num(j.serviceCost);
+  const tool = i.toolCost !== undefined ? num(i.toolCost) : num(j.serviceToolCost);
+  const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
+  const box = i.boxCost !== undefined ? num(i.boxCost) : num(j.cartonBoxCost);
+  return {
+    ...(es ? { engineerSymptomId: es.id } : {}),
+    ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
+    ...(i.engineerRemark !== undefined ? { engineerRemark: cleanText(i.engineerRemark) } : {}),
+    ...(cleanSerial(i.newSerial)
+      ? { sparePartReplace: withNewSerial(j.sparePartReplace, cleanSerial(i.newSerial)) }
+      : {}),
+    ...(takes ? { engineerId: byUserId } : {}),
+    sparePartTotalCost: money(partsTotal),
+    serviceCost: money(service),
+    serviceToolCost: money(tool),
+    deliveryCost: money(delivery),
+    cartonBoxCost: money(box),
+  };
+}
+
+/**
+ * บันทึกงานซ่อม's new status (undefined = stays): a changed choice wins (the page sends the current one back
+ * unchanged); new stock requests move a new/in-progress job to 11; taken here = as /jobs/assign: a new job →
+ * อยู่ระหว่างดำเนินการ
+ */
+function repairStatus(status: JobRow['jobStatusId'], picked: number | undefined, newRequests: boolean, takes: boolean) {
+  let target = picked === status ? undefined : picked;
+  if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS))
+    target = JS.PARTS_REQUESTED;
+  if (target === undefined && takes && status === JS.NEW) target = JS.IN_PROGRESS;
+  return target;
+}
+
 /**
  * Column mapping inferred from the dump: request_qty / is_quotation / is_special
  * (+ the *_b twins) — is_quotation = "เสนอ" (in the quotation), is_special = "เบิก"
  * (requested from stock; booking += qty until the store issues it). The job is charged for a line
  * only when both are ticked (partCharge).
+ *
+ * บันทึกงานซ่อม's part lines (job_order_spare_part_log), under the job lock: a line gone from the page is cancelled
+ * while still pending, an existing one re-booked / rewritten when it changed, a new one inserted (+ booking when
+ * เบิก). `partsTotal` = what the lines add to the job; `partsChanged` = a line was added / changed / removed
+ * (only then is the parts total recomputed — M2); `newRequests` = a new เบิก line for stock.
  */
+async function syncPartLines(
+  tx: Tx,
+  jobNo: string,
+  parts: NonNullable<RepairInput['parts']>,
+  locked: boolean,
+  byUserId: number,
+): Promise<{ partsTotal: number; partsChanged: boolean; newRequests: boolean }> {
+  const partsLocked = () => new HttpError(409, moneyLockedMsg('รายการ / ราคา / จำนวนอะไหล่'));
+  let partsTotal = 0;
+  let partsChanged = false;
+  let newRequests = false;
+  const existing = await tx
+    .select()
+    .from(jobOrderSparePartLog)
+    .where(eq(jobOrderSparePartLog.jobNo, jobNo))
+    .for('update');
+  const keep = new Set(parts.map((p) => p.logId).filter((x): x is number => !!x));
+  const codes = parts.map((p) => str(p.code)).filter(Boolean);
+  // still-pending rows are the only existing ones whose booking can move (cancel / re-book)
+  const pending = existing.filter((e) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0);
+  const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? '')]);
+  await lockStock(
+    tx,
+    [...map.values()].map((p) => p.id),
+  );
+
+  // rows removed in the UI: cancel while still pending (nothing issued yet)
+  for (const e of pending) {
+    if (!keep.has(e.jobOrderLogId)) {
+      if (locked) throw partsLocked();
+      await tx
+        .update(jobOrderSparePartLog)
+        .set({ orderStatusId: PART.CANCELLED })
+        .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
+      const prod = map.get(e.sparePartCode ?? '');
+      if (prod && e.isSpecial) await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
+      partsChanged = true;
+    }
+  }
+
+  for (const p of parts) {
+    const price = num(p.unitPrice);
+    const qtyA = Math.max(0, int(p.a.qty, 0));
+    const qtyB = Math.max(0, int(p.b.qty, 0));
+    const useA = (p.a.pick || p.a.quote) && qtyA > 0;
+    const useB = (p.b.pick || p.b.quote) && qtyB > 0;
+    // the line's own total = what it adds to the job (partCharge): a เสนอ-only line is quotation only
+    const totalA = partCharge({ ...p.a, qty: qtyA }, price);
+    const totalB = partCharge({ ...p.b, qty: qtyB }, price);
+    const values = {
+      sparePartUnitPrice: money(price),
+      isQuotation: useA && p.a.quote,
+      isSpecial: useA && p.a.pick,
+      requestQty: useA ? qtyA : 0,
+      sparePartTotalPrice: money(useA ? totalA : 0),
+      isQuotationB: useB && p.b.quote,
+      isSpecialB: useB && p.b.pick,
+      requestQtyB: useB ? qtyB : 0,
+      sparePartTotalPriceB: money(useB ? totalB : 0),
+    };
+
+    if (p.logId) {
+      const e = existing.find((x) => x.jobOrderLogId === p.logId);
+      if (!e) continue;
+      // a closed job: the line as loaded passes untouched, anything else is a money change
+      const asLoaded =
+        price === num(e.sparePartUnitPrice) &&
+        !!p.a.pick === !!e.isSpecial &&
+        !!p.a.quote === !!e.isQuotation &&
+        qtyA === (e.requestQty ?? 0) &&
+        !!p.b.pick === !!e.isSpecialB &&
+        !!p.b.quote === !!e.isQuotationB &&
+        qtyB === (e.requestQtyB ?? 0);
+      if (locked && !asLoaded) throw partsLocked();
+      if (!locked && e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0) {
+        // still editable: re-book the delta on the row's own part (never the code the page sent)
+        const prod = map.get(e.sparePartCode ?? '');
+        const before = e.isSpecial ? (e.requestQty ?? 0) : 0;
+        const after = values.isSpecial ? values.requestQty : 0;
+        if (prod && after !== before)
+          await adjustQty(tx, prod.id, { booking: after - before }, { allowNegative: true });
+        // the line as loaded is not written again (a legacy row keeps its stored prices)
+        if (!asLoaded) {
+          await tx.update(jobOrderSparePartLog).set(values).where(eq(jobOrderSparePartLog.jobOrderLogId, p.logId));
+          partsChanged = true;
+        }
+        partsTotal += useA ? totalA : 0;
+      } else {
+        partsTotal += num(e.sparePartTotalPrice);
+      }
+      continue;
+    }
+    if (!useA && !useB) continue;
+    if (locked) throw partsLocked();
+    const prod = map.get(str(p.code));
+    if (!prod) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${p.code}`);
+    if (values.isSpecial) await adjustQty(tx, prod.id, { booking: values.requestQty }, { allowNegative: true });
+    await tx.insert(jobOrderSparePartLog).values({
+      jobNo,
+      sparePartCode: str(p.code),
+      sparePartSerialNo: '',
+      stockId: STORE_LOCATION_ID,
+      ...values,
+      orderStatusId: PART.REQUESTED,
+      requestDate: nowThai(),
+      requestBy: byUserId,
+      grantQty: 0,
+      grantDate: SENTINEL_TS,
+      grantBy: -1,
+      returnQty: 0,
+      returnDate: SENTINEL_TS,
+      returnBy: -1,
+      returnStockId: -1,
+    });
+    if (values.isSpecial) newRequests = true;
+    partsChanged = true;
+    partsTotal += useA ? totalA : 0;
+  }
+  return { partsTotal, partsChanged, newRequests };
+}
+
+/** บันทึกงานซ่อม: repair details, costs, the part lines (syncPartLines) and the status, in one transaction */
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
   assertValid(repairActionSchema, i);
   const [cur] = await db
@@ -1871,7 +2021,6 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   // the repair page's own list — a close is ปิดงาน's (STATUS_CLOSE_ONLY)
   await assertPageStatus(newStatus, cur.status, REPAIR_STATUS_IDS, REPAIR_STATUS_ONLY);
-  let newRequests = false;
   // nobody on the job yet: who saves the repair takes it when their role has Job Take (another role does not)
   const meTakes = !(cur.eng && cur.eng > 0) && (await userHasRight(byUserId, 'Job Take'));
 
@@ -1881,151 +2030,22 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     // a page loaded before someone else's save would cancel the part requests added since (it sends the lines it knows)
     assertVersion(i.version, j.rowVersion);
     const locked = await moneyLocked(status, byUserId);
-    const partsLocked = () => new HttpError(409, moneyLockedMsg('รายการ / ราคา / จำนวนอะไหล่'));
-    let partsTotal = 0;
-    // a line added / changed / removed in this save — only then is the parts total recomputed (M2)
-    let partsChanged = false;
-    if (i.parts) {
-      const existing = await tx
-        .select()
-        .from(jobOrderSparePartLog)
-        .where(eq(jobOrderSparePartLog.jobNo, jobNo))
-        .for('update');
-      const keep = new Set(i.parts.map((p) => p.logId).filter((x): x is number => !!x));
-      const codes = i.parts.map((p) => str(p.code)).filter(Boolean);
-      // still-pending rows are the only existing ones whose booking can move (cancel / re-book)
-      const pending = existing.filter((e) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0);
-      const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? '')]);
-      await lockStock(
-        tx,
-        [...map.values()].map((p) => p.id),
-      );
-
-      // rows removed in the UI: cancel while still pending (nothing issued yet)
-      for (const e of pending) {
-        if (!keep.has(e.jobOrderLogId)) {
-          if (locked) throw partsLocked();
-          await tx
-            .update(jobOrderSparePartLog)
-            .set({ orderStatusId: PART.CANCELLED })
-            .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
-          const prod = map.get(e.sparePartCode ?? '');
-          if (prod && e.isSpecial)
-            await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
-          partsChanged = true;
-        }
-      }
-
-      for (const p of i.parts) {
-        const price = num(p.unitPrice);
-        const qtyA = Math.max(0, int(p.a.qty, 0));
-        const qtyB = Math.max(0, int(p.b.qty, 0));
-        const useA = (p.a.pick || p.a.quote) && qtyA > 0;
-        const useB = (p.b.pick || p.b.quote) && qtyB > 0;
-        // the line's own total = what it adds to the job (partCharge): a เสนอ-only line is quotation only
-        const totalA = partCharge({ ...p.a, qty: qtyA }, price);
-        const totalB = partCharge({ ...p.b, qty: qtyB }, price);
-        const values = {
-          sparePartUnitPrice: money(price),
-          isQuotation: useA && p.a.quote,
-          isSpecial: useA && p.a.pick,
-          requestQty: useA ? qtyA : 0,
-          sparePartTotalPrice: money(useA ? totalA : 0),
-          isQuotationB: useB && p.b.quote,
-          isSpecialB: useB && p.b.pick,
-          requestQtyB: useB ? qtyB : 0,
-          sparePartTotalPriceB: money(useB ? totalB : 0),
-        };
-
-        if (p.logId) {
-          const e = existing.find((x) => x.jobOrderLogId === p.logId);
-          if (!e) continue;
-          // a closed job: the line as loaded passes untouched, anything else is a money change
-          const asLoaded =
-            price === num(e.sparePartUnitPrice) &&
-            !!p.a.pick === !!e.isSpecial &&
-            !!p.a.quote === !!e.isQuotation &&
-            qtyA === (e.requestQty ?? 0) &&
-            !!p.b.pick === !!e.isSpecialB &&
-            !!p.b.quote === !!e.isQuotationB &&
-            qtyB === (e.requestQtyB ?? 0);
-          if (locked && !asLoaded) throw partsLocked();
-          if (!locked && e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0) {
-            // still editable: re-book the delta on the row's own part (never the code the page sent)
-            const prod = map.get(e.sparePartCode ?? '');
-            const before = e.isSpecial ? (e.requestQty ?? 0) : 0;
-            const after = values.isSpecial ? values.requestQty : 0;
-            if (prod && after !== before)
-              await adjustQty(tx, prod.id, { booking: after - before }, { allowNegative: true });
-            // the line as loaded is not written again (a legacy row keeps its stored prices)
-            if (!asLoaded) {
-              await tx.update(jobOrderSparePartLog).set(values).where(eq(jobOrderSparePartLog.jobOrderLogId, p.logId));
-              partsChanged = true;
-            }
-            partsTotal += useA ? totalA : 0;
-          } else {
-            partsTotal += num(e.sparePartTotalPrice);
-          }
-          continue;
-        }
-        if (!useA && !useB) continue;
-        if (locked) throw partsLocked();
-        const prod = map.get(str(p.code));
-        if (!prod) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${p.code}`);
-        if (values.isSpecial) await adjustQty(tx, prod.id, { booking: values.requestQty }, { allowNegative: true });
-        await tx.insert(jobOrderSparePartLog).values({
-          jobNo,
-          sparePartCode: str(p.code),
-          sparePartSerialNo: '',
-          stockId: STORE_LOCATION_ID,
-          ...values,
-          orderStatusId: PART.REQUESTED,
-          requestDate: nowThai(),
-          requestBy: byUserId,
-          grantQty: 0,
-          grantDate: SENTINEL_TS,
-          grantBy: -1,
-          returnQty: 0,
-          returnDate: SENTINEL_TS,
-          returnBy: -1,
-          returnStockId: -1,
-        });
-        if (values.isSpecial) newRequests = true;
-        partsChanged = true;
-        partsTotal += useA ? totalA : 0;
-      }
-    }
+    const parts = i.parts
+      ? await syncPartLines(tx, jobNo, i.parts, locked, byUserId)
+      : { partsTotal: 0, partsChanged: false, newRequests: false };
     // no line changed: the stored total stays (a legacy job's parts cost may have no part rows behind it)
-    if (!partsChanged) partsTotal = num(j.sparePartTotalCost);
+    const partsTotal = parts.partsChanged ? parts.partsTotal : num(j.sparePartTotalCost);
 
     // ---- job fields ----
     const takes = !((j.engineerId ?? 0) > 0) && meTakes;
-    const service = i.serviceCost !== undefined ? num(i.serviceCost) : num(j.serviceCost);
-    const tool = i.toolCost !== undefined ? num(i.toolCost) : num(j.serviceToolCost);
-    const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
-    const box = i.boxCost !== undefined ? num(i.boxCost) : num(j.cartonBoxCost);
-    const repairValues = {
-      ...(es ? { engineerSymptomId: es.id } : {}),
-      ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
-      ...(i.engineerRemark !== undefined ? { engineerRemark: cleanText(i.engineerRemark) } : {}),
-      ...(cleanSerial(i.newSerial)
-        ? { sparePartReplace: withNewSerial(j.sparePartReplace, cleanSerial(i.newSerial)) }
-        : {}),
-      ...(takes ? { engineerId: byUserId } : {}),
-      sparePartTotalCost: money(partsTotal),
-      serviceCost: money(service),
-      serviceToolCost: money(tool),
-      deliveryCost: money(delivery),
-      cartonBoxCost: money(box),
-    };
-    const changed = withTotal(j, changedOnly(j, repairValues));
+    const changed = withTotal(j, changedOnly(j, repairValues(j, i, { es, takes, partsTotal, byUserId })));
     const toWrite = locked ? keepMoney(j, changed) : changed;
     if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     // the take-over has its own ASSIGN row
     const changes = diff(j as Record<string, unknown>, toWrite as Record<string, unknown>, {
       skip: ['engineerId'],
     });
-    if (changes || partsChanged)
+    if (changes || parts.partsChanged)
       await audit(tx, byUserId, {
         action: 'UPDATE',
         module: 'Job Repair',
@@ -2036,12 +2056,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       });
     if (takes) await auditAssign(tx, byUserId, jobNo, 0, byUserId, 'Job Repair');
 
-    // ---- status: a changed choice wins (the page sends the current one back unchanged); new stock
-    // requests move a new/in-progress job to 11; taken here = as /jobs/assign: a new job → อยู่ระหว่างดำเนินการ ----
-    let target = newStatus === status ? undefined : newStatus;
-    if (target === undefined && newRequests && (status === JS.NEW || status === JS.IN_PROGRESS))
-      target = JS.PARTS_REQUESTED;
-    if (target === undefined && takes && status === JS.NEW) target = JS.IN_PROGRESS;
+    // ---- status ----
+    const target = repairStatus(status, newStatus, parts.newRequests, takes);
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
   return (await getJob(jobNo))!;
@@ -2071,16 +2087,134 @@ export async function markPartsIssued(jobNo: string, byUserId: number) {
 /* ------------------------------------------------------------------ *
  * Outsource (บันทึกงานส่งซ่อมต่อ)
  * ------------------------------------------------------------------ */
-export type OutsourceInput = {
-  engineerSymptom?: string;
-  symptomOther?: string;
-  repairDetail?: string;
-  /** `by` = app_user id of ส่งโดย / รับโดย; left out → the user saving */
-  send?: { to: string; date?: string; detail?: string; by?: number };
-  receive?: { from?: string; date?: string; detail?: string; by?: number };
-  status?: string;
-};
+/**
+ * The parsed body of POST /api/jobs/{no}/outsource (jobOutsource in src/server/contract/jobs.ts).
+ * `by` = app_user id of ส่งโดย / รับโดย; left out → the user saving.
+ */
+export type OutsourceInput = z.output<typeof jobOutsource.body>;
 
+type SendRow = typeof jobSendForwardDt.$inferSelect;
+
+/**
+ * The audit diff of an out-source save — old values: the job row + the latest send row (none yet → null);
+ * new: the job fields written + the send / receive block sent.
+ */
+function outsourceChanges(
+  i: OutsourceInput,
+  before: JobRow,
+  fields: Partial<JobRow>,
+  last: SendRow | undefined,
+  o: { back: boolean; sendBy: number; receiveBy: number },
+) {
+  const { back, sendBy, receiveBy } = o;
+  return diff(
+    {
+      ...before,
+      ...(last
+        ? {
+            sendTo: last.sendToName,
+            sendDate: fmtDate(last.sendDate),
+            sendBy: last.sendBy,
+            ...(back
+              ? {
+                  receiveFrom: last.sendToName,
+                  receiveDate: fmtDate(last.receiveDate),
+                  receiveBy: last.receiveBy,
+                  receiveDetail: last.receiveDetail,
+                }
+              : {}),
+          }
+        : {}),
+    },
+    {
+      ...fields,
+      ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
+      ...(i.receive
+        ? {
+            receiveFrom: str(i.receive.from),
+            receiveDate: str(i.receive.date),
+            receiveBy,
+            receiveDetail: cleanText(i.receive.detail),
+          }
+        : {}),
+    },
+  );
+}
+
+/**
+ * The job_send_forward_dt write of an out-source save: a receive closes the open row; a send updates the open
+ * row, saves the last one again, or opens a new trip. Returns the status that implies (undefined = none).
+ */
+async function writeSendRow(
+  tx: Tx,
+  jobNo: string,
+  i: OutsourceInput,
+  open: SendRow | undefined,
+  last: SendRow | undefined,
+  o: { back: boolean; sendBy: number; receiveBy: number; byUserId: number },
+): Promise<number | undefined> {
+  const { back, sendBy, receiveBy, byUserId } = o;
+  if (i.receive && open) {
+    await tx
+      .update(jobSendForwardDt)
+      .set({
+        receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
+        receiveBy,
+        receiveDetail: cleanText(i.receive.detail),
+        sendStatus: SEND_STATUS.RECEIVED,
+      })
+      .where(eq(jobSendForwardDt.id, open.id));
+    // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
+    // the job is closed with job_repaired_date 1900 and drops out of the repair reports
+    await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
+    return JS.OUTSOURCE_RECEIVED;
+  } else if (i.send?.to) {
+    // the page sends the send block again after the receive (+ the receive block, its note may be edited):
+    // the same vendor + send date as the last row (already back) is that row saved again, not a new
+    // trip — no second row, no going back to 14. With its receive block, a changed vendor / send date is
+    // that trip corrected (a new open row would block the close), not a new one.
+    const again =
+      !open &&
+      !!last &&
+      ((back && !!i.receive) ||
+        (clean(last.sendToName) === clean(i.send.to) && fmtDate(last.sendDate) === str(i.send.date)));
+    const row = open ?? (again ? last : undefined);
+    if (row) {
+      await tx
+        .update(jobSendForwardDt)
+        .set({
+          sendToName: clean(i.send.to),
+          sendDetail: cleanText(i.send.detail),
+          sendDate: dateOrSentinel(i.send.date ?? nowThai()),
+          sendBy,
+          ...(again && back && i.receive
+            ? {
+                receiveDate: dateOrSentinel(i.receive.date),
+                receiveBy,
+                receiveDetail: cleanText(i.receive.detail),
+              }
+            : {}),
+        })
+        .where(eq(jobSendForwardDt.id, row.id));
+    } else {
+      await tx.insert(jobSendForwardDt).values({
+        jobNo,
+        sendToName: clean(i.send.to),
+        sendDetail: cleanText(i.send.detail),
+        sendDate: dateOrSentinel(i.send.date ?? nowThai()),
+        sendBy,
+        receiveDate: SENTINEL_TS,
+        receiveBy: -1,
+        receiveDetail: '',
+        sendStatus: SEND_STATUS.SENT,
+      });
+    }
+    if (!again) return JS.OUTSOURCE_SENT;
+  }
+  return undefined;
+}
+
+/** บันทึกงานส่งซ่อมต่อ: send to / receive back from an outside repairer + the job fields and status, in one transaction */
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
   const [cur] = await db
@@ -2153,180 +2287,24 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
         : i.send
           ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
           : 'บันทึกงานส่งซ่อมต่อ',
-      // old values: the job row + the latest send row (none yet → null)
-      changes: diff(
-        {
-          ...before,
-          ...(last
-            ? {
-                sendTo: last.sendToName,
-                sendDate: fmtDate(last.sendDate),
-                sendBy: last.sendBy,
-                ...(back
-                  ? {
-                      receiveFrom: last.sendToName,
-                      receiveDate: fmtDate(last.receiveDate),
-                      receiveBy: last.receiveBy,
-                      receiveDetail: last.receiveDetail,
-                    }
-                  : {}),
-              }
-            : {}),
-        },
-        {
-          ...fields,
-          ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
-          ...(i.receive
-            ? {
-                receiveFrom: str(i.receive.from),
-                receiveDate: str(i.receive.date),
-                receiveBy,
-                receiveDetail: cleanText(i.receive.detail),
-              }
-            : {}),
-        },
-      ),
+      changes: outsourceChanges(i, before, fields, last, { back, sendBy, receiveBy }),
     });
 
-    let target = newStatus;
-
-    if (i.receive && open[0]) {
-      await tx
-        .update(jobSendForwardDt)
-        .set({
-          receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
-          receiveBy,
-          receiveDetail: cleanText(i.receive.detail),
-          sendStatus: SEND_STATUS.RECEIVED,
-        })
-        .where(eq(jobSendForwardDt.id, open[0].id));
-      // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
-      // the job is closed with job_repaired_date 1900 and drops out of the repair reports
-      await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
-      target ??= JS.OUTSOURCE_RECEIVED;
-    } else if (i.send?.to) {
-      // the page sends the send block again after the receive (+ the receive block, its note may be edited):
-      // the same vendor + send date as the last row (already back) is that row saved again, not a new
-      // trip — no second row, no going back to 14. With its receive block, a changed vendor / send date is
-      // that trip corrected (a new open row would block the close), not a new one.
-      const again =
-        !open[0] &&
-        !!last &&
-        ((back && !!i.receive) ||
-          (clean(last.sendToName) === clean(i.send.to) && fmtDate(last.sendDate) === str(i.send.date)));
-      const row = open[0] ?? (again ? last : undefined);
-      if (row) {
-        await tx
-          .update(jobSendForwardDt)
-          .set({
-            sendToName: clean(i.send.to),
-            sendDetail: cleanText(i.send.detail),
-            sendDate: dateOrSentinel(i.send.date ?? nowThai()),
-            sendBy,
-            ...(again && back && i.receive
-              ? {
-                  receiveDate: dateOrSentinel(i.receive.date),
-                  receiveBy,
-                  receiveDetail: cleanText(i.receive.detail),
-                }
-              : {}),
-          })
-          .where(eq(jobSendForwardDt.id, row.id));
-      } else {
-        await tx.insert(jobSendForwardDt).values({
-          jobNo,
-          sendToName: clean(i.send.to),
-          sendDetail: cleanText(i.send.detail),
-          sendDate: dateOrSentinel(i.send.date ?? nowThai()),
-          sendBy,
-          receiveDate: SENTINEL_TS,
-          receiveBy: -1,
-          receiveDetail: '',
-          sendStatus: SEND_STATUS.SENT,
-        });
-      }
-      if (!again) target ??= JS.OUTSOURCE_SENT;
-    }
+    const implied = await writeSendRow(tx, jobNo, i, open[0], last, { back, sendBy, receiveBy, byUserId });
+    const target = newStatus ?? implied;
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
   });
   return (await getJob(jobNo))!;
 }
 
-/** Distinct outsource vendors seen in the data (for the dropdown). */
-export function listOutsourceVendors(): Promise<string[]> {
-  return cached('jobs:vendors', 5 * TTL_MASTER, loadOutsourceVendors);
-}
-async function loadOutsourceVendors(): Promise<string[]> {
-  const rows = await db
-    .select({ name: jobSendForwardDt.sendToName, n: count() })
-    .from(jobSendForwardDt)
-    .groupBy(jobSendForwardDt.sendToName)
-    .orderBy(desc(count()));
-  return rows.map((r) => r.name?.trim() ?? '').filter(Boolean);
-}
-
-/** งานย่อย (job.job_type_detail) — every value the legacy data uses, most common first. */
-export function listJobTypeDetails(): Promise<string[]> {
-  return cached('jobs:type_details', 5 * TTL_MASTER, loadJobTypeDetails);
-}
-async function loadJobTypeDetails(): Promise<string[]> {
-  const rows = await db
-    .select({ v: job.jobTypeDetail, n: count() })
-    .from(job)
-    .where(sql`coalesce(${job.jobTypeDetail},'') <> ''`)
-    .groupBy(job.jobTypeDetail)
-    .orderBy(desc(count()));
-  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
-}
-
-/** บริษัทขนส่ง (job.job_reception_shipper) — free text in the legacy app; top values as suggestions. */
-export function listShippers(limit = 15): Promise<string[]> {
-  return cached(`jobs:shippers:${limit}`, 5 * TTL_MASTER, () => loadShippers(limit));
-}
-async function loadShippers(limit: number): Promise<string[]> {
-  const rows = await db
-    .select({ v: job.jobReceptionShipper, n: count() })
-    .from(job)
-    .where(sql`length(trim(coalesce(${job.jobReceptionShipper},''))) >= 2`)
-    .groupBy(job.jobReceptionShipper)
-    .orderBy(desc(count()))
-    .limit(limit);
-  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
-}
-
-/** Shop Name (job.product_sale_out_shop_name) — free text in the legacy app (511 spellings);
- *  the most used ones (trimmed) are offered as suggestions, typing a new one still works. */
-export function listShopNames(limit = 60): Promise<string[]> {
-  return cached(`jobs:shop_names:${limit}`, 5 * TTL_MASTER, () => loadShopNames(limit));
-}
-async function loadShopNames(limit: number): Promise<string[]> {
-  const v = sql<string>`trim(${job.productSaleOutShopName})`;
-  const rows = await db
-    .select({ v, n: count() })
-    .from(job)
-    .where(sql`length(trim(coalesce(${job.productSaleOutShopName},''))) >= 2`)
-    .groupBy(v)
-    .orderBy(desc(count()))
-    .limit(limit);
-  return rows.map((r) => r.v ?? '').filter(Boolean);
-}
-
 /* ------------------------------------------------------------------ *
  * Swap / Refund
  * ------------------------------------------------------------------ */
-export type SwapRefundInput = {
-  inspection?: string; // ผลการตรวจสอบ → engineer_repair_detail
-  newSerial?: string;
-  newModel?: string;
-  swapDate?: string;
-  docNo?: string;
-  refundAmount?: number | string;
-  refundMethod?: string;
-  refundRef?: string;
-  refundDate?: string;
-  detail?: string;
-  status?: string;
-};
+/**
+ * The parsed body of POST /api/jobs/{no}/swap-refund (jobSwapRefund in src/server/contract/jobs.ts).
+ * `inspection` = ผลการตรวจสอบ → engineer_repair_detail.
+ */
+export type SwapRefundInput = z.output<typeof jobSwapRefund.body>;
 
 export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId: number): Promise<JobDetail> {
   const [cur] = await db
@@ -2403,14 +2381,11 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
 /* ------------------------------------------------------------------ *
  * Close (ปิดงาน-ส่งคืนสินค้า)
  * ------------------------------------------------------------------ */
-export type CloseInput = {
-  repairDetail?: string;
-  payment?: { type?: string; amount?: number | string; date?: string; no?: string; detail?: string };
-  /** the deposit given back (it is more than the total): stored as a negative payment, "คืนมัดจำ <date>" */
-  refund?: { type?: string; amount?: number | string; date?: string };
-  return?: { type?: string; date?: string; courier?: string; tracking?: string; detail?: string; shipperId?: number };
-  status: string;
-};
+/**
+ * The parsed body of POST /api/jobs/{no}/close (jobClose in src/server/contract/jobs.ts). `refund` = the deposit
+ * given back (it is more than the total): stored as a negative payment, "คืนมัดจำ <date>".
+ */
+export type CloseInput = z.output<typeof jobClose.body>;
 
 const RETURN_COLS = [
   'jobReturnDate',
@@ -2444,7 +2419,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
   await db.transaction(async (tx) => {
     const before = await lockJob(tx, jobNo);
     const status = before.jobStatusId;
-    const pay = i.payment ?? {};
+    const pay: Partial<NonNullable<CloseInput['payment']>> = i.payment ?? {};
     const ret = i.return ?? {};
     // a refund stored as a negative payment (Swap/Refund, คืนมัดจำ) is never wiped by a payment of nothing
     const payNothing = num(before.jobPaymentAmount) < 0 && !(num(pay.amount) > 0);
@@ -2732,6 +2707,68 @@ async function computeDashboard(from: string, to: string, type = '') {
 }
 
 /* ------------------------------------------------------------------ *
+ * Form suggestions — the values the data already uses, most common first
+ * ------------------------------------------------------------------ */
+/** Distinct outsource vendors seen in the data (for the dropdown). */
+export function listOutsourceVendors(): Promise<string[]> {
+  return cached('jobs:vendors', 5 * TTL_MASTER, loadOutsourceVendors);
+}
+async function loadOutsourceVendors(): Promise<string[]> {
+  const rows = await db
+    .select({ name: jobSendForwardDt.sendToName, n: count() })
+    .from(jobSendForwardDt)
+    .groupBy(jobSendForwardDt.sendToName)
+    .orderBy(desc(count()));
+  return rows.map((r) => r.name?.trim() ?? '').filter(Boolean);
+}
+
+/** งานย่อย (job.job_type_detail) — every value the legacy data uses, most common first. */
+export function listJobTypeDetails(): Promise<string[]> {
+  return cached('jobs:type_details', 5 * TTL_MASTER, loadJobTypeDetails);
+}
+async function loadJobTypeDetails(): Promise<string[]> {
+  const rows = await db
+    .select({ v: job.jobTypeDetail, n: count() })
+    .from(job)
+    .where(sql`coalesce(${job.jobTypeDetail},'') <> ''`)
+    .groupBy(job.jobTypeDetail)
+    .orderBy(desc(count()));
+  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
+}
+
+/** บริษัทขนส่ง (job.job_reception_shipper) — free text in the legacy app; top values as suggestions. */
+export function listShippers(limit = 15): Promise<string[]> {
+  return cached(`jobs:shippers:${limit}`, 5 * TTL_MASTER, () => loadShippers(limit));
+}
+async function loadShippers(limit: number): Promise<string[]> {
+  const rows = await db
+    .select({ v: job.jobReceptionShipper, n: count() })
+    .from(job)
+    .where(sql`length(trim(coalesce(${job.jobReceptionShipper},''))) >= 2`)
+    .groupBy(job.jobReceptionShipper)
+    .orderBy(desc(count()))
+    .limit(limit);
+  return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
+}
+
+/** Shop Name (job.product_sale_out_shop_name) — free text in the legacy app (511 spellings);
+ *  the most used ones (trimmed) are offered as suggestions, typing a new one still works. */
+export function listShopNames(limit = 60): Promise<string[]> {
+  return cached(`jobs:shop_names:${limit}`, 5 * TTL_MASTER, () => loadShopNames(limit));
+}
+async function loadShopNames(limit: number): Promise<string[]> {
+  const v = sql<string>`trim(${job.productSaleOutShopName})`;
+  const rows = await db
+    .select({ v, n: count() })
+    .from(job)
+    .where(sql`length(trim(coalesce(${job.productSaleOutShopName},''))) >= 2`)
+    .groupBy(v)
+    .orderBy(desc(count()))
+    .limit(limit);
+  return rows.map((r) => r.v ?? '').filter(Boolean);
+}
+
+/* ------------------------------------------------------------------ *
  * Symptom picker data — usage counts (job.product_symptom_id ∪ job_symptom)
  * ------------------------------------------------------------------ */
 /** Active symptoms ordered by how often they were used, most common first (5 min memo; a symptom edit drops it). */
@@ -2823,31 +2860,4 @@ export async function addCallLog(jobNo: string, detail: string, byUserId: number
     });
   });
   return listCallLogs(jobNo);
-}
-
-/** Header chips of the job list — counts over the whole table (a GROUP BY over every job, so 30 s memo
- *  like the dashboard; job writes have no cache invalidation, the chips may lag by up to 30 s). */
-export function jobStats() {
-  return cached('jobs:stats', 30_000, loadJobStats);
-}
-async function loadJobStats() {
-  const rows = await db
-    .select({ id: job.jobStatusId, group: jobStatus.jobStatusGroup, n: count() })
-    .from(job)
-    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .groupBy(job.jobStatusId, jobStatus.jobStatusGroup);
-  let total = 0;
-  let fresh = 0;
-  let done = 0;
-  let declined = 0;
-  for (const r of rows) {
-    if (r.id === JS.CANCELLED) continue; // = DELETED
-    const n = Number(r.n);
-    total += n;
-    if (r.id === JS.NEW) fresh += n;
-    else if (r.id === JS.REPAIR_CANCELLED)
-      declined += n; // ลูกค้าไม่ซ่อม: neither repaired nor in progress (kpiGroup)
-    else if (r.group === JOB_GROUP.FINISHED || r.group === JOB_GROUP.REPAIRED) done += n;
-  }
-  return { total, fresh, done, progress: total - fresh - done - declined };
 }

@@ -11,7 +11,7 @@ import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { matchProducts } from '@/lib/product-match';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useProducts, useJobNos, useStaff } from '@/data/db';
-import { STOCK_PICK_TYPES } from '@/data/mock';
+import { STOCK_PICK_TYPES } from '@/data/options';
 import { int, cn } from '@/lib/utils';
 import { api, postJson, errMsg, qs } from '@/lib/api';
 import { useMountTime } from '@/lib/use-client';
@@ -69,14 +69,13 @@ type ReturnLine = {
 export default function PickPage() {
   const { push } = useToast();
   const fe = useFormErrors(); // same as every form: the error under its field, focus, one summary toast
-  const { data: PRODUCTS, refetch: refetchProducts } = useProducts();
   // งานที่ยังไม่ปิด/ไม่ยกเลิกที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (รับคืนได้ทุกสถานะงาน)
-  const { data: PENDING_JOB_NOS } = useJobNos(300, 'pending_parts');
-  const { data: RETURNABLE_JOB_NOS } = useJobNos(300, 'returnable');
+  const { data: PENDING_JOB_NOS, ...pendingLookup } = useJobNos(300, 'pending_parts');
+  const { data: RETURNABLE_JOB_NOS, ...returnableLookup } = useJobNos(300, 'returnable');
   // ใบสั่งขายที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย (อนุมัติ = ตัดสต๊อกให้แล้ว จึงมักว่าง)
   const pickOrders = useApi<{ rows: string[] }>('/api/stock/pick-orders', { fresh: true });
   const SALE_ORDERS = pickOrders.data?.rows ?? [];
-  const { data: STAFF } = useStaff();
+  const { data: STAFF, ...staffLookup } = useStaff();
   const [saving, setSaving] = React.useState(false);
 
   const [docType, setDocType] = React.useState(DOC_TYPES[0]);
@@ -98,9 +97,25 @@ export default function PickPage() {
         : docType === 'รับคืนจากการเบิก'
           ? 'return'
           : 'other';
+  // the whole catalog only for จ่ายออกอื่นๆ (its lines ARE the in-stock parts) — the other types read their
+  // lines from the reference document
+  const {
+    data: PRODUCTS,
+    loading: productsLoading,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useProducts(kind === 'other');
   // อ้างอิง: งานที่ค้างเบิก / งานที่รับคืนได้ / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
   const refOptions =
     kind === 'job' ? PENDING_JOB_NOS : kind === 'return' ? RETURNABLE_JOB_NOS : kind === 'sale' ? SALE_ORDERS : [];
+  const refLookup =
+    kind === 'job'
+      ? pendingLookup
+      : kind === 'return'
+        ? returnableLookup
+        : kind === 'sale'
+          ? { error: pickOrders.error, refetch: () => void pickOrders.mutate() }
+          : undefined;
   const isReturn = kind === 'return';
   const RECIPIENTS = React.useMemo(() => [STORE_LOCATION_NAME, ...STAFF.map((s) => s.name)], [STAFF]);
 
@@ -117,6 +132,11 @@ export default function PickPage() {
   // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
   const getData = async () => {
     if (kind === 'other') {
+      if (productsError) {
+        push({ kind: 'error', title: 'โหลดรายการอะไหล่ไม่สำเร็จ', desc: productsError });
+        refetchProducts();
+        return;
+      }
       // จ่ายออกอื่นๆ: เลือกจากรายการอะไหล่ทั้งหมด (ใส่จำนวนเฉพาะที่ต้องการจ่าย)
       setLines(
         PRODUCTS.filter((p) => p.onhand > 0).map((p) => ({
@@ -295,7 +315,7 @@ export default function PickPage() {
               ))}
             </Select>
           </Field>
-          <Field label="อ้างอิงเลขเอกสาร" required={kind !== 'other'} error={fe.errors.ref}>
+          <Field label="อ้างอิงเลขเอกสาร" required={kind !== 'other'} error={fe.errors.ref} lookup={refLookup}>
             <div className="flex gap-2">
               {kind === 'job' || kind === 'return' ? (
                 // พิมพ์เลขงานเองได้ + รายการแนะนำ = งานที่ค้างเบิก / รับคืนได้ (ไม่จำกัดแค่ 100 งานล่าสุด)
@@ -336,7 +356,7 @@ export default function PickPage() {
                   />
                 </div>
               )}
-              <Button size="md" variant="outline" onClick={getData}>
+              <Button size="md" variant="outline" onClick={getData} disabled={kind === 'other' && productsLoading}>
                 <Search className="h-3.5 w-3.5" />
                 Get Data
               </Button>
@@ -469,7 +489,7 @@ export default function PickPage() {
       {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
-          <Field label={isReturn ? 'รับคืนจาก' : 'จ่ายให้'} required error={fe.errors.payTo}>
+          <Field label={isReturn ? 'รับคืนจาก' : 'จ่ายให้'} required error={fe.errors.payTo} lookup={staffLookup}>
             <SearchSelect
               value={payTo}
               onChange={setPayTo}

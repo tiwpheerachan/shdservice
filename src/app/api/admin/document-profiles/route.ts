@@ -5,7 +5,6 @@ import {
   listDocumentProfiles,
   saveDocumentProfile,
   deleteDocumentProfile,
-  type DocumentProfileInput,
 } from '@/server/services/document-profiles';
 
 export const runtime = 'nodejs';
@@ -28,7 +27,6 @@ export const DELETE = handle(async (req: NextRequest) => {
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, documentProfileSave);
-  // the parsed body; the service's own type predates the contract (it reads null as none) — the old readJson<T> cast
-  const row = await saveDocumentProfile(body as DocumentProfileInput, me.userId);
+  const row = await saveDocumentProfile(body, me.userId);
   return NextResponse.json({ row });
 });

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
 import { ChevronsUpDown, Search, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
-import { type Model } from '@/data/mock';
+import type { Model } from '@/data/types';
 import { cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
 

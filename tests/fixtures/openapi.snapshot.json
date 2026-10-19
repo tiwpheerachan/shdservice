@@ -1089,8 +1089,7 @@
                         ]
                       },
                       "no": {
-                        "type": "string",
-                        "nullable": true
+                        "type": "string"
                       },
                       "detail": {
                         "type": "string",
@@ -1151,8 +1150,7 @@
                         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                       },
                       "tracking": {
-                        "type": "string",
-                        "nullable": true
+                        "type": "string"
                       },
                       "courier": {
                         "type": "string",
@@ -1163,8 +1161,7 @@
                         "nullable": true
                       },
                       "shipperId": {
-                        "type": "number",
-                        "nullable": true
+                        "type": "number"
                       }
                     },
                     "required": [
@@ -1389,8 +1386,7 @@
                         "nullable": true
                       },
                       "from": {
-                        "type": "string",
-                        "nullable": true
+                        "type": "string"
                       }
                     },
                     "additionalProperties": {
@@ -1399,7 +1395,6 @@
                   },
                   "engineerSymptom": {
                     "type": "string",
-                    "nullable": true,
                     "description": "อาการเสียที่ตรวจพบ (a symptom name)"
                   }
                 },
@@ -1645,12 +1640,10 @@
                               ]
                             },
                             "pick": {
-                              "type": "boolean",
-                              "nullable": true
+                              "type": "boolean"
                             },
                             "quote": {
-                              "type": "boolean",
-                              "nullable": true
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": {
@@ -1671,12 +1664,10 @@
                               ]
                             },
                             "pick": {
-                              "type": "boolean",
-                              "nullable": true
+                              "type": "boolean"
                             },
                             "quote": {
-                              "type": "boolean",
-                              "nullable": true
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": {
@@ -1684,14 +1675,16 @@
                           }
                         },
                         "logId": {
-                          "type": "number",
-                          "nullable": true
+                          "type": "number"
                         },
                         "code": {
-                          "type": "string",
-                          "nullable": true
+                          "type": "string"
                         }
                       },
+                      "required": [
+                        "a",
+                        "b"
+                      ],
                       "additionalProperties": {
                         "nullable": true
                       }
@@ -1699,7 +1692,6 @@
                   },
                   "engineerSymptom": {
                     "type": "string",
-                    "nullable": true,
                     "description": "อาการเสียที่ตรวจพบ (a symptom name)"
                   },
                   "version": {
@@ -1870,12 +1862,10 @@
                     "nullable": true
                   },
                   "newSerial": {
-                    "type": "string",
-                    "nullable": true
+                    "type": "string"
                   },
                   "docNo": {
-                    "type": "string",
-                    "nullable": true
+                    "type": "string"
                   },
                   "swapDate": {
                     "anyOf": [
@@ -1906,8 +1896,7 @@
                     ]
                   },
                   "refundRef": {
-                    "type": "string",
-                    "nullable": true
+                    "type": "string"
                   },
                   "refundAmount": {
                     "anyOf": [
@@ -1926,12 +1915,10 @@
                     "type": "string"
                   },
                   "newModel": {
-                    "type": "string",
-                    "nullable": true
+                    "type": "string"
                   },
                   "detail": {
-                    "type": "string",
-                    "nullable": true
+                    "type": "string"
                   }
                 },
                 "additionalProperties": {
@@ -15223,8 +15210,7 @@
             "type": "string"
           },
           "so": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "channel": {
             "type": "string"
@@ -15278,12 +15264,10 @@
             "type": "string"
           },
           "imei": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "serial": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "brand": {
             "type": "string"
@@ -15313,8 +15297,7 @@
             ]
           },
           "receptionTrackingNo": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "receptionShipper": {
             "type": "string"
@@ -15601,61 +15584,47 @@
           },
           "code": {
             "type": "string",
-            "nullable": true,
             "description": "Set = edit that customer."
           },
           "name": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "taxId": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "type": {
             "type": "string",
-            "nullable": true,
             "description": "`Normal` = a person."
           },
           "online": {
-            "type": "boolean",
-            "nullable": true
+            "type": "boolean"
           },
           "cityId": {
-            "type": "number",
-            "nullable": true
+            "type": "number"
           },
           "districtId": {
-            "type": "number",
-            "nullable": true
+            "type": "number"
           },
           "subDistrictId": {
-            "type": "number",
-            "nullable": true
+            "type": "number"
           },
           "postalCode": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "phone": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "email": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "line": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "priceGroup": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "status": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "version": {
             "anyOf": [
@@ -15938,21 +15907,17 @@
                   ]
                 },
                 "id": {
-                  "type": "number",
-                  "nullable": true
+                  "type": "number"
                 },
                 "itemType": {
                   "type": "string",
-                  "nullable": true,
                   "description": "`SparePart` | `Service` | `Delivery`"
                 },
                 "code": {
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 },
                 "unit": {
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 },
                 "discount": {
                   "anyOf": [
@@ -15961,9 +15926,6 @@
                     },
                     {
                       "type": "number"
-                    },
-                    {
-                      "nullable": true
                     }
                   ]
                 },
@@ -15974,9 +15936,6 @@
                     },
                     {
                       "type": "number"
-                    },
-                    {
-                      "nullable": true
                     }
                   ]
                 }
@@ -16032,37 +15991,29 @@
           },
           "no": {
             "type": "string",
-            "nullable": true,
             "description": "Set = edit that quotation."
           },
           "documentProfileId": {
-            "type": "number",
-            "nullable": true
+            "type": "number"
           },
           "type": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "customerCode": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "jobNo": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "discountType": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "discountUnit": {
             "type": "string",
-            "nullable": true,
             "description": "`บาท` or `%`"
           },
           "status": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "version": {
             "anyOf": [
@@ -16353,12 +16304,10 @@
                   ]
                 },
                 "name": {
-                  "type": "string",
-                  "nullable": true
+                  "type": "string"
                 },
                 "type": {
                   "type": "string",
-                  "nullable": true,
                   "description": "`SparePart` | `Service`"
                 }
               },
@@ -16371,8 +16320,7 @@
             }
           },
           "paymentType": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "paymentAmount": {
             "anyOf": [
@@ -16405,25 +16353,20 @@
             "nullable": true
           },
           "tracking": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "documentProfileId": {
-            "type": "number",
-            "nullable": true
+            "type": "number"
           },
           "no": {
             "type": "string",
-            "nullable": true,
             "description": "Set = edit that order."
           },
           "slip": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "submit": {
-            "type": "boolean",
-            "nullable": true
+            "type": "boolean"
           },
           "version": {
             "anyOf": [
@@ -16560,8 +16503,7 @@
         "type": "object",
         "properties": {
           "mfgCode": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "name": {
             "type": "string",
@@ -16624,28 +16566,22 @@
           },
           "sysCode": {
             "type": "string",
-            "nullable": true,
             "description": "Set = edit that part."
           },
           "category": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "brand": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "status": {
-            "type": "string",
-            "nullable": true
+            "type": "string"
           },
           "ubRepairOnly": {
-            "type": "boolean",
-            "nullable": true
+            "type": "boolean"
           },
           "models": {
             "type": "array",
-            "nullable": true,
             "items": {
               "type": "string"
             }

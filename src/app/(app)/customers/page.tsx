@@ -8,14 +8,15 @@ import { PageHeader } from '@/components/shared/page-header';
 import { RowActions } from '@/components/shared/row-actions';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect } from '@/components/shared/search-select';
-import { DataTable, type Column, type ServerTableState } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { CUSTOMER_TYPES, type Customer } from '@/data/mock';
+import { CUSTOMER_TYPES } from '@/data/options';
+import type { Customer } from '@/data/types';
 import { useApi, useCustomersPage, useProvinces } from '@/data/db';
 import {
   CustomerFields,
@@ -29,8 +30,30 @@ import { api, postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form-errors';
 import { customerSchema } from '@/lib/validation/customer';
-import { isFilterActive } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
 import { ExportButton } from '@/components/shared/export-button';
+
+// filter bar (applied on ค้นหา) — every field is AND-ed on the server; same params feed the Excel export
+type CustomerFilter = {
+  code: string;
+  name: string;
+  phone: string;
+  email: string;
+  taxId: string;
+  type: string;
+  province: string;
+  status: '' | 'Active' | 'Inactive';
+};
+const NO_FILTER: CustomerFilter = {
+  code: '',
+  name: '',
+  phone: '',
+  email: '',
+  taxId: '',
+  type: '',
+  province: '',
+  status: '',
+};
 
 function CustomersPageInner() {
   const { push } = useToast();
@@ -38,45 +61,9 @@ function CustomersPageInner() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/customers');
 
   // server-side paging / search over the customer table (43k rows)
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  // filter bar (applied on ค้นหา) — every field is AND-ed on the server; same params feed the Excel export
-  type CustomerFilter = {
-    code: string;
-    name: string;
-    phone: string;
-    email: string;
-    taxId: string;
-    type: string;
-    province: string;
-    status: '' | 'Active' | 'Inactive';
-  };
-  const NO_FILTER: CustomerFilter = {
-    code: '',
-    name: '',
-    phone: '',
-    email: '',
-    taxId: '',
-    type: '',
-    province: '',
-    status: '',
-  };
-  const [draft, setDraft] = React.useState<CustomerFilter>(NO_FILTER);
-  const [filter, setFilter] = React.useState<CustomerFilter>(NO_FILTER);
-  const setD = <K extends keyof CustomerFilter>(k: K, v: CustomerFilter[K]) => setDraft((f) => ({ ...f, [k]: v }));
-  const { data: PROVINCES } = useProvinces();
-  const {
-    rows: CUSTOMERS,
-    total,
-    loading,
-    refetch,
-    error: loadError,
-  } = useCustomersPage({
-    page: table.page,
-    pageSize: table.pageSize,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-    ...filter,
-  });
+  const { draft, setD, filters: filter, apply, reset, narrowed, pageArgs, server } = useServerTable(NO_FILTER);
+  const { data: PROVINCES, ...provincesLookup } = useProvinces();
+  const { rows: CUSTOMERS, total, loading, refetch, error: loadError } = useCustomersPage({ ...pageArgs, ...filter });
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Customer | null>(null);
@@ -202,11 +189,6 @@ function CustomersPageInner() {
     },
   ];
 
-  const resetFilters = () => {
-    setDraft(NO_FILTER);
-    setFilter(NO_FILTER);
-  };
-
   return (
     <>
       <PageHeader
@@ -225,12 +207,7 @@ function CustomersPageInner() {
         }
       />
 
-      <FilterBar
-        onSearch={() => {
-          setFilter(draft);
-        }}
-        onReset={resetFilters}
-      >
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="รหัสลูกค้า">
           <Input
             placeholder="C43600"
@@ -265,7 +242,7 @@ function CustomersPageInner() {
             ))}
           </Select>
         </Field>
-        <Field label="จังหวัด">
+        <Field label="จังหวัด" lookup={provincesLookup}>
           <SearchSelect
             value={draft.province}
             onChange={(v) => setD('province', v)}
@@ -286,8 +263,8 @@ function CustomersPageInner() {
       </FilterBar>
 
       <DataTable
-        narrowed={isFilterActive(filter, NO_FILTER)}
-        onClearFilters={resetFilters}
+        narrowed={narrowed}
+        onClearFilters={reset}
         searchable={false}
         columns={columns}
         rows={CUSTOMERS}
@@ -295,7 +272,7 @@ function CustomersPageInner() {
         error={loadError}
         onRetry={refetch}
         rowKey={(r) => r.code}
-        server={{ total, onChange: setTable, resetKey: JSON.stringify(filter) }}
+        server={{ ...server, total }}
       />
 
       <Modal

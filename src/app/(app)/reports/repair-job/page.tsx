@@ -2,14 +2,14 @@
 
 import * as React from 'react';
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import type { ServerTableState } from '@/components/ui/data-table';
 import { StatusBadge } from '@/components/ui/badge';
-import { type Job } from '@/data/mock';
+import type { Job } from '@/data/types';
 import { useJobsPage, useJobSummary, useSymptoms, useStaff, useJobTypes } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { useServerTable } from '@/lib/use-server-table';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
 const columns: Column<Job>[] = [
@@ -51,14 +51,20 @@ const columns: Column<Job>[] = [
 ];
 
 export default function Page() {
-  const [f, setF] = React.useState<ReportValues>({
+  const {
+    filters: f,
+    setFilters: setF,
+    table,
+    pageArgs,
+    server,
+  } = useServerTable<ReportValues>({
     from: daysAgo(30),
     to: today(),
     type: '',
     engineer: '',
     symptom: '',
   });
-  const { data: STAFF } = useStaff('engineer');
+  const { data: STAFF, ...staffLookup } = useStaff('engineer');
   // by id like the sale-order report: names carry stray spaces and may repeat
   const engineerId = STAFF.find((s) => s.name === f.engineer)?.id;
   // "วันที่ซ่อม" = job_repaired_date
@@ -70,14 +76,6 @@ export default function Page() {
     engineer: engineerId ? String(engineerId) : f.engineer,
     symptom: f.symptom,
   };
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  const pageArgs = {
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-  };
   const { data: sum } = useJobSummary({ ...filters, q: table.q });
   const {
     rows: JOBS,
@@ -86,8 +84,8 @@ export default function Page() {
     error: loadError,
     refetch: retryLoad,
   } = useJobsPage({ ...pageArgs, ...filters });
-  const { data: SYMPTOMS } = useSymptoms();
-  const { data: JOB_TYPES } = useJobTypes();
+  const { data: SYMPTOMS, ...symptomsLookup } = useSymptoms();
+  const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
   const S = sum[0];
   const count = S?.total ?? 0;
   const done = S?.done ?? 0;
@@ -100,14 +98,27 @@ export default function Page() {
       filters={[
         { kind: 'date', key: 'from', label: 'วันที่ซ่อม (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่ซ่อม (ถึง)', value: f.to },
-        { kind: 'select', key: 'type', label: 'ประเภทงาน', options: ['ทั้งหมด', ...JOB_TYPES.map((j) => j.name)] },
+        {
+          kind: 'select',
+          key: 'type',
+          label: 'ประเภทงาน',
+          options: ['ทั้งหมด', ...JOB_TYPES.map((j) => j.name)],
+          lookup: jobTypesLookup,
+        },
         {
           kind: 'select',
           key: 'engineer',
           label: 'ช่างผู้รับผิดชอบ',
           options: ['ทั้งหมด', ...STAFF.map((s) => s.name)],
+          lookup: staffLookup,
         },
-        { kind: 'select', key: 'symptom', label: 'อาการเสีย', options: ['ทั้งหมด', ...SYMPTOMS.map((s) => s.name)] },
+        {
+          kind: 'select',
+          key: 'symptom',
+          label: 'อาการเสีย',
+          options: ['ทั้งหมด', ...SYMPTOMS.map((s) => s.name)],
+          lookup: symptomsLookup,
+        },
       ]}
       onApply={setF}
       onExport={() => exportXlsx('jobs', { ...filters, q: table.q })}
@@ -123,7 +134,7 @@ export default function Page() {
       error={loadError}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
-      server={{ total: totalRows, onChange: setTable, resetKey: JSON.stringify(f) }}
+      server={{ ...server, total: totalRows }}
     />
   );
 }

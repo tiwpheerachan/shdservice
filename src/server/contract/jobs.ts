@@ -33,8 +33,9 @@ const tags = ['Jobs'];
 const jobNo = byNo('หมายเลขงาน (J…)');
 const answer = (what: string) => jsonResponse(what, z.object({ ok: z.literal(true), job: JobDetail }));
 
-const sn = s.nullish();
-const nn = n.nullish();
+/** a field the pages always send as text / a number (never null) */
+const optText = s.optional();
+const optNum = n.optional();
 
 /**
  * The job form's fields (jobSchema in src/lib/validation/job.ts) without a stored job: SO / Serial / IMEI /
@@ -44,10 +45,10 @@ const nn = n.nullish();
 const JobBody = z
   .looseObject({
     ...jobSchema().shape,
-    so: sn,
-    serial: sn,
-    imei: sn,
-    receptionTrackingNo: sn,
+    so: optText,
+    serial: optText,
+    imei: optText,
+    receptionTrackingNo: optText,
     version,
     takeOver: flag.meta({ description: 'Take a job assigned to someone else (else 409).' }),
   })
@@ -59,21 +60,21 @@ const CloseBody = z.looseObject({
   ...close,
   payment: close.payment
     .unwrap()
-    .extend({ no: sn })
+    .extend({ no: optText })
     .optional()
     .meta({ description: 'Left out when nobody paid (an in-warranty job).' }),
   refund: close.refund.meta({ description: 'The deposit given back.' }),
-  return: close.return.extend({ tracking: sn, shipperId: nn }),
+  return: close.return.extend({ tracking: optText, shipperId: optNum }),
 });
 
 /** Swap / Refund's fields without a stored job: New S/N, doc no and refund ref are only text here */
 const SwapBody = z.looseObject({
   ...swapRefundSchema().shape,
-  newSerial: sn,
-  docNo: sn,
-  refundRef: sn,
-  newModel: sn,
-  detail: sn,
+  newSerial: optText,
+  docNo: optText,
+  refundRef: optText,
+  newModel: optText,
+  detail: optText,
 });
 
 export const jobGet = defineOperation({
@@ -198,8 +199,8 @@ export const jobOutsource = defineOperation({
   description: 'Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts).',
   params: jobNo,
   body: outsourceActionSchema.safeExtend({
-    engineerSymptom: sn.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
-    receive: outsourceActionSchema.shape.receive.unwrap().extend({ from: sn }).optional(),
+    engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
+    receive: outsourceActionSchema.shape.receive.unwrap().extend({ from: optText }).optional(),
   }),
   responses: {
     200: answer('Saved; the job as stored now.'),
@@ -211,6 +212,8 @@ export const jobOutsource = defineOperation({
 });
 
 const repairPart = repairActionSchema.shape.parts.unwrap().element;
+/** เบิก / เสนอ of one option (A or B) */
+const partPick = { pick: z.boolean().optional(), quote: z.boolean().optional() };
 
 export const jobRepair = defineOperation({
   method: 'post',
@@ -221,20 +224,15 @@ export const jobRepair = defineOperation({
     'Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it.',
   params: jobNo,
   body: repairActionSchema.extend({
-    engineerSymptom: sn.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
+    engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
     parts: z
       .array(
         repairPart.extend({
-          logId: nn,
-          code: sn,
-          a: repairPart.shape.a
-            .unwrap()
-            .extend({ pick: z.boolean().nullish(), quote: z.boolean().nullish() })
-            .optional(),
-          b: repairPart.shape.b
-            .unwrap()
-            .extend({ pick: z.boolean().nullish(), quote: z.boolean().nullish() })
-            .optional(),
+          logId: optNum,
+          code: optText,
+          // both always sent (the page's A and B columns); saveRepair reads each
+          a: repairPart.shape.a.unwrap().extend(partPick),
+          b: repairPart.shape.b.unwrap().extend(partPick),
         }),
       )
       .optional(),

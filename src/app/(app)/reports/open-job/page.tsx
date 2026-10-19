@@ -2,14 +2,15 @@
 
 import * as React from 'react';
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import type { ServerTableState } from '@/components/ui/data-table';
 import { StatusBadge, Badge } from '@/components/ui/badge';
-import { CHANNELS, type Job } from '@/data/mock';
+import { CHANNELS } from '@/data/options';
+import type { Job } from '@/data/types';
 import { useJobsPage, useJobSummary, useJobTypes } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { useServerTable } from '@/lib/use-server-table';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
 const columns: Column<Job>[] = [
@@ -48,20 +49,18 @@ const columns: Column<Job>[] = [
 ];
 
 export default function Page() {
-  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), type: '', channel: '' });
+  const {
+    filters: f,
+    setFilters: setF,
+    table,
+    pageArgs,
+    server,
+  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), type: '', channel: '' });
   const filters = { from: f.from, to: f.to, type: f.type, channel: f.channel };
-  const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
-  const pageArgs = {
-    page: table.page,
-    pageSize: table.pageSize,
-    q: table.q,
-    sort: table.sort?.key,
-    dir: table.sort?.dir,
-  };
   // KPIs over the whole range (1 query) + one page of rows
   const { data: sum } = useJobSummary({ ...filters, q: table.q });
   const { rows: JOBS, total, loading, error: loadError, refetch: retryLoad } = useJobsPage({ ...pageArgs, ...filters });
-  const { data: JOB_TYPES } = useJobTypes();
+  const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
   const S = sum[0];
   const newJobs = S?.fresh ?? 0;
   const days = Math.max(
@@ -76,7 +75,13 @@ export default function Page() {
       filters={[
         { kind: 'date', key: 'from', label: 'วันที่เปิดงาน (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่เปิดงาน (ถึง)', value: f.to },
-        { kind: 'select', key: 'type', label: 'ประเภทงาน', options: ['ทั้งหมด', ...JOB_TYPES.map((j) => j.name)] },
+        {
+          kind: 'select',
+          key: 'type',
+          label: 'ประเภทงาน',
+          options: ['ทั้งหมด', ...JOB_TYPES.map((j) => j.name)],
+          lookup: jobTypesLookup,
+        },
         { kind: 'select', key: 'channel', label: 'ช่องทางการขาย', options: ['ทั้งหมด', ...CHANNELS] },
       ]}
       onApply={setF}
@@ -93,7 +98,7 @@ export default function Page() {
       error={loadError}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
-      server={{ total, onChange: setTable, resetKey: JSON.stringify(f) }}
+      server={{ ...server, total }}
     />
   );
 }

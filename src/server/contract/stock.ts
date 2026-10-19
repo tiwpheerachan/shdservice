@@ -64,13 +64,14 @@ export const productSave = defineOperation({
     .looseObject({
       // productSchema(prev)'s fields; the vendor code is checked against the stored one ("never worse") by the service
       ...productSchema().shape,
-      mfgCode: s.nullish(),
-      sysCode: s.nullish().meta({ description: 'Set = edit that part.' }),
-      category: s.nullish(),
-      brand: s.nullish(),
-      status: s.nullish(),
-      ubRepairOnly: z.boolean().nullish(),
-      models: z.array(s).nullish(),
+      // the page sends these as text / a list, never null
+      mfgCode: s.optional(),
+      sysCode: s.optional().meta({ description: 'Set = edit that part.' }),
+      category: s.optional(),
+      brand: s.optional(),
+      status: s.optional(),
+      ubRepairOnly: z.boolean().optional(),
+      models: z.array(s).optional(),
       version,
     })
     .meta({ id: 'ProductInput' }),

@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { JOB_STATUS_OPTIONS } from '@/data/mock';
+import { JOB_STATUS_OPTIONS } from '@/data/options';
 import { useVendors, useStaff, useJobStatuses } from '@/data/db';
 import { JS } from '@/lib/status-ids';
 import { SEND_STATUS } from '@/lib/outsource-status';
@@ -50,8 +50,8 @@ const receiveSchema = outsourceActionSchema.refine((v) => !!v.receive?.date, {
 
 function OutsourceForm() {
   const { push } = useToast();
-  const { data: VENDORS } = useVendors();
-  const { data: STAFF } = useStaff();
+  const { data: VENDORS, ...vendorsLookup } = useVendors();
+  const { data: STAFF, ...staffLookup } = useStaff();
   const { data: JOB_STATUSES } = useJobStatuses();
   const outsourceStatuses = JOB_STATUSES.length
     ? JOB_STATUSES.filter((x) => OUTSOURCE_IDS.includes(x.id)).map((x) => x.name)
@@ -268,7 +268,13 @@ function OutsourceForm() {
 
         <Section title="รายละเอียด การส่งงานซ่อม" icon={Truck}>
           <FieldGrid>
-            <Field label="ส่งไปยัง" required error={act.errors['send.to']} className="lg:col-span-2">
+            <Field
+              label="ส่งไปยัง"
+              required
+              error={act.errors['send.to']}
+              className="lg:col-span-2"
+              lookup={vendorsLookup}
+            >
               <div className="space-y-2">
                 <SearchSelect
                   value={d.sendTo}
@@ -289,7 +295,7 @@ function OutsourceForm() {
             <Field label="วันที่ส่ง" required error={act.errors['send.date']}>
               <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
             </Field>
-            <Field label="ส่งโดย (ค่าเริ่มต้น: ผู้บันทึก)" error={act.errors['send.by']}>
+            <Field label="ส่งโดย (ค่าเริ่มต้น: ผู้บันทึก)" error={act.errors['send.by']} lookup={staffLookup}>
               <SearchSelect
                 value={d.sendBy}
                 onChange={(v) => upd({ sendBy: v })}
@@ -310,7 +316,7 @@ function OutsourceForm() {
 
         <Section title="รายละเอียด การรับคืนงานซ่อม" icon={PackageCheck}>
           <FieldGrid>
-            <Field label="รับจาก" className="lg:col-span-2">
+            <Field label="รับจาก" className="lg:col-span-2" lookup={vendorsLookup}>
               <SearchSelect
                 value={d.recvFrom}
                 onChange={(v) => upd({ recvFrom: v })}
@@ -321,7 +327,7 @@ function OutsourceForm() {
             <Field label="วันที่รับ" required={!!open} error={act.errors['receive.date']}>
               <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
             </Field>
-            <Field label="รับโดย" error={act.errors['receive.by']}>
+            <Field label="รับโดย" error={act.errors['receive.by']} lookup={staffLookup}>
               <SearchSelect
                 value={d.recvBy || String(meId)}
                 onChange={(v) => upd({ recvBy: v })}

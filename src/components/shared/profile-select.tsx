@@ -31,7 +31,7 @@ export function ProfileSelect({
   className?: string;
 }) {
   const { push } = useToast();
-  const { data: profiles } = useDocumentProfiles();
+  const { data: profiles, ...profilesLookup } = useDocumentProfiles();
   const [busy, setBusy] = React.useState(false);
   const def = profiles.find((p) => p.isDefault) ?? profiles[0];
 
@@ -41,8 +41,8 @@ export function ProfileSelect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [def?.id, !!doc]);
 
-  // a single profile = nothing to choose; keep the form unchanged
-  if (profiles.length <= 1) return null;
+  // a single profile = nothing to choose; keep the form unchanged (a failed load still says so, with a retry)
+  if (profiles.length <= 1 && !profilesLookup.error) return null;
 
   const change = async (id: number) => {
     if (!doc) return onChange(id, 'user');
@@ -70,6 +70,7 @@ export function ProfileSelect({
     <Field
       label="ออกเอกสารในนาม"
       className={className}
+      lookup={profilesLookup}
       hint={
         doc
           ? 'เปลี่ยนได้ทุกเมื่อ มีผลกับเอกสารที่พิมพ์ (เลขที่เอกสารไม่เปลี่ยน)'

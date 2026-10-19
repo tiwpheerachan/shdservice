@@ -5,7 +5,7 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { Loader2, Search, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
 import { StatusBadge } from '@/components/ui/badge';
-import { type Job } from '@/data/mock';
+import type { Job } from '@/data/types';
 import { qs } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';

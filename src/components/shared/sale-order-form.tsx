@@ -1,18 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { Plus, Trash2, UserRound, FileText, ShoppingCart, Wallet } from 'lucide-react';
+import { UserRound, FileText, Wallet } from 'lucide-react';
 import { Section } from './section';
 import { CustomerSelect } from './customer-select';
-import { ProductPicker } from './product-picker';
 import { ProfileSelect } from './profile-select';
-import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
-import { Input, Textarea, Radio, NumberInput } from '@/components/ui/input';
+import { Input, Textarea, Radio } from '@/components/ui/input';
 import { SearchSelect } from '@/components/shared/search-select';
 import { useToast } from '@/components/ui/toast';
-import { PAYMENT_METHODS, type Customer } from '@/data/mock';
-import { useProducts, useStaff } from '@/data/db';
+import { PAYMENT_METHODS } from '@/data/options';
+import type { Customer } from '@/data/types';
+import { useStaff } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
@@ -21,6 +20,7 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { overpaidMessage, saleOrderSchema, SUBMIT_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
+import { SaleOrderLines, type SaleOrderLine as Line } from '@/components/sale/sale-order-lines';
 
 // approve status label (approve_name_th; 3 is shown as ส่งกลับแก้ไข) → badge tone (list + edit page)
 export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
@@ -30,8 +30,6 @@ export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> 
   ส่งกลับแก้ไข: 'danger',
   กำลังดำเนินการจัดทำ: 'info',
 };
-
-type Line = { id: number; code: string; name: string; qty: number; price: number; type: 'SparePart' | 'Service' };
 
 /** GET /api/sale-orders/:no (subset the form uses) */
 export type SaleOrderLoaded = {
@@ -103,8 +101,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const { push } = useToast();
     const { name: me, userId, isAdmin } = useAccess();
     const fe = useFormErrors();
-    const { data: PRODUCTS } = useProducts();
-    const { data: STAFF } = useStaff();
+    const { data: STAFF, ...staffLookup } = useStaff();
     // an existing SO fills the form when it mounts — the edit page remounts the form (key) for every
     // order it loads or saves, so this is the one place the form takes `initial`
     const [lines, setLines] = React.useState<Line[]>(() =>
@@ -117,9 +114,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         type: l.type,
       })),
     );
-    const [code, setCode] = React.useState('');
     const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม
-    const [qty, setQty] = React.useState(1);
     const [customer, setCustomer] = React.useState<Customer | null>(() => {
       const c = initial?.customerDetail;
       return c
@@ -193,7 +188,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     // the order's own date, or (a new order) when the screen opened — Thai time, browser only
     const openedAt = useMountTime();
     const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : '');
-    const idRef = React.useRef(initial?.lines.length ?? 0);
 
     // the form as it opened (a loaded order, or empty) — anything else is an unsaved edit; the edit
     // page remounts the form for every order it loads or saves
@@ -211,17 +205,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [saved, setSaved] = React.useState(now);
     useUnsavedChanges(JSON.stringify(now) !== JSON.stringify(saved));
 
-    const add = () => {
-      const p = PRODUCTS.find((x) => x.sysCode === code);
-      if (!p) return;
-      setLines((s) => [
-        ...s,
-        { id: ++idRef.current, code: p.sysCode, name: p.name, qty, price: p.price, type: 'SparePart' },
-      ]);
-      setCode('');
-      setQty(1);
-    };
-
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
     const net = total + (initial?.fee ?? 0); // the edit keeps the order's fee
     // the server refuses more than the total — shown as soon as a line change makes it so
@@ -235,6 +218,18 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     React.useEffect(() => clear('paymentAmount'), [payAmount, clear]);
     React.useEffect(() => clear('paymentType'), [payment, clear]);
 
+    const payloadOf = (): SaleOrderPayload => ({
+      no: soNo || initial?.no || undefined,
+      documentProfileId: profileId || undefined,
+      customerCode: customer?.code ?? '',
+      salesId: salesId || undefined,
+      lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
+      paymentType: payment,
+      paymentAmount: payAmount,
+      slip: slip.includes('/') ? slip : '',
+      remark,
+      submit,
+    });
     React.useImperativeHandle(ref, () => ({
       uploadPendingSlip: async (no: string) => {
         if (!pendingSlip) return;
@@ -253,18 +248,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       fromApi: fe.fromApi,
       payload: () => payloadOf(),
     }));
-    const payloadOf = (): SaleOrderPayload => ({
-      no: soNo || initial?.no || undefined,
-      documentProfileId: profileId || undefined,
-      customerCode: customer?.code ?? '',
-      salesId: salesId || undefined,
-      lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
-      paymentType: payment,
-      paymentAmount: payAmount,
-      slip: slip.includes('/') ? slip : '',
-      remark,
-      submit,
-    });
 
     return (
       <fieldset disabled={readOnly} className="contents">
@@ -303,7 +286,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             <Field label="สร้างโดย">
               <ReadOnly>{initial?.createdBy || me || '—'}</ReadOnly>
             </Field>
-            <Field label="พนักงานขาย" required error={fe.errors.salesId}>
+            <Field label="พนักงานขาย" required error={fe.errors.salesId} lookup={staffLookup}>
               <SearchSelect
                 value={salesId ? String(salesId) : ''}
                 onChange={(v) => setSalesId(Number(v) || 0)}
@@ -316,132 +299,15 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           </FieldGrid>
         </Section>
 
-        <Section title="รายการสินค้า" icon={ShoppingCart} bodyClassName="p-0">
-          {!readOnly && (
-            <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-end">
-              <Field label="รหัสสินค้า หรือ ชื่อสินค้า" className="flex-1" error={fe.errors.lines}>
-                <ProductPicker
-                  id="so-product"
-                  products={PRODUCTS}
-                  value={code}
-                  clearable
-                  onPick={(p) => setCode(p?.code ?? '')}
-                  placeholder="ค้นหา ชื่อสินค้า / รหัส / เลข part / ยี่ห้อ…"
-                />
-              </Field>
-              <Field label="จำนวน" className="sm:w-28">
-                <NumberInput min={1} max={1000} step={1} placeholder="1" value={qty} onChange={(n) => setQty(n)} />
-              </Field>
-              <Field label="หน่วยนับ" className="sm:w-28">
-                <Input readOnly value="Pcs." />
-              </Field>
-              <Button size="md" onClick={add} disabled={!code}>
-                <Plus className="h-3.5 w-3.5" />
-                เพิ่มรายการ
-              </Button>
-            </div>
-          )}
-
-          <div className="table-scroll rounded-none">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                  <th className="w-10 px-3 py-2 text-left">#</th>
-                  <th className="w-28 px-3 py-2 text-left">รหัสสินค้า</th>
-                  <th className="px-3 py-2 text-left">รายละเอียดสินค้า</th>
-                  <th className="w-20 px-3 py-2 text-right">จำนวน</th>
-                  <th className="w-28 px-3 py-2 text-right">ราคาขาย/หน่วย</th>
-                  <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
-                  {!readOnly && <th className="w-16 px-3 py-2 text-center">ลบ</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {lines.length === 0 ? (
-                  <tr>
-                    <td colSpan={readOnly ? 6 : 7} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                      ยังไม่มีรายการสินค้า
-                    </td>
-                  </tr>
-                ) : (
-                  lines.map((l, i) => {
-                    // stock on hand now (the approval takes it out) — a warning only, the approval refuses for real
-                    const onhand = PRODUCTS.find((p) => p.sysCode === l.code)?.onhand;
-                    const short = !readOnly && l.type === 'SparePart' && onhand !== undefined && l.qty > onhand;
-                    return (
-                      <tr key={l.id} className="border-b border-border/70 last:border-0">
-                        <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
-                        <td className="num px-3 py-2 font-medium">{l.code}</td>
-                        <td className="px-3 py-2">
-                          <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
-                          {!readOnly && l.type === 'SparePart' && onhand !== undefined && (
-                            <span
-                              className={
-                                short ? 'block text-xs font-medium text-warning' : 'block text-xs text-muted-foreground'
-                              }
-                            >
-                              คงเหลือ {onhand}
-                              {short && ' — ไม่พออนุมัติ: รับเข้าอะไหล่ที่ เมนูรับเข้า ก่อน'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <NumberInput
-                            aria-label={`จำนวน ${l.code}`}
-                            aria-invalid={!!fe.errors[`lines.${i}.qty`] || undefined}
-                            min={1}
-                            max={1000}
-                            step={1}
-                            inputMode="numeric"
-                            value={l.qty}
-                            onChange={(n) =>
-                              setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
-                            }
-                            className="ml-auto h-8 w-16 text-right text-xs"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <NumberInput
-                            aria-label={`ราคา ${l.code}`}
-                            aria-invalid={!!fe.errors[`lines.${i}.price`] || undefined}
-                            step="0.01"
-                            showZero={!!initial}
-                            value={l.price}
-                            onChange={(n) => {
-                              setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));
-                              fe.clear(`lines.${i}.price`);
-                            }}
-                            className="ml-auto h-8 w-24 text-right text-xs"
-                          />
-                        </td>
-                        <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
-                        {!readOnly && (
-                          <td className="px-3 py-2 text-center">
-                            <button
-                              onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
-                              className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                              aria-label="ลบ"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-              <tfoot>
-                <tr className="bg-muted/50 font-semibold">
-                  <td colSpan={5} className="px-3 py-2 text-right">
-                    รวมเป็นเงินทั้งสิ้น
-                  </td>
-                  <td className="num px-3 py-2 text-right text-primary">{baht(total)}</td>
-                  {!readOnly && <td />}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </Section>
+        <SaleOrderLines
+          lines={lines}
+          setLines={setLines}
+          total={total}
+          readOnly={readOnly}
+          errors={fe.errors}
+          clear={fe.clear}
+          showZero={!!initial}
+        />
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>
           <FieldGrid>

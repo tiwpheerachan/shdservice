@@ -8,7 +8,7 @@ import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Tabs } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useJobs } from '@/data/db';
-import type { Customer } from '@/data/mock';
+import type { Customer } from '@/data/types';
 import { baht, cn } from '@/lib/utils';
 import { postJson, errMsg } from '@/lib/api';
 
