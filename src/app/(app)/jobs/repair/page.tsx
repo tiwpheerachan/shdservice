@@ -36,6 +36,7 @@ import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
+import { QuoteLink } from '@/components/jobs/quote-link';
 import { postJson, errMsg } from '@/lib/api';
 import {
   partCharge,
@@ -606,6 +607,11 @@ function RepairForm() {
                 }}
               />
             </Field>
+            {job?.sparePartReplace && (
+              <Field label="อะไหล่ที่เปลี่ยน / New S/N (ที่บันทึกไว้)" wide>
+                <Textarea rows={2} readOnly value={job.sparePartReplace} />
+              </Field>
+            )}
             <Field
               label="New Serial No."
               error={act.errors.newSerial}
@@ -648,14 +654,17 @@ function RepairForm() {
           denied={can('Job Repair', 'edit') ? undefined : VIEW_ONLY}
           cancelHref="/jobs/list"
           extra={
-            <PrintButton
-              label="พิมพ์ใบรับงาน"
-              kind="job"
-              no={job?.no ?? ''}
-              profileId={job?.documentProfileId}
-              href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
-              disabled={!job}
-            />
+            <>
+              <QuoteLink jobNo={job?.no} />
+              <PrintButton
+                label="พิมพ์ใบรับงาน"
+                kind="job"
+                no={job?.no ?? ''}
+                profileId={job?.documentProfileId}
+                href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+                disabled={!job}
+              />
+            </>
           }
         />
       </RecordGate>

@@ -236,6 +236,16 @@ export type SaleOrderDetail = SaleOrder & {
   salesId: number;
 };
 
+/** a line's description: its product's name, else its remark (a service line); legacy service lines (SV0001,
+ *  product_id -1) have neither */
+const lineName = (
+  productName: string | null,
+  d: { remarkDt: string | null; productType: string | null; productCode: string | null },
+) =>
+  productName ||
+  str(d.remarkDt) ||
+  (str(d.productType) === 'Service' ? `ค่าบริการ/ค่าส่ง (${str(d.productCode)})` : '');
+
 const linesOf = (x: Tx, no: string) =>
   x
     .select()
@@ -291,7 +301,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       listNo: d.listNo ?? 0,
       productId: d.productId ?? 0,
       code: d.productCode ?? '',
-      name: name ?? d.remarkDt ?? '',
+      name: lineName(name, d),
       type: (d.productType as 'SparePart' | 'Service') ?? 'SparePart',
       qty: d.saleOutQuantity,
       unit: 'Pcs.',
@@ -413,7 +423,7 @@ export async function saveSaleOrder(
         o.saleOutQuantity === l.qty &&
         num(o.saleOutPrice) === price &&
         str(o.productType) === type &&
-        (!l.isService || str(o.remarkDt) === l.name.slice(0, 100).trim())
+        (!l.isService || lineName(null, o) === l.name.slice(0, 100).trim())
       ) {
         return { kept: true, row: { ...o, saleOutDtId: undefined } };
       }

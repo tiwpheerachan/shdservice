@@ -27,7 +27,7 @@ const WAITING = 'รออนุมัติ'; // approve_status 2 (its approve_
 
 function SaleOrderList() {
   const { add: canAdd, edit: canEdit } = useAccess().forPath('/sale/orders');
-  const { data: USERS } = useStaff();
+  const { data: USERS } = useStaff('sales');
   const [draft, setDraft] = React.useState<Filters>(NO_FILTER);
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));

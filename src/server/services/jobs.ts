@@ -63,6 +63,7 @@ import { staffOrKeep } from './users';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
 import { RS, statusStamp } from '@/server/record-status';
+import { filePath, resolvePath } from '@/server/storage';
 import { addDays } from '@/lib/dates';
 import {
   jobSchema,
@@ -537,8 +538,9 @@ export function jobWhere(q: string, f: JobFilters) {
     closedFrom = ymd(f.closedFrom),
     closedTo = ymd(f.closedTo);
   return and(
-    // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for
-    f.includeCancelled ? undefined : ne(job.recordStatus, RS.DELETED),
+    // soft-deleted jobs (record_status DELETED = legacy status 0) are hidden unless asked for — picking
+    // the status ยกเลิกข้อมูล (0) asks for them
+    f.includeCancelled || f.statusId === JS.CANCELLED ? undefined : ne(job.recordStatus, RS.DELETED),
     term
       ? or(
           ilike(job.jobNo, likeTerm(term)),
@@ -778,6 +780,12 @@ export type JobDetail = {
   engineerRemark: string;
   repairedDate: string;
   closedDate: string;
+  /** ซ่อมเสร็จโดย / ปิดงานโดย — job_repaired_by / job_closed_by names */
+  repairedBy: string;
+  closedBy: string;
+  /** อะไหล่ที่เปลี่ยน / New S/N — job.spare_part_replace (withNewSerial) */
+  sparePartReplace: string;
+  /** `slip` = the storage path (a legacy bare file name → jobs/{no}/slip/{file}) */
   payment: { type: string; no: string; amount: number; detail: string; slip: string };
   return: { date: string; type: string; tracking: string; detail: string; shipperId: number };
   swap: { detail: string; docNo: string };
@@ -848,6 +856,8 @@ async function readableHistory(rows: AuditRow[]): Promise<AuditRow[]> {
 
 export async function getJob(jobNo: string): Promise<JobDetail | null> {
   const engSym = alias(symptom, 'eng_sym');
+  const repairer = alias(appUser, 'repairer');
+  const closer = alias(appUser, 'closer');
   const [r] = await db
     .select({
       j: job,
@@ -863,6 +873,10 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
       engLast: eng.lastName,
       openerFirst: opener.firstName,
       openerLast: opener.lastName,
+      repairerFirst: repairer.firstName,
+      repairerLast: repairer.lastName,
+      closerFirst: closer.firstName,
+      closerLast: closer.lastName,
       due: effectiveDueText,
     })
     .from(job)
@@ -875,6 +889,8 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     .leftJoin(engSym, eq(engSym.symptomId, job.engineerSymptomId))
     .leftJoin(eng, eq(eng.userId, job.engineerId))
     .leftJoin(opener, eq(opener.userId, job.jobCreateBy))
+    .leftJoin(repairer, eq(repairer.userId, job.jobRepairedBy))
+    .leftJoin(closer, eq(closer.userId, job.jobClosedBy))
     .where(eq(job.jobNo, jobNo))
     .limit(1);
   if (!r) return null;
@@ -1018,12 +1034,16 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
     engineerRemark: j.engineerRemark ?? '',
     repairedDate: fmtDateTime(j.jobRepairedDate),
     closedDate: fmtDateTime(j.jobClosedDate),
+    repairedBy: fullName(r.repairerFirst, r.repairerLast),
+    closedBy: fullName(r.closerFirst, r.closerLast),
+    sparePartReplace: j.sparePartReplace ?? '',
     payment: {
       type: j.jobPaymentType ?? '',
       no: j.jobPaymentNo ?? '',
       amount: num(j.jobPaymentAmount),
       detail: j.jobPaymentDetail ?? '',
-      slip: j.jobPaymentSlipFileName ?? '',
+      // legacy slips are a bare file name — /api/files signs only jobs/{no}/slip/… (like attachments)
+      slip: j.jobPaymentSlipFileName ? resolvePath(j.jobPaymentSlipFileName, (f) => filePath.jobSlip(j.jobNo, f)) : '',
     },
     return: {
       date: fmtDateTime(j.jobReturnDate),
@@ -1162,9 +1182,22 @@ async function auditAssign(tx: Tx, byUserId: number, jobNo: string, from: number
  */
 const trimmed = (col: Parameters<typeof eq>[0]) => sql`btrim(${col}, E' \t\r\n')`;
 const nameIs = (col: Parameters<typeof eq>[0], v: string) => sql`${trimmed(col)} = ${v.trim()}`;
+/**
+ * Symptom names are not unique (ACTIVE twins 37/76, 119/168, 45/63, 183/184): of the rows a name matches,
+ * the job's own one first (`mine`), then an ACTIVE one, then the lowest id — so re-saving a job never
+ * swaps its symptom for the twin.
+ */
+const symptomFirst = (mine?: SQL) => [
+  ...(mine ? [desc(mine)] : []), // a bare constant in ORDER BY is refused by Postgres — a new job has no own row
+  desc(eq(symptom.recordStatus, RS.ACTIVE)),
+  asc(symptom.symptomId),
+];
 
-/** `prevShipper` = the courier stored now: a legacy free-text name ("F", "flash") may stay as it is */
-async function lookups(i: JobInput, prevShipper?: string | null) {
+/**
+ * `prevShipper` = the courier stored now: a legacy free-text name ("F", "flash") may stay as it is;
+ * `jobNo` = the job being edited (its symptoms win a duplicate name: symptomFirst)
+ */
+async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string) {
   const [jt] = i.jobType
     ? await db.select({ id: jobType.jobTypeId }).from(jobType).where(nameIs(jobType.jobTypeName, i.jobType)).limit(1)
     : [];
@@ -1195,6 +1228,14 @@ async function lookups(i: JobInput, prevShipper?: string | null) {
         .select({ id: symptom.symptomId, name: sql<string>`${trimmed(symptom.symptomName)}` })
         .from(symptom)
         .where(inArray(trimmed(symptom.symptomName), names))
+        .orderBy(
+          ...symptomFirst(
+            jobNo
+              ? sql`${symptom.symptomId} in (select ${jobSymptom.symptomId} from ${jobSymptom} where ${jobSymptom.jobNo} = ${jobNo}
+                  union select ${job.productSymptomId} from ${job} where ${job.jobNo} = ${jobNo})`
+              : undefined,
+          ),
+        )
     : [];
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
   // a name that was sent but is not in the list used to be saved as id 0 — refuse it under its field
@@ -1568,7 +1609,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
   const was = await jobNow(jobNo);
   assertValid(jobSchema(was?.keep, was?.check), i); // never worse than it is now
   const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
-  const lk = await lookups(i, was?.shipper);
+  const lk = await lookups(i, was?.shipper, jobNo);
   const c = costFields(i);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   await assertPageStatus(newStatus, cur.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
@@ -1770,13 +1811,17 @@ function withNewSerial(replace: string | null, serial: string): string {
  */
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
   assertValid(repairActionSchema, i);
-  const [cur] = await db.select({ status: job.jobStatusId, eng: job.engineerId }).from(job).where(eq(job.jobNo, jobNo));
+  const [cur] = await db
+    .select({ status: job.jobStatusId, eng: job.engineerId, es: job.engineerSymptomId })
+    .from(job)
+    .where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const [es] = i.engineerSymptom
     ? await db
         .select({ id: symptom.symptomId })
         .from(symptom)
-        .where(eq(symptom.symptomName, i.engineerSymptom))
+        .where(nameIs(symptom.symptomName, i.engineerSymptom))
+        .orderBy(...symptomFirst(eq(symptom.symptomId, cur.es ?? 0)))
         .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
@@ -1995,13 +2040,17 @@ export type OutsourceInput = {
 
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
-  const [cur] = await db.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo));
+  const [cur] = await db
+    .select({ status: job.jobStatusId, es: job.engineerSymptomId })
+    .from(job)
+    .where(eq(job.jobNo, jobNo));
   if (!cur) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
   const [es] = i.engineerSymptom
     ? await db
         .select({ id: symptom.symptomId })
         .from(symptom)
-        .where(eq(symptom.symptomName, i.engineerSymptom))
+        .where(nameIs(symptom.symptomName, i.engineerSymptom))
+        .orderBy(...symptomFirst(eq(symptom.symptomId, cur.es ?? 0)))
         .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;

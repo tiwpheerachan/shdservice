@@ -102,7 +102,7 @@ export default function ProductsPage() {
   const { push } = useToast();
   const confirm = useConfirm();
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath('/stock/products');
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: MANUFACTURERS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const { data: CATEGORIES } = useCategories();
   const { data: MODELS } = useModels();
 

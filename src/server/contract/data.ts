@@ -206,7 +206,7 @@ resource(
   'product_stats',
   'Spare-part totals for the filter',
   ANY,
-  one(z.object({ total: n, qty: n, value: n, low: n, out: n })),
+  one(z.object({ total: n, qty: n, value: n, low: n, out: n, noPrice: n })),
   productFilters,
 );
 

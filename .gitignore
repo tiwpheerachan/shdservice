@@ -13,3 +13,6 @@ next-env.d.ts
 /playwright-report
 /test-results
 .apidoc
+
+# tsc incremental cache — rewritten on every run
+*.tsbuildinfo

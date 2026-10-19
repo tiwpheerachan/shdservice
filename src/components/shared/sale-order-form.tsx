@@ -52,6 +52,8 @@ export type SaleOrderLoaded = {
   approvedBy?: string;
   approveDate?: string;
   tracking?: string;
+  /** stamped when the tracking no. is saved */
+  deliveryDate?: string;
   /** who may not decide on it (the server refuses them; System Admin may) */
   creatorIds?: number[];
   paymentType?: string;
@@ -480,7 +482,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             </Field>
             <Field
               label="สลิปหลักฐานการโอน"
-              hint={slip.includes('/') ? undefined : slip ? `จะอัปโหลดหลังบันทึก: ${slip}` : undefined}
+              hint={
+                slip.includes('/') || !slip
+                  ? undefined
+                  : pendingSlip
+                    ? `จะอัปโหลดหลังบันทึก: ${slip}`
+                    : `สลิปอยู่บนระบบเก่า: ${slip}` // a legacy row keeps a bare file name, the file is not here
+              }
             >
               <div className="flex items-center gap-2">
                 <Input

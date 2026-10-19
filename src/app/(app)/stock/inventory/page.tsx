@@ -11,15 +11,15 @@ import { Modal } from '@/components/ui/modal';
 import { Field } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { type Movement, STOCK_MOVE_TYPES, WAREHOUSES } from '@/data/mock';
+import { type Movement, STOCK_MOVE_TYPES } from '@/data/mock';
 import { useApi, useMovementsPage } from '@/data/db';
 import { int, isFilterActive } from '@/lib/utils';
 import { exportXlsx } from '@/lib/api';
 import { ExportButton } from '@/components/shared/export-button';
 
 type LineRow = { code: string; name: string; qty: number; unit: string; supplier: string; ref: string };
-type Filters = { from: string; to: string; type: string; warehouse: string; code: string; doc: string; ref: string };
-const NO_FILTER: Filters = { from: '', to: '', type: '', warehouse: '', code: '', doc: '', ref: '' };
+type Filters = { from: string; to: string; type: string; code: string; doc: string; ref: string };
+const NO_FILTER: Filters = { from: '', to: '', type: '', code: '', doc: '', ref: '' };
 
 const DOC_TYPES = STOCK_MOVE_TYPES;
 
@@ -172,14 +172,6 @@ export default function InventoryPage() {
             ))}
           </Select>
         </Field>
-        <Field label="คลังสินค้า">
-          <Select value={draft.warehouse} onChange={(e) => setD('warehouse', e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            {WAREHOUSES.map((w) => (
-              <option key={w}>{w}</option>
-            ))}
-          </Select>
-        </Field>
         <Field label="รหัส / ชื่ออะไหล่">
           <Input
             placeholder="P02534 หรือ ชื่ออะไหล่"
@@ -253,7 +245,7 @@ export default function InventoryPage() {
                   </thead>
                   <tbody>
                     {lines.map((l, i) => (
-                      <tr key={l.code} className="border-b border-border/70 last:border-0">
+                      <tr key={i} className="border-b border-border/70 last:border-0">
                         <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
                         <td className="num px-3 py-2">{viewDoc.doc}</td>
                         <td className="num px-3 py-2 font-medium">{l.code}</td>

@@ -205,7 +205,7 @@ export const useProducts = (params: Params = {}) =>
   useTable<Product>('products', { column: 'sysCode' }, 'active', { fields: 'lite', ...params });
 export const useProductsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
   usePagedTable<Product & { value: number }>('products', params, mode);
-export type ProductStats = { total: number; qty: number; value: number; low: number; out: number };
+export type ProductStats = { total: number; qty: number; value: number; low: number; out: number; noPrice: number };
 export const useProductStats = (params: Params = {}, mode: DeletedMode = 'exclude') =>
   useTable<ProductStats>('product_stats', undefined, mode, params);
 export const useMovements = (params: Params = {}) => useTable<Movement>('movements', undefined, 'exclude', params);

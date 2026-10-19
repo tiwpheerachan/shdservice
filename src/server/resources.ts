@@ -210,6 +210,9 @@ export async function readResource(
             from: p.f.from,
             to: p.f.to,
             type: p.f.type,
+            code: p.f.code,
+            doc: p.f.doc,
+            ref: p.f.ref,
             limit: clampInt(sp.get('limit'), 1000, 5000),
           }); // JSON stays 5k — 20k is for the Excel export
     case 'job_summary':

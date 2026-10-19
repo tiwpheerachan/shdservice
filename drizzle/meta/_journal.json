@@ -232,6 +232,20 @@
       "when": 1757900032000,
       "tag": "0032_database_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1757900033000,
+      "tag": "0033_clear_raw_track_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1757900034000,
+      "tag": "0034_customer_name_clean_index",
+      "breakpoints": true
     }
   ]
 }

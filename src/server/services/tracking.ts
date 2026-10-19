@@ -5,8 +5,8 @@ import { db } from '@/db/client';
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd, trackDocTicket, trackSession } from '@/db/schema';
 import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
-import { addDays, today } from '@/lib/dates';
-import { QUOTATION_VALIDITY } from '@/lib/company';
+import { today } from '@/lib/dates';
+import { quoteExpired } from '@/lib/quote-expiry';
 import type { Customer } from '@/data/mock';
 import { JS, effectiveDueText, type JobDetail } from './jobs';
 import type { QuotationDetail } from './quotations';
@@ -114,12 +114,7 @@ export function statusLabel(statusId: number, step: TrackStepKey | null, lastQuo
 }
 const QUOTE_EXPIRED_TEXT = 'หมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่';
 const DUE_PASSED_TEXT = 'เลยกำหนดเดิม — ศูนย์จะแจ้งวันใหม่';
-/** "7 Days" → 7: the validity printed on the quotation */
-const QUOTE_VALID_DAYS = parseInt(QUOTATION_VALIDITY, 10) || 7;
-
-/** a sent quotation the customer can no longer answer: พ้นกำหนด (8), or sent (2) and past its validity / the job says so */
-export const quoteExpired = (st: number | null | undefined, at: string | null, jobStatusId: number | null) =>
-  st === 8 || (st === 2 && (fmtDate(at) < addDays(today(), -QUOTE_VALID_DAYS) || jobStatusId === JS.QUOTE_EXPIRED));
+export { quoteExpired };
 
 /**
  * What the quotation's "ตกลงซ่อมโดย" box shows (staff and customer copies): the sign-and-return request only
@@ -237,6 +232,9 @@ export function maskJobForCustomer(j: JobDetail): JobDetail {
     engineer: '',
     createBy: 0,
     createByName: '', // staff names stay on the staff copy (ผู้รับงาน / ผู้ส่งคืน)
+    repairedBy: '',
+    closedBy: '',
+    sparePartReplace: '', // holds the new serial ("New S/N: …") — masked like `serial`
     outsource: [],
     logs: [],
     history: [],
@@ -762,7 +760,7 @@ export function trackLinkFor(token: string, baseUrl: string): string {
 /** a new link: only its hash is stored, fresh 1-day window, not opened yet */
 const issue = (token: string) => ({
   trackTokenHash: tokenHash(token),
-  trackToken: null, // legacy raw column (drizzle/0012): never written again, dropped by the 0025 follow-up
+  trackToken: null, // legacy raw column (drizzle/0012): never written again; existing values emptied by drizzle/0033
   trackTokenAt: nowThai(),
   trackOpenedAt: null,
   trackLinkExpiresAt: null,

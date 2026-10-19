@@ -376,7 +376,8 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
     if (onhand) {
       // no price changed / sent (an API call with names only) → nothing to set: drizzle refuses an empty SET
       if (priceSent) await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
-    } else if (!i.sysCode || priceSent) {
+    } else {
+      // missing row (legacy product) → create it on any save, or every receive / issue refuses it (adjustQty 400)
       await tx.insert(productNoneSerial).values({
         productId,
         storeLocationId: STORE_LOCATION_ID,
@@ -1143,13 +1144,9 @@ const movementSearch = (text: string, docs: boolean) =>
       ),
   );
 
-export async function listMovements(
-  opts: { limit?: number; q?: string; from?: string; to?: string; type?: string } = {},
-): Promise<Movement[]> {
-  const { limit = 1000, q = '', type } = opts;
-  const from = ymd(opts.from),
-    to = ymd(opts.to);
-  const term = q.trim();
+/** Unpaged (Excel export / JSON list) — the same movementWhere as the paged screen, so the file matches it. */
+export async function listMovements(opts: MovementFilters & { limit?: number } = {}): Promise<Movement[]> {
+  const { limit = 1000 } = opts;
   const rows = await db
     .select({
       doc: inventoryHd.inventoryNo,
@@ -1169,15 +1166,7 @@ export async function listMovements(
     .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
     .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
     .leftJoin(storeLocation, eq(storeLocation.storeLocationId, STORE_LOCATION_ID))
-    .where(
-      and(
-        ne(inventoryHd.isActive, false),
-        movementSearch(term, true),
-        from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
-        to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
-        type ? eq(inventoryType.inventoryTypeName, type) : undefined,
-      ),
-    )
+    .where(movementWhere(opts))
     .orderBy(desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId))
     .limit(Math.min(limit, 20000)); // 20k = the Excel export cap (src/server/export.ts)
   return rows.map((r) => {
@@ -1409,6 +1398,8 @@ export async function productStats(q: string, f: ProductFilters) {
       value: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0) * coalesce(${productNoneSerial.retailPrice},0)),0)`,
       low: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) between 1 and 3)`,
       out: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) <= 0)`,
+      // in stock but no retail price: left out of value — the page says how many
+      noPrice: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) > 0 and coalesce(${productNoneSerial.retailPrice},0) = 0)`,
     })
     .from(product)
     .leftJoin(category, eq(category.categoryId, product.categoryId))
@@ -1417,7 +1408,14 @@ export async function productStats(q: string, f: ProductFilters) {
     .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
     .where(productWhere(q, f));
   if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
-  return { total: Number(r.total), qty: num(r.qty), value: num(r.value), low: num(r.low), out: num(r.out) };
+  return {
+    total: Number(r.total),
+    qty: num(r.qty),
+    value: num(r.value),
+    low: num(r.low),
+    out: num(r.out),
+    noPrice: num(r.noPrice),
+  };
 }
 
 /** Lite rows for dropdowns / pickers — a few fields instead of ~25 (the EN / CN names: the pickers search them). */

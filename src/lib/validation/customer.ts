@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { clean, maxText, type FieldErrors } from './index';
+import { clean, type FieldErrors } from './index';
 import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/mock';
 
 /**
@@ -70,7 +70,20 @@ export const isIndividual = (type: unknown) => !clean(type) || clean(type) === '
 
 /** the stored values the form opened with — an UNCHANGED legacy value still passes ("never worse") */
 export type CustomerPrev = Partial<
-  Record<'name' | 'phone' | 'taxId' | 'email' | 'line' | 'type' | 'priceGroup' | 'postalCode', string>
+  Record<
+    | 'name'
+    | 'phone'
+    | 'taxId'
+    | 'email'
+    | 'line'
+    | 'type'
+    | 'priceGroup'
+    | 'postalCode'
+    | 'address'
+    | 'address1'
+    | 'address2',
+    string
+  >
 >;
 
 /**
@@ -81,15 +94,16 @@ export type CustomerPrev = Partial<
  *    OTP key), a Corporate / Dealer one may give a landline; an existing customer that has one must keep
  *    one; the format is checked whenever it changed, on an edit too (an unchanged legacy phone stays savable)
  *  - tax ID 13 digits + check digit; postal code 5 digits; email ≤ 50; Line ID; lists for type / price group
- *  - text no longer than its column (address 100 each) — nothing is cut off silently
+ *  - text no longer than its column (address 100 each) — nothing is cut off silently; an unchanged legacy
+ *    address passes (C01029's 117-character one-line address shows in บรรทัด 1 and could never be saved)
  */
 /** the form's labels + the stored values (customers.ts maps one to the other) */
 const PRICE_GROUP_VALUES = [...PRICE_GROUPS, 'Retail', 'Wholesale', 'Special'];
 
-/** the fields' own rules (no stored customer) — the API reads the body with these (src/server/contract) */
+/** the fields' static part (the lengths depend on the stored customer) — the API reads the body with these (src/server/contract) */
 export const customerFields = z.looseObject({
-  address1: maxText(100, 'ที่อยู่ '),
-  address2: maxText(100, 'ซอย - ถนน '),
+  address1: z.string().nullish(),
+  address2: z.string().nullish(),
 });
 
 export function customerSchema(prev?: CustomerPrev | null) {
@@ -120,6 +134,13 @@ export function customerSchema(prev?: CustomerPrev | null) {
               'ลูกค้าบุคคลต้องมีเบอร์มือถือ (06 / 08 / 09 + 8 หลัก) — ใช้รับรหัส OTP ติดตามงาน (นิติบุคคลใช้เบอร์สำนักงานได้)',
             );
         }
+
+        // the form shows a legacy address-only row's one-line address in บรรทัด 1 (toCustomerForm)
+        const address1 = clean(v.address1);
+        if (address1.length > 100 && address1 !== clean(prev?.address1 || prev?.address))
+          bad('address1', 'ที่อยู่ ยาวเกิน 100 ตัวอักษร');
+        if (clean(v.address2).length > 100 && !same('address2', v.address2))
+          bad('address2', 'ซอย - ถนน ยาวเกิน 100 ตัวอักษร');
 
         const postal = clean(v.postalCode);
         if (postal && !/^\d{5}$/.test(postal) && !same('postalCode', postal))

@@ -124,12 +124,15 @@ WHERE coalesce(product_vender_code, '') <> ''
 ORDER BY (product_vender_code ~ ','), product_code;
 
 -- 5. Customer names / addresses: invisible characters (zero-width, bidi marks, BOM) and non-breaking
---    spaces — 1,995 names and 3,720 address rows. They look right and never match a search. The app now
+--    spaces — 1,995 names and 3,720 address rows — and runs of 2+ spaces (787 names, 776 of them with nothing
+--    else wrong, so the character test alone left them). They look right and never match a search. The app now
 --    writes clean() values on save; this cleans the rows nobody edits.
-SELECT count(*) FILTER (WHERE customer_name ~ E'[​-‏‪-‮⁠﻿ ]') AS names,
+SELECT count(*) FILTER (WHERE customer_name ~ E'[​-‏‪-‮⁠﻿ ]' OR customer_name ~ ' {2,}') AS names,
        count(*) FILTER (WHERE customer_address1 ~ E'[​-‏‪-‮⁠﻿ ]'
                            OR customer_address2 ~ E'[​-‏‪-‮⁠﻿ ]'
-                           OR customer_address ~ E'[​-‏‪-‮⁠﻿ ]') AS addresses
+                           OR customer_address ~ E'[​-‏‪-‮⁠﻿ ]'
+                           OR customer_address1 ~ ' {2,}' OR customer_address2 ~ ' {2,}'
+                           OR customer_address ~ ' {2,}') AS addresses
 FROM customer;
 BEGIN;
 UPDATE customer
@@ -140,7 +143,11 @@ SET customer_name     = btrim(regexp_replace(regexp_replace(customer_name, E'[�
 WHERE customer_name ~ E'[​-‏‪-‮⁠﻿ ]'
    OR customer_address ~ E'[​-‏‪-‮⁠﻿ ]'
    OR customer_address1 ~ E'[​-‏‪-‮⁠﻿ ]'
-   OR customer_address2 ~ E'[​-‏‪-‮⁠﻿ ]';
+   OR customer_address2 ~ E'[​-‏‪-‮⁠﻿ ]'
+   OR customer_name ~ ' {2,}'
+   OR customer_address ~ ' {2,}'
+   OR customer_address1 ~ ' {2,}'
+   OR customer_address2 ~ ' {2,}';
 ROLLBACK; -- COMMIT after review
 
 -- 6. Tax ids: 8 are not 13 digits — the 7 in section 3 plus C00602 '-' (= none → ''). All 10 that ARE

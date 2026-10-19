@@ -47,6 +47,7 @@ export default function ModelsPage() {
     ...filter,
   });
   const { data: MANUFACTURERS } = useManufacturers();
+  const { data: ALL_BRANDS } = useManufacturers('exclude'); // filter: INACTIVE brands still own models
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Model | null>(null);
   const [viewOnly, setViewOnly] = React.useState(false);
@@ -73,8 +74,8 @@ export default function ModelsPage() {
   // ยี่ห้อให้เลือก = ยี่ห้อ Active + ยี่ห้อเดิมของรุ่นที่กำลังแก้ (152 รุ่นสังกัดยี่ห้อ Inactive —
   // ไม่ให้ dropdown เปลี่ยนยี่ห้อโดยไม่ตั้งใจ)
   const brandFilterOptions = React.useMemo(
-    () => MANUFACTURERS.map((m) => ({ value: m.name, label: m.name })),
-    [MANUFACTURERS],
+    () => ALL_BRANDS.map((m) => ({ value: m.name, label: m.name })),
+    [ALL_BRANDS],
   );
   const brandOptions = React.useMemo(() => {
     const names = MANUFACTURERS.map((m) => m.name);

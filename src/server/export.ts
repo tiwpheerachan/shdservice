@@ -147,6 +147,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'approvedBy', header: 'ผู้อนุมัติ', width: 20 },
       { key: 'stockDoc', header: 'เอกสารจ่ายสต๊อก', width: 14 },
       { key: 'tracking', header: 'Tracking', width: 18 },
+      { key: 'deliveryDate', header: 'วันที่จัดส่ง', width: 18 },
     ],
   },
   products: {
@@ -163,6 +164,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'issued', header: 'จ่ายออกสะสม', width: 12, num: true },
       { key: 'capitalPrice', header: 'ราคาทุน', width: 12, money: true },
       { key: 'price', header: 'ราคาขาย', width: 12, money: true },
+      { key: 'value', header: 'มูลค่าคงเหลือ', width: 14, money: true }, // pageProducts: max(0, คงเหลือ) × ราคาขาย
       { key: 'status', header: 'สถานะ', width: 10 },
     ],
   },
@@ -303,10 +305,13 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
     }
     case 'movements':
       return listMovements({
-        q: p.q || f.code || f.doc || f.ref,
+        q: p.q,
         from: f.from,
         to: f.to,
         type: f.type,
+        code: f.code,
+        doc: f.doc,
+        ref: f.ref,
         limit: MAX_ROWS,
       }) as unknown as Row[];
     case 'issued_lines':

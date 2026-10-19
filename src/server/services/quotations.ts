@@ -374,6 +374,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const no = await db.transaction(async (tx) => {
     let linesChanged = true;
     let statusChanged = true; // a new quotation, or another status than the stored one
+    let wasAgreed = false;
     const values = {
       customerCode: cust.code,
       customerContactName: clean(i.contactName),
@@ -409,16 +410,18 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       // lines are re-written only when they changed (same value read the same way as the audit diff:
       // "100" = "100.00", trimmed) — an unchanged save keeps the rows, their ids and the version
       linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);
+      statusChanged = prev.quotationStatusId !== statusId;
+      wasAgreed = AGREED.has(prev.quotationStatusId ?? 0);
       const upd = {
         ...values,
         customerApproveDate:
           AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,
-        // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API
-        ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
+        // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API. Stamped only when
+        // the status moves: a re-save keeps record_status and who/when changed it
+        ...(statusChanged ? statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId) : {}),
       };
       await tx.update(quotationHd).set(upd).where(eq(quotationHd.quotationNo, no));
       if (linesChanged) await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
-      statusChanged = prev.quotationStatusId !== statusId;
       await audit(tx, byUserId, {
         action: statusChanged ? 'STATUS' : 'UPDATE',
         module: 'Quotation',
@@ -456,6 +459,9 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     // customer agreed → remember the approved quotation on the job
     if (AGREED.has(statusId) && values.referenceJobNo) {
       await tx.update(job).set({ quotationNoApproved: no }).where(eq(job.jobNo, values.referenceJobNo));
+    } else if (wasAgreed && !AGREED.has(statusId)) {
+      // no longer agreed (declined / cancelled …) → a job still naming it as the approved one forgets it
+      await tx.update(job).set({ quotationNoApproved: '' }).where(eq(job.quotationNoApproved, no!));
     }
     // sent / agreed moves the job forward (owner 2026-10-16) — only when the status was set now: an unchanged
     // re-save never touches the job

@@ -128,6 +128,13 @@ const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\
 const phoneHas = (digits: string) =>
   or(...phoneDigitVariants(digits).map((d) => sql`${phoneDigits} LIKE ${'%' + d + '%'}`));
 
+/**
+ * Name as clean() writes it — invisible characters dropped, any whitespace run (NBSP too) → one space: ~1,050
+ * legacy names hold double spaces / zero-width marks and never matched an ilike of the typed name (audit 2026-10).
+ * ponytail: seq scan (~50 ms on 43k rows) — an expression trigram index on exactly this expression makes it ~0.1 ms.
+ */
+const nameText = sql`regexp_replace(regexp_replace(${customer.customerName}, '[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]', '', 'g'), '[\\s\\u00A0]+', ' ', 'g')`;
+
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
@@ -135,7 +142,7 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
   const search = term
     ? or(
         ilike(customer.customerCode, likeTerm(term)),
-        ilike(customer.customerName, likeTerm(term)),
+        ilike(nameText, likeTerm(clean(term))),
         ilike(customer.phoneNumber, likeTerm(term)),
         termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
         ilike(customer.email, likeTerm(term)),
@@ -144,14 +151,15 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
     : undefined;
   const like = (v?: string) => (v && v.trim() ? likeTerm(v.trim()) : null);
   const phone = f.phone ? f.phone.replace(/\D/g, '') : '';
+  const taxId = f.taxId ? f.taxId.replace(/\D/g, '') : ''; // digits only, like phone: "0-1055-…" typed finds it
   return and(
     active,
     search,
     like(f.code) ? ilike(customer.customerCode, like(f.code)!) : undefined,
-    like(f.name) ? ilike(customer.customerName, like(f.name)!) : undefined,
+    clean(f.name) ? ilike(nameText, likeTerm(clean(f.name))) : undefined,
     phone ? phoneHas(phone) : undefined,
     like(f.email) ? ilike(customer.email, like(f.email)!) : undefined,
-    like(f.taxId) ? ilike(customer.customerCardId, like(f.taxId)!) : undefined,
+    taxId ? sql`regexp_replace(${customer.customerCardId}, '\\D', '', 'g') LIKE ${likeTerm(taxId)}` : undefined,
     f.type ? eq(customer.customerType, f.type) : undefined,
     f.province && /^\d+$/.test(f.province) ? eq(customer.cityId, Number(f.province)) : undefined,
     f.status === 'Active'

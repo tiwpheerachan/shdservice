@@ -324,6 +324,10 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     refuseSelf(before.userId, actorId, 'เปลี่ยนอีเมลหรือ Username ของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน');
   // a stale tab's คืนสิทธิ์ / แก้ไข on a user deleted meanwhile used to set it straight back to ACTIVE
   if (before?.recordStatus === RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
+  // the page sends the full name it shows: unchanged → first / last stay as stored (splitName moved the 2nd
+  // word of a two-word first name into last_name on every edit / approve / revoke, with a fake audit change)
+  const keepName =
+    !!before && clean(input.name) === clean(fullName(before.firstName, before.lastName) || before.username);
 
   // "รออนุมัติ" (no role) is where a sign-up starts, never a role to give: only a user still pending keeps it
   if (!userType && (!before || before.userType?.trim()))
@@ -358,8 +362,8 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
 
   if (before) {
     const userValues = {
-      firstName: first,
-      lastName: last,
+      firstName: keepName ? undefined : first,
+      lastName: keepName ? undefined : last,
       userType,
       ...statusStamp(rs, actorId),
       deleted: false,

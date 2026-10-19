@@ -186,6 +186,7 @@ function EditSaleOrder() {
               {approveId === 4 && loaded.approvedBy && (
                 <span className="text-muted-foreground">
                   โดย {loaded.approvedBy} วันที่ {loaded.approveDate}
+                  {loaded.approveRemark && ` · หมายเหตุ: ${loaded.approveRemark}`}
                 </span>
               )}
             </div>
@@ -223,6 +224,9 @@ function EditSaleOrder() {
                 >
                   บันทึกเลขพัสดุ
                 </Button>
+              )}
+              {loaded?.deliveryDate && (
+                <span className="text-sm text-muted-foreground sm:pb-2">วันที่บันทึกจัดส่ง {loaded.deliveryDate}</span>
               )}
             </div>
           </Section>

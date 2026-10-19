@@ -8866,6 +8866,9 @@
                       },
                       "out": {
                         "type": "number"
+                      },
+                      "noPrice": {
+                        "type": "number"
                       }
                     },
                     "required": [
@@ -8873,7 +8876,8 @@
                       "qty",
                       "value",
                       "low",
-                      "out"
+                      "out",
+                      "noPrice"
                     ]
                   }
                 }
@@ -14673,6 +14677,15 @@
           "closedDate": {
             "type": "string"
           },
+          "repairedBy": {
+            "type": "string"
+          },
+          "closedBy": {
+            "type": "string"
+          },
+          "sparePartReplace": {
+            "type": "string"
+          },
           "payment": {
             "type": "object",
             "properties": {
@@ -15013,6 +15026,9 @@
           "engineerRemark",
           "repairedDate",
           "closedDate",
+          "repairedBy",
+          "closedBy",
+          "sparePartReplace",
           "payment",
           "return",
           "swap",

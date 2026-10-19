@@ -1,9 +1,14 @@
 'use client';
 
 import * as React from 'react';
+import { Wrench } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { JobSearch } from '@/components/shared/job-search';
 import { JobHistorySection } from '@/components/shared/job-history';
+import { Section } from '@/components/shared/section';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/input';
+import { QuoteLink } from '@/components/jobs/quote-link';
 import {
   CustomerSection,
   JobOpenSection,
@@ -84,6 +89,32 @@ function EditJobForm() {
         <JobOpenSection jobNo={job?.no} status={job?.status ?? 'อยู่ระหว่างดำเนินการ'} />
         <ProductSection variant="open" />
         <OtherInfoSection />
+        {/* read-only: the repair (บันทึกงานซ่อม) and the close (ปิดงาน) as saved there */}
+        {job && (job.repairedBy || job.closedBy || job.sparePartReplace || job.repairedDate || job.closedDate) && (
+          <Section title="การซ่อม / ปิดงาน" icon={Wrench}>
+            <FieldGrid>
+              <Field label="ซ่อมเสร็จโดย">
+                <ReadOnly>{job.repairedBy}</ReadOnly>
+              </Field>
+              <Field label="วันที่ซ่อมเสร็จ">
+                <ReadOnly>
+                  <span className="num">{job.repairedDate}</span>
+                </ReadOnly>
+              </Field>
+              <Field label="ปิดงานโดย">
+                <ReadOnly>{job.closedBy}</ReadOnly>
+              </Field>
+              <Field label="วันที่ปิดงาน">
+                <ReadOnly>
+                  <span className="num">{job.closedDate}</span>
+                </ReadOnly>
+              </Field>
+              <Field label="อะไหล่ที่เปลี่ยน / New S/N" wide>
+                <Textarea rows={2} readOnly value={job.sparePartReplace} />
+              </Field>
+            </FieldGrid>
+          </Section>
+        )}
         <AttachmentSection jobNo={job?.no} />
         {job?.no && <TrackLink jobNo={job.no} />}
         <JobHistorySection job={job} />
@@ -96,6 +127,7 @@ function EditJobForm() {
           denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
           extra={
             <>
+              <QuoteLink jobNo={job?.no} />
               <PrintButton
                 label="พิมพ์ใบรับงาน"
                 kind="job"

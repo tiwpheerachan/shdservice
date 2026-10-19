@@ -33,6 +33,12 @@ const columns: Column<Job>[] = [
     cell: (r) => <span className="num text-xs">{r.openDate}</span>,
   },
   {
+    key: 'closedDate',
+    header: 'วันที่ปิดงาน',
+    width: '140px',
+    cell: (r) => <span className="num text-xs">{r.closedDate}</span>,
+  },
+  {
     key: 'customer',
     header: 'ลูกค้า',
     minWidth: COL_MIN_WIDTH.customer,

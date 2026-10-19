@@ -60,7 +60,7 @@ const columns: Column<Row>[] = [
 
 export default function Page() {
   const { data: CATEGORIES } = useCategories();
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: MANUFACTURERS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const [f, setF] = React.useState<ReportValues>({ category: '', brand: '', stock: '', q: '' });
   const stockKey =
     f.stock === 'มีสินค้า' ? 'in' : f.stock === 'ใกล้หมด (≤3)' ? 'low' : f.stock === 'หมดสต๊อก' ? 'out' : '';
@@ -105,8 +105,19 @@ export default function Page() {
       onApply={setF}
       onExport={() => exportXlsx('products', { ...filters, q: table.q || f.q, deleted: 'active' })}
       kpis={[
-        { label: 'จำนวนคงเหลือรวม', value: `${int(totalQty)} ชิ้น`, tone: 'primary' },
-        { label: 'มูลค่าสต๊อกรวม', value: baht(totalValue), tone: 'success' },
+        // productStats sums max(0, คงเหลือ) — a negative line in the table is not subtracted here
+        {
+          label: 'จำนวนคงเหลือรวม',
+          value: `${int(totalQty)} ชิ้น`,
+          tone: 'primary',
+          sub: 'ไม่นับรายการที่คงเหลือติดลบ',
+        },
+        {
+          label: 'มูลค่าสต๊อกรวม',
+          value: baht(totalValue),
+          tone: 'success',
+          sub: S?.noPrice ? `${int(S.noPrice)} รายการมีสต๊อกแต่ไม่มีราคา (ไม่รวมในมูลค่า)` : undefined,
+        },
         { label: 'ใกล้หมด (≤ 3)', value: int(low), tone: 'warning' },
         { label: 'หมดสต๊อก', value: int(out), tone: 'danger' },
       ]}

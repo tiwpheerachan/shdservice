@@ -17,6 +17,8 @@ import { useQuotationsPage, useManufacturers, useTable } from '@/data/db';
 import { baht, isFilterActive } from '@/lib/utils';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
+import { quoteExpired } from '@/lib/quote-expiry';
+import { cleanCode } from '@/lib/validation';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 import { ExportButton } from '@/components/shared/export-button';
 
@@ -68,6 +70,7 @@ export default function QuotationListPage() {
   const [filters, setFilters] = React.useState<Filters>(NO_FILTER);
   const setD = <K extends keyof Filters>(k: K, v: Filters[K]) => setDraft((f) => ({ ...f, [k]: v }));
   const [table, setTable] = React.useState<ServerTableState>({ page: 1, pageSize: 25, q: '', sort: null });
+  const textQ = table.q || filters.no || filters.customer || filters.customerCode || filters.imei;
   const {
     rows: PAGE,
     total: totalRows,
@@ -77,7 +80,9 @@ export default function QuotationListPage() {
   } = useQuotationsPage({
     page: table.page,
     pageSize: table.pageSize,
-    q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei,
+    // one text box rides on q (the API has no own param for no / customer / code / IMEI); the job no is its own (exact)
+    q: textQ,
+    jobNo: cleanCode(filters.jobNo),
     sort: table.sort?.key,
     dir: table.sort?.dir,
     status: filters.status,
@@ -158,11 +163,17 @@ export default function QuotationListPage() {
       key: 'status',
       header: 'สถานะ',
       width: '140px',
-      cell: (r) => (
-        <Badge tone={TONE[r.status] ?? 'neutral'} dot>
-          {r.status}
-        </Badge>
-      ),
+      cell: (r) =>
+        // sent but past its validity — the same rule as the print and /track (the list row has no job status)
+        r.statusId === 2 && quoteExpired(r.statusId, r.date, null) ? (
+          <Badge tone="danger" dot>
+            หมดอายุ
+          </Badge>
+        ) : (
+          <Badge tone={TONE[r.status] ?? 'neutral'} dot>
+            {r.status}
+          </Badge>
+        ),
     },
     {
       key: 'action',
@@ -200,7 +211,8 @@ export default function QuotationListPage() {
             <ExportButton
               run={() =>
                 exportXlsx('quotations', {
-                  q: table.q || filters.no || filters.customer || filters.customerCode || filters.jobNo || filters.imei,
+                  q: textQ,
+                  jobNo: cleanCode(filters.jobNo),
                   status: filters.status,
                   from: filters.from,
                   to: filters.to,

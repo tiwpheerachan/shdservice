@@ -5,7 +5,7 @@ import { ReportView, type ReportValues } from '@/components/shared/report-view';
 import type { ServerTableState } from '@/components/ui/data-table';
 import { StatusBadge } from '@/components/ui/badge';
 import { type Job } from '@/data/mock';
-import { useJobsPage, useJobSummary, useSymptoms, useStaff } from '@/data/db';
+import { useJobsPage, useJobSummary, useSymptoms, useStaff, useJobTypes } from '@/data/db';
 import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
@@ -14,6 +14,12 @@ import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-colum
 
 const columns: Column<Job>[] = [
   { key: 'no', header: 'เลขที่งาน', width: '130px', cell: (r) => <span className="num font-medium">{r.no}</span> },
+  {
+    key: 'repairedDate',
+    header: 'วันที่ซ่อม',
+    width: '140px',
+    cell: (r) => <span className="num text-xs">{r.repairedDate}</span>,
+  },
   {
     key: 'customer',
     header: 'ลูกค้า',
@@ -45,7 +51,13 @@ const columns: Column<Job>[] = [
 ];
 
 export default function Page() {
-  const [f, setF] = React.useState<ReportValues>({ from: daysAgo(30), to: today(), engineer: '', symptom: '' });
+  const [f, setF] = React.useState<ReportValues>({
+    from: daysAgo(30),
+    to: today(),
+    type: '',
+    engineer: '',
+    symptom: '',
+  });
   const { data: STAFF } = useStaff('engineer');
   // by id like the sale-order report: names carry stray spaces and may repeat
   const engineerId = STAFF.find((s) => s.name === f.engineer)?.id;
@@ -54,6 +66,7 @@ export default function Page() {
     from: f.from,
     to: f.to,
     dateBy: 'repaired',
+    type: f.type,
     engineer: engineerId ? String(engineerId) : f.engineer,
     symptom: f.symptom,
   };
@@ -74,6 +87,7 @@ export default function Page() {
     refetch: retryLoad,
   } = useJobsPage({ ...pageArgs, ...filters });
   const { data: SYMPTOMS } = useSymptoms();
+  const { data: JOB_TYPES } = useJobTypes();
   const S = sum[0];
   const count = S?.total ?? 0;
   const done = S?.done ?? 0;
@@ -86,6 +100,7 @@ export default function Page() {
       filters={[
         { kind: 'date', key: 'from', label: 'วันที่ซ่อม (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่ซ่อม (ถึง)', value: f.to },
+        { kind: 'select', key: 'type', label: 'ประเภทงาน', options: ['ทั้งหมด', ...JOB_TYPES.map((j) => j.name)] },
         {
           kind: 'select',
           key: 'engineer',

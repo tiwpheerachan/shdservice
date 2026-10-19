@@ -63,7 +63,7 @@ export default function Page() {
   return (
     <ReportView
       title="รายงานการเบิกจ่ายอะไหล่"
-      description="อะไหล่ที่ถูกเบิกใช้ในงานซ่อมและใบสั่งขาย (หักที่รับคืนเข้าสต๊อก) พร้อมมูลค่ารวม"
+      description="อะไหล่ที่ถูกเบิกใช้ในงานซ่อม ใบสั่งขาย และจ่ายออกอื่นๆ (หักที่รับคืนเข้าสต๊อก) พร้อมมูลค่ารวม"
       filters={[
         { kind: 'date', key: 'from', label: 'วันที่ (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่ (ถึง)', value: f.to },

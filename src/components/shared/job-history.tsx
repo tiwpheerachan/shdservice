@@ -31,13 +31,15 @@ const fmt = (v: unknown) =>
         : String(v).replace(/^(\d{4}-\d{2}-\d{2}) 00:00:00$/, '$1'); // a date-only field stored as a timestamp
 
 /**
- * ประวัติการแก้ไขของงาน — audit_log rows for this job (who / when / what changed),
- * shown to anyone allowed to open the job. Collapsed by default, latest first.
+ * ประวัติการแก้ไขของงาน — audit_log rows for this job (who / when / what changed), then its status
+ * history (job_log — also the legacy system's, from before the audit log), shown to anyone allowed
+ * to open the job. Collapsed by default, latest first.
  */
 export function JobHistorySection({ job }: { job: JobDetail | null }) {
   const [open, setOpen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<number | null>(null);
   const rows = job?.history ?? [];
+  const logs = job?.logs ?? [];
   if (!job) return null;
   return (
     <Section
@@ -50,7 +52,8 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
           onClick={() => setOpen((o) => !o)}
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          {rows.length} รายการ {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {rows.length + logs.length} รายการ{' '}
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
       }
     >
@@ -58,7 +61,9 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
         <p className="text-xs text-muted-foreground">
           {rows[0]
             ? `ล่าสุด: ${rows[0].at} · ${rows[0].user || '—'} · ${rows[0].summary}`
-            : 'ยังไม่มีประวัติ (เริ่มบันทึกตั้งแต่เปิดใช้ audit log)'}
+            : logs[0]
+              ? `ล่าสุด: ${logs[0].date} · ${logs[0].by || '—'} · สถานะ ${logs[0].status}`
+              : 'ยังไม่มีประวัติ (เริ่มบันทึกตั้งแต่เปิดใช้ audit log)'}
         </p>
       ) : (
         <ol className="divide-y divide-border/70 text-sm">
@@ -93,7 +98,18 @@ export function JobHistorySection({ job }: { job: JobDetail | null }) {
               )}
             </li>
           ))}
-          {rows.length === 0 && <li className="py-2 text-xs text-muted-foreground">ยังไม่มีประวัติ</li>}
+          {rows.length + logs.length === 0 && <li className="py-2 text-xs text-muted-foreground">ยังไม่มีประวัติ</li>}
+          {logs.length > 0 && (
+            <li className="pt-3 pb-1 text-xs font-medium text-muted-foreground">ประวัติสถานะงาน ({logs.length})</li>
+          )}
+          {logs.map((l, i) => (
+            <li key={`log-${i}`} className="flex flex-wrap items-center gap-2 py-2">
+              <span className="num text-xs text-muted-foreground">{l.date || '—'}</span>
+              <Badge tone="warning">สถานะ</Badge>
+              <span className="font-medium">{l.by || '—'}</span>
+              <span className="text-muted-foreground">{l.status || `#${l.statusId}`}</span>
+            </li>
+          ))}
         </ol>
       )}
     </Section>

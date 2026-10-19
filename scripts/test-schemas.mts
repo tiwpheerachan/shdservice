@@ -675,6 +675,11 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
     assert.ok(errorsOf(customerSchema(), { ...cust, line: 'ไลน์ ของฉัน' }).line);
     assert.deepEqual(errorsOf(customerSchema({ ...cust, line: 'ไลน์ เก่า' }), { ...cust, line: 'ไลน์ เก่า' }), {});
     assert.ok(errorsOf(customerSchema(), { ...cust, address1: 'ก'.repeat(101) }).address1);
+    // a legacy one-line address over 100 (C01029: 117) saves untouched; edited, it must fit
+    const longAddr = 'ก'.repeat(117);
+    assert.deepEqual(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr }), {});
+    assert.ok(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr + 'x' }).address1);
+    assert.ok(errorsOf(customerSchema({ ...cust, address2: longAddr }), { ...cust, address2: longAddr + 'x' }).address2);
     assert.ok(errorsOf(customerSchema(), { ...cust, type: 'x'.repeat(60) }).type);
     assert.ok(errorsOf(customerSchema(), { ...cust, priceGroup: 'VIP' }).priceGroup);
     assert.deepEqual(

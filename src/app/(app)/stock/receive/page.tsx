@@ -54,7 +54,7 @@ export default function ReceivePage() {
   const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
   const { name: me } = useAccess();
   const { data: PRODUCTS, loading, refetch } = useProducts();
-  const { data: BRANDS } = useManufacturers();
+  const { data: BRANDS } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const { data: CATEGORIES } = useCategories();
   // every active part is a candidate line (qty typed per line); a fresh product list — loaded, or
   // re-read after a receipt is saved — starts the lines over (adjusted while rendering)
