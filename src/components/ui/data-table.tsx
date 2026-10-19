@@ -69,6 +69,23 @@ const HIDE: Record<string, string> = {
   '2xl': 'hidden 2xl:table-cell',
 };
 
+/** a table wider than a phone: the scroll box is named and focusable, so the keyboard can scroll it (WCAG 2.1.1) */
+export function TableScroll({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div role="region" aria-label={label} tabIndex={0} className={cn('table-scroll', className)}>
+      {children}
+    </div>
+  );
+}
+
 export function DataTable<T extends Record<string, unknown>>({
   columns,
   rows,
@@ -89,6 +106,7 @@ export function DataTable<T extends Record<string, unknown>>({
   onClearFilters,
   error = null,
   onRetry,
+  label = 'ตารางข้อมูล',
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -113,6 +131,8 @@ export function DataTable<T extends Record<string, unknown>>({
   /** the rows failed to load — say so (with a retry) instead of "no data" */
   error?: string | null;
   onRetry?: () => void;
+  /** names the table's scroll region */
+  label?: string;
 }) {
   const [q, setQ] = React.useState('');
   const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(server?.initial?.sort ?? null);
@@ -223,7 +243,7 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <div className="table-scroll rounded-none">
+      <TableScroll label={label} className="rounded-none">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/60">
@@ -250,8 +270,9 @@ export function DataTable<T extends Record<string, unknown>>({
                     {sortable ? (
                       <button
                         onClick={() => toggleSort(c.key)}
+                        // min-h-6: a 24px target (WCAG 2.5.8); -my-1 keeps the header row its height
                         className={cn(
-                          'inline-flex items-center gap-1 rounded transition-colors hover:text-foreground',
+                          '-my-1 inline-flex min-h-6 items-center gap-1 rounded transition-colors hover:text-foreground',
                           c.align === 'right' && 'flex-row-reverse',
                           c.headerWrap && (c.align === 'right' ? 'text-right' : 'text-left'),
                           active && 'text-primary',
@@ -278,8 +299,9 @@ export function DataTable<T extends Record<string, unknown>>({
           </thead>
           <tbody>
             {view.length === 0 && loading ? (
-              // first load: skeleton rows keep the table's height so nothing jumps when data lands
-              Array.from({ length: Math.min(pageSize, 8) }, (_, i) => (
+              // first load: a full page of skeleton rows keeps the table's height, so nothing below it
+              // (pager, footer) jumps when data lands (CLS)
+              Array.from({ length: pageSize }, (_, i) => (
                 <tr key={`sk-${i}`} className="border-b border-border/70 last:border-0" aria-busy>
                   {columns.map((c, j) => (
                     <td key={c.key} className={cn(cellPad, c.hideBelow && HIDE[c.hideBelow])}>
@@ -368,7 +390,7 @@ export function DataTable<T extends Record<string, unknown>>({
             )}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5 text-xs text-muted-foreground">
         <div className="flex items-center gap-2">

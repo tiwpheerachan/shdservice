@@ -5,13 +5,17 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/** what the dialog opens on: its first field to fill (Radix alone would focus the close button) */
+/** what the dialog opens on: an element marked `data-autofocus` (anywhere in it, footer included), else
+ *  its first field to fill (Radix alone would focus the close button). Not React's `autoFocus`: that
+ *  focuses before Radix looks, so the opener would never be remembered for the focus return.
+ *  :enabled / :not(:disabled) — a control disabled by a <fieldset disabled> (view mode) is skipped too */
 const FIELD =
-  'input:not([type=hidden]):not([disabled]):not([readonly]), select:not([disabled]), textarea:not([disabled]):not([readonly]), [role=combobox]:not([disabled])';
+  'input:enabled:not([type=hidden]):not([readonly]), select:enabled, textarea:enabled:not([readonly]), [role=combobox]:not(:disabled)';
 
 /**
  * App modal — same props/look as before, now a Radix Dialog underneath
- * (focus trap, Esc, scroll lock, aria-modal, focus restore on close).
+ * (focus trap, Esc, scroll lock, aria-modal). Controlled without a Trigger, Radix has nothing to
+ * give focus back to on close — so the element focused when it opened is remembered and refocused.
  */
 export function Modal({
   open,
@@ -21,6 +25,8 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  alert,
+  describedBy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +35,10 @@ export function Modal({
   children?: React.ReactNode;
   footer?: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** a confirmation that interrupts (role=alertdialog) */
+  alert?: boolean;
+  /** id of the element in the body that describes the dialog (instead of `description`) */
+  describedBy?: string;
 }) {
   const w = {
     sm: 'max-w-sm',
@@ -37,6 +47,8 @@ export function Modal({
     xl: 'max-w-4xl',
   }[size];
   const body = React.useRef<HTMLDivElement>(null);
+  const content = React.useRef<HTMLDivElement>(null);
+  const returnTo = React.useRef<HTMLElement | null>(null);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && onClose()}>
@@ -44,15 +56,28 @@ export function Modal({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 no-print">
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
           <DialogPrimitive.Content
-            // a click on a toast (its "โหลดใหม่" / close) is not a click outside: the dialog stays open
+            ref={content}
+            // only when set: an `undefined` here would erase Radix's own role="dialog" / aria-describedby
+            {...(alert && { role: 'alertdialog' })}
+            {...(describedBy && { 'aria-describedby': describedBy })}
             onOpenAutoFocus={(e) => {
-              const first = [...(body.current?.querySelectorAll<HTMLElement>(FIELD) ?? [])].find(
-                (el) => el.getClientRects().length > 0, // not a display:none file input
-              );
-              if (!first) return; // no field (a confirm, a view): Radix's default
-              e.preventDefault();
-              first.focus();
+              // still the opener here: Radix moves focus only after this event
+              returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              const first =
+                content.current?.querySelector<HTMLElement>('[data-autofocus]') ??
+                [...(body.current?.querySelectorAll<HTMLElement>(FIELD) ?? [])].find(
+                  (el) => el.getClientRects().length > 0, // not a display:none file input
+                );
+              first?.focus();
+              // no field (a confirm, a view) or it refused focus: Radix's default (first tabbable / the dialog)
+              if (first && document.activeElement === first) e.preventDefault();
             }}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              if (returnTo.current?.isConnected) returnTo.current.focus();
+              returnTo.current = null;
+            }}
+            // a click on a toast (its "โหลดใหม่" / close) is not a click outside: the dialog stays open
             onInteractOutside={(e) => {
               if (e.target instanceof Element && e.target.closest('[data-sonner-toaster]')) e.preventDefault();
             }}

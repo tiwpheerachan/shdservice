@@ -30,12 +30,5 @@ export default async function TrackFormPage() {
       </div>
     );
   }
-  return (
-    <TrackClient
-      mode="form"
-      nonce={h.get('x-nonce') ?? undefined}
-      otpAvailable={smsAvailable()}
-      devOtpLog={smsProvider() === 'log'}
-    />
-  );
+  return <TrackClient mode="form" otpAvailable={smsAvailable()} devOtpLog={smsProvider() === 'log'} />;
 }

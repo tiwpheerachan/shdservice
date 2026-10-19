@@ -25,6 +25,8 @@ type FieldCtx = {
   labelId: string;
   describedBy?: string;
   invalid: boolean;
+  /** the Field shows a visible label (its owner is named by it) */
+  labelled: boolean;
   /** the control that owns the label: the first one registered that is still mounted */
   owner: string | null;
   /** a control announces itself (labelable = a real form control); returns its unregister */
@@ -37,26 +39,31 @@ export type FieldControlProps = {
   'aria-describedby'?: string;
   'aria-invalid'?: boolean;
   'aria-labelledby'?: string;
+  'aria-label'?: string;
 };
 
 /**
  * For form controls: the props that tie this control to the surrounding Field's label.
  * Only the first control in a Field gets them; outside a Field it returns just `{ id }`.
  * `labelable: false` — not a form control (a read-only value): named by aria-labelledby instead.
+ * `label` — the name to fall back on (aria-label) when no visible label names the control: it is
+ *   not in a Field, or its Field has no `label`. Outside a Field an own `id` means the page labels it.
  */
-export function useFieldControl(ownId?: string, opts: { labelable?: boolean } = {}): FieldControlProps {
+export function useFieldControl(ownId?: string, opts: { labelable?: boolean; label?: string } = {}): FieldControlProps {
   const labelable = opts.labelable ?? true;
   const ctx = React.useContext(FieldContext);
   const token = React.useId();
   const register = ctx?.register;
   React.useLayoutEffect(() => register?.(token, labelable), [register, token, labelable]);
   const primary = !!ctx && ctx.owner === token;
-  if (!primary) return ownId ? { id: ownId } : {};
+  // never an `aria-label: undefined` key: spread after a caller's own aria-label it would erase it
+  const fallback = opts.label ? { 'aria-label': opts.label } : {};
+  if (!primary) return ownId ? { id: ownId } : fallback;
   return {
     id: ownId ?? ctx.id,
     'aria-describedby': ctx.describedBy,
     'aria-invalid': ctx.invalid || undefined,
-    ...(labelable ? {} : { 'aria-labelledby': ctx.labelId }),
+    ...(ctx.labelled ? (labelable ? {} : { 'aria-labelledby': ctx.labelId }) : fallback),
   };
 }
 
@@ -112,8 +119,16 @@ export function Field({
     };
   }, []);
   const ctx = React.useMemo<FieldCtx>(
-    () => ({ id, labelId, describedBy: errorId ?? hintId, invalid: !!error, owner: owner?.token ?? null, register }),
-    [id, labelId, errorId, hintId, error, owner, register],
+    () => ({
+      id,
+      labelId,
+      describedBy: errorId ?? hintId,
+      invalid: !!error,
+      labelled: !!label,
+      owner: owner?.token ?? null,
+      register,
+    }),
+    [id, labelId, errorId, hintId, error, label, owner, register],
   );
   // `for` only when it reaches a real form control: one that registered as labelable, or an id the
   // page named itself (htmlFor / the child's own id)

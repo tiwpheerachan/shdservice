@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { clean, cleanCode, codeField, maxText, moneyField } from './index';
 import { isFilled } from './job';
 import { isThaiTaxId, phoneFormatOk, taxIdDigits } from './customer';

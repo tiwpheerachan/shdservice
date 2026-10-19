@@ -174,68 +174,128 @@ export function CustomerCallModal({
           </div>
 
           {/* tabs: history + call log */}
-          <div>
-            <Tabs
-              value={tab}
-              onChange={setTab}
-              tabs={[
-                { key: 'history', label: `ประวัติงาน (${hist.total})` },
-                { key: 'calls', label: `Call Log (${log.length})` },
-              ]}
-            />
-          </div>
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { key: 'history', label: `ประวัติงาน (${hist.total})` },
+              { key: 'calls', label: `Call Log (${log.length})` },
+            ]}
+            contentClassName="mt-5"
+          >
+            {tab === 'history' ? (
+              <div className="space-y-3">
+                {/* history summary */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <p className="text-2xs text-muted-foreground">จำนวนงานทั้งหมด</p>
+                    <p className="num text-lg font-semibold tabular-nums">{hist.total}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <p className="text-2xs text-muted-foreground">ปิดงาน / เสร็จ</p>
+                    <p className="num text-lg font-semibold tabular-nums text-success">{hist.done}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <p className="text-2xs text-muted-foreground">มูลค่ารวม</p>
+                    <p className="num text-lg font-semibold tabular-nums text-primary">{baht(hist.value)}</p>
+                  </div>
+                </div>
 
-          {tab === 'history' ? (
-            <div className="space-y-3">
-              {/* history summary */}
-              <div className="grid grid-cols-3 gap-2.5">
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                  <p className="text-2xs text-muted-foreground">จำนวนงานทั้งหมด</p>
-                  <p className="num text-lg font-semibold tabular-nums">{hist.total}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                  <p className="text-2xs text-muted-foreground">ปิดงาน / เสร็จ</p>
-                  <p className="num text-lg font-semibold tabular-nums text-success">{hist.done}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                  <p className="text-2xs text-muted-foreground">มูลค่ารวม</p>
-                  <p className="num text-lg font-semibold tabular-nums text-primary">{baht(hist.value)}</p>
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <div className="max-h-[38vh] overflow-y-auto">
+                    <table className="w-full min-w-[560px] text-sm">
+                      <thead className="sticky top-0 z-10">
+                        <tr className="border-b border-border bg-muted text-2xs uppercase tracking-wide text-muted-foreground">
+                          <th className="px-3 py-2 text-left">เลขที่งาน</th>
+                          <th className="px-3 py-2 text-left">วันที่</th>
+                          <th className="px-3 py-2 text-left">ยี่ห้อ, รุ่น</th>
+                          <th className="px-3 py-2 text-left">ประเภทงาน</th>
+                          <th className="px-3 py-2 text-right">มูลค่า</th>
+                          <th className="px-3 py-2 text-left">สถานะ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {history.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                              ลูกค้ารายนี้ยังไม่มีประวัติงานในระบบ
+                            </td>
+                          </tr>
+                        ) : (
+                          history.map((j) => (
+                            <tr key={j.no} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
+                              <td className="num px-3 py-2 font-medium text-primary">{j.no}</td>
+                              <td className="num px-3 py-2 text-xs text-muted-foreground">{j.openDate.slice(0, 10)}</td>
+                              <td className="px-3 py-2">{j.brandModel}</td>
+                              <td className="px-3 py-2 text-xs">
+                                <Badge tone="primary">{j.jobType}</Badge>
+                              </td>
+                              <td className="num px-3 py-2 text-right tabular-nums">{baht(j.amount)}</td>
+                              <td className="px-3 py-2">
+                                <StatusBadge status={j.status} group={j.statusGroup} />
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
+            ) : (
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                  บันทึกการโทร (Call Log)
+                  {log.length > 0 && (
+                    <span className="num rounded-full bg-primary/10 px-1.5 text-2xs text-primary">{log.length}</span>
+                  )}
+                </div>
 
-              <div className="overflow-hidden rounded-lg border border-border">
-                <div className="max-h-[38vh] overflow-y-auto">
-                  <table className="w-full min-w-[560px] text-sm">
-                    <thead className="sticky top-0 z-10">
-                      <tr className="border-b border-border bg-muted text-2xs uppercase tracking-wide text-muted-foreground">
-                        <th className="px-3 py-2 text-left">เลขที่งาน</th>
-                        <th className="px-3 py-2 text-left">วันที่</th>
-                        <th className="px-3 py-2 text-left">ยี่ห้อ, รุ่น</th>
-                        <th className="px-3 py-2 text-left">ประเภทงาน</th>
-                        <th className="px-3 py-2 text-right">มูลค่า</th>
-                        <th className="px-3 py-2 text-left">สถานะ</th>
+                <div className="flex gap-2">
+                  <input
+                    value={text}
+                    maxLength={200}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addLog()}
+                    placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
+                    className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <Button size="sm" onClick={addLog}>
+                    <Plus className="h-3.5 w-3.5" />
+                    เพิ่มรายการ
+                  </Button>
+                </div>
+
+                <div className="mt-3 overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
+                        <th className="w-10 px-3 py-2 text-center">#</th>
+                        <th className="px-3 py-2 text-left">รายละเอียด</th>
+                        <th className="w-36 px-3 py-2 text-left">วันที่</th>
+                        <th className="w-32 px-3 py-2 text-left">โดย</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {history.length === 0 ? (
+                      {log.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                            ลูกค้ารายนี้ยังไม่มีประวัติงานในระบบ
+                          <td colSpan={4} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                            ยังไม่มีบันทึกการโทร — เพิ่มรายการแรกได้เลย
                           </td>
                         </tr>
                       ) : (
-                        history.map((j) => (
-                          <tr key={j.no} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
-                            <td className="num px-3 py-2 font-medium text-primary">{j.no}</td>
-                            <td className="num px-3 py-2 text-xs text-muted-foreground">{j.openDate.slice(0, 10)}</td>
-                            <td className="px-3 py-2">{j.brandModel}</td>
-                            <td className="px-3 py-2 text-xs">
-                              <Badge tone="primary">{j.jobType}</Badge>
+                        log.map((l, i) => (
+                          <tr key={l.id} className="border-b border-border/70 last:border-0">
+                            <td className="num px-3 py-2 text-center text-muted-foreground">{log.length - i}</td>
+                            <td className="px-3 py-2">{l.detail}</td>
+                            <td className="num px-3 py-2 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {l.date}
+                              </span>
                             </td>
-                            <td className="num px-3 py-2 text-right tabular-nums">{baht(j.amount)}</td>
-                            <td className="px-3 py-2">
-                              <StatusBadge status={j.status} group={j.statusGroup} />
-                            </td>
+                            <td className="px-3 py-2 text-xs">{l.by}</td>
                           </tr>
                         ))
                       )}
@@ -243,69 +303,8 @@ export function CustomerCallModal({
                   </table>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div>
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                บันทึกการโทร (Call Log)
-                {log.length > 0 && (
-                  <span className="num rounded-full bg-primary/10 px-1.5 text-2xs text-primary">{log.length}</span>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  value={text}
-                  maxLength={200}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addLog()}
-                  placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
-                  className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                />
-                <Button size="sm" onClick={addLog}>
-                  <Plus className="h-3.5 w-3.5" />
-                  เพิ่มรายการ
-                </Button>
-              </div>
-
-              <div className="mt-3 overflow-hidden rounded-lg border border-border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                      <th className="w-10 px-3 py-2 text-center">#</th>
-                      <th className="px-3 py-2 text-left">รายละเอียด</th>
-                      <th className="w-36 px-3 py-2 text-left">วันที่</th>
-                      <th className="w-32 px-3 py-2 text-left">โดย</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {log.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                          ยังไม่มีบันทึกการโทร — เพิ่มรายการแรกได้เลย
-                        </td>
-                      </tr>
-                    ) : (
-                      log.map((l, i) => (
-                        <tr key={l.id} className="border-b border-border/70 last:border-0">
-                          <td className="num px-3 py-2 text-center text-muted-foreground">{log.length - i}</td>
-                          <td className="px-3 py-2">{l.detail}</td>
-                          <td className="num px-3 py-2 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {l.date}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-xs">{l.by}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+            )}
+          </Tabs>
         </div>
       )}
     </Modal>

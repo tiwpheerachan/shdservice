@@ -7,7 +7,7 @@ import { SymptomPicker } from './symptom-picker';
 import { SearchSelect, withCurrent } from './search-select';
 import { CustomerSelect } from './customer-select';
 import { ProfileSelect } from './profile-select';
-import { Attachments, type AttachmentsHandle } from './attachments';
+import { Attachments, type AttachmentsHandle, type AttachmentsProps } from './attachments';
 import {
   BrandField,
   ChannelField,
@@ -608,7 +608,8 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
  *  and the Out-Source "รายละเอียดการซ่อม" tab. */
 export function MainSymptomField() {
   const { s, set, errors } = useJobForm();
-  const { data: MODELS } = useModels();
+  // the model's name below: the brand's list ModelField reads anyway (no brand → its code)
+  const { data: MODELS } = useModels('active', { brand: s.brand, enabled: !!s.brand });
   const { data: SYMPTOMS, error: symptomsError, refetch: retrySymptoms } = useSymptoms();
   const { data: SYMPTOM_STATS, error: statsError, refetch: retryStats } = useSymptomStats();
   const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
@@ -868,7 +869,7 @@ export function CostSummary({
                     set(f.key, Number(e.target.value) || 0);
                     action?.clear(f.key);
                   }}
-                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
+                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
                 />
               </CostRow>
               {error && (
@@ -1012,13 +1013,13 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   );
 }
 
-export const AttachmentSection = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function AttachmentSection(
-  { jobNo },
+export const AttachmentSection = React.forwardRef<AttachmentsHandle, AttachmentsProps>(function AttachmentSection(
+  { jobNo, files },
   ref,
 ) {
   return (
     <Section title="เอกสารแนบ" icon={Paperclip}>
-      <Attachments ref={ref} jobNo={jobNo} />
+      <Attachments ref={ref} jobNo={jobNo} files={files} />
     </Section>
   );
 });

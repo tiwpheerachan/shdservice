@@ -5,6 +5,7 @@ import { Plus, Trash2, Stethoscope } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { ProductPicker } from '@/components/shared/product-picker';
 import { Badge } from '@/components/ui/badge';
+import { TableScroll } from '@/components/ui/data-table';
 import { Checkbox, NumberInput } from '@/components/ui/input';
 import type { PickableProduct } from '@/lib/product-match';
 import type { FieldErrors } from '@/lib/validation';
@@ -234,7 +235,7 @@ function PlanCells({
 
 function PartsTable({ lines, lock, act, upd, remove }: RowProps) {
   return (
-    <div className="table-scroll hidden rounded-none md:block">
+    <TableScroll label="รายการอะไหล่" className="hidden rounded-none md:block">
       <table className="w-full min-w-[1080px] text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -320,6 +321,6 @@ function PartsTable({ lines, lock, act, upd, remove }: RowProps) {
           </tfoot>
         )}
       </table>
-    </div>
+    </TableScroll>
   );
 }

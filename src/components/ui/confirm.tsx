@@ -13,7 +13,8 @@ import { cn } from '@/lib/utils';
  *   if (!(await confirm({ title: "ลบผู้ใช้?", description: "…", tone: "danger" }))) return;
  *
  * One instance is mounted by <ConfirmProvider> in the root layout, so every page
- * gets the same look (Radix Dialog: focus trap, Esc = cancel, Enter = confirm).
+ * gets the same look (Radix Dialog, role=alertdialog: focus trap, Esc = cancel; opens on the confirm
+ * button — on Cancel when tone is danger).
  */
 export type ConfirmOptions = {
   title: string;
@@ -46,6 +47,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     setPending(null);
   };
   const danger = pending?.tone === 'danger';
+  const descId = React.useId();
 
   return (
     <Ctx.Provider value={confirm}>
@@ -55,12 +57,20 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         onClose={() => settle(false)}
         title={pending?.title ?? ''}
         size="sm"
+        alert
+        describedBy={descId}
         footer={
           <>
-            <Button variant="outline" size="sm" onClick={() => settle(false)}>
+            {/* a destructive action is never one Enter away: danger opens on Cancel */}
+            <Button variant="outline" size="sm" data-autofocus={danger || undefined} onClick={() => settle(false)}>
               {pending?.cancelLabel ?? 'ยกเลิก'}
             </Button>
-            <Button variant={danger ? 'danger' : 'primary'} size="sm" autoFocus onClick={() => settle(true)}>
+            <Button
+              variant={danger ? 'danger' : 'primary'}
+              size="sm"
+              data-autofocus={!danger || undefined}
+              onClick={() => settle(true)}
+            >
               {pending?.confirmLabel ?? (danger ? 'ยืนยันลบ' : 'ยืนยัน')}
             </Button>
           </>
@@ -75,7 +85,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
           >
             {danger ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
           </span>
-          <div className="min-w-0 text-sm leading-relaxed text-foreground/90">
+          <div id={descId} className="min-w-0 text-sm leading-relaxed text-foreground/90">
             {pending?.description ?? 'ต้องการดำเนินการต่อหรือไม่?'}
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { addDays, today } from '@/lib/dates';
 import { CHANNELS, CLOSE_STATUS_OPTIONS, JOB_STATUS_OPTIONS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';

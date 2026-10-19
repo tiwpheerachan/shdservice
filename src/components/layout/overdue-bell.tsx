@@ -29,8 +29,24 @@ export function OverdueBell() {
   // quiet background poll through swr: every 5 min, paused while the tab is hidden, once more
   // when a tab comes back after that long; a failed answer keeps the last one on screen
   const poll = { quiet: true, refreshInterval: POLL_MS, revalidateOnFocus: true };
-  const { data, error, mutate, ageMs } = useApi<OverdueAlerts>(allowed ? '/api/alerts/overdue' : null, poll);
-  const so = useApi<PendingSaleOrders>(approver ? '/api/alerts/sale-orders-pending' : null, poll);
+  // first read a few seconds after the page has finished loading — its JS and its own data go first on a
+  // slow phone (requestIdleCallback fired during the network wait, measured 2026-10-19) — or at once when
+  // the bell is opened
+  const [idle, setIdle] = React.useState(false);
+  React.useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const later = () => {
+      t = setTimeout(() => setIdle(true), 3000);
+    };
+    if (document.readyState === 'complete') later();
+    else window.addEventListener('load', later, { once: true });
+    return () => {
+      window.removeEventListener('load', later);
+      clearTimeout(t);
+    };
+  }, []);
+  const { data, error, mutate, ageMs } = useApi<OverdueAlerts>(allowed && idle ? '/api/alerts/overdue' : null, poll);
+  const so = useApi<PendingSaleOrders>(approver && idle ? '/api/alerts/sale-orders-pending' : null, poll);
   const [open, setOpen] = React.useState(false);
   if (!allowed && !approver) return null;
 
@@ -49,6 +65,7 @@ export function OverdueBell() {
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
+        if (v) setIdle(true);
         if (v && ageMs() > FRESH_MS) void mutate();
         if (v && so.ageMs() > FRESH_MS) void so.mutate();
       }}
@@ -62,7 +79,7 @@ export function OverdueBell() {
         >
           <Bell className="h-4 w-4" />
           {badge > 0 && (
-            <span className="num absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+            <span className="num absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white dark:text-background">
               {badge > 99 ? '99+' : badge}
             </span>
           )}

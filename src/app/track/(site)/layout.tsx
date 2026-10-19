@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { COMPANY } from '@/lib/company';
 import { listDocumentProfiles } from '@/server/services/document-profiles';
 
@@ -18,11 +19,18 @@ export const dynamic = 'force-dynamic';
  */
 export default async function TrackLayout({ children }: { children: React.ReactNode }) {
   const co = (await listDocumentProfiles().catch(() => [])).find((p) => p.isDefault) ?? COMPANY;
+  // the per-request CSP nonce (src/proxy.ts) — 'strict-dynamic' trusts what this script loads in turn
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <div className="min-h-dvh bg-background">
+      {/* Turnstile (the gate) from the server HTML: connection + api.js start with the page, not after
+          hydration — React hoists both into <head>; track-client.tsx waits for window.turnstile */}
+      <link rel="preconnect" href="https://challenges.cloudflare.com" />
+      <script async src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" nonce={nonce} />
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3.5">
-          <img src={co.logoUrl} alt="" className="h-8 w-auto" />
+          {/* width/height = the default logo's ratio (1252×320 at 32 px): its box is reserved before it loads */}
+          <img src={co.logoUrl} alt="" width={125} height={32} className="h-8 w-auto" />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-sm font-semibold">{co.nameTh}</p>
             <p className="truncate text-2xs text-muted-foreground">ติดตามสถานะงานซ่อม</p>

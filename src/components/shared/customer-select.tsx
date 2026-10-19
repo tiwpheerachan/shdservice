@@ -232,8 +232,8 @@ export function CustomerSelect({
 /* ---------- search-as-you-type (cmdk) ---------- */
 function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNew?: (prefill: string) => void }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(undefined, { label: 'ค้นหาลูกค้า' }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   // debounced server lookup (code / name / phone / tax id / email), max 10 rows — swr keeps the
   // last answer on screen while the next one loads and never lets an older answer win
@@ -272,11 +272,15 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
         <button
           type="button"
           role="combobox"
-          aria-haspopup="listbox"
-          aria-controls={listId}
           {...field}
-          aria-label={field.id ? undefined : 'ค้นหาลูกค้า'}
           aria-expanded={open}
+          aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+              setOpen(true);
+            }
+          }}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 sm:max-w-xl"
         >
           <Search className="h-3.5 w-3.5 shrink-0" />
@@ -285,11 +289,14 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
         </button>
       </PopoverTrigger>
       <PopoverContent
+        id={popupId}
+        aria-label={'ค้นหาลูกค้า'}
         align="start"
         className="w-[var(--radix-popover-trigger-width)] min-w-[320px] p-0"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <CommandPrimitive
+          label={'ค้นหาลูกค้า'}
           shouldFilter={false}
           loop
           className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
@@ -318,7 +325,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               )
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
+          <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
             {q.trim().length < SEARCH_MIN_CHARS && (
               <p className="px-3 py-5 text-center text-xs text-muted-foreground">
                 พิมพ์รหัส ชื่อ เบอร์โทร เลขบัตร หรืออีเมล อย่างน้อย {SEARCH_MIN_CHARS} ตัวอักษร

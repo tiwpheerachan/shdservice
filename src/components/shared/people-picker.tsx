@@ -36,7 +36,7 @@ export function PeoplePicker({
 }) {
   const [q, setQ] = React.useState('');
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(); // tie to the surrounding <Field> label
+  const field = useFieldControl(undefined, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
   const listId = React.useId();
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);
@@ -67,6 +67,7 @@ export function PeoplePicker({
   const stale = shown && !!found.data?.stale;
   const error = shown ? (found.error ?? found.data?.error ?? null) : null;
   const loading = shown && (typed !== settled || found.validating);
+  const listShown = open && shown && !error && items.length > 0;
 
   const pick = (p: Person) => {
     onChange(p);
@@ -108,10 +109,9 @@ export function PeoplePicker({
         <input
           {...field}
           role="combobox"
-          aria-label={field.id ? undefined : placeholder}
           aria-autocomplete="list"
           aria-expanded={open && q.trim().length >= 2}
-          aria-controls={listId}
+          aria-controls={listShown ? listId : undefined} // only while the list is rendered
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -133,7 +133,7 @@ export function PeoplePicker({
             } else if (e.key === 'Escape') setOpen(false);
           }}
           placeholder={placeholder}
-          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
         />
         {loading && (
           <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />

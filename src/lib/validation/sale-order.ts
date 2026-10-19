@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { maxText, moneyField, trackingField } from './index';
 import { isFilled } from './job';
 import { PAYMENT_METHODS } from '@/data/options';

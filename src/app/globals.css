@@ -126,9 +126,9 @@
     --card: 0 0% 100%;
     --card-foreground: 222 47% 12%;
     --muted: 210 24% 95%;
-    --muted-foreground: 215 16% 45%;
+    --muted-foreground: 215 16% 42%; /* 5.0:1 on muted, 5.7:1 on card */
     --border: 214 22% 89%;
-    --input: 214 22% 86%;
+    --input: 215 14% 56%; /* control borders ≥ 3:1 (WCAG 1.4.11) on card / background / muted */
     --ring: 221 83% 53%;
 
     --primary: 221 83% 51%;
@@ -137,13 +137,14 @@
     --accent: 210 24% 94%;
     --accent-foreground: 222 47% 12%;
 
-    --success: 152 58% 34%;
+    /* text on its -soft background ≥ 4.5:1 (and white on the solid colour) */
+    --success: 152 58% 28%;
     --success-soft: 150 60% 94%;
-    --warning: 33 92% 40%;
+    --warning: 33 92% 31%;
     --warning-soft: 40 95% 93%;
     --danger: 0 72% 47%;
     --danger-soft: 0 90% 96%;
-    --info: 199 89% 40%;
+    --info: 199 89% 31%;
     --info-soft: 199 90% 94%;
 
     /* light-mode sidebar: clean, elevated white panel that matches the theme */
@@ -162,10 +163,11 @@
     --muted: 220 26% 16%;
     --muted-foreground: 215 18% 62%;
     --border: 218 24% 20%;
-    --input: 218 24% 26%;
-    --ring: 217 91% 60%;
+    --input: 218 14% 46%; /* ≥ 3:1 on card / background / muted */
+    --ring: 213 94% 68%;
 
-    --primary: 217 91% 60%;
+    /* lighter than light mode's: text-primary on primary-soft 5.9:1 (solid buttons carry dark text) */
+    --primary: 213 94% 68%;
     --primary-foreground: 222 47% 8%;
     --primary-soft: 220 45% 18%;
     --accent: 220 26% 17%;
@@ -175,7 +177,7 @@
     --success-soft: 152 40% 15%;
     --warning: 38 92% 58%;
     --warning-soft: 36 45% 16%;
-    --danger: 0 78% 63%;
+    --danger: 0 85% 70%; /* on danger-soft 5.5:1; solid danger/success carry dark text (white fails) */
     --danger-soft: 0 45% 17%;
     --info: 199 90% 58%;
     --info-soft: 199 45% 16%;
@@ -316,6 +318,12 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
   transform: translateY(14px);
   animation: fadeSlideIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+/* the logo + h1: moved only, never invisible — every element starting at opacity 0 meant a phone
+   (hero hidden below md) painted nothing contentful until the animations ran (no FCP) */
+.animate-rise {
+  transform: translateY(14px);
+  animation: fadeSlideIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
 .animate-slide-right {
   opacity: 0;
   filter: blur(6px);
@@ -342,6 +350,7 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-element,
+  .animate-rise,
   .animate-slide-right {
     animation: none;
     opacity: 1;
@@ -360,16 +369,16 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
   --muted: 0 0% 95%;
   --muted-foreground: 220 12% 42%;
   --border: 0 0% 89%;
-  --input: 0 0% 86%;
+  --input: 0 0% 55%;
   --ring: 221 83% 53%;
   --primary: 221 83% 51%;
   --primary-foreground: 0 0% 100%;
   --primary-soft: 221 90% 96%;
   --accent: 0 0% 94%;
   --accent-foreground: 222 47% 12%;
-  --success: 152 58% 34%;
+  --success: 152 58% 28%;
   --success-soft: 150 55% 92%;
-  --warning: 33 92% 40%;
+  --warning: 33 92% 31%;
   --warning-soft: 40 95% 92%;
   --danger: 0 72% 47%;
   --danger-soft: 0 90% 96%;

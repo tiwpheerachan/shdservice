@@ -66,7 +66,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   const newSerial = parseSwap(j.sparePartReplace)['New S/N'];
 
   return (
-    <div className="print-page qt text-[11.5px] leading-[1.35] text-black">
+    <main className="print-page qt text-[11.5px] leading-[1.35] text-black">
       <AutoPrint />
       <style>{`
         .qt table { border-collapse: collapse; width: 100%; }
@@ -441,6 +441,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </ol>
         <span className="shrink-0">Printing Date : {stamp()}</span>
       </div>
-    </div>
+    </main>
   );
 }

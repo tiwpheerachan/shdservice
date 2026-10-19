@@ -108,24 +108,27 @@ export function QuotationSummary({
         <Row label="รวมค่าอะไหล่" value={baht(partsTotal)} />
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">ค่าบริการ</dt>
-          <NumberInput
-            aria-label="ค่าบริการ"
-            aria-invalid={!!errors.serviceAmount || undefined}
-            step="0.01"
-            showZero={showZero}
-            value={service}
-            onChange={(n) => {
-              setService(n);
-              clear('serviceAmount');
-            }}
-            className="h-8 w-32 text-xs"
-          />
+          {/* every value of a <dl> row sits in a <dd> — an input too */}
+          <dd>
+            <NumberInput
+              aria-label="ค่าบริการ"
+              aria-invalid={!!errors.serviceAmount || undefined}
+              step="0.01"
+              showZero={showZero}
+              value={service}
+              onChange={(n) => {
+                setService(n);
+                clear('serviceAmount');
+              }}
+              className="h-8 w-32 text-xs"
+            />
+          </dd>
         </div>
         {deliveryTotal > 0 && <Row label="ค่าขนส่ง" value={baht(deliveryTotal)} />}
         <Row label="รวมเป็นเงิน" value={baht(t.sumExclude)} />
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">{discountType === 'ส่วนลดรวม' ? 'ส่วนลด' : discountType}</dt>
-          <div className="flex gap-1">
+          <dd className="flex gap-1">
             <NumberInput
               aria-label={`ส่วนลด (${discountUnit})`}
               aria-invalid={!!errors.discountValue || undefined}
@@ -151,26 +154,28 @@ export function QuotationSummary({
               <option value="%">%</option>
               <option value="บาท">บาท</option>
             </Select>
-          </div>
+          </dd>
         </div>
         <Row label="ส่วนลดเป็นเงิน" value={baht(t.discount)} />
         <Row label="มูลค่าก่อนภาษี" value={baht(t.totalBase)} />
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
           {/* 0 or 7 % only (quotation_hd.vat_rate) — a free number let 5 % through */}
-          <Select
-            aria-label="ภาษีมูลค่าเพิ่ม (%)"
-            aria-invalid={!!errors.vatRate || undefined}
-            value={String(vatRate)}
-            onChange={(e) => {
-              setVatRate(Number(e.target.value));
-              clear('vatRate');
-            }}
-            className="h-8 w-32 text-xs"
-          >
-            <option value="0">0</option>
-            <option value="7">7</option>
-          </Select>
+          <dd>
+            <Select
+              aria-label="ภาษีมูลค่าเพิ่ม (%)"
+              aria-invalid={!!errors.vatRate || undefined}
+              value={String(vatRate)}
+              onChange={(e) => {
+                setVatRate(Number(e.target.value));
+                clear('vatRate');
+              }}
+              className="h-8 w-32 text-xs"
+            >
+              <option value="0">0</option>
+              <option value="7">7</option>
+            </Select>
+          </dd>
         </div>
         <Row label="ภาษีมูลค่าเพิ่ม" value={baht(t.vat)} />
         <div className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">

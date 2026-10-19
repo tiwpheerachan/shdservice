@@ -104,13 +104,15 @@ export function Sidebar({
       <aside
         role={mobileOpen ? 'dialog' : undefined}
         aria-modal={mobileOpen || undefined}
-        aria-label={mobileOpen ? 'เมนู' : undefined}
+        aria-label={mobileOpen ? 'เมนู' : 'แถบเมนูด้านข้าง'} // two <aside>s on a page (admin/guide) each need a name
         className={cn(
           'fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground',
-          'border-r border-sidebar-border shadow-xs transition-[width,transform] duration-200 ease-out no-print',
+          // visibility is transitioned too: the closed drawer turns invisible (out of the tab order) only
+          // after it has slid out
+          'border-r border-sidebar-border shadow-xs transition-[width,transform,visibility] duration-200 ease-out no-print',
           collapsed ? 'lg:w-[72px]' : 'lg:w-[268px]',
           'w-[268px]',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          mobileOpen ? 'translate-x-0' : 'invisible -translate-x-full lg:visible lg:translate-x-0',
         )}
       >
         {/* brand */}
@@ -145,7 +147,7 @@ export function Sidebar({
         </div>
 
         {/* nav */}
-        <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
+        <nav aria-label="เมนูหลัก" className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
           {NAV.map((g) => {
             const isOpen = open.includes(g.id) && !collapsed;
             const groupActive = g.items.some((i) => i.href === pathname);
@@ -216,6 +218,7 @@ export function Sidebar({
 
                 {!collapsed && (
                   <div
+                    inert={!isOpen} // a folded group's links stay out of the tab order
                     className={cn(
                       'grid transition-[grid-template-rows] duration-200 ease-out',
                       isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',

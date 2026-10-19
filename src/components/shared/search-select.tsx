@@ -46,8 +46,8 @@ export function SearchSelect({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(id, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const selected = options.find((o) => o.value === value);
 
@@ -97,11 +97,15 @@ export function SearchSelect({
         <button
           type="button"
           role="combobox"
-          aria-haspopup="listbox"
-          aria-controls={listId}
           {...field}
-          aria-label={field.id ? undefined : placeholder}
           aria-expanded={open}
+          aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+              setOpen(true);
+            }
+          }}
           disabled={disabled}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -117,12 +121,15 @@ export function SearchSelect({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        id={popupId}
+        aria-label={placeholder}
         align="start"
         className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0"
         style={{ minWidth }}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <CommandPrimitive
+          label={placeholder}
           shouldFilter={false}
           defaultValue={current}
           loop
@@ -148,7 +155,7 @@ export function SearchSelect({
               </button>
             )}
           </div>
-          <CommandPrimitive.List ref={listRef} id={listId} className="max-h-72 overflow-y-auto p-1.5">
+          <CommandPrimitive.List ref={listRef} className="max-h-72 overflow-y-auto p-1.5">
             {emptyLabel && !q.trim() && (
               <CommandPrimitive.Item
                 value="__empty__"

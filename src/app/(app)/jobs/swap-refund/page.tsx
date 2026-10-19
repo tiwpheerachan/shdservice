@@ -187,28 +187,28 @@ function SwapRefundForm() {
             { key: 'product', label: 'ข้อมูลสินค้า' },
             { key: 'detail', label: 'รายละเอียดการซ่อม' },
           ]}
-        />
-
-        {tab === 'product' ? (
-          <ProductSection title="ข้อมูลสินค้า" variant="repair" />
-        ) : (
-          <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
-            <FieldGrid>
-              <MainSymptomField />
-              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
-                <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
-              </Field>
-              <Field label="ผลการตรวจสอบ" wide error={act.errors.inspection}>
-                <Textarea
-                  rows={3}
-                  maxLength={200}
-                  value={d.inspection}
-                  onChange={(e) => upd({ inspection: e.target.value })}
-                />
-              </Field>
-            </FieldGrid>
-          </Section>
-        )}
+        >
+          {tab === 'product' ? (
+            <ProductSection title="ข้อมูลสินค้า" variant="repair" />
+          ) : (
+            <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+              <FieldGrid>
+                <MainSymptomField />
+                <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+                  <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
+                </Field>
+                <Field label="ผลการตรวจสอบ" wide error={act.errors.inspection}>
+                  <Textarea
+                    rows={3}
+                    maxLength={200}
+                    value={d.inspection}
+                    onChange={(e) => upd({ inspection: e.target.value })}
+                  />
+                </Field>
+              </FieldGrid>
+            </Section>
+          )}
+        </Tabs>
 
         <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
           <div className="mb-4 flex gap-2">
@@ -323,7 +323,7 @@ function SwapRefundForm() {
         </Section>
 
         <CostSummary />
-        <AttachmentSection jobNo={job?.no} />
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
 
         <FormActions
           saveLabel="บันทึกข้อมูล"

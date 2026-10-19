@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 
 /**
  * Form validation shared by the browser and the API (zod). Every form's rules live in one schema

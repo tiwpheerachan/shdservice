@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { userFromCookies, canViewAny } from '@/server/auth';
 import { notFound } from 'next/navigation';
 import { getSaleOrder } from '@/server/services/sale-orders';
@@ -5,6 +6,11 @@ import { ShippingLabel } from '@/components/print/shipping-label';
 import { profileForDocument } from '@/server/services/document-profiles';
 
 export const dynamic = 'force-dynamic';
+
+/** the tab / window title names the document (root template: "… · OneService") */
+export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
+  return { title: `ใบสั่งขาย ${decodeURIComponent((await params).no).toUpperCase()}` };
+}
 
 /** พิมพ์ใบสั่งขาย = ใบปะหน้าพัสดุ A5 (what the legacy app printed for a sale order). */
 export default async function Page({ params }: { params: Promise<{ no: string }> }) {

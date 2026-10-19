@@ -1,12 +1,11 @@
 'use client';
 
 import * as React from 'react';
-import Script from 'next/script';
 import { Clock, Loader2, Search, ShieldCheck, Timer } from 'lucide-react';
 import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from '@/lib/track-public';
-import { PublicJobView } from './public-job-view';
+import { focusOnMount, PublicJobView } from './public-job-view';
 import { TrackOtp } from './track-otp';
-import { Countdown, useSessionClock } from './session-clock';
+import { Countdown, ExpiryWarning, useSessionClock } from './session-clock';
 
 /**
  * Browser side of customer tracking. Both entry points start behind the same gate:
@@ -37,9 +36,7 @@ const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
 /** reuse a gate token only while it is comfortably inside its 5-minute life */
 const TOKEN_FRESH_MS = 4 * 60_000;
 
-type Props =
-  | { mode: 'link'; linkToken: string; nonce?: string }
-  | { mode: 'form'; nonce?: string; otpAvailable: boolean; devOtpLog: boolean };
+type Props = { mode: 'link'; linkToken: string } | { mode: 'form'; otpAvailable: boolean; devOtpLog: boolean };
 type Phase = 'gate' | 'ready' | 'done' | 'expired';
 
 async function post(path: string, body: Record<string, string>) {
@@ -82,10 +79,27 @@ function useTurnstile(
   return id;
 }
 
+/**
+ * One box that already holds the first screen (≈ the viewport under the header) in every phase, so
+ * gate → loading → job never moves the footer (it starts below the fold) — CLS was 0.38.
+ */
 export function TrackClient(props: Props) {
-  // the script may already be loaded (client-side navigation between /track pages); on a fresh page
-  // it loads after hydration, so the server and the first browser render agree (false)
-  const [tsReady, setTsReady] = React.useState(() => typeof window !== 'undefined' && !!window.turnstile);
+  return (
+    <div className="min-h-[calc(100svh-6.5rem)]">
+      <TrackBody {...props} />
+    </div>
+  );
+}
+
+function TrackBody(props: Props) {
+  // api.js is in the server HTML (async, layout.tsx) — it may run before or after hydration, so the first
+  // render always says "not ready" (server and browser agree) and this picks it up once it is there
+  const [tsReady, setTsReady] = React.useState(false);
+  React.useEffect(() => {
+    if (tsReady) return;
+    const t = setInterval(() => window.turnstile && setTsReady(true), 50);
+    return () => clearInterval(t);
+  }, [tsReady]);
   const [phase, setPhase] = React.useState<Phase>('gate');
   const [verifying, setVerifying] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -193,20 +207,10 @@ export function TrackClient(props: Props) {
     return <Notice text={TRACK_MSG.otpUnavailable} />;
   }
 
-  const script = (
-    <Script
-      src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
-      strategy="afterInteractive"
-      nonce={props.nonce}
-      onReady={() => setTsReady(true)}
-    />
-  );
-
   /* ---------- 1. gate ---------- */
   if (phase === 'gate') {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
-        {script}
         <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-primary" />
         <h1 className="text-base font-semibold">ยืนยันก่อนใช้งาน</h1>
         <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
@@ -220,7 +224,11 @@ export function TrackClient(props: Props) {
             </p>
           )}
         </div>
-        {error && <p className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
       </div>
     );
   }
@@ -230,7 +238,10 @@ export function TrackClient(props: Props) {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
         <Clock className="mx-auto mb-3 h-9 w-9 text-warning" />
-        <h1 className="text-base font-semibold">{TRACK_MSG.linkExpired}</h1>
+        {/* focused on arrival: a link that ran out while on screen is announced, not just swapped */}
+        <h1 ref={focusOnMount} tabIndex={-1} className="text-base font-semibold outline-hidden">
+          {TRACK_MSG.linkExpired}
+        </h1>
         <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
           {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือตรวจสอบด้วยเบอร์มือถือ (รับรหัส OTP ทาง SMS)
         </p>
@@ -270,7 +281,6 @@ export function TrackClient(props: Props) {
   /* ---------- form: phone + OTP ---------- */
   return (
     <div className="space-y-3">
-      {script}
       <TrackOtp getToken={getToken} verifying={verifying} devOtpLog={props.devOtpLog} />
       {/* background re-check: empty unless Cloudflare asks for a click */}
       <div ref={bgEl} className="flex justify-center empty:hidden" />
@@ -296,12 +306,13 @@ function LinkResult({
   onExpiresAt: (ms: number) => void;
   onExpired: () => void;
 }) {
-  useSessionClock(expiresAt, onExpired, () => {
+  const keepalive = () => {
     void post('/api/track/link/keepalive', { linkToken }).then((d) => {
       if (d.reason === 'link') onExpired();
       else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
     });
-  });
+  };
+  useSessionClock(expiresAt, onExpired, keepalive);
 
   // documents: the link itself authorises them (the server ignores any job no from here)
   const openDoc = React.useCallback(
@@ -321,6 +332,7 @@ function LinkResult({
           <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
         </p>
       )}
+      <ExpiryWarning to={expiresAt} onExtend={keepalive} />
       <PublicJobView j={job} onOpenDoc={openDoc} />
     </div>
   );

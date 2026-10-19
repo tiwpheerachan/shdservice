@@ -106,7 +106,6 @@ export default function ProductsPage() {
   const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath('/stock/products');
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
-  const { data: MODELS, ...modelsLookup } = useModels();
 
   const [detail, setDetail] = React.useState<{
     product: Product | null;
@@ -130,6 +129,13 @@ export default function ProductsPage() {
     server,
     narrowed: filtered,
   } = useServerTable(NO_FILTER);
+  // a chosen brand loads only its models; without one the whole list waits until the รุ่น field is first used
+  const [modelsWanted, setModelsWanted] = React.useState(false);
+  const wantModels = () => setModelsWanted(true);
+  const { data: MODELS, ...modelsLookup } = useModels('active', {
+    brand: draft.brand,
+    enabled: !!draft.brand || !!draft.model || modelsWanted,
+  });
   // KPI card → stock filter, applied right away and mirrored in the filter bar; same card again = clear
   const pickStock = (v: StockFilter) => {
     const next = filters.stock === v ? '' : v;
@@ -387,19 +393,21 @@ export default function ProductsPage() {
           />
         </Field>
         <Field label="รุ่น" hint="อะไหล่ที่ใช้ได้กับรุ่นนั้น (ตามที่ผูกไว้ในข้อมูลอะไหล่)" lookup={modelsLookup}>
-          <SearchSelect
-            placeholder="ทั้งหมด"
-            emptyLabel="ทั้งหมด"
-            value={draft.model}
-            onChange={(v) => setD('model', v)}
-            options={(draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS).map((m) => ({
-              value: m.code,
-              label: m.name,
-              sub: m.brand || undefined,
-            }))}
-            minWidth={360}
-            searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
-          />
+          <div className="contents" onFocus={wantModels} onPointerDown={wantModels}>
+            <SearchSelect
+              placeholder="ทั้งหมด"
+              emptyLabel="ทั้งหมด"
+              value={draft.model}
+              onChange={(v) => setD('model', v)}
+              options={(draft.brand ? MODELS.filter((m) => m.brand === draft.brand) : MODELS).map((m) => ({
+                value: m.code,
+                label: m.name,
+                sub: m.brand || undefined,
+              }))}
+              minWidth={360}
+              searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
+            />
+          </div>
         </Field>
         <Field label="สถานะอะไหล่">
           <Select value={draft.status} onChange={(e) => setD('status', e.target.value)}>

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Eye } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
-import { DataTable, type Column } from '@/components/ui/data-table';
+import { DataTable, type Column, TableScroll } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge, type Tone } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
@@ -212,7 +212,7 @@ export default function InventoryPage() {
         {viewDoc && (
           <div className="space-y-4">
             <div className="overflow-hidden rounded-lg border border-border">
-              <div className="table-scroll">
+              <TableScroll label="รายการในเอกสาร">
                 <table className="w-full min-w-[860px] text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -256,7 +256,7 @@ export default function InventoryPage() {
                     </tr>
                   </tfoot>
                 </table>
-              </div>
+              </TableScroll>
             </div>
             <p className="text-xs text-muted-foreground">หมายเหตุ: {viewDoc.remark || '—'}</p>
           </div>

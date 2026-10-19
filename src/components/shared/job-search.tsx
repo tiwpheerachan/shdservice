@@ -45,8 +45,8 @@ export function JobSearch({
   className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(id, { label: 'ค้นหางาน' }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   // a job loaded by any route (a pick, the auto-pick of a full job no, the URL) closes the dropdown
   const [shown, setShown] = React.useState(value);
@@ -105,13 +105,17 @@ export function JobSearch({
         <button
           type="button"
           role="combobox"
-          aria-haspopup="listbox"
-          aria-controls={listId}
           {...field}
-          aria-label={field.id ? undefined : 'ค้นหางาน'}
           aria-expanded={open}
+          aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+              setOpen(true);
+            }
+          }}
           className={cn(
-            'flex h-9 w-56 items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
+            'flex h-9 w-44 items-center gap-2 rounded-md border border-input sm:w-56 bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
             value ? 'num font-medium text-foreground' : 'text-muted-foreground',
             className,
           )}
@@ -121,11 +125,14 @@ export function JobSearch({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        id={popupId}
+        aria-label={'ค้นหางาน'}
         align="end"
         className="w-[520px] max-w-[calc(100vw-2rem)] p-0"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <CommandPrimitive
+          label={'ค้นหางาน'}
           shouldFilter={false}
           loop
           className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
@@ -160,7 +167,7 @@ export function JobSearch({
               )
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5">
+          <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
             {term.length < SEARCH_MIN_CHARS && (
               <p className="px-3 py-5 text-center text-xs text-muted-foreground">
                 {SEARCH_MIN_HINT} — เลขงาน ชื่อ/รหัส/เบอร์ลูกค้า Serial, IMEI หรือรุ่น

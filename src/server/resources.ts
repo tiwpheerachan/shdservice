@@ -127,9 +127,10 @@ export async function readResource(
     case 'symptoms':
       return listSymptoms(deleted);
     case 'models':
+      // unpaged ?brand= → that brand's models only (a picker whose brand is chosen), from the same cached list
       return paged
         ? pageModels(p, deleted, { brand: p.f.brand, code: p.f.code, name: p.f.name, status: p.f.status })
-        : listModels(deleted);
+        : listModels(deleted).then((rows) => (p.f.brand ? rows.filter((m) => m.brand === p.f.brand) : rows));
     case 'staff': {
       const usedAs = sp.get('usedAs');
       return listStaff(usedAs === 'engineer' || usedAs === 'sales' ? usedAs : undefined);

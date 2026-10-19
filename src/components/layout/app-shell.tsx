@@ -1,9 +1,9 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
-import { CommandPalette } from './command-palette';
 import { AccessGuard } from './access-guard';
 import { cn } from '@/lib/utils';
 import { usePathname } from 'next/navigation';
@@ -12,6 +12,10 @@ import { useLocalStorage } from '@/lib/use-client';
 import { useUnsavedChangesGuard } from '@/lib/use-unsaved-changes';
 import { today } from '@/lib/dates';
 
+// cmdk + a Radix dialog (~16 KB gz) that only Ctrl+K / the search button opens: its own chunk, loaded
+// on first open (that first press still opens it, once the chunk arrives)
+const CommandPalette = dynamic(() => import('./command-palette').then((m) => m.CommandPalette));
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const closeMobile = React.useCallback(() => setMobileOpen(false), []); // stable: the drawer's focus effect keys on it
@@ -19,6 +23,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsedPref, setCollapsedPref] = useLocalStorage('shd-sidebar-collapsed', '0');
   const collapsed = collapsedPref === '1';
   const [palette, setPalette] = React.useState(false);
+  // mounted from the first open on (and kept: closing runs Radix's focus return)
+  const [paletteUsed, setPaletteUsed] = React.useState(false);
+  if (palette && !paletteUsed) setPaletteUsed(true);
   useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
   // a page the user may not open is never rendered (AccessGuard redirects): no 403 API calls first
   const allowed = useAccess().canPath(usePathname());
@@ -38,6 +45,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen">
+      <a
+        href="#main"
+        className="sr-only rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-pop focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-100 no-print"
+      >
+        ข้ามไปยังเนื้อหาหลัก
+      </a>
       <AccessGuard />
       <Sidebar
         mobileOpen={mobileOpen}
@@ -58,7 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onToggleCollapse={toggleCollapse}
           collapsed={collapsed}
         />
-        <main className="flex-1 p-3 sm:p-4 lg:p-6">
+        <main id="main" tabIndex={-1} className="flex-1 p-3 outline-hidden sm:p-4 lg:p-6">
           <div className="mx-auto w-full max-w-[1600px] space-y-4">{allowed ? children : null}</div>
         </main>
         <footer className="border-t border-border px-4 py-3 text-2xs text-muted-foreground no-print">
@@ -68,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </footer>
       </div>
-      <CommandPalette open={palette} onOpenChange={setPalette} />
+      {paletteUsed && <CommandPalette open={palette} onOpenChange={setPalette} />}
     </div>
   );
 }

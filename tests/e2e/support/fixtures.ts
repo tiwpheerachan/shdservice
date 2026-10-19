@@ -11,6 +11,49 @@ export async function signIn(page: Page, email: string, loginUrl = '/login'): Pr
   await page.waitForURL((url) => url.origin === APP_ORIGIN && !url.pathname.startsWith('/api/'));
 }
 
+/** Another person at the same browser: the session cookie goes, then a fresh SSO sign-in. */
+export async function switchUser(page: Page, email: string): Promise<void> {
+  await page.context().clearCookies();
+  await signIn(page, email);
+}
+
+/**
+ * Closes every toast (their × button). They stack bottom-right, over a page's bottom-right save button, and
+ * pause while the pointer is on them — a click aimed at the button then waits on a toast that never goes.
+ */
+export async function dismissToasts(page: Page): Promise<void> {
+  const toasts = page.getByRole('region', { name: /^Notifications/ }).getByRole('listitem');
+  for (let left = await toasts.count(); left > 0; left = await toasts.count())
+    await toasts
+      .first()
+      .getByRole('button', { name: 'Close toast' })
+      .click({ timeout: 1000 })
+      .catch(() => {}); // already on its way out
+}
+
+type CallResult = {
+  status: number;
+  body: { error?: string; details?: { fields?: Record<string, string> } } & Record<string, unknown>;
+};
+
+/**
+ * A request sent from the page itself (same origin, the session cookie, Sec-Fetch-Site) — what a second tab,
+ * a double click or a tampered client sends; the specs use it for what the UI does not offer (it is refused).
+ */
+export async function call(page: Page, method: string, path: string, body?: unknown): Promise<CallResult> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const r = await fetch(path, {
+        method,
+        headers: body === undefined ? {} : { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: r.status, body: await r.json() };
+    },
+    { method, path, body },
+  );
+}
+
 /** Every spec fails on a CSP violation — a blocked script/style is a broken page in production. */
 export const test = base.extend<{ csp: void }>({
   csp: [

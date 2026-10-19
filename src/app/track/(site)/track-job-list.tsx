@@ -6,6 +6,7 @@ import { TRACK_STEPS, type PublicJobSummary } from '@/lib/track-public';
 import { Input, Select } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { NO_FILTERS, type Filters, type Tab } from './use-track-session';
+import { focusOnMount } from './public-job-view';
 
 /** job list rows per page (each tab keeps its own page, also across opening a job and coming back) */
 const PAGE_SIZE = 5;
@@ -56,6 +57,10 @@ export function JobList({
   const goPage = (n: number) => setPages((p) => ({ ...p, [tab]: Math.min(totalPages, Math.max(1, n)) }));
   return (
     <div className="surface overflow-hidden">
+      {/* focus lands here after the OTP and on กลับไปรายการงาน (WCAG 2.4.3) */}
+      <h1 ref={focusOnMount} tabIndex={-1} className="px-5 pt-4 text-base font-semibold outline-hidden">
+        งานซ่อมของคุณ
+      </h1>
       <div className="flex border-b border-border">
         {(
           [
@@ -66,6 +71,7 @@ export function JobList({
           <button
             key={k}
             type="button"
+            aria-pressed={tab === k}
             onClick={() => {
               setTab(k);
               setFilters((f) => ({ ...f, status: '' })); // statuses differ per tab
@@ -281,7 +287,7 @@ function Pager({
           type="button"
           onClick={() => goPage(page - 1)}
           disabled={page === 1}
-          className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+          className="grid h-11 w-11 place-items-center rounded-md border border-border transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
           aria-label="ก่อนหน้า"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
@@ -293,7 +299,7 @@ function Pager({
           type="button"
           onClick={() => goPage(page + 1)}
           disabled={page >= totalPages}
-          className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+          className="grid h-11 w-11 place-items-center rounded-md border border-border transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
           aria-label="ถัดไป"
         >
           <ChevronRight className="h-3.5 w-3.5" />

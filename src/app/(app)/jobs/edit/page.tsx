@@ -111,7 +111,7 @@ function EditJobForm() {
             </FieldGrid>
           </Section>
         )}
-        <AttachmentSection jobNo={job?.no} />
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
         {job?.no && <TrackLink jobNo={job.no} />}
         <JobHistorySection job={job} />
 

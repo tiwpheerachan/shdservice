@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { cleanCode, codeField, isoDateString, maxText } from './index';
 import { JOB_NO_RE } from './quotation';
 import { trackingField } from './sale-order';

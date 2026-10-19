@@ -307,7 +307,7 @@ function EditSaleOrder() {
         }
       >
         <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร — ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้`}>
-          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Modal>
     </>

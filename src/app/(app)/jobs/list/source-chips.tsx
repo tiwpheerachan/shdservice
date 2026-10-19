@@ -38,7 +38,7 @@ export function SourceChips({
               onClick={clearAll}
               title="ล้างตัวกรองงานเกินกำหนดส่ง"
               aria-label="ล้างตัวกรองงานเกินกำหนดส่ง"
-              className="grid h-6 w-6 place-items-center rounded-full transition-colors hover:bg-danger hover:text-white"
+              className="grid h-6 w-6 place-items-center rounded-full transition-colors hover:bg-danger hover:text-white dark:hover:text-background"
             >
               <X className="h-3.5 w-3.5" />
             </button>

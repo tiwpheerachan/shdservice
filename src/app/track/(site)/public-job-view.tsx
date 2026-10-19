@@ -11,6 +11,10 @@ import { cn } from '@/lib/utils';
  */
 export type DocOpener = (d: PublicDoc) => Promise<{ url?: string; error?: string }>;
 
+/** ref for a view's heading (tabIndex -1): focus moves there when the view appears (WCAG 2.4.3) —
+ *  module-level, so React calls it once per mount, not on every render */
+export const focusOnMount = (el: HTMLElement | null) => el?.focus();
+
 /** Renders a PublicJob (already masked / whitelisted by the server). */
 export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocOpener }) {
   const reached = new Map(j.history.map((h) => [h.key, h.at]));
@@ -59,7 +63,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
               type="button"
               onClick={() => void openDoc(d)}
               disabled={!!busy}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
+              className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
             >
               {busy === key ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -99,7 +103,9 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
     <div className="space-y-4">
       <div className="surface p-5">
         <p className="text-2xs uppercase tracking-wider text-muted-foreground">หมายเลขงานซ่อม</p>
-        <h1 className="num mt-0.5 text-xl font-semibold tracking-tight">{j.no}</h1>
+        <h1 ref={focusOnMount} tabIndex={-1} className="num mt-0.5 text-xl font-semibold tracking-tight outline-hidden">
+          {j.no}
+        </h1>
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:grid-cols-4">
           {[
             ['ลูกค้า', j.customerMasked],
@@ -154,8 +160,17 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                       <span className={cn('my-0.5 w-px flex-1', done ? 'bg-success/40' : 'bg-border')} />
                     )}
                   </div>
-                  <div className={cn('pb-5', !done && !now && 'opacity-55')}>
-                    <p className={cn('text-sm font-medium', now && 'text-primary')}>{label}</p>
+                  {/* a step not reached yet: muted-foreground (5.7:1 on card), not faded — opacity-55 failed 1.4.3 */}
+                  <div className="pb-5">
+                    <p
+                      className={cn(
+                        'text-sm font-medium',
+                        now && 'text-primary',
+                        !done && !now && 'text-muted-foreground',
+                      )}
+                    >
+                      {label}
+                    </p>
                     {label === s.label && <p className="text-xs text-muted-foreground">{s.hint}</p>}
                     {at && <p className="num mt-0.5 text-2xs text-muted-foreground">{at}</p>}
                     {docButtons(docs.filter((d) => d.step === s.key))}

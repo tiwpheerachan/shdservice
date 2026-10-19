@@ -75,20 +75,22 @@ export function useTrackSession(getToken: () => Promise<string | null>) {
   }, []);
 
   /* ---------- clock, activity, keepalive (session-clock.tsx) ---------- */
+  /** also the ต่อเวลา button of the last 2 minutes (ExpiryWarning) */
+  const extend = () => {
+    if (!session.current) return;
+    void call<{ expiresAt?: string }>('/api/track/me/keepalive', { method: 'POST', session: session.current }).then(
+      ({ status, d }) => {
+        if (status === 401) signOut(TRACK_MSG.sessionExpired);
+        else if (d.expiresAt) setExpiresAt(Date.parse(d.expiresAt));
+      },
+    );
+  };
   const markActive = useSessionClock(
     expiresAt,
     () => {
       if (session.current) signOut(TRACK_MSG.sessionExpired);
     },
-    () => {
-      if (!session.current) return;
-      void call<{ expiresAt?: string }>('/api/track/me/keepalive', { method: 'POST', session: session.current }).then(
-        ({ status, d }) => {
-          if (status === 401) signOut(TRACK_MSG.sessionExpired);
-          else if (d.expiresAt) setExpiresAt(Date.parse(d.expiresAt));
-        },
-      );
-    },
+    extend,
   );
 
   /* ---------- actions ---------- */
@@ -216,6 +218,7 @@ export function useTrackSession(getToken: () => Promise<string | null>) {
     lists,
     job,
     expiresAt,
+    extend,
     signOut,
     requestCode,
     verify,

@@ -50,7 +50,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
   const lbl = 'text-neutral-700';
 
   return (
-    <div className="print-page qt text-[11.5px] leading-[1.35] text-black">
+    <main className="print-page qt text-[11.5px] leading-[1.35] text-black">
       <AutoPrint />
       <style>{`
         .qt table { border-collapse: collapse; width: 100%; }
@@ -367,6 +367,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
       </table>
 
       <p className="mt-2 text-[9.5px]">Printing Date : {stamp()}</p>
-    </div>
+    </main>
   );
 }

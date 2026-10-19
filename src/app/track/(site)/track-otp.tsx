@@ -2,8 +2,8 @@
 
 import { ArrowLeft, LogOut, Timer } from 'lucide-react';
 import { TRACK_MSG } from '@/lib/track-public';
-import { PublicJobView } from './public-job-view';
-import { Countdown } from './session-clock';
+import { focusOnMount, PublicJobView } from './public-job-view';
+import { Countdown, ExpiryWarning } from './session-clock';
 import { useTrackSession } from './use-track-session';
 import { CodeStep, PhoneStep } from './track-sign-in';
 import { JobList } from './track-job-list';
@@ -35,6 +35,7 @@ export function TrackOtp({
   /* ---------- views ---------- */
   const errorBox = error && (
     <p
+      role="alert"
       className={cn(
         'rounded-md px-3 py-2 text-sm',
         error === TRACK_MSG.signedOut ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger',
@@ -47,7 +48,10 @@ export function TrackOtp({
   if (step === 'phone' || step === 'code') {
     return (
       <div className="surface mx-auto max-w-md p-6">
-        <h1 className="text-lg font-semibold tracking-tight">ติดตามสถานะงานซ่อม</h1>
+        {/* focus lands here after ออก / an expired session (the list it was on is gone) */}
+        <h1 ref={focusOnMount} tabIndex={-1} className="text-lg font-semibold tracking-tight outline-hidden">
+          ติดตามสถานะงานซ่อม
+        </h1>
         {step === 'phone' ? (
           <PhoneStep
             phone={s.phone}
@@ -81,7 +85,12 @@ export function TrackOtp({
     );
   }
 
-  const header = <SessionHeader expiresAt={s.expiresAt} onSignOut={() => signOut(TRACK_MSG.signedOut)} />;
+  const header = (
+    <>
+      <SessionHeader expiresAt={s.expiresAt} onSignOut={() => signOut(TRACK_MSG.signedOut)} />
+      <ExpiryWarning to={s.expiresAt} onExtend={s.extend} />
+    </>
+  );
 
   if (step === 'detail' && s.job) {
     return (
@@ -90,7 +99,7 @@ export function TrackOtp({
         <button
           type="button"
           onClick={() => s.setStep('list')}
-          className="inline-flex items-center gap-1.5 px-1 text-sm font-medium text-primary hover:underline"
+          className="inline-flex min-h-11 items-center gap-1.5 px-1 text-sm font-medium text-primary hover:underline"
         >
           <ArrowLeft className="h-4 w-4" /> กลับไปรายการงาน
         </button>
@@ -126,7 +135,11 @@ function SessionHeader({ expiresAt, onSignOut }: { expiresAt: number; onSignOut:
         <Timer className="h-3.5 w-3.5" /> เหลือเวลา <Countdown to={expiresAt} />
         <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่</span>
       </span>
-      <button type="button" onClick={onSignOut} className="inline-flex items-center gap-1 hover:text-foreground">
+      <button
+        type="button"
+        onClick={onSignOut}
+        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 px-2 hover:text-foreground"
+      >
         <LogOut className="h-3.5 w-3.5" /> ออก
       </button>
     </div>

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductPicker, type ExtraItem } from '@/components/shared/product-picker';
 import { Input, NumberInput } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/data-table';
 import type { FieldErrors } from '@/lib/validation';
 import { baht } from '@/lib/utils';
 import type { QuotationLine } from './line-totals';
@@ -30,7 +31,7 @@ export function QuotationLineTable({
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   return (
-    <div className="table-scroll rounded-none">
+    <TableScroll label="รายการในใบเสนอราคา" className="rounded-none">
       <table className="w-full min-w-[720px] text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -129,6 +130,6 @@ export function QuotationLineTable({
           )}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

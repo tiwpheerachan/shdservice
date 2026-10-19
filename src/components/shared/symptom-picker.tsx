@@ -38,8 +38,8 @@ export function SymptomPicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(undefined, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const selected = new Set(value);
 
@@ -113,7 +113,8 @@ export function SymptomPicker({
                       type="button"
                       onClick={() => makePrimary(name)}
                       title="ตั้งเป็นอาการหลัก"
-                      className="rounded-full text-muted-foreground hover:text-primary"
+                      aria-label={`ตั้ง ${name} เป็นอาการหลัก`}
+                      className="-my-1 -ml-1.5 grid h-6 w-6 place-items-center rounded-full text-muted-foreground hover:text-primary"
                     >
                       <Star className="h-3 w-3" />
                     </button>
@@ -125,7 +126,8 @@ export function SymptomPicker({
                   type="button"
                   onClick={() => remove(name)}
                   aria-label={`เอา ${name} ออก`}
-                  className="ml-0.5 rounded-full opacity-70 hover:opacity-100"
+                  // 24×24 target; the negative margins keep the chip its size
+                  className="-my-1 -mr-1.5 -ml-1 grid h-6 w-6 place-items-center rounded-full opacity-70 hover:opacity-100"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -142,49 +144,57 @@ export function SymptomPicker({
           if (!o) setQ('');
         }}
       >
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            role="combobox"
-            aria-haspopup="listbox"
-            aria-controls={listId}
-            {...field}
-            aria-label={field.id ? undefined : placeholder}
-            aria-expanded={open}
-            className={cn(
-              'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground',
-              'transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
-              'disabled:cursor-not-allowed disabled:bg-muted',
-            )}
-          >
-            <Search className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1 truncate">
-              {!multiple && value[0] ? <span className="text-foreground">{value[0]}</span> : placeholder}
-            </span>
-            {multiple && value.length > 0 && <span className="num text-2xs">{value.length} อาการ</span>}
-            {!multiple && value[0] && !disabled && (
-              <span
-                role="button"
-                aria-label="ล้างค่า"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChange([]);
-                }}
-                className="rounded-full p-0.5 opacity-70 hover:bg-accent hover:opacity-100"
-              >
-                <X className="h-3.5 w-3.5" />
+        {/* the clear × is a sibling of the combobox (no button inside a button), laid over it */}
+        <div className="relative">
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              disabled={disabled}
+              role="combobox"
+              {...field}
+              aria-expanded={open}
+              aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+                  setOpen(true);
+                }
+              }}
+              className={cn(
+                'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm text-muted-foreground',
+                'transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
+                'disabled:cursor-not-allowed disabled:bg-muted',
+              )}
+            >
+              <Search className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1 truncate">
+                {!multiple && value[0] ? <span className="text-foreground">{value[0]}</span> : placeholder}
               </span>
-            )}
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-          </button>
-        </PopoverTrigger>
+              {multiple && value.length > 0 && <span className="num text-2xs">{value.length} อาการ</span>}
+              {!multiple && value[0] && !disabled && <span className="h-6 w-5 shrink-0" />}
+              <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+            </button>
+          </PopoverTrigger>
+          {!multiple && value[0] && !disabled && (
+            <button
+              type="button"
+              aria-label="ล้างค่า"
+              onClick={() => onChange([])}
+              className="absolute right-8 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full opacity-70 hover:bg-accent hover:opacity-100"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         <PopoverContent
+          id={popupId}
+          aria-label={'ค้นหาอาการเสีย'}
           align="start"
           className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <CommandPrimitive
+            label={'ค้นหาอาการเสีย'}
             shouldFilter={false}
             loop
             className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
@@ -202,7 +212,7 @@ export function SymptomPicker({
                 <span className="num shrink-0 text-2xs text-muted-foreground">{value.length} เลือกแล้ว</span>
               )}
             </div>
-            <CommandPrimitive.List id={listId} className="max-h-72 overflow-y-auto p-1.5">
+            <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
               {sugOptions.length === 0 && restOptions.length === 0 && (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">
                   ไม่พบอาการเสีย "{q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน

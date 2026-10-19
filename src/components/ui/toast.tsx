@@ -30,7 +30,13 @@ const push = (t: ToastInput) => {
           : toast.info;
   // a body that only repeats the title (an API message + the same field error) is not shown twice
   const desc = t.desc && !t.title.includes(t.desc) ? t.desc : undefined;
-  fn(t.title, { description: desc, id: t.id, ...(t.action && { action: t.action, duration: Infinity }) });
+  fn(t.title, {
+    description: desc,
+    id: t.id,
+    // an error needs reading (and maybe acting on): 8 s, not the 3.6 s a "saved" gets (WCAG 2.2.1)
+    ...(t.kind === 'error' && { duration: 8000 }),
+    ...(t.action && { action: t.action, duration: Infinity }),
+  });
 };
 
 const Ctx = React.createContext<{ push: (t: ToastInput) => void }>({ push });
@@ -72,7 +78,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             description: 'mt-0.5! text-xs! text-muted-foreground!',
             icon: 'mt-0.5! m-0!',
             closeButton:
-              'static! order-last! ml-auto! h-auto! w-auto! rounded! border-0! bg-transparent! p-0.5! text-muted-foreground! translate-x-0! translate-y-0! hover:bg-black/5! dark:hover:bg-white/10!',
+              // 24×24 target (WCAG 2.5.8); -my-0.5 keeps a one-line toast its height
+              'static! order-last! ml-auto! -my-0.5! grid! h-6! w-6! shrink-0! place-items-center! rounded! border-0! bg-transparent! p-0! text-muted-foreground! translate-x-0! translate-y-0! hover:bg-black/5! dark:hover:bg-white/10!',
             success: TONE.success,
             error: TONE.error,
             info: TONE.info,

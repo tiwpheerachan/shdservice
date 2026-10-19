@@ -95,7 +95,7 @@ function NewJobForm() {
             </Button>
             <Button
               size="sm"
-              autoFocus
+              data-autofocus
               onClick={() => opened && window.open(`/print/job/${encodeURIComponent(opened)}`, '_blank')}
             >
               พิมพ์ใบรับงาน

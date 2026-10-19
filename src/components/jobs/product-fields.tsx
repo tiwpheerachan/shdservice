@@ -177,20 +177,26 @@ export function BrandField({ f: { s, set, errors } }: P) {
 }
 
 export function ModelField({ f: { s, patch, errors } }: P) {
-  const { data: MODELS, ...modelsLookup } = useModels();
-  // models of the chosen brand first (still allows any model)
-  const modelOptions = React.useMemo(() => {
-    const own = MODELS.filter((m) => !s.brand || m.brand === s.brand);
-    return own.length ? own : MODELS;
-  }, [MODELS, s.brand]);
+  // the chosen brand's models only (all the picker offers then). The whole list (1,171) only for a brand
+  // with no models, a saved model of another brand (its name), or no brand — once the picker is used
+  const [wanted, setWanted] = React.useState(false);
+  const { data: OWN, ...ownLookup } = useModels('active', { brand: s.brand, enabled: !!s.brand });
+  const own = React.useMemo(() => (s.brand ? OWN.filter((m) => m.brand === s.brand) : []), [OWN, s.brand]);
+  const needAll = s.brand
+    ? !ownLookup.loading && (!own.length || (!!s.modelCode && !own.some((m) => m.code === s.modelCode)))
+    : wanted || !!s.modelCode;
+  const { data: MODELS, ...modelsLookup } = useModels('active', { enabled: needAll });
+  const modelOptions = own.length ? own : MODELS;
   return (
-    <Field label="รุ่น" required error={errors.modelCode} lookup={modelsLookup}>
-      <ModelPicker
-        models={modelOptions}
-        value={s.modelCode}
-        fallbackName={MODELS.find((m) => m.code === s.modelCode)?.name}
-        onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
-      />
+    <Field label="รุ่น" required error={errors.modelCode} lookup={[ownLookup, modelsLookup]}>
+      <div className="contents" onFocus={() => setWanted(true)} onPointerDown={() => setWanted(true)}>
+        <ModelPicker
+          models={modelOptions}
+          value={s.modelCode}
+          fallbackName={[...own, ...MODELS].find((m) => m.code === s.modelCode)?.name}
+          onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
+        />
+      </div>
     </Field>
   );
 }

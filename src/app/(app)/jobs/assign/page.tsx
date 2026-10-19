@@ -70,7 +70,13 @@ export default function AssignPage() {
   } = useServerTable(NO_FILTER);
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
   const { data: BRANDS, ...brandsLookup } = useManufacturers();
-  const { data: MODELS, ...modelsLookup } = useModels();
+  // a chosen brand loads only its models; without one the whole list waits until the รุ่น field is first used
+  const [modelsWanted, setModelsWanted] = React.useState(false);
+  const wantModels = () => setModelsWanted(true);
+  const { data: MODELS, ...modelsLookup } = useModels('active', {
+    brand: draft.brand,
+    enabled: !!draft.brand || !!draft.model || modelsWanted,
+  });
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
@@ -252,14 +258,16 @@ export default function AssignPage() {
           />
         </Field>
         <Field label="รุ่น" lookup={modelsLookup}>
-          <SearchSelect
-            {...all}
-            value={draft.model}
-            onChange={(v) => setD('model', v)}
-            options={MODEL_OPTIONS}
-            minWidth={360}
-            searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
-          />
+          <div className="contents" onFocus={wantModels} onPointerDown={wantModels}>
+            <SearchSelect
+              {...all}
+              value={draft.model}
+              onChange={(v) => setD('model', v)}
+              options={MODEL_OPTIONS}
+              minWidth={360}
+              searchPlaceholder="พิมพ์ชื่อรุ่น หรือยี่ห้อ…"
+            />
+          </div>
         </Field>
         <Field label="ประเภทงาน" lookup={jobTypesLookup}>
           <SearchSelect {...all} value={draft.type} onChange={(v) => setD('type', v)} options={JOB_TYPE_OPTIONS} />

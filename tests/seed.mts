@@ -23,7 +23,7 @@ export async function seed(db: { query(text: string): Promise<unknown> }): Promi
       (0, 'ยกเลิก', 0, 'Cancel', true),
       (1, 'รับงานใหม่', 1, 'Open', true),
       (2, 'กำลังดำเนินการ', 2, 'Open', true),
-      (20, 'เสร็จสมบูรณ์', 20, 'Finished', true);
+      (20, 'ปิดงาน (Complete)', 20, 'Finished', true);
 
     INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES
       (1, 'C00001', 'สมชาย ทดสอบ', '081-234-5678'),

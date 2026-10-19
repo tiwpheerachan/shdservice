@@ -52,8 +52,8 @@ export function ProductPicker({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(id, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const term = q.trim();
 
@@ -101,55 +101,64 @@ export function ProductPicker({
         if (!o) setQ('');
       }}
     >
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          role="combobox"
-          aria-haspopup="listbox"
-          aria-controls={listId}
-          {...field}
-          aria-label={field.id ? undefined : placeholder}
-          aria-expanded={open}
-          className={cn(
-            'flex w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
-            size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm',
-            className,
-          )}
-        >
-          {value ? (
-            <span className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="num shrink-0 font-medium">{value}</span>
-              <span className="truncate text-muted-foreground">{label}</span>
-            </span>
-          ) : (
-            <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
-              <Search className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{placeholder}</span>
-            </span>
-          )}
-          {clearable && value ? (
-            <span
-              role="button"
-              aria-label="ล้าง"
-              onClick={(e) => {
-                e.stopPropagation();
-                pick(null);
-              }}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </span>
-          ) : (
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
-          )}
-        </button>
-      </PopoverTrigger>
+      {/* the clear × is a sibling of the combobox (no button inside a button), laid over its right end */}
+      <div className={cn('relative w-full', className)}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            role="combobox"
+            {...field}
+            aria-expanded={open}
+            aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+                setOpen(true);
+              }
+            }}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20',
+              size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm',
+            )}
+          >
+            {value ? (
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <span className="num shrink-0 font-medium">{value}</span>
+                <span className="truncate text-muted-foreground">{label}</span>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{placeholder}</span>
+              </span>
+            )}
+            {clearable && value ? (
+              <span className="h-3.5 w-3.5 shrink-0" /> // room for the clear button below
+            ) : (
+              <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+            )}
+          </button>
+        </PopoverTrigger>
+        {clearable && value && (
+          <button
+            type="button"
+            aria-label="ล้างการเลือก"
+            onClick={() => pick(null)}
+            className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
       <PopoverContent
+        id={popupId}
+        aria-label={'ค้นหาอะไหล่'}
         align={align}
         className="w-[560px] max-w-[calc(100vw-2rem)] p-0"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <CommandPrimitive
+          label={'ค้นหาอะไหล่'}
           shouldFilter={false}
           loop
           className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
@@ -178,7 +187,7 @@ export function ProductPicker({
               )
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5" aria-busy={loading}>
+          <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5" aria-busy={loading}>
             {extraRows.length > 0 && (
               <CommandPrimitive.Group
                 heading="บริการ"

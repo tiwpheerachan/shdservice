@@ -56,10 +56,10 @@ export default async function LoginPage({
     <main className="auth-page">
       <AuthSplit heroImageSrc={HERO} fit="contain">
         <div className="flex flex-col gap-6">
-          <Logo variant="navy" className="h-9 w-auto self-start animate-element" />
+          <Logo variant="navy" className="h-9 w-auto self-start animate-rise" />
 
           <div>
-            <h1 className="animate-element animate-delay-100 text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h1 className="animate-rise animate-delay-100 text-3xl font-semibold tracking-tight sm:text-4xl">
               ยินดีต้อนรับ
             </h1>
             <p className="animate-element animate-delay-200 mt-2 text-muted-foreground">

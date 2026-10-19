@@ -26,6 +26,20 @@ export function Topbar({
   const pathname = usePathname();
   const crumb = findBreadcrumb(pathname);
 
+  // the tab title names the page (WCAG 2.4.2) — the (app) pages are client pages without metadata of
+  // their own, so the root's "OneService" would stay. Re-applied if Next writes its <title> after us.
+  const pageTitle = crumb?.item?.title ?? crumb?.group.title;
+  React.useEffect(() => {
+    const want = pageTitle ? `${pageTitle} · OneService` : 'OneService';
+    const apply = () => {
+      if (document.title !== want) document.title = want;
+    };
+    apply();
+    const mo = new MutationObserver(apply);
+    mo.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, [pageTitle]);
+
   const { user: me } = useMe();
   const [avatarError, setAvatarError] = React.useState(false);
 

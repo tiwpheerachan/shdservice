@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Paperclip, Trash2, Upload, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TableScroll } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -11,6 +12,9 @@ import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useAccess } from '@/lib/use-access';
 
 type Row = { id: number; name: string; note: string; file?: string; pending?: File };
+type SavedFile = { id: number; name: string; file: string; remark: string };
+/** files = the loaded job's attachments (JobDetail.attachments) */
+export type AttachmentsProps = { jobNo?: string; files?: SavedFile[] };
 
 /**
  * Job attachments (document_attach + Supabase Storage).
@@ -20,8 +24,8 @@ type Row = { id: number; name: string; note: string; file?: string; pending?: Fi
  */
 export type AttachmentsHandle = { uploadPending: (jobNo: string) => Promise<void> };
 
-export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string }>(function Attachments(
-  { jobNo },
+export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>(function Attachments(
+  { jobNo, files },
   ref,
 ) {
   const { push } = useToast();
@@ -36,24 +40,11 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
   // files queued for a job not saved yet are an unsaved edit (they upload with the job)
   useUnsavedChanges(rows.some((r) => r.pending));
 
-  // existing files of a loaded job
+  // existing files of a loaded job: `files` came with the job the page loaded (no second GET /api/jobs/:no);
+  // taken when another job is shown, so a save (same job) keeps what was uploaded here meanwhile
   React.useEffect(() => {
-    if (!jobNo) {
-      setRows([]);
-      return;
-    }
-    let active = true;
-    api<{ job: { attachments: { id: number; name: string; file: string; remark: string }[] } }>(
-      `/api/jobs/${encodeURIComponent(jobNo)}`,
-    )
-      .then(
-        (d) =>
-          active && setRows(d.job.attachments.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file }))),
-      )
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
+    setRows(jobNo && files ? files.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file })) : []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobNo]);
 
   const upload = async (target: string, f: File, remark: string) => {
@@ -162,7 +153,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
         </Button>
       </div>
 
-      <div className="table-scroll border border-border">
+      <TableScroll label="ไฟล์แนบ" className="border border-border">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -219,7 +210,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, { jobNo?: string 
             )}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 });

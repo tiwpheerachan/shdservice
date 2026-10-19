@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/data-table';
 import { LookupError } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -49,13 +50,15 @@ function LoadFailed({ error, onRetry }: { error: string; onRetry: () => void }) 
   );
 }
 
-/** first load: placeholder rows that keep a table's height */
+/** first load: placeholder rows that keep a table's height (each as tall as a data row: py-2.5 + a 20px line) */
+const TAT_SKELETON_ROWS = 16;
+
 function SkeletonRows({ rows, cols }: { rows: number; cols: number }) {
   return Array.from({ length: rows }, (_, i) => (
     <tr key={i} className="border-b border-border/60 last:border-0" aria-busy>
       {Array.from({ length: cols }, (_, j) => (
-        <td key={j} className={cn('py-3', j === 0 ? 'pl-5 pr-3' : 'px-3')}>
-          <Skeleton className={cn('h-3.5', j === 0 ? 'w-10' : i % 2 ? 'w-3/5' : 'w-4/5')} />
+        <td key={j} className={cn('py-2.5', j === 0 ? 'pl-5 pr-3' : 'px-3')}>
+          <Skeleton className={cn('my-[3px] h-3.5', j === 0 ? 'w-10' : i % 2 ? 'w-3/5' : 'w-4/5')} />
         </td>
       ))}
     </tr>
@@ -259,13 +262,14 @@ export default function DashboardPage() {
             <LookupError error={jobTypesLookup.error} onRetry={jobTypesLookup.refetch} />
           </div>
           {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
-          <div className="flex items-center gap-1.5">
+          {/* a full-width row below sm: two 150px inputs overflowed a 320px screen (WCAG 1.4.10) */}
+          <div className="flex w-full items-center gap-1.5 sm:w-auto">
             <Input
               type="date"
               value={from}
               max={to || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              className="num h-9 w-[150px]"
+              className="num h-9 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่เริ่ม"
             />
             <span className="text-xs text-muted-foreground">–</span>
@@ -274,7 +278,7 @@ export default function DashboardPage() {
               value={to}
               min={from || undefined}
               onChange={(e) => setTo(e.target.value)}
-              className="num h-9 w-[150px]"
+              className="num h-9 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่สิ้นสุด"
             />
           </div>
@@ -380,7 +384,7 @@ export default function DashboardPage() {
         }
         bodyClass="p-0"
       >
-        <div className="table-scroll">
+        <TableScroll label="งานค้างตามสถานะและจำนวนวัน">
           <table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-border text-2xs uppercase tracking-wide text-muted-foreground">
@@ -395,7 +399,9 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {dashFirstLoad && <SkeletonRows rows={6} cols={8} />}
+              {/* a FIXED height (the usual 15 open statuses + total): it must not wait for job_statuses — sizing
+                  it from that second request made the panel grow 7 → 19 → 16 rows (CLS 0.15, measured) */}
+              {dashFirstLoad && <SkeletonRows rows={TAT_SKELETON_ROWS} cols={8} />}
               {dashError && (
                 <tr>
                   <td colSpan={8}>
@@ -453,7 +459,7 @@ export default function DashboardPage() {
               </tfoot>
             )}
           </table>
-        </div>
+        </TableScroll>
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -468,7 +474,8 @@ export default function DashboardPage() {
                 เปิดงาน
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-success" />
+                {/* dashed like its line: the two series differ by more than colour (WCAG 1.4.1) */}
+                <span className="w-3.5 border-t-2 border-dashed border-success" />
                 ปิดงาน
               </span>
             </div>
@@ -480,7 +487,7 @@ export default function DashboardPage() {
             style={{ height: 200 }}
             preserveAspectRatio="none"
             role="img"
-            aria-label="แนวโน้มรายเดือน"
+            aria-label="แนวโน้มงานเปิด / ปิด — ตัวเลขอยู่ในตารางถัดไป"
           >
             {[0.25, 0.5, 0.75, 1].map((f) => (
               <line
@@ -502,6 +509,7 @@ export default function DashboardPage() {
                   fill="none"
                   stroke="hsl(var(--success))"
                   strokeWidth="2"
+                  strokeDasharray="5 4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -522,7 +530,27 @@ export default function DashboardPage() {
               </>
             )}
           </svg>
-          <div className="mt-2 flex justify-between px-1 text-2xs text-muted-foreground">
+          {/* the chart's numbers for screen readers (WCAG 1.1.1) */}
+          <table className="sr-only">
+            <caption>{granularity === 'day' ? 'จำนวนงานเปิด / ปิด รายวัน' : 'จำนวนงานเปิด / ปิด รายเดือน'}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{granularity === 'day' ? 'วัน' : 'เดือน'}</th>
+                <th scope="col">เปิดงาน</th>
+                <th scope="col">ปิดงาน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {MONTHLY.map((m) => (
+                <tr key={m.m}>
+                  <th scope="row">{m.m}</th>
+                  <td>{int(m.open)}</td>
+                  <td>{int(m.close)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div aria-hidden className="mt-2 flex justify-between px-1 text-2xs text-muted-foreground">
             {MONTHLY.filter(
               (_, i, a) => a.length <= 14 || i % Math.ceil(a.length / 12) === 0 || i === a.length - 1,
             ).map((m) => (
@@ -567,7 +595,7 @@ export default function DashboardPage() {
         }
         bodyClass="p-0"
       >
-        <div className="table-scroll">
+        <TableScroll label="งานล่าสุด">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-2xs uppercase tracking-wide text-muted-foreground">
@@ -605,7 +633,7 @@ export default function DashboardPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       </Panel>
     </div>
   );

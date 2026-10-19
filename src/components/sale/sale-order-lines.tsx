@@ -5,6 +5,7 @@ import { Plus, Trash2, ShoppingCart } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { ProductPicker, type PickedItem } from '@/components/shared/product-picker';
 import { Button } from '@/components/ui/button';
+import { TableScroll } from '@/components/ui/data-table';
 import { Field } from '@/components/ui/field';
 import { Input, NumberInput } from '@/components/ui/input';
 import { useProductSearch } from '@/data/db';
@@ -95,7 +96,7 @@ export function SaleOrderLines({
         </div>
       )}
 
-      <div className="table-scroll rounded-none">
+      <TableScroll label="รายการสินค้า" className="rounded-none">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -181,7 +182,7 @@ export function SaleOrderLines({
             </tr>
           </tfoot>
         </table>
-      </div>
+      </TableScroll>
     </Section>
   );
 }

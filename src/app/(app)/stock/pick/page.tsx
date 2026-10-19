@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Save, Search } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { Button } from '@/components/ui/button';
+import { TableScroll } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, NumberInput } from '@/components/ui/input';
@@ -395,7 +396,7 @@ export default function PickPage() {
             {fe.errors.lines}
           </p>
         )}
-        <div className="table-scroll">
+        <TableScroll label="รายการเบิกอะไหล่">
           <table className="w-full min-w-[880px] text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -477,7 +478,7 @@ export default function PickPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
         {lines.length > 0 && (
           <div className="flex justify-end gap-3 border-t border-border px-3 py-2.5 text-sm">
             <span className="text-muted-foreground">{isReturn ? 'รวมจำนวนรับคืน' : 'รวมจำนวนจ่ายออก'}</span>

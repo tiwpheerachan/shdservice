@@ -15,11 +15,21 @@ type MeResponse = {
 
 export const ME_KEY = '/api/sso/me';
 
+/** the page's first read: AccessGuard's page-change refresh() on mount joins it instead of making a second
+ *  /api/sso/me request. Only that one — a later refresh (e.g. after renewing the session) always reads anew */
+let firstRead: Promise<MeResponse> | null = null;
+let firstDone = false;
+function fetchMe(url: string): Promise<MeResponse> {
+  if (firstDone) return readMe(url);
+  firstRead ??= readMe(url).finally(() => (firstDone = true));
+  return firstRead;
+}
+
 /**
  * quiet fetch — never redirects by itself: a 401 comes back as `unauthorized` (AccessGuard decides
  * what to do); a network error throws, so swr keeps the last answer
  */
-async function fetchMe(url: string): Promise<MeResponse> {
+async function readMe(url: string): Promise<MeResponse> {
   const r = await fetch(url, { cache: 'no-store' });
   if (r.status === 401) {
     const b = (await r.json().catch(() => null)) as { signedOut?: boolean } | null;

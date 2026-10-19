@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { userFromCookies, canViewAny, JOB_MODULES } from '@/server/auth';
 import { getJob } from '@/server/services/jobs';
@@ -6,6 +7,11 @@ import { ShippingLabel } from '@/components/print/shipping-label';
 import { profileForDocument } from '@/server/services/document-profiles';
 
 export const dynamic = 'force-dynamic';
+
+/** the tab / window title names the document (root template: "… · OneService") */
+export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
+  return { title: `ใบปะหน้าพัสดุ ${decodeURIComponent((await params).no).toUpperCase()}` };
+}
 
 /** ใบปะหน้าพัสดุสำหรับงานซ่อมที่ส่งคืนทางขนส่ง — same A5 sheet as the sale order, keyed by job no. */
 export default async function Page({ params }: { params: Promise<{ no: string }> }) {

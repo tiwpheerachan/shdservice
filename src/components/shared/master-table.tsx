@@ -235,7 +235,17 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       header: 'สถานะ',
       width: '110px',
       cell: (r) => (
-        <button onClick={() => toggleStatus(r.id)} title="คลิกเพื่อสลับสถานะ">
+        // a switch: its state is announced (on = Active), not only shown by the badge's colour / text;
+        // min-h-6 = a 24px target, -my-0.5 keeps the row its height
+        <button
+          type="button"
+          role="switch"
+          aria-checked={r.status === 'Active'}
+          aria-label={`${r.status} — สถานะของ ${r.name}`}
+          onClick={() => toggleStatus(r.id)}
+          title="คลิกเพื่อสลับสถานะ"
+          className="-my-0.5 inline-flex min-h-6 items-center rounded-full"
+        >
           <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
             {r.status}
           </Badge>

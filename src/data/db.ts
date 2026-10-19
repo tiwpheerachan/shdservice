@@ -183,8 +183,9 @@ export const useProductTypes = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('product_types', { column: 'id' }, mode, {}, TTL_MASTER);
 export const useSymptoms = (mode: DeletedMode = 'active') =>
   useTable<Symptom>('symptoms', { column: 'id' }, mode, {}, TTL_MASTER);
-export const useModels = (mode: DeletedMode = 'active') =>
-  useTable<Model>('models', { column: 'code' }, mode, {}, TTL_MASTER);
+/** the whole list is 1,171 rows (~140 KB): `brand` → only that brand's models; `enabled: false` → nothing loaded (yet) */
+export const useModels = (mode: DeletedMode = 'active', { brand = '', enabled = true } = {}) =>
+  useTable<Model>('models', { column: 'code' }, mode, brand ? { brand } : {}, TTL_MASTER, enabled);
 export const useModelsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
   usePagedTable<Model>('models', params, mode);
 /** Audit trail (System Admin) — see src/server/audit.ts */

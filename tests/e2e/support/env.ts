@@ -23,6 +23,15 @@ export const OWNER_EMAIL = 'owner@e2e.test';
 export const STAFF_EMAIL = 'staff@e2e.test';
 export const E2E_ROLE = 'E2E Staff';
 
+/** the money-flow people (support/seed.ts): each role holds only what its screen needs */
+export const CLOSER_EMAIL = 'closer@e2e.test'; // ปิดงาน — no Job Money After Close
+export const ENGINEER_EMAIL = 'engineer@e2e.test'; // บันทึกงานซ่อม
+export const STOCK_EMAIL = 'stock@e2e.test'; // ตัดจ่ายอะไหล่ / รับคืน
+export const SELLER_EMAIL = 'seller@e2e.test'; // ใบสั่งขาย — no SO Approve
+export const MANAGER_EMAIL = 'manager@e2e.test'; // ใบสั่งขาย + SO Approve
+/** the customer every money spec bills (support/seed.ts) */
+export const E2E_CUSTOMER = 'CE2E01';
+
 export const SSO_CLIENT_ID = 'oneservice-e2e';
 export const SSO_CLIENT_SECRET = 'e2e-client-secret';
 export const CENTRAL_API_KEY = 'e2e-central-api-key';

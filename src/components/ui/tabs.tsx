@@ -7,17 +7,24 @@ import { cn } from '@/lib/utils';
 /**
  * App tabs — same props/look (underline style), now Radix Tabs underneath
  * (roving focus, ←/→/Home/End keyboard navigation, proper tab/tabpanel roles).
+ * `children` = the active tab's content: it renders in that tab's tabpanel, and every tab has a
+ * panel (the inactive ones empty + hidden), so no trigger's aria-controls points at nothing.
  */
 export function Tabs({
   tabs,
   value,
   onChange,
   className,
+  children,
+  contentClassName = 'mt-4',
 }: {
   tabs: { key: string; label: string; count?: number }[];
   value: string;
   onChange: (k: string) => void;
   className?: string;
+  children?: React.ReactNode;
+  /** the gap between the tab row and the content (what the page's space-y gave before) */
+  contentClassName?: string;
 }) {
   return (
     <TabsPrimitive.Root value={value} onValueChange={onChange}>
@@ -57,6 +64,18 @@ export function Tabs({
           );
         })}
       </TabsPrimitive.List>
+      {tabs.map((t) => (
+        // forceMount: every panel exists, so each trigger's aria-controls resolves; only the active one shows
+        <TabsPrimitive.Content
+          key={t.key}
+          value={t.key}
+          forceMount
+          hidden={t.key !== value}
+          className={contentClassName}
+        >
+          {t.key === value ? children : null}
+        </TabsPrimitive.Content>
+      ))}
     </TabsPrimitive.Root>
   );
 }

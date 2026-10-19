@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { clean, cleanCode, maxNote, maxText, moneyField } from './index';
 import { isFilled } from './job';
 

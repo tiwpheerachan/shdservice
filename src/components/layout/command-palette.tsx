@@ -17,6 +17,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const leave = useLeave(); // asks first when a form on this page has unsaved edits
   const { canLink } = useAccess();
   const links = React.useMemo(() => EVERY_LINK.filter(canLink), [canLink]);
+  // opened by a shortcut, not a Trigger: Radix has nothing to give focus back to — remember the opener
+  const returnTo = React.useRef<HTMLElement | null>(null);
 
   const go = (href: string) => {
     onOpenChange(false);
@@ -28,7 +30,18 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       <DialogPrimitive.Portal>
         <div className="fixed inset-0 z-80 flex items-start justify-center p-4 pt-[12vh] no-print">
           <DialogPrimitive.Overlay className="absolute inset-0 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
-          <DialogPrimitive.Content className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in">
+          <DialogPrimitive.Content
+            // the opener is still focused here; Radix then focuses the first tabbable — the search input
+            onOpenAutoFocus={() => {
+              returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            }}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              if (returnTo.current?.isConnected) returnTo.current.focus();
+              returnTo.current = null;
+            }}
+            className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-pop outline-hidden data-[state=open]:animate-scale-in"
+          >
             <DialogPrimitive.Title className="sr-only">ค้นหาเมนู</DialogPrimitive.Title>
             <DialogPrimitive.Description className="sr-only">
               พิมพ์เพื่อค้นหาเมนู แล้วกด Enter เพื่อไป
@@ -37,7 +50,6 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               <div className="flex items-center gap-2 border-b border-border px-3.5">
                 <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <CommandPrimitive.Input
-                  autoFocus
                   placeholder="ค้นหาเมนู… (เช่น เปิดงานใหม่, อะไหล่, รายงาน)"
                   className="h-12 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
                 />

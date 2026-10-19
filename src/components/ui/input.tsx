@@ -7,7 +7,7 @@ import { useFieldControl } from './field';
 import { Checkbox as ShadcnCheckbox } from '@/components/shadcn/checkbox';
 
 const base =
-  'w-full rounded-md border border-input bg-card text-foreground placeholder:text-muted-foreground/70 ' +
+  'w-full rounded-md border border-input bg-card text-foreground placeholder:text-muted-foreground ' +
   'transition-[border-color,box-shadow] duration-150 ' +
   'focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/20 ' +
   'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground ' +

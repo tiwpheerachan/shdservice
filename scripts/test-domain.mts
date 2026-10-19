@@ -127,7 +127,7 @@ async function seed() {
       SELECT * FROM (VALUES (0, 'ยกเลิก', 0, 'Cancel', true), (1, 'รับงานใหม่', 1, 'Open', true), (2, 'กำลังดำเนินการ', 2, 'Open', true),
                             (3, 'อยู่ระหว่างการซ่อม - รออะไหล่', 35, 'Pending', true),
                             (4, 'อยู่ระหว่างการซ่อม - เสนอราคาลูกค้า', 37, 'Pending', true),
-                            (5, 'ซ่อมเสร็จ', 5, 'Repaired', true), (20, 'เสร็จสมบูรณ์', 20, 'Finished', true),
+                            (5, 'ซ่อมเสร็จ', 5, 'Repaired', true), (20, 'ปิดงาน (Complete)', 20, 'Finished', true),
                             (6, 'ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)', 6, 'Repaired', true),
                             (7, 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)', 50, 'Finished', true),
                             (8, 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)', 51, 'Finished', true),
@@ -544,7 +544,7 @@ try {
     ).rows.map((r) => r.s);
   await test('5 concurrent closeJob → all succeed, exactly one job_log row, job is Finished', async () => {
     const input = {
-      status: 'เสร็จสมบูรณ์',
+      status: 'ปิดงาน (Complete)',
       payment: { type: 'เงินสด' },
       return: { type: 'รับเอง', date: '2026-10-01' },
     };

@@ -40,7 +40,8 @@ export function ShippingLabel({
           .filter(Boolean)
           .join(' ');
   return (
-    <>
+    <main>
+      <h1 className="sr-only">ใบปะหน้าพัสดุ {docNo}</h1>
       <style>{`
         @page { size: A5 landscape; margin: 0; }
         .so-sheet { width: 210mm; height: 147mm; /* a hair under A5 so rounding never spills a blank 2nd page */ margin: 0 auto; background: #fff; color: #000; position: relative; box-shadow: 0 2px 12px rgb(0 0 0 / 0.15); }
@@ -74,6 +75,6 @@ export function ShippingLabel({
           </div>
         </div>
       </div>
-    </>
+    </main>
   );
 }

@@ -238,33 +238,33 @@ function OutsourceForm() {
             { key: 'device', label: 'ข้อมูลเครื่องซ่อม' },
             { key: 'detail', label: 'รายละเอียดการซ่อม' },
           ]}
-        />
-
-        {tab === 'device' ? (
-          <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
-        ) : (
-          <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
-            <FieldGrid>
-              <MainSymptomField />
-              <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={act.errors.symptomOther}>
-                <Textarea
-                  rows={2}
-                  maxLength={200}
-                  value={form.symptomOther}
-                  onChange={(e) => set('symptomOther', e.target.value)}
-                />
-              </Field>
-              <Field label="วิธีการซ่อมเบื้องต้น" wide error={act.errors.repairDetail}>
-                <Textarea
-                  rows={3}
-                  maxLength={200}
-                  value={d.repairDetail}
-                  onChange={(e) => upd({ repairDetail: e.target.value })}
-                />
-              </Field>
-            </FieldGrid>
-          </Section>
-        )}
+        >
+          {tab === 'device' ? (
+            <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+          ) : (
+            <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
+              <FieldGrid>
+                <MainSymptomField />
+                <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={act.errors.symptomOther}>
+                  <Textarea
+                    rows={2}
+                    maxLength={200}
+                    value={form.symptomOther}
+                    onChange={(e) => set('symptomOther', e.target.value)}
+                  />
+                </Field>
+                <Field label="วิธีการซ่อมเบื้องต้น" wide error={act.errors.repairDetail}>
+                  <Textarea
+                    rows={3}
+                    maxLength={200}
+                    value={d.repairDetail}
+                    onChange={(e) => upd({ repairDetail: e.target.value })}
+                  />
+                </Field>
+              </FieldGrid>
+            </Section>
+          )}
+        </Tabs>
 
         <Section title="รายละเอียด การส่งงานซ่อม" icon={Truck}>
           <FieldGrid>
@@ -359,7 +359,7 @@ function OutsourceForm() {
         </Section>
 
         <CostSummary />
-        <AttachmentSection jobNo={job?.no} />
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
 
         <FormActions
           saveLabel="บันทึกข้อมูล Out-Source"

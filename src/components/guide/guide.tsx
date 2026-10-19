@@ -80,7 +80,7 @@ export function Guide() {
   return (
     <div className="grid gap-5 md:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
       {/* ---- topic list ---- */}
-      <aside className="md:sticky md:top-[4.75rem] md:self-start">
+      <aside aria-label="หัวข้อคู่มือ" className="md:sticky md:top-[4.75rem] md:self-start">
         {/* one tall card, like the topbar height away from the viewport bottom — the topic list scrolls inside it */}
         <div className="surface flex flex-col p-3 md:h-[calc(100vh-6rem)]">
           <div className="flex items-center gap-2 px-1 pb-2">

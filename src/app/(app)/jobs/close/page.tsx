@@ -203,24 +203,24 @@ function CloseForm() {
             { key: 'work', label: 'รายละเอียดการดำเนินงาน' },
             { key: 'payment', label: 'รายละเอียดการรับชำระเงิน' },
           ]}
-        />
+        >
+          {tab === 'product' && <ProductSection title="ข้อมูลสินค้า" />}
 
-        {tab === 'product' && <ProductSection title="ข้อมูลสินค้า" />}
+          {tab === 'work' && <CloseWorkSection job={job} />}
 
-        {tab === 'work' && <CloseWorkSection job={job} />}
-
-        {tab === 'payment' && (
-          <ClosePaymentSection
-            job={job}
-            d={d}
-            upd={upd}
-            errors={act.errors}
-            lock={lock}
-            bal={bal}
-            slip={slip}
-            onPickSlip={onPickSlip}
-          />
-        )}
+          {tab === 'payment' && (
+            <ClosePaymentSection
+              job={job}
+              d={d}
+              upd={upd}
+              errors={act.errors}
+              lock={lock}
+              bal={bal}
+              slip={slip}
+              onPickSlip={onPickSlip}
+            />
+          )}
+        </Tabs>
 
         <CloseReturnSection
           job={job}

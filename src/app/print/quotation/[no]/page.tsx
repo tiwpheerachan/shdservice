@@ -1,8 +1,14 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { userFromCookies, canViewAny } from '@/server/auth';
 import { QuotationDoc } from '@/components/print/docs/quotation';
 
 export const dynamic = 'force-dynamic';
+
+/** the tab / window title names the document (root template: "… · OneService") */
+export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
+  return { title: `ใบเสนอราคา ${decodeURIComponent((await params).no).toUpperCase()}` };
+}
 
 /** staff print view (login required by app/print/layout.tsx) — the customer gets the same sheet via /track/doc */
 export default async function Page({ params }: { params: Promise<{ no: string }> }) {

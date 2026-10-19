@@ -75,3 +75,42 @@ export function Countdown({ to }: { to: number }) {
   const now = useNow();
   return <span className="num font-medium text-foreground">{mmss(to - now)}</span>;
 }
+
+const WARN_LEFT_MS = 2 * 60_000;
+
+/**
+ * The last 2 minutes (WCAG 2.2.1): an alert with ต่อเวลา — `onExtend` is the clock's own keepalive.
+ * Static text (a ticking number inside role="alert" would be read out every second). Pressed and the
+ * expiry did not move (the server's 60-minute cap) → it says so instead of offering the button again.
+ */
+export function ExpiryWarning({ to, onExtend }: { to: number; onExtend: () => void }) {
+  const now = useNow();
+  const [tried, setTried] = React.useState({ to: 0, at: 0 });
+  const left = to - now;
+  if (!to || left <= 0 || left > WARN_LEFT_MS) return null;
+  const capped = tried.to === to && now - tried.at > 5000;
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning"
+    >
+      <span>
+        {capped
+          ? 'ครบเวลาสูงสุดแล้ว ต่อเวลาไม่ได้ — หน้านี้จะปิดเมื่อหมดเวลา'
+          : 'เหลือเวลาไม่ถึง 2 นาที — กด "ต่อเวลา" เพื่อดูต่อ'}
+      </span>
+      {!capped && (
+        <button
+          type="button"
+          onClick={() => {
+            setTried({ to, at: Date.now() });
+            onExtend();
+          }}
+          className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          ต่อเวลา
+        </button>
+      )}
+    </div>
+  );
+}

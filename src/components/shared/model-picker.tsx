@@ -65,8 +65,8 @@ export function ModelPicker({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id); // tie to the surrounding <Field> label
-  const listId = React.useId();
+  const field = useFieldControl(id, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const rows = React.useMemo(() => matchModels(models, q), [models, q]);
   const selected = value ? models.find((m) => m.code === value) : undefined;
@@ -86,11 +86,15 @@ export function ModelPicker({
         <button
           type="button"
           role="combobox"
-          aria-haspopup="listbox"
-          aria-controls={listId}
           {...field}
-          aria-label={field.id ? undefined : placeholder}
           aria-expanded={open}
+          aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
+              setOpen(true);
+            }
+          }}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20"
         >
           {value ? (
@@ -108,11 +112,14 @@ export function ModelPicker({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        id={popupId}
+        aria-label={'ค้นหารุ่น'}
         align="start"
         className="w-[440px] max-w-[calc(100vw-2rem)] p-0"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <CommandPrimitive
+          label={'ค้นหารุ่น'}
           shouldFilter={false}
           loop
           className="flex w-full flex-col overflow-hidden rounded-md bg-card text-foreground"
@@ -137,7 +144,7 @@ export function ModelPicker({
               </button>
             )}
           </div>
-          <CommandPrimitive.List id={listId} className="max-h-80 overflow-y-auto p-1.5">
+          <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
             {rows.length === 0 ? (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">
                 {models.length === 0 ? 'กำลังโหลดรายการรุ่น…' : `ไม่พบรุ่นที่ตรงกับ "${q.trim()}"`}

@@ -25,8 +25,8 @@ export const buttonVariants = cva(
         secondary: 'bg-muted text-foreground hover:bg-accent border border-border',
         outline: 'border border-input bg-card text-foreground hover:bg-accent hover:border-border',
         ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground',
-        danger: 'bg-danger text-white hover:bg-danger/90 shadow-xs',
-        success: 'bg-success text-white hover:bg-success/90 shadow-xs',
+        danger: 'bg-danger text-white dark:text-background hover:bg-danger/90 shadow-xs', // white fails on dark's lighter red
+        success: 'bg-success text-white dark:text-background hover:bg-success/90 shadow-xs',
         link: 'text-primary underline-offset-4 hover:underline p-0 h-auto',
       },
       size: {

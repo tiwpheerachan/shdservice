@@ -187,7 +187,7 @@ function RepairForm() {
 
         <CostSummary partsTotal={charged} action={act} />
         <OtherInfoSection />
-        <AttachmentSection jobNo={job?.no} />
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
         <JobHistorySection job={job} />
 
         <FormActions
