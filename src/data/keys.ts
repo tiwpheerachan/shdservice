@@ -50,3 +50,5 @@ export const jobKey = (no: string) => `/api/jobs/${encodeURIComponent(no)}`;
 export const quotationKey = (no: string) => `/api/quotations/${encodeURIComponent(no)}`;
 /** the job a job screen opens with: ?job= is what every link writes; ?no= / ?jobNo= open the same */
 export const jobNoParam = (sp: Pick<URLSearchParams, 'get'>) => sp.get('job') || sp.get('no') || sp.get('jobNo') || '';
+/** not a URL: the id prefetch() stamps on each answer set, so <Prefetched> seeds one set only once */
+export const PREFETCH_ID = 'prefetch:id';

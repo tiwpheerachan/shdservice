@@ -15,8 +15,10 @@ services:
     # migrations run only AFTER a successful build (a failed build leaves the schema untouched),
     # just before the new version takes traffic. db:migrate is idempotent (scripts/migrate.ts).
     preDeployCommand: npm run db:migrate
-    # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains
-    startCommand: node node_modules/next/dist/bin/next start -H 0.0.0.0
+    # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains;
+    # the heap cap (512 MB Starter) is here, not in NODE_OPTIONS: env vars reach the build too, and
+    # `next build` runs out of memory under 400 MB
+    startCommand: node --max-old-space-size=400 node_modules/next/dist/bin/next start -H 0.0.0.0
     # a deploy that boots but can't answer is not switched in. /api/health always answers 200
     # (verdict in the body) so a Supabase blip never makes Render cycle the only instance.
     healthCheckPath: /api/health
@@ -88,9 +90,6 @@ services:
         sync: false
       - key: THAIBULKSMS_OTP_SECRET
         sync: false
-      # keep the Node heap under the 512 MB Starter instance
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=400
       - key: NEXT_TELEMETRY_DISABLED
         value: '1'
       # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ

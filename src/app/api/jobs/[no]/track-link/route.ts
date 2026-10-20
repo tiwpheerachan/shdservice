@@ -20,7 +20,7 @@ type Ctx = { params: Promise<{ no: string }> };
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'view');
   const { no } = await parseParams(ctx, trackLinkGet);
-  const jobNo = decodeURIComponent(no).toUpperCase();
+  const jobNo = no.toUpperCase();
   const token = (await can(me, 'Job Management', 'edit')) ? await ensureToken(jobNo) : '';
   if (token)
     await audit(db, me.userId, {
@@ -42,7 +42,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, trackLinkNew);
-  const jobNo = decodeURIComponent(no).toUpperCase();
+  const jobNo = no.toUpperCase();
   const token = await rotateToken(jobNo);
   await audit(db, me.userId, {
     action: 'UPDATE',

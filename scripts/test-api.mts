@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { crc32, deflateSync } from 'node:zlib';
 import { NextRequest } from 'next/server';
 import { TEST_DATABASE_URL, assertLocal } from '../tests/db-url.mts';
 
@@ -44,6 +45,7 @@ const { today } = await import('@/lib/dates');
 
 const ADMIN = { email: 'td-admin@example.invalid' };
 const MANAGER = { email: 'td-manager@example.invalid' }; // approves sale orders (SO Approve)
+const VIEWER = { email: 'td-viewer@example.invalid' }; // Customer view only
 const SELLER2 = { email: 'td-seller2@example.invalid' }; // signs out at the end (bumps its session_version)
 const SV = 3; // test-domain's fixture session_version
 const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -172,10 +174,52 @@ try {
   };
   await expect([400], '/api/upload', { method: 'POST', form: form({ kind: 'product-image', id: 'TDP1' }) });
   await expect([400], '/api/attachments', { method: 'POST', form: form({ jobNo: 'TDJ0004' }) });
+  await test('POST /api/attachments to a deleted job → 409, nothing stored', async () => {
+    await pool.query(`DELETE FROM job WHERE job_no = 'TDJDEL';
+      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJDEL', 1, 'DELETED')`);
+    const f = form({ jobNo: 'TDJDEL' });
+    f.set(
+      'file',
+      new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], 'x.pdf', { type: 'application/pdf' }),
+    );
+    const r = await call('/api/attachments', { method: 'POST', form: f });
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.deepEqual(r.body, { error: 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้' });
+    const { rows } = await pool.query(`SELECT 1 FROM document_attach WHERE reference_item_code = 'TDJDEL'`);
+    assert.equal(rows.length, 0);
+  });
+  await test('POST /api/attachments with a 10000×10000 PNG → 413 (photos go through optimizeImage)', async () => {
+    // a PNG header declaring 100 M pixels: optimizeImage refuses it before decoding — the route maps that
+    const chunk = (type: string, data: Buffer) => {
+      const body = Buffer.concat([Buffer.from(type), data]);
+      const head = Buffer.alloc(4);
+      head.writeUInt32BE(data.length);
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(crc32(body));
+      return Buffer.concat([head, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(10_000, 0);
+    ihdr.writeUInt32BE(10_000, 4);
+    ihdr[8] = 8; // bit depth
+    ihdr[9] = 2; // RGB
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(Buffer.alloc(64))),
+      chunk('IEND', Buffer.alloc(0)),
+    ]);
+    const f = form({ jobNo: 'TDJ0004' });
+    f.set('file', new File([new Uint8Array(png)], 'x.png', { type: 'image/png' }));
+    const r = await call('/api/attachments', { method: 'POST', form: f });
+    assert.equal(r.status, 413, JSON.stringify(r.body));
+    assert.deepEqual(r.body, { error: 'รูปมีความละเอียดสูงเกินไป (เกิน 40 ล้านพิกเซล)' });
+  });
 
   console.log('\nJobs');
   await expect([200], '/api/jobs/TDJ0004');
   await expect([404], '/api/jobs/NOPE' + rand);
+  await expect([404], '/api/jobs/J%25zz'); // a literal % (Next hands the segment over decoded once): no URIError
   await expect([200], '/api/jobs/TDJ0004/calls');
   await expect([200], '/api/jobs/TDJ0004/calls', { method: 'POST', body: { detail: 'โทรแจ้งลูกค้าแล้ว (test-api)' } });
   await expect([400], '/api/jobs/TDJ0004/calls', { method: 'POST', body: { detail: '' } });
@@ -209,6 +253,25 @@ try {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     customerCode = String((r.body.row as { code: string }).code);
   });
+  // deleted customers (PDPA) are System Admin's alone: anyone else asking for them gets the live list, no 400
+  await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCDEL';
+    INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status)
+      VALUES (9601, 'TDCDEL', 'TD ลูกค้าที่ลบแล้ว', '02-000-0001', 'DELETED')`);
+  for (const [who, sees] of [
+    [VIEWER, false],
+    [ADMIN, true],
+  ] as const)
+    for (const url of ['/api/data/customers?deleted=only&q=TDCDEL', '/api/data/customers?paged=1&deleted=all&q=TDCDEL'])
+      await test(`GET ${url} as ${who.email} → ${sees ? 'the' : 'no'} deleted customer`, async () => {
+        const r = await call(url, { as: who });
+        assert.equal(r.status, 200, JSON.stringify(r.body));
+        const body = r.body as unknown;
+        const rows = (Array.isArray(body) ? body : (body as { rows: unknown[] }).rows) as { code: string }[];
+        assert.equal(
+          rows.some((c) => c.code === 'TDCDEL'),
+          sees,
+        );
+      });
   await expect([200, 409], '/api/customers', {
     method: 'POST',
     body: { code: 'TDC001', name: 'ลูกค้า ทดสอบโดเมน', phone: '02-000-0000', version: -1 },
@@ -386,7 +449,8 @@ try {
   const badInput = { error: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่' };
   await refuses(400, badInput, '/api/data/jobs?q=a%00b');
   await refuses(400, badInput, '/api/customers/lookup?q=a%00b');
-  await refuses(400, badInput, '/api/sale-orders/SO%25n%25s');
+  // a literal % in a number is just a character (Next decodes the segment once): not found, not 400 / 500
+  await refuses(404, { error: 'ไม่พบใบสั่งขาย SO%n%s' }, '/api/sale-orders/SO%25n%25s');
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', { method: 'POST', body: { items: 'all' } });
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', {
     method: 'POST',

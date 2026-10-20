@@ -150,12 +150,17 @@ function ListFilters({
           value={filters.q}
           onChange={(e) => setFilter('q', e.target.value)}
           placeholder="ค้นหาเลขที่งาน รุ่นสินค้า หรือ S/N 4 ตัวท้าย"
-          className="pl-8"
+          className="h-11 pl-8 text-base"
           maxLength={50}
           aria-label="ค้นหา"
         />
       </label>
-      <Select value={filters.status} onChange={(e) => setFilter('status', e.target.value)} aria-label="สถานะ">
+      <Select
+        value={filters.status}
+        onChange={(e) => setFilter('status', e.target.value)}
+        aria-label="สถานะ"
+        className="h-11 text-base"
+      >
         <option value="">ทุกสถานะ</option>
         {statusOptions.map((o) => (
           <option key={o.key} value={o.key}>
@@ -170,6 +175,7 @@ function ListFilters({
           max={filters.to || undefined}
           onChange={(e) => setFilter('from', e.target.value)}
           aria-label="รับเครื่องตั้งแต่วันที่"
+          className="h-11 text-base"
         />
         <span className="shrink-0 text-xs text-muted-foreground">ถึง</span>
         <Input
@@ -178,6 +184,7 @@ function ListFilters({
           min={filters.from || undefined}
           onChange={(e) => setFilter('to', e.target.value)}
           aria-label="รับเครื่องถึงวันที่"
+          className="h-11 text-base"
         />
       </div>
       {reversed && (
@@ -197,7 +204,7 @@ function ListFilters({
               setFilters(NO_FILTERS);
               setPages({ active: 1, history: 1 });
             }}
-            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            className="inline-flex min-h-11 items-center gap-1 px-2 font-medium text-primary hover:underline"
           >
             <X className="h-3.5 w-3.5" /> ล้างตัวกรอง
           </button>

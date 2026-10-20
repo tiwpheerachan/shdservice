@@ -12,11 +12,12 @@ const base =
   'focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/20 ' +
   'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground ' +
   'read-only:bg-muted/60';
+// text-base on phones: iOS Safari zooms into any field under 16px when it is focused
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => {
     const field = useFieldControl(props.id);
-    return <input ref={ref} className={cn(base, 'h-9 px-3 text-sm', className)} {...props} {...field} />;
+    return <input ref={ref} className={cn(base, 'h-9 px-3 text-base md:text-sm', className)} {...props} {...field} />;
   },
 );
 Input.displayName = 'Input';
@@ -86,7 +87,7 @@ export function NumberInput({
       placeholder={placeholder}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => onChange(Number(e.target.value) || 0)}
-      className={cn(base, 'h-9 px-3 text-sm num text-right', className)}
+      className={cn(base, 'h-9 px-3 text-base md:text-sm num text-right', className)}
       {...props}
       {...field}
     />
@@ -100,7 +101,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
       <textarea
         ref={ref}
         rows={rows}
-        className={cn(base, 'px-3 py-2 text-sm resize-y min-h-[38px]', className)}
+        className={cn(base, 'px-3 py-2 text-base md:text-sm resize-y min-h-[38px]', className)}
         {...props}
         {...field}
       />
@@ -116,7 +117,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
       <div className="relative">
         <select
           ref={ref}
-          className={cn(base, 'h-9 pl-3 pr-8 text-sm appearance-none cursor-pointer', className)}
+          className={cn(base, 'h-9 pl-3 pr-8 text-base md:text-sm appearance-none cursor-pointer', className)}
           {...props}
           {...field}
         >

@@ -324,6 +324,13 @@ export const partCharge = (o: { pick?: boolean; quote?: boolean; qty: number }, 
 /** มอบหมายงานนี้ให้ — only a role with the special right Job Take takes jobs; the job's current assignee may stay */
 export const NOT_ENGINEER = `มอบหมายงานได้เฉพาะผู้ใช้ที่มี${rightLabel('Job Take')}`;
 
+/** a stored line (logId) at most once per save: the services read each line once, so a repeat would count twice */
+export const REPEATED_LINE = 'มีรายการซ้ำกัน — แต่ละรายการระบุได้ครั้งเดียว';
+export const noRepeatedLine = (lines: Record<string, unknown>[]) => {
+  const ids = lines.map((l) => l.logId).filter(Boolean);
+  return new Set(ids.map(Number)).size === ids.length;
+};
+
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair (money 0–1,000,000, part qty whole 0–1000, text ≤ its column) */
 export const repairActionSchema = z.looseObject({
   status: req('โปรดระบุสถานะงานซ่อม'),
@@ -334,7 +341,10 @@ export const repairActionSchema = z.looseObject({
   toolCost: moneyField('ค่าเครื่องมือพิเศษ'),
   deliveryCost: moneyField('ค่าขนส่ง'),
   boxCost: moneyField('ค่ากล่องพัสดุ'),
-  parts: z.array(z.looseObject({ unitPrice: moneyField('ราคาอะไหล่'), a: partOption, b: partOption })).optional(),
+  parts: z
+    .array(z.looseObject({ unitPrice: moneyField('ราคาอะไหล่'), a: partOption, b: partOption }))
+    .refine(noRepeatedLine, REPEATED_LINE)
+    .optional(),
 });
 
 /** บันทึกงานส่งซ่อมต่อ → POST /api/jobs/:no/outsource (sending: to + date; receiving back: the receive block) */

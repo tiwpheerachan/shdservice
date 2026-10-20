@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 /** the tab / window title names the document (root template: "… · OneService") */
 export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
-  return { title: `ใบสั่งขาย ${decodeURIComponent((await params).no).toUpperCase()}` };
+  return { title: `ใบสั่งขาย ${(await params).no.toUpperCase()}` };
 }
 
 /** พิมพ์ใบสั่งขาย = ใบปะหน้าพัสดุ A5 (what the legacy app printed for a sale order). */
@@ -18,7 +18,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   // same rule as the API: the layout only checks sign-in, the role must be able to view this document
   const user = await userFromCookies();
   if (!user || !(await canViewAny(user, ['Sale Order', 'Product Pick Stock']))) notFound();
-  const o = await getSaleOrder(decodeURIComponent(no).toUpperCase());
+  const o = await getSaleOrder(no.toUpperCase());
   if (!o) notFound();
   const c = o.customerDetail;
   const co = await profileForDocument(o.documentProfileId);

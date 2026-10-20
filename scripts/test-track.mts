@@ -659,7 +659,7 @@ try {
     );
     if (!hitRow.rows.length) NOBODY = cand;
   }
-  const { normalizePhone } = await import('@/server/track-otp');
+  const { normalizePhone, customerIdsForPhone } = await import('@/server/track-otp');
   phoneHashes = [PHONE, NOBODY].map((p) => guard.hmac(`phone:${p}`));
   /** the resend cooldown of each test number (track-guard claimCooldown: a track_block row, not a counter) */
   const coolKeys = () => phoneHashes.map((h) => `cool:${h}`);
@@ -676,6 +676,8 @@ try {
     ).rows[0]?.s ?? null;
   let otpSession = '';
   const otpIp = nextIp();
+  const otpRowCount = async (requestId: string) =>
+    (await db.execute(sql`SELECT 1 FROM track_otp WHERE request_hash = ${guard.sha256(requestId)}`)).rows.length;
 
   await test('phone formats normalize (0x / +66 / spaces / dashes); landlines and junk rejected', async () => {
     assert.equal(normalizePhone('081-234-5678'), '0812345678');
@@ -683,6 +685,35 @@ try {
     assert.equal(normalizePhone('812345678'), '0812345678');
     assert.equal(normalizePhone('021234567'), null);
     assert.equal(normalizePhone('hello'), null);
+  });
+  await test('a field holding two numbers matches each exactly — never a 9-digit window across both', async () => {
+    await db.execute(sql`
+      INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES
+        (9101, 'TT9101', 'สองเบอร์', '086-234-5678 / 089-876-5432'),
+        (9102, 'TT9102', 'สองเบอร์ +66', '+66 86 111 2222, 0863334444'),
+        (9103, 'TT9103', 'สองเบอร์ เว้นวรรค', '0864445555 0865556666'),
+        (9104, 'TT9104', 'เบอร์เดียว +66', '+66861234560'),
+        (9105, 'TT9105', 'เบอร์เดียว 66', '66-86-123-4561')`);
+    try {
+      const ids = async (p: string) => (await customerIdsForPhone(p)).filter((id) => id > 9100);
+      for (const [p, id] of [
+        ['0862345678', 9101],
+        ['0898765432', 9101],
+        ['0861112222', 9102],
+        ['0863334444', 9102],
+        ['0864445555', 9103],
+        ['0865556666', 9103],
+        ['0861234560', 9104],
+        ['0861234561', 9105],
+      ] as const)
+        assert.deepEqual(await ids(p), [id], p);
+      // "08623456780898765432" holds 080-898-7654 across the " / " — a stranger, not this customer
+      assert.deepEqual(await ids('0808987654'), []);
+      assert.deepEqual(await ids('0644455550'), [], 'nor across a space ("…4555 0865…")');
+      assert.deepEqual(await customerIdsForPhone(PHONE), [1], 'the fixture customer still matches');
+    } finally {
+      await db.execute(sql`DELETE FROM customer WHERE customer_id BETWEEN 9101 AND 9105`);
+    }
   });
   await test('invalid number → 400, no SMS', async () => {
     const before = smsLog.length;
@@ -802,6 +833,47 @@ try {
     assert.equal((await otpReq(PHONE, nextIp())).status, 200);
     await new Promise((res) => setTimeout(res, 150)); // the send lands before the provider tests switch modes
     assert.equal(smsLog.length - before, 1);
+  });
+
+  await test('the wrong code that locks the IP out of the number retires the code — the right one is then refused', async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    let r = await otpReq(PHONE, ip);
+    await new Promise((res) => setTimeout(res, 100));
+    const wrong = lastOtp() === '0000' ? '1111' : '0000';
+    for (let i = 0; i < 5; i++) assert.equal((await otpVerify(r.json.requestId!, wrong, ip)).status, 401); // 5 = OTP_FAILS_PER_PHONE_DAY
+    await clearPhoneLimits(); // a new code for the same number + IP (still under the lock's ceiling)
+    r = await otpReq(PHONE, ip);
+    assert.equal(r.status, 200);
+    await new Promise((res) => setTimeout(res, 100));
+    const right = lastOtp();
+    assert.equal((await otpVerify(r.json.requestId!, right === '0000' ? '1111' : '0000', ip)).status, 401); // 6th → lock
+    assert.equal((await otpVerify(r.json.requestId!, right, ip)).status, 401, 'tries were left, but the lock holds');
+    await db.execute(sql`DELETE FROM track_block WHERE key LIKE 'phone:%'`);
+    await clearPhoneLimits();
+  });
+  await test('company-wide daily SMS cap (OTP_SMS_PER_DAY = 500): over it → the usual answer, no SMS, logged', async () => {
+    await clearPhoneLimits();
+    const ip = nextIp();
+    await db.execute(sql`
+      INSERT INTO track_rate (bucket, key, hits, window_start)
+      VALUES ('otp_sms_global_day', 'all', 500, to_timestamp(floor(extract(epoch FROM now()) / 86400) * 86400))
+      ON CONFLICT (bucket, key, window_start) DO UPDATE SET hits = 500`);
+    try {
+      const before = smsLog.length;
+      const r = await otpReq(PHONE, ip);
+      assert.equal(r.status, 200);
+      await new Promise((res) => setTimeout(res, 300));
+      assert.equal(smsLog.length, before, 'no SMS');
+      assert.equal(await otpRowCount(r.json.requestId!), 0, 'no code to check either');
+      const ev = await db.execute(
+        sql`SELECT 1 FROM track_event WHERE event = 'otp_sms_global_cap' AND result = 'day' AND ip_hash = ${guard.ipKeyOf(ip)}`,
+      );
+      assert.equal(ev.rows.length, 1);
+    } finally {
+      await db.execute(sql`DELETE FROM track_rate WHERE bucket = 'otp_sms_global_day'`);
+      await clearPhoneLimits();
+    }
   });
 
   // ---- ThaiBulkSMS OTP service (production): it makes, sends and checks the code ----
@@ -1242,6 +1314,20 @@ try {
       ['hk-current'],
     );
     await db.execute(sql`DELETE FROM track_rate WHERE key = 'hk-current'`);
+  });
+  await test('housekeeping drops an OTP expired over a day ago, keeps a live one', async () => {
+    const old = guard.sha256('hk-otp-old');
+    const live = guard.sha256('hk-otp-live');
+    await db.execute(sql`
+      INSERT INTO track_otp (request_hash, phone_hash, customer_ids, issued_ip, expires_at) VALUES
+        (${old}, 'hk', '{}', '203.0.113.1', now() - interval '25 hours'),
+        (${live}, 'hk', '{}', '203.0.113.1', now() + interval '5 minutes')`);
+    await guard.housekeeping();
+    const left = await db.execute<{ live: boolean }>(
+      sql`SELECT request_hash = ${live} AS live FROM track_otp WHERE phone_hash = 'hk'`,
+    );
+    assert.deepEqual(left.rows, [{ live: true }]);
+    await db.execute(sql`DELETE FROM track_otp WHERE phone_hash = 'hk'`);
   });
 
   console.log('\nBody size');

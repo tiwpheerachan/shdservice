@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useSearchParams } from 'next/navigation';
 import useSWR, { useSWRConfig } from 'swr';
 import { api, errMsg } from '@/lib/api';
 import { recordNo } from '@/data/keys';
@@ -20,6 +21,11 @@ import { recordNo } from '@/data/keys';
  *
  * The URL's record may come with the page (<Prefetched>, src/server/prefetch.ts — the record itself, as
  * `pick` returns it): then it is not read again on mount, and `onRecord` gets it as if it had just loaded.
+ * Not on a back/forward replay: <Prefetched> offers a payload's records once, so the replayed (older)
+ * record is never taken for the current one — it is read again.
+ *
+ * `initial` is read once: a screen whose URL number can change under it (a link to another record on the
+ * same route — Next keeps the page mounted) is keyed by that number: <RecordKey>, or `key` on the server.
  */
 export function useRecord<T>(opts: {
   url: (no: string) => string;
@@ -85,4 +91,16 @@ export function useRecord<T>(opts: {
   const reload = React.useCallback(() => mutate(), [mutate]);
 
   return { no, data: data ?? null, loading: isLoading, error: error ? errMsg(error) : null, find, setData, reload };
+}
+
+/** its children remounted for each record number `of(searchParams)` names (see useRecord) — inside a <Suspense> */
+export function RecordKey({
+  of,
+  children,
+}: {
+  of: (sp: Pick<URLSearchParams, 'get'>) => string;
+  children: React.ReactNode;
+}) {
+  const sp = useSearchParams();
+  return React.createElement(React.Fragment, { key: recordNo(of(sp)) }, children); // .ts: no JSX
 }

@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import { cleanCode, codeField, isoDateString, maxText } from './index';
+import { noRepeatedLine, REPEATED_LINE } from './job';
 import { JOB_NO_RE } from './quotation';
 import { trackingField } from './sale-order';
 import { today } from '@/lib/dates';
@@ -47,7 +48,10 @@ export const issueSchema = z
       .nullish()
       .transform((v) => v ?? ''),
     remark: maxText(100, 'หมายเหตุ '),
-    lines: lines({ logId: id.nullish(), dtId: id.nullish(), code: z.string().max(50).nullish(), qty }),
+    lines: lines({ logId: id.nullish(), dtId: id.nullish(), code: z.string().max(50).nullish(), qty }).refine(
+      noRepeatedLine,
+      REPEATED_LINE,
+    ),
   })
   .refine((v) => !!v.payTo, {
     path: ['payTo'],

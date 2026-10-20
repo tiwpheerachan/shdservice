@@ -36,7 +36,8 @@ import { ipBucket } from '@/lib/client-ip';
  *  - the code: ThaiBulkSMS's OTP service makes it, sends it and checks it — the row keeps its token
  *    (useless without the SMS); our 5-try cap comes first. Development `log` mode makes its own
  *    code and keeps only an HMAC of it bound to its request id
- *  - nothing else raw is stored: phone → HMAC, request id / session token → sha256
+ *  - nothing else raw is stored: phone → HMAC, request id / session token → sha256 (the issuing IP
+ *    aside — db/schema/track.ts)
  *  - session: 15 min, activity keeps ≥ 5 min left, never past 60 min from sign-in;
  *    the token lives only in page memory (leaving the page = a new OTP)
  */
@@ -57,6 +58,7 @@ const OTP_FAILS_PER_PHONE_DAY_ALL = 10; // per number, any IP → the number is 
 const OTP_PHONE_LOCK_MIN = 24 * 60;
 /** company-wide SMS spend cap (SMS pumping / a list of customer numbers) — real sends only */
 const OTP_SMS_PER_HOUR = 200;
+const OTP_SMS_PER_DAY = 500;
 const SESSION_START_MIN = 15;
 const SESSION_EXTEND_MIN = 5;
 const SESSION_MAX_MIN = 60;
@@ -78,11 +80,29 @@ const maskOtpPhone = (p: string) => `${p.slice(0, 2)}x-xxx-${p.slice(-4)}`;
 
 const phoneKey = (phone10: string) => hmac(`phone:${phone10}`);
 
-/** every customer row holding this number (legacy rows may keep two numbers in one field) */
-async function customerIdsForPhone(phone10: string): Promise<number[]> {
-  const core = phone10.slice(1); // 9 digits without the leading 0 — matches 0…, 66…, and "a / b" fields
+/**
+ * the mobiles a phone field holds: "081-234-5678 / +66 89 876 5432" → both. Every run of digit groups
+ * (split on anything but space / dash / dot / brackets / +) that normalises on its own — never a window
+ * across two numbers, which could be someone else's
+ */
+function phonesIn(field: string): Set<string> {
+  const out = new Set<string>();
+  for (const part of field.split(/[^\d\s().+-]/)) {
+    const g = part.match(/\d+/g) ?? [];
+    for (let i = 0; i < g.length; i++)
+      for (let j = i, d = ''; j < g.length && (d += g[j]).length <= 11; j++) {
+        const p = normalizePhone(d);
+        if (p) out.add(p);
+      }
+  }
+  return out;
+}
+
+/** every customer row holding this number (legacy rows may keep two numbers in one field) — exported for scripts/test-track.mts */
+export async function customerIdsForPhone(phone10: string): Promise<number[]> {
+  const core = phone10.slice(1); // 9 digits without the leading 0 — a cheap prefilter for 0…, 66…, "a / b"; phonesIn decides
   const rows = await db
-    .select({ id: customer.customerId })
+    .select({ id: customer.customerId, phone: customer.phoneNumber })
     .from(customer)
     .where(
       and(
@@ -91,7 +111,7 @@ async function customerIdsForPhone(phone10: string): Promise<number[]> {
       ),
     )
     .limit(50);
-  return rows.map((x) => Number(x.id));
+  return rows.filter((x) => phonesIn(x.phone ?? '').has(phone10)).map((x) => Number(x.id));
 }
 
 /* ------------------------------------------------------------------ *
@@ -184,9 +204,13 @@ async function issueOtp(
   ipHash: string,
   requestIdForLog?: string,
 ) {
-  // over the company-wide cap: the answer was the usual one, just don't send (and say so in the log)
-  if (!(await hit('otp_sms_global_hour', 'all', OTP_SMS_PER_HOUR, 3600)))
-    return logEvent('otp_sms_global_cap', { ipHash, requestId: requestIdForLog });
+  // over a company-wide cap: the answer was the usual one, just don't send (and say so in the log)
+  const [hourOk, dayOk] = await Promise.all([
+    hit('otp_sms_global_hour', 'all', OTP_SMS_PER_HOUR, 3600),
+    hit('otp_sms_global_day', 'all', OTP_SMS_PER_DAY, 86400),
+  ]);
+  if (!hourOk || !dayOk)
+    return logEvent('otp_sms_global_cap', { ipHash, requestId: requestIdForLog, result: dayOk ? 'hour' : 'day' });
   const rh = sha256(requestId);
   // development `log` mode makes its own code; ThaiBulkSMS makes the real one
   const own = smsProvider() === 'log' ? String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0') : null;
@@ -235,14 +259,18 @@ export async function verifyOtp(
     .returning({ codeHash: trackOtp.codeHash, providerToken: trackOtp.providerToken, phoneHash: trackOtp.phoneHash });
   if (!tried) return null;
   // a wrong code counts against number+IP (locks that IP out of the number) and the number
-  // (locks it only past the higher ceiling) — both for 24 h
+  // (locks it only past the higher ceiling) — both for 24 h. A lock also retires the number's live
+  // code (the one being guessed — a new code retires older ones), or its tries left would still count
   const wrong = async () => {
     const ipKey = hmac(`phone-ip:${tried.phoneHash}:${ipBucket(ip)}`);
     const ipOk = await hit('otp_fail_phone_day', ipKey, OTP_FAILS_PER_PHONE_DAY, 86400);
     const allOk = await hit('otp_fail_phone_day_all', tried.phoneHash, OTP_FAILS_PER_PHONE_DAY_ALL, 86400);
     if (!ipOk) await block(`phone:${ipKey}`, OTP_PHONE_LOCK_MIN);
     if (!allOk) await block(`phone:${tried.phoneHash}`, OTP_PHONE_LOCK_MIN);
-    if (!ipOk || !allOk) logEvent('otp_phone_locked', { ipHash, result: allOk ? 'ip' : 'number' });
+    if (!ipOk || !allOk) {
+      await retireUnused(tried.phoneHash);
+      logEvent('otp_phone_locked', { ipHash, result: allOk ? 'ip' : 'number' });
+    }
     return null;
   };
   if (tried.providerToken) {

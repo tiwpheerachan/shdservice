@@ -191,6 +191,16 @@
               }
             }
           },
+          "409": {
+            "description": "The job is deleted (cancelled) — nothing is stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
             "description": "File over 10 MB.",
             "content": {
@@ -1173,6 +1183,20 @@
                     "additionalProperties": {
                       "nullable": true
                     }
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "row_version the form loaded (an edit) — 409 `stale` if it moved since; left out = no check."
                   }
                 },
                 "required": [

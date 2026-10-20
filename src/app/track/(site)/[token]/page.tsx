@@ -34,11 +34,6 @@ export default async function Page({ params }: { params: Promise<{ token: string
     );
   }
 
-  let linkToken = '';
-  try {
-    linkToken = decodeURIComponent(token).slice(0, 128);
-  } catch {
-    linkToken = '';
-  }
+  const linkToken = token.slice(0, 128); // Next hands the segment over decoded
   return <TrackClient mode="link" linkToken={linkToken} />;
 }

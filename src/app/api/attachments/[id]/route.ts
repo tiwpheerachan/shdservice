@@ -24,6 +24,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   if (!row || row.recordStatus === RS.DELETED) throw new HttpError(404, 'not found');
   const url = await signedUrl(
     resolvePath(row.systemFileName ?? '', (f) => filePath.attachment(row.referenceItemCode ?? '', f)),
+    120, // a leaked link (history, a forwarded URL) stops working soon
   );
   if (!url) throw new HttpError(404, 'ไฟล์นี้อยู่บนระบบเก่า ยังไม่ได้ย้ายมา');
   return NextResponse.redirect(url);

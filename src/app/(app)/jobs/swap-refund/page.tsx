@@ -30,6 +30,8 @@ import { useToast } from '@/components/ui/toast';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
+import { RecordKey } from '@/lib/use-record';
+import { jobNoParam } from '@/data/keys';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { parseSwap, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
@@ -340,7 +342,9 @@ function SwapRefundForm() {
 export default function SwapRefundPage() {
   return (
     <JobScreen>
-      <SwapRefundForm />
+      <RecordKey of={jobNoParam}>
+        <SwapRefundForm />
+      </RecordKey>
     </JobScreen>
   );
 }

@@ -197,9 +197,9 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                     <Truck className="h-4 w-4 text-muted-foreground" />
                   )}
                 </span>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 basis-40">
                   <p className="text-xs text-muted-foreground">{j.courier?.name || j.shipper || 'การจัดส่งคืน'}</p>
-                  <p className="num text-sm font-semibold tracking-tight">{j.trackingNo}</p>
+                  <p className="num text-sm font-semibold tracking-tight break-all">{j.trackingNo}</p>
                 </div>
                 {j.courier?.trackUrl && (
                   <a
@@ -207,7 +207,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
                     target="_blank"
                     rel="noopener noreferrer nofollow"
                     referrerPolicy="no-referrer"
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    className="inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                   >
                     ติดตามพัสดุ
                     <ExternalLink className="h-3.5 w-3.5" />

@@ -300,6 +300,8 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
       const [loaded] = await productQuery(tx).where(eq(product.productId, productId));
       const oldModels = await modelsOf(tx, productId);
       assertVersion(i.version, productVersion(loaded!, oldModels));
+      // restored through the records page (Product del) — the form's status would revive it with edit only
+      if (before.recordStatus === RS.DELETED) throw new HttpError(409, 'อะไหล่นี้ถูกลบแล้ว แก้ไขไม่ได้');
       // "never worse": only what really changes is written — a value equal to the stored one once both are
       // cleaned keeps the stored one (a legacy trailing space); saved unchanged = no write, no audit row
       const same: Record<string, boolean> = {

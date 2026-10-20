@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /** the tab / window title names the document (root template: "… · OneService") */
 export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
-  return { title: `ใบปะหน้าพัสดุ ${decodeURIComponent((await params).no).toUpperCase()}` };
+  return { title: `ใบปะหน้าพัสดุ ${(await params).no.toUpperCase()}` };
 }
 
 /** ใบปะหน้าพัสดุสำหรับงานซ่อมที่ส่งคืนทางขนส่ง — same A5 sheet as the sale order, keyed by job no. */
@@ -19,7 +19,7 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   // also checked by ../layout.tsx, but layouts can be skipped on partial renders — check here too
   const user = await userFromCookies();
   if (!user || !(await canViewAny(user, JOB_MODULES))) notFound();
-  const j = await getJob(decodeURIComponent(no).toUpperCase());
+  const j = await getJob(no.toUpperCase());
   if (!j) notFound();
   const cust = j.customer?.code ? await getCustomerByCode(j.customer.code) : null;
   const names = await addressNames(cust);

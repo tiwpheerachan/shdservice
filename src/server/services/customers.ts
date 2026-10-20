@@ -11,7 +11,7 @@ import { assertVersion } from '@/server/http-error';
 import { nowThai, str, fmtDateTime } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
-import { statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
+import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 import {
   customerSchema,
   conflictErrors,
@@ -413,6 +413,8 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for('update');
       if (!before) throw new HttpError(404, 'customer not found');
       assertVersion(i.version, before.rowVersion);
+      // restored through the records page (Customer del) — the form's status would revive it with edit only
+      if (before.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว แก้ไขไม่ได้');
       // "never worse": only what really changes is written. The stored row goes through the same cleaning
       // as the form (which shows a legacy address-only row's address in บรรทัด 1) — equal → the stored value
       // stays as it is (a legacy trailing space); saved unchanged = no UPDATE, no audit, no row_version bump

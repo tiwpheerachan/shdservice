@@ -5344,6 +5344,233 @@ try {
     await pool.query(`DELETE FROM app_config WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Closing'`);
     invalidateGrantCache();
   }
+  console.log('\nService audit — repeated lines, deleted records, a stale close, the job-list count');
+  {
+    const { REPEATED_LINE } = await import('@/lib/validation/job');
+    const { saveSwapRefund } = await import('@/server/services/jobs');
+    const { saveProduct } = await import('@/server/services/stock');
+    const logOf = async (jobNo: string) =>
+      (
+        await db.execute<{ id: number; req: number; g: number; r: number; s: number }>(sql`
+          SELECT job_order_log_id AS id, request_qty AS req, grant_qty AS g, return_qty AS r, order_status_id AS s
+            FROM job_order_spare_part_log WHERE job_no = ${jobNo}`)
+      ).rows[0];
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_repaired_date, engineer_id, job_type_id) VALUES
+        ('J9900961', 11, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01', 9110, (SELECT job_type_id FROM job_type WHERE job_type_name = 'TD งานซ่อม')),
+        ('J9900962', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01', 9110, NULL),
+        ('J9900963', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01', NULL, NULL),
+        ('J9900964', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01', NULL, NULL),
+        ('J9900965', 5, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01', NULL, NULL);
+      INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special,
+                                            request_qty, spare_part_unit_price, spare_part_total_price, order_status_id,
+                                            request_date, request_by, grant_qty, return_qty) VALUES
+        ('J9900961', '${P.a.code}', '', 1, false, true, 4, 100, 0, 1, now(), 9101, 0, 0),
+        ('J9900962', '${P.b.code}', '', 1, false, true, 4, 200, 0, 3, now(), 9101, 4, 0),
+        ('J9900963', '${P.c.code}', '', 1, true, true, 1, 300, 300, 1, now(), 9101, 0, 0);`);
+    const pick = async (type: 'job' | 'return', ref: string, logId: number) =>
+      json(
+        await stockIssuePOST(
+          await request('/api/stock/issue', U.admin, {
+            method: 'POST',
+            body: {
+              type,
+              ref,
+              payTo: 'คลังสินค้าดี',
+              lines: [
+                { logId, qty: 2 },
+                { logId, qty: 2 },
+              ],
+            },
+          }),
+        ),
+      );
+    await test('stock issue (job) naming one request line twice → 400 under lines; stock and the request unchanged', async () => {
+      await setStock(P.a.code, 10);
+      await db.execute(sql`UPDATE product_none_serial SET quantity_booking = 4 WHERE product_id = ${P.a.id}`);
+      const before = [await qty(P.a.code), await logOf('J9900961')];
+      const r = await pick('job', 'J9900961', before[1].id);
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.deepEqual((r.body.details as { fields: object }).fields, { lines: REPEATED_LINE });
+      assert.deepEqual([await qty(P.a.code), await logOf('J9900961')], before, 'nothing moved');
+    });
+    await test('stock return naming one issued line twice → 400 under lines; stock and return_qty unchanged', async () => {
+      await setStock(P.b.code, 10);
+      const before = [await qty(P.b.code), await logOf('J9900962')];
+      const r = await pick('return', 'J9900962', before[1].id);
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.deepEqual((r.body.details as { fields: object }).fields, { lines: REPEATED_LINE });
+      assert.deepEqual([await qty(P.b.code), await logOf('J9900962')], before, 'nothing moved');
+    });
+    await test('saveRepair naming one part line twice → 400 under parts; booking, the line and the parts total unchanged', async () => {
+      const cost = async () =>
+        (
+          await db.execute<{ p: string; v: number }>(
+            sql`SELECT spare_part_total_cost AS p, row_version AS v FROM job WHERE job_no = 'J9900963'`,
+          )
+        ).rows[0];
+      const before = [await qty(P.c.code), await logOf('J9900963'), await cost()];
+      const line = {
+        logId: before[1].id,
+        code: P.c.code,
+        unitPrice: 300,
+        a: { pick: true, quote: true, qty: 2 },
+        b: { pick: false, quote: false, qty: 0 },
+      };
+      const status = (await getJob('J9900963'))!.status;
+      const r = await fieldsOf(saveRepair('J9900963', { status, parts: [line, line] }, U.admin.id));
+      assert.deepEqual([r.status, r.fields], [400, { parts: REPEATED_LINE }]);
+      assert.deepEqual([await qty(P.c.code), await logOf('J9900963'), await cost()], before, 'nothing moved');
+    });
+
+    const jobState = async (no: string) =>
+      (
+        await db.execute(sql`
+          SELECT j.job_status_id, j.record_status, j.row_version, (SELECT count(*)::int FROM job_log l WHERE l.job_no = j.job_no) AS logs,
+                 (SELECT count(*)::int FROM job_send_forward_dt f WHERE f.job_no = j.job_no) AS sends
+            FROM job j WHERE j.job_no = ${no}`)
+      ).rows[0];
+    await test('a DELETED job: edit / repair / close / out-source / swap → 409, nothing written; restored via records it saves again', async () => {
+      const no = 'J9900964';
+      await setRecordStatus('jobs', no, 'DELETED', U.admin.id);
+      const before = await jobState(no);
+      const status = (await getJob(no))!.status;
+      const calls = {
+        updateJob: () => updateJob(no, { ...jobEdit, remark: 'TD deleted' }, U.admin.id),
+        saveRepair: () => saveRepair(no, { status, repairDetail: 'TD deleted' }, U.admin.id),
+        closeJob: async () => closeJob(no, await closeInput(), U.admin.id),
+        saveOutsource: async () =>
+          saveOutsource(
+            no,
+            { send: { to: 'TD Vendor', date: '2026-10-01' }, status: await statusName(14) },
+            U.admin.id,
+          ),
+        saveSwapRefund: () =>
+          saveSwapRefund(no, { status: 'ซ่อมเสร็จ', newSerial: 'SWAP0964', docNo: 'DOC964' }, U.admin.id),
+      };
+      for (const [name, call] of Object.entries(calls)) {
+        const r = await fieldsOf(call());
+        assert.deepEqual([name, r.status, r.message], [name, 409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้']);
+      }
+      assert.deepEqual(await jobState(no), before, 'nothing written');
+      await setRecordStatus('jobs', no, 'ACTIVE', U.admin.id);
+      assert.equal((await fieldsOf(updateJob(no, { ...jobEdit, remark: 'TD restored' }, U.admin.id))).status, 200);
+    });
+    await test('a DELETED quotation: a save with a new status → 409, still DELETED; restored via records it saves', async () => {
+      await pool.query(`
+        INSERT INTO quotation_hd (quotation_no, customer_code, net_amount, quotation_status_id, create_date, create_by, is_active, record_status, reference_job_no)
+          VALUES ('TDQ0961', '${CUSTOMER}', 100, 1, now(), 9101, true, 'DELETED', '');`);
+      const save = () =>
+        fieldsOf(
+          saveQuotation(
+            {
+              no: 'TDQ0961',
+              customerCode: CUSTOMER,
+              contactName: 'TD',
+              status: 'เสนอราคาแล้ว',
+              lines: [{ itemType: 'SparePart', code: P.a.code, detail: 'TD', qty: 1, unit: 'ชิ้น', unitPrice: 100 }],
+            },
+            U.admin.id,
+          ),
+        );
+      const r = await save();
+      assert.deepEqual([r.status, r.message], [409, 'ใบเสนอราคานี้ถูกลบแล้ว แก้ไขไม่ได้']);
+      const row = async () =>
+        (
+          await db.execute(
+            sql`SELECT quotation_status_id, record_status, row_version FROM quotation_hd WHERE quotation_no = 'TDQ0961'`,
+          )
+        ).rows[0];
+      assert.deepEqual({ ...(await row()) }, { quotation_status_id: 1, record_status: 'DELETED', row_version: 0 });
+      await setRecordStatus('quotations', 'TDQ0961', 'ACTIVE', U.admin.id);
+      assert.equal((await save()).status, 200);
+      assert.equal((await row()).quotation_status_id, 2);
+    });
+    await test('a DELETED customer: an edit with status Active → 409, still DELETED; restored via records it saves', async () => {
+      await pool.query(`
+        DELETE FROM customer WHERE customer_code = 'TDC961';
+        INSERT INTO customer (customer_code, customer_name, phone_number, record_status) VALUES ('TDC961', 'TD ลูกค้าที่ลบ', '0819610961', 'DELETED');`);
+      const save = async () =>
+        json(
+          await customerPOST(
+            await request('/api/customers', U.admin, {
+              method: 'POST',
+              body: { code: 'TDC961', name: 'TD ลูกค้าที่ลบ แก้', phone: '0819610961', status: 'Active' },
+            }),
+          ),
+        );
+      const r = await save();
+      assert.deepEqual([r.status, r.body.error], [409, 'ลูกค้ารายนี้ถูกลบแล้ว แก้ไขไม่ได้']);
+      const row = async () =>
+        (await db.execute(sql`SELECT customer_name, record_status FROM customer WHERE customer_code = 'TDC961'`))
+          .rows[0];
+      assert.deepEqual({ ...(await row()) }, { customer_name: 'TD ลูกค้าที่ลบ', record_status: 'DELETED' });
+      await setRecordStatus('customers', 'TDC961', 'ACTIVE', U.admin.id);
+      assert.equal((await save()).status, 200);
+    });
+    await test('a DELETED product: an edit with status Active → 409, still DELETED; restored via records it saves', async () => {
+      await pool.query(`
+        DELETE FROM product_none_serial WHERE product_id = 9261;
+        DELETE FROM product WHERE product_id = 9261 OR product_code = 'TDP961';
+        INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9261, 'TDP961', 'TD อะไหล่ที่ลบ', 'DELETED');
+        INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+          VALUES (9261, 9261, 0, 0, 0, 0, 0);`);
+      const save = () =>
+        fieldsOf(saveProduct({ sysCode: 'TDP961', name: 'TD อะไหล่ที่ลบ แก้', status: 'Active' }, U.admin.id));
+      const r = await save();
+      assert.deepEqual([r.status, r.message], [409, 'อะไหล่นี้ถูกลบแล้ว แก้ไขไม่ได้']);
+      const row = async () =>
+        (await db.execute(sql`SELECT product_name, record_status FROM product WHERE product_code = 'TDP961'`)).rows[0];
+      assert.deepEqual({ ...(await row()) }, { product_name: 'TD อะไหล่ที่ลบ', record_status: 'DELETED' });
+      await setRecordStatus('products', 'TDP961', 'ACTIVE', U.admin.id);
+      assert.equal((await save()).status, 200);
+    });
+
+    await test('closeJob with a stale version → 409 { stale }, nothing written; the current version closes', async () => {
+      const no = 'J9900965';
+      const v = await version('job', sql`job_no = ${no}`);
+      await db.execute(sql`UPDATE job SET job_remark = 'TD someone else' WHERE job_no = ${no}`); // v + 1
+      const before = await jobState(no);
+      let err: unknown;
+      await closeJob(no, { ...(await closeInput()), version: v }, U.admin.id).catch((e) => (err = e));
+      assert.ok(err instanceof HttpError, 'refused');
+      assert.deepEqual([err.status, err.details], [409, { stale: true }]);
+      assert.deepEqual(await jobState(no), before, 'nothing written');
+      await closeJob(no, { ...(await closeInput()), version: v + 1 }, U.admin.id);
+      assert.equal((await jobState(no)).job_status_id, 20);
+    });
+
+    await test('job list: the count (joins only for the filters that read them) = the rows, filtered and not', async () => {
+      const all = await pageJobs({ page: 1, pageSize: 25, q: '', f: {} }, filtersFromQuery({}));
+      const [n] = (
+        await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM job WHERE record_status <> 'DELETED'`)
+      ).rows;
+      assert.equal(all.total, n.n, 'no filter: every live job');
+      const filters: Record<string, string>[] = [
+        {},
+        { status: 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่' },
+        { closable: '1' },
+        { type: 'TD งานซ่อม' },
+        { engineer: 'TD td-engineer' },
+        { engineer: String(U.engineer.id) },
+        { symptom: 'TD ไม่มีอาการนี้' },
+        { status: 'กำลังดำเนินการ', engineer: 'TD td-engineer', includeCancelled: '1' },
+      ];
+      for (const f of filters) {
+        const p = await pageJobs(
+          { page: 1, pageSize: 500, q: '', f: {} },
+          filtersFromQuery({ customerCode: CUSTOMER, ...f }),
+        );
+        assert.equal(p.total, p.rows.length, JSON.stringify(f));
+      }
+      const some = await pageJobs(
+        { page: 1, pageSize: 500, q: '', f: {} },
+        filtersFromQuery({ customerCode: CUSTOMER, engineer: 'TD td-engineer' }),
+      );
+      const listed = some.rows.map((r) => r.no);
+      assert.ok(listed.includes('J9900961') && listed.includes('J9900962'), 'the engineer filter still matches');
+    });
+  }
 } finally {
   // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next
   // suite's first app insert (test:api POST /api/masters/symptoms) collides on the primary key

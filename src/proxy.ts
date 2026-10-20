@@ -14,7 +14,8 @@ import { log, safePath } from '@/lib/log';
 // It runs on EVERY path except /api/health, in these steps:
 //   1. origin guard  — the request must come through Cloudflare (X-Origin-Auth)
 //      + CSRF: cookie-carrying /api writes from another site are refused
-//   2. /track        — security headers + CSP nonce for the public tracking pages
+//   2. CSP           — every page gets a per-request nonce CSP (withCsp); /track adds Turnstile
+//      and its no-store / no-referrer headers
 //   3. login gate    — the old matcher's pages need a session cookie
 export const config = {
   // /api/health stays reachable for Render's health check (it calls the origin directly).
@@ -28,9 +29,9 @@ export const config = {
   ],
 };
 
-/** paths the login gate used to skip (the previous matcher) */
+/** paths the login gate used to skip (the previous matcher); images top-level only, like `matcher` */
 const PUBLIC_PATH =
-  /^\/(?:api(?:\/|$)|_next\/static|_next\/image|login(?:\/|$)|track(?:\/|$)|favicon\.ico$|robots\.txt$)|\.(?:png|jpg|jpeg|svg|ico|webp)$/i;
+  /^\/(?:api(?:\/|$)|_next\/static|_next\/image|login(?:\/|$)|track(?:\/|$)|favicon\.ico$|robots\.txt$|[^/]+\.(?:png|jpe?g|svg|ico|webp)$)/i;
 /** public tracking pages (not /api/track — those are JSON and set their own headers) */
 const TRACK_PAGE = /^\/track(?:\/|$)/;
 

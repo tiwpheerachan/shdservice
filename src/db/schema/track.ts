@@ -12,8 +12,12 @@ import {
 
 /**
  * Public tracking security tables (drizzle/0014, 0017, 0019 — hand-written migrations, RLS on,
- * no policies: only the app role can touch them). Raw tokens / phones / IPs are never stored:
- * sha256 or HMAC only (server/track-guard.ts, server/track-otp.ts).
+ * no policies: only the app role can touch them). Raw tokens / phones are never stored: sha256 or
+ * HMAC only (server/track-guard.ts, server/track-otp.ts). Keys, counters and logs hold IPs as HMACs too.
+ * The raw IP is kept in one place: issued_ip (inet) on the short-lived rows — track_ticket (3 min) and
+ * track_session (≤ 60 min) are bound to it, track_otp (5 min) and track_doc_ticket (10 min) record it —
+ * and it goes with the row: expired tickets / doc tickets on the next issue, sessions past their 60 min
+ * on the next sign-in, OTPs a day after they expire (track-guard housekeeping).
  */
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -102,7 +106,7 @@ export const trackSession = pgTable(
   (t) => [index('ix_track_session_expires').on(t.expiresAt)],
 );
 
-/** one-time document ticket (60 s, bound to IP + UA) */
+/** document link (10 min — DOC_LINK_MINUTES; bound to the session / link it was issued under, services/tracking.ts) */
 export const trackDocTicket = pgTable(
   'track_doc_ticket',
   {

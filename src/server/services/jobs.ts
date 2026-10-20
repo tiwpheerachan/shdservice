@@ -205,9 +205,11 @@ type JobRow = typeof job.$inferSelect;
  * and setStatus compares against the status as it is now — not a read from before the
  * other save committed (duplicate job_log rows, lost parts totals).
  */
-async function lockJob(tx: Tx, jobNo: string): Promise<JobRow> {
+async function lockJob(tx: Tx, jobNo: string, allowDeleted = false): Promise<JobRow> {
   const [r] = await tx.select().from(job).where(eq(job.jobNo, jobNo)).for('update');
   if (!r) throw jobNotFound(jobNo);
+  // a deleted job is restored through the records page (Job Management del) — never edited back to life
+  if (r.recordStatus === RS.DELETED && !allowDeleted) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้');
   return r;
 }
 
@@ -318,7 +320,10 @@ export async function followQuotation(
 ) {
   const target = QUOTE_MOVES_BY_ID[quotationStatusId]; // the rule lives in src/lib/quote-job.ts (the page shares it)
   if (target === undefined) return false;
-  const current = (await lockJob(tx, jobNo)).jobStatusId;
+  // a deleted job stays as it is: the quotation saves, the job does not move
+  const j = await lockJob(tx, jobNo, true);
+  if (j.recordStatus === RS.DELETED) return false;
+  const current = j.jobStatusId;
   const from = QUOTE_STEP[current ?? -1];
   if (from === undefined || from >= QUOTE_STEP[target]!) return false;
   return setStatus(tx, jobNo, target, byUserId, current, `ตามใบเสนอราคา ${quotationNo} : ${quotationStatus}`);
@@ -669,16 +674,16 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
 
 export async function pageJobs(p: PageQuery, f: JobFilters): Promise<Page<JobListRow>> {
   const where = jobWhere(p.q, f);
+  // the count joins only the tables a filter reads (each a lookup by id: never more or fewer rows) — joined
+  // always, Postgres scans the whole job heap on every list load; a filter added without its join fails loudly
+  let counter = db.select({ total: count() }).from(job).$dynamic();
+  if (f.status || f.closable) counter = counter.leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId));
+  if (f.type) counter = counter.leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId));
+  if (f.engineer) counter = counter.leftJoin(eng, eq(eng.userId, job.engineerId));
+  if (f.symptom) counter = counter.leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId));
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
-    db
-      .select({ total: count() })
-      .from(job)
-      .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-      .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
-      .leftJoin(eng, eq(eng.userId, job.engineerId))
-      .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-      .where(where),
+    counter.where(where),
     baseQuery()
       .where(where)
       .orderBy(...orderBy(p.sort, SORT, [desc(job.jobCreateDate), desc(job.jobNo)]))
@@ -1768,7 +1773,7 @@ export async function assignJobs(
 ): Promise<number> {
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
   if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
-  await assertAssignee(engineerId); // the signed-in user takes the jobs: their role has Job Take
+  await assertAssignee(engineerId); // the chosen engineer takes the jobs: their role has Job Take
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
@@ -2442,6 +2447,8 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
   if (newStatus === JS.CLOSED_WAIT_TRACKING && cleanTracking(i.return?.tracking)) newStatus = JS.CLOSED_TRACKED;
   await db.transaction(async (tx) => {
     const before = await lockJob(tx, jobNo);
+    // a page loaded before someone else's save would close on what it showed (absent = last write wins)
+    assertVersion(i.version, before.rowVersion);
     const status = before.jobStatusId;
     const pay: Partial<NonNullable<CloseInput['payment']>> = i.payment ?? {};
     const ret = i.return ?? {};

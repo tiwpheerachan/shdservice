@@ -32,6 +32,8 @@ import { SEND_STATUS } from '@/lib/outsource-status';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
+import { RecordKey } from '@/lib/use-record';
+import { jobNoParam } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
@@ -376,7 +378,9 @@ function OutsourceForm() {
 export default function OutsourcePage() {
   return (
     <JobScreen>
-      <OutsourceForm />
+      <RecordKey of={jobNoParam}>
+        <OutsourceForm />
+      </RecordKey>
     </JobScreen>
   );
 }

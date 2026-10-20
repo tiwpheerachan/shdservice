@@ -23,7 +23,7 @@ import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { ApiError, postJson, errMsg } from '@/lib/api';
-import { useRecord } from '@/lib/use-record';
+import { RecordKey, useRecord } from '@/lib/use-record';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
@@ -317,7 +317,9 @@ function EditSaleOrder() {
 export default function EditSaleOrderPage() {
   return (
     <React.Suspense fallback={null}>
-      <EditSaleOrder />
+      <RecordKey of={(sp) => sp.get('no') ?? ''}>
+        <EditSaleOrder />
+      </RecordKey>
     </React.Suspense>
   );
 }

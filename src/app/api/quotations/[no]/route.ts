@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ no: string }> }) => {
   await requireView(req, ['Quotation']);
   const { no } = await parseParams(ctx, quotationGet);
-  const quotation = await getQuotation(decodeURIComponent(no).trim().toUpperCase());
+  const quotation = await getQuotation(no.trim().toUpperCase());
   if (!quotation) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + no);
   return NextResponse.json({ quotation });
 });

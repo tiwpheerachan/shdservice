@@ -35,6 +35,8 @@ declare global {
 const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
 /** reuse a gate token only while it is comfortably inside its 5-minute life */
 const TOKEN_FRESH_MS = 4 * 60_000;
+/** api.js not there after this → stop waiting and say so */
+const TS_LOAD_MS = 15_000;
 
 type Props = { mode: 'link'; linkToken: string } | { mode: 'form'; otpAvailable: boolean; devOtpLog: boolean };
 type Phase = 'gate' | 'ready' | 'done' | 'expired';
@@ -95,14 +97,23 @@ function TrackBody(props: Props) {
   // api.js is in the server HTML (async, layout.tsx) — it may run before or after hydration, so the first
   // render always says "not ready" (server and browser agree) and this picks it up once it is there
   const [tsReady, setTsReady] = React.useState(false);
+  const [error, setError] = React.useState('');
   React.useEffect(() => {
     if (tsReady) return;
-    const t = setInterval(() => window.turnstile && setTsReady(true), 50);
+    const giveUp = Date.now() + TS_LOAD_MS;
+    const t = setInterval(() => {
+      if (window.turnstile) setTsReady(true);
+      else if (Date.now() > giveUp) {
+        clearInterval(t);
+        setError(TRACK_MSG.unavailable); // blocked / offline: a refresh is the way back
+      }
+    }, 50);
     return () => clearInterval(t);
   }, [tsReady]);
   const [phase, setPhase] = React.useState<Phase>('gate');
   const [verifying, setVerifying] = React.useState(false);
-  const [error, setError] = React.useState('');
+  /** the gate's widget is up — off after a failed link call until ลองอีกครั้ง, or it would pass and post again on its own */
+  const [armed, setArmed] = React.useState(true);
   const [job, setJob] = React.useState<PublicJob | null>(null);
   const [linkExpiresAt, setLinkExpiresAt] = React.useState(0);
 
@@ -134,6 +145,7 @@ function TrackBody(props: Props) {
         setPhase('done');
       } catch (e) {
         setError(e instanceof Error && e.message ? e.message : 'เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setArmed(false);
         setPhase('gate');
       }
     },
@@ -160,7 +172,7 @@ function TrackBody(props: Props) {
   });
 
   // 1. the gate: a visible checkbox — nothing else on the page until it passes
-  useTurnstile(gateEl, phase === 'gate', tsReady, () => ({
+  useTurnstile(gateEl, phase === 'gate' && armed, tsReady, () => ({
     appearance: 'always',
     callback: (t: string) => onGatePass.current(t),
     'error-callback': () => setError(TRACK_MSG.unavailable),
@@ -218,10 +230,25 @@ function TrackBody(props: Props) {
         </p>
         <div className="mt-5 flex min-h-[65px] justify-center">
           <div ref={gateEl} />
-          {!tsReady && (
-            <p className="inline-flex items-center gap-2 self-center text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลด…
-            </p>
+          {!armed ? (
+            <button
+              ref={focusOnMount}
+              type="button"
+              onClick={() => {
+                setError('');
+                setArmed(true);
+              }}
+              className="inline-flex h-11 items-center self-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              ลองอีกครั้ง
+            </button>
+          ) : (
+            !tsReady &&
+            !error && (
+              <p className="inline-flex items-center gap-2 self-center text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลด…
+              </p>
+            )
           )}
         </div>
         {error && (
@@ -249,7 +276,7 @@ function TrackBody(props: Props) {
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a
           href="/track"
-          className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          className="mt-4 inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Search className="h-4 w-4" /> ตรวจสอบด้วยเบอร์มือถือ
         </a>

@@ -258,7 +258,8 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
     case 'customers':
       return listCustomers({
         q: p.q,
-        deleted: mode,
+        // deleted customers (PDPA: erased on request) are System Admin's alone — as GET /api/data/customers
+        deleted: !user.isAdmin && (mode === 'only' || mode === 'all') ? 'exclude' : mode,
         limit: MAX_ROWS,
         filters: customerFiltersFromQuery(f),
       });

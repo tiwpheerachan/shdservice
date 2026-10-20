@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 /** the tab / window title names the document (root template: "… · OneService") */
 export async function generateMetadata({ params }: { params: Promise<{ no: string }> }): Promise<Metadata> {
-  return { title: `ใบเสนอราคา ${decodeURIComponent((await params).no).toUpperCase()}` };
+  return { title: `ใบเสนอราคา ${(await params).no.toUpperCase()}` };
 }
 
 /** staff print view (login required by app/print/layout.tsx) — the customer gets the same sheet via /track/doc */
@@ -16,5 +16,5 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   // same rule as the API: the layout only checks sign-in, the role must be able to view this document
   const user = await userFromCookies();
   if (!user || !(await canViewAny(user, ['Quotation']))) notFound();
-  return <QuotationDoc no={decodeURIComponent(no).toUpperCase()} />;
+  return <QuotationDoc no={no.toUpperCase()} />;
 }

@@ -83,8 +83,8 @@ export class ImageTooLargeError extends Error {}
  * container (lossless PNG barely shrinks it) — it comes back as JPEG with a
  * .jpg name; a PNG with transparency (logo, graphic) stays PNG. The stored
  * file name is generated from the returned name, so nothing legacy is renamed.
- * Anything that is not a raster image, or that would not get smaller, is
- * returned untouched; a decode failure falls back to the original file rather
+ * Anything that is not a raster image, or that would not get smaller and carries no EXIF, is
+ * returned untouched (EXIF — GPS, camera serial — is always stripped by re-encoding); a decode failure falls back to the original file rather
  * than rejecting the upload.
  */
 export async function optimizeImage(file: File): Promise<File> {
@@ -117,7 +117,7 @@ export async function optimizeImage(file: File): Promise<File> {
         name = name.replace(/\.png$/i, '') + '.jpg';
       }
     }
-    if (out.length >= input.length && type === file.type) return file;
+    if (out.length >= input.length && type === file.type && !meta?.exif) return file;
     return new File([new Uint8Array(out)], name, { type, lastModified: file.lastModified });
   } catch {
     return file;
@@ -173,7 +173,7 @@ export async function uploadFile(path: string, file: File | Blob, contentType?: 
     );
 }
 
-export async function signedUrl(path: string, seconds = 600): Promise<string | null> {
+export async function signedUrl(path: string, seconds = 120): Promise<string | null> {
   const { data, error } = await storage().from(BUCKET).createSignedUrl(path, seconds);
   if (error) {
     logError(error, 'storage signedUrl failed');

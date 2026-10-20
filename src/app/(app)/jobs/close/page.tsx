@@ -24,6 +24,8 @@ import { baht } from '@/lib/utils';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
+import { RecordKey } from '@/lib/use-record';
+import { jobNoParam } from '@/data/keys';
 import { PrintButton } from '@/components/shared/print-button';
 import { ClosePaymentSection } from '@/components/jobs/close-payment';
 import { CloseJobInfoSection, CloseReturnSection, CloseWorkSection } from '@/components/jobs/close-sections';
@@ -146,8 +148,13 @@ function CloseForm() {
       return;
     setSaving(true);
     try {
-      adopt(await saveCommonSections(job.no, form, canEdit));
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, body);
+      const common = await saveCommonSections(job.no, form, canEdit);
+      adopt(common);
+      // the version as of now: someone else's save since the page loaded → 409 (reload)
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
+        ...body,
+        version: common.version ?? form.version,
+      });
       setJob(r.job);
       push({ kind: 'success', title: 'ปิดงานและบันทึกการส่งคืนเรียบร้อย', desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {
@@ -246,7 +253,9 @@ function CloseForm() {
 export default function ClosePage() {
   return (
     <JobScreen>
-      <CloseForm />
+      <RecordKey of={jobNoParam}>
+        <CloseForm />
+      </RecordKey>
     </JobScreen>
   );
 }

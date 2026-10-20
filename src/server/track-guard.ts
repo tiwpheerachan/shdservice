@@ -2,7 +2,7 @@ import 'server-only';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { and, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { trackBlock, trackEvent, trackRate, trackTicket } from '@/db/schema';
+import { trackBlock, trackEvent, trackOtp, trackRate, trackTicket } from '@/db/schema';
 import { logError } from '@/lib/log';
 import { ipBucket } from '@/lib/client-ip';
 
@@ -263,7 +263,7 @@ export function logEvent(
     })
     .then(() => undefined)
     .catch((e) => logError(e, 'track_event'));
-  // ~1 in 200 writes also trims old rows (counters whose window ended, blocks ended, events > 30 days)
+  // ~1 in 200 writes also trims old rows (counters whose window ended, blocks ended, OTPs expired > 1 day, events > 30 days)
   if (Math.random() < 0.005) void housekeeping();
 }
 
@@ -274,6 +274,7 @@ export async function housekeeping() {
     // counting — trimming it sooner would reset the daily caps and the wrong-code lock
     await db.delete(trackRate).where(lt(trackRate.windowStart, sql`now() - interval '25 hours'`));
     await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
+    await db.delete(trackOtp).where(lt(trackOtp.expiresAt, sql`now() - interval '1 day'`));
     await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));
   } catch (e) {
     logError(e, 'track_housekeeping');

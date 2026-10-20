@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 const inputCls =
   'num h-11 w-full rounded-md border border-input bg-background px-3 text-base tracking-wide outline-hidden focus-visible:ring-2 focus-visible:ring-ring';
 const btnCls =
-  'inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
+  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 
 /** step 1: the mobile number → ขอรหัส OTP (the Turnstile token is fetched by onSubmit) */
 export function PhoneStep({
@@ -107,7 +107,11 @@ export function CodeStep({
       </div>
       {errorBox}
       <div className="flex items-center justify-between text-sm">
-        <button type="button" onClick={onChangePhone} className="text-muted-foreground hover:text-foreground">
+        <button
+          type="button"
+          onClick={onChangePhone}
+          className="min-h-11 px-2 text-muted-foreground hover:text-foreground"
+        >
           เปลี่ยนเบอร์
         </button>
         <ResendButton resendAt={resendAt} disabled={busy || verifying} onClick={onResend} />
@@ -226,7 +230,7 @@ function ResendButton({ resendAt, disabled, onClick }: { resendAt: number; disab
       type="button"
       onClick={onClick}
       disabled={disabled || waitMs > 0}
-      className="font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+      className="min-h-11 px-2 font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
     >
       {waitMs > 0 ? `ขอรหัสใหม่ได้ใน ${Math.ceil(waitMs / 1000)} วินาที` : 'ขอรหัสใหม่'}
     </button>

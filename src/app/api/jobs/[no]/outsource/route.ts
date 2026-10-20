@@ -10,6 +10,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ no:
   const user = await requireCan(req, 'Job Repair', 'edit');
   const { no } = await parseParams(ctx, jobOutsource);
   const body = await parseBody(req, jobOutsource);
-  const job = await saveOutsource(decodeURIComponent(no), body, user.userId);
+  const job = await saveOutsource(no, body, user.userId);
   return NextResponse.json({ ok: true, job });
 });

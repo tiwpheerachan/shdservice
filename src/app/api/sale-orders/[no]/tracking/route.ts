@@ -11,6 +11,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ no:
   const { no } = await parseParams(ctx, saleOrderTracking);
   const { tracking } = await parseBody(req, saleOrderTracking); // as text
   // checked in setTracking against the number stored now (trackingSchema — an unchanged legacy one passes)
-  const order = await setTracking(decodeURIComponent(no), tracking, user.userId);
+  const order = await setTracking(no, tracking, user.userId);
   return NextResponse.json({ ok: true, order });
 });

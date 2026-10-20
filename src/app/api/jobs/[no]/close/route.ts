@@ -10,6 +10,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ no:
   const user = await requireCan(req, 'Job Closing', 'edit');
   const { no } = await parseParams(ctx, jobClose);
   const body = await parseBody(req, jobClose);
-  const job = await closeJob(decodeURIComponent(no), body, user.userId);
+  const job = await closeJob(no, body, user.userId);
   return NextResponse.json({ ok: true, job });
 });

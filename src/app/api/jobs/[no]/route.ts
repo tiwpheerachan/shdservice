@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ no: string }> };
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, [...JOB_MODULES, 'Quotation']);
   const { no } = await parseParams(ctx, jobGet);
-  const job = await getJob(decodeURIComponent(no).trim().toUpperCase());
+  const job = await getJob(no.trim().toUpperCase());
   if (!job) throw jobNotFound(no);
   return NextResponse.json({ job });
 });
@@ -22,6 +22,6 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, jobUpdate);
   const body = await parseBody(req, jobUpdate);
-  const job = await updateJob(decodeURIComponent(no), body, user.userId);
+  const job = await updateJob(no, body, user.userId);
   return NextResponse.json({ ok: true, job });
 });

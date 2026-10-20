@@ -13,10 +13,10 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   const key = no ? jobKey(no) : '';
   const got = key ? await prefetch([key, ...LOOKUPS]) : {};
   const answer = got[key] as { job: JobDetail } | undefined;
-  const lookups = Object.fromEntries(LOOKUPS.filter((k) => k in got).map((k) => [k, got[k]]));
+  // keyed by the number: Next keeps the page mounted when only ?job= changes (a link to another job)
   return (
-    <Prefetched fallback={answer ? { ...lookups, [key]: answer.job } : lookups}>
-      <RepairPage job={answer?.job} />
+    <Prefetched fallback={answer ? { ...got, [key]: answer.job } : got}>
+      <RepairPage key={no} job={answer?.job} />
     </Prefetched>
   );
 }

@@ -391,6 +391,8 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         .where(eq(quotationDt.quotationNo, no))
         .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
       assertVersion(i.version, versionOf(prev.rowVersion, old));
+      // restored through the records page (Quotation del) — a status change here would stamp it ACTIVE
+      if (prev.recordStatus === RS.DELETED) throw new HttpError(409, 'ใบเสนอราคานี้ถูกลบแล้ว แก้ไขไม่ได้');
       // lines are re-written only when they changed (same value read the same way as the audit diff:
       // "100" = "100.00", trimmed) — an unchanged save keeps the rows, their ids and the version
       linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);

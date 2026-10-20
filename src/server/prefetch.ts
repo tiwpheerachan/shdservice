@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import { GET as dataGet } from '@/app/api/data/[resource]/route';
 import { GET as jobGet } from '@/app/api/jobs/[no]/route';
 import { GET as quotationGet } from '@/app/api/quotations/[no]/route';
+import { PREFETCH_ID } from '@/data/keys';
 
 /**
  * A page's first data, read while the server renders it, so it arrives in the HTML instead of after
@@ -18,6 +19,8 @@ import { GET as quotationGet } from '@/app/api/quotations/[no]/route';
  * Give it the hooks' own keys (src/data/keys.ts); hand the result to <Prefetched> (src/data/db.ts).
  * All calls run in parallel; after `timeoutMs` the page renders with what has answered so far, so a slow
  * database never holds the HTML back for long (a late answer is dropped — its hook fetches it).
+ * The result also carries a fresh id under PREFETCH_ID: back/forward replays this payload, and the id
+ * tells <Prefetched> it has seeded these (by then older) answers already.
  */
 const ROUTES: [RegExp, (req: NextRequest, segment: string) => Promise<Response>][] = [
   [/^\/api\/data\/([^/]+)$/, (req, resource) => dataGet(req, { params: Promise.resolve({ resource }) })],
@@ -45,7 +48,8 @@ export async function prefetch(urls: string[], { timeoutMs = 1500 } = {}): Promi
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([Promise.all(calls), new Promise((r) => (timer = setTimeout(r, timeoutMs)))]);
   clearTimeout(timer);
-  return { ...done }; // a copy: an answer that lands after the deadline must not join while it renders
+  // a copy: an answer that lands after the deadline must not join while it renders
+  return { ...done, [PREFETCH_ID]: crypto.randomUUID() };
 }
 
 /** a page's `searchParams` as the URLSearchParams the browser's useSearchParams() would give */

@@ -11,12 +11,12 @@ type Ctx = { params: Promise<{ no: string }> };
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, JOB_MODULES);
   const { no } = await parseParams(ctx, jobCalls);
-  return NextResponse.json({ rows: await listCallLogs(decodeURIComponent(no)) });
+  return NextResponse.json({ rows: await listCallLogs(no) });
 });
 
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, jobCallAdd);
   const body = await parseBody(req, jobCallAdd); // callLogSchema
-  return NextResponse.json({ ok: true, rows: await addCallLog(decodeURIComponent(no), body.detail, user.userId) });
+  return NextResponse.json({ ok: true, rows: await addCallLog(no, body.detail, user.userId) });
 });

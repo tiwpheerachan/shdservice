@@ -25,6 +25,8 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useJob, type JobDetail } from '@/lib/use-job';
+import { RecordKey } from '@/lib/use-record';
+import { jobNoParam } from '@/data/keys';
 import { PrintButton } from '@/components/shared/print-button';
 import { TrackLink } from '@/components/shared/track-link';
 import { patchJson, errMsg } from '@/lib/api';
@@ -153,7 +155,9 @@ function EditJobForm() {
 export default function EditJobPage() {
   return (
     <JobScreen>
-      <EditJobForm />
+      <RecordKey of={jobNoParam}>
+        <EditJobForm />
+      </RecordKey>
     </JobScreen>
   );
 }

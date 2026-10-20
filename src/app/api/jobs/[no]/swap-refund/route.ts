@@ -10,6 +10,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ no:
   const user = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, jobSwapRefund);
   const body = await parseBody(req, jobSwapRefund);
-  const job = await saveSwapRefund(decodeURIComponent(no), body, user.userId);
+  const job = await saveSwapRefund(no, body, user.userId);
   return NextResponse.json({ ok: true, job });
 });

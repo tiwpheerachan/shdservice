@@ -9,5 +9,5 @@ export const dynamic = 'force-dynamic';
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ no: string }> }) => {
   await requireView(req, ['Product Onhand', 'Product Receive Stock', 'Product Pick Stock']);
   const { no } = await parseParams(ctx, stockMovementLines);
-  return NextResponse.json({ rows: await movementLines(decodeURIComponent(no)) });
+  return NextResponse.json({ rows: await movementLines(no) });
 });

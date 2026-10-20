@@ -65,6 +65,7 @@ const CloseBody = z.looseObject({
     .meta({ description: 'Left out when nobody paid (an in-warranty job).' }),
   refund: close.refund.meta({ description: 'The deposit given back.' }),
   return: close.return.extend({ tracking: optText, shipperId: optNum }),
+  version,
 });
 
 /** Swap / Refund's fields without a stored job: New S/N, doc no and refund ref are only text here */
@@ -340,6 +341,7 @@ export const attachmentAdd = defineOperation({
     ...SIGNED_IN,
     400: errorResponse('Not multipart/form-data, or no file.'),
     ...notFound('No such job.'),
+    409: errorResponse('The job is deleted (cancelled) — nothing is stored.'),
     413: errorResponse('File over 10 MB.'),
     415: errorResponse('Not an allowed file type.'),
     ...RATE_LIMITED,

@@ -118,8 +118,7 @@ export async function readResource(
   }
 
   const access = Object.hasOwn(READ_ACCESS, resource) ? READ_ACCESS[resource] : undefined;
-  if (access) await requireView(req, access);
-  else await requireUser(req);
+  const user = access ? await requireView(req, access) : await requireUser(req);
 
   if (isSimpleKind(resource)) return listSimple(resource, deleted);
   switch (resource) {
@@ -168,15 +167,18 @@ export async function readResource(
     }
     case 'product_stats':
       return [await productStats(p.q, productFiltersFromQuery(p.f, deleted))];
-    case 'customers':
+    case 'customers': {
+      // deleted customers (PDPA: erased on request) are System Admin's alone — anyone else gets the live list
+      const mode = !user.isAdmin && (deleted === 'only' || deleted === 'all') ? 'exclude' : deleted;
       return paged
-        ? pageCustomers(p, deleted, customerFiltersFromQuery(p.f))
+        ? pageCustomers(p, mode, customerFiltersFromQuery(p.f))
         : listCustomers({
             q: p.q,
-            deleted,
+            deleted: mode,
             limit,
             filters: customerFiltersFromQuery(p.f),
           });
+    }
     case 'issued_lines':
       return paged
         ? pageIssuedLines(p, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })

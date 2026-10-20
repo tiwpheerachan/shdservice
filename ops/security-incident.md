@@ -24,7 +24,7 @@
   - `UPDATE` / `DELETE` / `STATUS` = แก้ข้อมูลอะไร (มีค่าก่อน-หลัง)
 - **Render logs** — log ของ Render เก็บไม่นาน ให้ดาวน์โหลดช่วงเวลาที่เกี่ยวข้องเก็บไว้
   - ค้น `requestId`, `track_*` (หน้า `/track` ของลูกค้า), `API 4xx/5xx`
-  - IP ใน log ฝั่ง `/track` เป็น HMAC (`ipHash`) — เทียบได้ว่าเป็น IP เดียวกัน แต่ย้อนกลับเป็น IP ไม่ได้
+  - IP ใน log และ `track_event` ฝั่ง `/track` เป็น HMAC (`ipHash`) — เทียบได้ว่าเป็น IP เดียวกัน แต่ย้อนกลับเป็น IP ไม่ได้ · IP จริงอยู่ใน `issued_ip` ของ `track_ticket` / `track_otp` / `track_session` / `track_doc_ticket` แค่ช่วงสั้น (ตั๋วผูกกับ IP; ถูกลบเมื่อหมดอายุ) — ดึงเก็บไว้ก่อนถ้าเหตุเพิ่งเกิด
 - **Cloudflare** — Security → Events ของช่วงเวลานั้น
 - **Supabase** — ถ้าสงสัยว่าเข้าถึง DB ตรง: Logs → Postgres
 

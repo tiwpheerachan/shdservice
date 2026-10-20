@@ -36,7 +36,7 @@ const STAFF_PATHS: [RegExp, readonly Module[]][] = [
   [/^products\/[^/]+\/[^/]+$/, PRODUCT_MODULES],
 ];
 const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
-const URL_TTL_S = 300;
+const URL_TTL_S = 120;
 
 export const GET = handle(async (req: NextRequest) => {
   // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"

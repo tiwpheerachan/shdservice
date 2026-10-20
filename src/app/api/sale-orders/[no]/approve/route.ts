@@ -11,6 +11,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ no:
   const user = await requireCan(req, 'Sale Order', 'edit');
   const { no } = await parseParams(ctx, saleOrderApprove);
   const body = await parseBody(req, saleOrderApprove); // approveSchema
-  const order = await approveSaleOrder(decodeURIComponent(no), body.decision, body.remark ?? '', user, body.version);
+  const order = await approveSaleOrder(no, body.decision, body.remark ?? '', user, body.version);
   return NextResponse.json({ ok: true, order });
 });

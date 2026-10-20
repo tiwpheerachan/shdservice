@@ -3,7 +3,7 @@
 import * as React from 'react';
 import useSWR, { mutate, SWRConfig, useSWRConfig, type SWRConfiguration } from 'swr';
 import { api, errMsg, onApiWrite } from '@/lib/api';
-import { qs, tableKey, pagedKey, type Params } from './keys';
+import { qs, tableKey, pagedKey, PREFETCH_ID, type Params } from './keys';
 import type { Order, DeletedMode } from './queries';
 import type {
   User,
@@ -78,15 +78,30 @@ onApiWrite(invalidateLists);
  * they are kept as reads that just finished — cached with their age, so no hook fetches them again on
  * mount and the usual ttl / refetch / invalidateLists rules apply from there. A key that is missing
  * (refused, failed, too slow) is simply fetched by its hook.
+ *
+ * Back/forward remounts the page with the SAME payload — answers older than what the cache got since
+ * (a save, a re-read). A set whose id (PREFETCH_ID) was seeded before is such a replay: it seeds nothing
+ * and offers no fallback, so the cache and its ttl rules decide, as on any client-side visit.
  */
-export function Prefetched({ fallback, children }: { fallback: Record<string, unknown>; children: React.ReactNode }) {
+const seeded = new Set<unknown>();
+export function Prefetched({
+  fallback: all,
+  children,
+}: {
+  fallback: Record<string, unknown>;
+  children: React.ReactNode;
+}) {
+  const { [PREFETCH_ID]: id, ...answers } = all;
+  const fallback = id !== undefined && seeded.has(id) ? {} : answers;
   React.useEffect(() => {
+    if (id !== undefined) seeded.add(id);
     const now = Date.now();
     for (const [key, data] of Object.entries(fallback)) {
       fetchedAt.set(key, now);
       void mutate(key, data, { revalidate: false });
     }
-  }, [fallback]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per answer set
+  }, [all]);
   return React.createElement(SWRConfig, { value: { fallback } }, children); // .ts: no JSX
 }
 
