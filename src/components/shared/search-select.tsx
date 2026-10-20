@@ -142,7 +142,7 @@ export function SearchSelect({
               value={q}
               onValueChange={setQ}
               placeholder={searchPlaceholder}
-              className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+              className="h-10 w-full bg-transparent text-base outline-hidden placeholder:text-muted-foreground md:text-sm"
             />
             {q && (
               <button

@@ -214,7 +214,7 @@ export function SymptomPicker({
                 value={q}
                 onValueChange={setQ}
                 placeholder={placeholder}
-                className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+                className="h-10 w-full bg-transparent text-base outline-hidden placeholder:text-muted-foreground md:text-sm"
               />
               {multiple && (
                 <span className="num shrink-0 text-2xs text-muted-foreground">{value.length} เลือกแล้ว</span>

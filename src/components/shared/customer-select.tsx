@@ -308,7 +308,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               value={q}
               onValueChange={setQ}
               placeholder={`${SEARCH_MIN_HINT}…`}
-              className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+              className="h-10 w-full bg-transparent text-base outline-hidden placeholder:text-muted-foreground md:text-sm"
             />
             {loading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />

@@ -120,7 +120,7 @@ export function QuotationSummary({
                 setService(n);
                 clear('serviceAmount');
               }}
-              className="h-8 w-32 text-xs"
+              className="h-8 w-32"
             />
           </dd>
         </div>
@@ -140,7 +140,7 @@ export function QuotationSummary({
                 setDiscount(n);
                 clear('discountValue');
               }}
-              className="h-8 w-24 text-xs"
+              className="h-8 w-24"
             />
             <Select
               aria-label="หน่วยส่วนลด"
@@ -149,7 +149,7 @@ export function QuotationSummary({
                 setDiscountUnit(e.target.value === 'บาท' ? 'บาท' : '%');
                 clear('discountValue');
               }}
-              className="h-8 w-20 text-xs"
+              className="h-8 w-20"
             >
               <option value="%">%</option>
               <option value="บาท">บาท</option>
@@ -170,7 +170,7 @@ export function QuotationSummary({
                 setVatRate(Number(e.target.value));
                 clear('vatRate');
               }}
-              className="h-8 w-32 text-xs"
+              className="h-8 w-32"
             >
               <option value="0">0</option>
               <option value="7">7</option>

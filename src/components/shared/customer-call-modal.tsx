@@ -259,7 +259,7 @@ export function CustomerCallModal({
                     onChange={(e) => setText(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addLog()}
                     placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
-                    className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-sm outline-hidden placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-base outline-hidden md:text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   />
                   <Button size="sm" onClick={addLog}>
                     <Plus className="h-3.5 w-3.5" />

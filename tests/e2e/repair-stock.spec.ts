@@ -153,3 +153,28 @@ test('more than on hand is never issued: the page flags it, a stale screen gets 
   expect(await lineOf(no)).toMatchObject({ requested: 3, granted: 0, status: 1 });
   expect((await jobCosts(no)).status).toBe(11);
 });
+
+test('picking a part again points at its open line instead of adding a second one; an issued line allows more', async ({
+  page,
+}) => {
+  const part = await newPart({ remain: 5, price: PRICE });
+  const no = await newJob({ status: 2 });
+  await newPartLine({ jobNo: no, code: part.code, price: PRICE, qty: 1, granted: 1 }); // issued: read-only
+  await signIn(page, ENGINEER_EMAIL);
+  await page.goto(`/jobs/repair?job=${no}`);
+  const qty = page.getByLabel(`จำนวน แบบ A ${part.code}`).filter({ visible: true });
+  await expect(qty).toHaveCount(1);
+  const add = async () => {
+    await page.getByRole('combobox', { name: 'เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…' }).click();
+    await page.getByPlaceholder(/^พิมพ์ชื่ออะไหล่/).fill(part.code); // not keyboard.type: the box may not have focus yet
+    await page.getByRole('option', { name: new RegExp(part.code) }).click();
+  };
+
+  await add(); // the issued line cannot take more → a new line
+  await expect(qty).toHaveCount(2);
+  await expect(page.getByRole('status').filter({ hasText: 'อยู่ในรายการแล้ว' })).toHaveCount(0);
+
+  await add(); // the new line is still open → no third line, a hint naming row 2
+  await expect(qty).toHaveCount(2);
+  await expect(page.getByRole('status').filter({ hasText: `${part.code} อยู่ในรายการแล้ว (แถว 2)` })).toBeVisible();
+});

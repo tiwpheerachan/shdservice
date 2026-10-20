@@ -138,7 +138,7 @@ export function SaleOrderLines({
                         onChange={(n) =>
                           setLines((s) => s.map((x) => (x.id === l.id ? { ...x, qty: Math.max(1, n) } : x)))
                         }
-                        className="ml-auto h-8 w-16 text-right text-xs"
+                        className="ml-auto h-8 w-16 text-right"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -152,7 +152,7 @@ export function SaleOrderLines({
                           setLines((s) => s.map((x) => (x.id === l.id ? { ...x, price: n } : x)));
                           clear(`lines.${i}.price`);
                         }}
-                        className="ml-auto h-8 w-24 text-right text-xs"
+                        className="ml-auto h-8 w-24 text-right"
                       />
                     </td>
                     <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>

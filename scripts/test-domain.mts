@@ -2268,7 +2268,8 @@ try {
       const ok = await add({
         code,
         name: 'TD R2 บริษัท จำกัด',
-        phone: `${landline} / 081-234-5678`,
+        // a mobile nobody has: 081-234-5678 is seed customer C00001's (a duplicate inside "a / b" — 409)
+        phone: `${landline} / 08${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
         type: 'Corporate',
       });
       assert.equal(ok.status, 200, JSON.stringify(ok.body));
@@ -3624,6 +3625,7 @@ try {
       await db.execute(sql`UPDATE sale_out_hd SET record_status = 'DELETED' WHERE sale_out_hd_no = ${o.no}`);
       const edit = await post(U.admin, {
         no: o.no,
+        version: 999999, // a form opened before the cancel: the cancelled message, not "reload"
         customerCode: CUSTOMER,
         salesId: U.admin.id,
         submit: true,
@@ -3870,6 +3872,36 @@ try {
         (fresh.body.row as { phone: string }).phone,
         `0${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}`,
       );
+    });
+
+    await test('customers: a number inside a legacy two-number field is a duplicate (either side may hold two); one read across the two is not; an edit keeping its own number is not', async () => {
+      const rnd = (n: number) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
+      // a: its last 4 digits start "06", so a's tail + b's head reads as a mobile ("…06xx" + "08xxxx")
+      const [a, b, c] = [`08${rnd(4)}06${rnd(2)}`, `08${rnd(8)}`, `09${rnd(8)}`];
+      const across = a.slice(6) + b.slice(0, 6);
+      await pool.query(`
+        DELETE FROM customer WHERE customer_code IN ('TDC504', 'TDC505');
+        INSERT INTO customer (customer_code, customer_name, phone_number, record_status) VALUES
+          ('TDC504', 'TD สองเบอร์', '${a},${b}', 'ACTIVE'),
+          ('TDC505', 'TD เบอร์เดียว', '${c}', 'ACTIVE');`);
+      const save = async (body: object) =>
+        json(await customerPOST(await request('/api/customers', U.admin, { method: 'POST', body })));
+      const dup = await save({ name: 'TD เบอร์ที่สอง', phone: b });
+      assert.deepEqual(
+        [dup.status, dup.body.error],
+        [409, 'เบอร์โทรศัพท์นี้มีลูกค้าอยู่แล้ว (TDC504 TD สองเบอร์) — ห้ามสร้างซ้ำ'],
+      );
+      assert.equal((await save({ name: 'TD +66', phone: `+66 ${a.slice(1)}` })).status, 409, '+66 form of the first');
+      // the new field holds two numbers, the second one TDC505's
+      const two = await save({ name: 'TD สองเบอร์ใหม่', phone: `08${rnd(8)} / ${c}` });
+      assert.deepEqual(
+        [two.status, two.body.error],
+        [409, 'เบอร์โทรศัพท์นี้มีลูกค้าอยู่แล้ว (TDC505 TD เบอร์เดียว) — ห้ามสร้างซ้ำ'],
+      );
+      const ok = await save({ name: 'TD ข้ามเบอร์', phone: across });
+      assert.equal(ok.status, 201, JSON.stringify(ok.body));
+      const edit = await save({ code: 'TDC504', name: 'TD สองเบอร์', phone: b });
+      assert.equal(edit.status, 200, JSON.stringify(edit.body));
     });
 
     await test('R5 customers: an "unchanged" phone is the same text — "-" → "ไม่มีเบอร์" and "081abc2345678" for "081-234-5678" → 400; the same text saves and is kept as is', async () => {
@@ -5436,7 +5468,8 @@ try {
       const before = await jobState(no);
       const status = (await getJob(no))!.status;
       const calls = {
-        updateJob: () => updateJob(no, { ...jobEdit, remark: 'TD deleted' }, U.admin.id),
+        // a stale form too: the deleted message, not "reload" (lockJob checks DELETED first)
+        updateJob: () => updateJob(no, { ...jobEdit, remark: 'TD deleted', version: 999999 }, U.admin.id),
         saveRepair: () => saveRepair(no, { status, repairDetail: 'TD deleted' }, U.admin.id),
         closeJob: async () => closeJob(no, await closeInput(), U.admin.id),
         saveOutsource: async () =>
@@ -5456,11 +5489,11 @@ try {
       await setRecordStatus('jobs', no, 'ACTIVE', U.admin.id);
       assert.equal((await fieldsOf(updateJob(no, { ...jobEdit, remark: 'TD restored' }, U.admin.id))).status, 200);
     });
-    await test('a DELETED quotation: a save with a new status → 409, still DELETED; restored via records it saves', async () => {
+    await test('a DELETED quotation: a save with a new status (and a stale version) → 409 deleted, still DELETED; restored via records it saves', async () => {
       await pool.query(`
         INSERT INTO quotation_hd (quotation_no, customer_code, net_amount, quotation_status_id, create_date, create_by, is_active, record_status, reference_job_no)
           VALUES ('TDQ0961', '${CUSTOMER}', 100, 1, now(), 9101, true, 'DELETED', '');`);
-      const save = () =>
+      const save = (version?: number) =>
         fieldsOf(
           saveQuotation(
             {
@@ -5469,11 +5502,12 @@ try {
               contactName: 'TD',
               status: 'เสนอราคาแล้ว',
               lines: [{ itemType: 'SparePart', code: P.a.code, detail: 'TD', qty: 1, unit: 'ชิ้น', unitPrice: 100 }],
+              version,
             },
             U.admin.id,
           ),
         );
-      const r = await save();
+      const r = await save(999999); // a form opened before the delete: the deleted message, not "reload"
       assert.deepEqual([r.status, r.message], [409, 'ใบเสนอราคานี้ถูกลบแล้ว แก้ไขไม่ได้']);
       const row = async () =>
         (
@@ -5486,20 +5520,20 @@ try {
       assert.equal((await save()).status, 200);
       assert.equal((await row()).quotation_status_id, 2);
     });
-    await test('a DELETED customer: an edit with status Active → 409, still DELETED; restored via records it saves', async () => {
+    await test('a DELETED customer: an edit with status Active (and a stale version) → 409 deleted, still DELETED; restored via records it saves', async () => {
       await pool.query(`
         DELETE FROM customer WHERE customer_code = 'TDC961';
         INSERT INTO customer (customer_code, customer_name, phone_number, record_status) VALUES ('TDC961', 'TD ลูกค้าที่ลบ', '0819610961', 'DELETED');`);
-      const save = async () =>
+      const save = async (version?: number) =>
         json(
           await customerPOST(
             await request('/api/customers', U.admin, {
               method: 'POST',
-              body: { code: 'TDC961', name: 'TD ลูกค้าที่ลบ แก้', phone: '0819610961', status: 'Active' },
+              body: { code: 'TDC961', name: 'TD ลูกค้าที่ลบ แก้', phone: '0819610961', status: 'Active', version },
             }),
           ),
         );
-      const r = await save();
+      const r = await save(999999); // a form opened before the delete: the deleted message, not "reload"
       assert.deepEqual([r.status, r.body.error], [409, 'ลูกค้ารายนี้ถูกลบแล้ว แก้ไขไม่ได้']);
       const row = async () =>
         (await db.execute(sql`SELECT customer_name, record_status FROM customer WHERE customer_code = 'TDC961'`))
@@ -5508,22 +5542,95 @@ try {
       await setRecordStatus('customers', 'TDC961', 'ACTIVE', U.admin.id);
       assert.equal((await save()).status, 200);
     });
-    await test('a DELETED product: an edit with status Active → 409, still DELETED; restored via records it saves', async () => {
+    await test('a DELETED product: an edit with status Active (and a stale version) → 409 deleted, still DELETED; restored via records it saves', async () => {
       await pool.query(`
         DELETE FROM product_none_serial WHERE product_id = 9261;
         DELETE FROM product WHERE product_id = 9261 OR product_code = 'TDP961';
         INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9261, 'TDP961', 'TD อะไหล่ที่ลบ', 'DELETED');
         INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
           VALUES (9261, 9261, 0, 0, 0, 0, 0);`);
-      const save = () =>
-        fieldsOf(saveProduct({ sysCode: 'TDP961', name: 'TD อะไหล่ที่ลบ แก้', status: 'Active' }, U.admin.id));
-      const r = await save();
+      const save = (version?: number) =>
+        fieldsOf(saveProduct({ sysCode: 'TDP961', name: 'TD อะไหล่ที่ลบ แก้', status: 'Active', version }, U.admin.id));
+      const r = await save(999999); // a form opened before the delete: the deleted message, not "reload"
       assert.deepEqual([r.status, r.message], [409, 'อะไหล่นี้ถูกลบแล้ว แก้ไขไม่ได้']);
       const row = async () =>
         (await db.execute(sql`SELECT product_name, record_status FROM product WHERE product_code = 'TDP961'`)).rows[0];
       assert.deepEqual({ ...(await row()) }, { product_name: 'TD อะไหล่ที่ลบ', record_status: 'DELETED' });
       await setRecordStatus('products', 'TDP961', 'ACTIVE', U.admin.id);
       assert.equal((await save()).status, 200);
+    });
+    await test('a customer deleted while a form was open: new job / job moved to it / new quotation / new sale order → 409, nothing written; restored they save; documents already on it still save', async () => {
+      const { saveSaleOrder } = await import('@/server/services/sale-orders');
+      const { WALK_IN_CHANNEL } = await import('@/lib/validation/job');
+      await pool.query(`
+        DELETE FROM customer WHERE customer_code = 'TDC962';
+        INSERT INTO customer (customer_code, customer_name, phone_number, record_status) VALUES ('TDC962', 'TD ลูกค้าลบระหว่างกรอก', '', 'DELETED');`);
+      const [m] = (await db.execute<{ c: string }>(sql`SELECT model_code AS c FROM model LIMIT 1`)).rows;
+      const [jt] = (await db.execute<{ n: string }>(sql`SELECT job_type_name AS n FROM job_type LIMIT 1`)).rows;
+      const newJob = {
+        customerCode: 'TDC962',
+        jobType: jt!.n,
+        channel: WALK_IN_CHANNEL,
+        warrantyMonth: 12,
+        serial: 'TD-DELETED-CUSTOMER',
+        brand: 'TD Trail Brand', // made by the "legacy master names" test
+        modelCode: m!.c,
+        symptoms: ['TD trail sym'],
+        dueDate: addDays(today(), 5),
+      };
+      const moved = { ...jobEdit, customerCode: 'TDC962' };
+      const quote = {
+        customerCode: 'TDC962',
+        jobNo: JOB_QUOTE,
+        contactName: 'TD',
+        lines: [{ itemType: 'SparePart' as const, code: P.a.code, detail: 'TD', qty: 1, unit: 'ชิ้น', unitPrice: 100 }],
+      };
+      const order = { customerCode: 'TDC962', salesId: U.admin.id, submit: false, lines: [{ code: P.b.code, qty: 1 }] };
+      const admin = { userId: U.admin.id, isAdmin: true };
+      const written = async () =>
+        (
+          await db.execute(sql`SELECT
+            (SELECT count(*)::int FROM job j JOIN customer c ON c.customer_id = j.customer_id WHERE c.customer_code = 'TDC962') AS jobs,
+            (SELECT count(*)::int FROM quotation_hd WHERE customer_code = 'TDC962') AS quotations,
+            (SELECT count(*)::int FROM sale_out_hd WHERE customer_code = 'TDC962') AS orders`)
+        ).rows[0];
+      const before = await written();
+      const calls = {
+        createJob: () => createJob(newJob, U.admin.id),
+        updateJob: () => updateJob('J9900964', moved, U.admin.id),
+        saveQuotation: () => saveQuotation(quote, U.admin.id),
+        saveSaleOrder: () => saveSaleOrder(order, admin),
+      };
+      for (const [name, call] of Object.entries(calls)) {
+        const r = await fieldsOf(call());
+        assert.deepEqual([name, r.status, r.message], [name, 409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น']);
+      }
+      assert.deepEqual(await written(), before, 'nothing written');
+      await setRecordStatus('customers', 'TDC962', 'ACTIVE', U.admin.id);
+      for (const [name, call] of Object.entries(calls))
+        assert.deepEqual([name, (await fieldsOf(call())).status], [name, 200]);
+      assert.deepEqual({ ...(await written()) }, { jobs: 2, quotations: 1, orders: 1 });
+      // deleted again: a document already on it keeps it (an edit that does not change the customer saves)
+      const [q] = (
+        await db.execute<{ no: string }>(
+          sql`SELECT quotation_no AS no FROM quotation_hd WHERE customer_code = 'TDC962'`,
+        )
+      ).rows;
+      const [o] = (
+        await db.execute<{ no: string }>(
+          sql`SELECT sale_out_hd_no AS no FROM sale_out_hd WHERE customer_code = 'TDC962'`,
+        )
+      ).rows;
+      await setRecordStatus('customers', 'TDC962', 'DELETED', U.admin.id);
+      const keep = {
+        updateJob: () => updateJob('J9900964', { ...moved, remark: 'TD keeps a deleted customer' }, U.admin.id),
+        saveQuotation: () => saveQuotation({ ...quote, no: q!.no, remark: 'TD keep' }, U.admin.id),
+        saveSaleOrder: () => saveSaleOrder({ ...order, no: o!.no, remark: 'TD keep' }, admin),
+      };
+      for (const [name, call] of Object.entries(keep)) {
+        const r = await fieldsOf(call());
+        assert.deepEqual([name, r.status], [name, 200], JSON.stringify(r));
+      }
     });
 
     await test('closeJob with a stale version → 409 { stale }, nothing written; the current version closes', async () => {

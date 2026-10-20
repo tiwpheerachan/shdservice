@@ -88,6 +88,8 @@ export const TRACK_MSG = {
   ticketFail: 'หมดเวลา กรุณายืนยันอีกครั้ง',
   rateLimited: 'มีคำขอมากเกินไป กรุณาลองใหม่ภายหลัง',
   unavailable: 'ระบบยืนยันตัวตนไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลังหรือติดต่อศูนย์บริการ',
+  /** the request never got an answer from the app (offline, proxy error page) — as src/lib/api.ts errMsg */
+  network: 'เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
   linkExpired: 'ลิงก์นี้หมดอายุหรือใช้งานไม่ได้แล้ว',
   phoneInvalid: 'กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678',
   otpRate: 'ขอรหัสถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',

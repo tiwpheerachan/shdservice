@@ -51,7 +51,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <CommandPrimitive.Input
                   placeholder="ค้นหาเมนู… (เช่น เปิดงานใหม่, อะไหล่, รายงาน)"
-                  className="h-12 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+                  className="h-12 w-full bg-transparent text-base outline-hidden placeholder:text-muted-foreground md:text-sm"
                 />
                 <kbd className="hidden rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground sm:block">
                   Esc

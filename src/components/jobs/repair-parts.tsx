@@ -9,7 +9,7 @@ import { TableScroll } from '@/components/ui/data-table';
 import { Checkbox, NumberInput } from '@/components/ui/input';
 import type { PickableProduct } from '@/lib/product-match';
 import type { FieldErrors } from '@/lib/validation';
-import { baht } from '@/lib/utils';
+import { baht, cn } from '@/lib/utils';
 import { type Line, amountA, partTone, planOf, quoteTotal, statusOf, tickPlan } from './repair-lines';
 
 type Action = { errors: FieldErrors; clear: (key: string) => void };
@@ -19,6 +19,8 @@ type RowProps = {
   act: Action;
   upd: (id: number, patch: Partial<Line>) => void;
   remove: (l: Line) => void;
+  /** the line a second pick of the same part pointed at — highlighted */
+  dup: number | null;
 };
 
 /** การใช้อะไหล่ และการเสนอราคา — the part lines of บันทึกงานซ่อม, quotation แบบ A (Normal) / B (VIP) */
@@ -36,12 +38,26 @@ export function RepairPartsSection({
   lock?: string;
   act: Action;
 }) {
-  const upd = (id: number, patch: Partial<Line>) =>
+  /** a part picked again while its line is still open (not issued / returned): point at that line, add none */
+  const [dup, setDup] = React.useState<number | null>(null);
+  const upd = (id: number, patch: Partial<Line>) => {
+    setDup(null);
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
-  const remove = (l: Line) => setLines((s) => s.filter((x) => x.id !== l.id));
+  };
+  const remove = (l: Line) => {
+    setDup(null);
+    setLines((s) => s.filter((x) => x.id !== l.id));
+  };
+  const pick = (p: PickableProduct) => {
+    const open = lines.find((l) => !l.locked && l.code === p.sysCode);
+    setDup(open?.id ?? null);
+    if (!open) onAdd(p); // an issued line of it → a new line is the way to ask for more
+  };
+  const dupRow = lines.findIndex((l) => l.id === dup);
+  const dupLine = lines[dupRow];
   // part-line rule errors ("parts.<row>.a.qty" …) — listed under the table by row number
   const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
-  const rows = { lines, lock, act, upd, remove };
+  const rows = { lines, lock, act, upd, remove, dup };
 
   return (
     <Section
@@ -51,13 +67,18 @@ export function RepairPartsSection({
       bodyClassName="p-0"
     >
       {!lock && (
-        <div className="flex items-center gap-2 border-b border-border p-3">
-          <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <ProductPicker
-            onPick={(p) => p?.product && onAdd(p.product)}
-            placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
-            className="sm:max-w-xl"
-          />
+        <div className="border-b border-border p-3">
+          <div className="flex items-center gap-2">
+            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <ProductPicker
+              onPick={(p) => p?.product && pick(p.product)}
+              placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
+              className="sm:max-w-xl"
+            />
+          </div>
+          <p role="status" className="text-xs text-warning empty:hidden">
+            {dupLine && `${dupLine.code} อยู่ในรายการแล้ว (แถว ${dupRow + 1}) — แก้จำนวนที่แถวเดิม`}
+          </p>
         </div>
       )}
       <PartCards {...rows} />
@@ -89,7 +110,7 @@ function RemoveLine({ line, lock, remove }: { line: Line; lock?: string; remove:
 }
 
 /** phone: one card per line (the 14-column table does not fit) — the same fields, desktop keeps the table */
-function PartCards({ lines, lock, act, upd, remove }: RowProps) {
+function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
   return (
     <ul className="divide-y divide-border md:hidden">
       {lines.length === 0 && (
@@ -98,7 +119,7 @@ function PartCards({ lines, lock, act, upd, remove }: RowProps) {
         </li>
       )}
       {lines.map((l, i) => (
-        <li key={l.id} className="space-y-2 p-3 text-sm">
+        <li key={l.id} className={cn('space-y-2 p-3 text-sm', l.id === dup && 'bg-warning-soft')}>
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="num font-medium">
@@ -152,7 +173,7 @@ function PartCards({ lines, lock, act, upd, remove }: RowProps) {
                     upd(l.id, k === 'a' ? { aQty: n } : { bQty: n });
                     act.clear(`parts.${i}.${k}.qty`);
                   }}
-                  className="h-8 w-16 px-1.5 text-xs"
+                  className="h-8 w-16 px-1.5"
                 />
                 <span className="num ml-auto">{k === 'a' ? amountA(l) : baht(quote ? l.price * qty : 0)}</span>
               </div>
@@ -185,7 +206,7 @@ function PlanCells({
   lock,
   act,
   upd,
-}: Omit<RowProps, 'lines' | 'remove'> & { l: Line; i: number; k: 'a' | 'b' }) {
+}: Omit<RowProps, 'lines' | 'remove' | 'dup'> & { l: Line; i: number; k: 'a' | 'b' }) {
   const { pick, quote, qty } = planOf(l, k);
   const T = k.toUpperCase();
   return (
@@ -225,7 +246,7 @@ function PlanCells({
             upd(l.id, k === 'a' ? { aQty: n } : { bQty: n });
             act.clear(`parts.${i}.${k}.qty`);
           }}
-          className="h-7 w-14 px-1.5 text-xs"
+          className="h-7 w-14 px-1.5"
         />
       </td>
       <td className="num px-2 py-2 text-right">{k === 'a' ? amountA(l) : baht(quote ? l.price * qty : 0)}</td>
@@ -233,7 +254,7 @@ function PlanCells({
   );
 }
 
-function PartsTable({ lines, lock, act, upd, remove }: RowProps) {
+function PartsTable({ lines, lock, act, upd, remove, dup }: RowProps) {
   return (
     <TableScroll label="รายการอะไหล่" className="hidden rounded-none md:block">
       <table className="w-full min-w-[1080px] text-sm">
@@ -284,7 +305,10 @@ function PartsTable({ lines, lock, act, upd, remove }: RowProps) {
             </tr>
           ) : (
             lines.map((l, i) => (
-              <tr key={l.id} className="border-b border-border/70 hover:bg-accent/50">
+              <tr
+                key={l.id}
+                className={cn('border-b border-border/70 hover:bg-accent/50', l.id === dup && 'bg-warning-soft')}
+              >
                 <td className="num px-2 py-2 text-muted-foreground">{i + 1}</td>
                 <td className="num px-2 py-2 font-medium">{l.code}</td>
                 <td className="px-2 py-2">

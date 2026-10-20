@@ -170,7 +170,7 @@ export function ProductPicker({
               value={q}
               onValueChange={setQ}
               placeholder="พิมพ์ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้)…"
-              className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+              className="h-10 w-full bg-transparent text-base outline-hidden placeholder:text-muted-foreground md:text-sm"
             />
             {loading ? (
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="กำลังค้นหา" />

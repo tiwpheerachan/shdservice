@@ -83,9 +83,9 @@ const phoneKey = (phone10: string) => hmac(`phone:${phone10}`);
 /**
  * the mobiles a phone field holds: "081-234-5678 / +66 89 876 5432" → both. Every run of digit groups
  * (split on anything but space / dash / dot / brackets / +) that normalises on its own — never a window
- * across two numbers, which could be someone else's
+ * across two numbers, which could be someone else's. Also the customer duplicate-phone check (services/customers.ts)
  */
-function phonesIn(field: string): Set<string> {
+export function phonesIn(field: string): Set<string> {
   const out = new Set<string>();
   for (const part of field.split(/[^\d\s().+-]/)) {
     const g = part.match(/\d+/g) ?? [];

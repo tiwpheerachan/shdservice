@@ -26,6 +26,7 @@ import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { assertValid } from '@/server/validate';
 import type { z } from 'zod';
 import type { customerSave } from '@/server/contract/sales';
+import { phonesIn } from '@/server/track-otp';
 
 export type DeletedMode = StatusMode;
 
@@ -206,6 +207,18 @@ export async function getCustomerByCode(code: string): Promise<Customer | null> 
   return rows[0] ? toCustomer(rows[0]) : null;
 }
 
+/**
+ * The customer a document is written for (getCustomerByCode still returns a deleted one — old documents show
+ * theirs): one deleted while the form was open gets nothing new (409). `current` = the customer already on the
+ * document (its id or code): an edit that keeps it still saves.
+ */
+export async function customerForDocument(code: string, current?: number | string | null): Promise<Customer | null> {
+  const [r] = await db.select().from(customer).where(eq(customer.customerCode, code)).limit(1);
+  if (r?.recordStatus === RS.DELETED && current !== r.customerId && current !== r.customerCode)
+    throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
+  return r ? toCustomer(r) : null;
+}
+
 export async function getCustomerById(id: number): Promise<Customer | null> {
   const rows = await db.select().from(customer).where(eq(customer.customerId, id)).limit(1);
   return rows[0] ? toCustomer(rows[0]) : null;
@@ -296,13 +309,29 @@ export async function findCustomerConflicts(
   const phone = digits(v.phone);
   const email = normEmail(v.email);
   const taxId = digits(v.taxId);
-  const checks: { field: CustomerConflict['field']; value: string; cond: ReturnType<typeof sql> }[] = [];
-  if (phone.length >= 6)
+  const checks: {
+    field: CustomerConflict['field'];
+    value: string;
+    cond: ReturnType<typeof sql>;
+    keep?: (r: { phone: string | null }) => boolean;
+  }[] = [];
+  if (phone.length >= 6) {
+    // the whole field (+66 … = 0 …), or any mobile either side holds in a legacy "a / b" field: LIKE on the
+    // 9 digits after the 0 finds candidates, phonesIn decides (never a number read across two numbers)
+    const mobiles = [...phonesIn(str(v.phone))];
     checks.push({
       field: 'phone',
       value: phone,
-      cond: or(...phoneDigitVariants(phone).map((d) => sql`${phoneDigits} = ${d}`))!, // +66 … = 0 …
+      cond: or(
+        ...phoneDigitVariants(phone).map((d) => sql`${phoneDigits} = ${d}`),
+        ...mobiles.map((m) => sql`${phoneDigits} LIKE ${'%' + m.slice(1) + '%'}`),
+      )!,
+      keep: (r) => {
+        const theirs = phonesIn(r.phone ?? '');
+        return phoneDigitVariants(phone).includes(digits(r.phone)) || mobiles.some((m) => theirs.has(m));
+      },
     });
+  }
   if (email)
     checks.push({ field: 'email', value: email, cond: sql`lower(trim(coalesce(${customer.email},''))) = ${email}` });
   if (taxId.length >= 5)
@@ -331,19 +360,21 @@ export async function findCustomerConflicts(
             excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
           ),
         )
-        .limit(5),
+        .limit(50),
     ),
   );
   return checks.flatMap((c, k) =>
-    found[k]!.map((r) => ({
-      field: c.field,
-      value: c.value,
-      code: r.code ?? '',
-      name: r.name ?? '',
-      phone: r.phone ?? '',
-      email: r.email ?? '',
-      taxId: r.taxId ?? '',
-    })),
+    found[k]!.filter((r) => !c.keep || c.keep(r))
+      .slice(0, 5)
+      .map((r) => ({
+        field: c.field,
+        value: c.value,
+        code: r.code ?? '',
+        name: r.name ?? '',
+        phone: r.phone ?? '',
+        email: r.email ?? '',
+        taxId: r.taxId ?? '',
+      })),
   );
 }
 
@@ -412,9 +443,9 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     if (i.code) {
       const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for('update');
       if (!before) throw new HttpError(404, 'customer not found');
-      assertVersion(i.version, before.rowVersion);
       // restored through the records page (Customer del) — the form's status would revive it with edit only
       if (before.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว แก้ไขไม่ได้');
+      assertVersion(i.version, before.rowVersion);
       // "never worse": only what really changes is written. The stored row goes through the same cleaning
       // as the form (which shows a legacy address-only row's address in บรรทัด 1) — equal → the stored value
       // stays as it is (a legacy trailing space); saved unchanged = no UPDATE, no audit, no row_version bump

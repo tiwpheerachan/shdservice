@@ -80,7 +80,7 @@ export function QuotationLineTable({
                       upd(l.id, { name: e.target.value });
                       clear(`lines.${i}.detail`);
                     }}
-                    className="h-8 text-xs"
+                    className="h-8"
                     placeholder="รายละเอียดรายการ"
                   />
                 </td>
@@ -98,7 +98,7 @@ export function QuotationLineTable({
                       upd(l.id, { qty: n });
                       clear(`lines.${i}.qty`);
                     }}
-                    className="h-8 text-xs"
+                    className="h-8"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -112,7 +112,7 @@ export function QuotationLineTable({
                       upd(l.id, { price: n });
                       clear(`lines.${i}.unitPrice`);
                     }}
-                    className="h-8 text-xs"
+                    className="h-8"
                   />
                 </td>
                 <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>

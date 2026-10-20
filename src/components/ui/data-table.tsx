@@ -225,7 +225,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 }}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
-                className="h-8 pl-8 text-xs"
+                className="h-8 pl-8"
                 aria-describedby={tooShort ? 'dt-search-hint' : undefined}
               />
               {tooShort && (
@@ -408,7 +408,7 @@ export function DataTable<T extends Record<string, unknown>>({
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="h-8 w-28 text-xs"
+            className="h-8 w-28"
             aria-label="จำนวนต่อหน้า"
           >
             {PAGE_SIZES.map((n) => (

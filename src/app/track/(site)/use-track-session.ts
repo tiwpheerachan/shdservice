@@ -13,21 +13,30 @@ const SESSION_HEADER = 'x-track-session';
 export type Filters = { q: string; status: string; from: string; to: string };
 export const NO_FILTERS: Filters = { q: '', status: '', from: '', to: '' };
 
-async function call<T>(path: string, init: RequestInit & { session?: string } = {}) {
+type Reply = { ok?: boolean; error?: string; reason?: string };
+
+/**
+ * Every /track call (link and OTP flows). Never throws: no answer (offline → "Failed to fetch") or a body that
+ * is not ours (a proxy's error page) comes back as status 0 / `{ error: TRACK_MSG.network }` — Thai, like the rest.
+ */
+export async function call<T>(path: string, init: RequestInit & { session?: string } = {}) {
   const { session, ...rest } = init;
-  const r = await fetch(path, {
-    ...rest,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(session ? { [SESSION_HEADER]: session } : {}),
-      ...(rest.headers ?? {}),
-    },
-    cache: 'no-store',
-    credentials: 'same-origin',
-    referrerPolicy: 'no-referrer',
-  });
-  const d = (await r.json().catch(() => ({}))) as T & { ok?: boolean; error?: string; reason?: string };
-  return { status: r.status, d };
+  try {
+    const r = await fetch(path, {
+      ...rest,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session ? { [SESSION_HEADER]: session } : {}),
+        ...(rest.headers ?? {}),
+      },
+      cache: 'no-store',
+      credentials: 'same-origin',
+      referrerPolicy: 'no-referrer',
+    });
+    return { status: r.status, d: (await r.json()) as T & Reply };
+  } catch {
+    return { status: 0, d: { error: TRACK_MSG.network } as T & Reply };
+  }
 }
 
 const EMPTY_CODE: string[] = Array(OTP_LENGTH).fill('');

@@ -94,7 +94,7 @@ export function Guide() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="ค้นหัวข้อ…"
-              className="h-8 pl-8 pr-7 text-xs"
+              className="h-8 pl-8 pr-7"
               aria-label="ค้นหัวข้อ"
             />
             {q && (
@@ -110,7 +110,7 @@ export function Guide() {
 
           {/* small screens: jump list */}
           <select
-            className="mb-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm md:hidden"
+            className="mb-1 h-9 w-full rounded-md border border-input bg-background px-2 text-base md:hidden"
             value={active}
             onChange={(e) => jump(e.target.value)}
             aria-label="ไปที่หัวข้อ"

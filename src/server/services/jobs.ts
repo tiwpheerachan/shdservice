@@ -62,7 +62,7 @@ import {
   str,
 } from '@/server/mappers/format';
 import { QUOTE_MOVES_BY_ID, QUOTE_STEP } from '@/lib/quote-job';
-import { getCustomerByCode, getCustomerById } from './customers';
+import { customerForDocument, getCustomerById } from './customers';
 import { staffOrKeep } from './users';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
@@ -1480,6 +1480,7 @@ async function jobNow(jobNo: string): Promise<{
   shipper: string | null;
   status: number | null;
   due: string | null;
+  customerId: number | null;
 } | null> {
   const [r] = await db
     .select({
@@ -1536,6 +1537,7 @@ async function jobNow(jobNo: string): Promise<{
     shipper: r.shipper,
     status: r.status,
     due: r.due,
+    customerId: r.customerId,
   };
 }
 
@@ -1550,7 +1552,7 @@ const BRANCH_ID = 1;
 
 export async function createJob(i: JobInput, byUserId: number): Promise<JobDetail> {
   assertValid(jobSchema(), i); // a new job: every required field (400 with every failing field under its box)
-  const cust = await getCustomerByCode(str(i.customerCode));
+  const cust = await customerForDocument(str(i.customerCode));
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้าก่อนเปิดงาน');
   const lk = await lookups(i);
   if (!lk.jobTypeId) throw new HttpError(400, 'ต้องเลือกประเภทงานหลัก');
@@ -1656,7 +1658,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
   const was = await jobNow(jobNo);
   if (!was) throw jobNotFound(jobNo);
   assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
-  const cust = i.customerCode ? await getCustomerByCode(str(i.customerCode)) : null;
+  const cust = i.customerCode ? await customerForDocument(str(i.customerCode), was.customerId) : null;
   const lk = await lookups(i, was.shipper, jobNo);
   const c = costFields(i);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;

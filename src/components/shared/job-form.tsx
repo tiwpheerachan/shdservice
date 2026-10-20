@@ -889,7 +889,7 @@ export function CostSummary({
                     set(f.key, Number(e.target.value) || 0);
                     action?.clear(f.key);
                   }}
-                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
+                  className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-base outline-hidden md:text-sm transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
                 />
               </CostRow>
               {error && (

@@ -6,6 +6,7 @@ import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from '@/lib/track-public';
 import { focusOnMount, PublicJobView } from './public-job-view';
 import { TrackOtp } from './track-otp';
 import { Countdown, ExpiryWarning, useSessionClock } from './session-clock';
+import { call } from './use-track-session';
 
 /**
  * Browser side of customer tracking. Both entry points start behind the same gate:
@@ -41,25 +42,13 @@ const TS_LOAD_MS = 15_000;
 type Props = { mode: 'link'; linkToken: string } | { mode: 'form'; otpAvailable: boolean; devOtpLog: boolean };
 type Phase = 'gate' | 'ready' | 'done' | 'expired';
 
-async function post(path: string, body: Record<string, string>) {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-    credentials: 'same-origin',
-    referrerPolicy: 'no-referrer',
-  });
-  return (await r.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-    reason?: string;
-    ticket?: string;
-    job?: PublicJob;
-    expiresAt?: string;
-    url?: string;
-  };
-}
+const post = async (path: string, body: Record<string, string>) =>
+  (
+    await call<{ ticket?: string; job?: PublicJob; expiresAt?: string; url?: string }>(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  ).d;
 
 /** one Turnstile widget bound to a container while it is mounted */
 function useTurnstile(
@@ -144,7 +133,7 @@ function TrackBody(props: Props) {
         setJob(d.job);
         setPhase('done');
       } catch (e) {
-        setError(e instanceof Error && e.message ? e.message : 'เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setError(e instanceof Error && e.message ? e.message : TRACK_MSG.network);
         setArmed(false);
         setPhase('gate');
       }

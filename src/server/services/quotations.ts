@@ -13,7 +13,7 @@ import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
-import { getCustomerByCode } from './customers';
+import { customerForDocument, getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { followQuotation, getJob } from './jobs';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
@@ -300,7 +300,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
   const [before] = i.no
     ? await db
-        .select({ jobNo: quotationHd.referenceJobNo })
+        .select({ jobNo: quotationHd.referenceJobNo, customerCode: quotationHd.customerCode })
         .from(quotationHd)
         .where(eq(quotationHd.quotationNo, i.no))
         .limit(1)
@@ -311,7 +311,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     ? await db.select({ profileId: job.documentProfileId }).from(job).where(eq(job.jobNo, jobNo)).limit(1)
     : [];
   if (jobNo && !found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
-  const cust = await getCustomerByCode(str(i.customerCode));
+  const cust = await customerForDocument(str(i.customerCode), before?.customerCode);
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   const lines = (i.lines ?? [])
     .filter((l) => str(l.code) || str(l.detail))
@@ -390,9 +390,9 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         .from(quotationDt)
         .where(eq(quotationDt.quotationNo, no))
         .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
-      assertVersion(i.version, versionOf(prev.rowVersion, old));
       // restored through the records page (Quotation del) — a status change here would stamp it ACTIVE
       if (prev.recordStatus === RS.DELETED) throw new HttpError(409, 'ใบเสนอราคานี้ถูกลบแล้ว แก้ไขไม่ได้');
+      assertVersion(i.version, versionOf(prev.rowVersion, old));
       // lines are re-written only when they changed (same value read the same way as the audit diff:
       // "100" = "100.00", trimmed) — an unchanged save keeps the rows, their ids and the version
       linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);

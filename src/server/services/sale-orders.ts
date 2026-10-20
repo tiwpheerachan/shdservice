@@ -13,7 +13,7 @@ import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
-import { getCustomerByCode, addressNames } from './customers';
+import { customerForDocument, getCustomerByCode, addressNames } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
@@ -369,6 +369,7 @@ export async function saveSaleOrder(
           paymentType: saleOutHd.paymentType,
           tracking: saleOutHd.deliveryTrackingNo,
           fee: saleOutHd.feeAmount,
+          customerCode: saleOutHd.customerCode,
         })
         .from(saleOutHd)
         .where(eq(saleOutHd.saleOutHdNo, i.no))
@@ -376,7 +377,7 @@ export async function saveSaleOrder(
     : [];
   // same rules as the form (lib/validation/sale-order); an edit keeps a legacy payment type / tracking no
   assertValid(saleOrderSchema(cur && { ...cur, fee: num(cur.fee) }), i);
-  const cust = await getCustomerByCode(str(i.customerCode));
+  const cust = await customerForDocument(str(i.customerCode), cur?.customerCode);
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
   const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
@@ -500,8 +501,8 @@ export async function saveSaleOrder(
       ...(i.tracking !== undefined || !prev ? { deliveryTrackingNo: cleanTracking(i.tracking) } : {}),
     };
     if (no && prev) {
-      assertVersion(i.version, versionOf(prev.rowVersion, old));
       if (prev.recordStatus === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} แก้ไขไม่ได้`);
+      assertVersion(i.version, versionOf(prev.rowVersion, old));
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
       if (prev.approveStatusId === AS.DENIED) throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว แก้ไขไม่ได้');
       // only the creator sends it for approval (else an approver submits someone's draft and approves it)
