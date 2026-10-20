@@ -31,7 +31,7 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
       summary: `ออกลิงก์ติดตามให้ลูกค้า — ${jobNo}`,
     });
   const url = token ? trackLinkFor(token, appBaseUrl(req.headers.get('host'))) : '';
-  // `ready` (in the contract): tracking needs nothing per job any more — every job can be tracked
+  // `ready` (in the contract): always true — tracking needs nothing per job
   return NextResponse.json(
     { url, ready: true, status: await linkStatus(jobNo) },
     { headers: { 'Cache-Control': 'no-store' } },

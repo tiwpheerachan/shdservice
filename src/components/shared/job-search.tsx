@@ -15,7 +15,7 @@ import { useFieldControl } from '@/components/ui/field';
 /**
  * Which jobs the dropdown offers — each job screen narrows the list to what it
  * can act on. Typing a full job no (J2612164) always loads that job regardless
- * of scope, so nothing that used to work through the GO button is blocked.
+ * of scope.
  */
 export type JobSearchScope = 'all' | 'unassigned' | 'open' | 'closable';
 
@@ -39,13 +39,13 @@ export function JobSearch({
   id?: string;
   /** currently loaded job no — shown in the trigger */
   value?: string;
-  /** called with the chosen job no (upper-cased); the page loads it the same way GO used to */
+  /** called with the chosen job no (upper-cased) */
   onPick: (jobNo: string) => void | Promise<unknown>;
   scope?: JobSearchScope;
   className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id, { label: 'ค้นหางาน' }); // tie to the surrounding <Field> label (or name it)
+  const field = useFieldControl(id, { label: 'ค้นหางาน' });
   const popupId = React.useId();
   const [q, setQ] = React.useState('');
   // a job loaded by any route (a pick, the auto-pick of a full job no, the URL) closes the dropdown

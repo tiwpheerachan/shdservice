@@ -232,7 +232,7 @@ export function CustomerSelect({
 /* ---------- search-as-you-type (cmdk) ---------- */
 function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNew?: (prefill: string) => void }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(undefined, { label: 'ค้นหาลูกค้า' }); // tie to the surrounding <Field> label (or name it)
+  const field = useFieldControl(undefined, { label: 'ค้นหาลูกค้า' });
   const popupId = React.useId();
   const [q, setQ] = React.useState('');
   // debounced server lookup (code / name / phone / tax id / email), max 10 rows — swr keeps the

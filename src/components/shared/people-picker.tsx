@@ -36,7 +36,7 @@ export function PeoplePicker({
 }) {
   const [q, setQ] = React.useState('');
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(undefined, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const field = useFieldControl(undefined, { label: placeholder });
   const listId = React.useId();
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);

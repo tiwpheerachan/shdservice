@@ -1,6 +1,6 @@
 import 'server-only';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { and, eq, gt, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { trackBlock, trackEvent, trackRate, trackTicket } from '@/db/schema';
 import { logError } from '@/lib/log';
@@ -78,6 +78,24 @@ export async function hit(bucket: string, key: string, limit: number, windowSec:
     })
     .returning({ hits: trackRate.hits });
   return Number(r?.hits ?? 0) <= limit;
+}
+
+/**
+ * Sliding cooldown: claims `key` for `seconds` from now if it is free. ONE atomic upsert — true = claimed
+ * (the caller may go ahead), false = still cooling. Not tied to the clock's minute like `hit`, and of two
+ * concurrent claims only one gets the row. Stored in track_block as `cool:<key>` (housekeeping trims it).
+ */
+export async function claimCooldown(key: string, seconds: number): Promise<boolean> {
+  const rows = await db
+    .insert(trackBlock)
+    .values({ key: `cool:${key}`, blockedUntil: dbNowPlus(seconds) })
+    .onConflictDoUpdate({
+      target: trackBlock.key,
+      set: { blockedUntil: sql`excluded.blocked_until` },
+      setWhere: lte(trackBlock.blockedUntil, dbNow),
+    })
+    .returning({ key: trackBlock.key });
+  return rows.length > 0;
 }
 
 export async function isBlocked(key: string): Promise<boolean> {
@@ -253,7 +271,7 @@ export function logEvent(
 export async function housekeeping() {
   try {
     // the longest window is a day (otp_*_day, started at 00:00 UTC): a row younger than that may still be
-    // counting — trimming at 2 h used to reset the daily caps and the wrong-code lock several times a day
+    // counting — trimming it sooner would reset the daily caps and the wrong-code lock
     await db.delete(trackRate).where(lt(trackRate.windowStart, sql`now() - interval '25 hours'`));
     await db.delete(trackBlock).where(lt(trackBlock.blockedUntil, dbNow));
     await db.delete(trackEvent).where(lt(trackEvent.at, sql`now() - interval '30 days'`));

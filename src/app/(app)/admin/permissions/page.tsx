@@ -81,7 +81,7 @@ export default function PermissionsPage() {
   // locked, whatever its rows say (they are saved back as stored); Job Take stays a real tick
   const implicit = (menu: string) => role === ADMIN_USER_TYPE && adminImplicit(menu as Module);
 
-  // ticked but not saved: switching role used to drop these edits without a word
+  // ticked but not saved: switching role asks before dropping these edits
   const FIELDS = ['add', 'edit', 'del', 'view'] as const;
   const savedMap = React.useMemo(() => buildMap(perms), [perms]);
   const dirty = [...MENUS, ...RIGHT_NAMES].some((menu) => {

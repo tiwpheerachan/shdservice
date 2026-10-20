@@ -46,7 +46,6 @@ export async function seed(db: { query(text: string): Promise<unknown> }): Promi
   `);
 }
 
-// standalone: npx tsx tests/seed.mts
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   assertLocal(TEST_DATABASE_URL);
   const pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1, options: '-c TimeZone=Asia/Bangkok' });

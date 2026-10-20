@@ -99,6 +99,8 @@ export type JobFormState = {
   serial: string;
   brand: string;
   modelCode: string;
+  /** the stored model's name — shown while the model lists load (not sent: the API takes the code) */
+  modelName: string;
   modelDetail: string;
   receptionDate: string;
   receptionTrackingNo: string;
@@ -151,6 +153,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   serial: '',
   brand: '',
   modelCode: '',
+  modelName: '',
   modelDetail: '',
   receptionDate: '',
   receptionTrackingNo: '',
@@ -214,6 +217,7 @@ export function fromJob(j: JobDetail): JobFormState {
     serial: j.serial,
     brand: j.brand,
     modelCode: j.modelCode,
+    modelName: j.modelName,
     modelDetail: j.modelDetail,
     receptionDate: j.receptionDate,
     receptionTrackingNo: j.receptionTrackingNo,
@@ -335,10 +339,11 @@ const errorKey = (k: keyof JobFormState): string => (k === 'customer' ? 'custome
 
 const FormCtx = React.createContext<Ctx | null>(null);
 
-/** a job screen's page: the form state + the Suspense useJob's useSearchParams needs */
-export function JobScreen({ children }: { children: React.ReactNode }) {
+/** a job screen's page: the form state + the Suspense useJob's useSearchParams needs.
+ *  `initial`: the form built from the job that came with the page (fromJob), so the server HTML is the filled form */
+export function JobScreen({ initial, children }: { initial?: JobFormState; children: React.ReactNode }) {
   return (
-    <JobFormProvider>
+    <JobFormProvider initial={initial}>
       <React.Suspense fallback={null}>{children}</React.Suspense>
     </JobFormProvider>
   );
@@ -603,6 +608,32 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
 
 /* ---------------- product info ---------------- */
 
+/** a symptom picker's lists (by usage, else the plain list; the model's common ones on top) — read once the
+ *  picker is first focused / pressed, not with the page: the chosen symptoms show from the form meanwhile */
+export function useSymptomLists(modelCode: string) {
+  const [wanted, setWanted] = React.useState(false);
+  const symptoms = useSymptoms('active', wanted);
+  const stats = useSymptomStats(wanted);
+  const { data: suggested } = useModelSymptoms(modelCode, wanted);
+  const options = stats.data.length ? stats.data : symptoms.data.map((sy) => ({ id: Number(sy.id), name: sy.name }));
+  return {
+    // empty only when both failed
+    lookup: {
+      error: options.length ? null : (stats.error ?? symptoms.error),
+      refetch: () => {
+        stats.refetch();
+        symptoms.refetch();
+      },
+    },
+    picker: {
+      options,
+      suggested,
+      loading: !options.length && (stats.loading || symptoms.loading),
+      onWant: () => setWanted(true),
+    },
+  };
+}
+
 /** อาการเสียหลัก (มาตรฐาน) — searchable multi-select bound to the form's symptoms (first = main);
  *  ordered by real usage, with the chosen model's common symptoms on top. Used by ProductSection
  *  and the Out-Source "รายละเอียดการซ่อม" tab. */
@@ -610,25 +641,15 @@ export function MainSymptomField() {
   const { s, set, errors } = useJobForm();
   // the model's name below: the brand's list ModelField reads anyway (no brand → its code)
   const { data: MODELS } = useModels('active', { brand: s.brand, enabled: !!s.brand });
-  const { data: SYMPTOMS, error: symptomsError, refetch: retrySymptoms } = useSymptoms();
-  const { data: SYMPTOM_STATS, error: statsError, refetch: retryStats } = useSymptomStats();
-  const { data: MODEL_SYMPTOMS } = useModelSymptoms(s.modelCode);
+  const lists = useSymptomLists(s.modelCode);
   const symptoms = s.symptoms;
-  // the picker reads the stats, else the plain list — empty only when both failed
-  const listError = SYMPTOM_STATS.length || SYMPTOMS.length ? null : (statsError ?? symptomsError);
   return (
     <Field
       label="อาการเสียหลัก (มาตรฐาน)"
       required
       wide
       error={errors.symptoms}
-      lookup={{
-        error: listError,
-        refetch: () => {
-          retryStats();
-          retrySymptoms();
-        },
-      }}
+      lookup={lists.lookup}
       hint={
         symptoms.length
           ? `เลือกแล้ว ${symptoms.length} อาการ · ★ ${symptoms[0]} = อาการหลัก`
@@ -638,8 +659,7 @@ export function MainSymptomField() {
       <SymptomPicker
         value={symptoms}
         onChange={(names) => set('symptoms', names)}
-        options={SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))}
-        suggested={MODEL_SYMPTOMS}
+        {...lists.picker}
         suggestedLabel={
           s.modelCode
             ? `อาการที่พบบ่อยของรุ่น ${MODELS.find((m) => m.code === s.modelCode)?.name ?? s.modelCode}`

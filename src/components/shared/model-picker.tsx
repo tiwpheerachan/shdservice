@@ -65,7 +65,7 @@ export function ModelPicker({
   id?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(id, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const field = useFieldControl(id, { label: placeholder });
   const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const rows = React.useMemo(() => matchModels(models, q), [models, q]);

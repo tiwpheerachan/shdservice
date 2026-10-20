@@ -1,109 +1,16 @@
-'use client';
+import { Prefetched } from '@/data/db';
+import { quotationKey, recordNo } from '@/data/keys';
+import { prefetch, searchOf, type SearchParams } from '@/server/prefetch';
+import EditQuotationPage from './page-client';
 
-import * as React from 'react';
-import { useSearchParams } from 'next/navigation';
-import { PageHeader } from '@/components/shared/page-header';
-import { QuotationForm, type QuotationFormHandle, type QuotationLoaded } from '@/components/shared/quotation-form';
-import { PrintButton } from '@/components/shared/print-button';
-import { FormActions, JobLookupBar, VIEW_ONLY } from '@/components/shared/job-form';
-import { RecordGate } from '@/components/shared/record-gate';
-import { useToast } from '@/components/ui/toast';
-import { postJson, errMsg } from '@/lib/api';
-import { useRecord } from '@/lib/use-record';
-import { useAccess } from '@/lib/use-access';
-import { quoteJobNote } from '@/lib/quote-job';
-
-function EditQuotation() {
-  const { push } = useToast();
-  const { can } = useAccess();
-  const sp = useSearchParams();
-  const initialNo = sp.get('no') ?? '';
-  const form = React.useRef<QuotationFormHandle>(null);
-  // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
-  // once, when it mounts, so a new record always starts from a clean form
-  const [version, setVersion] = React.useState(0);
-  // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
-  const {
-    data: loaded,
-    setData: setLoaded,
-    loading,
-    error,
-    find: load,
-  } = useRecord<QuotationLoaded>({
-    url: (n) => `/api/quotations/${encodeURIComponent(n)}`,
-    pick: (d: { quotation: QuotationLoaded }) => d.quotation,
-    initial: initialNo,
-    onRecord: () => setVersion((v) => v + 1),
-    onLoaded: (d) => {
-      push({ kind: 'success', title: 'เรียกข้อมูลใบเสนอราคาสำเร็จ', desc: d.no });
-      window.history.replaceState(null, '', `?no=${encodeURIComponent(d.no)}`); // a refresh keeps this one
-    },
-    onMissing: (n) => push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: n }),
-  });
-  const no = loaded?.no ?? '';
-  const [saving, setSaving] = React.useState(false);
-
-  const save = async () => {
-    const p = form.current?.payload();
-    if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
-    if (!form.current?.validate()) return;
-    setSaving(true);
-    try {
-      const d = await postJson<{ quotation: QuotationLoaded }>('/api/quotations', {
-        ...p,
-        no,
-        version: loaded?.version,
-      });
-      setLoaded(d.quotation);
-      push({ kind: 'success', title: 'บันทึกการแก้ไขใบเสนอราคาแล้ว', desc: d.quotation.no });
-      // a new status that leaves the job where it is says so (the saved job is the one after the save)
-      const note = p.status !== loaded?.status ? quoteJobNote(p.status, d.quotation.job) : '';
-      if (note) push({ kind: 'info', title: 'สถานะงานไม่เปลี่ยน', desc: note });
-    } catch (e) {
-      if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
-    } finally {
-      setSaving(false);
-    }
-  };
-
+/** the quotation from ?no= in the HTML (the page's useRecord) */
+export default async function Page({ searchParams }: { searchParams: SearchParams }) {
+  const no = recordNo(searchOf(await searchParams).get('no') ?? ''); // the page's initialNo
+  const key = no ? quotationKey(no) : '';
+  const answer = key ? ((await prefetch([key]))[key] as { quotation: unknown } | undefined) : undefined;
   return (
-    <>
-      <PageHeader title="แก้ไขใบเสนอราคา" description="ระบุหมายเลขใบเสนอราคาเพื่อเรียกข้อมูลมาแก้ไข" />
-      <JobLookupBar
-        id="quotation-no"
-        label="ระบุ หมายเลขใบเสนอราคา"
-        placeholder="Q2600462"
-        initial={initialNo}
-        onFind={(v) => load(v)}
-      />
-      <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบเสนอราคา" searchId="quotation-no">
-        <QuotationForm key={version} ref={form} mode="edit" quotationNo={no || undefined} initial={loaded} />
-        <FormActions
-          saveLabel="บันทึกการแก้ไข"
-          onSave={save}
-          saving={saving}
-          cancelHref="/quotation/list"
-          denied={can('Quotation', 'edit') ? undefined : VIEW_ONLY}
-          extra={
-            <PrintButton
-              label="พิมพ์ใบเสนอราคา"
-              kind="quotation"
-              no={no ?? ''}
-              profileId={loaded?.documentProfileId}
-              href={`/print/quotation/${encodeURIComponent(no ?? '')}`}
-              disabled={!no}
-            />
-          }
-        />
-      </RecordGate>
-    </>
-  );
-}
-
-export default function EditQuotationPage() {
-  return (
-    <React.Suspense fallback={null}>
-      <EditQuotation />
-    </React.Suspense>
+    <Prefetched fallback={answer ? { [key]: answer.quotation } : {}}>
+      <EditQuotationPage />
+    </Prefetched>
   );
 }

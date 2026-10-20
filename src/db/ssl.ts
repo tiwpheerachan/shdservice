@@ -4,7 +4,7 @@
  * Supabase pooler: always encrypted. With DB_SSL_CA (PEM text; literal "\n" escapes accepted for
  * one-line env fields) the server certificate is VERIFIED against it — Supabase signs the pooler
  * with its own "Supabase Root 2021 CA" (not in Node's default store), see .env.example.
- * Without it: encrypted but unverified, as before, so a deploy without the variable keeps working.
+ * Without it: encrypted but unverified, so a deploy without the variable keeps working.
  * Local docker: no TLS.
  */
 export function dbSsl(url: string) {

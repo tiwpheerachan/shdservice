@@ -16,8 +16,7 @@ type ToastInput = {
 };
 
 /**
- * App toasts — same `useToast().push({ kind, title, desc })` API as before, now
- * rendered by Sonner (stacking, pause on hover, swipe to dismiss, a11y live region).
+ * App toasts — `useToast().push({ kind, title, desc })`, rendered by Sonner (stacking, pause on hover, swipe to dismiss, a11y live region).
  */
 const push = (t: ToastInput) => {
   const fn =

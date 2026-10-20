@@ -30,7 +30,7 @@ export function OverdueBell() {
   // when a tab comes back after that long; a failed answer keeps the last one on screen
   const poll = { quiet: true, refreshInterval: POLL_MS, revalidateOnFocus: true };
   // first read a few seconds after the page has finished loading — its JS and its own data go first on a
-  // slow phone (requestIdleCallback fired during the network wait, measured 2026-10-19) — or at once when
+  // slow phone (requestIdleCallback fired during the network wait) — or at once when
   // the bell is opened
   const [idle, setIdle] = React.useState(false);
   React.useEffect(() => {

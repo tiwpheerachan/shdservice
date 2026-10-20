@@ -26,7 +26,6 @@ export function isOwner(email: string): boolean {
   return ownerEmails().includes(email.trim().toLowerCase());
 }
 
-/** True when this role + status combination is allowed to use the app. */
 export function isApproved(role: string | null | undefined, status: string | null | undefined): boolean {
   const r = (role || '').trim();
   const s = (status || '').trim();

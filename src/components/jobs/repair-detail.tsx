@@ -3,14 +3,13 @@
 import * as React from 'react';
 import { Wrench } from 'lucide-react';
 import { Section } from '@/components/shared/section';
-import { useJobForm } from '@/components/shared/job-form';
+import { useJobForm, useSymptomLists } from '@/components/shared/job-form';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { SymptomPicker } from '@/components/shared/symptom-picker';
 import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { REPAIR_STATUS_OPTIONS } from '@/data/options';
-import { useSymptoms, useSymptomStats, useModelSymptoms } from '@/data/db';
 import { useAccess } from '@/lib/use-access';
 import type { JobDetail } from '@/lib/use-job';
 import type { FieldErrors } from '@/lib/validation';
@@ -76,12 +75,8 @@ export function RepairDetailSection({
   /** why the chosen status is refused while parts are not issued */
   partsBlock?: string;
 }) {
-  const { data: SYMPTOMS, error: symptomsError, refetch: retrySymptoms } = useSymptoms();
-  const { data: SYMPTOM_STATS, error: statsError, refetch: retryStats } = useSymptomStats();
-  // the symptom picker reads the stats, else the plain list — empty only when both failed
-  const symptomListError = SYMPTOM_STATS.length || SYMPTOMS.length ? null : (statsError ?? symptomsError);
   const { s: form } = useJobForm();
-  const { data: MODEL_SYMPTOMS } = useModelSymptoms(form.modelCode);
+  const symptomLists = useSymptomLists(form.modelCode);
   const { has } = useAccess();
   // a closed job keeps its status unless the role has Job Reopen (setStatus refuses it otherwise)
   const reopenLock = form.statusGroup === 'Finished' && !has('Job Reopen') ? REOPEN_LOCKED : undefined;
@@ -96,26 +91,12 @@ export function RepairDetailSection({
   return (
     <Section title="รายละเอียดการซ่อม" icon={Wrench}>
       <FieldGrid>
-        <Field
-          label="อาการเสียที่ตรวจพบ"
-          wide
-          hint="เลือกได้ 1 อาการ"
-          lookup={{
-            error: symptomListError,
-            refetch: () => {
-              retryStats();
-              retrySymptoms();
-            },
-          }}
-        >
+        <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ" lookup={symptomLists.lookup}>
           <SymptomPicker
             multiple={false}
             value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
             onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? '' }))}
-            options={
-              SYMPTOM_STATS.length ? SYMPTOM_STATS : SYMPTOMS.map((sy) => ({ id: Number(sy.id), name: sy.name }))
-            }
-            suggested={MODEL_SYMPTOMS}
+            {...symptomLists.picker}
             suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
             placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
           />

@@ -46,7 +46,7 @@ export function JobFilterBar({
     [STAFF],
   );
   const all = { placeholder: 'ทั้งหมด', emptyLabel: 'ทั้งหมด' };
-  // every status in the DB (25, incl. ones the old hard-coded list missed), in workflow order
+  // every status in the DB, in workflow order
   const { data: JOB_STATUSES, ...statusesLookup } = useJobStatuses();
   const STATUS_OPTIONS = React.useMemo(
     () =>

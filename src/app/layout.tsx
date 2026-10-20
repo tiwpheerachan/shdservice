@@ -8,9 +8,8 @@ import { ConfirmProvider } from '@/components/ui/confirm';
 // Self-hosted at build time (next/font): no request to fonts.googleapis.com on
 // every page load and no render-blocking external stylesheet. Exposed as CSS
 // variables that globals.css folds into --font-sans.
-// Noto Sans Thai only: it carries Latin too and comes first in --font-sans, so Inter never drew
-// a glyph — it was 7 files (48 KB preloaded) for nothing. No `weight`: it is a variable font, one
-// file per subset covers 400–700 (all four are used: font-medium/semibold/bold, <th>).
+// Noto Sans Thai only: it carries Latin too and comes first in --font-sans, so a second (Latin)
+// font would never draw a glyph. No `weight`: it is a variable font, one file per subset covers 400–700 (all four are used: font-medium/semibold/bold, <th>).
 const notoThai = Noto_Sans_Thai({
   subsets: ['thai', 'latin'],
   variable: '--font-noto-thai',

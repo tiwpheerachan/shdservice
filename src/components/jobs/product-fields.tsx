@@ -193,8 +193,9 @@ export function ModelField({ f: { s, patch, errors } }: P) {
         <ModelPicker
           models={modelOptions}
           value={s.modelCode}
-          fallbackName={[...own, ...MODELS].find((m) => m.code === s.modelCode)?.name}
-          onPick={(m) => patch({ modelCode: m.code, brand: m.brand || s.brand })}
+          // the stored name while the lists load: the field reads the same before and after
+          fallbackName={[...own, ...MODELS].find((m) => m.code === s.modelCode)?.name ?? (s.modelName || undefined)}
+          onPick={(m) => patch({ modelCode: m.code, modelName: m.name, brand: m.brand || s.brand })}
         />
       </div>
     </Field>

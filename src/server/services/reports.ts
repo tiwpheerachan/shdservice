@@ -87,7 +87,7 @@ export async function quotationReportSummary(f: QuotationFilters, q = '') {
         .$dynamic(),
     ).where(quotationWhere(q, f)),
   );
-  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row');
   return {
     total: Number(r.total),
     agreed: num(r.agreed),
@@ -112,7 +112,7 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = '') {
         .$dynamic(),
     ).where(saleOrderWhere(q, f)),
   );
-  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row');
   const approved = num(r.approved);
   const amount = num(r.amount);
   return {

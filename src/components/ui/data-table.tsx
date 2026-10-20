@@ -17,9 +17,10 @@ import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';
 import { Input, Select } from './input';
 import { Skeleton } from './skeleton';
 import { Button } from './button';
+import { PAGE_SIZES } from '@/data/keys';
 
 /** the page-size choices (also what a ?size= in a shared job-list link may be) */
-export const PAGE_SIZES = [10, 25, 50, 100];
+export { PAGE_SIZES };
 
 export type Column<T> = {
   key: string;
@@ -146,8 +147,8 @@ export function DataTable<T extends Record<string, unknown>>({
   }, []);
 
   // server mode: debounce the search box, then let the caller refetch. A term
-  // shorter than SEARCH_MIN_CHARS is never sent (the trigram indexes cannot use
-  // it) — the box shows a hint and the table keeps the unfiltered list.
+  // shorter than SEARCH_MIN_CHARS is never sent — the box shows a hint and the
+  // table keeps the unfiltered list.
   const tooShort = !!server && q.trim().length > 0 && q.trim().length < SEARCH_MIN_CHARS;
   const [dq, setDq] = React.useState('');
   React.useEffect(() => {

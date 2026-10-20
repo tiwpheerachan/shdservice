@@ -12,7 +12,6 @@ export function useUserActions(refetch: () => void) {
   const { push } = useToast();
   const confirm = useConfirm();
 
-  // Quick inline actions (revoke / restore) — write straight to the DB and refetch.
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const quickSet = async (r: User, patch: Partial<UserForm>, okTitle: string) => {
     setBusyId(r.id);
@@ -33,7 +32,7 @@ export function useUserActions(refetch: () => void) {
     }
   };
 
-  // ถอนสิทธิ์ / คืนสิทธิ์ — one click used to act at once; ask first, naming the person
+  // ถอนสิทธิ์ / คืนสิทธิ์ — ask first, naming the person
   const setActive = async (r: User, active: boolean) => {
     const ok = await confirm({
       tone: active ? 'default' : 'danger',

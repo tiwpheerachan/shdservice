@@ -31,8 +31,7 @@ const DEFAULTS: Record<RunningType, { prefix: string; yearly: boolean; len: numb
 
 /**
  * Job / Quotation / SaleOrder rows carry company_id = 1 in the legacy table
- * (normalised in 0007, re-asserted in 0010). Numbers are ONE series per document
- * type for the whole company — "ออกเอกสารในนาม" never changes the number.
+ * (normalised in 0007, re-asserted in 0010).
  */
 const COMPANY_ROWS: ReadonlySet<RunningType> = new Set(['Job', 'Quotation', 'SaleOrder']);
 

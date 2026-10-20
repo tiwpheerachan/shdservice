@@ -120,7 +120,7 @@ export function computeTotals(i: {
 /**
  * The job's parts the technician ticked "เสนอ" in the repair screen → quotation lines, from the set
  * the quotation is for: type A = set A (is_quotation / request_qty), type B = set B (is_quotation_b /
- * request_qty_b). Type B used to take set A's lines, so a B quotation never counted the B lines.
+ * request_qty_b).
  */
 export function quotedParts(
   parts: {

@@ -38,7 +38,7 @@ function createPool() {
     // and stop a runaway query before it holds a connection for minutes
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
-    // honoured by a direct connection (local docker); the Supabase pooler DROPS it (measured 2026-10-16) —
+    // honoured by a direct connection (local docker); the Supabase pooler DROPS it —
     // there the timezone comes from the database (drizzle/0032) and timeouts from withStatementTimeout()
     options: '-c TimeZone=Asia/Bangkok -c statement_timeout=30000',
   });

@@ -803,7 +803,7 @@ try {
           body: { code: CUSTOMER, name, phone: '02-000-0000', line, version: ver },
         }),
       );
-    // a real change moves the version (a save that changes nothing keeps it — Round 6)
+    // a real change moves the version (a save that changes nothing keeps it)
     assert.equal((await save('ลูกค้า ทดสอบโดเมน', v, `td-${crypto.randomUUID().slice(0, 8)}`)).status, 200);
     assert.equal((await save('TD ชื่อทับ', v)).status, 409);
     const [c] = (
@@ -1005,7 +1005,7 @@ try {
     assert.equal((await qty(P.b.code)).remain, 10);
   });
 
-  // ==== row_version on no-op saves (drizzle/0027) + legacy บาท discount on quotations (agent B, 2026-10-15) ====
+  // row_version on no-op saves: drizzle/0027
   console.log('\nrow_version: a save that changes nothing keeps the version; บาท discounts survive an edit');
   const { getQuotation } = await import('@/server/services/quotations');
   const { parseDiscount } = await import('@/lib/validation/quotation');
@@ -1294,7 +1294,6 @@ try {
     await setTracking('TDS0001', 'TRK-NEW', U.admin.id);
     assert.deepEqual((await lastChanges('sale_out_hd', 'TDS0001'))?.deliveryTrackingNo, ['TRK-OLD', 'TRK-NEW']);
   });
-  // ==== field formats: products / customers / quotation / sale order / stock / users (agent P, 2026-10-15) ====
   console.log('\nField formats (agent P) — the API refuses what the forms refuse, legacy values still save');
   {
     const { saveProduct } = await import('@/server/services/stock');
@@ -1677,7 +1676,6 @@ try {
     });
   }
 
-  // ── Round 1: sale orders + customers + addresses ──
   console.log('\nRound 1 — sale orders + customers + addresses');
   {
     const newSO = async (code: string) => {
@@ -1697,7 +1695,7 @@ try {
         await soApprovePOST(
           await request(`/api/sale-orders/${no}/approve`, U.admin, {
             method: 'POST',
-            body: { decision, remark: 'TD reason' }, // deny / send back need a reason (round 2)
+            body: { decision, remark: 'TD reason' }, // deny / send back need a reason
           }),
           { params: Promise.resolve({ no }) },
         )
@@ -1786,7 +1784,6 @@ try {
       assert.equal(withPrefix('อ.', 'กิ่งอำเภอบ้านแฮด'), 'กิ่งอำเภอบ้านแฮด');
     });
   }
-  // ── Round 1: app shell + admin users ──
   console.log('\nRound 1 — admin users: an admin cannot revoke, disable, delete or re-role their own account');
   {
     const { upsertUser, setUserDeleted } = await import('@/server/services/users');
@@ -1813,7 +1810,6 @@ try {
       assert.equal(await statusOf(upsertUser({ ...self, status: 'Active' }, U.admin.id)), 200);
     });
   }
-  // ── Round 1: stock + products ──
   console.log('\nRound 1 — stock + products');
   {
     const { saveProduct, getProduct, pageProducts, listProductsLite, jobsWithPendingParts } =
@@ -1881,7 +1877,6 @@ try {
       );
     });
   }
-  // ── Round 1: jobs ──
   console.log('\nRound 1 — jobs (repair / close / out-source / job list)');
   {
     const { markPartsIssued, listJobs } = await import('@/server/services/jobs');
@@ -2024,7 +2019,6 @@ try {
       );
     });
   }
-  // ── Round 2: stock + products ──
   console.log('\nRound 2 — stock + products');
   {
     const { saleOrdersToPick, listSaleOrderPickLines, issueForSaleOrder, jobsWithPendingParts } =
@@ -2131,7 +2125,6 @@ try {
       await db.execute(sql`UPDATE sale_out_dt SET pick_inventory_no = ${line.pickNo} WHERE sale_out_hd_no = ${no}`);
     });
   }
-  // ── Round 2: sale orders + quotations + customers ──
   console.log('\nRound 2 — sale orders + quotations + customers');
   {
     const { SELF_APPROVE, REASON_REQUIRED, getSaleOrder } = await import('@/server/services/sale-orders');
@@ -2290,7 +2283,6 @@ try {
       assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
     });
   }
-  // ── Round 2: customer /track + documents + migration 0028 ──
   console.log('\nRound 2 — customer /track, documents, shipping profiles, migration 0028');
   {
     const tracking = await import('@/server/services/tracking');
@@ -2350,7 +2342,7 @@ try {
         pub.docs.find((d) => d.kind === 'quotation')!.label,
         /หมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่/,
       );
-      // round 3: the status line no longer asks for an answer to it either
+      // the status line does not ask for an answer to it either
       assert.equal(pub.stepLabel, 'ใบเสนอราคาหมดอายุแล้ว — ติดต่อศูนย์เพื่อขอใบเสนอราคาใหม่');
     });
     await test('R2 track: one received date — header, timeline and receipt all show job_reception_date (1900 → opened)', async () => {
@@ -2427,7 +2419,6 @@ try {
       assert.deepEqual(await state(), want, 'second run changes nothing');
     });
   }
-  // ── Round 2: app shell + admin + dashboard ──
   console.log('\nRound 2 — app shell + admin + dashboard');
   {
     const { provisionFailure, upsertUser, setUserDeleted } = await import('@/server/services/users');
@@ -2490,7 +2481,6 @@ try {
       }
     });
   }
-  // ── Round 2: jobs ──
   console.log('\nRound 2 — jobs (underpayment / closed-job money / take-over / walk-in)');
   {
     const { saveSwapRefund } = await import('@/server/services/jobs');
@@ -2633,7 +2623,6 @@ try {
       );
     });
   }
-  // ── Round 3: customer /track + print documents ──
   console.log('\nRound 3 — customer /track + print documents');
   {
     const tracking = await import('@/server/services/tracking');
@@ -2716,7 +2705,6 @@ try {
       );
     });
   }
-  // ── Round 3: sale orders + quotations + customers + stock ──
   console.log('\nRound 3 — sale orders + quotations + customers + stock');
   {
     const { SELF_APPROVE, SELF_APPROVE_SALES, getSaleOrder, pageSaleOrders } =
@@ -2860,7 +2848,6 @@ try {
       );
     });
   }
-  // ── Round 3: app shell + admin ──
   console.log('\nRound 3 — app shell + admin');
   {
     const { GET: meGET } = await import('@/app/api/sso/me/route');
@@ -2957,7 +2944,6 @@ try {
       await upsertUser(self, U.admin.id);
     });
   }
-  // ── Round 3: jobs ──
   console.log('\nRound 3 — jobs (closed-job status / เสนอ-only parts / out-source receive / close / export / phone)');
   {
     const { saveSwapRefund, markPartsIssued, listJobs } = await import('@/server/services/jobs');
@@ -3056,7 +3042,6 @@ try {
       assert.ok(!(await found({ q: '+66899993467' })), 'another number');
     });
   }
-  // ── Round 4: sale orders ──
   console.log('\nRound 4 — sale orders');
   {
     const { NOT_APPROVER, SUBMIT_CREATOR_ONLY } = await import('@/server/services/sale-orders');
@@ -3123,7 +3108,6 @@ try {
       assert.equal(await statusOfSO(other), 2);
     });
   }
-  // ── Round 4: jobs ──
   console.log('\nRound 4 — jobs (charged parts / deposit refund / who may take a job)');
   {
     const { listStaff } = await import('@/server/services/users');
@@ -3213,7 +3197,6 @@ try {
       assert.equal(await assigned(), 'TD td-admin เปลี่ยนผู้รับงานจาก TD td-clerk เป็น TD td-engineer');
     });
   }
-  // ── Round 4: landing page + notification bell ──
   console.log('\nRound 4 — landing page + bell (sale orders waiting for approval)');
   {
     const { GET: pendingGET } = await import('@/app/api/alerts/sale-orders-pending/route');
@@ -3260,7 +3243,6 @@ try {
       assert.equal(landingPath({ isAdmin: false, userType: 'Manager' }, {}), '/admin/guide', 'no Sale Order view');
     });
   }
-  // ── Round 5: customer /track + print documents ──
   console.log('\nRound 5 — customer /track + print documents');
   {
     const tracking = await import('@/server/services/tracking');
@@ -3340,7 +3322,6 @@ try {
       assert.deepEqual([s(4, today, 6), s(5, today, 2)], ['declined', 'cancelled']);
     });
   }
-  // ── Round 5: auth + admin ──
   console.log('\nRound 5 — sign-out marker, own email, deleted users, cancel / restore, bell, migration 0029');
   {
     const { GET: callbackGET } = await import('@/app/api/sso/callback/route');
@@ -3535,7 +3516,6 @@ try {
       assert.equal(canViewPath(false, g, '/sale/orders/new'), false);
     });
   }
-  // ── Round 5: sale orders + quotations + customers + stock ──
   console.log('\nRound 5 — sale orders + quotations + customers + stock');
   {
     const { getSaleOrder } = await import('@/server/services/sale-orders');
@@ -3940,7 +3920,6 @@ try {
       assert.equal((await qty(P.a.code)).remain, 11, 'back on the shelf');
     });
   }
-  // ── Round 5: jobs ──
   console.log(
     '\nRound 5 — jobs (refund kept at close / locked close / parts before close / status paths / never worse)',
   );
@@ -4313,7 +4292,6 @@ try {
       assert.ok(actions.includes('ASSIGN') && actions.includes('STATUS'), actions.join(','));
     });
   }
-  // ── Round 6: session messages ──
   console.log('\nRound 6 — session messages');
   {
     const { GET: meGET } = await import('@/app/api/sso/me/route');
@@ -4339,7 +4317,6 @@ try {
       assert.deepEqual([rfIdle.status, ((await rfIdle.json()) as { reason?: string }).reason], [401, 'expired']);
     });
   }
-  // ── Round 6: jobs + quotation → job status ──
   console.log('\nRound 6 — jobs (a quotation moves its job / รับงานเอง / no engineer → งานใหม่)');
   {
     const { invalidate } = await import('@/server/cache');
@@ -4447,7 +4424,6 @@ try {
       assert.deepEqual([await statusIdOf('TDJ0703'), await logRows('TDJ0703')], [11, []]);
     });
   }
-  // ── Round 6: customers + products + sale-order slip ──
   console.log('\nRound 6 — customers + products + sale-order slip');
   {
     const { getCustomerByCode } = await import('@/server/services/customers');
@@ -4607,7 +4583,6 @@ try {
       assert.equal((await upload(U.admin, no)).status, 409, 'cancelled');
     });
   }
-  // ── Round 6: special rights ──
   console.log('\nRound 6 — special rights (app_config rows instead of role names in code) + migration 0030');
   {
     const { savePermissions, listStaff } = await import('@/server/services/users');
@@ -4820,7 +4795,6 @@ try {
       }
     });
   }
-  // ── Round 7: small fixes ──
   console.log('\nRound 7 — small fixes (rights names, System Admin on the permissions page)');
   {
     const { RIGHTS, PAGE_MODULES, adminImplicit, checkGrant, checkRight, rightLabel, noRight } =
@@ -4858,7 +4832,7 @@ try {
       says(REOPEN_LOCKED, 'Job Reopen');
       says(MONEY_LOCKED, 'Job Money After Close');
       says(moneyLockedMsg('ค่าบริการ'), 'Job Money After Close');
-      // the names the testers saw disagree (page vs error) are gone: the page shows RIGHTS[r] itself
+      // the page shows RIGHTS[r] itself, so the page and the error name a right the same way
       assert.equal(RIGHTS['SO Approve'], 'อนุมัติใบสั่งขาย');
       assert.equal(RIGHTS['Job Reopen'], 'เปิดงานที่ปิดแล้ว');
       for (const r of rights) assert.ok(!RIGHTS[r].includes(' / ') && RIGHTS[r].length <= 30, `short name: ${r}`);
@@ -5048,7 +5022,6 @@ try {
       assert.ok(!(await listCustomers({ filters: { code: '_' } })).some((c) => c.code === CUSTOMER), 'customer code');
     });
   }
-  // ── Security round (2026-10-19): money lock on the job slip, list caps, restore / attachment / file rights ──
   console.log('\nSecurity round — job slip, list caps, restore, attachments, files, permissions audit, part qty');
   {
     const { invalidateGrantCache } = await import('@/server/auth');

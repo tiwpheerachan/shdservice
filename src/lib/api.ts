@@ -1,6 +1,7 @@
 'use client';
 
 import { sessionExpired, toLogin } from '@/lib/navigation';
+import { qs } from '@/data/keys';
 
 /**
  * Tiny fetch wrapper for the app's own API routes.
@@ -111,16 +112,7 @@ export const isStale = (e: unknown) =>
 export const patchJson = json('PATCH');
 export const del = <T = unknown>(url: string) => api<T>(url, { method: 'DELETE' });
 
-/** Build a query string, skipping empty values. */
-export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === '') continue;
-    sp.set(k, String(v));
-  }
-  const s = sp.toString();
-  return s ? `?${s}` : '';
-}
+export { qs }; // pure, in src/data/keys — the server builds the same URLs
 
 /** the message to show for a failed call: a request that never reached the server (offline, DNS) fails with
  *  a TypeError ("Failed to fetch") — say so in Thai; the server's own refusals (ApiError) keep their message */

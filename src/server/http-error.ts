@@ -14,7 +14,7 @@ export class HttpError extends Error {
 /**
  * Optimistic locking (drizzle/0026 row_version): `sent` is the version the edit form loaded,
  * `current` the row's version read under FOR UPDATE. Another save in between → 409, nothing
- * written. A request without a version (older client / script) keeps the old last-write-wins.
+ * written. A request without a version (older client / script) is last-write-wins.
  */
 export function assertVersion(sent: unknown, current: number) {
   if (sent === undefined || sent === null || sent === '') return;

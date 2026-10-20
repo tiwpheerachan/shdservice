@@ -11,6 +11,7 @@ import {
   normalizeUa,
   logEvent,
   hit,
+  claimCooldown,
   block,
   isBlocked,
   dbNow,
@@ -44,10 +45,10 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SEC = 60;
 const OTP_PER_PHONE_HOUR = 3;
 /**
- * A 4-digit code (owner: stays 4 digits, 2026-10-19): 15 guesses/h was 360/day per target → daily caps +
- * a lock after a few misses. Counted per number+IP first, so someone who knows a customer's number cannot
- * lock THAT customer out from their own IP (review 2026-10-14); the per-number ceiling is higher and only
- * bites a guesser spread over many IPs (≤ 10 guesses/day = 0.1% per day; it was 30 = 0.3%).
+ * A 4-digit code (owner decision: stays 4 digits): the hourly cap alone allows 15 guesses/h = 360/day per
+ * target → daily caps + a lock after a few misses. Counted per number+IP first, so someone who knows a
+ * customer's number cannot lock THAT customer out from their own IP; the per-number ceiling is higher and
+ * only bites a guesser spread over many IPs (≤ 10 guesses/day = 0.1% per day).
  */
 const OTP_PER_PHONE_DAY = 8; // per number + IP
 const OTP_PER_PHONE_DAY_ALL = 20; // per number, any IP
@@ -116,18 +117,20 @@ export async function requestOtp(phoneInput: unknown, ip: string, requestIdForLo
   const key = phoneKey(phone);
   const ipHash = ipKeyOf(ip); // the route's c.ipKey: one request logs one hash
 
-  // resend cooldown (1 per minute) + 3 per hour per number, counted for EVERY number; every counter
-  // always counts (no short-circuit) — independent upserts / reads, so side by side
+  // hourly / daily caps per number, counted for EVERY number; every counter always counts (no
+  // short-circuit) — independent upserts / reads, so side by side
   const ipKey = hmac(`phone-ip:${key}:${ipBucket(ip)}`); // one hash (varchar(128)) · IPv6 per /64, like the other limits
-  const [coolOk, hourOk, dayOk, dayAllOk, blocked, ipBlocked] = await Promise.all([
-    hit('otp_phone_min', key, 1, OTP_RESEND_SEC),
+  const [hourOk, dayOk, dayAllOk, blocked, ipBlocked] = await Promise.all([
     hit('otp_phone_hour', key, OTP_PER_PHONE_HOUR, 3600),
     hit('otp_phone_day', ipKey, OTP_PER_PHONE_DAY, 86400),
     hit('otp_phone_day_all', key, OTP_PER_PHONE_DAY_ALL, 86400),
     isBlocked(`phone:${key}`),
     isBlocked(`phone:${ipKey}`),
   ]);
-  if (!coolOk || !hourOk || !dayOk || !dayAllOk || blocked || ipBlocked) {
+  // then the resend cooldown: 60 s from the last ACCEPTED request (sliding, atomic — two at once get one
+  // claim). Claimed only once the caps pass, so a refused request does not push the next code back; the
+  // claim does not depend on whether the number is a customer, so timing stays the same for both
+  if (!hourOk || !dayOk || !dayAllOk || blocked || ipBlocked || !(await claimCooldown(key, OTP_RESEND_SEC))) {
     logEvent('otp_rate_limited', { ipHash, requestId: requestIdForLog });
     return { ok: false, reason: 'rate' };
   }

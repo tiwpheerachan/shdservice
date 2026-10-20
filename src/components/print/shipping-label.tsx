@@ -27,7 +27,7 @@ export function ShippingLabel({
   district?: string;
   province?: string;
 }) {
-  // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line (a bare "ต. อ. จ." printed before).
+  // "ต.… อ.… จ.…" — only the parts the customer master has; none → no line, never a bare "ต. อ. จ.".
   // customer_address already ends with them + the postcode (composeAddress / legacy): then print it once
   const tao =
     province && address.includes(province)

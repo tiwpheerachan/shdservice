@@ -12,9 +12,9 @@ import { logError } from '@/lib/log';
  *   jobs/{jobNo}/slip/{file}          job.job_payment_slip_file_name    (full path)
  *   sale-orders/{soNo}/slip/{file}    sale_out_hd.slip_file_name        (full path)
  *   products/{code}/{file}            product.pictrue_file_name         (file name only, 50 chars)
- * Legacy files were copied into the same layout (2026-09-16): product images
- * 786/822 and job attachments from the old server's FileUpload folder; rows
- * whose file was missing on the old server just show their file name.
+ * Legacy product images and job attachments (the old server's FileUpload folder)
+ * were copied into the same layout; rows whose file was missing on the old server
+ * just show their file name.
  */
 export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'oneservice';
 
@@ -72,6 +72,10 @@ export async function fileProblem(file: File, types: ReadonlySet<string> = ALLOW
 /** Longest edge kept for uploaded photos (product images / payment slips). */
 export const IMAGE_MAX_EDGE = 1600;
 
+/** a photo never needs more than this; a tiny file declaring 16k×16k pixels would eat ~1 GB of RAM */
+export const MAX_IMAGE_PIXELS = 40_000_000;
+export class ImageTooLargeError extends Error {}
+
 /**
  * Shrink an uploaded photo before it goes to the bucket: apply EXIF rotation,
  * cap the longest edge at IMAGE_MAX_EDGE, re-encode at quality 82. jpg/webp
@@ -83,10 +87,6 @@ export const IMAGE_MAX_EDGE = 1600;
  * returned untouched; a decode failure falls back to the original file rather
  * than rejecting the upload.
  */
-/** a photo never needs more than this; a tiny file declaring 16k×16k pixels would eat ~1 GB of RAM */
-export const MAX_IMAGE_PIXELS = 40_000_000;
-export class ImageTooLargeError extends Error {}
-
 export async function optimizeImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
   const input = Buffer.from(await file.arrayBuffer());

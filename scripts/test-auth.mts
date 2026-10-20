@@ -20,7 +20,7 @@ const cases: [string | null | undefined, string][] = [
   [decodeURIComponent('/%09%5Cevil.example'), D],
   ['/\n/evil.example', D],
   ['javascript:alert(1)', D],
-  // dot-segments fold into "//host" (found in review 2026-10-14 — the first fix let these out)
+  // dot-segments fold into "//host"
   ['/.//evil.example', D],
   ['/..//evil.example', D],
   [decodeURIComponent('/%2e//evil.example'), D],

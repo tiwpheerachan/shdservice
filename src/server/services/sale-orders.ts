@@ -119,7 +119,7 @@ export type SaleOrderFilters = {
   to?: string;
   sales?: string;
   deleted?: StatusMode;
-  /** the list page's own boxes — each its own condition (they used to be folded into one `q`) */
+  /** the list page's own boxes — each its own condition */
   no?: string;
   customer?: string;
   /** a part / accessory code on one of the order's lines */
@@ -401,7 +401,7 @@ export async function saveSaleOrder(
     .filter((l) => str(l.code))
     .map((l) => {
       const p = byCode.get(str(l.code));
-      // a service only when no product has the code: a real part sent as 'Service' skipped the approval's stock issue
+      // a service only when no product has the code: a real part sent as 'Service' would skip the approval's stock issue
       const isService = !p && (l.type === 'Service' || !!str(l.name));
       if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
       return {
@@ -464,7 +464,7 @@ export async function saveSaleOrder(
     });
     const linesChanged = !prev || old.length !== rows.length || rows.some((r) => !r.kept);
     const totalBase = Math.round(rows.reduce((s, r) => s + num(r.row.amountDt), 0) * 100) / 100;
-    // the edit form sends neither fee nor tracking: left out → the order keeps its own (a save used to wipe them)
+    // the edit form sends neither fee nor tracking: left out → the order keeps its own
     const fee = i.fee !== undefined ? num(i.fee) : num(prev?.feeAmount);
     const net = Math.round((totalBase + fee) * 100) / 100;
     // ยอดชำระ: only what the user typed (no default type / amount), never more than the order total —

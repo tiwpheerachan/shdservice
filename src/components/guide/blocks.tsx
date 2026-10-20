@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Info, AlertTriangle, Lightbulb } from 'lucide-react';
+import { TableScroll } from '@/components/ui/data-table';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ *
@@ -50,7 +51,7 @@ export function Fields({
   head?: [string, string];
 }) {
   return (
-    <div className="table-scroll rounded-lg border border-border">
+    <TableScroll label={head.join(' · ')} className="rounded-lg border border-border">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="bg-muted/60 text-left text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -67,7 +68,7 @@ export function Fields({
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 

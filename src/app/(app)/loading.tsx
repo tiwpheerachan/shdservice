@@ -4,10 +4,14 @@ import { Skeleton } from '@/components/ui/skeleton';
  * Shown by the App Router while the (app) layout resolves the session on a
  * navigation — a generic page outline (header, KPI row, table) so the shell
  * does not sit empty and the content does not jump in.
+ *
+ * At least the viewport's content height (100dvh less the top bar): the footer stays below the fold
+ * while it shows. Shorter, the footer would jump down when the page replaced it — React holds a streamed
+ * boundary's reveal ~300 ms after its fallback painted, so that is a visible layout shift (CLS).
  */
 export default function AppLoading() {
   return (
-    <div className="space-y-5" aria-busy aria-label="กำลังโหลด">
+    <div className="min-h-[calc(100dvh-var(--topbar-h))] space-y-5" aria-busy aria-label="กำลังโหลด">
       <div className="space-y-2">
         <Skeleton className="h-6 w-56" />
         <Skeleton className="h-3.5 w-80 max-w-full" />

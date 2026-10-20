@@ -5,7 +5,6 @@ import { Plus, Calculator } from 'lucide-react';
 import { Section } from './section';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { useApi } from '@/data/db';
 import { QUOTATION_STATUS_OPTIONS } from '@/data/options';
 import type { Customer } from '@/data/types';
 import { api, errMsg, qs } from '@/lib/api';
@@ -142,7 +141,7 @@ export const QuotationForm = React.forwardRef<
   const idRef = React.useRef((initial?.lines.length ?? 0) + 1);
 
   // the form as it opened (a loaded quotation, or empty / filled from ?job=) — anything else is an
-  // unsaved edit; the edit page remounts the form for every quotation it loads or saves
+  // unsaved edit
   const now = {
     type,
     profileId,
@@ -170,7 +169,7 @@ export const QuotationForm = React.forwardRef<
   const openedAt = useMountTime();
 
   // the job's parts flagged "เสนอ" in the repair screen, from set A or set B (= the quotation type)
-  // always replaced — switching A → B with nothing quoted in B used to keep A's lines on a B quotation
+  // always replaced — otherwise switching A → B with nothing quoted in B would keep A's lines on a B quotation
   const fillQuoted = (j: JobDetail, t: 'A' | 'B') =>
     setLines(quotedParts(j.parts, t).map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
   // a job → customer + device info (+ its quoted parts become lines)
@@ -203,20 +202,24 @@ export const QuotationForm = React.forwardRef<
     }
   };
 
-  // /quotation/new?job=J… opens with that job, its customer and its quoted parts filled in — once,
-  // from the swr answer's callback (not an effect, not during render)
+  // /quotation/new?job=J… opens with that job, its customer and its quoted parts filled in — once.
+  // A direct read, NOT the swr cache: the job screens keep the bare JobDetail under /api/jobs/<no>
+  // (useRecord, and the server prefetch seeds it), this answer is { job } — sharing the key handed
+  // each screen the other's shape.
   const urlJobApplied = React.useRef(false);
-  useApi<{ job: JobDetail }>(jobNo && !initial ? `/api/jobs/${encodeURIComponent(jobNo.trim().toUpperCase())}` : null, {
-    fresh: true,
-    onSuccess: (d) => {
-      if (urlJobApplied.current) return;
-      urlJobApplied.current = true;
-      applyJob(d.job, true)
-        .catch((e) => push({ kind: 'error', title: 'โหลดข้อมูลลูกค้าไม่สำเร็จ', desc: errMsg(e) }))
-        .finally(() => setSettled(false));
-    },
-    onError: (msg) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: msg }),
-  });
+  React.useEffect(() => {
+    const no = jobNo?.trim().toUpperCase();
+    if (!no || initial || urlJobApplied.current) return;
+    urlJobApplied.current = true;
+    api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(no)}`).then(
+      (d) =>
+        applyJob(d.job, true)
+          .catch((e) => push({ kind: 'error', title: 'โหลดข้อมูลลูกค้าไม่สำเร็จ', desc: errMsg(e) }))
+          .finally(() => setSettled(false)),
+      (e) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: errMsg(e) }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page: the URL's job, not every render of applyJob
+  }, [jobNo, initial]);
 
   const add = () =>
     setLines((s) => [...s, { id: ++idRef.current + 100, code: '', name: '', qty: 1, price: 0, itemType: 'SparePart' }]);

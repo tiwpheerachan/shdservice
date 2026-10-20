@@ -79,8 +79,7 @@ const LIST_DEFAULT = 200;
 const LIST_MAX = 1000;
 
 /**
- * Read side for the UI hooks in src/data/db.ts. One endpoint per table name the
- * hooks already used, so the pages did not have to change their imports.
+ * Read side for the UI hooks in src/data/db.ts, one resource per table name the hooks use.
  * Returns either a plain array or, with ?paged=1, a { rows, total } page.
  * `query` = the request's query as the resource's operation parsed it (any other name is a filter).
  */

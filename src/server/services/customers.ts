@@ -68,10 +68,6 @@ export function toCustomer(r: Row, createdBy = ''): Customer {
   };
 }
 
-/**
- * Customer list. 43k rows in the legacy DB, so the default is the most recent
- * `limit`; `q` searches code / name / phone / email / tax id server-side.
- */
 /** filter bar of the ข้อมูลลูกค้า page — AND-ed; text fields are partial matches */
 export type CustomerFilters = {
   code?: string;
@@ -94,6 +90,10 @@ export const customerFiltersFromQuery = (f: Record<string, string>): CustomerFil
   status: f.status,
 });
 
+/**
+ * Customer list. 43k rows in the legacy DB, so the default is the most recent
+ * `limit`; `q` searches code / name / phone / email / tax id server-side.
+ */
 export async function listCustomers(
   opts: {
     q?: string;
@@ -123,7 +123,7 @@ const SORT = {
 
 /**
  * Phone match on DIGITS only, both sides: ~30% of legacy numbers are stored "081-4969925" /
- * "081 496 9925", so "0814969925" never matched an ilike (dogfood 2026-10-14). Same rule as
+ * "081 496 9925", so "0814969925" would not match an ilike. Same rule as
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
@@ -133,7 +133,7 @@ const phoneHas = (digits: string) =>
 
 /**
  * Name as clean() writes it — invisible characters dropped, any whitespace run (NBSP too) → one space: ~1,050
- * legacy names hold double spaces / zero-width marks and never matched an ilike of the typed name (audit 2026-10).
+ * legacy names hold double spaces / zero-width marks and would not match an ilike of the typed name.
  * Backed by the expression trigram index gin_customer_name_clean (drizzle/0034) — keep the two character-for-character
  * identical, or the search falls back to a seq scan of 43k rows.
  */

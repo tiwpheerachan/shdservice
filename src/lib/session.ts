@@ -9,18 +9,17 @@ const dec = new TextDecoder();
  * Production cookie names carry the `__Host-` prefix: the browser takes them only Secure, Path=/ and
  * without Domain, so no sibling subdomain or plain-http page can set or shadow them. Outside production
  * (http dev, the unit tests) the plain names. Every Set-Cookie of one — a clear too — must send Secure
- * in production, or the browser drops it. No fallback to the old plain name: a deploy signs everyone
- * in again once (the old cookie lives ≤ 30 min and nothing reads it).
+ * in production, or the browser drops it.
  */
 export const hostCookie = (name: string) => (process.env.NODE_ENV === 'production' ? `__Host-${name}` : name);
 
 export const SESSION_COOKIE = hostCookie('os_session');
 // Idle timeout: the timer in the topbar renews the cookie on activity (≤ every
 // 5 min), so an active user never hits this; 30 min without activity → /login.
-export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+export const SESSION_TTL_MS = 30 * 60 * 1000;
 // Absolute lifetime from sign-in: renewing the idle timer never extends a session
 // past this — a stolen cookie cannot be kept alive forever through /refresh.
-export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
+export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 // Long-lived marker that a session once existed on this browser — lets the
 // proxy tell "session expired" (→ /login with a message) apart from a
 // first visit (→ /login without it). Set by /api/sso/me + /refresh (JSON responses,
@@ -62,7 +61,7 @@ function unb64url(s: string) {
 }
 
 // Signing secret. Production: ONLY `SESSION_SECRET` (random, ≥ 32 chars, used for
-// nothing else). It is deliberately NOT CENTRAL_API_KEY any more — that key is also
+// nothing else). It is deliberately NOT CENTRAL_API_KEY — that key is also
 // sent to the central directory service, and anyone holding it could mint sessions.
 // Missing in production = fail closed (nobody can sign in) rather than fall back.
 // Keep it fixed in the Render dashboard (sync: false) — changing it signs everyone out.

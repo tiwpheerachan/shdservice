@@ -257,7 +257,8 @@ async function setStatus(
   const group = await statusGroup(statusId);
   const fromGroup = current == null ? '' : await statusGroup(current);
   const name = await statusName(statusId);
-  // a closed job back to an open status (a re-save picking the first status in the list did that by accident)
+  // a closed job back to an open status needs Job Reopen (so a re-save picking the first status in the list
+  // cannot reopen it by accident)
   if (fromGroup === FINISHED_GROUP && group !== FINISHED_GROUP && !(await userHasRight(byUserId, 'Job Reopen')))
     throw new HttpError(409, REOPEN_LOCKED, { fields: { status: REOPEN_LOCKED } });
   // 8 = "ลงเลขที่พัสดุแล้ว": every path into it (close, repair, swap, edit) needs the parcel no. stored
@@ -281,7 +282,7 @@ async function setStatus(
     extra.jobRepairedBy = byUserId;
   }
   if (group === FINISHED_GROUP) {
-    // a job sent out-source must come back before it is closed (owner, Dogfood round 2). Only on the way
+    // a job sent out-source must come back before it is closed (owner decision). Only on the way
     // INTO Finished: an already-closed legacy job (7 → 8, adding the tracking no.) is not blocked.
     const closing = fromGroup !== FINISHED_GROUP;
     const [out] = closing
@@ -508,8 +509,8 @@ const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
  *
  * Written as `job_status_id = ANY(ARRAY(subquery))` on purpose: Postgres runs the subquery once,
  * then reads only the open jobs through ix_job_status — the cost follows the open work (~2k jobs),
- * not the history (48k and growing). Filtering on job_status_group through the join instead made
- * it scan every job (~105 ms vs ~6 ms on 2026-09-28). The status list stays live (no app cache).
+ * not the history (48k and growing). Filtering on job_status_group through the join instead makes
+ * it scan every job (~105 ms vs ~6 ms). The status list stays live (no app cache).
  * Works with or without job_status joined.
  */
 const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
@@ -517,7 +518,7 @@ const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .from(jobStatus)
   .where(notInArray(jobStatus.jobStatusGroup, [JOB_GROUP.FINISHED, JOB_GROUP.CANCEL]))}))`;
 
-/** kpiGroup = `group`, written like isOpenJob (the status ids first, then ix_job_status): through the join it scanned every job */
+/** kpiGroup = `group`, written like isOpenJob (the status ids first, then ix_job_status): through the join it scans every job */
 const inKpiGroup = (group: string) =>
   sql`${job.jobStatusId} = ANY(ARRAY(${db
     .select({ id: jobStatus.jobStatusId })
@@ -1197,8 +1198,8 @@ async function auditAssign(tx: Tx, byUserId: number, jobNo: string, from: number
 
 /**
  * Master names are compared trimmed on BOTH sides: legacy rows carry trailing spaces / "\n"
- * ("ได้รับสินค้าไม่ครบ ", "POCO ") while the input is trimmed (str), so a plain = never matched —
- * which, once unknown names became a 400, blocked saving every job that used them.
+ * ("ได้รับสินค้าไม่ครบ ", "POCO ") while the input is trimmed (str): a plain = would never match, and
+ * since an unknown name is a 400, every job using one could not be saved.
  */
 const trimmed = (col: Parameters<typeof eq>[0]) => sql`btrim(${col}, E' \t\r\n')`;
 const nameIs = (col: Parameters<typeof eq>[0], v: string) => sql`${trimmed(col)} = ${v.trim()}`;
@@ -1270,7 +1271,7 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
       : [],
   ]);
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
-  // a name that was sent but is not in the list used to be saved as id 0 — refuse it under its field
+  // a name that was sent but is not in the list is refused under its field, never saved as id 0
   const fields: FieldErrors = {};
   if (i.productType && !pt) fields.productType = `ไม่พบประเภทสินค้า "${i.productType}" ในรายการ`;
   if (i.brand && !mf) fields.brand = `ไม่พบยี่ห้อ "${i.brand}" ในรายการ`;
@@ -1690,7 +1691,7 @@ export async function updateJob(jobNo: string, i: JobInput, byUserId: number): P
         ? { productModelId: lk.modelId, productModelName: (lk.modelName ?? '').slice(0, 50) }
         : {}),
       productModelDetail: clean(i.modelDetail),
-      // the form has no color field: not sent = keep it (it used to be blanked by every edit)
+      // the form has no color field: not sent = keep it
       ...(i.color !== undefined ? { productColor: clean(i.color).slice(0, 50) } : {}),
       ...(lk.symIds.length ? { productSymptomId: lk.symIds[0] } : {}),
       productSymptomOther: clean(i.symptomOther),
@@ -2575,7 +2576,7 @@ function periodKeys(lo: string, hi: string, daily: boolean): string[] {
     for (let d = lo; d <= hi && keys.length < 400; d = addDays(d, 1)) keys.push(d);
     return keys;
   }
-  let [y = NaN, m = NaN] = lo.slice(0, 7).split('-').map(Number); // missing part → NaN, as before
+  let [y = NaN, m = NaN] = lo.slice(0, 7).split('-').map(Number); // missing part → NaN
   const end = hi.slice(0, 7);
   for (let k = lo.slice(0, 7); k <= end && keys.length < 1200;) {
     keys.push(k);

@@ -32,20 +32,23 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   const confirm = useConfirm();
   // removing a saved file needs Job Management delete (the API refuses others); a queued one is just dropped
   const canDelete = useAccess().can('Job Management', 'del');
-  const [rows, setRows] = React.useState<Row[]>([]);
+  // existing files of a loaded job: `files` came with the job the page loaded (no second GET /api/jobs/:no),
+  // on screen from the first render (so in the server HTML); taken again only when another job is shown, so
+  // a save (same job) keeps what was uploaded here meanwhile
+  const rowsOf = (no?: string): Row[] =>
+    no && files ? files.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file })) : [];
+  const [rows, setRows] = React.useState(() => rowsOf(jobNo));
+  const [rowsFor, setRowsFor] = React.useState(jobNo);
+  if (rowsFor !== jobNo) {
+    setRowsFor(jobNo);
+    setRows(rowsOf(jobNo));
+  }
   const [file, setFile] = React.useState<File | null>(null);
   const [note, setNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const idRef = React.useRef(0);
   // files queued for a job not saved yet are an unsaved edit (they upload with the job)
   useUnsavedChanges(rows.some((r) => r.pending));
-
-  // existing files of a loaded job: `files` came with the job the page loaded (no second GET /api/jobs/:no);
-  // taken when another job is shown, so a save (same job) keeps what was uploaded here meanwhile
-  React.useEffect(() => {
-    setRows(jobNo && files ? files.map((a) => ({ id: a.id, name: a.name, note: a.remark, file: a.file })) : []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobNo]);
 
   const upload = async (target: string, f: File, remark: string) => {
     const fd = new FormData();

@@ -27,6 +27,8 @@ export function SymptomPicker({
   multiple = true,
   disabled = false,
   placeholder = 'พิมพ์ค้นหาอาการเสีย… เช่น แบต, จอ, ชาร์จ',
+  loading = false,
+  onWant,
 }: {
   value: string[];
   onChange: (names: string[]) => void;
@@ -36,9 +38,13 @@ export function SymptomPicker({
   multiple?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** the options are on their way — the list says so instead of "ไม่พบ" */
+  loading?: boolean;
+  /** the trigger got focus / was pressed: the options are about to be needed (load them now) */
+  onWant?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const field = useFieldControl(undefined, { label: placeholder }); // tie to the surrounding <Field> label (or name it)
+  const field = useFieldControl(undefined, { label: placeholder });
   const popupId = React.useId();
   const [q, setQ] = React.useState('');
   const selected = new Set(value);
@@ -154,6 +160,8 @@ export function SymptomPicker({
               {...field}
               aria-expanded={open}
               aria-controls={open ? popupId : undefined} // the popup, only while it is rendered
+              onFocus={onWant}
+              onPointerDown={onWant}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
@@ -215,7 +223,7 @@ export function SymptomPicker({
             <CommandPrimitive.List className="max-h-72 overflow-y-auto p-1.5">
               {sugOptions.length === 0 && restOptions.length === 0 && (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  ไม่พบอาการเสีย "{q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน
+                  {loading ? 'กำลังโหลด…' : `ไม่พบอาการเสีย "${q}" — ระบุใน "อาการเสีย (อื่นๆ)" แทน`}
                 </p>
               )}
               {sugOptions.length > 0 && (

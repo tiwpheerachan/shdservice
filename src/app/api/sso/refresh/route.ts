@@ -66,8 +66,8 @@ export const GET = checked(async (request: NextRequest) => {
       }
     } else log.warn('sso central session check unavailable', { userId: u.userId });
   } else if (mode === 'log' && !current.sub) {
-    // rollout visibility: a session without sub is never checked (cookies from before this
-    // deploy, or /sso/verify not sending sub) — say so instead of looking like "all fine"
+    // rollout visibility: a session without sub is never checked (a cookie issued before
+    // sub was stored, or /sso/verify not sending sub) — say so instead of looking like "all fine"
     log.info('sso central session check skipped: no sub', { userId: u.userId });
   }
 

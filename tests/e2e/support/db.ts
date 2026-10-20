@@ -26,11 +26,16 @@ export async function one<T = Record<string, unknown>>(text: string, params: unk
 export const userId = async (email: string) =>
   (await one<{ id: number }>('SELECT user_id AS id FROM app_user WHERE email_address = $1', [email])).id;
 
-/** J97 + 5 digits: J + 7 digits like a real job no. (the pick page's rule), a series the app never issues (J + yy) */
+/** J97 + 5 digits: J + 7 digits like a real job no. (the pick page's rule), a series the app never issues (J + yy).
+ *  Past every number already used ANYWHERE: test:track TRUNCATEs job (not the stock documents / part logs that
+ *  point at it), so counting job alone hands out a number whose old movements are still there. */
 export async function newJobNo(): Promise<string> {
   const r = await one<{ no: string }>(
-    `SELECT 'J97' || lpad((coalesce(max(substring(job_no FROM 4)::int), 0) + 1)::text, 5, '0') AS no
-       FROM job WHERE job_no ~ '^J97[0-9]{5}$'`,
+    `SELECT 'J97' || lpad((coalesce(max(substring(n FROM 4)::int), 0) + 1)::text, 5, '0') AS no
+       FROM (SELECT job_no AS n FROM job
+             UNION ALL SELECT job_no FROM job_order_spare_part_log
+             UNION ALL SELECT reference_document_no FROM inventory_hd) used
+      WHERE n ~ '^J97[0-9]{5}$'`,
   );
   return r.no;
 }

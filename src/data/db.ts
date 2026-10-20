@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import useSWR, { mutate, useSWRConfig, type SWRConfiguration } from 'swr';
-import { api, qs, errMsg, onApiWrite } from '@/lib/api';
+import useSWR, { mutate, SWRConfig, useSWRConfig, type SWRConfiguration } from 'swr';
+import { api, errMsg, onApiWrite } from '@/lib/api';
+import { qs, tableKey, pagedKey, type Params } from './keys';
 import type { Order, DeletedMode } from './queries';
 import type {
   User,
@@ -22,11 +23,10 @@ import type {
   TopSymptom,
 } from './types';
 
-export type { Order, DeletedMode };
+export type { Order, DeletedMode, Params };
 
 /* ------------------------------------------------------------------ *
- * React hooks over the app's read API (/api/data/<resource>). The hook names
- * and return shapes are the ones the pages already use; data now comes from
+ * React hooks over the app's read API (/api/data/<resource>); data comes from
  * the legacy tables through drizzle on the server.
  *
  * Caching (swr): every hook is keyed by its full URL, so components asking for
@@ -44,8 +44,6 @@ export type TableState<T> = {
   error: string | null;
   refetch: () => void;
 };
-
-export type Params = Record<string, string | number | boolean | undefined | null>;
 
 /** how long a cached list is served without re-fetching */
 export const TTL_MASTER = 5 * 60_000;
@@ -73,6 +71,24 @@ export function invalidateLists() {
   void mutate((key) => typeof key === 'string' && key.startsWith('/api/data/'));
 }
 onApiWrite(invalidateLists);
+
+/**
+ * A page's first answers, read on the server while it rendered (src/server/prefetch.ts, keyed by the
+ * URLs in ./keys): the first render shows them through swr's `fallback` (so they are in the HTML), then
+ * they are kept as reads that just finished — cached with their age, so no hook fetches them again on
+ * mount and the usual ttl / refetch / invalidateLists rules apply from there. A key that is missing
+ * (refused, failed, too slow) is simply fetched by its hook.
+ */
+export function Prefetched({ fallback, children }: { fallback: Record<string, unknown>; children: React.ReactNode }) {
+  React.useEffect(() => {
+    const now = Date.now();
+    for (const [key, data] of Object.entries(fallback)) {
+      fetchedAt.set(key, now);
+      void mutate(key, data, { revalidate: false });
+    }
+  }, [fallback]);
+  return React.createElement(SWRConfig, { value: { fallback } }, children); // .ts: no JSX
+}
 
 /** Re-fetch a cached key when it is older than `ttl` (or its age is unknown). */
 function useStaleCheck(url: string | null, ttl: number, revalidate: () => Promise<unknown>) {
@@ -108,7 +124,7 @@ export function useTable<T>(
   /** false = nothing loaded (yet) — e.g. a list only one mode of the screen needs */
   enabled = true,
 ): TableState<T> {
-  const url = enabled ? `/api/data/${table}${qs({ deleted, ...params })}` : null;
+  const url = enabled ? tableKey(table, deleted, params) : null;
   const { data, error, isLoading, mutate: revalidate } = useSWR<T[]>(url, fetcher, SWR_OPTS);
   useStaleCheck(url, ttl, revalidate);
 
@@ -145,7 +161,7 @@ export type PageParams = {
 const EMPTY: never[] = [];
 
 export function usePagedTable<T>(table: string, params: PageParams, deleted: DeletedMode = 'exclude'): PageState<T> {
-  const url = `/api/data/${table}${qs({ paged: 1, deleted, ...params })}`;
+  const url = pagedKey(table, params, deleted);
   const { data, error, isLoading, mutate: revalidate } = useSWR<{ rows: T[]; total: number }>(url, fetcher, SWR_OPTS);
   useStaleCheck(url, TTL_DEFAULT, revalidate);
   const refetch = React.useCallback(() => {
@@ -181,8 +197,9 @@ export const useJobTypes = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('job_types', { column: 'id' }, mode, {}, TTL_MASTER);
 export const useProductTypes = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('product_types', { column: 'id' }, mode, {}, TTL_MASTER);
-export const useSymptoms = (mode: DeletedMode = 'active') =>
-  useTable<Symptom>('symptoms', { column: 'id' }, mode, {}, TTL_MASTER);
+/** `enabled: false` → nothing loaded (yet): the symptom pickers load their lists once opened / focused */
+export const useSymptoms = (mode: DeletedMode = 'active', enabled = true) =>
+  useTable<Symptom>('symptoms', { column: 'id' }, mode, {}, TTL_MASTER, enabled);
 /** the whole list is 1,171 rows (~140 KB): `brand` → only that brand's models; `enabled: false` → nothing loaded (yet) */
 export const useModels = (mode: DeletedMode = 'active', { brand = '', enabled = true } = {}) =>
   useTable<Model>('models', { column: 'code' }, mode, brand ? { brand } : {}, TTL_MASTER, enabled);
@@ -240,7 +257,7 @@ export function useDashboard(range: DashRange = {}) {
   return { data: data[0] ?? null, loading, error, refetch };
 }
 
-/* ---- lookups added for the real backend ---- */
+/* ---- lookups ---- */
 export type Staff = { id: number; name: string; userType: string; takesJobs: boolean };
 /** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
@@ -282,9 +299,17 @@ export const useShippingProfiles = () =>
   useTable<ShippingProfileLite>('shipping_profiles', undefined, 'exclude', {}, TTL_MASTER);
 /** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
 export type SymptomStat = { id: number; name: string; group: string; count: number };
-export const useSymptomStats = () => useTable<SymptomStat>('symptom_stats', undefined, 'exclude', {}, TTL_MASTER);
-export const useModelSymptoms = (model: string) =>
-  useTable<{ id: number; name: string; count: number }>('model_symptoms', undefined, 'exclude', { model }, TTL_MASTER);
+export const useSymptomStats = (enabled = true) =>
+  useTable<SymptomStat>('symptom_stats', undefined, 'exclude', {}, TTL_MASTER, enabled);
+export const useModelSymptoms = (model: string, enabled = true) =>
+  useTable<{ id: number; name: string; count: number }>(
+    'model_symptoms',
+    undefined,
+    'exclude',
+    { model },
+    TTL_MASTER,
+    enabled,
+  );
 /** qty < 0 = รับคืนจากการเบิก; value = qty × price (`priceBasis`: ราคา ณ วันเบิก, else ราคาปัจจุบัน) */
 export type IssuedLine = Movement & {
   code: string;

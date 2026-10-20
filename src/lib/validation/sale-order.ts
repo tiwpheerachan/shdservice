@@ -27,7 +27,7 @@ export const overpaidMessage = (total: number) =>
  * `prev` = the order being edited (an unchanged legacy payment type / tracking no still passes).
  *  - customer, salesperson (prefilled with the signed-in user) and at least one product line
  *  - qty a whole number 1–1000, prices money (≤ 1,000,000), the paid amount ≤ 10,000,000
- *    (payment_amount numeric(11,2) — 1e9 used to fail the save as a 500)
+ *    (payment_amount numeric(11,2) — 1e9 would fail the save as a 500)
  *  - payment type from the list; no default type or amount (nothing paid until the user says so);
  *    an amount needs its type and may not exceed the lines' total + `prev.fee` (the server re-checks the net)
  *  - remark ≤ 100 (the column — nothing is cut off silently)

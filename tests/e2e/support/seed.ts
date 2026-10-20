@@ -119,6 +119,12 @@ export default async function seed(): Promise<void> {
       INSERT INTO store_location (store_location_id, store_location_name, is_active)
         SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
          WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
+      -- a sale order's status badge reads its name from here (src/lib/status-ids.ts AS)
+      INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+        SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ', 'In Progess', true, true), (2, 'รออนุมัติ', 'Wait Approve', true, true),
+                              (3, 'แก้ไขข้อมูล', 'Reject', true, true), (4, 'อนุมัติแล้ว', 'Approved', false, false),
+                              (5, 'ปฏิเสธ', 'Deny', false, false)) v(id, th, en, ed, rv)
+         WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
 
       ${ensure('customer', 'customer_id', { customer_code: "'CE2E01'", customer_name: "'ลูกค้า E2E'", phone_number: "'081-000-9001'" })}
       ${ensure('job_type', 'job_type_id', { job_type_name: "'E2E ซ่อม'", is_active: 'true' })}

@@ -189,8 +189,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const openedAt = useMountTime();
     const date = initial?.date ?? (openedAt ? isoDateTime(openedAt) : '');
 
-    // the form as it opened (a loaded order, or empty) — anything else is an unsaved edit; the edit
-    // page remounts the form for every order it loads or saves
+    // the form as it opened (a loaded order, or empty) — anything else is an unsaved edit
     const now = {
       profileId,
       customer: customer?.code ?? '',

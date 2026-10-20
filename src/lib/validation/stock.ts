@@ -5,12 +5,12 @@ import { trackingField } from './sale-order';
 import { today } from '@/lib/dates';
 
 /**
- * Bodies of the write routes that had no schema (stock in/out, assign, SO approve /
- * tracking, call log). Bounds, not business rules — those stay in the services:
+ * Bodies of the stock in/out, assign, SO approve / tracking and call log routes. Bounds, not business
+ * rules — those stay in the services:
  *  - qty: a whole number 0–100,000 (0 = "skip this line", the services filter qty > 0;
- *    stock columns are integers, so 1.5 or 1e9 used to reach the DB as a 500)
+ *    stock columns are integers, so 1.5 or 1e9 would reach the DB as a 500)
  *  - at most 500 lines; free text no longer than its column (nothing is cut off silently)
- *  - enums for the choices a typo used to fall through (decision "approvee" = reject)
+ *  - enums for the choices, so a typo cannot fall through (decision "approvee" = reject)
  */
 const qty = z.coerce.number().int('จำนวนต้องเป็นจำนวนเต็ม').min(0, 'จำนวนต้องไม่ติดลบ').max(100_000, 'จำนวนมากเกินไป');
 const id = z.coerce.number().int().positive();
@@ -39,7 +39,7 @@ export const issueSchema = z
   .looseObject({
     type: z.enum(['job', 'sale', 'other', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
     ref: text(50),
-    // จ่ายให้ / รับคืนจาก: required — a stock-out document without a recipient was saved (inventory_hd.reference_out_to, 50)
+    // จ่ายให้ / รับคืนจาก: required (inventory_hd.reference_out_to, 50)
     payTo: z
       .string()
       .trim()
@@ -76,7 +76,7 @@ export const approveSchema = z.looseObject({
 /** เลขพัสดุของใบสั่งขาย — `prev` = the number stored now (an unchanged legacy value passes) */
 export const trackingSchema = (prev?: string | null) => z.looseObject({ tracking: trackingField(prev) });
 
-/** job_call_log.call_log_description is varchar(200): a longer note is refused (it used to lose the rest) */
+/** job_call_log.call_log_description is varchar(200): a longer note is refused, never cut */
 export const callLogSchema = z.looseObject({
   detail: z.string().trim().min(1, 'ต้องระบุรายละเอียด').max(200, 'ยาวเกิน 200 ตัวอักษร'),
 });

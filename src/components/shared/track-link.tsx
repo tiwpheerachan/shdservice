@@ -11,8 +11,7 @@ import { useAccess } from '@/lib/use-access';
 import { cn } from '@/lib/utils';
 
 /**
- * "ลิงก์ติดตามสำหรับลูกค้า" — staff copy it here and send it in LINE (there is no QR any
- * more). Opening it shows nothing until the customer passes Turnstile — see app/api/track/*.
+ * "ลิงก์ติดตามสำหรับลูกค้า" — staff copy it here and send it in LINE. Opening it shows nothing until the customer passes Turnstile — see app/api/track/*.
  *
  * Lifetime (services/tracking.ts, drizzle/0016): 1 day from issue while unopened, then
  * 15 minutes from the customer's first open, kept alive while the page is in use (≤ 60 minutes
@@ -32,7 +31,7 @@ type LinkStatus = {
 };
 type LinkResponse = { url: string; ready?: boolean; status: LinkStatus };
 
-/** what really happens (services/tracking.ts LINK_* + app/api/track/session) — testers saw "24 ชม." because a staff open is not counted */
+/** what really happens (services/tracking.ts LINK_* + app/api/track/session) */
 const LINK_TEXT =
   'ลูกค้ากดยืนยันว่าไม่ใช่บอท (captcha) แล้วเห็นสถานะงาน และเปิดเอกสารของงานนี้ได้ (ใบรับงาน · ใบเสนอราคาพร้อมราคา · ใบส่งคืน) — ' +
   'ลิงก์ใช้ได้ 1 วันถ้ายังไม่มีใครเปิด เมื่อลูกค้าเปิดครั้งแรกจะใช้ต่อได้อีก 15 นาที (ต่อเวลาอัตโนมัติขณะเปิดหน้าอยู่ รวมไม่เกิน 60 นาที) ' +

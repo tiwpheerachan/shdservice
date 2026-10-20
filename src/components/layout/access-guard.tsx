@@ -28,7 +28,7 @@ export function AccessGuard() {
   // Page-level permission (app_config `view`; a create page also needs `add`): a user who types a URL
   // they may not open is sent to their landing page — and told why, not silently. The landing page is
   // picked HERE from the same (client) grants: "/" picks it from the DB's grants, and after an admin
-  // changed this role mid-session the two disagreed → "/" sent the user to a page this guard denied →
+  // changes this role mid-session the two disagree → "/" would send the user to a page this guard denies →
   // back to "/" forever. A target the client grants also deny (only the guide) → full reload, fresh grants.
   // (AppShell does not render that page, so it fires no API call first.) The API
   // enforces the same grants on every write regardless.

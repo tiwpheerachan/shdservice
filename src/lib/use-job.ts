@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { useRecord } from '@/lib/use-record';
 import { useToast } from '@/components/ui/toast';
 import type { JobDetail } from '@/server/services/jobs';
+import { jobKey, jobNoParam } from '@/data/keys';
 
 export type { JobDetail };
 
@@ -25,9 +26,9 @@ export function useJob(
   const sp = useSearchParams();
   const { push } = useToast();
   // ?job= is what every link writes (list, bell, quotation, เปิดงานใหม่); ?no= / ?jobNo= open the same
-  const initial = sp.get('job') || sp.get('no') || sp.get('jobNo') || '';
+  const initial = jobNoParam(sp);
   const r = useRecord<JobDetail>({
-    url: (no) => `/api/jobs/${encodeURIComponent(no)}`,
+    url: jobKey,
     pick: (d: { job: JobDetail }) => d.job,
     initial,
     onLoaded: opts.onLoaded ?? ((j) => push({ kind: 'success', title: 'เรียกข้อมูลงานสำเร็จ', desc: j.no })),

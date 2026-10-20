@@ -3,7 +3,7 @@
 //
 // Central directory = a copy of the Lark employee list, synced every 3 h and
 // exposed to apps holding the `directory:read:people` scope (SSO manual, step G).
-// Real response shape (verified 2026-09-17):
+// Response shape:
 //   GET /directory/search?q=&limit=  → { ok, synced_at, stale, count, max, items: Person[] }
 //   GET /directory/user?email=|union_id= → { ok, synced_at, stale, person: Person }
 //   Person = { union_id, name, en_name, email, job_title, departments[], city, country,

@@ -263,7 +263,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
         ),
       )
     : new Set();
-  // a name that is not in the list used to be saved as "no brand" / category #1 without a word
+  // a name that is not in the list is refused, never saved silently as "no brand" / category #1
   const fields: Record<string, string> = {};
   if (str(i.category) && !cat) fields.category = `ไม่พบหมวดหมู่ "${str(i.category)}" ในรายการ`;
   if (str(i.brand) && !mfg) fields.brand = `ไม่พบยี่ห้อ "${str(i.brand)}" ในรายการ`;
@@ -1109,7 +1109,7 @@ export async function issueForSaleOrder(
   const run = async (t: Tx) => {
     // header first — the same lock order as saveSaleOrder / approveSaleOrder (no deadlock);
     // only an APPROVED order may take stock out (the UI filters, the API must too: a pick on a
-    // waiting order, then an edit + approve, used to take the stock out twice)
+    // waiting order, then an edit + approve, would take the stock out twice)
     const [hd] = await t
       .select({ approve: saleOutHd.approveStatusId, status: saleOutHd.recordStatus })
       .from(saleOutHd)
@@ -1564,7 +1564,6 @@ const MOVE_SORT = {
 
 export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<Page<Movement>> {
   const w = movementWhere({ ...f, q: p.q || f.q });
-  // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
     db
       .select({ total: countFn() })
@@ -1722,7 +1721,6 @@ const ISSUED_SORT = {
 
 export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
   const w = issuedWhere(p.q, f);
-  // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
     issuedCountBase().where(w),
     issuedBase()
@@ -1754,7 +1752,7 @@ export async function issuedStats(q: string, f: IssuedFilters) {
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .where(w);
-  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
+  if (!r) throw new Error('aggregate returned no row');
   const [top] = await db
     .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${issuedQty})` })
     .from(inventoryDt)

@@ -90,7 +90,7 @@ export function userColumns({
       header: 'ประเภทผู้ใช้งาน / สิทธิ์',
       cell: (r) => <RoleBadge role={r.role} />,
     },
-    // at 1280px (with the sidebar) every column did not fit and pushed Action off-screen:
+    // at 1280px (with the sidebar) every column does not fit and pushes Action off-screen:
     // หน่วยงาน / ติดต่อ show only on wider screens (both stay in the edit dialog)
     { key: 'branch', header: 'สาขา / หน่วยงาน', hideBelow: 'xl' },
     {

@@ -81,7 +81,7 @@ function useTurnstile(
 
 /**
  * One box that already holds the first screen (≈ the viewport under the header) in every phase, so
- * gate → loading → job never moves the footer (it starts below the fold) — CLS was 0.38.
+ * gate → loading → job never moves the footer (it starts below the fold): no layout shift.
  */
 export function TrackClient(props: Props) {
   return (

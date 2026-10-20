@@ -66,14 +66,12 @@ export async function findAppUserByEmail(email: string) {
 
 /* ------------------------------------------------------------------ *
  * app_user lookup — cached 10 s per email. A screen fires 10–20 API calls
- * on load and every one of them resolved the same row; now it is one query
- * per user per 10 s. Admin edits (approve / role / delete) call
+ * on load that all resolve the same row. Admin edits (approve / role / delete) call
  * invalidateUserCache() so they still take effect immediately; the TTL only
  * bounds what a direct SQL edit can lag by.
  * ------------------------------------------------------------------ */
 type AppUserRow = NonNullable<Awaited<ReturnType<typeof findAppUserByEmail>>>;
-// on globalThis: the build loads /api routes and pages in separate module copies — one cache per process,
-// so an admin write (which clears it) is seen by pages too (same reason as src/server/cache.ts)
+// on globalThis so an admin write (which clears it) is seen by pages too — see src/server/cache.ts
 const g = globalThis as typeof globalThis & {
   __shdUserCache?: Map<string, { at: number; row: AppUserRow }>;
   __shdGrantCache?: Map<string, { at: number; grants: GrantMap }>;

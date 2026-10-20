@@ -20,9 +20,8 @@ type Box = { v: unknown; at: number };
 type Loader = () => Promise<unknown>;
 
 // ONE store per process, on globalThis: the build loads route handlers (/api) and pages through separate
-// module runtimes (.next/server/chunks vs chunks/ssr), so a module-level store existed twice — a write
-// through /api invalidated only the API's copy and a page (the brand list) kept serving its own for up to
-// a TTL (persona QA: a new brand missing from the list / search for 20–40 s).
+// module runtimes (.next/server/chunks vs chunks/ssr), so a module-level store would exist twice — a write
+// through /api would invalidate only the API's copy while a page kept serving its own for up to a TTL.
 const g = globalThis as typeof globalThis & { __shdCache?: LRUCache<string, Box, Loader> };
 const store = (g.__shdCache ??= new LRUCache<string, Box, Loader>({
   max: 500,

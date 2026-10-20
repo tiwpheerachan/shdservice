@@ -3,6 +3,7 @@
 import * as React from 'react';
 import type { ServerTableState } from '@/components/ui/data-table';
 import { useFilterDraft } from '@/lib/use-filter-draft';
+import { FIRST_PAGE, pageArgsOf } from '@/data/keys';
 
 /**
  * The state every server-paged list page keeps: a filter bar whose edits (`draft`) only take effect on
@@ -23,22 +24,16 @@ export function useServerTable<F extends object>(
 ) {
   const f = useFilterDraft(empty, opts.start);
   const [table, setTable] = React.useState<ServerTableState>({
-    page: opts.page ?? 1,
-    pageSize: opts.pageSize ?? 25,
-    q: '',
-    sort: opts.sort ?? null,
+    page: opts.page ?? FIRST_PAGE.page,
+    pageSize: opts.pageSize ?? FIRST_PAGE.pageSize,
+    q: FIRST_PAGE.q,
+    sort: opts.sort ?? FIRST_PAGE.sort,
   });
   return {
     ...f,
     table,
     /** page / pageSize / q / sort / dir — spread into the page hook (and q into the export) */
-    pageArgs: {
-      page: table.page,
-      pageSize: table.pageSize,
-      q: table.q,
-      sort: table.sort?.key,
-      dir: table.sort?.dir,
-    },
+    pageArgs: pageArgsOf(table),
     /** DataTable's `server` prop minus `total` */
     server: {
       onChange: setTable,

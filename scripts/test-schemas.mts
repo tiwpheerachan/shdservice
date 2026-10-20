@@ -553,7 +553,6 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.equal(ymd(bad), undefined, String(bad));
 });
 
-// ==== legacy data: phones / quotation discounts (agent B, 2026-10-15) ====
 console.log('\nLegacy data: invisible characters in phones, บาท discounts on quotations');
 {
   const { normalizePhone } = await import('../src/lib/validation/customer.ts');
@@ -563,7 +562,7 @@ console.log('\nLegacy data: invisible characters in phones, บาท discounts 
     assert.equal(normalizePhone('\u202A02\u2013123\u20144567\u202C'), '02-123-4567');
     assert.equal(normalizePhone(undefined), '');
     assert.deepEqual(errorsOf(customerSchema(), { name: 'ก', phone: '081\u200B2345678\u200F' }), {});
-    // a landline only: fine on an existing customer (a NEW one must also give a mobile — see agent P)
+    // a landline only: fine on an existing customer (a NEW one must also give a mobile — see Field formats below)
     assert.deepEqual(
       errorsOf(customerSchema({ phone: '0800000000' }), { name: 'ก', phone: '02\u2013123\u20134567' }),
       {},
@@ -601,7 +600,6 @@ console.log('\nLegacy data: invisible characters in phones, บาท discounts 
   }
 }
 
-// ==== field formats: products / customers / quotation / sale order / stock / admin (agent P, 2026-10-15) ====
 console.log('\nField formats (agent P): products, customers, quotation, sale order, stock, admin');
 {
   const { cleanMfgCode } = await import('../src/lib/validation/admin.ts');
@@ -680,7 +678,9 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
     const longAddr = 'ก'.repeat(117);
     assert.deepEqual(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr }), {});
     assert.ok(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr + 'x' }).address1);
-    assert.ok(errorsOf(customerSchema({ ...cust, address2: longAddr }), { ...cust, address2: longAddr + 'x' }).address2);
+    assert.ok(
+      errorsOf(customerSchema({ ...cust, address2: longAddr }), { ...cust, address2: longAddr + 'x' }).address2,
+    );
     assert.ok(errorsOf(customerSchema(), { ...cust, type: 'x'.repeat(60) }).type);
     assert.ok(errorsOf(customerSchema(), { ...cust, priceGroup: 'VIP' }).priceGroup);
     assert.deepEqual(
@@ -710,7 +710,7 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
   test('sale order: qty 1–1000, paid ≤ 10,000,000 (1e9 was a 500), remark ≤ 100, payment type from the list', () => {
     assert.ok(errorsOf(saleOrderSchema(), { ...order, lines: [{ code: 'P1', qty: 1001 }] })['lines.0.qty']);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentAmount: 1e9 }).paymentAmount);
-    // the cap holds on an order big enough to be paid 10,000,000 (paying more than the total is refused — round 3)
+    // the cap holds on an order big enough to be paid 10,000,000 (paying more than the total is refused)
     assert.deepEqual(
       errorsOf(saleOrderSchema(), {
         ...order,

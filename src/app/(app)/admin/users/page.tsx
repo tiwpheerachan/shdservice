@@ -28,7 +28,7 @@ export default function UsersPage() {
   const { data: USERS, loading, refetch } = useUsers(view === 'deleted' ? 'only' : 'exclude');
   // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
   const { data: dbRoles } = useRoles();
-  // System Admin last: the dropdown keyboard-highlights the first row, and Enter there granted full admin
+  // System Admin last: the dropdown keyboard-highlights the first row, and Enter there would grant full admin
   const ROLE_OPTIONS = React.useMemo(
     () =>
       dbRoles.length
@@ -66,7 +66,7 @@ export default function UsersPage() {
   const { openAdd, openEdit, dialog } = useUserDialog(refetch);
   const { busyId, quickSet, setActive, softSet } = useUserActions(refetch);
 
-  // อนุมัติ asks for the role first, nothing pre-picked: a silent default role handed people
+  // อนุมัติ asks for the role first, nothing pre-picked: a silent default role would hand people
   // menus they should not have
   const [approving, setApproving] = React.useState<User | null>(null);
   const [approveRole, setApproveRole] = React.useState('');

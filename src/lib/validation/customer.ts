@@ -30,8 +30,8 @@ export function isThaiTaxId(v: string): boolean {
 export const taxIdDigits = (v: unknown) => String(v ?? '').replace(/[\s-]/g, '');
 /**
  * one or more phone numbers: digits / spaces / dashes / "/" between numbers, each number 9–11 digits
- * (02-123-4567, 081-234-5678, +66 81 234 5678). The digit groups are read left to right into numbers;
- * "086-417-29530611474570" (one 20-digit run) used to pass because only the total (≥ 9) was checked.
+ * (02-123-4567, 081-234-5678, +66 81 234 5678). The digit groups are read left to right into numbers —
+ * checking only the total (≥ 9) would pass "086-417-29530611474570" (one 20-digit run).
  */
 export const phoneFormatOk = (v: unknown) => {
   const p = normalizePhone(v);
@@ -57,7 +57,7 @@ const ADDRESS_PREFIXES = [
 ];
 /**
  * "ต." + name, unless the master name already carries one of its level's prefixes
- * (every Bangkok แขวง / เขต does) — "แขวงแขวงห้วยขวาง" was stored before.
+ * (every Bangkok แขวง / เขต does) — never "แขวงแขวงห้วยขวาง".
  */
 export function withPrefix(prefix: string, name: string): string {
   const n = name.trim();
@@ -123,7 +123,7 @@ export function customerSchema(prev?: CustomerPrev | null) {
 
         const phone = normalizePhone(v.phone);
         if (phoneRequired && !phone) bad('phone', 'ต้องระบุเบอร์โทรศัพท์');
-        // unchanged = the same text (separators and all): comparing digits only let "-" become "ไม่มีเบอร์"
+        // unchanged = the same text (separators and all): comparing digits only would let "-" become "ไม่มีเบอร์"
         // and "081abc2345678" pass as the stored "081-234-5678"
         else if (phone && !same('phone', v.phone, normalizePhone)) {
           if (!phoneFormatOk(phone)) bad('phone', 'เบอร์โทรศัพท์ไม่ถูกต้อง (เบอร์ละ 9–10 หลัก หลายเบอร์คั่นด้วย /)');

@@ -333,7 +333,7 @@ export const inventoryDt = pgTable('inventory_dt', {
 });
 
 export const job = pgTable('job', {
-  // optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+  // optimistic-locking token (drizzle/0026) — see customer.rowVersion
   rowVersion: integer('row_version').notNull().default(0),
   // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
   documentProfileId: integer('document_profile_id'),
@@ -412,7 +412,7 @@ export const job = pgTable('job', {
   swapRefundDocumentNo: varchar('swap_refund_document_no', { length: 100 }),
   isJobBounce: boolean('is_job_bounce'),
   // public customer tracking link (drizzle/0012) — /track/<token>; lifetime: drizzle/0016
-  // legacy raw token — no longer written (new code stores only the hash below); dropped by a later contract migration
+  // legacy raw token — never written (only the hash below is); existing values emptied by drizzle/0033
   trackToken: varchar('track_token', { length: 43 }),
   // sha256(link token) as hex (drizzle/0025) — the only thing a link is looked up by
   trackTokenHash: varchar('track_token_hash', { length: 64 }),
@@ -678,7 +678,7 @@ export const quotationDt = pgTable(
 export const quotationHd = pgTable(
   'quotation_hd',
   {
-    // optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+    // optimistic-locking token (drizzle/0026) — see customer.rowVersion
     rowVersion: integer('row_version').notNull().default(0),
     // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
     documentProfileId: integer('document_profile_id'),
@@ -770,7 +770,7 @@ export const saleInHd = pgTable('sale_in_hd', {
 });
 
 export const saleOutHd = pgTable('sale_out_hd', {
-  // optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
+  // optimistic-locking token (drizzle/0026) — see customer.rowVersion
   rowVersion: integer('row_version').notNull().default(0),
   // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
   documentProfileId: integer('document_profile_id'),

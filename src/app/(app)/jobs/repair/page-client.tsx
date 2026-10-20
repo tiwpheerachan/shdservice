@@ -1,0 +1,241 @@
+'use client';
+
+import * as React from 'react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { JobHistorySection } from '@/components/shared/job-history';
+import {
+  CustomerSection,
+  ProductSection,
+  CostSummary,
+  OtherInfoSection,
+  AttachmentSection,
+  FormActions,
+  VIEW_ONLY,
+  JobScreen,
+  useJobForm,
+  fromJob,
+  saveCommonSections,
+  useWorkflowErrors,
+  useMoneyLock,
+} from '@/components/shared/job-form';
+import { useAccess } from '@/lib/use-access';
+import { useToast } from '@/components/ui/toast';
+import type { PickableProduct } from '@/lib/product-match';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { PrintButton } from '@/components/shared/print-button';
+import { QuoteLink } from '@/components/jobs/quote-link';
+import { RepairPartsSection } from '@/components/jobs/repair-parts';
+import { RepairDetailSection, RepairJobInfoSection, type RepairDetail } from '@/components/jobs/repair-detail';
+import { type Line, chargedTotal, partsBlockOf } from '@/components/jobs/repair-lines';
+import { postJson, errMsg } from '@/lib/api';
+import { repairActionSchema } from '@/lib/validation/job';
+
+const NO_DETAIL: RepairDetail = {
+  engineerSymptom: '',
+  repairDetail: '',
+  engineerRemark: '',
+  newSerial: '',
+  status: '',
+};
+
+/** repair details and spare-part requests of a job; the lines get ids lastId + 1, + 2, … */
+function repairStateOf(job: JobDetail, lastId: number): { detail: RepairDetail; lines: Line[] } {
+  return {
+    detail: {
+      engineerSymptom: job.engineerSymptom,
+      repairDetail: job.repairDetail,
+      engineerRemark: job.engineerRemark,
+      newSerial: '',
+      // the job's own status even when the list does not offer it (closed, out-source…): saved unchanged = kept
+      status: job.status,
+    },
+    lines: job.parts.map((p, i) => ({
+      id: lastId + i + 1,
+      logId: p.logId,
+      code: p.code,
+      name: p.name,
+      price: p.unitPrice,
+      aPick: p.isSpecial,
+      aQuote: p.isQuotation,
+      aQty: p.requested,
+      bPick: p.isSpecialB,
+      bQuote: p.isQuotationB,
+      bQty: p.requestQtyB,
+      status: p.status,
+      total: p.total,
+      locked: p.statusId !== 1 || p.granted > 0,
+      waiting: p.statusId === 1 && p.isSpecial && p.requested > p.granted,
+    })),
+  };
+}
+
+/** `initial`: the job that came with the page — the form starts filled from it (server HTML = hydrated tree) */
+function RepairForm({ initial }: { initial?: JobDetail }) {
+  const { push } = useToast();
+  // the job the form was built from: its mount onRecord (useRecord hands the page's record over once) is
+  // already on screen; every other job that arrives — search bar, a save (setJob), a re-read — fills the form
+  const builtFrom = React.useRef(initial);
+  const { jobNo, job, loading, error, find, setJob } = useJob({
+    onRecord: (j) => {
+      const b = builtFrom.current;
+      builtFrom.current = undefined;
+      if (b?.no !== j.no || b.version !== j.version) prefill(j);
+    },
+  });
+  const { s: form, reset, adopt } = useJobForm();
+  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
+  const { can } = useAccess();
+  const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (Job Money After Close may change them)
+  // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
+  const [saved, setSaved] = React.useState(() => (initial ? repairStateOf(initial, 0) : null));
+  const [lines, setLines] = React.useState<Line[]>(() => saved?.lines ?? []);
+  const [detail, setDetail] = React.useState<RepairDetail>(() => saved?.detail ?? NO_DETAIL);
+  const [saving, setSaving] = React.useState(false);
+  const idRef = React.useRef(saved?.lines.length ?? 0);
+  useUnsavedChanges(!!saved && JSON.stringify({ detail, lines }) !== JSON.stringify(saved));
+
+  // prefill form, repair details and spare-part requests from the loaded job
+  function prefill(job: JobDetail) {
+    reset(fromJob(job));
+    const next = repairStateOf(job, idRef.current);
+    idRef.current += next.lines.length;
+    setDetail(next.detail);
+    setLines(next.lines);
+    setSaved(next);
+  }
+
+  const go = (v: string) => find(v);
+
+  // POST /api/jobs/:no/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
+  const save = async () => {
+    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    const body = {
+      ...detail,
+      status: detail.status || undefined,
+      serviceCost: form.serviceCost,
+      toolCost: form.toolCost,
+      deliveryCost: form.deliveryCost,
+      boxCost: form.boxCost,
+      parts: lines.map((l) => ({
+        logId: l.logId,
+        code: l.code,
+        unitPrice: l.price,
+        a: { pick: l.aPick, quote: l.aQuote, qty: l.aQty },
+        b: { pick: l.bPick, quote: l.bQuote, qty: l.bQty },
+      })),
+    };
+    const canEdit = can('Job Management', 'edit');
+    if (!act.check(repairActionSchema, body, canEdit)) return;
+    if (partsBlock) return push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: partsBlock });
+    setSaving(true);
+    try {
+      // product / other-info sections shown on this screen are saved too
+      const common = await saveCommonSections(job.no, form, canEdit);
+      adopt(common);
+      // the version as of now: someone else's save since the page loaded → 409 (reload) instead of
+      // silently cancelling the part requests they added
+      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
+        ...body,
+        version: common.version ?? form.version,
+      });
+      setJob(d.job);
+      push({ kind: 'success', title: 'บันทึกงานซ่อมเรียบร้อย', desc: `${d.job.no} · ${d.job.status}` });
+    } catch (e) {
+      if (!act.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addPart = (p: PickableProduct) => {
+    setLines((s) => [
+      ...s,
+      {
+        id: ++idRef.current,
+        code: p.sysCode,
+        name: p.name,
+        price: p.price,
+        aPick: true,
+        aQuote: true,
+        aQty: 1,
+        bPick: false,
+        bQuote: false,
+        bQty: 0,
+        status: p.onhand > 0 ? 'พร้อมเบิก' : 'รออะไหล่',
+      },
+    ]);
+  };
+
+  // what the job charges (ค่าอะไหล่ in the summary) = what saveRepair stores: the stored total while no line
+  // changed; otherwise issued / returned lines keep their stored amount, the others เบิก + เสนอ only
+  const linesEdited = !!saved && JSON.stringify(lines) !== JSON.stringify(saved.lines);
+  const charged = linesEdited ? chargedTotal(lines) : (job?.partsCost ?? 0);
+  // the server refuses the change to ซ่อมเสร็จ / ไม่ซ่อม while these are not issued — say so before saving
+  const partsBlock = partsBlockOf(lines, detail.status, job?.status);
+
+  return (
+    <>
+      <PageHeader
+        title="บันทึกงานซ่อม"
+        description="ข้อมูลงาน » บันทึกการทำงาน — บันทึกอะไหล่ที่ใช้ วิธีการซ่อม และค่าใช้จ่าย"
+        actions={
+          <div className="flex items-center gap-2">
+            <label htmlFor="repair-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
+              ระบุ หมายเลขงาน
+            </label>
+            <JobSearch id="repair-job-no" value={jobNo} scope="open" onPick={go} />
+          </div>
+        }
+      />
+
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="repair-job-no">
+        <CustomerSection readOnly />
+
+        <RepairJobInfoSection job={job} />
+
+        <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+
+        <RepairPartsSection lines={lines} setLines={setLines} onAdd={addPart} lock={lock} act={act} />
+
+        <RepairDetailSection job={job} detail={detail} setDetail={setDetail} act={act} partsBlock={partsBlock} />
+
+        <CostSummary partsTotal={charged} action={act} />
+        <OtherInfoSection />
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
+        <JobHistorySection job={job} />
+
+        <FormActions
+          saveLabel="บันทึกงานซ่อม"
+          onSave={save}
+          saving={saving}
+          denied={can('Job Repair', 'edit') ? undefined : VIEW_ONLY}
+          cancelHref="/jobs/list"
+          extra={
+            <>
+              <QuoteLink jobNo={job?.no} />
+              <PrintButton
+                label="พิมพ์ใบรับงาน"
+                kind="job"
+                no={job?.no ?? ''}
+                profileId={job?.documentProfileId}
+                href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+                disabled={!job}
+              />
+            </>
+          }
+        />
+      </RecordGate>
+    </>
+  );
+}
+
+export default function RepairPage({ job }: { job?: JobDetail }) {
+  return (
+    <JobScreen initial={job && fromJob(job)}>
+      <RepairForm initial={job} />
+    </JobScreen>
+  );
+}

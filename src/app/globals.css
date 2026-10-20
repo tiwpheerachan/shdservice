@@ -105,6 +105,12 @@
   background: linear-gradient(var(--brand-angle, 135deg), #43a6f8, #55d5a1);
 }
 
+/* the same gradient (hues kept, lightness lowered) under WHITE TEXT: ≥ 5.5:1 at every point, ≥ 4.5:1 at
+   hover:opacity-90 (bg-brand: 1.8–2.6:1). Decoration without text keeps bg-brand. Revert: bg-brand's stops */
+@utility bg-brand-ink {
+  background: linear-gradient(var(--brand-angle, 135deg), #076abc, #1d7652);
+}
+
 @utility no-scrollbar {
   &::-webkit-scrollbar {
     display: none;

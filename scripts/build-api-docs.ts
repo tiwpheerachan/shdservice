@@ -507,7 +507,7 @@ html = html
 /*
  * One language switch, ไทย / English (the header's): APIDoc ships seven UI languages and no Thai,
  * and a second per-endpoint switch whose TH changed nothing (every endpoint has the same English
- * text in both). Now the header offers ไทย and English, ไทย = the English words with the visible
+ * text in both). The header offers ไทย and English instead, ไทย = the English words with the visible
  * ones in Thai, picking one also sets the content language, and the per-endpoint box is gone.
  * Plus the requests that only ever 404: /data/home.md and /favicon.svg (/favicon.ico).
  */
@@ -597,7 +597,7 @@ const FIXES: [anchor: string, replacement: string, count?: number][] = [
   ['await fetch("/data/home.md")', '{ok:!1}'],
   [
     '<link rel="icon" type="image/svg+xml" href="/favicon.svg">\n  <link rel="alternate icon" href="/favicon.ico">',
-    // no logo (owner 2026-10-16); an empty icon also stops the browser's /favicon.ico request
+    // no logo (owner's decision); an empty icon also stops the browser's /favicon.ico request
     '<link rel="icon" href="data:,">',
   ],
   ['<html lang="es">', '<html lang="th">'],

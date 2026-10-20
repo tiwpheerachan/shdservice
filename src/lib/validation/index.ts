@@ -127,7 +127,7 @@ export const codeField = (re: RegExp, msg: string, prev?: string | null) =>
       return c === '' || re.test(c) || (prev != null && c === cleanCode(prev));
     }, msg);
 
-/** money: 0–max, at most 2 decimals (numeric(18,2) columns; a bigger value used to fail the save as a 500) */
+/** money: 0–max, at most 2 decimals (numeric(18,2) columns; a bigger value would fail the save as a 500) */
 export const moneyField = (label: string, max = 1_000_000) =>
   z
     .union([z.number(), z.string()])

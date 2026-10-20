@@ -94,7 +94,7 @@ export default async function LoginPage({
           <a
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
             rel="nofollow"
-            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand hover:opacity-90"
+            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand-ink hover:opacity-90"
           >
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO

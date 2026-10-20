@@ -48,7 +48,7 @@ export default function PendingPage() {
 
   React.useEffect(() => {
     if (preview) return;
-    const id = setInterval(() => !document.hidden && void check(), 15000); // not while the tab is hidden
+    const id = setInterval(() => !document.hidden && void check(), 15000);
     return () => clearInterval(id);
   }, [check, preview]);
 
@@ -109,7 +109,7 @@ export default function PendingPage() {
             <button
               onClick={check}
               disabled={checking}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand hover:opacity-90 disabled:opacity-60"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand-ink hover:opacity-90 disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
               ตรวจสอบสถานะการอนุมัติ

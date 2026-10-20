@@ -133,7 +133,7 @@ function OutsourceForm() {
 
   const open = job?.outsource.find((o) => o.status === SEND_STATUS.SENT);
   // already received: saving again sends the receive block too (its note / date / person may be edited) —
-  // a legacy row received without a date is saved as before (send block only)
+  // a legacy row received without a date is saved with the send block only
   const back = !open && job?.outsource.at(-1)?.status === SEND_STATUS.RECEIVED && !!d.recvDate;
 
   // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log

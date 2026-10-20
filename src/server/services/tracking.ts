@@ -377,12 +377,12 @@ export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promi
 }
 
 /**
- * Document links (drizzle/0019, relaxed in round 2 — see drizzle/0028): the URL /track/doc/<ticket>
+ * Document links (drizzle/0019, drizzle/0028): the URL /track/doc/<ticket>
  * works for DOC_LINK_MINUTES, any number of times and from any browser, but only while the
  * tracking session (phone + OTP) or the /track/<token> link that asked for it is still live.
  * LINE's in-app browser loads the page, then "open in Safari" loads it again from another
- * browser (and often another IP): the old 60-second, single-use, IP + User-Agent bound ticket
- * failed exactly there. 256 random bits, only sha256 stored — unguessable, never permanent.
+ * browser (and often another IP): a short-lived, single-use, IP + User-Agent bound ticket
+ * fails exactly there. 256 random bits, only sha256 stored — unguessable, never permanent.
  * track_doc_ticket.ua_hash holds sha256(session token | link token): the authorisation it is bound to.
  */
 export const DOC_LINK_MINUTES = 10;
@@ -539,7 +539,7 @@ export async function jobNoForLink(token: string): Promise<string | null> {
       .from(job)
       .where(eq(job.trackTokenHash, tokenHash(t)))
       .limit(1);
-    // the link's own lifetime replaces the 90-days-after-close rule: 1 day unopened, 15 min after opening
+    // only the link's own lifetime counts (no cut-off after the job closes): 1 day unopened, 15 min after opening
     if (!row || row.recordStatus === RS.DELETED || !row.live) return null;
     return row.no;
   });

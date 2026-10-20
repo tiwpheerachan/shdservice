@@ -11,8 +11,6 @@ export const TAT_BUCKET_LABEL = {
   over30: 'เกิน 30 วัน',
 } as const;
 
-/* ---------- Static UI config (not database data) ---------- */
-
 /* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก app_config ผ่าน useRoles) */
 export const ROLES: [string, ...string[]] = [
   'System Admin',

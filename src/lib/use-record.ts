@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { api, errMsg } from '@/lib/api';
+import { recordNo } from '@/data/keys';
 
 /**
  * One record looked up by its number for the "ระบุหมายเลข… → แก้ไข" screens (jobs, quotations,
@@ -16,6 +17,9 @@ import { api, errMsg } from '@/lib/api';
  *  - `onRecord`: every record that arrives — loaded (URL or search) or saved through `setData` —
  *    e.g. to fill the page's form from it (an event, not an effect watching the data)
  *  - `setData`: the saved record the API answered with, shown without another read
+ *
+ * The URL's record may come with the page (<Prefetched>, src/server/prefetch.ts — the record itself, as
+ * `pick` returns it): then it is not read again on mount, and `onRecord` gets it as if it had just loaded.
  */
 export function useRecord<T>(opts: {
   url: (no: string) => string;
@@ -26,10 +30,11 @@ export function useRecord<T>(opts: {
   onMissing?: (no: string, message: string) => void;
   onRecord?: (record: T) => void;
 }) {
-  const norm = (v: string) => v.trim().toUpperCase();
-  const [no, setNo] = React.useState(() => norm(opts.initial ?? ''));
+  const [no, setNo] = React.useState(() => recordNo(opts.initial ?? ''));
   const quiet = React.useRef(!!no); // the URL's record opens without a "found" toast
   const key = no ? opts.url(no) : null;
+  const { fallback } = useSWRConfig();
+  const [prefetched] = React.useState(() => (key ? (fallback?.[key] as T | undefined) : undefined));
 
   const { pick, onLoaded, onMissing, onRecord } = opts;
   const { data, error, isLoading, mutate } = useSWR<T>(key, async (url: string) => pick((await api(url)) as never), {
@@ -37,7 +42,7 @@ export function useRecord<T>(opts: {
     revalidateOnReconnect: false,
     shouldRetryOnError: false,
     keepPreviousData: false, // never show one record under another's number
-    revalidateOnMount: true,
+    revalidateOnMount: prefetched === undefined, // only the first mount: a new number is always read
     revalidateIfStale: true,
     dedupingInterval: 0,
     // swr calls these from the latest render's options → `key` / `no` are the current lookup
@@ -54,9 +59,17 @@ export function useRecord<T>(opts: {
     },
   });
 
+  // the record that came with the page: what onSuccess does for a record read on mount
+  React.useEffect(() => {
+    if (prefetched === undefined) return;
+    quiet.current = false;
+    onRecord?.(prefetched);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the record the page came with
+  }, []);
+
   const find = React.useCallback(
     (v: string) => {
-      const n = norm(v);
+      const n = recordNo(v);
       if (!n) return;
       quiet.current = false;
       if (n === no)

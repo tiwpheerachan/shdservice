@@ -160,7 +160,7 @@ export function QuotationSummary({
         <Row label="มูลค่าก่อนภาษี" value={baht(t.totalBase)} />
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">ภาษีมูลค่าเพิ่ม (%)</dt>
-          {/* 0 or 7 % only (quotation_hd.vat_rate) — a free number let 5 % through */}
+          {/* 0 or 7 % only (quotation_hd.vat_rate) */}
           <dd>
             <Select
               aria-label="ภาษีมูลค่าเพิ่ม (%)"

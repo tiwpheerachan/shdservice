@@ -37,9 +37,9 @@ const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
 /** the column as masterNameKey() sees a name (no spaces, lower case) */
 const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
   sql`lower(regexp_replace(coalesce(${col}, ''), '[[:space:]]', '', 'g'))`;
-/** 409 under the name field: the same name ignoring case and spaces exists (the unique index used to answer 500).
+/** 409 under the name field: the same name ignoring case and spaces exists.
  *  The message names the row that has it — it may be Inactive or deleted, i.e. not in the list — and the
- *  field error IS that message: the toast fades, the line under the name stays (it used to say only "มีชื่อนี้อยู่แล้ว"). */
+ *  field error IS that message: the toast fades, the line under the name stays. */
 function duplicate(dup: { name: string | null; ref: string | number; rs?: string | null }) {
   const msg = `${DUPLICATE_NAME}: "${clean(dup.name)}" (รหัส ${dup.ref}${dup.rs === RS.DELETED ? ' · อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? ' · Inactive' : ''})`;
   return new HttpError(409, msg, { fields: { name: msg } });
@@ -166,7 +166,7 @@ export async function saveSimple(
     statusChangedBy: byUserId,
   };
   if (d.keys.detail) values[d.keys.detail] = clean(input.detail);
-  // the page has no field for it (categories.shot_code): not sent = keep it (every edit used to blank it)
+  // the page has no field for it (categories.shot_code): not sent = keep it
   if (d.keys.extra && input.extra !== undefined) values[d.keys.extra] = clean(input.extra).slice(0, 50);
   if (d.keys.days) values[d.keys.days] = Number(input.days);
 
@@ -176,7 +176,7 @@ export async function saveSimple(
         .from(d.table)
         .where(eq(d.id, Number(input.id)))
     : [];
-  if (input.id && !before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`); // was: silent update of nothing + undefined answer
+  if (input.id && !before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`);
   // unique name ignoring case + spaces (legacy has unique indexes on most names); a row keeping its own
   // name is not checked — 5 legacy symptom pairs already clash and must stay editable
   const oldName = before ? (before as Record<string, unknown>)[d.keys.name] : undefined;
@@ -410,7 +410,7 @@ export async function saveModel(
     .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${clean(input.brand)}`) // legacy names carry trailing spaces
     .limit(1);
   if (!brand[0]) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + clean(input.brand));
-  // one name per brand, ignoring case + spaces (ix_unique_model used to answer a duplicate with a 500);
+  // one name per brand, ignoring case + spaces (checked here so a duplicate is a 409, not ix_unique_model's 500);
   // a model keeping its own name and brand is not checked
   const [before] = input.code
     ? await db

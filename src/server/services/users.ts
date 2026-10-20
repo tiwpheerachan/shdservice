@@ -70,7 +70,7 @@ export async function provisionSsoUser(
 
   if (existing) {
     // owner = bootstrap only: a row with no role yet becomes System Admin; a role or a
-    // disable an admin set later sticks (owners are no longer un-removable)
+    // disable an admin set later sticks
     const userType = existing.userType?.trim() || (owner ? ADMIN_USER_TYPE : null);
     await db
       .update(appUser)
@@ -320,10 +320,10 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   const same = (a: string, b: string | null) => a.toLowerCase() === clean(b).toLowerCase();
   if (before && ((email && !same(email, before.emailAddress)) || (username && !same(username, before.username))))
     refuseSelf(before.userId, actorId, 'เปลี่ยนอีเมลหรือ Username ของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน');
-  // a stale tab's คืนสิทธิ์ / แก้ไข on a user deleted meanwhile used to set it straight back to ACTIVE
+  // a stale tab's คืนสิทธิ์ / แก้ไข on a user deleted meanwhile must not set it straight back to ACTIVE
   if (before?.recordStatus === RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
-  // the page sends the full name it shows: unchanged → first / last stay as stored (splitName moved the 2nd
-  // word of a two-word first name into last_name on every edit / approve / revoke, with a fake audit change)
+  // the page sends the full name it shows: unchanged → first / last stay as stored (splitName would move the
+  // 2nd word of a two-word first name into last_name and log a fake audit change)
   const keepName =
     !!before && clean(input.name) === clean(fullName(before.firstName, before.lastName) || before.username);
 
@@ -335,7 +335,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   // the role must be one of the roles (or the one the user already has)
   if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { role: 'ไม่พบประเภทผู้ใช้งานนี้ในรายการ' } });
-  // email / username belong to one user: a new user with someone's email used to UPDATE that user silently
+  // email / username belong to one user: a new user with someone's email must not silently UPDATE that user
   const clash: Record<string, string> = {};
   if (email) {
     const other = await findAppUserByEmail(email);
@@ -434,7 +434,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
 
 /**
  * The audit line of a user edit, by what it did — the users page's อนุมัติ / ถอนสิทธิ์ / คืนสิทธิ์
- * all save through upsertUser, and every one of them used to read "แก้ไขผู้ใช้ …".
+ * all save through upsertUser, so the line is told apart here instead of a generic "แก้ไขผู้ใช้ …".
  */
 export function userAuditLine(
   name: string,
@@ -531,7 +531,7 @@ export async function savePermissions(
     /** role → menu → [was, now]: one audit entry per role, keyed by that role */
     const changed = new Map<string, Record<string, [unknown, unknown]>>();
     // one upsert on ix_user_type_and_module_name (unique (user_type, module_name)) instead of a
-    // SELECT + UPDATE/INSERT per row; a pair sent twice keeps its last value (as the loop did)
+    // SELECT + UPDATE/INSERT per row; a pair sent twice keeps its last value
     const rows = new Map(
       items.map((it) => [
         `${it.role}\0${it.menu}`,

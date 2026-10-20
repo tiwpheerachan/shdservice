@@ -13,7 +13,7 @@ import { IDEMPOTENCY } from '@/server/contract/common';
  * answer back instead of a second document. A repeat that arrives while the first is still running
  * → 409 — it never runs in parallel. Only a 2xx answer is stored: a refused request (400 / 409 …)
  * created nothing, so its key is released and the same submit may be sent again.
- * No header → `fn` runs exactly as before.
+ * No header → `fn` just runs.
  */
 let lastPurge = 0;
 

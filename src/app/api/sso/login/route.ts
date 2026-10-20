@@ -35,8 +35,8 @@ export const GET = checked(async (request: NextRequest) => {
   }
 
   // Several logins can start within seconds (link prefetch, a second tab, two
-  // 401 handlers racing) — each used to overwrite the cookie and the earlier
-  // flow then failed with state_mismatch. Keep the last few states instead.
+  // 401 handlers racing) — with one state per cookie each would overwrite the last and the
+  // earlier flow fail with state_mismatch, so the last few states are kept.
   const prev = request.cookies.get(STATE_COOKIE)?.value ?? '';
   const states = [state, ...prev.split(STATE_SEP).filter(Boolean)].slice(0, MAX_STATES);
 

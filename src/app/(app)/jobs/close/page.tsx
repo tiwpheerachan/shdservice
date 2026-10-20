@@ -73,7 +73,6 @@ function CloseForm() {
     }
   };
 
-  // cost summary straight from the job row
   const net = netOf(costRows(job));
   // a part requested from stock (เบิก) not issued yet → the server refuses a close of an open job (setStatus)
   const waiting = job?.parts.filter((p) => p.statusId === 1 && p.isSpecial && p.requested > p.granted) ?? [];

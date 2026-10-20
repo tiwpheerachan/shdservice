@@ -37,7 +37,7 @@ export const PAGE_MODULES: readonly Module[] = [
 
 /**
  * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
- * permissions page, section สิทธิ์พิเศษ). Every rule that used to name a role in code reads one of these.
+ * permissions page, section สิทธิ์พิเศษ). Rules read these, never a role name.
  * System Admin holds all of them implicitly, except Job Take (checkRight).
  * The value is the right's one short name — the permissions page, the error messages and the hints all
  * say this (rightLabel); RIGHT_HINTS is the longer line under it on the permissions page.
@@ -117,7 +117,6 @@ export function checkGrant(isAdmin: boolean, grants: GrantMap, module: Module | 
  *  technician (assignee list, self-take), not what one may do, and no admin was ever offered as an assignee. */
 export const adminImplicit = (m: Module) => m !== 'Job Take';
 
-/** Does the role hold a special right? */
 export function checkRight(isAdmin: boolean, grants: GrantMap, right: Right): boolean {
   return checkGrant(isAdmin && adminImplicit(right), grants, right, 'view');
 }

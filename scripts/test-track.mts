@@ -661,7 +661,19 @@ try {
   }
   const { normalizePhone } = await import('@/server/track-otp');
   phoneHashes = [PHONE, NOBODY].map((p) => guard.hmac(`phone:${p}`));
-  const clearPhoneLimits = () => db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
+  /** the resend cooldown of each test number (track-guard claimCooldown: a track_block row, not a counter) */
+  const coolKeys = () => phoneHashes.map((h) => `cool:${h}`);
+  const clearCooldowns = () => db.execute(sql`DELETE FROM track_block WHERE key IN ${coolKeys()}`);
+  const clearPhoneLimits = async () => {
+    await db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
+    await clearCooldowns();
+  };
+  const cooldownLeft = async (phone: string) =>
+    (
+      await db.execute<{ s: number }>(
+        sql`SELECT extract(epoch FROM blocked_until - now())::float8 AS s FROM track_block WHERE key = ${`cool:${guard.hmac(`phone:${phone}`)}`}`,
+      )
+    ).rows[0]?.s ?? null;
   let otpSession = '';
   const otpIp = nextIp();
 
@@ -715,8 +727,12 @@ try {
     assert.ok(row);
     assert.ok(!row.j.includes(lastOtp()) && !row.j.includes(PHONE) && !row.j.includes(reqId));
   });
-  await test('resend within a minute → 429 (cooldown)', async () => {
+  await test('resend right after an accepted request → 429 (cooldown), no SMS', async () => {
+    // the previous test's request was accepted a moment ago: the sliding 60 s cooldown holds whatever the clock
+    const before = smsLog.length;
     assert.equal((await otpReq(PHONE, nextIp())).status, 429);
+    await new Promise((res) => setTimeout(res, 100));
+    assert.equal(smsLog.length, before);
   });
   await test('5 wrong codes burn the OTP — the right one then fails too', async () => {
     const right = lastOtp();
@@ -748,6 +764,44 @@ try {
     for (const x of all)
       if (x.json.session)
         await db.execute(sql`DELETE FROM track_session WHERE token_hash = ${guard.sha256(x.json.session)}`);
+  });
+  await test('the cooldown slides: a turning clock minute does not reopen it; it ends 60 s after the accepted request', async () => {
+    await clearPhoneLimits();
+    assert.equal((await otpReq(PHONE, nextIp())).status, 200);
+    const left = await cooldownLeft(PHONE);
+    assert.ok(left !== null && left > 55 && left <= 60, `60 s from the accepted request (${left})`);
+    // a new minute / hour starts every fixed window afresh — none of them is the cooldown
+    await db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes}`);
+    assert.equal((await otpReq(PHONE, nextIp())).status, 429);
+    assert.ok(Math.abs((await cooldownLeft(PHONE))! - left!) < 2, 'a refused request does not extend it');
+    // 60 s later
+    await db.execute(
+      sql`UPDATE track_block SET blocked_until = now() - interval '1 second' WHERE key IN ${coolKeys()}`,
+    );
+    assert.equal((await otpReq(PHONE, nextIp())).status, 200);
+    assert.ok((await cooldownLeft(PHONE))! > 55, 'claimed again');
+    await new Promise((res) => setTimeout(res, 150)); // its send lands before the next test counts SMS
+  });
+  await test('concurrent requests for one number → exactly one accepted, one SMS', async () => {
+    await clearPhoneLimits();
+    const before = smsLog.length;
+    // 3 = the hourly cap, so only the cooldown can refuse
+    const all = await Promise.all(Array.from({ length: 3 }, () => otpReq(PHONE, nextIp())));
+    assert.deepEqual(all.map((r) => r.status).sort(), [200, 429, 429]);
+    await new Promise((res) => setTimeout(res, 150));
+    assert.equal(smsLog.length - before, 1);
+  });
+  await test('a request refused by another limit does not start the cooldown', async () => {
+    await clearPhoneLimits();
+    const lock = `phone:${guard.hmac(`phone:${PHONE}`)}`;
+    await guard.block(lock, 5);
+    assert.equal((await otpReq(PHONE, nextIp())).status, 429);
+    assert.equal(await cooldownLeft(PHONE), null);
+    await db.execute(sql`DELETE FROM track_block WHERE key = ${lock}`);
+    const before = smsLog.length;
+    assert.equal((await otpReq(PHONE, nextIp())).status, 200);
+    await new Promise((res) => setTimeout(res, 150)); // the send lands before the provider tests switch modes
+    assert.equal(smsLog.length - before, 1);
   });
 
   // ---- ThaiBulkSMS OTP service (production): it makes, sends and checks the code ----
@@ -867,7 +921,7 @@ try {
         const answers = new Set<string>();
         let slowest = Infinity;
         for (let round = 0; round < 2; round++) {
-          await clearPhoneLimits(); // the per-number minute / hour caps — not the per number+IP fail counter
+          await clearPhoneLimits(); // the per-number cooldown / hour caps — not the per number+IP fail counter
           await db.execute(sql`DELETE FROM track_rate WHERE key = ${guard.ipKeyOf(ip)}`); // 10 verifies/min per IP
           const r = await otpReq(phone, ip);
           assert.equal(r.status, 200, `${phone === PHONE ? 'customer' : 'stranger'} round ${round}`);
@@ -902,8 +956,12 @@ try {
       await db.execute(sql`DELETE FROM track_rate WHERE bucket LIKE 'otp_fail_phone_day%'`);
       await db.execute(sql`DELETE FROM track_block`);
       // the request caps (cooldown / hour) are cleared between rounds; the per-number wrong-code counter is not
-      const clearRequestCaps = () =>
-        db.execute(sql`DELETE FROM track_rate WHERE key IN ${phoneHashes} AND bucket <> 'otp_fail_phone_day_all'`);
+      const clearRequestCaps = async () => {
+        await db.execute(
+          sql`DELETE FROM track_rate WHERE key IN ${phoneHashes} AND bucket <> 'otp_fail_phone_day_all'`,
+        );
+        await clearCooldowns();
+      };
       for (const n of [5, 5, 1]) {
         const ip = nextIp();
         await clearRequestCaps();
@@ -1160,11 +1218,11 @@ try {
   });
   await test('3 OTPs per number per hour', async () => {
     await clearPhoneLimits();
-    // the minute cooldown is separate — clear it between sends, the hour counter stays
+    // the resend cooldown is separate — clear it between sends, the hour counter stays
     const codes: number[] = [];
     for (let i = 0; i < 4; i++) {
       codes.push((await otpReq(PHONE, nextIp())).status);
-      await db.execute(sql`DELETE FROM track_rate WHERE bucket = 'otp_phone_min' AND key IN ${phoneHashes}`);
+      await clearCooldowns();
     }
     assert.deepEqual(codes, [200, 200, 200, 429]);
   });
