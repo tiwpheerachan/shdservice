@@ -15,7 +15,11 @@ const sn = s.nullish();
 
 /** ?id= of a DELETE: a positive number, else 400 "id required" */
 const byId = z.object({
-  id: z.coerce.number({ error: 'id required' }).positive('id required').meta({ description: 'profile id' }),
+  id: z.coerce
+    .number({ error: 'id required' })
+    .int('id required')
+    .positive('id required')
+    .meta({ description: 'profile id' }),
 });
 
 /** what the route's `str()` reads: a string, trimmed; anything else as "" */

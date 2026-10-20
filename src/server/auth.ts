@@ -10,7 +10,7 @@ import { verifySession, SESSION_COOKIE, type SessionUser } from '@/lib/session';
 import { summary, validate } from '@/lib/validation';
 import type { Invalid, Part } from '@/server/contract/registry';
 import { readSmallJson } from '@/server/track-http';
-import { logError, requestId } from '@/lib/log';
+import { log, logError, requestFields, requestId } from '@/lib/log';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
 import {
   ADMIN_USER_TYPE,
@@ -41,7 +41,7 @@ export type CurrentUser = {
   session: SessionUser;
 };
 
-import { HttpError } from './http-error';
+import { BAD_INPUT, HttpError } from './http-error';
 export { HttpError };
 
 export const fullName = (first?: string | null, last?: string | null) =>
@@ -313,6 +313,13 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
           },
           { status: 409 },
         );
+      }
+      // a value the DB cannot take (22xxx: NUL byte, not a number, too long, out of range) or a
+      // malformed %-escape: the caller's input, not a server fault — warned (a bug can land here too), not paged
+      if (e instanceof URIError || code?.startsWith('22')) {
+        const req = args[0] instanceof Request ? args[0] : undefined;
+        log.warn('input refused by db', { code: code ?? 'URIError', ...(req ? requestFields(req) : {}) });
+        return NextResponse.json({ error: BAD_INPUT }, { status: 400 });
       }
       if (code === '57014')
         return NextResponse.json({ error: 'ใช้เวลานานเกินไป ลองจำกัดช่วงข้อมูลให้แคบลง' }, { status: 503 });

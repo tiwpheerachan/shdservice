@@ -379,6 +379,14 @@ try {
   await refuses(400, idRequired, '/api/admin/document-profiles', { method: 'DELETE' });
   await refuses(400, idRequired, '/api/admin/document-profiles?id=abc', { method: 'DELETE' });
   await refuses(400, idRequired, '/api/admin/shipping-profiles?id=0', { method: 'DELETE' });
+  await refuses(400, idRequired, '/api/admin/shipping-profiles?id=1.2', { method: 'DELETE' });
+  await refuses(404, { error: 'not found' }, '/api/attachments/id');
+  await refuses(404, { error: 'not found' }, '/api/attachments/id', { method: 'DELETE' });
+  // what the DB cannot take (DAST 2026-10-20): the caller's mistake → 400, not an "unhandled" 500
+  const badInput = { error: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่' };
+  await refuses(400, badInput, '/api/data/jobs?q=a%00b');
+  await refuses(400, badInput, '/api/customers/lookup?q=a%00b');
+  await refuses(400, badInput, '/api/sale-orders/SO%25n%25s');
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', { method: 'POST', body: { items: 'all' } });
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', {
     method: 'POST',

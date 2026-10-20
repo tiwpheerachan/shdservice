@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { connection } from 'next/server';
 import { Noto_Sans_Thai } from 'next/font/google';
 import './globals.css';
 import { ThemeScript } from '@/components/layout/theme-script';
@@ -35,7 +36,8 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection(); // every page per request: the CSP nonce (src/proxy.ts) is stamped at render
   return (
     <html lang="th" className={notoThai.variable} suppressHydrationWarning>
       <head>

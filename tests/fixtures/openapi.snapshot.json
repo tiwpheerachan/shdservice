@@ -3,7 +3,7 @@
   "info": {
     "title": "OneService API",
     "version": "1.0.0",
-    "description": "The API the OneService pages call — for the internal team. Every path is under `/api`.\n\n**Sign-in.** The `__Host-os_session` cookie (`os_session` outside production), set by `/api/sso/callback`\nafter the central SSO. No API keys:\na script calls the API as a signed-in person would. 30 minutes idle (renewed by `/api/sso/refresh`),\n12 hours at most; signing out bumps the user's session_version, so every cookie of theirs dies.\nPermissions come from the role (app_config): view / add / edit / del per module, plus special rights.\n\n**Writes.** A body is JSON with `Content-Type: application/json` (anything else is 415 — the CSRF rule,\nwith the proxy refusing cross-site writes), at most 1 MB. Uploads are multipart.\n\n**Errors.** `{ \"error\": \"<Thai message>\" }`, plus `details` when there is more: `details.fields` =\n{ field: message } for a failed form rule (400), `details.stale` for an edit someone saved first (409).\nAn unexpected error is a 500 with `ref` — the details are in the server log.\n\n**Idempotency-Key** on create POSTs: the same key again gets the stored answer, never a second document.\n\n**row_version.** Edits send back the `version` they loaded; if the row moved since → 409 `details.stale`.\n\n**Public paths** (no session): `/api/health`, `/api/sso/*`, `/api/track/*` (the customer tracking page,\nfail-closed), and the public logo folders of `/api/files`."
+    "description": "The API the OneService pages call — for the internal team. Every path is under `/api`.\n\n**Sign-in.** The `__Host-os_session` cookie (`os_session` outside production), set by `/api/sso/callback`\nafter the central SSO. No API keys:\na script calls the API as a signed-in person would. 30 minutes idle (renewed by `/api/sso/refresh`),\n12 hours at most; signing out bumps the user's session_version, so every cookie of theirs dies.\nPermissions come from the role (app_config): view / add / edit / del per module, plus special rights.\n\n**Writes.** A body is JSON with `Content-Type: application/json` (anything else is 415 — the CSRF rule,\nwith the proxy refusing cross-site writes), at most 1 MB. Uploads are multipart.\n\n**Errors.** `{ \"error\": \"<Thai message>\" }`, plus `details` when there is more: `details.fields` =\n{ field: message } for a failed form rule (400), `details.stale` for an edit someone saved first (409).\nAny operation may answer 400 `ข้อมูลไม่ถูกต้อง…` for a value the database cannot take (a NUL byte, a number\nout of range, text too long) or a malformed %-escape in the path.\nAn unexpected error is a 500 with `ref` — the details are in the server log.\n\n**Idempotency-Key** on create POSTs: the same key again gets the stored answer, never a second document.\n\n**row_version.** Edits send back the `version` they loaded; if the row moved since → 409 `details.stale`.\n\n**Public paths** (no session): `/api/health`, `/api/sso/*`, `/api/track/*` (the customer tracking page,\nfail-closed), and the public logo folders of `/api/files`."
   },
   "servers": [
     {
@@ -244,6 +244,7 @@
           {
             "schema": {
               "type": "string",
+              "pattern": "^\\d{1,9}$",
               "description": "document_attach id"
             },
             "required": true,
@@ -316,6 +317,7 @@
           {
             "schema": {
               "type": "string",
+              "pattern": "^\\d{1,9}$",
               "description": "document_attach id"
             },
             "required": true,
@@ -11578,7 +11580,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "number",
+              "type": "integer",
               "minimum": 0,
               "exclusiveMinimum": true,
               "description": "profile id"
@@ -12295,7 +12297,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "number",
+              "type": "integer",
               "minimum": 0,
               "exclusiveMinimum": true,
               "description": "profile id"
@@ -15118,7 +15120,8 @@
               "RECEIVE",
               "RETURN",
               "UPLOAD",
-              "LOGIN"
+              "LOGIN",
+              "EXPORT"
             ]
           },
           "module": {

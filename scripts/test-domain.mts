@@ -4733,6 +4733,41 @@ try {
       }
     });
 
+    await test('R6 Export: every file is in the audit log (who, what, rows, filters); a refused one is not', async () => {
+      const exports = async () =>
+        (
+          await pool.query<{ user_id: number; module: string; summary: string; meta: Record<string, unknown> }>(
+            `SELECT user_id, module, summary, meta FROM audit_log WHERE action = 'EXPORT' AND entity = 'customers'
+              ORDER BY id`,
+          )
+        ).rows;
+      const before = (await exports()).length;
+      const res = await exportGET(await request('/api/export/customers?q=TD', U.admin), {
+        params: Promise.resolve({ resource: 'customers' }),
+      });
+      assert.equal(res.status, 200);
+      await res.arrayBuffer();
+      const after = await exports();
+      assert.equal(after.length, before + 1);
+      const row = after.at(-1)!;
+      assert.deepEqual(
+        [row.user_id, row.module, (row.meta.filters as { q?: string }).q],
+        [U.admin.id, 'Customer', 'TD'],
+      );
+      assert.match(row.summary, /^ส่งออก Excel ลูกค้า \d[\d,]* แถว$/);
+      assert.equal(row.meta.rows, Number(row.summary.match(/([\d,]+) แถว/)![1]!.replaceAll(',', '')));
+      await tick('TD Customer Viewer', 'Export', false);
+      try {
+        const refused = await exportGET(await request('/api/export/customers', U.viewer), {
+          params: Promise.resolve({ resource: 'customers' }),
+        });
+        assert.equal(refused.status, 403);
+        assert.equal((await exports()).length, before + 1);
+      } finally {
+        await tick('TD Customer Viewer', 'Export', true);
+      }
+    });
+
     await test('R6 migration 0030: seeds the rights as the rules were; re-run changes nothing; a removed right stays removed', async () => {
       const file = readFile('drizzle/0030_special_rights.sql', 'utf8');
       await pool.query(`

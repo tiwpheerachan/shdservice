@@ -23,7 +23,8 @@ export type AuditAction =
   | 'RECEIVE'
   | 'RETURN'
   | 'UPLOAD'
-  | 'LOGIN';
+  | 'LOGIN'
+  | 'EXPORT';
 
 export type AuditChanges = Record<string, [unknown, unknown]>;
 

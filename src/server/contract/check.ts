@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { log } from '@/lib/log';
+import { BAD_INPUT } from '@/server/http-error';
 import { registry } from './index';
 
 /**
@@ -36,6 +37,8 @@ export async function responseProblem(request: Request, response: Response): Pro
   if (!route) return undefined;
 
   const name = `${route.method} ${route.path} ${response.status}`;
+  // handle()'s 400 for input the DB cannot take is every operation's, like its 500
+  if (response.status === 400 && (await badInput(response))) return undefined;
   const declared = route.responses[response.status];
   if (!declared) {
     // the opaque 500 of handle() is every operation's and no operation's
@@ -65,6 +68,14 @@ export async function checkResponse(request: Request, response: Response): Promi
   if (!problem) return;
   if (process.env.API_CONTRACT_STRICT === '1') throw new Error(`API contract drift — ${problem}`);
   log.warn('API contract drift', { problem });
+}
+
+async function badInput(response: Response): Promise<boolean> {
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  return isRecord(body) && body.error === BAD_INPUT && Object.keys(body).length === 1;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

@@ -11,6 +11,9 @@ export class HttpError extends Error {
   }
 }
 
+/** handle()'s answer to input the DB cannot take (pg 22xxx) or a malformed %-escape — any operation's 400 */
+export const BAD_INPUT = 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่';
+
 /**
  * Optimistic locking (drizzle/0026 row_version): `sent` is the version the edit form loaded,
  * `current` the row's version read under FOR UPDATE. Another save in between → 409, nothing

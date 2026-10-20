@@ -37,3 +37,31 @@ test('a login link cannot send the browser to another site afterwards', async ({
   expect(new URL(page.url()).origin).toBe(APP_ORIGIN);
   await expect(page).toHaveURL(`${APP_ORIGIN}/jobs/dashboard`);
 });
+
+test('every page runs under a nonce CSP (no inline script without it) and nothing is refused', async ({ page }) => {
+  const refused: string[] = [];
+  await page.addInitScript(() =>
+    document.addEventListener('securitypolicyviolation', (e) =>
+      console.error(`csp-violation ${e.violatedDirective} ${e.blockedURI}`),
+    ),
+  );
+  page.on('console', (m) => /csp-violation|Content Security Policy/i.test(m.text()) && refused.push(m.text()));
+  const policyOf = async (path: string) => {
+    const res = await page.goto(path);
+    const csp = (await res!.allHeaders())['content-security-policy'] ?? '';
+    expect(csp, path).toMatch(/script-src 'self' 'nonce-[^']+' 'sha256-[^']+' 'strict-dynamic'/);
+    expect(csp, path).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+    return csp;
+  };
+  await policyOf('/login');
+  await page.waitForLoadState('networkidle');
+  expect(await policyOf('/track')).toContain('frame-src https://challenges.cloudflare.com'); // Turnstile, /track only
+  await page.waitForLoadState('networkidle');
+  await signIn(page, OWNER_EMAIL);
+  for (const path of ['/jobs/dashboard', '/jobs/repair', '/customers', '/admin/audit', '/no-such-page']) {
+    expect(await policyOf(path)).not.toContain('challenges.cloudflare.com');
+    await page.waitForLoadState('networkidle');
+  }
+  // a script the policy refused would be a violation here — Next's own chunks included
+  expect(refused).toEqual([]);
+});

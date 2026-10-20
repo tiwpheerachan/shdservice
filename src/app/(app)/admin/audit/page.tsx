@@ -29,6 +29,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   RETURN: { label: 'รับคืน', tone: 'success' },
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
   LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
+  EXPORT: { label: 'ส่งออก Excel', tone: 'warning' },
 };
 
 type Filters = { from: string; to: string; user: string; module: string; action: string; key: string; q: string };

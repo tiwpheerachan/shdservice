@@ -346,7 +346,7 @@ export const attachmentAdd = defineOperation({
   },
 });
 
-const attachmentId = z.object({ id: s.meta({ description: 'document_attach id' }) });
+const attachmentId = z.object({ id: s.regex(/^\d{1,9}$/, 'not found').meta({ description: 'document_attach id' }) });
 
 export const attachmentGet = defineOperation({
   method: 'get',
@@ -354,6 +354,7 @@ export const attachmentGet = defineOperation({
   tags,
   summary: 'Open an attachment',
   params: attachmentId,
+  invalid: { params: 404 },
   responses: {
     307: redirect('To a short-lived signed URL of the file.'),
     ...SIGNED_IN,
@@ -369,6 +370,7 @@ export const attachmentDelete = defineOperation({
   description:
     'Job Management del. Soft delete: the row is marked DELETED (audited) and no longer listed or opened; the stored file is kept.',
   params: attachmentId,
+  invalid: { params: 404 },
   responses: {
     200: jsonResponse('Removed.', Ok),
     ...SIGNED_IN,

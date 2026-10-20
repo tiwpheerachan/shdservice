@@ -17,7 +17,9 @@ import {
   listIssuedLines,
   productFiltersFromQuery,
 } from '@/server/services/stock';
-import { listAudit } from '@/server/audit';
+import { audit, listAudit } from '@/server/audit';
+import { db } from '@/db/client';
+import { clientIp } from '@/lib/client-ip';
 import { listJobs, filtersFromQuery } from '@/server/services/jobs';
 import { listQuotations, quotationFiltersFromQuery } from '@/server/services/quotations';
 import { listSaleOrders, saleOrderFiltersFromQuery } from '@/server/services/sale-orders';
@@ -356,6 +358,16 @@ export async function exportXlsx(
       resource === 'products' && !(await canSeeCost(user))
         ? spec.cols.filter((c) => c.key !== 'capitalPrice')
         : spec.cols;
+    // who took which data out, before a byte leaves: no record, no file
+    const filters = Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined && v !== ''));
+    await audit(db, user.userId, {
+      action: 'EXPORT',
+      module: spec.module ?? 'Admin',
+      entity: resource,
+      key: resource,
+      summary: `ส่งออก Excel ${spec.title} ${Math.min(rows.length, MAX_ROWS).toLocaleString('en-US')} แถว`,
+      meta: { rows: Math.min(rows.length, MAX_ROWS), filters, ip: clientIp(req.headers) },
+    });
   } catch (e) {
     exporting = false;
     throw e;

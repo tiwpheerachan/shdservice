@@ -77,18 +77,23 @@ function themeScriptHash(): Promise<string> {
   return themeHash;
 }
 
-async function trackPage(request: NextRequest): Promise<NextResponse> {
-  // per-request nonce: Next.js reads it from the request CSP header and stamps its own scripts
+/**
+ * Every page's CSP: a per-request nonce (Next.js reads it from the request CSP header and stamps its own
+ * scripts; every page is dynamic — the root layout calls connection()), no inline script without it.
+ * /track adds Turnstile. Not /api-docs: that route sets its own policy.
+ */
+async function withCsp(request: NextRequest, track: boolean): Promise<NextResponse> {
   const nonce = btoa(crypto.randomUUID());
   const dev = process.env.NODE_ENV !== 'production';
+  const turnstile = 'https://challenges.cloudflare.com';
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' ${await themeScriptHash()} 'strict-dynamic' https://challenges.cloudflare.com${dev ? " 'unsafe-eval'" : ''}`,
+    `script-src 'self' 'nonce-${nonce}' ${await themeScriptHash()} 'strict-dynamic'${track ? ` ${turnstile}` : ''}${dev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    'frame-src https://challenges.cloudflare.com',
+    ...(track ? [`frame-src ${turnstile}`] : []),
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -100,6 +105,7 @@ async function trackPage(request: NextRequest): Promise<NextResponse> {
   reqHeaders.set('content-security-policy', csp);
   const res = NextResponse.next({ request: { headers: reqHeaders } });
   res.headers.set('Content-Security-Policy', csp);
+  if (!track) return res;
   res.headers.set('Cache-Control', 'no-store');
   res.headers.set('Referrer-Policy', 'no-referrer');
   res.headers.set('X-Robots-Tag', 'noindex, nofollow');
@@ -119,11 +125,11 @@ export async function proxy(request: NextRequest) {
   }
 
   const path = request.nextUrl.pathname;
-  if (TRACK_PAGE.test(path)) return trackPage(request);
-  if (PUBLIC_PATH.test(path)) return NextResponse.next();
+  if (TRACK_PAGE.test(path)) return withCsp(request, true);
+  if (PUBLIC_PATH.test(path)) return /^\/login(?:\/|$)/.test(path) ? withCsp(request, false) : NextResponse.next();
 
   const hasCookie = !!request.cookies.get(SESSION_COOKIE)?.value;
-  if (hasCookie) return NextResponse.next();
+  if (hasCookie) return /^\/api-docs(?:\/|$)/.test(path) ? NextResponse.next() : withCsp(request, false);
 
   // No cookie → our own /login page, ALWAYS. Never bounce an anonymous visitor
   // straight through to the central SSO (and on to Google): an onrender.com URL

@@ -1,5 +1,9 @@
 import * as z from 'zod';
 
+// browser: the CSP allows no eval, and zod's probe for it (new Function) is reported as a violation even
+// though zod catches it — skip the probe and the JIT it would enable (every schema file imports this one)
+if (typeof window !== 'undefined') z.config({ jitless: true });
+
 /**
  * Form validation shared by the browser and the API (zod). Every form's rules live in one schema
  * under src/lib/validation — the page checks with it before sending, the API checks the same

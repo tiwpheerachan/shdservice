@@ -1,16 +1,3 @@
-const PAGE_CSP = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'production' ? '' : " 'unsafe-eval'"}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -38,15 +25,7 @@ const nextConfig = {
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
         ],
       },
-      // staff app CSP (OneLink lib/security-headers.ts): no foreign scripts, no plugins, no
-      // framing, forms only to us. Inline scripts stay allowed (theme script + Next's bootstrap
-      // carry no nonce here); images may be https: (Lark avatars, Supabase signed URLs).
-      // NOT on /track — a second CSP would intersect with its nonce policy and block Turnstile —
-      // nor on /api-docs, which sets its own nonce policy (src/app/api-docs/route.ts).
-      {
-        source: '/((?!api/|api-docs|track).*)',
-        headers: [{ key: 'Content-Security-Policy', value: PAGE_CSP }],
-      },
+      // pages: a nonce CSP per request, set by src/proxy.ts (/api-docs sets its own)
       {
         source: '/api/:path*',
         headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'none'" }],

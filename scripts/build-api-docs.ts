@@ -476,6 +476,22 @@ for (const anchor of [GUIDE_HIDDEN, GUIDE_HEADING, GUIDE_BODY]) {
 const PLAIN =
   '(()=>{const t=document.createElement("textarea");t.innerHTML=String(vn.description||"-").replace(/<[^>]*>/g,"");return t.value})()';
 
+// jsPDF (the page's PDF export) bundles DOMPurify 3.3.0, which has known sanitizer bypasses: its whole
+// module — from the license comment to its one export — becomes the pinned devDependency's build
+const PURIFY_START = '/*! @license DOMPurify 3.3.0';
+const PURIFY_END = 'var purify=createDOMPurify();';
+const purifyFrom = html.indexOf(PURIFY_START);
+const purifyTo = html.indexOf(PURIFY_END, purifyFrom);
+if (purifyFrom < 0 || purifyTo < 0 || html.includes(PURIFY_START, purifyFrom + 1))
+  throw new Error('APIDoc template changed: bundled DOMPurify module not found');
+const PURIFY_EXPORT = /var purify_default = createDOMPurify\(\);\s*export \{ purify_default as default \};[\s\S]*$/;
+const purifyEs = readFileSync(path.join(root, 'node_modules/dompurify/dist/purify.es.mjs'), 'utf8');
+if (!PURIFY_EXPORT.test(purifyEs)) throw new Error('dompurify build changed: its default export not found');
+html =
+  html.slice(0, purifyFrom) +
+  `var purify=(()=>{${purifyEs.replace(PURIFY_EXPORT, 'return createDOMPurify();')}})();` +
+  html.slice(purifyTo + PURIFY_END.length);
+
 html = html
   .replace(DATA, () => `window.__APICAT_DATA__ = ${JSON.stringify(data)};\n`)
   .replace(

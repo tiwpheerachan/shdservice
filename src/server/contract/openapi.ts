@@ -28,6 +28,8 @@ const description = [
   '',
   '**Errors.** `{ "error": "<Thai message>" }`, plus `details` when there is more: `details.fields` =',
   '{ field: message } for a failed form rule (400), `details.stale` for an edit someone saved first (409).',
+  'Any operation may answer 400 `ข้อมูลไม่ถูกต้อง…` for a value the database cannot take (a NUL byte, a number',
+  'out of range, text too long) or a malformed %-escape in the path.',
   'An unexpected error is a 500 with `ref` — the details are in the server log.',
   '',
   '**Idempotency-Key** on create POSTs: the same key again gets the stored answer, never a second document.',
