@@ -102,7 +102,7 @@ export function ProductPicker({
       }}
     >
       {/* the clear × is a sibling of the combobox (no button inside a button), laid over its right end */}
-      <div className={cn('relative w-full', className)}>
+      <div className={cn('relative w-full min-w-0', className)}>
         <PopoverTrigger asChild>
           <button
             type="button"

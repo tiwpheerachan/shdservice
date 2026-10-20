@@ -60,12 +60,13 @@ export type ServerTable = {
   initial?: { page?: number; sort?: ServerTableState['sort'] };
 };
 
-// sm–lg: the screen (the sidebar only appears at lg). xl: the table's own width — at a 1280px screen the
-// 268px sidebar leaves the table ~960px, so an xl column waits for a 1152px-wide table (@container below)
+// sm: the screen. md–xl: the table's own width (@container below) — the 268px sidebar appears at a
+// 1024px screen and leaves the table ~700px, less than a 768 tablet's ~734px; a 1280px screen leaves ~960px.
+// So an md column waits for a 720px-wide table (a 768 tablet keeps it), lg for 896px, xl for 1152px.
 const HIDE: Record<string, string> = {
   sm: 'hidden sm:table-cell',
-  md: 'hidden md:table-cell',
-  lg: 'hidden lg:table-cell',
+  md: 'hidden @min-[45rem]:table-cell',
+  lg: 'hidden @4xl:table-cell',
   xl: 'hidden @6xl:table-cell',
   '2xl': 'hidden 2xl:table-cell',
 };
@@ -408,7 +409,7 @@ export function DataTable<T extends Record<string, unknown>>({
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="h-8 w-28"
+            className="h-8 w-32"
             aria-label="จำนวนต่อหน้า"
           >
             {PAGE_SIZES.map((n) => (
@@ -421,7 +422,7 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={current === 1}
-              className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+              className="grid h-9 w-9 place-items-center rounded-md border border-border transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent pointer-coarse:h-11 pointer-coarse:w-11"
               aria-label="ก่อนหน้า"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
@@ -432,7 +433,7 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={current >= totalPages}
-              className="rounded-md border border-border p-1.5 transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+              className="grid h-9 w-9 place-items-center rounded-md border border-border transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent pointer-coarse:h-11 pointer-coarse:w-11"
               aria-label="ถัดไป"
             >
               <ChevronRight className="h-3.5 w-3.5" />

@@ -165,11 +165,13 @@ export default function ProductsPage() {
     }
   };
 
+  // phones (below sm): รหัส / ชื่อ / คงเหลือ first, Action after them
   const columns: Column<Product>[] = [
     {
       key: 'no',
       header: '#',
       width: '52px',
+      hideBelow: 'sm',
       align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
@@ -229,6 +231,7 @@ export default function ProductsPage() {
       header: 'ราคาขาย',
       align: 'right',
       width: '110px',
+      hideBelow: 'sm',
       value: (r) => r.price,
       cell: (r) => baht(r.price),
     },
@@ -236,6 +239,7 @@ export default function ProductsPage() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
+      hideBelow: 'lg', // phones, and beside the sidebar at 1024–1279 (the 3-button Action column needs the room)
       cell: (r) => (
         <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
           {r.status}

@@ -75,7 +75,9 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         .qt .items { flex: 1 1 auto; height: 100%; }
         .qt .items tbody tr.fill { height: 100%; }
         .qt .items tbody tr.fill td { height: 100%; }
-        @media print { .qt { padding: 10mm 12mm 12mm; min-height: 296mm; } } /* a hair under A4 so rounding never spills a blank 2nd page */
+        /* + the 10mm @page margin (globals.css) = the legacy 10/12/12mm frame; 276mm = a hair under the 277mm
+           printable height, so rounding never spills a blank 2nd page */
+        @media print { .qt { padding: 0 2mm 2mm; min-height: 276mm; } }
       `}</style>
 
       {/* ── company header ── */}

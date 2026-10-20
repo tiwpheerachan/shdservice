@@ -262,14 +262,15 @@ export default function DashboardPage() {
             <LookupError error={jobTypesLookup.error} onRetry={jobTypesLookup.refetch} />
           </div>
           {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
-          {/* a full-width row below sm: two 150px inputs overflowed a 320px screen (WCAG 1.4.10) */}
+          {/* a full-width row below sm: two 150px inputs overflowed a 320px screen (WCAG 1.4.10); w-0: Chromium's
+              date box will not shrink below its ~170px content width, a 0 width + flex-1 lets it */}
           <div className="flex w-full items-center gap-1.5 sm:w-auto">
             <Input
               type="date"
               value={from}
               max={to || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              className="num h-9 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
+              className="num h-9 w-0 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่เริ่ม"
             />
             <span className="text-xs text-muted-foreground">–</span>
@@ -278,7 +279,7 @@ export default function DashboardPage() {
               value={to}
               min={from || undefined}
               onChange={(e) => setTo(e.target.value)}
-              className="num h-9 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
+              className="num h-9 w-0 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่สิ้นสุด"
             />
           </div>
@@ -303,7 +304,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => preset(k)}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 font-medium transition-colors',
+                  'rounded-md px-2.5 py-1.5 font-medium transition-colors pointer-coarse:py-3.5',
                   activePreset === k ? 'bg-card text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground',
                 )}
               >

@@ -236,7 +236,8 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       width: '110px',
       cell: (r) => (
         // a switch: its state is announced (on = Active), not only shown by the badge's colour / text;
-        // min-h-6 = a 24px target, -my-0.5 keeps the row its height
+        // min-h-6 = a 24px target, -my-0.5 keeps the row its height; on touch screens 44px, the -my-2.5
+        // taking it into the cell's padding (still no taller row)
         <button
           type="button"
           role="switch"
@@ -244,7 +245,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
           aria-label={`${r.status} — สถานะของ ${r.name}`}
           onClick={() => toggleStatus(r.id)}
           title="คลิกเพื่อสลับสถานะ"
-          className="-my-0.5 inline-flex min-h-6 items-center rounded-full"
+          className="-my-0.5 inline-flex min-h-6 items-center rounded-full pointer-coarse:-my-2.5 pointer-coarse:min-h-11"
         >
           <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
             {r.status}

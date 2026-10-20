@@ -483,7 +483,7 @@ export function JobLookupBar({
       <label htmlFor={inputId} className="text-sm font-medium">
         {label} :
       </label>
-      <div className="relative min-w-0 flex-1 sm:max-w-xs">
+      <div className="relative min-w-36 flex-1 sm:max-w-xs">
         <Input
           id={inputId}
           value={v}

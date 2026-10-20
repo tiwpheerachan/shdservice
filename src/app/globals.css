@@ -419,9 +419,11 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
   font-weight: 600;
   text-align: left;
 }
+/* real page margins: with margin 0 (and the sheet's padding standing in for it) a 2nd page started at
+   the paper's very top edge */
 @page {
   size: A4;
-  margin: 0;
+  margin: 10mm;
 }
 @media print {
   .print-root {
@@ -431,6 +433,7 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
   .print-page {
     box-shadow: none;
     margin: 0;
+    padding: 0;
     width: auto;
     min-height: auto;
   }

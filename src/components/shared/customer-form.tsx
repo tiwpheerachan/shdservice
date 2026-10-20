@@ -202,8 +202,8 @@ export function CustomerFields({
         <Input value={editing?.code || 'ออกรหัสอัตโนมัติเมื่อบันทึก'} readOnly />
       </Field>
       <Field label="ประเภทลูกค้า" error={errors.type}>
-        <div className="flex items-center gap-3">
-          <Select value={form.type} onChange={(e) => set('type', e.target.value)} className="flex-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={form.type} onChange={(e) => set('type', e.target.value)} className="min-w-28 flex-1">
             {CUSTOMER_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}

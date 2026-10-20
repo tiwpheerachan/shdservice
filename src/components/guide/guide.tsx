@@ -189,7 +189,8 @@ export function Guide() {
                     </span>
                     <h3 className="text-base font-semibold tracking-tight sm:text-lg">{t.title}</h3>
                   </div>
-                  <div className="space-y-3">{t.body}</div>
+                  {/* 80ch: a reading width on wide screens (190+ characters a line at 1728px); 1280px stays as it was */}
+                  <div className="max-w-[80ch] space-y-3">{t.body}</div>
                 </article>
               ))}
             </div>

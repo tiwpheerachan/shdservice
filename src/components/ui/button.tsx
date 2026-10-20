@@ -29,12 +29,13 @@ export const buttonVariants = cva(
         success: 'bg-success text-white dark:text-background hover:bg-success/90 shadow-xs',
         link: 'text-primary underline-offset-4 hover:underline p-0 h-auto',
       },
+      // pointer-coarse: a 44px target on touch screens; a mouse (fine pointer) keeps the compact sizes
       size: {
-        sm: 'h-8 px-3 text-xs gap-1.5 rounded-md',
-        md: 'h-9 px-3.5 text-sm gap-2 rounded-md',
-        lg: 'h-10 px-5 text-sm gap-2 rounded-lg',
-        icon: 'h-9 w-9 rounded-md',
-        'icon-sm': 'h-8 w-8 rounded-md',
+        sm: 'h-8 px-3 text-xs gap-1.5 rounded-md pointer-coarse:h-11',
+        md: 'h-9 px-3.5 text-sm gap-2 rounded-md pointer-coarse:h-11',
+        lg: 'h-10 px-5 text-sm gap-2 rounded-lg pointer-coarse:h-11',
+        icon: 'h-9 w-9 rounded-md pointer-coarse:h-11 pointer-coarse:w-11',
+        'icon-sm': 'h-8 w-8 rounded-md pointer-coarse:h-11 pointer-coarse:w-11',
       },
     },
     defaultVariants: { variant: 'primary', size: 'md' },

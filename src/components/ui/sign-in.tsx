@@ -23,7 +23,7 @@ export function AuthSplit({
         <div className="w-full max-w-md">{children}</div>
       </section>
 
-      <section className="relative hidden flex-1 md:block">
+      <section className="relative hidden flex-1 overflow-hidden md:block">
         <div
           className="animate-slide-right absolute inset-0 bg-center bg-no-repeat"
           style={{

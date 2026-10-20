@@ -51,7 +51,7 @@ export function Topbar({
     : '··';
 
   return (
-    <header className="sticky top-0 z-30 flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-4 no-print">
+    <header className="sticky top-0 z-30 flex h-(--topbar-h) shrink-0 items-center gap-1.5 border-b border-border bg-background/85 px-3 backdrop-blur-md sm:gap-2 sm:px-4 no-print">
       <button
         onClick={onOpenMobile}
         className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
@@ -70,7 +70,8 @@ export function Topbar({
         <PanelLeft className={cn('h-[18px] w-[18px] transition-transform', collapsed && 'rotate-180')} />
       </button>
 
-      <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
+      {/* xl: from 768 to 1279 the topbar has no room — it cut the trail to "4. ข้อ…" */}
+      <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm xl:flex">
         {crumb && (
           <>
             <span className="truncate text-muted-foreground">
@@ -88,13 +89,16 @@ export function Topbar({
 
       <div className="flex-1" />
 
+      {/* icon only below xl (the label stays for screen readers); the shortcut only where there is a keyboard */}
       <button
         onClick={onOpenPalette}
-        className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-input hover:text-foreground sm:flex"
+        className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-input hover:text-foreground"
       >
         <Search className="h-3.5 w-3.5" />
-        <span className="pr-6">ค้นหาเมนู…</span>
-        <kbd className="rounded border border-border bg-muted px-1.5 py-px text-2xs">Ctrl K</kbd>
+        <span className="sr-only xl:not-sr-only xl:pr-6">ค้นหาเมนู…</span>
+        <kbd className="hidden rounded border border-border bg-muted px-1.5 py-px text-2xs xl:pointer-fine:inline">
+          Ctrl K
+        </kbd>
       </button>
 
       <SessionTimer />
@@ -125,8 +129,8 @@ export function Topbar({
             {initials}
           </div>
         )}
-        {/* one line each, cut with … — a long email wrapped the topbar at 1280px */}
-        <div className="hidden min-w-0 max-w-48 leading-tight lg:block" title={me?.email}>
+        {/* one line each, cut with … — a long email wrapped the topbar at 1280px; xl: no room beside the sidebar at 1024 */}
+        <div className="hidden min-w-0 max-w-48 leading-tight xl:block" title={me?.email}>
           <p className="truncate text-xs font-medium">{me?.name ?? 'กำลังโหลด…'}</p>
           <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ''}</p>
         </div>

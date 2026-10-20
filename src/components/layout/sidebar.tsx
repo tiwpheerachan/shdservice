@@ -234,7 +234,7 @@ export function Sidebar({
                                 href={i.href}
                                 onClick={onCloseMobile}
                                 className={cn(
-                                  'relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors',
+                                  'relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors pointer-coarse:py-3.5',
                                   active
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground',

@@ -20,6 +20,7 @@ export function jobColumns({
   /** the phone button in the customer cell: customer info / call log */
   onCall: (job: Job) => void;
 }): Column<Job>[] {
+  // phones (below sm) keep เลขที่งาน / สถานะ / Action — the rest pushed them off a 360px screen
   return [
     {
       key: 'no',
@@ -35,12 +36,14 @@ export function jobColumns({
       key: 'openDate',
       header: 'วันที่เปิดงาน',
       width: '140px',
+      hideBelow: 'sm',
       cell: (r) => <span className="num text-xs">{r.openDate}</span>,
     },
     {
       key: 'customer',
       header: 'ลูกค้า',
       minWidth: COL_MIN_WIDTH.customer,
+      hideBelow: 'sm',
       cell: (r) => (
         <span className="flex items-center gap-2">
           <button

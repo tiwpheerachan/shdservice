@@ -143,7 +143,7 @@ function ListFilters({
     (key) => ({ key, label: key, n: tabRows.filter((r) => statusKey(r) === key).length }),
   );
   return (
-    <div className="grid gap-2 border-b border-border px-5 py-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-2 border-b border-border px-5 py-3 sm:grid-cols-2">
       <label className="relative sm:col-span-2">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -175,7 +175,7 @@ function ListFilters({
           max={filters.to || undefined}
           onChange={(e) => setFilter('from', e.target.value)}
           aria-label="รับเครื่องตั้งแต่วันที่"
-          className="h-11 text-base"
+          className="h-11 min-w-0 px-2 text-base"
         />
         <span className="shrink-0 text-xs text-muted-foreground">ถึง</span>
         <Input
@@ -184,7 +184,7 @@ function ListFilters({
           min={filters.from || undefined}
           onChange={(e) => setFilter('to', e.target.value)}
           aria-label="รับเครื่องถึงวันที่"
-          className="h-11 text-base"
+          className="h-11 min-w-0 px-2 text-base"
         />
       </div>
       {reversed && (

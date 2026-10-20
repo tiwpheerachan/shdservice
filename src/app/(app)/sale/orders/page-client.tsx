@@ -66,11 +66,13 @@ function SaleOrderList() {
       key: 'date',
       header: 'วันที่สั่ง',
       width: '110px',
+      hideBelow: 'sm', // phones: เลขที่ + สถานะอนุมัติ (what an approver scans for)
       cell: (r) => <span className="num text-xs">{r.date}</span>,
     },
     {
       key: 'customer',
       header: 'ชื่อลูกค้า',
+      hideBelow: 'sm',
       cell: (r) => <span className="line-clamp-1 max-w-[260px]">{r.customer}</span>,
     },
     {
@@ -78,6 +80,7 @@ function SaleOrderList() {
       header: 'จำนวนเงิน',
       align: 'right',
       width: '120px',
+      hideBelow: 'sm',
       value: (r) => r.amount,
       cell: (r) => <span className="font-medium">{baht(r.amount)}</span>,
     },
@@ -110,6 +113,7 @@ function SaleOrderList() {
       width: '110px',
       align: 'center',
       sortable: false,
+      hideBelow: 'sm', // the order number is the same link
       cell: (r) => (
         <RowActions
           viewHref={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`}

@@ -5,6 +5,14 @@ import { Filter, RotateCcw, Search, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+// md and up (the server and hydration render say yes; CSS shows the right state before that)
+const MD = '(min-width: 48rem)';
+const onMdChange = (cb: () => void) => {
+  const mq = window.matchMedia(MD);
+  mq.addEventListener('change', cb);
+  return () => mq.removeEventListener('change', cb);
+};
+
 export function FilterBar({
   children,
   onSearch,
@@ -20,7 +28,14 @@ export function FilterBar({
   title?: string;
   defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = React.useState(defaultOpen);
+  // null = not toggled yet: open from md up, closed on phones (17 fields pushed a list's rows ~1,300px down)
+  const [toggled, setOpen] = React.useState<boolean | null>(defaultOpen ? null : false);
+  const wide = React.useSyncExternalStore(
+    onMdChange,
+    () => window.matchMedia(MD).matches,
+    () => true,
+  );
+  const open = toggled ?? wide;
   // date boxes come in from / to pairs (in that order): a reversed pair finds nothing, so say so and do not search
   const grid = React.useRef<HTMLDivElement>(null);
   const [reversed, setReversed] = React.useState(false);
@@ -36,8 +51,8 @@ export function FilterBar({
   return (
     <div className={cn('surface overflow-hidden no-print', className)}>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 border-b border-border bg-muted/35 px-4 py-2.5 text-left"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-2 border-b border-border bg-muted/35 px-4 py-2.5 text-left pointer-coarse:min-h-11"
         aria-expanded={open}
       >
         <span className="flex items-center gap-2 text-sm font-semibold">
@@ -49,8 +64,9 @@ export function FilterBar({
       <div
         className={cn(
           'grid transition-[grid-template-rows] duration-200 ease-out',
-          open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+          toggled === null ? 'grid-rows-[0fr] md:grid-rows-[1fr]' : open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
+        inert={!open} // folded: its fields stay out of the tab order
       >
         <div className="overflow-hidden">
           <div className="space-y-3 p-4">

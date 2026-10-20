@@ -78,18 +78,21 @@ export default function AuditPage() {
       key: 'key',
       header: 'เลขที่ / รหัส',
       width: '130px',
+      hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ — the user name was squeezed to "perf-…"
       cell: (r) => <span className="num font-medium">{r.key}</span>,
     },
     {
       key: 'summary',
       header: 'รายละเอียด',
       sortable: false,
+      hideBelow: 'sm',
       cell: (r) => <span className="line-clamp-2">{r.summary}</span>,
     },
     {
       key: 'changes',
       header: 'ค่าที่เปลี่ยน',
       sortable: false,
+      hideBelow: 'sm',
       width: '110px',
       align: 'center',
       cell: (r) =>

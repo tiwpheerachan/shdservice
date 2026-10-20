@@ -31,6 +31,7 @@ const columns: Column<Job>[] = [
     key: 'openDate',
     header: 'วันที่เปิดงาน',
     width: '140px',
+    hideBelow: 'lg', // วันที่ปิดงาน is this report's date
     cell: (r) => <span className="num text-xs">{r.openDate}</span>,
   },
   {

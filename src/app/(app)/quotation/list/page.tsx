@@ -122,6 +122,7 @@ export default function QuotationListPage() {
       header: 'อ้างถึงงานซ่อม',
       headerWrap: true,
       width: '130px',
+      hideBelow: 'lg', // beside the sidebar at 1024–1279 it pushed สถานะ / Action off the table
       cell: (r) => <span className="num text-xs">{r.jobRef}</span>,
     },
     {
