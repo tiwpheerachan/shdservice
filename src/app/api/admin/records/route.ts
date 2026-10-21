@@ -1,65 +1,50 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { NextResponse, type NextRequest } from 'next/server';
+import { can, handle, hasRight, parseBody, requireAdmin, requireCan } from '@/server/auth';
+import { recordStatus } from '@/server/contract/admin';
+import { setRecordStatus, RECORD_MODULES } from '@/server/services/records';
+import { RS, type RecordStatus } from '@/server/record-status';
+import { refuseSelf, setUserDeleted } from '@/server/services/users';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-// Allowed tables and their primary-key column. Only these can be soft-deleted.
-const PK: Record<string, string> = {
-  users: "id",
-  jobs: "no",
-  quotations: "no",
-  sale_orders: "no",
-  customers: "code",
-  products: "sysCode",
-  models: "code",
-  movements: "id",
-  categories: "id",
-  manufacturers: "id",
-  colors: "id",
-  job_types: "id",
-  product_types: "id",
-  symptoms: "id",
-  permissions: "id",
-};
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
- * Soft-delete or restore a record: sets the `deleted` flag instead of removing
- * the row, so it can be recovered from each list's "รายการที่ลบ" view.
+ * Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete —
+ * nothing is ever removed). Accepts `status`, or the older `deleted` boolean.
+ * Permission: DELETED needs `del` on the table's module (users / masters: admin);
+ * ACTIVE ↔ INACTIVE needs `edit`; out of DELETED (กู้คืน) needs `del` as well (customers: System Admin only). A missing id / unknown
+ * table is a 400 before the permission check.
  */
-export async function POST(req: NextRequest) {
-  const me = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
-  if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+export const POST = handle(async (req: NextRequest) => {
+  const { table, id, status, deleted, remark } = await parseBody(req, recordStatus);
+  const rs: RecordStatus = status ?? (deleted === true ? RS.DELETED : RS.ACTIVE);
 
-  let body: { table?: string; id?: string | number; deleted?: boolean };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  if (table === 'users') {
+    const me = await requireAdmin(req);
+    if (rs !== RS.ACTIVE) refuseSelf(Number(id), me.userId); // never disable / delete your own account
+    // ลบ / กู้คืน: users.ts writes the audit line with the person's name ("ลบผู้ใช้ สมชาย ใจดี"); กู้คืน
+    // (ACTIVE / deleted:false) brings the account back INACTIVE — access returns only through คืนสิทธิ์
+    if (rs === RS.INACTIVE) await setRecordStatus('users', Number(id), rs, me.userId);
+    else await setUserDeleted(Number(id), rs === RS.DELETED, me.userId);
+    return NextResponse.json({ ok: true, status: rs === RS.ACTIVE ? RS.INACTIVE : rs });
   }
-
-  const table = String(body.table ?? "");
-  const pk = PK[table];
-  const id = body.id;
-  if (!pk) return NextResponse.json({ error: `table not allowed: ${table}` }, { status: 400 });
-  if (id === undefined || id === null || id === "")
-    return NextResponse.json({ error: "id required" }, { status: 400 });
-
-  let db;
-  try {
-    db = supabaseAdmin();
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "server database is not configured" },
-      { status: 503 }
-    );
-  }
-
-  const { error } = await db
-    .from(table)
-    .update({ deleted: body.deleted === true })
-    .eq(pk, id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
-}
+  const permModule = RECORD_MODULES[table];
+  const user =
+    permModule === null
+      ? await requireAdmin(req)
+      : // cancelling a sale order is its creator's own step (edit) — who else may is decided on the locked row
+        // (creator / SO Approve / System Admin); every other delete needs `del`
+        await requireCan(req, permModule, rs === RS.DELETED && table !== 'sale_orders' ? 'del' : 'edit');
+  // out of DELETED (กู้คืน) is the reverse of a delete → `del` too (checked against the locked row);
+  // a deleted customer (PDPA: erased on request) is System Admin's alone, as its list / lookup are
+  await setRecordStatus(
+    table,
+    id,
+    rs,
+    user.userId,
+    table === 'customers' ? user.isAdmin : permModule === null || (await can(user, permModule, 'del')),
+    table !== 'sale_orders' || user.isAdmin || (await hasRight(user, 'SO Approve')),
+    remark,
+  );
+  return NextResponse.json({ ok: true, status: rs });
+});

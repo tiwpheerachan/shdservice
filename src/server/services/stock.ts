@@ -1,0 +1,1831 @@
+import 'server-only';
+import { createHash } from 'node:crypto';
+import {
+  and,
+  asc,
+  count as countFn,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import { db, type Tx } from '@/db/client';
+import { AS, CONDITION_ID, INV, ITEM_UNIT, JS, PART, STORE_LOCATION_ID, STORE_LOCATION_NAME } from '@/lib/status-ids';
+import {
+  appUser,
+  category,
+  inventoryDt,
+  inventoryHd,
+  inventoryType,
+  job,
+  jobOrderSparePartLog,
+  jobStatus,
+  manufacturer,
+  model,
+  product,
+  productModel,
+  productNoneSerial,
+  saleOutDt,
+  saleOutHd,
+  storeLocation,
+} from '@/db/schema';
+import type { Movement, Product } from '@/data/types';
+import { HttpError, fullName, hasRight, type CurrentUser } from '@/server/auth';
+import { assertVersion } from '@/server/http-error';
+import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
+import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
+import { nextRunningNo } from '@/db/running-no';
+import { audit, diff, type AuditEntry } from '@/server/audit';
+import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
+import { cached, invalidate, TTL_MASTER } from '@/server/cache';
+import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
+import { assertValid } from '@/server/validate';
+import type { z } from 'zod';
+import type { productSave } from '@/server/contract/stock';
+import { cleanMfgCode, productSchema } from '@/lib/validation/admin';
+import { clean, cleanCode, summary } from '@/lib/validation';
+
+export type DeletedMode = StatusMode;
+
+/** The legacy system runs a single warehouse / condition and no serial control. */
+export { CONDITION_ID, INV, ITEM_UNIT, PART, STORE_LOCATION_ID };
+/** inventory_dt.stock_type_id — the legacy app wrote 1 on every line (no stock_type table; every row holds 1) */
+const STOCK_TYPE_ID = 1;
+/** category 1 = ยังไม่ระบุ: a product saved without a category (product.category_id is NOT NULL in the legacy app) */
+const UNSPECIFIED_CATEGORY_ID = 1;
+/** ใกล้หมด = 1..LOW_STOCK on hand (the products filter and the stock KPI) */
+const LOW_STOCK = 3;
+
+/* ------------------------------------------------------------------ *
+ * Products
+ * ------------------------------------------------------------------ */
+const productSelect = {
+  id: product.productId,
+  sysCode: product.productCode,
+  mfgCode: product.productVenderCode,
+  name: product.productName,
+  nameEn: product.productNameEn,
+  nameCn: product.productNameCn,
+  description: product.productDescription,
+  categoryId: product.categoryId,
+  category: category.categoryName,
+  manufacturerId: product.manufacturerId,
+  brand: manufacturer.manufacturerName,
+  active: product.recordStatus,
+  createDate: product.createDate,
+  createBy: product.createBy,
+  ubOnly: product.isUbRepairOnly,
+  serialControl: product.isSerialControl,
+  forModelColor: product.forModelColor,
+  picture: product.pictrueFileName,
+  onhand: productNoneSerial.quantityRemain,
+  available: productNoneSerial.quantityAvailable,
+  used: productNoneSerial.quantityUsed,
+  booking: productNoneSerial.quantityBooking,
+  capital: productNoneSerial.capitalPrice,
+  wholesale: productNoneSerial.wholesalePrice,
+  retail: productNoneSerial.retailPrice,
+  onhandItemId: productNoneSerial.itemId,
+  stockRemark: productNoneSerial.remark,
+  cancelRemark: product.cancelRemark,
+  cancelDate: product.cancelDate,
+  cancelBy: product.cancelBy,
+};
+
+type ProductRow = {
+  [K in keyof typeof productSelect]: (typeof productSelect)[K]['_']['data'] | null;
+};
+
+function toProduct(r: ProductRow, creator?: string, canceller?: string): Product {
+  return {
+    stockRemark: r.stockRemark ?? '',
+    cancelRemark: r.cancelRemark ?? '',
+    cancelDate: fmtDateTime(r.cancelDate), // '' for the 1900-01-01 sentinel (isSentinelDate)
+    cancelBy: canceller ?? '',
+    sysCode: r.sysCode ?? '',
+    mfgCode: r.mfgCode ?? '',
+    name: r.name ?? '',
+    category: r.category ?? '',
+    brand: r.brand ?? '',
+    onhand: r.onhand ?? 0,
+    price: num(r.retail),
+    status: uiStatus(r.active),
+    id: r.id ?? 0,
+    nameEn: r.nameEn ?? '',
+    nameCn: r.nameCn ?? '',
+    description: r.description ?? '',
+    capitalPrice: num(r.capital),
+    wholesalePrice: num(r.wholesale),
+    received: r.available ?? 0,
+    issued: r.used ?? 0,
+    reserved: r.booking ?? 0,
+    ubRepairOnly: !!r.ubOnly,
+    serialControl: !!r.serialControl, // product.is_serial_control (คุม S/N) — null = False
+    forModelColor: r.forModelColor ?? '',
+    createdDate: fmtDateTime(r.createDate),
+    createdBy: creator ?? '',
+    image: r.picture ? (r.picture.includes('/') ? r.picture : `products/${r.sysCode}/${r.picture}`) : '',
+  };
+}
+
+/** ราคาทุน: the special right Product Cost (System Admin always). The product API and the Excel export
+ *  leave it out for everyone else — the screens only mirror that. */
+export const canSeeCost = (u: CurrentUser) => hasRight(u, 'Product Cost');
+/** ราคาทุน left out — and the edit `version`: productVersion hashes the cost, so the hash would give it away */
+export const withoutCost = <T extends Product>(p: T): T => ({ ...p, capitalPrice: undefined, version: undefined });
+
+const productQuery = (x: Tx | typeof db = db) =>
+  x
+    .select(productSelect)
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId));
+
+/** a name search looks in the Thai, English and Chinese names */
+const nameLike = (t: string) =>
+  or(
+    ilike(product.productName, likeTerm(t)),
+    ilike(product.productNameEn, likeTerm(t)),
+    ilike(product.productNameCn, likeTerm(t)),
+  );
+/** free-text search of every product list / picker: system code, vendor part no, any of the names, brand or
+ *  category (the picker types "Dreame" or "มอเตอร์") — every caller joins category + manufacturer */
+const productSearch = (t: string) =>
+  or(
+    ilike(product.productCode, likeTerm(t)),
+    ilike(product.productVenderCode, likeTerm(t)),
+    nameLike(t),
+    ilike(manufacturer.manufacturerName, likeTerm(t)),
+    ilike(category.categoryName, likeTerm(t)),
+  );
+
+export async function listProducts(opts: { deleted?: DeletedMode; q?: string } = {}): Promise<Product[]> {
+  const { deleted = 'exclude', q = '' } = opts;
+  const active = statusFilter(product.recordStatus, deleted);
+  const term = q.trim();
+  const search = term ? productSearch(term) : undefined;
+  const rows = await productQuery().where(and(active, search)).orderBy(asc(product.productCode));
+  return rows.map((r) => withoutCost(toProduct(r))); // list screens never show the cost
+}
+
+const modelsOf = async (x: Tx | typeof db, productId: number) =>
+  (await x.select({ code: productModel.modelCode }).from(productModel).where(eq(productModel.productId, productId)))
+    .map((m) => m.code ?? '')
+    .filter(Boolean);
+
+/**
+ * Optimistic lock of the product form (assertVersion). product has no row_version column (drizzle/0026)
+ * and the prices live in product_none_serial, whose counters every stock movement moves — so the version
+ * is a hash of exactly what the form edits: a receipt / issue never makes an open form stale, another
+ * save of the form always does, a save that changes nothing keeps it.
+ */
+function productVersion(r: ProductRow, models: string[]): number {
+  const edited = [
+    r.mfgCode,
+    r.name,
+    r.nameEn,
+    r.nameCn,
+    r.description,
+    r.categoryId,
+    r.manufacturerId,
+    r.active,
+    r.ubOnly,
+    r.forModelColor,
+    num(r.capital),
+    num(r.wholesale),
+    num(r.retail),
+    [...models].sort(),
+  ];
+  return createHash('sha1').update(JSON.stringify(edited)).digest().readUInt32BE(0);
+}
+
+export async function getProduct(code: string): Promise<(Product & { models: string[]; version: number }) | null> {
+  const [r] = await productQuery().where(eq(product.productCode, code)).limit(1);
+  if (!r) return null;
+  const nameOf = (userId: number | null) =>
+    userId && userId > 0
+      ? db.select({ f: appUser.firstName, l: appUser.lastName }).from(appUser).where(eq(appUser.userId, userId))
+      : [];
+  const [[creator], [canceller], models] = await Promise.all([
+    nameOf(r.createBy),
+    nameOf(r.cancelBy),
+    modelsOf(db, r.id!),
+  ]);
+  return {
+    ...toProduct(r, creator ? fullName(creator.f, creator.l) : '', canceller ? fullName(canceller.f, canceller.l) : ''),
+    models,
+    version: productVersion(r, models),
+  };
+}
+
+/** the parsed body of POST /api/products (productSave in src/server/contract/stock.ts) */
+export type ProductInput = z.output<typeof productSave.body>;
+
+export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
+  // an unchanged legacy vendor code still saves ("never worse"); a new / changed one must be clean
+  const [cur] = i.sysCode
+    ? await db
+        .select({ mfgCode: product.productVenderCode })
+        .from(product)
+        .where(eq(product.productCode, i.sysCode))
+        .limit(1)
+    : [];
+  assertValid(productSchema(cur), i);
+  const name = clean(i.name);
+  const [cat] = str(i.category)
+    ? await db
+        .select({ id: category.categoryId })
+        .from(category)
+        .where(sql`btrim(${category.categoryName}, E' \t\r\n') = ${str(i.category)}`)
+        .limit(1)
+    : [];
+  const [mfg] = str(i.brand)
+    ? await db
+        .select({ id: manufacturer.manufacturerId })
+        .from(manufacturer)
+        .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${str(i.brand)}`) // legacy names carry trailing spaces
+        .limit(1)
+    : [];
+  const modelCodes = Array.from(new Set((i.models ?? []).map((m) => str(m)).filter(Boolean)));
+  const known = modelCodes.length
+    ? new Set(
+        (await db.select({ c: model.modelCode }).from(model).where(inArray(model.modelCode, modelCodes))).map(
+          (r) => r.c,
+        ),
+      )
+    : new Set();
+  // a name that is not in the list is refused, never saved silently as "no brand" / category #1
+  const fields: Record<string, string> = {};
+  if (str(i.category) && !cat) fields.category = `ไม่พบหมวดหมู่ "${str(i.category)}" ในรายการ`;
+  if (str(i.brand) && !mfg) fields.brand = `ไม่พบยี่ห้อ "${str(i.brand)}" ในรายการ`;
+  const unknownModels = modelCodes.filter((c) => !known.has(c));
+  if (unknownModels.length) fields.models = `ไม่พบรุ่นสินค้า ${unknownModels.join(', ')}`;
+  if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
+
+  const code = await db.transaction(async (tx) => {
+    const status = fromUiStatus(i.status);
+    const values = {
+      productVenderCode: cleanMfgCode(i.mfgCode),
+      productName: name,
+      productNameEn: clean(i.nameEn),
+      productNameCn: clean(i.nameCn),
+      productDescription: clean(i.description),
+      categoryId: cat?.id ?? UNSPECIFIED_CATEGORY_ID,
+      manufacturerId: mfg?.id ?? null,
+      isUbRepairOnly: !!i.ubRepairOnly,
+      forModelColor: clean(i.forModelColor),
+    };
+    // on-hand row (prices live here)
+    let prices = {
+      capitalPrice: i.capitalPrice !== undefined ? money(num(i.capitalPrice)) : undefined,
+      wholesalePrice: i.wholesalePrice !== undefined ? money(num(i.wholesalePrice)) : undefined,
+      retailPrice: i.price !== undefined ? money(num(i.price)) : undefined,
+    };
+    let models = i.models ? modelCodes : undefined;
+    let productId: number;
+    let code = i.sysCode;
+    if (code) {
+      const [before] = await tx.select().from(product).where(eq(product.productCode, code)).for('update');
+      if (!before) throw new HttpError(404, 'product not found');
+      // restored through the records page (Product del) — the form's status would revive it with edit only
+      if (before.recordStatus === RS.DELETED) throw new HttpError(409, 'อะไหล่นี้ถูกลบแล้ว แก้ไขไม่ได้');
+      productId = before.productId;
+      const [loaded] = await productQuery(tx).where(eq(product.productId, productId));
+      const oldModels = await modelsOf(tx, productId);
+      assertVersion(i.version, productVersion(loaded!, oldModels));
+      // "never worse": only what really changes is written — a value equal to the stored one once both are
+      // cleaned keeps the stored one (a legacy trailing space); saved unchanged = no write, no audit row
+      const same: Record<string, boolean> = {
+        productVenderCode: values.productVenderCode === cleanMfgCode(before.productVenderCode),
+        productName: values.productName === clean(before.productName),
+        productNameEn: values.productNameEn === clean(before.productNameEn),
+        productNameCn: values.productNameCn === clean(before.productNameCn),
+        productDescription: values.productDescription === clean(before.productDescription),
+        categoryId: clean(i.category) === clean(loaded!.category), // the form sends the names it showed
+        manufacturerId: clean(i.brand) === clean(loaded!.brand),
+        isUbRepairOnly: values.isUbRepairOnly === !!before.isUbRepairOnly,
+        forModelColor: values.forModelColor === clean(before.forModelColor),
+      };
+      const set: Partial<typeof product.$inferInsert> = Object.fromEntries(
+        Object.entries(values).filter(([k]) => !same[k]),
+      );
+      if (uiStatus(before.recordStatus) !== uiStatus(status)) Object.assign(set, statusStamp(status, byUserId));
+      const was = { capitalPrice: loaded!.capital, wholesalePrice: loaded!.wholesale, retailPrice: loaded!.retail };
+      prices = {
+        capitalPrice: num(prices.capitalPrice) !== num(was.capitalPrice) ? prices.capitalPrice : undefined,
+        wholesalePrice: num(prices.wholesalePrice) !== num(was.wholesalePrice) ? prices.wholesalePrice : undefined,
+        retailPrice: num(prices.retailPrice) !== num(was.retailPrice) ? prices.retailPrice : undefined,
+      };
+      if (models && [...models].sort().join('\n') === [...oldModels].sort().join('\n')) models = undefined;
+      if (Object.keys(set).length) await tx.update(product).set(set).where(eq(product.productId, productId));
+      const changes = diff(
+        { ...before, ...was, models: oldModels } as Record<string, unknown>,
+        { ...set, ...prices, models } as Record<string, unknown>,
+      );
+      if (changes)
+        await audit(tx, byUserId, {
+          action: 'UPDATE',
+          module: 'Product',
+          entity: 'product',
+          key: code,
+          summary: `แก้ไขอะไหล่ ${name}`,
+          changes,
+        });
+    } else {
+      code = await nextRunningNo(tx, 'Product');
+      const [row] = await tx
+        .insert(product)
+        .values({
+          ...values,
+          ...statusStamp(status, byUserId),
+          productCode: code,
+          isSerialControl: false,
+          pictrueFileName: '',
+          createDate: nowThai(),
+          createBy: byUserId,
+          cancelRemark: '',
+          cancelDate: SENTINEL_TS,
+          cancelBy: -1,
+        })
+        .returning({ id: product.productId });
+      if (!row) throw new Error('product insert returned no row');
+      productId = row.id;
+      await audit(tx, byUserId, {
+        action: 'CREATE',
+        module: 'Product',
+        entity: 'product',
+        key: code,
+        summary: `เพิ่มอะไหล่ ${name}`,
+      });
+    }
+
+    const [onhand] = await tx
+      .select({ id: productNoneSerial.itemId })
+      .from(productNoneSerial)
+      .where(eq(productNoneSerial.productId, productId));
+    const priceSent = Object.values(prices).some((v) => v !== undefined);
+    if (onhand) {
+      // no price changed / sent (an API call with names only) → nothing to set: drizzle refuses an empty SET
+      if (priceSent) await tx.update(productNoneSerial).set(prices).where(eq(productNoneSerial.itemId, onhand.id));
+    } else {
+      // missing row (legacy product) → create it on any save, or every receive / issue refuses it (adjustQty 400)
+      await tx.insert(productNoneSerial).values({
+        productId,
+        storeLocationId: STORE_LOCATION_ID,
+        conditionId: CONDITION_ID,
+        capitalPrice: prices.capitalPrice ?? '0.00',
+        wholesalePrice: prices.wholesalePrice ?? '0.00',
+        retailPrice: prices.retailPrice ?? '0.00',
+        remark: '',
+        isPublish: true,
+        quantityInspection: 0,
+        quantityNotAvailable: 0,
+        quantityAvailable: 0,
+        quantityUsed: 0,
+        quantityBooking: 0,
+        quantityLoss: 0,
+        quantityRemain: 0,
+      });
+    }
+
+    if (models) {
+      await tx.delete(productModel).where(eq(productModel.productId, productId));
+      if (models.length) await tx.insert(productModel).values(models.map((c) => ({ productId, modelCode: c })));
+    }
+    return code;
+  });
+  productsChanged();
+  return (await getProduct(code))!;
+}
+
+/* ------------------------------------------------------------------ *
+ * Quantities — the one place that touches product_none_serial counters.
+ *   available = cumulative received, used = cumulative issued,
+ *   booking   = requested-not-yet-granted, remain = available - used
+ * ------------------------------------------------------------------ */
+type QtyDelta = { available?: number; used?: number; booking?: number };
+type StockRow = typeof productNoneSerial.$inferSelect;
+
+const codeOf = async (tx: Tx, productId: number) =>
+  (await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId)))[0]?.code ??
+  `#${productId}`;
+const noStockRow = async (tx: Tx, productId: number) =>
+  new HttpError(400, `ไม่มีข้อมูลสต๊อกของอะไหล่ ${await codeOf(tx, productId)}`);
+
+/** The counters after a delta — the one rule adjustQty and stockMove share. */
+function nextQty(row: StockRow, d: QtyDelta) {
+  return {
+    quantityAvailable: (row.quantityAvailable ?? 0) + (d.available ?? 0),
+    quantityUsed: (row.quantityUsed ?? 0) + (d.used ?? 0),
+    quantityBooking: Math.max(0, (row.quantityBooking ?? 0) + (d.booking ?? 0)),
+    // apply the delta to remain (a few legacy rows drifted from available-used; keep their numbers)
+    quantityRemain: (row.quantityRemain ?? 0) + (d.available ?? 0) - (d.used ?? 0),
+  };
+}
+
+/** 409 "สต๊อก X ไม่พอ (คงเหลือ N)" — N = what the row held before this line. */
+async function notEnough(tx: Tx, productId: number, remain: number | null) {
+  return new HttpError(409, `สต๊อก ${await codeOf(tx, productId)} ไม่พอ (คงเหลือ ${remain ?? 0})`);
+}
+
+async function adjustQty(tx: Tx, productId: number, d: QtyDelta, opts: { allowNegative?: boolean } = {}) {
+  const [row] = await tx
+    .select()
+    .from(productNoneSerial)
+    .where(eq(productNoneSerial.productId, productId))
+    .for('update');
+  if (!row) throw await noStockRow(tx, productId);
+  const next = nextQty(row, d);
+  if (next.quantityRemain < 0 && !opts.allowNegative) throw await notEnough(tx, productId, row.quantityRemain);
+  await tx.update(productNoneSerial).set(next).where(eq(productNoneSerial.itemId, row.itemId));
+  return next.quantityRemain;
+}
+
+/**
+ * adjustQty for a whole movement: ONE select locks every stock row it touches, in product_id order
+ * (line-by-line locking in request order let two movements over the same parts deadlock → 500);
+ * adjust() applies a line in memory with adjustQty's rules (same 400 / 409, never below zero, a later
+ * line sees an earlier one) and flush() writes every changed row in ONE update.
+ */
+async function stockMove(tx: Tx, productIds: number[]) {
+  const rows = productIds.length
+    ? await tx
+        .select()
+        .from(productNoneSerial)
+        .where(inArray(productNoneSerial.productId, productIds))
+        .orderBy(asc(productNoneSerial.productId), asc(productNoneSerial.itemId))
+        .for('update')
+    : [];
+  const byProduct = new Map<number, StockRow>();
+  for (const r of rows) if (r.productId != null && !byProduct.has(r.productId)) byProduct.set(r.productId, r);
+  // the 409 says what is on hand, not what an earlier line of this movement left in memory
+  const onhand = new Map(rows.map((r) => [r.itemId, r.quantityRemain]));
+  const changed = new Set<StockRow>();
+  return {
+    async adjust(productId: number, d: QtyDelta) {
+      const row = byProduct.get(productId);
+      if (!row) throw await noStockRow(tx, productId);
+      const next = nextQty(row, d);
+      if (next.quantityRemain < 0) throw await notEnough(tx, productId, onhand.get(row.itemId) ?? null);
+      Object.assign(row, next);
+      changed.add(row);
+    },
+    async flush() {
+      if (!changed.size) return;
+      const values = sql.join(
+        [...changed].map(
+          (r) =>
+            sql`(${r.itemId}::int, ${r.quantityAvailable}::int, ${r.quantityUsed}::int, ${r.quantityBooking}::int, ${r.quantityRemain}::int)`,
+        ),
+        sql`, `,
+      );
+      await tx.execute(sql`
+        update product_none_serial s
+           set quantity_available = v.a, quantity_used = v.u, quantity_booking = v.b, quantity_remain = v.r
+          from (values ${values}) as v(id, a, u, b, r)
+         where s.item_id = v.id`);
+    },
+  };
+}
+
+/** `price` = ราคาขาย (retail — what the pickers show); `deleted` = ยกเลิกแล้ว: no new movement or request (gone());
+ *  `inactive` = ปิดใช้งาน: still moves, but no new / bigger job request (jobs.ts) */
+async function productsByCode(tx: Tx, codes: string[]) {
+  type P = { id: number; name: string; price: number; deleted: boolean; inactive: boolean };
+  if (!codes.length) return new Map<string, P>();
+  const rows = await tx
+    .select({
+      id: product.productId,
+      code: product.productCode,
+      name: product.productName,
+      price: productNoneSerial.retailPrice,
+      rs: product.recordStatus,
+    })
+    .from(product)
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(inArray(product.productCode, codes))
+    .orderBy(desc(productNoneSerial.itemId)) // a legacy second stock row: the Map keeps the lowest item_id, as stockMove
+    // every caller is a write transaction, and locks the product rows before their stock rows (stockMove):
+    // a product delete (records.ts, FOR UPDATE) running now finishes first, or waits for this write
+    .for('share', { of: product });
+  return new Map<string, P>(
+    rows.map((r) => [
+      r.code ?? '',
+      {
+        id: r.id,
+        name: r.name ?? '',
+        price: num(r.price),
+        deleted: r.rs === RS.DELETED,
+        inactive: r.rs === RS.INACTIVE,
+      },
+    ]),
+  );
+}
+
+/** a product deleted (ยกเลิก) since: nothing new is received, issued or requested for it — what it already
+ *  issued may still come back (returnFromJob) and a request for it may still be cancelled */
+const gone = (code: string | null) =>
+  new HttpError(409, `อะไหล่ ${code} ถูกยกเลิกแล้ว — รับเข้า จ่ายออก หรือเบิกเพิ่มไม่ได้`);
+
+/** stockMove's lock alone, for a write that then calls adjustQty itself (jobs.ts): adjustQty re-locks rows
+ *  this tx already holds, so the product_id order holds. */
+async function lockStock(tx: Tx, productIds: number[]) {
+  await stockMove(tx, productIds);
+}
+
+/** The picker list (listProductsLite) shows names + on-hand: drop it after a product / stock write
+ *  has COMMITTED — dropped earlier, a request in between would cache the old numbers again. */
+export const productsChanged = () => invalidate('master:products:lite');
+
+async function insertMovement(
+  tx: Tx,
+  h: { typeId: number; ref?: string; outTo?: string; remark?: string; date?: string },
+  lines: { code: string; qty: number }[],
+  byUserId: number,
+): Promise<string> {
+  const no = await nextRunningNo(
+    tx,
+    h.typeId === INV.RECEIVE || h.typeId === INV.RETURN_FROM_JOB ? 'Inventory-In' : 'Inventory-Out',
+  );
+  await tx.insert(inventoryHd).values({
+    inventoryNo: no,
+    inventoryTypeId: h.typeId,
+    itemType: 'SparePart',
+    // the forms' schemas keep these within the columns; the slice is for derived values (SO payTo = customer name)
+    referenceDocumentNo: cleanCode(h.ref).slice(0, 50),
+    referenceOutTo: clean(h.outTo).slice(0, 50),
+    inventoryRemark: clean(h.remark).slice(0, 100),
+    createDate: h.date ? `${h.date} ${nowThai().slice(11)}` : nowThai(),
+    createBy: byUserId,
+    isActive: true,
+    companyId: null,
+    branchId: null,
+  });
+  await tx.insert(inventoryDt).values(
+    lines.map((l) => ({
+      inventoryNo: no,
+      itemCode: l.code,
+      itemQuantity: l.qty.toFixed(4),
+      itemUnit: ITEM_UNIT,
+      storeLocationId: STORE_LOCATION_ID,
+      stockTypeId: STOCK_TYPE_ID,
+      receiveInventoryNo: '',
+    })),
+  );
+  return no;
+}
+
+export type StockLine = { code: string; qty: number };
+
+/** รับเข้า / จ่ายออกอื่นๆ: the same movement by product code, one counter apart. */
+async function moveByCode(
+  input: StockLine[],
+  empty: string,
+  counter: 'available' | 'used',
+  h: Parameters<typeof insertMovement>[1],
+  entry: (total: number, lines: StockLine[]) => Pick<AuditEntry, 'action' | 'module' | 'summary'>,
+  byUserId: number,
+): Promise<{ no: string; total: number }> {
+  const lines = input.filter((l) => l.qty > 0);
+  if (!lines.length) throw new HttpError(400, empty);
+  return db
+    .transaction(async (tx) => {
+      const map = await productsByCode(
+        tx,
+        lines.map((l) => l.code),
+      );
+      const stock = await stockMove(
+        tx,
+        [...map.values()].map((p) => p.id),
+      );
+      for (const l of lines) {
+        const p = map.get(l.code);
+        if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
+        if (p.deleted) throw gone(l.code);
+        await stock.adjust(p.id, { [counter]: l.qty });
+      }
+      await stock.flush();
+      const no = await insertMovement(tx, h, lines, byUserId);
+      const total = lines.reduce((s, l) => s + l.qty, 0);
+      await audit(tx, byUserId, {
+        ...entry(total, lines),
+        entity: 'inventory_hd',
+        key: no,
+        changes: { lines: [null, lines.map((l) => `${l.code} x${l.qty}`)] },
+      });
+      return { no, total };
+    })
+    .finally(productsChanged);
+}
+
+/** รับเข้าอะไหล่ → WHI (type 1), available += qty. */
+export async function receiveStock(
+  i: { date?: string; poRef?: string | null; supplier?: string | null; remark?: string | null; lines: StockLine[] },
+  byUserId: number,
+): Promise<{ no: string; total: number }> {
+  // receiveSchema: supplier ≤ 40 + remark ≤ 47 → fits inventory_remark varchar(100)
+  const remark = [clean(i.supplier) ? `Supplier: ${clean(i.supplier)}` : '', clean(i.remark)]
+    .filter(Boolean)
+    .join(' · ');
+  return moveByCode(
+    i.lines,
+    'ยังไม่ได้ระบุจำนวนรับเข้า',
+    'available',
+    { typeId: INV.RECEIVE, ref: i.poRef ?? '', remark, date: i.date },
+    (total, lines) => ({
+      action: 'RECEIVE',
+      module: 'Product Receive Stock',
+      summary: `รับเข้าอะไหล่ ${lines.length} รายการ · ${total} ชิ้น${i.poRef ? ` · PO ${cleanCode(i.poRef)}` : ''}`,
+    }),
+    byUserId,
+  );
+}
+
+/** จ่ายออกอื่นๆ → WHO (type 5). */
+export async function issueOther(
+  i: { payTo: string; remark?: string; lines: StockLine[] },
+  byUserId: number,
+): Promise<{ no: string; total: number }> {
+  return moveByCode(
+    i.lines,
+    'ยังไม่ได้ระบุจำนวนจ่ายออก',
+    'used',
+    { typeId: INV.OUT_OTHER, outTo: i.payTo, remark: i.remark },
+    (total) => ({
+      action: 'ISSUE',
+      module: 'Product Pick Stock',
+      summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`,
+    }),
+    byUserId,
+  );
+}
+
+/* ---- job spare-part requests (ใบเบิก) ---- */
+export type PartRequestLine = {
+  logId: number;
+  jobNo: string;
+  code: string;
+  name: string;
+  onhand: number;
+  need: number; // still to grant
+  requested: number;
+  granted: number;
+  /** returned to stock (รับคืนจากการเบิก) — billed qty = granted - returned */
+  returned: number;
+  statusId: number;
+  status: string;
+  unitPrice: number;
+  isQuotation: boolean;
+  isSpecial: boolean;
+  requestQtyB: number;
+  isQuotationB: boolean;
+  isSpecialB: boolean;
+};
+
+const PART_STATUS_NAME: Record<number, string> = {
+  1: 'รอเบิก',
+  2: 'ขอคืน',
+  3: 'จ่ายแล้ว',
+  4: 'ยกเลิก',
+  5: 'คืนแล้ว',
+};
+
+export async function listPartRequests(jobNo: string, onlyPending = false): Promise<PartRequestLine[]> {
+  const rows = await db
+    .select({
+      logId: jobOrderSparePartLog.jobOrderLogId,
+      jobNo: jobOrderSparePartLog.jobNo,
+      code: jobOrderSparePartLog.sparePartCode,
+      name: product.productName,
+      onhand: productNoneSerial.quantityRemain,
+      requested: jobOrderSparePartLog.requestQty,
+      granted: jobOrderSparePartLog.grantQty,
+      returned: jobOrderSparePartLog.returnQty,
+      statusId: jobOrderSparePartLog.orderStatusId,
+      unitPrice: jobOrderSparePartLog.sparePartUnitPrice,
+      isQuotation: jobOrderSparePartLog.isQuotation,
+      isSpecial: jobOrderSparePartLog.isSpecial,
+      requestQtyB: jobOrderSparePartLog.requestQtyB,
+      isQuotationB: jobOrderSparePartLog.isQuotationB,
+      isSpecialB: jobOrderSparePartLog.isSpecialB,
+    })
+    .from(jobOrderSparePartLog)
+    .leftJoin(product, eq(product.productCode, jobOrderSparePartLog.sparePartCode))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(
+      and(
+        eq(jobOrderSparePartLog.jobNo, jobNo),
+        onlyPending
+          ? and(
+              eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+              eq(jobOrderSparePartLog.isSpecial, true), // เสนอ-only lines (not ticked เบิก) are not for stock
+              sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
+            )
+          : ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED),
+      ),
+    )
+    .orderBy(asc(jobOrderSparePartLog.jobOrderLogId));
+  return rows.map((r) => {
+    const requested = r.requested ?? 0;
+    const granted = r.granted ?? 0;
+    return {
+      logId: r.logId,
+      jobNo: r.jobNo ?? jobNo,
+      code: r.code ?? '',
+      name: r.name ?? '',
+      onhand: r.onhand ?? 0,
+      need: Math.max(0, requested - granted),
+      requested,
+      granted,
+      returned: r.returned ?? 0,
+      statusId: r.statusId ?? 1,
+      status:
+        r.statusId === PART.REQUESTED && granted > 0 && granted < requested
+          ? 'เบิกบางส่วน'
+          : r.statusId === PART.REQUESTED && (r.onhand ?? 0) === 0
+            ? 'รออะไหล่'
+            : (PART_STATUS_NAME[r.statusId ?? 1] ?? ''),
+      unitPrice: num(r.unitPrice),
+      isQuotation: !!r.isQuotation,
+      isSpecial: !!r.isSpecial,
+      requestQtyB: r.requestQtyB ?? 0,
+      isQuotationB: !!r.isQuotationB,
+      isSpecialB: !!r.isSpecialB,
+    };
+  });
+}
+
+/** job.spare_part_total_cost = the job's charged part lines (cancelled ones and เสนอ-only lines excluded —
+ *  only parts ticked เบิก are charged, owner 2026-10-15; same rule as partCharge in validation/job.ts) */
+export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
+  const [sum] = await tx
+    .select({ s: sql<string>`coalesce(sum(${jobOrderSparePartLog.sparePartTotalPrice}),0)` })
+    .from(jobOrderSparePartLog)
+    .where(
+      and(
+        eq(jobOrderSparePartLog.jobNo, jobNo),
+        ne(jobOrderSparePartLog.orderStatusId, PART.CANCELLED),
+        eq(jobOrderSparePartLog.isSpecial, true),
+      ),
+    );
+  return num(sum?.s);
+}
+
+/** job_status ids of a closed or cancelled job: ยกเลิกข้อมูล · ยกเลิกซ่อม · ปิดงาน (7 / 8 / 20 / 21 / 23 / 24) ·
+ *  ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out (owner 2026-10-15) */
+export const JOB_CLOSED_STATUSES: number[] = [
+  JS.CANCELLED,
+  JS.REPAIR_CANCELLED,
+  JS.CLOSED_WAIT_TRACKING,
+  JS.CLOSED_TRACKED,
+  JS.COMPLETE,
+  JS.CLOSED_REFUND,
+  JS.REPAIRED_NO_FAULT,
+  JS.CLOSED_OUTSOURCE,
+  JS.CLOSED_WAIT_PICKUP,
+];
+
+/** No part goes out to a closed / cancelled job (returns from it stay allowed). In a transaction the
+ *  job row is locked first (job → request rows → stock, the order the repair save locks in) — for update:
+ *  the issue moves the job's status in the same transaction (followParts). */
+export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = db) {
+  const [j] = await x
+    .select({ id: job.jobStatusId, name: jobStatus.jobStatusName })
+    .from(job)
+    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+    .where(eq(job.jobNo, jobNo))
+    .for('update', { of: job });
+  if (j?.id != null && JOB_CLOSED_STATUSES.includes(j.id))
+    throw new HttpError(
+      409,
+      `งาน ${jobNo} อยู่ในสถานะ "${clean(j.name) || j.id}" (ปิดงาน ยกเลิก หรือไม่พบอาการเสีย) — ตัดจ่ายอะไหล่ให้งานนี้ไม่ได้`,
+    );
+}
+
+/** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows; every request issued → the job's status moves
+ *  (followParts) in the SAME transaction — done after, a save in between adopted the moved version. */
+export async function issueForJob(
+  i: { jobNo: string; remark?: string; payTo?: string; lines: { logId: number; qty: number }[] },
+  byUserId: number,
+): Promise<{ no: string; total: number; allGranted: boolean }> {
+  const lines = i.lines.filter((l) => l.qty > 0);
+  if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนจ่ายออก');
+  return db
+    .transaction(async (tx) => {
+      await assertJobOpenForIssue(i.jobNo, tx);
+      const reqs = await tx
+        .select()
+        .from(jobOrderSparePartLog)
+        .where(
+          and(
+            eq(jobOrderSparePartLog.jobNo, i.jobNo),
+            inArray(
+              jobOrderSparePartLog.jobOrderLogId,
+              lines.map((l) => l.logId),
+            ),
+          ),
+        )
+        .for('update');
+      const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+      const map = await productsByCode(
+        tx,
+        reqs.map((r) => r.sparePartCode ?? ''),
+      );
+      const stock = await stockMove(
+        tx,
+        [...map.values()].map((p) => p.id),
+      );
+      const mvLines: StockLine[] = [];
+      const now = nowThai();
+      for (const l of lines) {
+        const r = byId.get(l.logId);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!r.isSpecial) throw new HttpError(400, `${r.sparePartCode} ไม่ได้ติ๊ก "เบิก" — ไม่ใช่รายการขอเบิก`);
+        // issued / cancelled since the list was loaded
+        if (r.orderStatusId !== PART.REQUESTED)
+          throw new HttpError(409, `${r.sparePartCode} ไม่อยู่ในสถานะรอเบิกแล้ว — โหลดรายการใหม่`);
+        const need = (r.requestQty ?? 0) - (r.grantQty ?? 0);
+        if (l.qty > need) throw new HttpError(400, `จ่ายเกินจำนวนที่ขอ (${r.sparePartCode})`);
+        const p = map.get(r.sparePartCode ?? '');
+        if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
+        if (p.deleted) throw gone(r.sparePartCode);
+        await stock.adjust(p.id, { used: l.qty, booking: -l.qty });
+        const granted = (r.grantQty ?? 0) + l.qty;
+        await tx
+          .update(jobOrderSparePartLog)
+          .set({
+            grantQty: granted,
+            grantDate: now,
+            grantBy: byUserId,
+            orderStatusId: granted >= (r.requestQty ?? 0) ? PART.GRANTED : PART.REQUESTED,
+          })
+          .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
+        mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
+      }
+      await stock.flush();
+      const no = await insertMovement(
+        tx,
+        { typeId: INV.OUT_JOB, ref: i.jobNo, outTo: i.payTo, remark: i.remark },
+        mvLines,
+        byUserId,
+      );
+      await audit(tx, byUserId, {
+        action: 'ISSUE',
+        module: 'Job PickStock',
+        entity: 'job',
+        key: i.jobNo,
+        summary: `ตัดจ่ายอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`,
+        changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)] },
+      });
+      const [pending] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(jobOrderSparePartLog)
+        .where(
+          and(
+            eq(jobOrderSparePartLog.jobNo, i.jobNo),
+            eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+            eq(jobOrderSparePartLog.isSpecial, true),
+            sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
+          ),
+        );
+      const allGranted = (pending?.n ?? 0) === 0;
+      // jobs.ts imports this module — loaded when called, not at import (no import cycle)
+      const moved = allGranted && (await (await import('./jobs')).followParts(tx, i.jobNo, byUserId));
+      // a partial issue writes no job column: the version moves anyway, a repair page opened before is stale (0036)
+      if (!moved)
+        await tx
+          .update(job)
+          .set({ rowVersion: sql`${job.rowVersion} + 1` })
+          .where(eq(job.jobNo, i.jobNo));
+      return { no, total: mvLines.reduce((s, l) => s + l.qty, 0), allGranted };
+    })
+    .finally(productsChanged);
+}
+
+/* ---- job lists for the pick page reference dropdown ---- */
+/** Open jobs (not closed / cancelled) that still have parts waiting to be issued, newest request first. */
+export async function jobsWithPendingParts(limit = 300): Promise<string[]> {
+  const rows = await db
+    .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.requestDate})` })
+    .from(jobOrderSparePartLog)
+    .leftJoin(job, eq(job.jobNo, jobOrderSparePartLog.jobNo))
+    .where(
+      and(
+        or(isNull(job.jobStatusId), notInArray(job.jobStatusId, JOB_CLOSED_STATUSES)),
+        eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+        eq(jobOrderSparePartLog.isSpecial, true),
+        sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
+      ),
+    )
+    .groupBy(jobOrderSparePartLog.jobNo)
+    .orderBy(sql`max(${jobOrderSparePartLog.requestDate}) desc`)
+    .limit(limit);
+  return rows.map((r) => r.jobNo ?? '').filter(Boolean);
+}
+
+/** Jobs with issued parts that can still be returned to stock (granted > returned), newest first. */
+export async function jobsWithReturnableParts(limit = 300): Promise<string[]> {
+  const rows = await db
+    .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.grantDate})` })
+    .from(jobOrderSparePartLog)
+    .where(returnableLine)
+    .groupBy(jobOrderSparePartLog.jobNo)
+    .orderBy(sql`max(${jobOrderSparePartLog.grantDate}) desc`)
+    .limit(limit);
+  return rows.map((r) => r.jobNo ?? '').filter(Boolean);
+}
+
+/* ---- return from job (รับคืนจากการเบิก, inventory_type 2) ---- */
+/** a line stock may take parts back from: issued (จ่ายแล้ว / ขอคืน) or partly issued (still รอเบิก for the rest) —
+ *  with issued pieces not yet back */
+const RETURNABLE: number[] = [PART.GRANTED, PART.RETURN_REQUESTED, PART.REQUESTED];
+const returnableLine = and(
+  inArray(jobOrderSparePartLog.orderStatusId, RETURNABLE),
+  sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
+);
+export type ReturnLine = {
+  logId: number;
+  jobNo: string;
+  code: string;
+  name: string;
+  onhand: number;
+  granted: number;
+  returned: number;
+  returnable: number;
+  status: string;
+};
+
+export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> {
+  const rows = await db
+    .select({
+      logId: jobOrderSparePartLog.jobOrderLogId,
+      code: jobOrderSparePartLog.sparePartCode,
+      name: product.productName,
+      onhand: productNoneSerial.quantityRemain,
+      granted: jobOrderSparePartLog.grantQty,
+      returned: jobOrderSparePartLog.returnQty,
+      statusId: jobOrderSparePartLog.orderStatusId,
+    })
+    .from(jobOrderSparePartLog)
+    .leftJoin(product, eq(product.productCode, jobOrderSparePartLog.sparePartCode))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(and(eq(jobOrderSparePartLog.jobNo, jobNo), returnableLine))
+    .orderBy(asc(jobOrderSparePartLog.jobOrderLogId));
+  return rows.map((r) => ({
+    logId: r.logId,
+    jobNo,
+    code: r.code ?? '',
+    name: r.name ?? '',
+    onhand: r.onhand ?? 0,
+    granted: r.granted ?? 0,
+    returned: r.returned ?? 0,
+    returnable: Math.max(0, (r.granted ?? 0) - (r.returned ?? 0)),
+    status: r.statusId === PART.REQUESTED ? 'เบิกบางส่วน' : (PART_STATUS_NAME[r.statusId ?? 3] ?? ''),
+  }));
+}
+
+/**
+ * รับคืนจากการเบิก → WHI (type 2), reverses the issue on the counters
+ * (used -= qty → remain += qty) and records return_qty/date/by on the ใบเบิก row;
+ * a fully returned line becomes status 5 (คืนแล้ว). A charged line is re-priced to what is still
+ * used (granted - returned) and the job's parts / total cost follow in the same transaction.
+ */
+export async function returnFromJob(
+  i: { jobNo: string; remark?: string; from?: string; lines: { logId: number; qty: number }[] },
+  byUserId: number,
+): Promise<{ no: string; total: number }> {
+  const lines = i.lines.filter((l) => l.qty > 0);
+  if (!lines.length) throw new HttpError(400, 'ยังไม่ได้ระบุจำนวนรับคืน');
+  return db
+    .transaction(async (tx) => {
+      // the job row before its part rows — the order saveRepair locks them in
+      const [j] = await tx.select().from(job).where(eq(job.jobNo, i.jobNo)).for('update');
+      const reqs = await tx
+        .select()
+        .from(jobOrderSparePartLog)
+        .where(
+          and(
+            eq(jobOrderSparePartLog.jobNo, i.jobNo),
+            inArray(
+              jobOrderSparePartLog.jobOrderLogId,
+              lines.map((l) => l.logId),
+            ),
+          ),
+        )
+        .for('update');
+      const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+      const map = await productsByCode(
+        tx,
+        reqs.map((r) => r.sparePartCode ?? ''),
+      );
+      const stock = await stockMove(
+        tx,
+        [...map.values()].map((p) => p.id),
+      );
+      const mvLines: StockLine[] = [];
+      const now = nowThai();
+      for (const l of lines) {
+        const r = byId.get(l.logId);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!RETURNABLE.includes(r.orderStatusId ?? -1))
+          throw new HttpError(409, `${r.sparePartCode} ไม่อยู่ในสถานะที่รับคืนได้ — โหลดรายการใหม่`);
+        const returnable = (r.grantQty ?? 0) - (r.returnQty ?? 0);
+        if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
+        const p = map.get(r.sparePartCode ?? '');
+        if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
+        await stock.adjust(p.id, { used: -l.qty });
+        const returned = (r.returnQty ?? 0) + l.qty;
+        // a partly issued line still waits for the rest: it stays รอเบิก, charged for what it will use
+        const partly = r.orderStatusId === PART.REQUESTED;
+        const using = Math.max(0, (partly ? (r.requestQty ?? 0) : (r.grantQty ?? 0)) - returned);
+        await tx
+          .update(jobOrderSparePartLog)
+          .set({
+            returnQty: returned,
+            returnDate: now,
+            returnBy: byUserId,
+            returnStockId: STORE_LOCATION_ID,
+            orderStatusId: !partly && returned >= (r.grantQty ?? 0) ? PART.RETURNED : r.orderStatusId,
+            ...(r.isQuotation ? { sparePartTotalPrice: money(num(r.sparePartUnitPrice) * using) } : {}),
+          })
+          .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
+        mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
+      }
+      await stock.flush();
+      const no = await insertMovement(
+        tx,
+        { typeId: INV.RETURN_FROM_JOB, ref: i.jobNo, outTo: i.from, remark: i.remark },
+        mvLines,
+        byUserId,
+      );
+      let costs: Record<string, string> = {};
+      // a closed job's money is locked (its bill is out): the return moves stock, not the job's costs
+      const [st] = j
+        ? await tx
+            .select({ group: jobStatus.jobStatusGroup })
+            .from(jobStatus)
+            .where(eq(jobStatus.jobStatusId, j.jobStatusId ?? -1))
+        : [];
+      if (j && st?.group?.trim() !== 'Finished') {
+        const parts = await partsTotalOf(tx, i.jobNo);
+        const rest = num(j.serviceCost) + num(j.serviceToolCost) + num(j.deliveryCost) + num(j.cartonBoxCost);
+        costs = { sparePartTotalCost: money(parts), jobTotalCost: money(parts + rest) };
+      }
+      // the version moves even when the costs stay (one UPDATE: +1 either way, 0036) — a repair page opened before is stale
+      if (j)
+        await tx
+          .update(job)
+          .set({ ...costs, rowVersion: sql`${job.rowVersion} + 1` })
+          .where(eq(job.jobNo, i.jobNo));
+      await audit(tx, byUserId, {
+        action: 'RETURN',
+        module: 'Job ReturnStock',
+        entity: 'job',
+        key: i.jobNo,
+        summary: `รับคืนอะไหล่ ${no} · ${mvLines.reduce((s, l) => s + l.qty, 0)} ชิ้น`,
+        changes: { lines: [null, mvLines.map((l) => `${l.code} x${l.qty}`)], ...diff(j, costs) },
+      });
+      return { no, total: mvLines.reduce((s, l) => s + l.qty, 0) };
+    })
+    .finally(productsChanged);
+}
+
+/* ---- sale order picking ---- */
+/** `pickNo`: the WHO that already issued the line ('' = still to issue) */
+export type SoPickLine = {
+  dtId: number;
+  code: string;
+  name: string;
+  onhand: number;
+  need: number;
+  picked: boolean;
+  pickNo: string;
+};
+
+/** a product line no WHO has issued yet (legacy rows carry '' as well as null) */
+const soLineToPick = and(ne(saleOutDt.productType, 'Service'), sql`coalesce(${saleOutDt.pickInventoryNo}, '') = ''`);
+
+/** จ่ายออกตามใบสั่งขาย's list: approved orders with a product line still to issue. Approving an order
+ *  issues its stock (approveSaleOrder), so this is what approval left behind — usually nothing. */
+export async function saleOrdersToPick(limit = 300): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ no: saleOutHd.saleOutHdNo })
+    .from(saleOutHd)
+    .innerJoin(saleOutDt, eq(saleOutDt.saleOutHdNo, saleOutHd.saleOutHdNo))
+    .where(
+      and(eq(saleOutHd.approveStatusId, AS.APPROVED), statusFilter(saleOutHd.recordStatus, 'exclude'), soLineToPick),
+    )
+    .orderBy(desc(saleOutHd.saleOutHdNo))
+    .limit(limit);
+  return rows.flatMap((r) => (r.no ? [r.no] : []));
+}
+
+export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]> {
+  const rows = await db
+    .select({
+      dtId: saleOutDt.saleOutDtId,
+      code: saleOutDt.productCode,
+      name: product.productName,
+      onhand: productNoneSerial.quantityRemain,
+      qty: saleOutDt.saleOutQuantity,
+      pick: saleOutDt.pickInventoryNo,
+      type: saleOutDt.productType,
+    })
+    .from(saleOutDt)
+    .leftJoin(product, eq(product.productId, saleOutDt.productId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(and(eq(saleOutDt.saleOutHdNo, soNo), ne(saleOutDt.productType, 'Service')))
+    .orderBy(asc(saleOutDt.listNo));
+  return rows.map((r) => ({
+    dtId: r.dtId,
+    code: r.code ?? '',
+    name: r.name ?? '',
+    onhand: r.onhand ?? 0,
+    need: r.qty,
+    picked: !!r.pick,
+    pickNo: r.pick ?? '',
+  }));
+}
+
+/** จ่ายออกตามใบสั่งขาย → WHO (type 4); stamps pick_inventory_no / reference_no. */
+export async function issueForSaleOrder(
+  i: { soNo: string; remark?: string; payTo?: string; lines?: { dtId: number; qty: number }[] },
+  byUserId: number,
+  tx?: Tx,
+): Promise<{ no: string; total: number }> {
+  const run = async (t: Tx) => {
+    // header first — the same lock order as saveSaleOrder / approveSaleOrder (no deadlock);
+    // only an APPROVED order may take stock out (the UI filters, the API must too: a pick on a
+    // waiting order, then an edit + approve, would take the stock out twice)
+    const [hd] = await t
+      .select({ approve: saleOutHd.approveStatusId, status: saleOutHd.recordStatus })
+      .from(saleOutHd)
+      .where(eq(saleOutHd.saleOutHdNo, i.soNo))
+      .for('update');
+    if (!hd) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + i.soNo);
+    if (hd.status === RS.DELETED) throw new HttpError(409, 'ใบสั่งขายนี้ถูกยกเลิกแล้ว จ่ายสินค้าไม่ได้');
+    if (hd.approve !== AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายยังไม่ได้รับอนุมัติ จ่ายสินค้าไม่ได้');
+    const dts = await t
+      .select()
+      .from(saleOutDt)
+      .where(and(eq(saleOutDt.saleOutHdNo, i.soNo), ne(saleOutDt.productType, 'Service')))
+      .for('update');
+    const want = i.lines ? new Map(i.lines.map((l) => [l.dtId, l.qty])) : null;
+    const stock = await stockMove(
+      t,
+      dts.flatMap((d) => (!d.pickInventoryNo && d.productId ? [d.productId] : [])),
+    );
+    const mv: StockLine[] = [];
+    const picked: number[] = [];
+    for (const d of dts) {
+      if (d.pickInventoryNo) continue;
+      const qty = want ? (want.get(d.saleOutDtId) ?? 0) : d.saleOutQuantity;
+      if (qty <= 0) continue;
+      if (qty > d.saleOutQuantity) throw new HttpError(400, `จ่ายเกินจำนวนในใบสั่งขาย (${d.productCode})`);
+      if (!d.productId) throw new HttpError(400, `รายการ ${d.productCode} ไม่มี product_id`);
+      await stock.adjust(d.productId, { used: qty });
+      mv.push({ code: d.productCode ?? '', qty });
+      picked.push(d.saleOutDtId);
+    }
+    await stock.flush();
+    if (!mv.length) {
+      // approving the order issued it already — say so instead of a bare "nothing to issue"
+      const done = [...new Set(dts.map((d) => d.pickInventoryNo).filter(Boolean))];
+      if (dts.length && done.length && dts.every((d) => d.pickInventoryNo))
+        throw new HttpError(
+          409,
+          `ใบสั่งขาย ${i.soNo} ตัดสต๊อกครบแล้ว (${done.join(', ')}) — ไม่มีรายการที่ต้องจ่ายออก`,
+        );
+      throw new HttpError(400, 'ไม่มีรายการที่ต้องจ่ายออก');
+    }
+    const no = await insertMovement(
+      t,
+      { typeId: INV.OUT_SALE, ref: i.soNo, outTo: i.payTo, remark: i.remark },
+      mv,
+      byUserId,
+    );
+    await audit(t, byUserId, {
+      action: 'ISSUE',
+      module: 'Sale Order',
+      entity: 'sale_out_hd',
+      key: i.soNo,
+      summary: `ตัดสต๊อกตามใบสั่งขาย ${no} · ${mv.reduce((s, l) => s + l.qty, 0)} ชิ้น`,
+      changes: { lines: [null, mv.map((l) => `${l.code} x${l.qty}`)] },
+    });
+    await t.update(saleOutDt).set({ pickInventoryNo: no }).where(inArray(saleOutDt.saleOutDtId, picked));
+    await t.update(saleOutHd).set({ referenceNo: no }).where(eq(saleOutHd.saleOutHdNo, i.soNo));
+    return { no, total: mv.reduce((s, l) => s + l.qty, 0) };
+  };
+  // with the caller's tx, the caller calls productsChanged() after its commit
+  return tx ? run(tx) : db.transaction(run).finally(productsChanged);
+}
+
+/* ------------------------------------------------------------------ *
+ * Movements (ประวัติการเคลื่อนไหว) — inventory_hd + summarised lines
+ * ------------------------------------------------------------------ */
+/**
+ * Word search like the product picker's: every typed word ("P02556 ฝาหลัง") must match the document no /
+ * reference (`docs`) or a line's part code or Thai / English / Chinese name — the words in any order.
+ */
+const movementSearch = (text: string, docs: boolean) =>
+  and(
+    ...text
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) =>
+        or(
+          docs ? ilike(inventoryHd.inventoryNo, likeTerm(w)) : undefined,
+          docs ? ilike(inventoryHd.referenceDocumentNo, likeTerm(w)) : undefined,
+          sql`exists (select 1 from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo} and (d.item_code ilike ${likeTerm(w)}
+            or d.item_code in (select ${product.productCode} from ${product} where ${nameLike(w)})))`,
+        ),
+      ),
+  );
+
+/** Unpaged (Excel export / JSON list) — the same movementWhere as the paged screen, so the file matches it. */
+export async function listMovements(opts: MovementFilters & { limit?: number } = {}): Promise<Movement[]> {
+  const { limit = 1000 } = opts;
+  const rows = await db
+    .select({
+      doc: inventoryHd.inventoryNo,
+      type: inventoryType.inventoryTypeName,
+      typeId: inventoryHd.inventoryTypeId,
+      ref: inventoryHd.referenceDocumentNo,
+      outTo: inventoryHd.referenceOutTo,
+      date: inventoryHd.createDate,
+      remark: inventoryHd.inventoryRemark,
+      byFirst: appUser.firstName,
+      byLast: appUser.lastName,
+      qty: sql<string>`(select coalesce(sum(d.item_quantity),0) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+      items: sql<string>`(select string_agg(d.item_code || ' x' || d.item_quantity::int, ', ' order by d.inventory_dt_id) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+      loc: storeLocation.storeLocationName,
+    })
+    .from(inventoryHd)
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
+    .leftJoin(storeLocation, eq(storeLocation.storeLocationId, STORE_LOCATION_ID))
+    .where(movementWhere(opts))
+    .orderBy(desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId))
+    .limit(Math.min(limit, MAX_EXPORT_ROWS));
+  return rows.map((r) => {
+    const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
+    const wh = r.loc ?? STORE_LOCATION_NAME;
+    return {
+      doc: r.doc ?? '',
+      type: r.type ?? '',
+      ref: r.ref ?? '',
+      date: fmtDateTime(r.date),
+      by: fullName(r.byFirst, r.byLast),
+      from: isIn ? r.outTo || r.ref || 'Supplier' : wh,
+      to: isIn ? wh : r.outTo || r.ref || '',
+      remark: [r.items ? r.items : '', r.remark ?? ''].filter(Boolean).join(' · '),
+      qty: num(r.qty),
+      items: r.items ?? '',
+    };
+  });
+}
+
+/** Stock card for one product (product-detail modal). */
+export async function productStockCard(code: string) {
+  const rows = await db
+    .select({
+      no: inventoryHd.inventoryNo,
+      date: inventoryHd.createDate,
+      type: inventoryType.inventoryTypeName,
+      action: inventoryType.movementAction,
+      qty: inventoryDt.itemQuantity,
+      ref: inventoryHd.referenceDocumentNo,
+      remark: inventoryHd.inventoryRemark,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .where(and(eq(inventoryDt.itemCode, code), ne(inventoryHd.isActive, false)))
+    .orderBy(asc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId));
+  let bal = 0;
+  return rows
+    .map((r) => {
+      const q = num(r.qty);
+      const inc = (r.action ?? 1) > 0 ? q : 0;
+      const out = (r.action ?? 1) < 0 ? q : 0;
+      const before = bal;
+      bal = bal + inc - out;
+      return {
+        no: r.no ?? '',
+        date: fmtDateTime(r.date),
+        type: r.type ?? '',
+        before,
+        income: inc,
+        outcome: out,
+        after: bal,
+        ref: r.ref ?? '',
+        remark: r.remark ?? '',
+      };
+    })
+    .reverse();
+}
+
+export { adjustQty, insertMovement, lockStock, productsByCode };
+
+/** Line items of one movement document (inventory_dt joined to product). */
+export async function movementLines(no: string) {
+  const rows = await db
+    .select({
+      code: inventoryDt.itemCode,
+      name: product.productName,
+      qty: inventoryDt.itemQuantity,
+      unit: inventoryDt.itemUnit,
+      supplier: inventoryHd.inventoryRemark,
+      ref: inventoryHd.referenceDocumentNo,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .where(eq(inventoryDt.inventoryNo, no))
+    .orderBy(asc(inventoryDt.inventoryDtId));
+  return rows.map((r) => ({
+    code: r.code ?? '',
+    name: r.name ?? '',
+    qty: num(r.qty),
+    unit: r.unit ?? ITEM_UNIT,
+    supplier: (r.supplier ?? '').match(/Supplier:\s*([^·]+)/)?.[1]?.trim() ?? '',
+    ref: r.ref ?? '',
+  }));
+}
+
+/** รายงานการเบิกจ่ายอะไหล่ — every issued line (WHO types 3/4/5, returns 2 as negative qty) in a date range; the Excel export.
+ *  Same filter (issuedWhere) and rows as the screen (pageIssuedLines), only not paged. */
+export async function listIssuedLines(opts: IssuedFilters & { limit?: number } = {}) {
+  const rows = await issuedBase()
+    .where(issuedWhere('', opts))
+    .orderBy(desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId))
+    .limit(Math.min(opts.limit ?? 5000, MAX_EXPORT_ROWS));
+  return rows.map(toIssued);
+}
+
+/* ------------------------------------------------------------------ *
+ * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
+ * ------------------------------------------------------------------ */
+
+/** other products that already carry this vendor code — a warning on save, not a block (legacy has pairs) */
+export async function productsWithMfgCode(mfgCode: string, exceptSysCode: string): Promise<string[]> {
+  const code = cleanMfgCode(mfgCode);
+  if (!code) return [];
+  const rows = await db
+    .select({ c: product.productCode })
+    .from(product)
+    .where(and(sql`upper(btrim(${product.productVenderCode})) = ${code}`, ne(product.productCode, exceptSysCode)))
+    .limit(5);
+  return rows.map((r) => r.c ?? '');
+}
+
+export type ProductFilters = {
+  mode?: DeletedMode;
+  status?: string; // Active | Inactive (UI)
+  sysCode?: string;
+  mfgCode?: string;
+  name?: string;
+  brand?: string;
+  category?: string;
+  creator?: string;
+  date?: string; // create_date = YYYY-MM-DD
+  stock?: 'in' | 'low' | 'out'; // มีสินค้า / ใกล้หมด / หมด
+  model?: string; // model_code — parts usable with that model (product_model)
+};
+
+/** The page's query (?category=&stock=…) as filters — the list, its KPI and the export all read it here. */
+export const productFiltersFromQuery = (f: Record<string, string>, mode: DeletedMode): ProductFilters => ({
+  mode,
+  status: f.status,
+  sysCode: f.sysCode,
+  mfgCode: f.mfgCode,
+  name: f.name,
+  brand: f.brand,
+  category: f.category,
+  creator: f.creator,
+  date: f.date,
+  model: f.model,
+  stock: f.stock === 'in' || f.stock === 'low' || f.stock === 'out' ? f.stock : undefined,
+});
+
+const creatorUser = alias(appUser, 'product_creator');
+
+function productWhere(q: string, f: ProductFilters) {
+  const term = q.trim();
+  const rs =
+    f.status === 'Inactive'
+      ? eq(product.recordStatus, 'INACTIVE')
+      : f.status === 'Active'
+        ? eq(product.recordStatus, 'ACTIVE')
+        : statusFilter(product.recordStatus, f.mode ?? 'exclude');
+  return and(
+    rs,
+    term ? productSearch(term) : undefined,
+    f.sysCode ? ilike(product.productCode, likeTerm(f.sysCode)) : undefined,
+    f.mfgCode ? ilike(product.productVenderCode, likeTerm(f.mfgCode)) : undefined,
+    f.name ? nameLike(f.name) : undefined,
+    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    f.category ? eq(category.categoryName, f.category) : undefined,
+    f.creator?.trim()
+      ? /^\d+$/.test(f.creator.trim())
+        ? eq(product.createBy, Number(f.creator.trim()))
+        : // the same name fullName() builds: each part trimmed, empty parts dropped
+          sql`concat_ws(' ', nullif(trim(${creatorUser.firstName}),''), nullif(trim(${creatorUser.lastName}),'')) ilike ${likeTerm(f.creator.trim())}`
+      : undefined,
+    ymd(f.date) ? sql`${product.createDate}::date = ${f.date}::date` : undefined,
+    f.model
+      ? sql`exists (select 1 from product_model pm where pm.product_id = ${product.productId} and pm.model_code = ${f.model})`
+      : undefined,
+    f.stock === 'in' ? sql`coalesce(${productNoneSerial.quantityRemain},0) > ${LOW_STOCK}` : undefined,
+    f.stock === 'low' ? sql`coalesce(${productNoneSerial.quantityRemain},0) between 1 and ${LOW_STOCK}` : undefined,
+    f.stock === 'out' ? sql`coalesce(${productNoneSerial.quantityRemain},0) <= 0` : undefined,
+  );
+}
+
+const productPagedQuery = () =>
+  db
+    .select({ ...productSelect, creatorFirst: creatorUser.firstName, creatorLast: creatorUser.lastName })
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy));
+
+const PRODUCT_SORT = {
+  sysCode: product.productCode,
+  mfgCode: product.productVenderCode,
+  name: product.productName,
+  category: category.categoryName,
+  brand: manufacturer.manufacturerName,
+  onhand: productNoneSerial.quantityRemain,
+  price: productNoneSerial.retailPrice,
+  status: product.recordStatus,
+  value: sql`coalesce(${productNoneSerial.quantityRemain},0) * coalesce(${productNoneSerial.retailPrice},0)`,
+};
+
+/** `cost`: keep ราคาทุน (the export, for a user who may see it — canSeeCost); the list screens never show it */
+export async function pageProducts(
+  p: PageQuery,
+  f: ProductFilters,
+  cost = false,
+): Promise<Page<Product & { value: number }>> {
+  const w = productWhere(p.q, f);
+  // count + page in parallel: the response takes max(count, rows) instead of their sum
+  const [counted, rows] = await Promise.all([
+    db
+      .select({ total: countFn() })
+      .from(product)
+      .leftJoin(category, eq(category.categoryId, product.categoryId))
+      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+      .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+      .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
+      .where(w),
+    productPagedQuery()
+      .where(w)
+      .orderBy(...orderByCols(p.sort, PRODUCT_SORT, [asc(product.productCode)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
+  return {
+    rows: rows.map((r) => {
+      const pr = toProduct(r, fullName(r.creatorFirst, r.creatorLast));
+      return { ...(cost ? pr : withoutCost(pr)), value: Math.max(0, pr.onhand) * pr.price };
+    }),
+    total: totalOf(counted),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+/** KPI tiles of the product list / on-hand report for the same filter set. */
+export async function productStats(q: string, f: ProductFilters) {
+  const [r] = await db
+    .select({
+      total: countFn(),
+      qty: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0)),0)`,
+      value: sql<string>`coalesce(sum(greatest(coalesce(${productNoneSerial.quantityRemain},0),0) * coalesce(${productNoneSerial.retailPrice},0)),0)`,
+      low: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) between 1 and ${LOW_STOCK})`,
+      out: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) <= 0)`,
+      // in stock but no retail price: left out of value — the page says how many
+      noPrice: sql<string>`count(*) filter (where coalesce(${productNoneSerial.quantityRemain},0) > 0 and coalesce(${productNoneSerial.retailPrice},0) = 0)`,
+    })
+    .from(product)
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(creatorUser, eq(creatorUser.userId, product.createBy))
+    .where(productWhere(q, f));
+  if (!r) throw new Error('aggregate returned no row'); // no GROUP BY → always exactly one row
+  return {
+    total: Number(r.total),
+    qty: num(r.qty),
+    value: num(r.value),
+    low: num(r.low),
+    out: num(r.out),
+    noPrice: num(r.noPrice),
+  };
+}
+
+/** Lite rows for dropdowns / pickers — a few fields instead of ~25 (the EN / CN names: the pickers search them). */
+export type ProductLite = Pick<
+  Product,
+  'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'status' | 'category' | 'brand'
+>;
+export function listProductsLite(q = '', mode: 'active' | 'exclude' = 'active'): Promise<ProductLite[]> {
+  // no term = the whole catalog (stock receive / pick grids); with a term = the picker's server search.
+  // `exclude` = INACTIVE too (stock receive: a part no new document may use still arrives).
+  // Both memoised; productsChanged() drops every key.
+  const term = q.trim();
+  return cached(`master:products:lite:${mode}:${term}`, TTL_MASTER, () => loadProductsLite(term, mode));
+}
+async function loadProductsLite(term: string, mode: 'active' | 'exclude'): Promise<ProductLite[]> {
+  const rows = await db
+    .select({
+      sysCode: product.productCode,
+      mfgCode: product.productVenderCode,
+      name: product.productName,
+      nameEn: product.productNameEn,
+      nameCn: product.productNameCn,
+      onhand: productNoneSerial.quantityRemain,
+      price: productNoneSerial.retailPrice,
+      category: category.categoryName,
+      brand: manufacturer.manufacturerName,
+      rs: product.recordStatus,
+    })
+    .from(product)
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
+    .where(and(statusFilter(product.recordStatus, mode), term ? productSearch(term) : undefined))
+    .orderBy(asc(product.productCode));
+  return rows.map((r) => ({
+    sysCode: r.sysCode ?? '',
+    mfgCode: r.mfgCode ?? '',
+    name: r.name ?? '',
+    nameEn: r.nameEn ?? '',
+    nameCn: r.nameCn ?? '',
+    onhand: r.onhand ?? 0,
+    price: num(r.price),
+    status: uiStatus(r.rs),
+    category: r.category ?? '',
+    brand: r.brand ?? '',
+  }));
+}
+
+/* ------------------------------------------------------------------ *
+ * Paged movements (ประวัติสต๊อก) and issued lines (รายงานเบิกจ่าย)
+ * ------------------------------------------------------------------ */
+export type MovementFilters = {
+  q?: string;
+  from?: string;
+  to?: string;
+  type?: string;
+  code?: string;
+  doc?: string;
+  ref?: string;
+};
+
+function movementWhere(f: MovementFilters) {
+  const term = (f.q ?? '').trim();
+  const from = ymd(f.from),
+    to = ymd(f.to);
+  return and(
+    ne(inventoryHd.isActive, false),
+    movementSearch(term, true),
+    f.doc ? ilike(inventoryHd.inventoryNo, likeTerm(f.doc)) : undefined,
+    f.ref ? ilike(inventoryHd.referenceDocumentNo, likeTerm(f.ref)) : undefined,
+    // รหัส / ชื่ออะไหล่ filter: the lines' part codes and names only
+    movementSearch(f.code ?? '', false),
+    from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
+    f.type ? eq(inventoryType.inventoryTypeName, f.type) : undefined,
+  );
+}
+
+const MOVE_SORT = {
+  doc: inventoryHd.inventoryNo,
+  type: inventoryType.inventoryTypeName,
+  ref: inventoryHd.referenceDocumentNo,
+  date: inventoryHd.createDate,
+  by: appUser.firstName,
+};
+
+export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<Page<Movement>> {
+  const w = movementWhere({ ...f, q: p.q || f.q });
+  const [counted, rows] = await Promise.all([
+    db
+      .select({ total: countFn() })
+      .from(inventoryHd)
+      .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+      .where(w),
+    db
+      .select({
+        doc: inventoryHd.inventoryNo,
+        type: inventoryType.inventoryTypeName,
+        typeId: inventoryHd.inventoryTypeId,
+        ref: inventoryHd.referenceDocumentNo,
+        outTo: inventoryHd.referenceOutTo,
+        date: inventoryHd.createDate,
+        remark: inventoryHd.inventoryRemark,
+        byFirst: appUser.firstName,
+        byLast: appUser.lastName,
+        qty: sql<string>`(select coalesce(sum(d.item_quantity),0) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+        items: sql<string>`(select string_agg(d.item_code || ' x' || d.item_quantity::int, ', ' order by d.inventory_dt_id) from inventory_dt d where d.inventory_no = ${inventoryHd.inventoryNo})`,
+      })
+      .from(inventoryHd)
+      .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+      .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy))
+      .where(w)
+      .orderBy(...orderByCols(p.sort, MOVE_SORT, [desc(inventoryHd.createDate), desc(inventoryHd.inventoryHdId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
+  const wh = STORE_LOCATION_NAME;
+  return {
+    rows: rows.map((r) => {
+      const isIn = r.typeId === INV.RECEIVE || r.typeId === INV.RETURN_FROM_JOB;
+      return {
+        doc: r.doc ?? '',
+        type: r.type ?? '',
+        ref: r.ref ?? '',
+        date: fmtDateTime(r.date),
+        by: fullName(r.byFirst, r.byLast),
+        from: isIn ? r.outTo || r.ref || 'Supplier' : wh,
+        to: isIn ? wh : r.outTo || r.ref || '',
+        remark: [r.items ? r.items : '', r.remark ?? ''].filter(Boolean).join(' · '),
+        qty: num(r.qty),
+        items: r.items ?? '',
+      };
+    }),
+    total: totalOf(counted),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+export type IssuedFilters = { from?: string; to?: string; category?: string; code?: string };
+
+/** a line's qty in the report: issued (3/4/5) counts up, รับคืนจากการเบิก (2) counts back down */
+const issuedQty = sql<string>`(case when ${inventoryHd.inventoryTypeId} = ${sql.raw(String(INV.RETURN_FROM_JOB))} then -${inventoryDt.itemQuantity} else ${inventoryDt.itemQuantity} end)`;
+/**
+ * The unit price stored when the part went out: the job's part line (job_order_spare_part_log, issue and
+ * return reference the job no.) or the sale-order line (sale_out_dt.retail_price). inventory_dt itself has
+ * no price. 0 = not stored (warranty lines are often 0) → null, and the report falls back to today's price.
+ */
+const storedPrice = sql<string | null>`coalesce(
+  (select l.spare_part_unit_price from job_order_spare_part_log l
+    where l.job_no = ${inventoryHd.referenceDocumentNo} and l.spare_part_code = ${inventoryDt.itemCode} and l.spare_part_unit_price > 0
+    order by l.job_order_log_id desc limit 1),
+  (select s.retail_price from sale_out_dt s
+    where s.sale_out_hd_no = ${inventoryHd.referenceDocumentNo} and s.product_code = ${inventoryDt.itemCode} and s.retail_price > 0
+    order by s.sale_out_dt_id desc limit 1))`;
+const issuedValue = sql`${issuedQty} * coalesce(${storedPrice}, ${productNoneSerial.retailPrice}, 0)`;
+
+function issuedWhere(q: string, f: IssuedFilters) {
+  const code = (f.code || q).trim();
+  const from = ymd(f.from),
+    to = ymd(f.to);
+  return and(
+    inArray(inventoryHd.inventoryTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER, INV.RETURN_FROM_JOB]),
+    ne(inventoryHd.isActive, false),
+    from ? gte(inventoryHd.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(inventoryHd.createDate, `${to} 23:59:59`) : undefined,
+    f.category ? eq(category.categoryName, f.category) : undefined,
+    code
+      ? or(
+          ilike(inventoryDt.itemCode, likeTerm(code)),
+          ilike(product.productName, likeTerm(code)),
+          ilike(inventoryHd.inventoryNo, likeTerm(code)),
+        )
+      : undefined,
+  );
+}
+
+const issuedBase = () =>
+  db
+    .select({
+      doc: inventoryHd.inventoryNo,
+      date: inventoryHd.createDate,
+      type: inventoryType.inventoryTypeName,
+      ref: inventoryHd.referenceDocumentNo,
+      code: inventoryDt.itemCode,
+      item: product.productName,
+      category: category.categoryName,
+      qty: issuedQty,
+      stored: storedPrice,
+      today: productNoneSerial.retailPrice,
+      byFirst: appUser.firstName,
+      byLast: appUser.lastName,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(inventoryType, eq(inventoryType.inventoryTypeId, inventoryHd.inventoryTypeId))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .leftJoin(appUser, eq(appUser.userId, inventoryHd.createBy));
+
+function toIssued(r: Awaited<ReturnType<typeof issuedBase>>[number]) {
+  const qty = num(r.qty);
+  const price = r.stored != null ? num(r.stored) : num(r.today);
+  return {
+    doc: r.doc ?? '',
+    date: fmtDateTime(r.date),
+    type: r.type ?? '',
+    ref: r.ref ?? '',
+    by: fullName(r.byFirst, r.byLast),
+    from: STORE_LOCATION_NAME,
+    to: r.ref ?? '',
+    remark: '',
+    code: r.code ?? '',
+    item: r.item ?? '',
+    category: r.category ?? '',
+    qty,
+    price,
+    /** where `price` came from: stored on the job / sale-order line, or today's price (none stored) */
+    priceBasis: r.stored != null ? 'ราคา ณ วันเบิก' : 'ราคาปัจจุบัน',
+    value: qty * price,
+  };
+}
+
+const issuedCountBase = () =>
+  db
+    .select({ total: countFn() })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId));
+
+const ISSUED_SORT = {
+  doc: inventoryHd.inventoryNo,
+  date: inventoryHd.createDate,
+  type: inventoryType.inventoryTypeName,
+  code: inventoryDt.itemCode,
+  item: product.productName,
+  qty: issuedQty,
+  value: issuedValue,
+  by: appUser.firstName,
+};
+
+export async function pageIssuedLines(p: PageQuery, f: IssuedFilters) {
+  const w = issuedWhere(p.q, f);
+  const [counted, rows] = await Promise.all([
+    issuedCountBase().where(w),
+    issuedBase()
+      .where(w)
+      .orderBy(...orderByCols(p.sort, ISSUED_SORT, [desc(inventoryHd.createDate), asc(inventoryDt.inventoryDtId)]))
+      .limit(p.pageSize)
+      .offset(offsetOf(p)),
+  ]);
+  return {
+    rows: rows.map(toIssued),
+    total: totalOf(counted),
+    page: p.page,
+    pageSize: p.pageSize,
+  };
+}
+
+export async function issuedStats(q: string, f: IssuedFilters) {
+  const w = issuedWhere(q, f);
+  const [r] = await db
+    .select({
+      lines: countFn(),
+      qty: sql<string>`coalesce(sum(${issuedQty}),0)`,
+      value: sql<string>`coalesce(sum(${issuedValue}),0)`,
+      todayPriced: sql<string>`count(*) filter (where ${storedPrice} is null)`,
+    })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(w);
+  if (!r) throw new Error('aggregate returned no row');
+  const [top] = await db
+    .select({ code: inventoryDt.itemCode, n: sql<string>`sum(${issuedQty})` })
+    .from(inventoryDt)
+    .innerJoin(inventoryHd, eq(inventoryHd.inventoryNo, inventoryDt.inventoryNo))
+    .leftJoin(product, eq(product.productCode, inventoryDt.itemCode))
+    .leftJoin(category, eq(category.categoryId, product.categoryId))
+    .where(w)
+    .groupBy(inventoryDt.itemCode)
+    .orderBy(desc(sql`sum(${issuedQty})`), asc(inventoryDt.itemCode)) // a tie → the lowest code, every time
+    .limit(1);
+  return {
+    lines: Number(r.lines),
+    qty: num(r.qty),
+    value: num(r.value),
+    todayPriced: num(r.todayPriced),
+    top: top?.code ?? '—',
+  };
+}

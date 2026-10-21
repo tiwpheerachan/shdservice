@@ -1,57 +1,31 @@
-// Neutral data-access helper — the single place that talks to PostgREST.
-// DB column names match the TS types 1:1 (camelCase), so rows need no mapping.
+// Server-side getters used by the admin master pages (server components).
+// They call the drizzle-backed services directly (no HTTP round-trip). A DB error throws on purpose:
+// the page shows (app)/error.tsx instead of an empty list an admin might "fill in" again.
 
-import { supabase } from "@/lib/supabase";
-import type { MasterRow, Symptom } from "./mock";
+import type { MasterRow, Symptom } from './types';
 
 export type Order = { column: string; ascending?: boolean };
 
-// Soft-delete view: hide deleted rows (default), show only deleted, or show all.
-export type DeletedMode = "exclude" | "only" | "all";
+// record_status view: active = ACTIVE only (dropdowns) · exclude = hide DELETED (lists) · only = DELETED · all
+export type DeletedMode = 'active' | 'exclude' | 'only' | 'all';
 
-export async function fetchTable<T>(
-  table: string,
-  order?: Order,
-  deleted: DeletedMode = "exclude"
-): Promise<T[]> {
-  const build = (applyFilter: boolean) => {
-    let q = supabase.from(table).select("*");
-    if (order) q = q.order(order.column, { ascending: order.ascending ?? true });
-    if (applyFilter && deleted === "exclude") q = q.or("deleted.is.null,deleted.eq.false");
-    if (applyFilter && deleted === "only") q = q.eq("deleted", true);
-    return q;
-  };
-  let { data, error } = await build(deleted !== "all");
-  // If the `deleted` column hasn't been migrated yet, retry without the filter
-  // so nothing breaks before the migration is applied.
-  if (error && /deleted/i.test(error.message)) {
-    ({ data, error } = await build(false));
-  }
-  if (error) throw new Error(`[${table}] ${error.message}`);
-  return (data ?? []) as T[];
-}
+// Admin tables list newest first (the services return id ASC, which the form
+// dropdowns keep — that is the order people know from the legacy app). Copy
+// before reversing: the service hands out its cached array.
+const newestFirst = <T>(rows: T[]) => [...rows].reverse();
+// brands are the one master people scan alphabetically
+const byName = <T extends { name: string }>(rows: T[]) => [...rows].sort((a, b) => a.name.localeCompare(b.name, 'th'));
 
-/**
- * Resilient wrapper for server components: if the table is missing (e.g. the
- * Supabase schema hasn't been created yet) or the request fails, return an
- * empty list so the page renders its empty state instead of crashing.
- */
-async function safeFetch<T>(table: string, order?: Order): Promise<T[]> {
-  try {
-    return await fetchTable<T>(table, order);
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error("Supabase fetch failed:", e);
-    return [];
-  }
-}
+const masters = () => import('@/server/services/masters');
 
-/* Server-side getters used by the admin master pages (server components). */
-export const getCategories = () => safeFetch<MasterRow>("categories", { column: "id" });
-export const getManufacturers = () =>
-  safeFetch<MasterRow>("manufacturers", { column: "id" });
-export const getColors = () => safeFetch<MasterRow>("colors", { column: "id" });
-export const getJobTypes = () => safeFetch<MasterRow>("job_types", { column: "id" });
-export const getProductTypes = () =>
-  safeFetch<MasterRow>("product_types", { column: "id" });
-export const getSymptoms = () => safeFetch<Symptom>("symptoms", { column: "id" });
+export const getCategories = async (): Promise<MasterRow[]> =>
+  newestFirst(await (await masters()).listSimple('categories', 'exclude'));
+export const getManufacturers = async (): Promise<MasterRow[]> =>
+  byName(await (await masters()).listSimple('manufacturers', 'exclude'));
+export const getColors = async (): Promise<MasterRow[]> =>
+  newestFirst(await (await masters()).listSimple('colors', 'exclude'));
+export const getJobTypes = async (): Promise<MasterRow[]> =>
+  newestFirst(await (await masters()).listSimple('job_types', 'exclude'));
+export const getProductTypes = async (): Promise<MasterRow[]> =>
+  newestFirst(await (await masters()).listSimple('product_types', 'exclude'));
+export const getSymptoms = async (): Promise<Symptom[]> => newestFirst(await (await masters()).listSymptoms('exclude'));

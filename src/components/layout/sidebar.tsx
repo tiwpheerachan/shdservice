@@ -1,12 +1,13 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ChevronRight, Check, X, PanelLeftClose } from "lucide-react";
-import { NAV, type NavGroup } from "@/lib/nav";
-import { Logo } from "@/components/shared/logo";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { ChevronRight, Check, X, PanelLeftClose } from 'lucide-react';
+import { NAV as ALL_NAV, type NavGroup } from '@/lib/nav';
+import { Logo } from '@/components/shared/logo';
+import { cn } from '@/lib/utils';
+import { useAccess } from '@/lib/use-access';
 
 type Flyout = { id: string; top: number; left: number };
 
@@ -22,20 +23,28 @@ export function Sidebar({
   onToggleCollapse: () => void;
 }) {
   const pathname = usePathname();
-  const activeGroup = NAV.find((g) =>
-    g.items.some((i) => i.href === pathname)
-  )?.id;
-
-  const [open, setOpen] = React.useState<string[]>(
-    activeGroup ? [activeGroup] : ["jobs"]
+  // hide menus the user has no `view` grant for (app_config), and add/edit screens without that grant; admin sees all
+  const { canLink } = useAccess();
+  const NAV = React.useMemo(
+    () =>
+      ALL_NAV.map((g) => ({ ...g, items: g.items.filter(canLink) }))
+        .filter((g) => g.items.length > 0)
+        .map((g) => ({ ...g, href: g.items.some((i) => i.href === g.href) ? g.href : (g.items[0]?.href ?? g.href) })), // items non-empty (filtered above)
+    [canLink],
   );
+  const activeGroup = NAV.find((g) => g.items.some((i) => i.href === pathname))?.id;
 
-  React.useEffect(() => {
-    if (activeGroup) setOpen((s) => (s.includes(activeGroup) ? s : [...s, activeGroup]));
-  }, [activeGroup]);
+  const [open, setOpen] = React.useState<string[]>(activeGroup ? [activeGroup] : ['jobs']);
 
-  const toggle = (id: string) =>
-    setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // moving to a page of another group opens that group (adjusted while rendering; the user can
+  // still close it — only a change of page re-opens)
+  const [openedFor, setOpenedFor] = React.useState(activeGroup);
+  if (activeGroup !== openedFor) {
+    setOpenedFor(activeGroup);
+    if (activeGroup && !open.includes(activeGroup)) setOpen([...open, activeGroup]);
+  }
+
+  const toggle = (id: string) => setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   /* ---------- collapsed hover flyout ---------- */
   const [flyout, setFlyout] = React.useState<Flyout | null>(null);
@@ -61,11 +70,24 @@ export function Sidebar({
     setFlyout({ id: g.id, top, left: rect.right + 10 });
   };
 
-  React.useEffect(() => {
-    if (!collapsed) setFlyout(null);
-  }, [collapsed]);
+  // the hover flyout only exists in the collapsed sidebar
+  if (!collapsed && flyout) setFlyout(null);
 
   React.useEffect(() => () => cancelClose(), []);
+
+  // mobile drawer: focus moves in when it opens, Esc closes it, focus goes back (the menu button) after
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    const back = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseMobile();
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      back?.focus();
+    };
+  }, [mobileOpen, onCloseMobile]);
 
   const flyoutGroup = flyout ? NAV.find((g) => g.id === flyout.id) : null;
   const FlyoutIcon = flyoutGroup?.icon;
@@ -74,37 +96,39 @@ export function Sidebar({
     <>
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-sm lg:hidden no-print"
+          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-xs lg:hidden no-print"
           onClick={onCloseMobile}
         />
       )}
 
       <aside
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen || undefined}
+        aria-label={mobileOpen ? 'เมนู' : 'แถบเมนูด้านข้าง'} // two <aside>s on a page (admin/guide) each need a name
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground",
-          "border-r border-sidebar-border shadow-sm transition-[width,transform] duration-200 ease-out no-print",
-          collapsed ? "lg:w-[72px]" : "lg:w-[268px]",
-          "w-[268px]",
-          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          'fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground',
+          // visibility is transitioned too: the closed drawer turns invisible (out of the tab order) only
+          // after it has slid out
+          'border-r border-sidebar-border shadow-xs transition-[width,transform,visibility] duration-200 ease-out no-print',
+          collapsed ? 'lg:w-[72px]' : 'lg:w-[268px]',
+          'w-[268px]',
+          mobileOpen ? 'translate-x-0' : 'invisible -translate-x-full lg:visible lg:translate-x-0',
         )}
       >
         {/* brand */}
         <div
           className={cn(
-            "flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border",
-            collapsed ? "justify-center px-0" : "px-3"
+            'flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-sidebar-border',
+            collapsed ? 'justify-center px-0' : 'px-3',
           )}
         >
           {collapsed ? (
-            <div
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-sm ring-1 ring-inset ring-white/15"
-              style={{ background: "linear-gradient(135deg,#43a6f8,#55d5a1)" }}
-            >
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-xs ring-1 ring-inset ring-white/15 bg-brand">
               <Check className="h-5 w-5" strokeWidth={3} />
             </div>
           ) : (
             <Link
-              href="/jobs/dashboard"
+              href="/"
               onClick={onCloseMobile}
               aria-label="OneService — หน้าแรก"
               className="flex min-w-0 flex-1 items-center rounded-lg px-1 py-1 text-sidebar-foreground transition-opacity hover:opacity-90"
@@ -113,6 +137,7 @@ export function Sidebar({
             </Link>
           )}
           <button
+            ref={closeRef}
             onClick={onCloseMobile}
             className="rounded-md p-1 text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
             aria-label="ปิดเมนู"
@@ -122,7 +147,7 @@ export function Sidebar({
         </div>
 
         {/* nav */}
-        <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
+        <nav aria-label="เมนูหลัก" className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
           {NAV.map((g) => {
             const isOpen = open.includes(g.id) && !collapsed;
             const groupActive = g.items.some((i) => i.href === pathname);
@@ -143,11 +168,11 @@ export function Sidebar({
                       onToggleCollapse();
                     }}
                     className={cn(
-                      "flex h-11 w-full items-center justify-center rounded-xl transition-colors",
+                      'flex h-11 w-full items-center justify-center rounded-xl transition-colors',
                       groupActive || flyout?.id === g.id
-                        ? "bg-primary/12 text-primary"
-                        : "text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                      groupActive && "bg-primary text-primary-foreground shadow-sm hover:bg-primary"
+                        ? 'bg-primary/12 text-primary'
+                        : 'text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                      groupActive && 'bg-primary text-primary-foreground shadow-xs hover:bg-primary',
                     )}
                   >
                     <Icon className="h-[19px] w-[19px]" />
@@ -157,18 +182,18 @@ export function Sidebar({
                     onClick={() => toggle(g.id)}
                     aria-expanded={isOpen}
                     className={cn(
-                      "group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-colors",
+                      'group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-colors',
                       groupActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                     )}
                   >
                     <span
                       className={cn(
-                        "grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors",
+                        'grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors',
                         groupActive
-                          ? "bg-primary/15 text-primary"
-                          : "text-sidebar-muted group-hover:text-sidebar-foreground"
+                          ? 'bg-primary/15 text-primary'
+                          : 'text-sidebar-muted group-hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-[17px] w-[17px]" />
@@ -176,18 +201,16 @@ export function Sidebar({
                     <span className="flex-1 truncate text-left">{g.title}</span>
                     <span
                       className={cn(
-                        "num rounded-full px-1.5 py-px text-2xs tabular-nums",
-                        groupActive
-                          ? "bg-primary/15 text-primary"
-                          : "text-sidebar-muted"
+                        'num rounded-full px-1.5 py-px text-2xs tabular-nums',
+                        groupActive ? 'bg-primary/15 text-primary' : 'text-sidebar-muted',
                       )}
                     >
                       {g.no}
                     </span>
                     <ChevronRight
                       className={cn(
-                        "h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-transform duration-200",
-                        isOpen && "rotate-90"
+                        'h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-transform duration-200',
+                        isOpen && 'rotate-90',
                       )}
                     />
                   </button>
@@ -195,9 +218,10 @@ export function Sidebar({
 
                 {!collapsed && (
                   <div
+                    inert={!isOpen} // a folded group's links stay out of the tab order
                     className={cn(
-                      "grid transition-[grid-template-rows] duration-200 ease-out",
-                      isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                      'grid transition-[grid-template-rows] duration-200 ease-out',
+                      isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
                     )}
                   >
                     <div className="overflow-hidden">
@@ -210,14 +234,14 @@ export function Sidebar({
                                 href={i.href}
                                 onClick={onCloseMobile}
                                 className={cn(
-                                  "relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                                  'relative block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors pointer-coarse:py-3.5',
                                   active
-                                    ? "bg-primary/10 font-medium text-primary"
-                                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                    ? 'bg-primary/10 font-medium text-primary'
+                                    : 'text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                                 )}
                               >
                                 {active && (
-                                  <span className="absolute -left-[13px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
+                                  <span className="absolute left-[-13px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
                                 )}
                                 {i.title}
                               </Link>
@@ -236,14 +260,14 @@ export function Sidebar({
         <div className="shrink-0 border-t border-sidebar-border p-2.5">
           <button
             onClick={onToggleCollapse}
+            aria-label={collapsed ? 'ขยายเมนู' : 'ย่อเมนู'}
+            title={collapsed ? 'ขยายเมนู' : undefined}
             className={cn(
-              "hidden w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex",
-              collapsed && "justify-center"
+              'hidden w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex',
+              collapsed && 'justify-center',
             )}
           >
-            <PanelLeftClose
-              className={cn("h-4 w-4 transition-transform", collapsed && "rotate-180")}
-            />
+            <PanelLeftClose className={cn('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
             {!collapsed && <span>ย่อเมนู</span>}
           </button>
         </div>
@@ -257,15 +281,13 @@ export function Sidebar({
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           style={{ top: flyout.top, left: flyout.left }}
-          className="fixed z-[60] hidden w-60 origin-left animate-scale-in rounded-xl border border-border bg-card p-1.5 shadow-pop lg:block no-print"
+          className="fixed z-60 hidden w-60 origin-left animate-scale-in rounded-xl border border-border bg-card p-1.5 shadow-pop lg:block no-print"
         >
           <div className="flex items-center gap-2 px-2.5 py-1.5">
             <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/12 text-primary">
               {FlyoutIcon && <FlyoutIcon className="h-3.5 w-3.5" />}
             </span>
-            <span className="truncate text-xs font-semibold text-foreground">
-              {flyoutGroup.title}
-            </span>
+            <span className="truncate text-xs font-semibold text-foreground">{flyoutGroup.title}</span>
           </div>
           <div className="my-1 h-px bg-border" />
           <ul className="max-h-[70vh] space-y-0.5 overflow-y-auto">
@@ -278,10 +300,10 @@ export function Sidebar({
                     href={i.href}
                     onClick={() => setFlyout(null)}
                     className={cn(
-                      "block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                      'block truncate rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                       active
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        ? 'bg-primary/10 font-medium text-primary'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                     )}
                   >
                     {i.title}

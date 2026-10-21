@@ -1,23 +1,45 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { ImageIcon, Upload } from "lucide-react";
-import { Modal } from "@/components/ui/modal";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Field, FieldGrid } from "@/components/ui/field";
-import { Input, Select, Textarea, Checkbox, Radio } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import * as React from 'react';
+import { ImageIcon, Upload } from 'lucide-react';
+import { Modal } from '@/components/ui/modal';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { useApi, useCategories } from '@/data/db';
+import type { Product } from '@/data/types';
+import { postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
+import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { useAccess } from '@/lib/use-access';
+import { productSchema } from '@/lib/validation/admin';
 import {
-  useModels,
-  useColors,
-  useCategories,
-  useManufacturers,
-} from "@/data/db";
-import type { Product } from "@/data/mock";
-import { baht, int } from "@/lib/utils";
+  type ProductForm as Form,
+  EMPTY_PRODUCT_FORM as EMPTY_FORM,
+  productFormOf,
+} from '@/components/stock/product-form';
+import {
+  type StockCardRow as Card,
+  ProductColorStatus,
+  ProductFields,
+  ProductLegacyNotes,
+  ProductModelChecklist,
+  ProductStockTables,
+} from '@/components/stock/product-sections';
 
-export type ProductMode = "view" | "edit";
+export type ProductMode = 'view' | 'edit' | 'add';
+
+/** `version`: what the save sends back — another save of this product since it loaded → 409 */
+type Detail = Product & { models: string[]; version?: number };
+
+const NEW_PRODUCT: Product = {
+  sysCode: '',
+  mfgCode: '',
+  name: '',
+  category: '',
+  brand: '',
+  onhand: 0,
+  price: 0,
+  status: 'Active',
+};
 
 export function ProductDetailModal({
   open,
@@ -30,70 +52,151 @@ export function ProductDetailModal({
   onClose: () => void;
   product: Product | null;
   mode: ProductMode;
-  onSave?: () => void;
+  onSave?: (saved: Product) => void;
 }) {
   const { push } = useToast();
-  const { data: MODELS } = useModels();
-  const { data: COLORS } = useColors();
-  const { data: CATEGORIES } = useCategories();
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: CATEGORIES } = useCategories(); // a new part starts in the first หมวดหมู่
+  // ราคาทุน: Product Cost only — the API leaves it out for everyone else, so hide the field too
+  const seeCost = useAccess().has('Product Cost');
 
-  const ro = mode === "view";
+  const ro = mode === 'view';
+  const code = product?.sysCode ?? '';
 
-  if (!product) return null;
+  // full detail + stock card from the DB (product / product_none_serial / inventory_*)
+  const detailKey = open && mode !== 'add' && code ? `/api/products/${encodeURIComponent(code)}` : null;
+  const loaded = useApi<{ product: Detail; card: Card[] }>(detailKey, {
+    fresh: true,
+    onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลอะไหล่ไม่สำเร็จ', desc: msg }),
+  });
+  const detail = detailKey ? (loaded.data?.product ?? null) : null;
+  const stockCard = React.useMemo(() => (detailKey ? (loaded.data?.card ?? []) : []), [detailKey, loaded.data]);
+  const [form, setForm] = React.useState<Form>(EMPTY_FORM);
+  const [saving, setSaving] = React.useState(false);
+  const [image, setImage] = React.useState('');
+  const [brokenImage, setBrokenImage] = React.useState(''); // the file that failed to load → placeholder
+  const [modelQ, setModelQ] = React.useState('');
+  const [allBrands, setAllBrands] = React.useState(false); // รุ่นสินค้า: only the chosen ยี่ห้อ's models unless ticked
+  const [uploading, setUploading] = React.useState(false);
 
-  // demo stock rows derived from the product's on-hand quantity
-  const onhandRows = [
-    {
-      sn: "-",
-      loc: "คลังสินค้าดี",
-      cond: "สินค้าใหม่",
-      income: product.onhand,
-      outcome: 0,
-      reserve: 0,
-      avail: product.onhand,
-      status: product.status,
-    },
-  ];
-  const stockCard =
-    product.onhand > 0
-      ? [
-          {
-            no: "WHI2601349",
-            date: "2026-09-04 14:54",
-            type: "รับเข้า",
-            before: 0,
-            income: product.onhand,
-            outcome: 0,
-            after: product.onhand,
-            ref: "",
-            remark: "",
+  // รูปอะไหล่ → bucket oneservice/products/{code}/… แล้วเก็บชื่อไฟล์ใน product.pictrue_file_name
+  const onPickImage = async (f: File | undefined) => {
+    if (!f || !code) return;
+    setUploading(true);
+    try {
+      const d = await uploadFile('product-image', code, f);
+      setImage(d.path);
+      push({ kind: 'success', title: 'อัปโหลดรูปแล้ว', desc: f.name });
+    } catch (e) {
+      push({ kind: 'error', title: 'อัปโหลดรูปไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setUploading(false);
+    }
+  };
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const fe = useFormErrors();
+  useClearOnChange(fe.clear, form);
+
+  // one dialog session = opened for one product (or "add"); state is adjusted while rendering:
+  //  - a new session starts clean (no leftover errors, empty form for "add")
+  //  - the edit form is filled ONCE per session, from a fresh answer (not a cached one still being
+  //    re-read) — a late answer never overwrites what the user has started typing
+  const session = `${open ? 1 : 0}|${mode}|${code}`;
+  const [seenSession, setSeenSession] = React.useState('');
+  const [filledFor, setFilledFor] = React.useState('');
+  // the version of the answer the form was filled from (a later re-read must not move it: the save
+  // would then claim to be based on values the form never showed)
+  const [version, setVersion] = React.useState<number>();
+  if (open && seenSession !== session) {
+    setSeenSession(session);
+    fe.setErrors({});
+    setModelQ('');
+    setAllBrands(false);
+    if (mode === 'add' || !code) {
+      setImage('');
+      // ยี่ห้อ starts empty: defaulting to the first one (70mai) saved parts under the wrong brand
+      setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? '' });
+    }
+  }
+  if (detailKey && loaded.data && !loaded.validating && filledFor !== session) {
+    const d = loaded.data;
+    setFilledFor(session);
+    setVersion(d.product.version);
+    setImage(d.product.image ?? '');
+    setForm(productFormOf(d.product));
+  }
+  if (!open && (filledFor || seenSession)) {
+    // closed → the next open (even of the same product) starts a new session
+    setFilledFor('');
+    setSeenSession('');
+  }
+
+  const save = async () => {
+    // the API checks the same; the vendor code the product already has (legacy) still saves
+    if (fe.report(fe.run(productSchema(detail), form))) return;
+    setSaving(true);
+    try {
+      const d = await postJson<{ row: Product; sameMfgCode?: string[] }>('/api/products', {
+        ...form,
+        sysCode: code || undefined,
+        version: mode === 'add' ? undefined : version,
+      });
+      // the dialog fills from this cached answer when it opens again: re-read it now, or the next edit of
+      // this product starts from the values before this save and writes them back
+      if (detailKey) await loaded.mutate();
+      push({
+        kind: 'success',
+        title: mode === 'add' ? 'เพิ่มอะไหล่แล้ว' : 'บันทึกการแก้ไขอะไหล่แล้ว',
+        desc: d.row.sysCode,
+      });
+      if (d.sameMfgCode?.length)
+        push({
+          kind: 'warning',
+          title: `รหัสผู้ผลิต ${d.row.mfgCode} ซ้ำกับอะไหล่อื่น`,
+          desc: `${d.sameMfgCode.join(', ')} — ตรวจว่าไม่ได้สร้างอะไหล่ซ้ำ`,
+        });
+      onSave?.(d.row);
+      onClose();
+    } catch (e) {
+      if (isStale(e) && detailKey)
+        // saved by someone else since this form opened: "โหลดใหม่" re-reads this product into the open dialog
+        // (a page reload lost the list's search and filters)
+        push({
+          kind: 'error',
+          title: errMsg(e),
+          desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง',
+          action: {
+            label: 'โหลดใหม่',
+            onClick: () => void loaded.mutate().then(() => setFilledFor('')),
           },
-        ]
-      : [];
+        });
+      else if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!product && mode !== 'add') return null;
+  const p: Product = detail ?? product ?? NEW_PRODUCT;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       size="xl"
-      title={mode === "view" ? "รายละเอียดอะไหล่" : "แก้ไขข้อมูลอะไหล่"}
-      description={`Mode: ${mode === "view" ? "View" : "Edit"} Data · Product ${product.sysCode}`}
+      title={mode === 'view' ? 'รายละเอียดอะไหล่' : mode === 'add' ? 'เพิ่มอะไหล่ใหม่' : 'แก้ไขข้อมูลอะไหล่'}
+      description={
+        mode === 'add'
+          ? 'Mode: Add New · รหัสอะไหล่จะถูกสร้างอัตโนมัติ'
+          : `Mode: ${mode === 'view' ? 'View' : 'Edit'} Data · Product ${p.sysCode}`
+      }
       footer={
         <>
           <Button variant="outline" size="sm" onClick={onClose}>
-            {mode === "view" ? "ปิด" : "ยกเลิก"}
+            {mode === 'view' ? 'ปิด' : 'ยกเลิก'}
           </Button>
-          {mode === "edit" && (
-            <Button
-              size="sm"
-              onClick={() => {
-                onSave?.();
-                push({ kind: "success", title: "บันทึกการแก้ไขอะไหล่แล้ว", desc: product.sysCode });
-                onClose();
-              }}
-            >
-              ยืนยันการแก้ไข
+          {mode !== 'view' && (
+            <Button size="sm" onClick={save} disabled={saving}>
+              {mode === 'add' ? 'บันทึกอะไหล่' : 'ยืนยันการแก้ไข'}
             </Button>
           )}
         </>
@@ -101,258 +204,101 @@ export function ProductDetailModal({
     >
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[180px_1fr]">
-          {/* image */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Part Image</p>
-            <div className="grid aspect-square place-items-center rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
-              <div className="text-center">
-                <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
-                <p className="mt-1 text-2xs">NO IMAGE</p>
-              </div>
-            </div>
-            {!ro && (
-              <label className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground">
-                <Upload className="h-3.5 w-3.5" /> เลือกไฟล์
-                <input type="file" className="hidden" />
-              </label>
-            )}
-          </div>
+          <PartImage
+            image={image}
+            broken={brokenImage === image}
+            onBroken={() => setBrokenImage(image)}
+            alt={p.name}
+            ro={ro}
+            code={code}
+            uploading={uploading}
+            onPick={onPickImage}
+          />
 
-          {/* fields */}
-          <FieldGrid cols={2}>
-            <Field label="รหัสอะไหล่ (ระบบ)">
-              <Input defaultValue={product.sysCode} readOnly className="num" />
-            </Field>
-            <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-              <Input defaultValue={product.mfgCode} readOnly={ro} className="num" />
-            </Field>
-
-            <Field label="ชื่ออะไหล่ (TH)" wide>
-              <Input defaultValue={product.name} readOnly={ro} />
-            </Field>
-            <Field label="ชื่ออะไหล่ (EN)" wide>
-              <Input defaultValue={product.name} readOnly={ro} />
-            </Field>
-            <Field label="ชื่ออะไหล่ (CN)" wide>
-              <Input defaultValue={product.name} readOnly={ro} />
-            </Field>
-            <Field label="รายละเอียด" wide>
-              <Input defaultValue="" placeholder="รายละเอียดเพิ่มเติม" readOnly={ro} />
-            </Field>
-
-            <Field label="หมวดหมู่">
-              <Select defaultValue={product.category} disabled={ro}>
-                {CATEGORIES.map((c) => (
-                  <option key={c.id}>{c.name}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="คุม S/N (Serial Control)">
-              <div className="flex h-9 items-center gap-4">
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name={`sn-${product.sysCode}`} disabled={ro} /> True
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                  <Radio name={`sn-${product.sysCode}`} defaultChecked disabled={ro} /> False
-                </label>
-              </div>
-            </Field>
-
-            <Field label="ราคาทุน (Capital) — บาท">
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
-            <Field label="ราคาขายส่ง (Wholesale) — บาท">
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
-            <Field label="ราคาขายปลีก (Retail) — บาท">
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                inputMode="decimal"
-                placeholder="0.00"
-                defaultValue={product.price ? product.price : undefined}
-                onFocus={(e) => e.currentTarget.select()}
-                readOnly={ro}
-                className="num text-right"
-              />
-            </Field>
-            <Field label="จำนวนคงเหลือ">
-              <Input defaultValue={product.onhand} readOnly className="num text-right" />
-            </Field>
-
-            <Field label="ยี่ห้อ (ผู้ผลิต)" wide>
-              <Select defaultValue={product.brand} disabled={ro}>
-                {MANUFACTURERS.map((m) => (
-                  <option key={m.id}>{m.name}</option>
-                ))}
-              </Select>
-            </Field>
-          </FieldGrid>
+          <ProductFields form={form} set={set} errors={fe.errors} ro={ro} p={p} seeCost={seeCost} />
         </div>
 
-        {/* product models */}
-        <div>
-          <p className="mb-2 text-sm font-medium">ใช้สำหรับ รุ่นสินค้า</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-3 lg:grid-cols-4">
-            {MODELS.map((m) => (
-              <label
-                key={m.code}
-                className="flex cursor-pointer items-center gap-2 text-xs"
-              >
-                <Checkbox disabled={ro} /> {m.code}
-              </label>
-            ))}
-            {MODELS.length === 0 && (
-              <span className="text-xs text-muted-foreground">ไม่มีข้อมูลรุ่นสินค้า</span>
-            )}
-          </div>
-        </div>
+        <ProductModelChecklist
+          form={form}
+          set={set}
+          errors={fe.errors}
+          ro={ro}
+          modelQ={modelQ}
+          setModelQ={setModelQ}
+          allBrands={allBrands}
+          setAllBrands={setAllBrands}
+        />
 
-        <FieldGrid cols={2}>
-          <Field label="ใช้สำหรับ สีสินค้า">
-            <Select defaultValue="" disabled={ro}>
-              <option value="">- - Please Select - -</option>
-              {COLORS.map((c) => (
-                <option key={c.id}>{c.name}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="สถานะ">
-            <div className="flex h-9 items-center gap-4">
-              <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                <Radio
-                  name={`status-${product.sysCode}`}
-                  defaultChecked={product.status === "Active"}
-                  disabled={ro}
-                />{" "}
-                Active
-              </label>
-              <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                <Radio
-                  name={`status-${product.sysCode}`}
-                  defaultChecked={product.status !== "Active"}
-                  disabled={ro}
-                />{" "}
-                Inactive
-              </label>
-            </div>
-          </Field>
-        </FieldGrid>
+        <ProductColorStatus form={form} set={set} ro={ro} sysCode={p.sysCode} />
 
-        <p className="text-2xs text-muted-foreground">
-          วันที่สร้าง: 2026-09-04 14:50 น. · สร้างโดย: Demo888
-        </p>
+        {mode !== 'add' && (
+          <p className="text-2xs text-muted-foreground">
+            วันที่สร้าง: {p.createdDate || '—'} · สร้างโดย: {p.createdBy || '—'}
+          </p>
+        )}
+
+        {mode !== 'add' && <ProductLegacyNotes detail={detail} />}
 
         {/* view-only stock tables */}
-        {mode === "view" && (
-          <div className="space-y-4 border-t border-border pt-4">
-            <div>
-              <p className="mb-2 text-sm font-semibold">สินค้าคงเหลือ (Stock Onhand)</p>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                      <th className="w-10 px-3 py-2 text-center">#</th>
-                      <th className="px-3 py-2 text-left">S/N</th>
-                      <th className="px-3 py-2 text-left">สถานที่จัดเก็บ</th>
-                      <th className="px-3 py-2 text-left">สภาพสินค้า</th>
-                      <th className="px-3 py-2 text-right">รับเข้า</th>
-                      <th className="px-3 py-2 text-right">จ่ายออก</th>
-                      <th className="px-3 py-2 text-right">จอง (ขาย)</th>
-                      <th className="px-3 py-2 text-right">คงเหลือ</th>
-                      <th className="px-3 py-2 text-left">สถานะ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {onhandRows.map((r, i) => (
-                      <tr key={i} className="border-b border-border/70 last:border-0">
-                        <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                        <td className="num px-3 py-2">{r.sn}</td>
-                        <td className="px-3 py-2">{r.loc}</td>
-                        <td className="px-3 py-2">{r.cond}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.income)}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.outcome)}</td>
-                        <td className="num px-3 py-2 text-right">{int(r.reserve)}</td>
-                        <td className="num px-3 py-2 text-right font-semibold">{int(r.avail)}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={r.status === "Active" ? "success" : "neutral"} dot>
-                            {r.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+        {mode === 'view' && <ProductStockTables p={p} stockCard={stockCard} />}
+      </div>
+    </Modal>
+  );
+}
 
-            <div>
-              <p className="mb-2 text-sm font-semibold">ประวัติการรับ-จ่าย (Stock Card)</p>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full min-w-[720px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                      <th className="w-10 px-3 py-2 text-center">#</th>
-                      <th className="px-3 py-2 text-left">Movement No.</th>
-                      <th className="px-3 py-2 text-left">วันที่</th>
-                      <th className="px-3 py-2 text-left">ประเภท</th>
-                      <th className="px-3 py-2 text-right">Before</th>
-                      <th className="px-3 py-2 text-right">รับ (+)</th>
-                      <th className="px-3 py-2 text-right">จ่าย (−)</th>
-                      <th className="px-3 py-2 text-right">After</th>
-                      <th className="px-3 py-2 text-left">Ref No.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockCard.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                          ยังไม่มีประวัติการเคลื่อนไหว
-                        </td>
-                      </tr>
-                    ) : (
-                      stockCard.map((m, i) => (
-                        <tr key={i} className="border-b border-border/70 last:border-0">
-                          <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                          <td className="num px-3 py-2 font-medium">{m.no}</td>
-                          <td className="num px-3 py-2 text-xs">{m.date}</td>
-                          <td className="px-3 py-2">{m.type}</td>
-                          <td className="num px-3 py-2 text-right">{int(m.before)}</td>
-                          <td className="num px-3 py-2 text-right text-success">{int(m.income)}</td>
-                          <td className="num px-3 py-2 text-right text-danger">{int(m.outcome)}</td>
-                          <td className="num px-3 py-2 text-right font-semibold">{int(m.after)}</td>
-                          <td className="num px-3 py-2 text-xs text-muted-foreground">
-                            {m.ref || "—"}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+/** Part Image — the uploaded picture (a placeholder when there is none or it fails to load) + the upload button */
+function PartImage({
+  image,
+  broken,
+  onBroken,
+  alt,
+  ro,
+  code,
+  uploading,
+  onPick,
+}: {
+  image: string;
+  /** this file failed to load once → the placeholder */
+  broken: boolean;
+  onBroken: () => void;
+  alt: string;
+  ro: boolean;
+  /** the part's code — a new part (none yet) is saved before its picture */
+  code: string;
+  uploading: boolean;
+  onPick: (f: File | undefined) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Part Image</p>
+      <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground">
+        {image && !broken ? (
+          <img src={fileUrl(image)} alt={alt} onError={onBroken} className="h-full w-full object-contain" />
+        ) : (
+          <div className="text-center">
+            <ImageIcon className="mx-auto h-8 w-8 opacity-40" />
+            <p className="mt-1 text-2xs">NO IMAGE</p>
           </div>
         )}
       </div>
-    </Modal>
+      {!ro && (
+        <label
+          className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-2 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
+          title={code ? 'อัปโหลดรูป (JPG/PNG/WEBP ≤ 10MB)' : 'บันทึกอะไหล่ก่อน แล้วค่อยอัปโหลดรูป'}
+        >
+          <Upload className="h-3.5 w-3.5" /> {uploading ? 'กำลังอัปโหลด…' : 'เลือกไฟล์'}
+          <input
+            type="file"
+            className="hidden"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={!code || uploading}
+            onChange={(e) => {
+              onPick(e.target.files?.[0]);
+              e.target.value = ''; // the same file can be chosen again
+            }}
+          />
+        </label>
+      )}
+    </div>
   );
 }

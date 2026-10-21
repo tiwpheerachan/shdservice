@@ -1,0 +1,19 @@
+# Generated, vendored or not ours to restyle (same idea as OneLink's).
+.next
+.next-*
+node_modules
+coverage
+playwright-report
+test-results
+drizzle
+package-lock.json
+next-env.d.ts
+tsconfig.tsbuildinfo
+public
+# generated: the API docs build, and the OpenAPI snapshot (written by scripts/test-openapi.mts)
+.apidoc
+tests/fixtures/openapi.snapshot.json
+# Markdown docs keep their author's layout (Thai prose, tables)
+*.md
+# Next.js rewrites it (adds .next-*/types to include) in its own layout on every build
+tsconfig.json

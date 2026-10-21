@@ -1,0 +1,154 @@
+import type { Page } from '@playwright/test';
+import { CLOSER_EMAIL } from './support/env';
+import { newJob, newPart, newPartLine, one, rows, userId } from './support/db';
+import { call, expect, signIn, test } from './support/fixtures';
+
+/**
+ * ปิดงาน-ส่งคืนสินค้า (/jobs/close) by a cashier whose role has Job Closing but not Job Money After Close:
+ * the payment of a repaired job, the close itself (status, closed date, job_log) and the return note's
+ * amounts; refused while a part requested from stock is not issued; a closed job's money stays as recorded.
+ */
+const CLOSE_STATUS = 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ'; // job_status 24, group Finished
+const RETURN_TYPE = 'ลูกค้ามารับเอง';
+const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
+async function openClose(page: Page, no: string) {
+  await signIn(page, CLOSER_EMAIL);
+  await page.goto(`/jobs/close?job=${no}`);
+  await expect(page.getByRole('heading', { name: 'ปิดงาน - ส่งคืนสินค้า' })).toBeVisible();
+  await expect(page.getByLabel('หมายเลขงาน', { exact: true })).toHaveText(no);
+}
+
+/** the job's close / money columns as stored */
+const closeState = (no: string) =>
+  one(
+    `SELECT j.job_status_id AS status, s.job_status_group AS grp, j.job_payment_type AS pay_type,
+            j.job_payment_amount::float AS paid, j.job_closed_by AS closed_by,
+            to_char(j.job_closed_date, 'YYYY-MM-DD') AS closed_day, coalesce(j.return_customer_type, '') AS return_type,
+            j.job_total_cost::float AS total
+       FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id WHERE j.job_no = $1`,
+    [no],
+  );
+const logsOf = (no: string) =>
+  rows('SELECT job_status_id AS status, job_action_by AS by FROM job_log WHERE job_no = $1 ORDER BY job_log_id', [no]);
+
+test('closing a repaired job: the amount due is prefilled, the payment and the close are stored and logged', async ({
+  page,
+}) => {
+  // parts 300 (issued) + service 500 = 800, deposit 200 → 600 due
+  const part = await newPart({ remain: 3, price: 300 });
+  const no = await newJob({ status: 5, service: 500, parts: 300, deposit: 200 });
+  await newPartLine({ jobNo: no, code: part.code, price: 300, qty: 1, granted: 1 });
+  const closer = await userId(CLOSER_EMAIL);
+
+  await openClose(page, no);
+  await page.getByRole('tab', { name: 'รายละเอียดการรับชำระเงิน' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'ยอดที่ต้องชำระ' })).toContainText('600.00');
+  const amount = page.getByLabel('จำนวนเงินที่ชำระ (บาท)');
+  await expect(amount).toHaveValue(''); // nothing paid yet: an untouched box is no payment
+  await page.getByLabel('วิธีการชำระเงิน').selectOption('เงินโอน');
+  await expect(amount).toHaveValue('600'); // choosing the method fills in total − deposit
+
+  await page.getByLabel('วิธีการส่งคืนสินค้า').selectOption(RETURN_TYPE);
+  await page.getByLabel('โปรดระบุ สถานะงาน').selectOption(CLOSE_STATUS);
+  await page.getByRole('button', { name: 'ยืนยันปิดงาน' }).click();
+  await expect(page.getByText('ปิดงานและบันทึกการส่งคืนเรียบร้อย')).toBeVisible();
+
+  expect(await closeState(no)).toEqual({
+    status: 24,
+    grp: 'Finished',
+    pay_type: 'เงินโอน',
+    paid: 600,
+    closed_by: closer,
+    closed_day: today(),
+    return_type: RETURN_TYPE,
+    total: 800,
+  });
+  expect(await logsOf(no)).toEqual([{ status: 24, by: closer }]);
+
+  // the return note (พิมพ์ใบส่งคืน opens this page; auto=0: no print dialog)
+  await page.goto(`/print/job/${no}/return?auto=0`);
+  await expect(page.getByRole('heading', { name: 'ใบส่งคืนสินค้า / RETURN & REPAIR NOTE' })).toBeVisible();
+  for (const line of [
+    new RegExp(`^1 ${part.code} ${part.name} 1 300\\.00 300\\.00$`),
+    /ค่าอะไหล่ \/ Parts : 300\.00$/,
+    /^ค่าบริการ \/ Service : 500\.00$/,
+    /^รวมทั้งสิ้น \/ Grand Total : 800\.00$/,
+    /^หักมัดจำ \/ Deposit : -200\.00$/,
+    /^ยอดที่ต้องชำระ \(หักมัดจำแล้ว\) : 600\.00$/,
+    /ชำระเงิน : เงินโอน 600\.00 บาท/,
+  ])
+    await expect(page.getByRole('row', { name: line }).first()).toBeVisible();
+});
+
+test('a job whose requested part is not issued yet is not closed: field error, nothing stored', async ({ page }) => {
+  const part = await newPart({ remain: 0, price: 120 });
+  // repaired (closable — anything else is refused before the parts are even looked at), one part still owed
+  const no = await newJob({ status: 5, service: 200, parts: 120 });
+  await newPartLine({ jobNo: no, code: part.code, price: 120, qty: 1, granted: 0 }); // เบิก, not issued
+  const before = await closeState(no);
+  const closes: string[] = [];
+  page.on('request', (r) => r.method() === 'POST' && r.url().endsWith('/close') && closes.push(r.url()));
+
+  await openClose(page, no);
+  await page.getByLabel('วิธีการส่งคืนสินค้า').selectOption(RETURN_TYPE);
+  const status = page.getByLabel('โปรดระบุ สถานะงาน');
+  await status.selectOption(CLOSE_STATUS);
+  const why = `ยังเปลี่ยนเป็น "${CLOSE_STATUS}" ไม่ได้ — อะไหล่ที่ติ๊ก "เบิก" ยังไม่ได้จ่ายจากสต๊อก`;
+  await expect(status).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText(why)).toBeVisible();
+  await page.getByRole('button', { name: 'ยืนยันปิดงาน' }).click();
+  await expect(page.getByText('บันทึกไม่สำเร็จ')).toBeVisible();
+  expect(closes, 'the page sends nothing').toEqual([]);
+
+  // the server refuses the same close on its own (a stale page, another client)
+  const r = await call(page, 'POST', `/api/jobs/${no}/close`, {
+    status: CLOSE_STATUS,
+    return: { type: RETURN_TYPE, date: today() },
+  });
+  expect(r.status).toBe(400);
+  expect(r.body.details?.fields?.status).toContain(why);
+
+  expect(await closeState(no)).toEqual(before); // the return fields written before the refusal rolled back too
+  expect(await logsOf(no)).toEqual([]);
+});
+
+test('a job not in a closable status is said so as soon as it is loaded; no save button', async ({ page }) => {
+  const no = await newJob({ status: 2 }); // กำลังดำเนินการ — not repaired yet
+  await openClose(page, no);
+  const why = 'งานนี้อยู่ในสถานะ "กำลังดำเนินการ" — ปิดงานได้เมื่อซ่อมเสร็จ (หรือรับคืนจาก Out-Source) แล้ว';
+  await expect(page.getByRole('alert').filter({ hasText: why })).toBeVisible();
+  await expect(page.getByRole('note').filter({ hasText: why })).toBeVisible(); // in the save bar, instead of the button
+  await expect(page.getByRole('button', { name: 'ยืนยันปิดงาน' })).toHaveCount(0);
+});
+
+test('a closed job keeps its money for a role without Job Money After Close: inputs locked, the API says 409', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 24, service: 500, paid: 500, payType: 'เงินสด', closed: true });
+  const before = await closeState(no);
+
+  await openClose(page, no);
+  await page.getByRole('tab', { name: 'รายละเอียดการรับชำระเงิน' }).click();
+  const method = page.getByLabel('วิธีการชำระเงิน');
+  await expect(method).toHaveValue('เงินสด');
+  await expect(method).toBeDisabled();
+  await expect(page.getByLabel('จำนวนเงินที่ชำระ (บาท)')).toHaveValue('500');
+  await expect(page.getByLabel('จำนวนเงินที่ชำระ (บาท)')).toBeDisabled();
+  await expect(
+    page.getByText('งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะผู้มีสิทธิ์พิเศษ "แก้ช่องเงินหลังปิดงาน"'),
+  ).toBeVisible();
+
+  // a client that sends a new amount anyway
+  const r = await call(page, 'POST', `/api/jobs/${no}/close`, {
+    status: CLOSE_STATUS,
+    payment: { type: 'เงินสด', amount: 300, date: today() },
+    return: { type: RETURN_TYPE, date: today() },
+  });
+  expect(r.status).toBe(409);
+  expect(r.body.error).toBe(
+    'งานปิดแล้ว — แก้จำนวนเงินที่ชำระ / เงินคืนได้เฉพาะผู้มีสิทธิ์พิเศษ "แก้ช่องเงินหลังปิดงาน" (Job Money After Close)',
+  );
+  expect(await closeState(no)).toEqual(before); // nothing of the save stuck — not even the return type
+  expect(await logsOf(no)).toEqual([]);
+});

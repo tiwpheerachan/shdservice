@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { Monitor, Moon, Sun } from "lucide-react";
-import { useTheme, type ThemeMode } from "@/lib/use-theme";
-import { cn } from "@/lib/utils";
+import { Monitor, Moon, Sun } from 'lucide-react';
+import { useTheme, type ThemeMode } from '@/lib/use-theme';
+import { cn } from '@/lib/utils';
 
 const OPTIONS: { key: ThemeMode; icon: typeof Sun; label: string }[] = [
-  { key: "light", icon: Sun, label: "สว่าง" },
-  { key: "dark", icon: Moon, label: "มืด" },
-  { key: "system", icon: Monitor, label: "ตามระบบ" },
+  { key: 'light', icon: Sun, label: 'สว่าง' },
+  { key: 'dark', icon: Moon, label: 'มืด' },
+  { key: 'system', icon: Monitor, label: 'ตามระบบ' },
 ];
 
 export function ThemeToggle() {
@@ -29,10 +29,8 @@ export function ThemeToggle() {
             aria-label={o.label}
             aria-pressed={active}
             className={cn(
-              "rounded-md p-1.5 transition-colors",
-              active
-                ? "bg-card text-primary shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+              'rounded-md p-1.5 transition-colors',
+              active ? 'bg-card text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground',
             )}
           >
             <o.icon className="h-3.5 w-3.5" />
