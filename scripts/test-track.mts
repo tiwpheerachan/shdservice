@@ -232,8 +232,8 @@ const pick = await db.execute<{ job_no: string }>(sql`
    WHERE j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
    ORDER BY j.job_create_date DESC LIMIT 2`);
 assert.ok(pick.rows.length === 2, 'need two open jobs in the DB (tests/seed.mts)');
-const JOB_A = { job_no: pick.rows[0].job_no, track_token: await rotateToken(pick.rows[0].job_no) };
-const JOB_B = { job_no: pick.rows[1].job_no, track_token: await rotateToken(pick.rows[1].job_no) };
+const JOB_A = { job_no: pick.rows[0].job_no, track_token: (await rotateToken(pick.rows[0].job_no)).token };
+const JOB_B = { job_no: pick.rows[1].job_no, track_token: (await rotateToken(pick.rows[1].job_no)).token };
 const tempEmail = `track-test-${Date.now()}@example.invalid`;
 /** HMACs of the two test phone numbers (their rate counters are cleared between tests) */
 let phoneHashes: string[] = [];
@@ -451,7 +451,7 @@ try {
   await test('issuing a new link resets the window and kills the old one', async () => {
     await setLink('1 minute', '5 minutes');
     const old = JOB_B.track_token;
-    JOB_B.track_token = await rotateToken(JOB_B.job_no);
+    JOB_B.track_token = (await rotateToken(JOB_B.job_no)).token;
     assert.equal((await linkStatus(JOB_B.job_no)).state, 'unopened');
     assert.equal(await jobNoForLink(old), null);
     assert.equal(await jobNoForLink(JOB_B.track_token), JOB_B.job_no);
@@ -487,7 +487,7 @@ try {
     track_opened_at = NULL, track_link_expires_at = NULL WHERE job_no = 'TJ00003'`);
     assert.equal((await linkRow('TJ00003')).hash, sha256hex(old));
     assert.equal(await jobNoForLink(old), 'TJ00003');
-    const fresh = await rotateToken('TJ00003'); // new code: raw column emptied, old link dead
+    const fresh = (await rotateToken('TJ00003')).token; // new code: raw column emptied, old link dead
     assert.equal((await linkRow('TJ00003')).raw, null);
     assert.equal(await jobNoForLink(old), null);
     assert.equal(await jobNoForLink(fresh), 'TJ00003');

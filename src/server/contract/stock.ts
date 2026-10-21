@@ -1,17 +1,7 @@
 import { z } from 'zod';
 import { productSchema } from '@/lib/validation/admin';
 import { issueSchema, receiveSchema } from '@/lib/validation/stock';
-import {
-  CONFLICT,
-  IDEMPOTENCY,
-  JSON_BODY,
-  SIGNED_IN,
-  byNo,
-  errorResponse,
-  jsonResponse,
-  notFound,
-  version,
-} from './common';
+import { IDEMPOTENCY, JSON_BODY, SIGNED_IN, byNo, errorResponse, jsonResponse, notFound, version } from './common';
 import { defineOperation } from './registry';
 import { PartRequestLine, Product } from './shapes';
 
@@ -60,7 +50,9 @@ export const productSave = defineOperation({
   tags: ['Products'],
   summary: 'Create (no `sysCode`) or update (with `sysCode`) a spare part',
   description:
-    'Product add / edit. Rules: `productSchema(prev)` in src/lib/validation/admin.ts, run by the service against the stored part. `capitalPrice` is ignored for a role without Product Cost (a new part then starts at 0). `sameMfgCode` lists other parts with the same vendor code — saved anyway, the form warns.',
+    'Product add / edit. Rules: `productSchema(prev)` in src/lib/validation/admin.ts, run by the service against the stored part. `capitalPrice` is ignored for a role without Product Cost (a new part then starts at 0). `sameMfgCode` lists other parts with the same vendor code — saved anyway, the form warns. Takes an Idempotency-Key.',
+  headers: IDEMPOTENCY.headers,
+  invalid: IDEMPOTENCY.invalid,
   body: z
     .looseObject({
       // productSchema(prev)'s fields; the vendor code is checked against the stored one ("never worse") by the service
@@ -84,7 +76,7 @@ export const productSave = defineOperation({
     ...SIGNED_IN,
     ...JSON_BODY,
     ...notFound('No such part, category, brand or model.'),
-    ...CONFLICT,
+    ...IDEMPOTENCY.responses,
   },
 });
 

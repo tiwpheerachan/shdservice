@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseParams, requireCan } from '@/server/auth';
 import { trackLinkGet, trackLinkNew } from '@/server/contract/jobs';
-import { db } from '@/db/client';
 import { audit } from '@/server/audit';
 import { appBaseUrl } from '@/lib/sso';
 import { rotateToken, trackLinkFor, linkStatus } from '@/server/services/tracking';
@@ -31,18 +30,19 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, trackLinkNew);
   const jobNo = no.toUpperCase();
-  const first = !(await linkStatus(jobNo)).issuedAt; // the job's first link replaces none
-  const token = await rotateToken(jobNo);
-  await audit(db, me.userId, {
-    action: 'UPDATE',
-    module: 'Job Management',
-    entity: 'job',
-    key: jobNo,
-    summary: first
-      ? `ออกลิงก์ติดตามให้ลูกค้า — ${jobNo}`
-      : `ออกลิงก์ติดตามใหม่ให้ลูกค้า (ลิงก์เดิมใช้ไม่ได้แล้ว) — ${jobNo}`,
-  });
+  // the job's first link replaces none — decided under the job row's lock, with the audit line in the same tx
+  const { token, status } = await rotateToken(jobNo, (tx, first) =>
+    audit(tx, me.userId, {
+      action: 'UPDATE',
+      module: 'Job Management',
+      entity: 'job',
+      key: jobNo,
+      summary: first
+        ? `ออกลิงก์ติดตามให้ลูกค้า — ${jobNo}`
+        : `ออกลิงก์ติดตามใหม่ให้ลูกค้า (ลิงก์เดิมใช้ไม่ได้แล้ว) — ${jobNo}`,
+    }),
+  );
   // returned once, to the staff member who generated it — only its hash is stored
   const url = trackLinkFor(token, appBaseUrl(req.headers.get('host')));
-  return NextResponse.json({ url, status: await linkStatus(jobNo) }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ url, status }, { headers: { 'Cache-Control': 'no-store' } });
 });

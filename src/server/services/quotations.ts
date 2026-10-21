@@ -8,17 +8,7 @@ import { QUOTE_VALID_DAYS } from '@/lib/company';
 import { addDays, today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
-import {
-  appUser,
-  customer,
-  job,
-  jobStatus,
-  manufacturer,
-  product,
-  quotationDt,
-  quotationHd,
-  quotationStatus,
-} from '@/db/schema';
+import { appUser, customer, job, manufacturer, product, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
 import type { Quotation } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
@@ -28,7 +18,7 @@ import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } 
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { customerForDocument, getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
-import { followQuotation, getJob } from './jobs';
+import { followQuotation, getJob, jobStatuses } from './jobs';
 import { JOB_CLOSED_STATUSES } from './stock';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
 import { computeTotals, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
@@ -337,39 +327,13 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
   const [before] = i.no
     ? await db
-        .select({ jobNo: quotationHd.referenceJobNo, customerCode: quotationHd.customerCode })
+        .select({ jobNo: quotationHd.referenceJobNo })
         .from(quotationHd)
         .where(eq(quotationHd.quotationNo, i.no))
         .limit(1)
     : [];
   assertValid(quotationSchema(i.no ? (before?.jobNo ?? '') : undefined), i);
   const jobNo = cleanCode(i.jobNo); // stored upper-case
-  const [found] = jobNo
-    ? await db
-        .select({
-          profileId: job.documentProfileId,
-          statusId: job.jobStatusId,
-          status: jobStatus.jobStatusName,
-          recordStatus: job.recordStatus,
-        })
-        .from(job)
-        .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-        .where(eq(job.jobNo, jobNo))
-        .limit(1)
-    : [];
-  if (jobNo && !found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
-  // a quotation is raised for (or moved to) an open job only — not one closed, cancelled or the customer declined
-  if (
-    found &&
-    jobNo !== cleanCode(before?.jobNo) &&
-    (found.recordStatus === RS.DELETED || JOB_CLOSED_STATUSES.includes(found.statusId ?? -1))
-  )
-    throw new HttpError(
-      409,
-      `งาน ${jobNo} อยู่ในสถานะ "${clean(found.status) || found.statusId}" (ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อม) — ออกใบเสนอราคาให้งานนี้ไม่ได้`,
-    );
-  const cust = await customerForDocument(str(i.customerCode), before?.customerCode);
-  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   const lines = (i.lines ?? [])
     .filter((l) => str(l.code) || str(l.detail))
     .map((l, idx) => {
@@ -385,25 +349,6 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         total: Math.round((qty * price - disc) * 100) / 100,
       };
     });
-  // a deleted / Inactive product goes on no new line (owner 2026-10-21) — a code the quotation already had keeps it
-  const had = i.no
-    ? (await db.select({ c: quotationDt.itemCode }).from(quotationDt).where(eq(quotationDt.quotationNo, i.no))).map(
-        (r) => str(r.c),
-      )
-    : [];
-  const added = lines.map((l) => str(l.code).slice(0, 50)).filter((c) => c && !had.includes(c));
-  const [off] = added.length
-    ? await db
-        .select({ code: product.productCode, rs: product.recordStatus })
-        .from(product)
-        .where(and(inArray(product.productCode, added), ne(product.recordStatus, RS.ACTIVE)))
-        .limit(1)
-    : [];
-  if (off)
-    throw new HttpError(
-      409,
-      `รหัสสินค้า ${off.code} ${off.rs === RS.DELETED ? 'ถูกลบแล้ว' : 'ปิดใช้งาน (Inactive)'} — เลือกสินค้าอื่น`,
-    );
   const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
   const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
   const service = num(i.serviceAmount);
@@ -414,15 +359,6 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
-  // the new-quotation form copied the job's quoted parts when it opened — they changed since → its copy is stale
-  if (!i.no && jobNo && i.jobParts != null) {
-    const j = await getJob(jobNo);
-    if (j && quotedPartsKey(j.parts, type === 'VIP' ? 'B' : 'A') !== i.jobParts)
-      throw new HttpError(409, `รายการอะไหล่ของงานเปลี่ยนแล้ว (${jobNo}) — โหลดใหม่ก่อนบันทึก`);
-  }
-  // a quotation raised from a job is issued under the job's profile unless the user picked another
-  const jobProfileId = !i.no ? (found?.profileId ?? undefined) : undefined;
-
   const dtRows = lines.map((l) => ({
     lineNumber: l.lineNumber,
     itemType: l.itemType ?? 'SparePart',
@@ -438,6 +374,68 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
 
   const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
   const no = await db.transaction(async (tx) => {
+    // checked under the locks, in the order quotation → job → customer → product (the running number is last):
+    // a delete running now finishes first, or waits for this save
+    const [prev] = i.no
+      ? await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, i.no)).for('update')
+      : [];
+    if (i.no && !prev) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + i.no);
+    const [found] = jobNo
+      ? await tx
+          .select({
+            profileId: job.documentProfileId,
+            statusId: job.jobStatusId,
+            recordStatus: job.recordStatus,
+          })
+          .from(job)
+          .where(eq(job.jobNo, jobNo))
+          .for('update', { of: job })
+      : [];
+    if (jobNo && !found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
+    // a quotation is raised for (or moved to) an open job only — not one closed, cancelled or the customer declined
+    if (
+      found &&
+      jobNo !== cleanCode(prev?.referenceJobNo) &&
+      (found.recordStatus === RS.DELETED || JOB_CLOSED_STATUSES.includes(found.statusId ?? -1))
+    )
+      throw new HttpError(
+        409,
+        // the name looked up after the lock: a row joined in the locking read is the one from before a wait
+        `งาน ${jobNo} อยู่ในสถานะ "${(await jobStatuses()).find((s) => s.id === found.statusId)?.name || found.statusId}" (ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อม) — ออกใบเสนอราคาให้งานนี้ไม่ได้`,
+      );
+    const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerCode);
+    if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
+    // a deleted / Inactive product goes on no new line (owner 2026-10-21) — a code the quotation already had keeps it
+    const had = prev
+      ? (await tx.select({ c: quotationDt.itemCode }).from(quotationDt).where(eq(quotationDt.quotationNo, i.no!))).map(
+          (r) => str(r.c),
+        )
+      : [];
+    const added = lines.map((l) => str(l.code).slice(0, 50)).filter((c) => c && !had.includes(c));
+    // every added code locked (not only the off ones: a row being deleted now still reads ACTIVE until it commits)
+    const off = (
+      added.length
+        ? await tx
+            .select({ code: product.productCode, rs: product.recordStatus })
+            .from(product)
+            .where(inArray(product.productCode, added))
+            .for('share')
+        : []
+    ).find((p) => p.rs !== RS.ACTIVE);
+    if (off)
+      throw new HttpError(
+        409,
+        `รหัสสินค้า ${off.code} ${off.rs === RS.DELETED ? 'ถูกลบแล้ว' : 'ปิดใช้งาน (Inactive)'} — เลือกสินค้าอื่น`,
+      );
+    // the new-quotation form copied the job's quoted parts when it opened — they changed since → its copy is stale
+    // (read under the job lock: part lines change under it)
+    if (!i.no && jobNo && i.jobParts != null) {
+      const j = await getJob(jobNo);
+      if (j && quotedPartsKey(j.parts, type === 'VIP' ? 'B' : 'A') !== i.jobParts)
+        throw new HttpError(409, `รายการอะไหล่ของงานเปลี่ยนแล้ว (${jobNo}) — โหลดใหม่ก่อนบันทึก`);
+    }
+    // a quotation raised from a job is issued under the job's profile unless the user picked another
+    const jobProfileId = !i.no ? (found?.profileId ?? undefined) : undefined;
     let linesChanged = true;
     let statusChanged = true; // a new quotation, or another status than the stored one
     let wasAgreed = false;
@@ -464,9 +462,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       quotationType: type,
     };
     let no = i.no;
-    if (no) {
-      const [prev] = await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, no)).for('update');
-      if (!prev) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + no);
+    if (no && prev) {
       const old = await tx
         .select()
         .from(quotationDt)

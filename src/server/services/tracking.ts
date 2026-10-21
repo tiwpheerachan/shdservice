@@ -1,6 +1,6 @@
 import 'server-only';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm';
-import { db } from '@/db/client';
+import { db, type Tx } from '@/db/client';
 import { customer, job, jobLog, jobStatus, manufacturer, quotationHd, trackDocTicket, trackSession } from '@/db/schema';
 import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
@@ -603,15 +603,18 @@ export async function extendLink(token: string): Promise<string | null> {
 
 export type LinkStatus = {
   state: 'unopened' | 'opened' | 'expired';
+  /** which issue this is (the start of its hash): two links issued in the same second have equal `issuedAt` */
+  id: string | null;
   issuedAt: string | null; // ISO
   openedAt: string | null; // ISO
   expiresAt: string | null; // ISO
 };
 
 /** back-office view of the current link (the hint next to it) */
-export async function linkStatus(jobNo: string): Promise<LinkStatus> {
-  const [r] = await db
+export async function linkStatus(jobNo: string, ex: Tx | typeof db = db): Promise<LinkStatus> {
+  const [r] = await ex
     .select({
+      id: sql<string | null>`left(${job.trackTokenHash}, 12)`,
       issuedAt: isoUtc(linkIssuedAt),
       openedAt: isoUtc(sql`${job.trackOpenedAt}`),
       expiresAt: isoUtc(linkExpiresAt),
@@ -620,9 +623,10 @@ export async function linkStatus(jobNo: string): Promise<LinkStatus> {
     .from(job)
     .where(eq(job.jobNo, jobNo))
     .limit(1);
-  if (!r) return { state: 'expired', issuedAt: null, openedAt: null, expiresAt: null };
+  if (!r) return { state: 'expired', id: null, issuedAt: null, openedAt: null, expiresAt: null };
   return {
     state: !r.live ? 'expired' : r.openedAt ? 'opened' : 'unopened',
+    id: r.id,
     issuedAt: r.issuedAt,
     openedAt: r.openedAt,
     expiresAt: r.expiresAt,
@@ -772,9 +776,21 @@ export async function ensureToken(jobNo: string): Promise<string> {
   return r.length ? token : '';
 }
 
-/** staff action: old link stops working immediately; the new one gets a fresh 1-day window */
-export async function rotateToken(jobNo: string): Promise<string> {
+/**
+ * staff action: old link stops working immediately; the new one gets a fresh 1-day window.
+ * `onIssued(tx, first)` runs in the same transaction, under the job row's lock — `first` = the job had no link
+ * before (of two issued at once, exactly one is the first). `status` is this link's, read in that transaction:
+ * read after it, it may already be the next one's.
+ */
+export async function rotateToken(
+  jobNo: string,
+  onIssued?: (tx: Tx, first: boolean) => Promise<unknown>,
+): Promise<{ token: string; status: LinkStatus }> {
   const token = newToken();
-  await db.update(job).set(issue(token)).where(eq(job.jobNo, jobNo));
-  return token;
+  return db.transaction(async (tx) => {
+    const [row] = await tx.select({ at: job.trackTokenAt }).from(job).where(eq(job.jobNo, jobNo)).for('update');
+    await tx.update(job).set(issue(token)).where(eq(job.jobNo, jobNo));
+    await onIssued?.(tx, !row?.at);
+    return { token, status: await linkStatus(jobNo, tx) };
+  });
 }

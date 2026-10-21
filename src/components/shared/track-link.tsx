@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
  */
 type LinkStatus = {
   state: 'unopened' | 'opened' | 'expired';
+  id: string | null; // which issue — two issued in the same second share `issuedAt`
   issuedAt: string | null;
   openedAt: string | null;
   expiresAt: string | null;
@@ -58,7 +59,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
   const [copied, setCopied] = React.useState(false);
   const [now, setNow] = React.useState(() => Date.now());
   // the link the server just returned (it is never sent again), and which issue it belongs to
-  const [fresh, setFresh] = React.useState<{ url: string; issuedAt: string | null } | null>(null);
+  const [fresh, setFresh] = React.useState<{ url: string; id: string | null } | null>(null);
 
   // the link + its state through swr; re-read every minute (the customer may open it meanwhile)
   const link = useApi<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, {
@@ -68,10 +69,10 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
   const ready = link.data?.ready ?? true;
   const status = link.data?.status ?? null;
   // keep it past the next refresh (which no longer carries it) — adjusting state while rendering
-  if (link.data?.url && link.data.url !== fresh?.url)
-    setFresh({ url: link.data.url, issuedAt: link.data.status.issuedAt });
-  // someone issued another link since → this one is dead, don't offer it
-  const url = !link.error && fresh && fresh.issuedAt === status?.issuedAt ? fresh.url : '';
+  if (link.data?.url && link.data.url !== fresh?.url) setFresh({ url: link.data.url, id: link.data.status.id });
+  const url = !link.error && fresh ? fresh.url : '';
+  // someone issued another link since → this one is dead: shown struck through, not offered
+  const replaced = !!url && fresh?.id !== status?.id;
 
   // keep the countdown honest between reads
   React.useEffect(() => {
@@ -81,15 +82,30 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
 
   const expiresMs = status?.expiresAt ? Date.parse(status.expiresAt) - now : 0;
   const state: LinkStatus['state'] = !status || status.state === 'expired' || expiresMs <= 0 ? 'expired' : status.state;
-  const usable = ready && state !== 'expired' && !!url;
+  const usable = ready && state !== 'expired' && !!url && !replaced;
 
   const copy = async () => {
+    // re-read first: someone may have issued a link after this page's last read — the 60 s poll alone
+    // would let this dead one be copied meanwhile
+    let dead = false;
+    const checked = link.mutate().then((d) => {
+      if (d?.status.id === fresh?.id) return url;
+      dead = true;
+      throw new Error('replaced');
+    });
     try {
-      await navigator.clipboard.writeText(url);
+      // the clipboard is written with the check still pending (Safari drops the click's permission after an await)
+      if (typeof ClipboardItem !== 'undefined')
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'text/plain': checked.then((u) => new Blob([u], { type: 'text/plain' })) }),
+        ]);
+      else await navigator.clipboard.writeText(await checked);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      push({ kind: 'error', title: 'คัดลอกไม่สำเร็จ', desc: 'กรุณาคัดลอกลิงก์ด้วยตัวเอง' });
+      if (dead)
+        push({ kind: 'error', title: 'ไม่ได้คัดลอก — ลิงก์นี้ถูกแทนที่แล้ว', desc: 'มีผู้สร้างลิงก์ใหม่ให้งานนี้' });
+      else push({ kind: 'error', title: 'คัดลอกไม่สำเร็จ', desc: 'กรุณาคัดลอกลิงก์ด้วยตัวเอง' });
     }
   };
 
@@ -107,7 +123,8 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     setBusy(true);
     try {
       const d = await postJson<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, {});
-      void link.mutate({ ...d, ready: d.ready ?? ready }, { revalidate: false }); // show the new link at once
+      // show the new link at once, then re-read: one issued at the same moment by someone else replaces it
+      void link.mutate({ ...d, ready: d.ready ?? ready });
       setNow(Date.now());
       push({
         kind: 'success',
@@ -128,6 +145,12 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     <span>ยังใช้ไม่ได้สำหรับงานนี้</span>
   ) : never ? (
     <span>ยังไม่ได้ออกลิงก์ให้งานนี้</span>
+  ) : replaced ? (
+    <span className="inline-flex flex-wrap items-center gap-1.5 font-medium text-danger">
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+      ลิงก์นี้ถูกแทนที่แล้ว — มีผู้สร้างลิงก์ใหม่ให้งานนี้ (ลิงก์นี้ใช้ไม่ได้){' '}
+      {canEdit ? '· กด “สร้างลิงก์ใหม่” เพื่อรับลิงก์ที่ใช้ได้' : '· แจ้งผู้มีสิทธิ์แก้ไขงานเพื่อสร้างลิงก์ใหม่'}
+    </span>
   ) : state === 'expired' ? (
     <span className="inline-flex flex-wrap items-center gap-1.5 font-medium text-danger">
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -197,13 +220,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
           </p>
         )}
         {canEdit && (
-          <Button
-            variant={state === 'expired' || !url ? 'primary' : 'ghost'}
-            size="sm"
-            type="button"
-            onClick={rotate}
-            disabled={busy}
-          >
+          <Button variant={!usable ? 'primary' : 'ghost'} size="sm" type="button" onClick={rotate} disabled={busy}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             สร้างลิงก์ใหม่
           </Button>

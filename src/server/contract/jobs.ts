@@ -170,15 +170,17 @@ export const jobCallAdd = defineOperation({
   path: '/jobs/{no}/calls',
   tags,
   summary: 'Add a call log line',
-  description: 'Job Management edit. Rules: `callLogSchema` (src/lib/validation/stock.ts).',
+  description: 'Job Management edit. Rules: `callLogSchema` (src/lib/validation/stock.ts). Takes an Idempotency-Key.',
   params: jobNo,
+  headers: IDEMPOTENCY.headers,
+  invalid: IDEMPOTENCY.invalid,
   body: callLogSchema,
   responses: {
     200: jsonResponse('The call log after the add.', z.object({ ok: z.literal(true), rows: z.array(CallLog) })),
     ...SIGNED_IN,
     ...JSON_BODY,
     ...notFound('No such job.'),
-    ...CONFLICT,
+    ...IDEMPOTENCY.responses,
   },
 });
 

@@ -11,6 +11,7 @@ import { RS } from '@/server/record-status';
 import {
   systemFileName,
   uploadFile,
+  removeFile,
   filePath,
   fileProblem,
   optimizeImage,
@@ -53,8 +54,13 @@ export const POST = handle(async (req: NextRequest) => {
       throw e;
     }
     const sys = systemFileName(file.type); // after optimizeImage: a photo-PNG may now be a JPEG
-    await uploadFile(filePath.attachment(row.no, sys), file);
-    const id = await addAttachment(row.no, file.name.slice(0, 200), sys, remark, user.userId);
+    const path = filePath.attachment(row.no, sys);
+    await uploadFile(path, file);
+    // the job is checked again under its lock when the row goes in (deleted during the upload → 409): no orphan file
+    const id = await addAttachment(row.no, file.name.slice(0, 200), sys, remark, user.userId).catch(async (e) => {
+      await removeFile(path);
+      throw e;
+    });
     return NextResponse.json({ ok: true, row: { id, name: file.name, file: sys, remark } });
   });
 });

@@ -390,49 +390,7 @@ export async function saveSaleOrder(
     : [];
   // same rules as the form (lib/validation/sale-order); an edit keeps a legacy payment type / tracking no
   assertValid(saleOrderSchema(cur && { ...cur, fee: num(cur.fee) }), i);
-  const cust = await customerForDocument(str(i.customerCode), cur?.customerCode);
-  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
-  // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
-  const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
-  // … whose role sells (Sale Order add) or System Admin — the form lists the same (listStaff `sells`)
-  if (salesId !== cur?.salesId && !(await sells(salesId)))
-    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
-      fields: { salesId: 'พนักงานคนนี้ไม่มีสิทธิ์เพิ่มใบสั่งขาย' },
-    });
   const lines = i.lines ?? []; // never empty here: saleOrderSchema asks for a line
-  const codes = lines.map((l) => str(l.code)).filter(Boolean);
-  const prods = await db
-    .select({
-      id: product.productId,
-      code: product.productCode,
-      name: product.productName,
-      retail: productNoneSerial.retailPrice,
-      capital: productNoneSerial.capitalPrice,
-      wholesale: productNoneSerial.wholesalePrice,
-      itemId: productNoneSerial.itemId,
-      status: product.recordStatus,
-    })
-    .from(product)
-    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
-    .where(inArray(product.productCode, codes));
-  const byCode = new Map(prods.map((p) => [p.code ?? '', p]));
-
-  const input = lines
-    .filter((l) => str(l.code))
-    .map((l) => {
-      const p = byCode.get(str(l.code));
-      // a service only when no product has the code: a real part sent as 'Service' would skip the approval's stock issue
-      const isService = !p && (l.type === 'Service' || !!str(l.name));
-      if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
-      return {
-        p,
-        isService,
-        code: str(l.code),
-        name: str(l.name) || p?.name || '',
-        qty: Math.max(1, Math.trunc(num(l.qty) || 1)),
-        price: l.price !== undefined && l.price !== '' ? num(l.price) : undefined,
-      };
-    });
   const approveId = i.submit === false ? AS.DRAFT : AS.WAIT;
 
   const no = await db.transaction(async (tx) => {
@@ -441,6 +399,50 @@ export async function saveSaleOrder(
     // edit — lock: an approval running now must finish first, so the APPROVED check below sees it
     const [prev] = no ? await tx.select().from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update') : [];
     if (no && !prev) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    // order → customer → product, under their locks: a delete running now finishes first, or waits for this save
+    const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerCode);
+    if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
+    // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
+    const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
+    // … whose role sells (Sale Order add) or System Admin — the form lists the same (listStaff `sells`)
+    if (salesId !== cur?.salesId && !(await sells(salesId)))
+      throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
+        fields: { salesId: 'พนักงานคนนี้ไม่มีสิทธิ์เพิ่มใบสั่งขาย' },
+      });
+    const codes = lines.map((l) => str(l.code)).filter(Boolean);
+    const prods = await tx
+      .select({
+        id: product.productId,
+        code: product.productCode,
+        name: product.productName,
+        retail: productNoneSerial.retailPrice,
+        capital: productNoneSerial.capitalPrice,
+        wholesale: productNoneSerial.wholesalePrice,
+        itemId: productNoneSerial.itemId,
+        status: product.recordStatus,
+      })
+      .from(product)
+      .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+      .where(inArray(product.productCode, codes))
+      .for('share', { of: product });
+    const byCode = new Map(prods.map((p) => [p.code ?? '', p]));
+
+    const input = lines
+      .filter((l) => str(l.code))
+      .map((l) => {
+        const p = byCode.get(str(l.code));
+        // a service only when no product has the code: a real part sent as 'Service' would skip the approval's stock issue
+        const isService = !p && (l.type === 'Service' || !!str(l.name));
+        if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
+        return {
+          p,
+          isService,
+          code: str(l.code),
+          name: str(l.name) || p?.name || '',
+          qty: Math.max(1, Math.trunc(num(l.qty) || 1)),
+          price: l.price !== undefined && l.price !== '' ? num(l.price) : undefined,
+        };
+      });
     const old = prev ? await linesOf(tx, no!) : [];
     // a line the user left as it was keeps its stored row (price, cost snapshot, id): an unchanged legacy
     // order is never re-priced from today's product; a changed / new line takes the request's price

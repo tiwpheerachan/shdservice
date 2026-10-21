@@ -17,7 +17,7 @@ export function jobColumns({
 }: {
   jobLink: ReturnType<typeof useAccess>['jobLink'];
   canEdit: boolean;
-  /** the phone button in the customer cell: customer info / call log */
+  /** the phone button in the customer cell (in the Action cell on phones): customer info / call log */
   onCall: (job: Job) => void;
 }): Column<Job>[] {
   // phones (below sm) keep เลขที่งาน / สถานะ / Action — the rest pushed them off a 360px screen
@@ -111,10 +111,22 @@ export function jobColumns({
       align: 'center',
       sortable: false,
       cell: (r) => (
-        <RowActions
-          viewHref={jobLink(r.no).href}
-          editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
-        />
+        <span className="flex items-center justify-center gap-0.5">
+          {/* phones: the customer column (and its phone button) is hidden — the call log stays one tap away */}
+          <button
+            type="button"
+            onClick={() => onCall(r)}
+            title="ดูข้อมูลลูกค้า / Call Log"
+            aria-label={`ข้อมูลลูกค้า ${r.customer}`}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary-soft sm:hidden"
+          >
+            <Phone className="h-3.5 w-3.5" />
+          </button>
+          <RowActions
+            viewHref={jobLink(r.no).href}
+            editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
+          />
+        </span>
       ),
     },
   ];

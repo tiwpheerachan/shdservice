@@ -104,8 +104,13 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
 
     let before: Row | undefined;
     if (i.id) {
-      [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, i.id)).limit(1);
+      [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, i.id)).for('update');
       if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+      // the form as it loaded the profile: a field another admin saved since → 409 stale, nothing written
+      const loaded: Record<string, unknown> = i.expect ?? {};
+      const now: Record<string, unknown> = toProfile(before);
+      if (Object.keys(values).some((k) => loaded[k] != null && loaded[k] !== now[k]))
+        throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้รายการนี้ — โหลดหน้าใหม่แล้วแก้อีกครั้ง', { stale: true });
     }
     const [row] = before
       ? await tx.update(shippingProfile).set(values).where(eq(shippingProfile.id, before.id)).returning()
@@ -146,9 +151,10 @@ export async function deleteShippingProfile(id: number, byUserId: number): Promi
   invalidate('shippers:');
 }
 
-export async function setShippingProfileLogo(id: number, logoPath: string, byUserId: number): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
+/** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
+export async function setShippingProfileLogo(id: number, logoPath: string, byUserId: number): Promise<string> {
+  const old = await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(shippingProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(shippingProfile.id, id));
     await audit(tx, byUserId, {
@@ -159,6 +165,8 @@ export async function setShippingProfileLogo(id: number, logoPath: string, byUse
       summary: `เปลี่ยนโลโก้บริษัทขนส่ง ${before.code}`,
       changes: { logoPath: [before.logoPath, logoPath] },
     });
+    return before.logoPath;
   });
   invalidate('shippers:');
+  return old;
 }

@@ -508,6 +508,10 @@ export const ShippingProfile = z
 export const LinkStatus = z
   .object({
     state: z.enum(['unopened', 'opened', 'expired']),
+    id: s.nullable().meta({
+      description:
+        'Which issue the current link is (the start of its hash) — compare this, not `issuedAt`, to tell two links apart.',
+    }),
     issuedAt: s.nullable(),
     openedAt: s.nullable(),
     expiresAt: s.nullable(),

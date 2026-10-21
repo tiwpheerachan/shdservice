@@ -1,8 +1,8 @@
 import 'server-only';
 import { audit, diff } from '@/server/audit';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { and, asc, eq, ne, or, sql } from 'drizzle-orm';
-import { db } from '@/db/client';
+import { and, asc, eq, ne, or, sql, type AnyColumn } from 'drizzle-orm';
+import { db, type Tx } from '@/db/client';
 import { appConfig, appUser } from '@/db/schema';
 import { isOwner, PENDING_ROLE } from '@/lib/access';
 import { ADMIN_USER_TYPE } from '@/lib/modules';
@@ -67,7 +67,6 @@ export async function provisionSsoUser(
 }> {
   const email = p.email.trim().toLowerCase();
   const owner = isOwner(email);
-  const existing = await findAppUserByEmail(email);
   const { first, last } = splitName(p.name || (email.split('@')[0] ?? email));
   const profile = {
     larkId: p.larkId || null,
@@ -77,33 +76,41 @@ export async function provisionSsoUser(
     lastLogin: nowThai(),
   };
 
-  if (existing) {
-    // owner = bootstrap only: a row with no role yet becomes System Admin; a role or a
-    // disable an admin set later sticks
-    const userType = existing.userType?.trim() || (owner ? ADMIN_USER_TYPE : null);
-    await db
-      .update(appUser)
-      .set({
-        // keep the legacy name if one exists; fill blanks from SSO
-        firstName: existing.firstName?.trim() ? existing.firstName : first,
-        lastName: existing.lastName?.trim() ? existing.lastName : last,
-        phoneNo: existing.phoneNo?.trim() ? existing.phoneNo : p.phone.slice(0, 50) || null,
-        userType,
-        // only overwrite profile fields we actually received
-        larkId: profile.larkId ?? existing.larkId,
-        department: profile.department ?? existing.department,
-        title: profile.title ?? existing.title,
-        avatar: profile.avatar ?? existing.avatar,
-        lastLogin: profile.lastLogin,
-      })
-      .where(eq(appUser.userId, existing.userId));
+  // one UPDATE that decides on the row as committed: a sign-in landing on an admin's role / name change waits for
+  // its row lock and re-reads, it never writes back values it read before (no read-then-write)
+  const blank = (c: AnyColumn) => sql`btrim(coalesce(${c}, '')) = ''`;
+  const keepOr = (c: AnyColumn, v: string | null) => sql`CASE WHEN ${blank(c)} THEN ${v} ELSE ${c} END`;
+  const [existing] = await db
+    .update(appUser)
+    .set({
+      // keep the legacy name if one exists; fill blanks from SSO
+      firstName: keepOr(appUser.firstName, first),
+      lastName: keepOr(appUser.lastName, last),
+      phoneNo: keepOr(appUser.phoneNo, p.phone.slice(0, 50) || null),
+      // owner = bootstrap only: a row with no role yet becomes System Admin; a role or a
+      // disable an admin set later sticks
+      userType: sql`coalesce(nullif(btrim(${appUser.userType}), ''), ${owner ? ADMIN_USER_TYPE : null})`,
+      // only overwrite profile fields we actually received (undefined = left as stored)
+      larkId: profile.larkId ?? undefined,
+      department: profile.department ?? undefined,
+      title: profile.title ?? undefined,
+      avatar: profile.avatar ?? undefined,
+      lastLogin: profile.lastLogin,
+    })
+    .where(sql`lower(trim(${appUser.emailAddress})) = ${email}`)
+    .returning({
+      userId: appUser.userId,
+      userType: appUser.userType,
+      recordStatus: appUser.recordStatus,
+      sessionVersion: appUser.sessionVersion,
+    });
+  if (existing)
     return {
       userId: existing.userId,
-      userType,
+      userType: existing.userType,
       isActive: existing.recordStatus === RS.ACTIVE,
       sessionVersion: existing.sessionVersion ?? 0,
     };
-  }
 
   const insert = (username: string) =>
     db
@@ -124,15 +131,16 @@ export async function provisionSsoUser(
   const local = (email.split('@')[0] ?? email).slice(0, 50);
   let row: { userId: number; sessionVersion: number | null } | undefined;
   try {
-    [row] = await insert(local);
+    [row] = await insert(local).catch((e) => {
+      // legacy unique (username, password): somchai@a and somchai@b share the local part
+      if (pgConstraint(e) === 'ix_username_and_password')
+        return insert(`${local.slice(0, 44)}.${crypto.randomUUID().slice(0, 4)}`);
+      throw e;
+    });
   } catch (e) {
-    const constraint = pgConstraint(e);
-    // a second tab finished the first sign-in a moment ago → that row is ours
-    if (constraint === 'ux_app_user_email' && !retried) return provisionSsoUser(p, true);
-    // legacy unique (username, password): somchai@a and somchai@b share the local part
-    if (constraint === 'ix_username_and_password')
-      [row] = await insert(`${local.slice(0, 44)}.${crypto.randomUUID().slice(0, 4)}`);
-    else throw e;
+    // a second tab finished the first sign-in a moment ago (its username clash comes first) → that row is ours
+    if (pgConstraint(e) === 'ux_app_user_email' && !retried) return provisionSsoUser(p, true);
+    throw e;
   }
   if (!row) throw new Error('app_user insert returned no row');
   userChanged(email);
@@ -369,31 +377,46 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
       fields: { role: 'เลือกบทบาท — "รออนุมัติ" ใช้กับบัญชีที่สมัครเข้ามาและยังไม่ได้อนุมัติเท่านั้น' },
     });
-  // the role must be one of the roles (or the one the user already has)
-  if (userType && userType !== before?.userType?.trim() && !(await listRoles()).includes(userType))
-    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { role: 'ไม่พบประเภทผู้ใช้งานนี้ในรายการ' } });
-  // email / username belong to one user: a new user with someone's email must not silently UPDATE that user
-  const clash: Record<string, string> = {};
-  if (email) {
-    const other = await findAppUserByEmail(email);
-    if (other && other.userId !== before?.userId)
-      clash.email = `อีเมลนี้เป็นของผู้ใช้ ${fullName(other.firstName, other.lastName) || other.username || `#${other.userId}`} แล้ว — แก้ไขจากรายการแทน`;
+  /** under this save's tx: a role being deleted (deleteRole / savePermissions lock the same key) or a username another
+   *  admin is creating at the same instant is checked after their commit, never between our check and our write */
+  async function checkLocked(tx: Tx) {
+    const newUsername = !!username && username.toLowerCase() !== clean(before?.username).toLowerCase();
+    if (newUsername)
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`app_user:username:${username.toLowerCase()}`}))`);
+    // the role must be one of the roles (or the one the user already has); System Admin has no app_config rows
+    if (userType && userType !== before?.userType?.trim() && userType !== ADMIN_USER_TYPE) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`app_config:${masterNameKey(userType)}`}))`);
+      const [exists] = await tx
+        .select({ t: appConfig.userType })
+        .from(appConfig)
+        .where(sql`btrim(${appConfig.userType}) = ${userType}`)
+        .limit(1);
+      if (!exists)
+        throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { role: 'ไม่พบประเภทผู้ใช้งานนี้ในรายการ' } });
+    }
+    // email / username belong to one user: a new user with someone's email must not silently UPDATE that user
+    const clash: Record<string, string> = {};
+    if (email) {
+      const other = await findAppUserByEmail(email, tx);
+      if (other && other.userId !== before?.userId)
+        clash.email = `อีเมลนี้เป็นของผู้ใช้ ${fullName(other.firstName, other.lastName) || other.username || `#${other.userId}`} แล้ว — แก้ไขจากรายการแทน`;
+    }
+    if (newUsername) {
+      const [other] = await tx
+        .select({ id: appUser.userId, first: appUser.firstName, last: appUser.lastName })
+        .from(appUser)
+        .where(
+          and(
+            sql`lower(btrim(${appUser.username})) = ${username.toLowerCase()}`,
+            ne(appUser.userId, before?.userId ?? -1),
+          ),
+        )
+        .limit(1);
+      if (other) clash.username = `Username นี้เป็นของ ${fullName(other.first, other.last) || `#${other.id}`} แล้ว`;
+    }
+    const [firstClash] = Object.values(clash);
+    if (firstClash) throw new HttpError(409, firstClash, { fields: clash });
   }
-  if (username && username.toLowerCase() !== clean(before?.username).toLowerCase()) {
-    const [other] = await db
-      .select({ id: appUser.userId, first: appUser.firstName, last: appUser.lastName })
-      .from(appUser)
-      .where(
-        and(
-          sql`lower(btrim(${appUser.username})) = ${username.toLowerCase()}`,
-          ne(appUser.userId, before?.userId ?? -1),
-        ),
-      )
-      .limit(1);
-    if (other) clash.username = `Username นี้เป็นของ ${fullName(other.first, other.last) || `#${other.id}`} แล้ว`;
-  }
-  const [firstClash] = Object.values(clash);
-  if (firstClash) throw new HttpError(409, firstClash, { fields: clash });
 
   if (before) {
     const userValues = {
@@ -412,6 +435,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       username: username || undefined,
     };
     const row = await db.transaction(async (tx) => {
+      await checkLocked(tx);
       // compared under the row lock: two admins saving at once are serialized, the second sees the first
       const [locked] = await tx.select().from(appUser).where(eq(appUser.userId, targetId)).for('update');
       if (!locked) throw new HttpError(404, 'user not found');
@@ -442,6 +466,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   }
 
   const row = await db.transaction(async (tx) => {
+    await checkLocked(tx);
     const [row] = await tx
       .insert(appUser)
       .values({
@@ -666,7 +691,6 @@ export async function deleteRole(role: string, actorId = 0): Promise<number> {
   if (role === ADMIN_USER_TYPE) throw new HttpError(409, 'ลบตำแหน่ง System Admin ไม่ได้');
   const n = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`app_config:${masterNameKey(role)}`}))`);
-    // ponytail: a user given this role in the same instant (upsertUser checks the cached role list) can slip by
     const [held] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(appUser)

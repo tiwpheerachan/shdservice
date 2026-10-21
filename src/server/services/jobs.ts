@@ -1211,14 +1211,20 @@ export type JobInput = z.output<typeof jobCreate.body>;
 /**
  * มอบหมายงานนี้ให้ (job.engineer_id): an active user whose role has Job Take (สิทธิ์พิเศษ) — checked only
  * when the assignee changes, so the job's current one re-saved passes ("never worse"). Else 400 under engineerId.
+ * FOR SHARE in the assigning transaction: a user save (users.ts, FOR UPDATE) running now finishes first.
  */
-async function assertAssignee(id: number) {
+async function assertAssignee(tx: Tx, id: number) {
   if (!(id > 0)) return;
-  const [u] = await db
-    .select({ type: appUser.userType })
+  const [u] = await tx
+    .select({ type: appUser.userType, rs: appUser.recordStatus })
     .from(appUser)
-    .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
-    .limit(1);
+    .where(eq(appUser.userId, id))
+    .limit(1)
+    .for('share');
+  if (u && u.rs !== RS.ACTIVE)
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
+      fields: { engineerId: 'บัญชีช่างคนนี้ถูกปิดใช้งานแล้ว — เลือกช่างคนอื่น' },
+    });
   if (!u || !(await hasRight({ isAdmin: false, userType: u.type?.trim() || null }, 'Job Take')))
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { engineerId: NOT_ENGINEER } });
 }
@@ -1607,17 +1613,19 @@ const BRANCH_ID = 1;
 
 export async function createJob(i: JobInput, byUserId: number): Promise<JobDetail> {
   assertValid(jobSchema(), i); // a new job: every required field (400 with every failing field under its box)
-  const cust = await customerForDocument(str(i.customerCode));
-  if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้าก่อนเปิดงาน');
-  const lk = await lookups(i);
-  if (!lk.jobTypeId) throw new HttpError(400, 'ต้องเลือกประเภทงานหลัก');
   const c = costFields(i);
   const now = nowThai();
   const engineerId = int(i.engineerId, 0);
-  await assertAssignee(engineerId);
-  const profile = await issuingProfile(i.documentProfileId);
 
   const jobNo = await db.transaction(async (tx) => {
+    // the customer and the assignee checked under their row locks (a delete running now finishes first, or
+    // waits), before the running number (always last)
+    const cust = await customerForDocument(tx, str(i.customerCode));
+    if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้าก่อนเปิดงาน');
+    const lk = await lookups(i);
+    if (!lk.jobTypeId) throw new HttpError(400, 'ต้องเลือกประเภทงานหลัก');
+    await assertAssignee(tx, engineerId);
+    const profile = await issuingProfile(i.documentProfileId);
     const no = await nextRunningNo(tx, 'Job');
     await tx.insert(job).values({
       jobNo: no,
@@ -1725,12 +1733,11 @@ async function prepJobEdit(jobNo: string, i: JobInput) {
   const was = await jobNow(jobNo);
   if (!was) throw jobNotFound(jobNo);
   assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
-  const cust = i.customerCode ? await customerForDocument(str(i.customerCode), was.customerId) : null;
   const lk = await lookups(i, was.shipper, jobNo);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   await assertPageStatus(newStatus, was.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
   const engineerId = i.engineerId !== undefined ? int(i.engineerId, 0) : undefined;
-  return { i, was, cust, lk, c: costFields(i), newStatus, engineerId };
+  return { i, was, lk, c: costFields(i), newStatus, engineerId };
 }
 
 /**
@@ -1744,14 +1751,16 @@ async function applyJobEdit(
   edit: Awaited<ReturnType<typeof prepJobEdit>>,
   byUserId: number,
 ): Promise<JobRow> {
-  const { i, was, cust, lk, c, newStatus, engineerId } = edit;
+  const { i, was, lk, c, newStatus, engineerId } = edit;
+  // under the job lock (job → customer / user): a delete running now finishes first, or waits for this save
+  const cust = i.customerCode ? await customerForDocument(tx, str(i.customerCode), existing.customerId) : null;
   // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
   const prevEng = existing.engineerId ?? 0;
   const assigning = engineerId !== undefined && engineerId > 0 && engineerId !== prevEng;
   // มอบหมายงานนี้ให้ cleared (the form sends 0): the job has nobody on it again
   const unassigning = engineerId !== undefined && engineerId <= 0 && prevEng > 0;
   if (assigning && prevEng > 0 && !i.takeOver) throw await takeOverError([{ no: jobNo, eng: prevEng }]);
-  if (assigning) await assertAssignee(engineerId);
+  if (assigning) await assertAssignee(tx, engineerId);
   // blank stays blank: a legacy job with no channel / reception type is not given the default by a re-save
   const orBlank = (v: unknown, dflt: string, stored: string | null) => clean(v) || (clean(stored) ? dflt : '');
   const values = {
@@ -1849,7 +1858,6 @@ export async function assignJobs(
 ): Promise<number> {
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
   if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
-  await assertAssignee(engineerId); // the chosen engineer takes the jobs: their role has Job Take
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
@@ -1858,6 +1866,7 @@ export async function assignJobs(
       .where(inArray(job.jobNo, jobNos))
       .orderBy(job.jobNo)
       .for('update');
+    await assertAssignee(tx, engineerId); // the chosen engineer takes the jobs: their role has Job Take
     const missing = jobNos.filter((no) => !rows.some((r) => r.no === no));
     if (missing.length) throw new HttpError(404, `ไม่พบหมายเลขงาน ${missing.join(', ')}`);
     // a closed or deleted job takes nobody new (its record of who repaired it stays)
@@ -2694,6 +2703,11 @@ export async function addAttachment(
   byUserId = 0,
 ) {
   return db.transaction(async (tx) => {
+    // the job checked again under a share lock (the route's check ran before the upload): a delete running
+    // now finishes first, or waits for this row — the caller removes the stored file when this refuses
+    const [j] = await tx.select({ rs: job.recordStatus }).from(job).where(eq(job.jobNo, jobNo)).for('share');
+    if (!j) throw jobNotFound(jobNo);
+    if (j.rs === RS.DELETED) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้');
     const [row] = await tx
       .insert(documentAttach)
       .values({
@@ -2720,20 +2734,24 @@ export async function addAttachment(
 
 export async function removeAttachment(id: number, byUserId = 0) {
   await db.transaction(async (tx) => {
+    // the check is the write: a second delete at the same moment changes nothing → 404, no second audit row
     const [row] = await tx
-      .select({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName })
-      .from(documentAttach)
-      .where(eq(documentAttach.documentAttachId, id));
-    await tx
       .update(documentAttach)
       .set(statusStamp(RS.DELETED, byUserId))
-      .where(eq(documentAttach.documentAttachId, id));
+      .where(
+        and(
+          eq(documentAttach.documentAttachId, id),
+          sql`${documentAttach.recordStatus} is distinct from ${RS.DELETED}`,
+        ),
+      )
+      .returning({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName });
+    if (!row) throw new HttpError(404, 'ไฟล์นี้ถูกลบไปแล้ว');
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Job Management',
       entity: 'job',
-      key: row?.jobNo ?? String(id),
-      summary: `ลบไฟล์แนบ ${row?.name ?? id}`,
+      key: row.jobNo ?? String(id),
+      summary: `ลบไฟล์แนบ ${row.name ?? id}`,
     });
   });
 }

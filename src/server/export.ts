@@ -28,6 +28,7 @@ import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/ser
 import { today } from '@/lib/dates';
 import { fieldLabel } from '@/lib/field-labels';
 import { logError } from '@/lib/log';
+import { rateLimit } from '@/server/rate-limit';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
 /**
@@ -375,8 +376,9 @@ async function totalRows(sp: URLSearchParams, resource: string, user: CurrentUse
   return MAX_ROWS; // the small lists (masters, users) never reach the cap
 }
 
-/** One export at a time per process: a second concurrent one answers 429 instead of doubling the memory. */
-let exporting = false;
+/** One export at a time per process: a second concurrent one answers 429 instead of doubling the memory.
+ *  Owned by a token: an export's own (late, repeated) release never frees the slot a next export took. */
+let slot: object | null = null;
 
 /**
  * `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data).
@@ -399,8 +401,17 @@ export async function exportXlsx(
   const user = spec.module === null ? await requireAdmin(req) : await requireCan(req, spec.module, 'view');
   // ส่งออก Excel is its own special right on top of seeing the list
   if (!(await hasRight(user, 'Export'))) throw new HttpError(403, noRight('Export'));
-  if (exporting) throw new HttpError(429, 'มีการส่งออกอยู่ กรุณาลองใหม่อีกครั้ง', { retryAfter: 10 });
-  exporting = true;
+  const busy = () => new HttpError(429, 'มีการส่งออกอยู่ กรุณาลองใหม่อีกครั้ง', { retryAfter: 10 });
+  // busy first, so a "มีการส่งออกอยู่" refusal does not use up the user's 5 a minute; the limit before the
+  // slot, so a user over it never holds the slot another user is waiting for
+  if (slot) throw busy();
+  await rateLimit(req, 'export', 5); // xlsx of up to 20k rows (MAX_ROWS) is the heaviest thing we do
+  if (slot) throw busy(); // taken while the limit was checked — no await from here to slot = mine
+  const mine = {};
+  slot = mine;
+  const release = () => {
+    if (slot === mine) slot = null;
+  };
   let rows: Row[];
   let cols: Col[];
   let total = 0;
@@ -425,14 +436,13 @@ export async function exportXlsx(
       meta: { rows: Math.min(rows.length, MAX_ROWS), filters, ip: clientIp(req.headers) },
     });
   } catch (e) {
-    exporting = false;
+    release();
     throw e;
   }
 
   // ponytail: no backpressure into the writer — a slow client buffers the zipped file (a few MB at 20k rows)
   // so the slot never waits on the network
   const out = new PassThrough({ highWaterMark: 64 * 1024 * 1024 });
-  const release = () => (exporting = false);
   const gone = new Promise<void>((resolve) => out.once('close', resolve)); // done, or the client went away
   void gone.then(release);
   const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true, useSharedStrings: false });

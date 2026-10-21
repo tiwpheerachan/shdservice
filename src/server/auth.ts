@@ -53,11 +53,11 @@ export const fullName = (first?: string | null, last?: string | null) =>
 
 const normEmail = (e: string) => e.trim().toLowerCase();
 
-/** Look up the app_user row for an email (case/whitespace-insensitive). */
-export async function findAppUserByEmail(email: string) {
+/** Look up the app_user row for an email (case/whitespace-insensitive); `q` = a transaction to read in. */
+export async function findAppUserByEmail(email: string, q: Pick<typeof db, 'select'> = db) {
   const e = normEmail(email);
   if (!e) return null;
-  const rows = await db
+  const rows = await q
     .select()
     .from(appUser)
     .where(sql`lower(trim(${appUser.emailAddress})) = ${e}`)
@@ -76,11 +76,15 @@ type AppUserRow = NonNullable<Awaited<ReturnType<typeof findAppUserByEmail>>>;
 const g = globalThis as typeof globalThis & {
   __shdUserCache?: Map<string, { at: number; row: AppUserRow }>;
   __shdGrantCache?: Map<string, { at: number; grants: GrantMap }>;
+  __shdAuthGen?: { user: number; grant: number };
 };
 const userCache = (g.__shdUserCache ??= new Map<string, { at: number; row: AppUserRow }>());
 const USER_TTL = 10_000;
+/** bumped by every invalidate: a load that started before it (read the old row) must not store what it read */
+const gen = (g.__shdAuthGen ??= { user: 0, grant: 0 });
 
 export function invalidateUserCache(email?: string) {
+  gen.user++;
   if (email) userCache.delete(normEmail(email));
   else userCache.clear();
 }
@@ -100,7 +104,9 @@ async function cachedAppUser(email: string): Promise<AppUserRow | null> {
   const key = normEmail(email);
   const hit = userCache.get(key);
   if (hit && Date.now() - hit.at < USER_TTL) return hit.row;
+  const at = gen.user;
   const row = await findAppUserByEmail(key);
+  if (gen.user !== at) return row; // invalidated while reading — this row may predate the change
   if (row)
     userCache.set(key, { at: Date.now(), row }); // a missing row is never cached (first login race)
   else userCache.delete(key);
@@ -167,6 +173,7 @@ export async function grantsForUserType(userType: string | null): Promise<GrantM
   if (!userType) return {};
   const hit = cache.get(userType);
   if (hit && Date.now() - hit.at < TTL) return hit.grants;
+  const at = gen.grant;
   const rows = await db
     .select({
       module: appConfig.moduleName,
@@ -183,11 +190,12 @@ export async function grantsForUserType(userType: string | null): Promise<GrantM
     const g: Grant = { add: !!r.add, edit: !!r.edit, del: !!r.del, view: !!r.view };
     grants[r.module.trim()] = g;
   }
-  cache.set(userType, { at: Date.now(), grants });
+  if (gen.grant === at) cache.set(userType, { at: Date.now(), grants }); // not when invalidated while reading
   return grants;
 }
 
 export function invalidateGrantCache() {
+  gen.grant++;
   cache.clear();
 }
 

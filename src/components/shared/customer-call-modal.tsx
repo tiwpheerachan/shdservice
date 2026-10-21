@@ -68,6 +68,7 @@ export function CustomerCallModal({
   const [tab, setTab] = React.useState('history');
   const [text, setText] = React.useState('');
   const [copied, setCopied] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
 
   // opened again / another job or customer → the draft starts clean (adjusted while rendering)
   const session = `${open ? 1 : 0}|${jobNo ?? ''}|${customer?.code ?? ''}`;
@@ -94,7 +95,8 @@ export function CustomerCallModal({
 
   const addLog = async () => {
     const v = text.trim();
-    if (!v || !jobNo) return;
+    if (!v || !jobNo || saving) return;
+    setSaving(true);
     try {
       const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
       void calls.mutate(d, { revalidate: false }); // the server answers with the updated log
@@ -102,6 +104,8 @@ export function CustomerCallModal({
       push({ kind: 'success', title: 'เพิ่มบันทึกการโทรแล้ว', desc: jobNo });
     } catch (e) {
       push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -261,8 +265,8 @@ export function CustomerCallModal({
                     placeholder="พิมพ์รายละเอียดการโทร แล้วกด Enter…"
                     className="h-9 flex-1 rounded-md border border-input bg-card px-3 text-base outline-hidden md:text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   />
-                  <Button size="sm" onClick={addLog}>
-                    <Plus className="h-3.5 w-3.5" />
+                  <Button size="sm" onClick={addLog} loading={saving}>
+                    {!saving && <Plus className="h-3.5 w-3.5" />}
                     เพิ่มรายการ
                   </Button>
                 </div>

@@ -34,11 +34,6 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'del');
   const { id } = await parseParams(ctx, attachmentDelete);
-  const [row] = await db
-    .select()
-    .from(documentAttach)
-    .where(eq(documentAttach.documentAttachId, Number(id)));
-  if (!row || row.recordStatus === RS.DELETED) throw new HttpError(404, 'not found');
-  await removeAttachment(row.documentAttachId, me.userId);
+  await removeAttachment(Number(id), me.userId); // 404 when it is gone or already deleted
   return NextResponse.json({ ok: true });
 });

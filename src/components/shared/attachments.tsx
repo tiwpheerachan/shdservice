@@ -7,7 +7,7 @@ import { TableScroll } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { del, errMsg, upload as send } from '@/lib/api';
+import { ApiError, del, errMsg, upload as send } from '@/lib/api';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useAccess } from '@/lib/use-access';
 
@@ -126,7 +126,11 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
       await del(`/api/attachments/${r.id}`);
       setRows((s) => s.filter((x) => x.id !== r.id));
     } catch (e) {
-      push({ kind: 'error', title: 'ลบไฟล์ไม่สำเร็จ', desc: errMsg(e) });
+      // 404: someone deleted it a moment ago — what was asked for is done
+      if (e instanceof ApiError && e.status === 404) {
+        setRows((s) => s.filter((x) => x.id !== r.id));
+        push({ kind: 'info', title: errMsg(e), desc: r.name });
+      } else push({ kind: 'error', title: 'ลบไฟล์ไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 

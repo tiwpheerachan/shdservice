@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { handle, parseBody, parseParams, requireCan, requireView, JOB_MODULES } from '@/server/auth';
 import { jobCallAdd, jobCalls } from '@/server/contract/jobs';
+import { idempotent } from '@/server/idempotency';
 import { addCallLog, listCallLogs } from '@/server/services/jobs';
 
 export const runtime = 'nodejs';
@@ -18,5 +19,7 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   const { no } = await parseParams(ctx, jobCallAdd);
   const body = await parseBody(req, jobCallAdd); // callLogSchema
-  return NextResponse.json({ ok: true, rows: await addCallLog(no, body.detail, user.userId) });
+  return idempotent(req, user.userId, async () =>
+    NextResponse.json({ ok: true, rows: await addCallLog(no, body.detail, user.userId) }),
+  );
 });

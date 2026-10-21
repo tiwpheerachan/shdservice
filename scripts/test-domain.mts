@@ -2383,7 +2383,7 @@ try {
       assert.equal((await tracking.publicJobByNo('TDJ0281'))!.deviceRef, '••••5678');
     });
     await test('R2 track: a document link opens many times / from any browser for 10 min, only while its /track link is live', async () => {
-      const token = await tracking.rotateToken('TDJ0282');
+      const { token } = await tracking.rotateToken('TDJ0282');
       const raw = await tracking.issueDocLink({ jobNo: 'TDJ0282', kind: 'job', ref: 'TDJ0282' }, token, '127.0.0.1');
       const want = { jobNo: 'TDJ0282', kind: 'job', ref: 'TDJ0282' };
       assert.deepEqual(await tracking.docForLink(raw), want, 'LINE in-app browser');

@@ -513,7 +513,10 @@ async function productsByCode(tx: Tx, codes: string[]) {
     .from(product)
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .where(inArray(product.productCode, codes))
-    .orderBy(desc(productNoneSerial.itemId)); // a legacy second stock row: the Map keeps the lowest item_id, as stockMove
+    .orderBy(desc(productNoneSerial.itemId)) // a legacy second stock row: the Map keeps the lowest item_id, as stockMove
+    // every caller is a write transaction, and locks the product rows before their stock rows (stockMove):
+    // a product delete (records.ts, FOR UPDATE) running now finishes first, or waits for this write
+    .for('share', { of: product });
   return new Map<string, P>(
     rows.map((r) => [
       r.code ?? '',

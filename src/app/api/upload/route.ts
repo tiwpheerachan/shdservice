@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { db, type Tx } from '@/db/client';
+import { db } from '@/db/client';
 import { job, product, saleOutHd } from '@/db/schema';
 import { handle, parseForm, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
 import { upload } from '@/server/contract/misc';
@@ -86,8 +86,7 @@ export const POST = handle(async (req: NextRequest) => {
       if (!prof || prof.id !== pid) throw new HttpError(404, 'ไม่พบโปรไฟล์ ' + id);
       const path = filePath.profileLogo(pid, sys);
       await uploadFile(path, file);
-      await setDocumentProfileLogo(pid, path, me.userId);
-      if (prof.logoPath) await removeFile(prof.logoPath);
+      await swapSlip(path, () => setDocumentProfileLogo(pid, path, me.userId));
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'shipper-logo': {
@@ -97,27 +96,32 @@ export const POST = handle(async (req: NextRequest) => {
       if (!prof) throw new HttpError(404, 'ไม่พบโปรไฟล์ขนส่ง ' + id);
       const path = filePath.shipperLogo(sid, sys);
       await uploadFile(path, body);
-      await setShippingProfileLogo(sid, path, me.userId);
-      if (prof.logoPath) await removeFile(prof.logoPath);
+      await swapSlip(path, () => setShippingProfileLogo(sid, path, me.userId));
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'product-image': {
-      const [row] = await db.select({ old: product.pictrueFileName }).from(product).where(eq(product.productCode, id));
-      if (!row) throw new HttpError(404, 'ไม่พบรหัสอะไหล่ ' + id);
+      const cols = { old: product.pictrueFileName };
+      const missing = () => new HttpError(404, 'ไม่พบรหัสอะไหล่ ' + id);
+      if (!(await db.select(cols).from(product).where(eq(product.productCode, id))).length) throw missing();
       const path = filePath.productImage(id, sys);
       await uploadFile(path, body);
-      await db.transaction(async (tx) => {
-        await tx.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
-        await audit(tx, me.userId, {
-          action: 'UPDATE',
-          module: 'Product',
-          entity: 'product',
-          key: id,
-          summary: `เปลี่ยนรูปอะไหล่ ${id}`,
-          changes: { pictrueFileName: [row.old, sys] },
-        });
-      });
-      if (row.old) await removeFile(resolvePath(row.old, (f) => filePath.productImage(id, f)));
+      // the replaced picture is read under the row lock: of two uploads at once, the second replaces the first's
+      await swapSlip(path, () =>
+        db.transaction(async (tx) => {
+          const [row] = await tx.select(cols).from(product).where(eq(product.productCode, id)).for('update');
+          if (!row) throw missing();
+          await tx.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
+          await audit(tx, me.userId, {
+            action: 'UPDATE',
+            module: 'Product',
+            entity: 'product',
+            key: id,
+            summary: `เปลี่ยนรูปอะไหล่ ${id}`,
+            changes: { pictrueFileName: [row.old, sys] },
+          });
+          return row.old ? resolvePath(row.old, (f) => filePath.productImage(id, f)) : null;
+        }),
+      );
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'sale-order-slip': {
@@ -162,31 +166,33 @@ export const POST = handle(async (req: NextRequest) => {
       guard((await db.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id)))[0]);
       const path = filePath.saleOrderSlip(id, sys);
       await uploadFile(path, body);
-      await swapSlip(path, async (tx) => {
-        const row = guard(
-          (await tx.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id)).for('update'))[0],
-        );
-        await tx
-          .update(saleOutHd)
-          .set({ slipFileName: path, ...(paid !== null ? { paymentAmount: money(paid) } : {}) })
-          .where(eq(saleOutHd.saleOutHdNo, id));
-        await audit(tx, me.userId, {
-          action: 'UPDATE',
-          module: 'Sale Order',
-          entity: 'sale_out_hd',
-          key: id,
-          summary:
-            `แนบสลิปใบสั่งขาย ${id}` +
-            (row.approve === AS.APPROVED ? ' (หลังอนุมัติ)' : '') +
-            (paid !== null ? ` · ชำระ ${paid.toFixed(2)} บาท` : ''),
-          changes: {
-            slipFileName: [row.old, path],
-            ...(paid !== null ? { paymentAmount: [row.paid === null ? null : num(row.paid), paid] } : {}),
-          },
-        });
-        // only ever delete this order's own slip folder (a stored path is data, not a command)
-        return row.old?.startsWith(`sale-orders/${id}/slip/`) ? row.old : null;
-      });
+      await swapSlip(path, () =>
+        db.transaction(async (tx) => {
+          const row = guard(
+            (await tx.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id)).for('update'))[0],
+          );
+          await tx
+            .update(saleOutHd)
+            .set({ slipFileName: path, ...(paid !== null ? { paymentAmount: money(paid) } : {}) })
+            .where(eq(saleOutHd.saleOutHdNo, id));
+          await audit(tx, me.userId, {
+            action: 'UPDATE',
+            module: 'Sale Order',
+            entity: 'sale_out_hd',
+            key: id,
+            summary:
+              `แนบสลิปใบสั่งขาย ${id}` +
+              (row.approve === AS.APPROVED ? ' (หลังอนุมัติ)' : '') +
+              (paid !== null ? ` · ชำระ ${paid.toFixed(2)} บาท` : ''),
+            changes: {
+              slipFileName: [row.old, path],
+              ...(paid !== null ? { paymentAmount: [row.paid === null ? null : num(row.paid), paid] } : {}),
+            },
+          });
+          // only ever delete this order's own slip folder (a stored path is data, not a command)
+          return row.old?.startsWith(`sale-orders/${id}/slip/`) ? row.old : null;
+        }),
+      );
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'job-slip': {
@@ -201,20 +207,22 @@ export const POST = handle(async (req: NextRequest) => {
       await guard((await db.select(cols).from(job).where(eq(job.jobNo, id)))[0]);
       const path = filePath.jobSlip(id, sys);
       await uploadFile(path, body);
-      await swapSlip(path, async (tx) => {
-        const row = await guard((await tx.select(cols).from(job).where(eq(job.jobNo, id)).for('update'))[0]);
-        await tx.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
-        await audit(tx, me.userId, {
-          action: 'UPDATE',
-          module: 'Job Closing',
-          entity: 'job',
-          key: id,
-          summary: `แนบสลิปชำระเงินงาน ${id}`,
-          changes: { jobPaymentSlipFileName: [row.old, path] },
-        });
-        // a closed job's previous slip stays in storage as evidence (the audit line names it)
-        return !(await jobClosed(row.status)) && row.old?.startsWith(`jobs/${id}/slip/`) ? row.old : null;
-      });
+      await swapSlip(path, () =>
+        db.transaction(async (tx) => {
+          const row = await guard((await tx.select(cols).from(job).where(eq(job.jobNo, id)).for('update'))[0]);
+          await tx.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
+          await audit(tx, me.userId, {
+            action: 'UPDATE',
+            module: 'Job Closing',
+            entity: 'job',
+            key: id,
+            summary: `แนบสลิปชำระเงินงาน ${id}`,
+            changes: { jobPaymentSlipFileName: [row.old, path] },
+          });
+          // a closed job's previous slip stays in storage as evidence (the audit line names it)
+          return !(await jobClosed(row.status)) && row.old?.startsWith(`jobs/${id}/slip/`) ? row.old : null;
+        }),
+      );
       return NextResponse.json({ ok: true, path, file: sys });
     }
   }
@@ -222,15 +230,15 @@ export const POST = handle(async (req: NextRequest) => {
 });
 
 /**
- * Writes a slip path under its row's lock: `write` re-reads and re-checks the row there (an approval / a
- * job close racing the upload is then wholly before it — refused — or after it) and returns the stored
- * path it replaced. Refused → the new file is removed; saved → the replaced one, after the commit (of two
- * uploads at once, the second replaces the first's file, read under the lock — none is orphaned).
+ * Writes an uploaded file's path under its row's lock: `write` (a transaction) re-reads and re-checks the row
+ * there (an approval / a job close racing the upload is then wholly before it — refused — or after it) and
+ * returns the stored path it replaced. Refused → the new file is removed; saved → the replaced one, after the
+ * commit (of two uploads at once, the second replaces the first's file, read under the lock — none is orphaned).
  */
-async function swapSlip(path: string, write: (tx: Tx) => Promise<string | null | undefined>) {
+async function swapSlip(path: string, write: () => Promise<string | null | undefined>) {
   let old: string | null | undefined;
   try {
-    old = await db.transaction(write);
+    old = await write();
   } catch (e) {
     await removeFile(path);
     throw e;

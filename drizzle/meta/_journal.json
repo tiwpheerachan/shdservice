@@ -267,6 +267,13 @@
       "when": 1757900037000,
       "tag": "0037_role_rights_2026_10_21",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1757900038000,
+      "tag": "0038_document_profile_one_default",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,7 @@ import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Checkbox } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { api, postJson, del, errMsg, uploadFile, useUploading } from '@/lib/api';
+import { api, postJson, del, errMsg, isStale, uploadFile, useUploading } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { documentProfileSchema } from '@/lib/validation/admin';
@@ -104,7 +104,12 @@ export default function DocumentProfilesPage() {
     if (fe.report(fe.run(documentProfileSchema, form))) return;
     setSaving(true);
     try {
-      const d = await postJson<{ row: Profile }>('/api/admin/document-profiles', { ...form, id: editing?.id });
+      // `expect`: the profile as the form loaded it — another admin's save since → 409 stale, not overwritten
+      const d = await postJson<{ row: Profile }>('/api/admin/document-profiles', {
+        ...form,
+        id: editing?.id,
+        expect: editing,
+      });
       let row = d.row;
       if (pendingLogo) {
         // new profile: the logo chosen before saving goes up now that there is an id
@@ -123,6 +128,11 @@ export default function DocumentProfilesPage() {
       await load();
       setOpen(false);
     } catch (e) {
+      if (isStale(e) && editing) {
+        // another admin saved this profile since the form loaded it: show it as stored now, the toast says why
+        const fresh = (await load())?.rows.find((r) => r.id === editing.id);
+        if (fresh) openForm(fresh);
+      }
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
@@ -141,7 +151,9 @@ export default function DocumentProfilesPage() {
       await uploadFile('profile-logo', String(editing.id), file);
       push({ kind: 'success', title: 'อัปโหลดโลโก้แล้ว' });
       const fresh = (await load())?.rows.find((r) => r.id === editing.id);
-      if (fresh) setEditing(fresh);
+      // only the logo: the rest of `editing` is what this open form loaded — the save's stale check compares
+      // against it, so taking the whole fresh row would let this form overwrite another admin's change unseen
+      if (fresh) setEditing((e) => (e ? { ...e, logoPath: fresh.logoPath, logoUrl: fresh.logoUrl } : e));
     } catch (e) {
       push({ kind: 'error', title: 'อัปโหลดไม่สำเร็จ', desc: errMsg(e) });
     } finally {

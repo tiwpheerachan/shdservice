@@ -2,7 +2,7 @@ import 'server-only';
 import type { z } from 'zod';
 import type { documentProfileSave } from '@/server/contract/admin';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { asc, eq, ne, and, isNull } from 'drizzle-orm';
+import { asc, eq, ne, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documentProfile, job, quotationHd, saleOutHd } from '@/db/schema';
 import { HttpError } from '@/server/auth';
@@ -53,6 +53,13 @@ export type DocumentProfile = {
 
 export const SHD_PROFILE_ID = 1;
 const BUILTIN_LOGO = '/logo-shd-mark.png';
+
+/** One profile change at a time (save / delete): "exactly one default" is checked and written by one of them
+ *  at a time. A document taking a profile holds it shared, so the profile cannot be deleted under it. */
+const lockProfiles = (shared = false) =>
+  shared
+    ? sql`SELECT pg_advisory_xact_lock_shared(hashtext('document_profile'))`
+    : sql`SELECT pg_advisory_xact_lock(hashtext('document_profile'))`;
 
 type Row = typeof documentProfile.$inferSelect;
 function toProfile(r: Row): DocumentProfile {
@@ -116,6 +123,7 @@ export async function defaultDocumentProfile(): Promise<DocumentProfile> {
     .where(
       and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)),
     )
+    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id))
     .limit(1);
   return r ? toProfile(r) : profileForDocument(SHD_PROFILE_ID);
 }
@@ -140,6 +148,7 @@ export async function issuingProfile(requested: number | null | undefined): Prom
 export async function deleteDocumentProfile(id: number, byUserId: number): Promise<void> {
   if (id === SHD_PROFILE_ID) throw new HttpError(400, 'โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)');
   await db.transaction(async (tx) => {
+    await tx.execute(lockProfiles());
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     if (before.isDefault)
@@ -211,6 +220,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
   };
 
   const saved = await db.transaction(async (tx) => {
+    await tx.execute(lockProfiles());
     // the short code is what dropdowns show — unique among LIVE profiles (a deleted one frees its code)
     const others = await tx
       .select()
@@ -227,8 +237,13 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
 
     let before: Row | undefined;
     if (i.id) {
-      [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).limit(1);
+      [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).for('update');
       if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+      // the form as it loaded the profile: a field another admin saved since → 409 stale, nothing written
+      const loaded: Record<string, unknown> = i.expect ?? {};
+      const now: Record<string, unknown> = toProfile(before);
+      if (Object.keys(values).some((k) => loaded[k] != null && loaded[k] !== now[k]))
+        throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้รายการนี้ — โหลดหน้าใหม่แล้วแก้อีกครั้ง', { stale: true });
       if (before.isDefault && values.isDefault === false)
         throw new HttpError(400, 'ต้องมีโปรไฟล์เริ่มต้น 1 รายการ — ตั้งรายการอื่นเป็นเริ่มต้นก่อน');
       if (before.isDefault && values.isActive === false) throw new HttpError(400, 'ปิดใช้งานโปรไฟล์เริ่มต้นไม่ได้');
@@ -260,9 +275,10 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
   return saved;
 }
 
-export async function setDocumentProfileLogo(id: number, logoPath: string, byUserId: number): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
+/** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
+export async function setDocumentProfileLogo(id: number, logoPath: string, byUserId: number): Promise<string> {
+  const old = await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.id, id));
     await audit(tx, byUserId, {
@@ -273,8 +289,10 @@ export async function setDocumentProfileLogo(id: number, logoPath: string, byUse
       summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`,
       changes: { logoPath: [before.logoPath, logoPath] },
     });
+    return before.logoPath;
   });
   invalidate('docprofiles:');
+  return old;
 }
 
 /* ------------------------------------------------------------------ *
@@ -322,12 +340,13 @@ export async function setDocumentProfile(
   byUserId: number,
 ): Promise<DocumentProfile> {
   const d = DOC[kind];
-  const target = await issuingProfile(profileId); // must exist, be active and not deleted
-  await db.transaction(async (tx) => {
-    const [row] = await tx.select({ cur: d.col }).from(d.table).where(eq(d.key, no)).limit(1);
+  return db.transaction(async (tx) => {
+    await tx.execute(lockProfiles(true)); // the target is not deleted / deactivated until this commits
+    const target = await issuingProfile(profileId); // must exist, be active and not deleted
+    const [row] = await tx.select({ cur: d.col }).from(d.table).where(eq(d.key, no)).for('update');
     if (!row) throw new HttpError(404, `ไม่พบ${d.label} ${no}`);
     const cur = row.cur ?? SHD_PROFILE_ID;
-    if (cur === target.id) return;
+    if (cur === target.id) return target;
     const from = await getDocumentProfile(cur);
     await tx.update(d.table).set({ documentProfileId: target.id }).where(eq(d.key, no));
     await audit(tx, byUserId, {
@@ -338,6 +357,6 @@ export async function setDocumentProfile(
       summary: `เปลี่ยนออกเอกสารในนาม ${d.label} ${no}: ${from?.code ?? cur} → ${target.code}`,
       changes: { documentProfileId: [cur, target.id] },
     });
+    return target;
   });
-  return target;
 }

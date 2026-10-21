@@ -887,7 +887,7 @@
           "Jobs"
         ],
         "summary": "Add a call log line",
-        "description": "Job Management edit. Rules: `callLogSchema` (src/lib/validation/stock.ts).",
+        "description": "Job Management edit. Rules: `callLogSchema` (src/lib/validation/stock.ts). Takes an Idempotency-Key.",
         "parameters": [
           {
             "schema": {
@@ -898,6 +898,17 @@
             "description": "หมายเลขงาน (J…)",
             "name": "no",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none."
+            },
+            "required": false,
+            "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none.",
+            "name": "Idempotency-Key",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -1034,6 +1045,16 @@
           },
           "415": {
             "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used for a different route.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3837,7 +3858,20 @@
           "Products"
         ],
         "summary": "Create (no `sysCode`) or update (with `sysCode`) a spare part",
-        "description": "Product add / edit. Rules: `productSchema(prev)` in src/lib/validation/admin.ts, run by the service against the stored part. `capitalPrice` is ignored for a role without Product Cost (a new part then starts at 0). `sameMfgCode` lists other parts with the same vendor code — saved anyway, the form warns.",
+        "description": "Product add / edit. Rules: `productSchema(prev)` in src/lib/validation/admin.ts, run by the service against the stored part. `capitalPrice` is ignored for a role without Product Cost (a new part then starts at 0). `sameMfgCode` lists other parts with the same vendor code — saved anyway, the form warns. Takes an Idempotency-Key.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none."
+            },
+            "required": false,
+            "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none.",
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -3944,6 +3978,16 @@
           },
           "415": {
             "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used for a different route.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11601,6 +11645,76 @@
                   "isActive": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "expect": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "id": {
+                        "type": "number"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "nameTh": {
+                        "type": "string"
+                      },
+                      "nameEn": {
+                        "type": "string"
+                      },
+                      "addressLine1": {
+                        "type": "string"
+                      },
+                      "addressLine2": {
+                        "type": "string"
+                      },
+                      "address": {
+                        "type": "string"
+                      },
+                      "phone": {
+                        "type": "string"
+                      },
+                      "email": {
+                        "type": "string"
+                      },
+                      "taxId": {
+                        "type": "string"
+                      },
+                      "bankName": {
+                        "type": "string"
+                      },
+                      "bankAccountType": {
+                        "type": "string"
+                      },
+                      "bankAccountNo": {
+                        "type": "string"
+                      },
+                      "bankAccountName": {
+                        "type": "string"
+                      },
+                      "logoPath": {
+                        "type": "string"
+                      },
+                      "logoUrl": {
+                        "type": "string"
+                      },
+                      "stampPath": {
+                        "type": "string"
+                      },
+                      "isDefault": {
+                        "type": "boolean"
+                      },
+                      "isActive": {
+                        "type": "boolean"
+                      },
+                      "isDeleted": {
+                        "type": "boolean"
+                      },
+                      "sortOrder": {
+                        "type": "number"
+                      }
+                    },
+                    "description": "The profile as the edit form loaded it (a row of GET /admin/document-profiles): a field saved since → 409 `details.stale`, nothing written."
                   }
                 },
                 "additionalProperties": {
@@ -12447,6 +12561,43 @@
                   "isActive": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "expect": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "id": {
+                        "type": "number"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "nameTh": {
+                        "type": "string"
+                      },
+                      "nameEn": {
+                        "type": "string"
+                      },
+                      "logoPath": {
+                        "type": "string"
+                      },
+                      "logoUrl": {
+                        "type": "string"
+                      },
+                      "trackUrl": {
+                        "type": "string"
+                      },
+                      "isActive": {
+                        "type": "boolean"
+                      },
+                      "isDeleted": {
+                        "type": "boolean"
+                      },
+                      "sortOrder": {
+                        "type": "number"
+                      }
+                    },
+                    "description": "The profile as the edit form loaded it (a row of GET /admin/shipping-profiles): a field saved since → 409 `details.stale`, nothing written."
                   }
                 },
                 "additionalProperties": {
@@ -15850,6 +16001,11 @@
               "expired"
             ]
           },
+          "id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Which issue the current link is (the start of its hash) — compare this, not `issuedAt`, to tell two links apart."
+          },
           "issuedAt": {
             "type": "string",
             "nullable": true
@@ -15865,6 +16021,7 @@
         },
         "required": [
           "state",
+          "id",
           "issuedAt",
           "openedAt",
           "expiresAt"

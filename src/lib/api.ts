@@ -99,18 +99,28 @@ const newKey = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toS
  * so the next submit — even an identical one — is a new document.
  */
 const pendingKeys = new Map<string, string>();
-export async function postJson<T = unknown>(url: string, body: unknown): Promise<T> {
+/** the same submit still on its way: a second one waits for its answer — sent too, the server would refuse it
+ *  with "กำลังบันทึกรายการนี้อยู่" (409) while the first is running */
+const inFlight = new Map<string, Promise<unknown>>();
+export function postJson<T = unknown>(url: string, body: unknown): Promise<T> {
   const payload = JSON.stringify(body ?? {});
   const id = `${url}\n${payload}`;
+  const running = inFlight.get(id);
+  if (running) return running as Promise<T>;
   const key = pendingKeys.get(id) ?? newKey();
   pendingKeys.set(id, key);
-  const data = await api<T>(url, {
+  const p = api<T>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
     body: payload,
-  });
-  pendingKeys.delete(id);
-  return data;
+  })
+    .then((data) => {
+      pendingKeys.delete(id); // answered OK: the next identical submit is a new document
+      return data;
+    })
+    .finally(() => inFlight.delete(id));
+  inFlight.set(id, p);
+  return p;
 }
 
 /** 409 from optimistic locking (assertVersion): someone else saved this record after the form loaded it */

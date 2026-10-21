@@ -225,10 +225,15 @@ export async function getCustomerByCode(code: string, deleted: DeletedMode = 'al
 /**
  * The customer a document is written for (getCustomerByCode still returns a deleted one — old documents show
  * theirs): one deleted or set Inactive (owner 2026-10-21) gets nothing new (409). `current` = the customer
- * already on the document (its id or code): an edit that keeps it still saves.
+ * already on the document (its id or code): an edit that keeps it still saves. Read FOR SHARE in the document's
+ * write transaction: a delete / Inactive switch (records.ts, FOR UPDATE) running now finishes first, or waits.
  */
-export async function customerForDocument(code: string, current?: number | string | null): Promise<Customer | null> {
-  const [r] = await db.select().from(customer).where(eq(customer.customerCode, code)).limit(1);
+export async function customerForDocument(
+  tx: Tx,
+  code: string,
+  current?: number | string | null,
+): Promise<Customer | null> {
+  const [r] = await tx.select().from(customer).where(eq(customer.customerCode, code)).limit(1).for('share');
   if (!r || current === r.customerId || current === r.customerCode) return r ? toCustomer(r) : null;
   if (r.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
   if (r.recordStatus === RS.INACTIVE)

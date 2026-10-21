@@ -299,6 +299,10 @@ export const documentProfileSave = defineOperation({
     bankAccountNo: sn,
     isDefault: b.nullish(),
     isActive: b.nullish(),
+    expect: DocumentProfile.partial().nullish().meta({
+      description:
+        'The profile as the edit form loaded it (a row of GET /admin/document-profiles): a field saved since → 409 `details.stale`, nothing written.',
+    }),
   }),
   responses: {
     200: jsonResponse('Saved.', z.object({ row: DocumentProfile })),
@@ -347,6 +351,10 @@ export const shippingProfileSave = defineOperation({
     nameTh: sn,
     trackUrl: sn,
     isActive: b.nullish(),
+    expect: ShippingProfile.partial().nullish().meta({
+      description:
+        'The profile as the edit form loaded it (a row of GET /admin/shipping-profiles): a field saved since → 409 `details.stale`, nothing written.',
+    }),
   }),
   responses: {
     200: jsonResponse('Saved.', z.object({ row: ShippingProfile })),
