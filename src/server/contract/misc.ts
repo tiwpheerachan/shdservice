@@ -124,6 +124,10 @@ export const health = defineOperation({
       '`ok` false = the database did not answer.',
       z.object({
         ok: b,
+        maintenance: z
+          .literal(true)
+          .optional()
+          .meta({ description: 'present while MAINTENANCE_MODE=1 (every other path answers 503)' }),
         hasDatabaseUrl: b.optional(),
         hasCentralApiKey: b.optional(),
         hasSsoClientSecret: b.optional(),

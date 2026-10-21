@@ -28,7 +28,7 @@ export function originAuthSecret(): string {
 }
 
 /** constant-time string compare (no early exit on the first differing char) */
-function sameString(a: string, b: string): boolean {
+export function sameString(a: string, b: string): boolean {
   let diff = a.length ^ b.length;
   const n = Math.max(a.length, b.length);
   for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);

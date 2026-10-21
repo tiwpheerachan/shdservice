@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import type { Customer } from '@/data/types';
 import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';
 import {
   CustomerFields,
@@ -57,6 +58,8 @@ export function CustomerSelect({
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
   const fe = useFormErrors();
+  // a new customer typed in, not saved yet — kept when the session runs out, asked before leaving
+  useUnsavedChanges(() => mode === 'new' && JSON.stringify(form) !== JSON.stringify(EMPTY_CUSTOMER));
 
   const pickByCode = async (code: string) => {
     try {

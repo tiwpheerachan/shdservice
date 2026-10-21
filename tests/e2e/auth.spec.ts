@@ -1,5 +1,5 @@
 import { APP_ORIGIN, OWNER_EMAIL, STAFF_EMAIL } from './support/env';
-import { expect, signIn, test } from './support/fixtures';
+import { expect, mainMenu, signIn, test } from './support/fixtures';
 
 test('an owner signs in through the SSO and lands on the dashboard', async ({ page }) => {
   await signIn(page, OWNER_EMAIL);
@@ -25,7 +25,7 @@ test('an unknown email waits for approval', async ({ page }) => {
 test('a role without Customer view sees no customers menu, and the API refuses', async ({ page }) => {
   await signIn(page, STAFF_EMAIL);
   await expect(page).toHaveURL(`${APP_ORIGIN}/jobs/dashboard`);
-  const nav = page.getByRole('navigation');
+  const nav = await mainMenu(page);
   await expect(nav.getByRole('button', { name: 'ข้อมูลงานบริการ' })).toBeVisible();
   await expect(nav.getByRole('button', { name: 'ข้อมูลลูกค้า' })).toHaveCount(0);
   expect((await page.request.get('/api/data/customers')).status()).toBe(403);

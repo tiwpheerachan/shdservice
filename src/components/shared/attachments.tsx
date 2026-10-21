@@ -7,7 +7,7 @@ import { TableScroll } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { api, del, errMsg } from '@/lib/api';
+import { del, errMsg, upload as send } from '@/lib/api';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useAccess } from '@/lib/use-access';
 
@@ -50,16 +50,13 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   // files queued for a job not saved yet are an unsaved edit (they upload with the job)
   useUnsavedChanges(rows.some((r) => r.pending));
 
-  const upload = async (target: string, f: File, remark: string) => {
-    const fd = new FormData();
-    fd.append('file', f);
-    fd.append('jobNo', target);
-    fd.append('remark', remark);
-    return api<{ row: { id: number; name: string; file: string; remark: string } }>('/api/attachments', {
-      method: 'POST',
-      body: fd,
-    });
-  };
+  // shrunk photo, progress, "ลองอีกครั้ง" on a failure (the file is kept) — lib/api upload
+  const upload = (target: string, f: File, remark: string) =>
+    send<{ row: { id: number; name: string; file: string; remark: string } }>(
+      '/api/attachments',
+      { jobNo: target, remark },
+      f,
+    );
 
   React.useImperativeHandle(ref, () => ({
     uploadPending: async (target: string) => {
@@ -140,7 +137,10 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
             type="file"
             className="hidden"
             accept=".pdf,.jpg,.jpeg,.png,.webp"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              e.target.value = ''; // the same file can be chosen again
+            }}
           />
         </label>
         <Input

@@ -76,6 +76,19 @@
         ],
         "summary": "Attach a file to a job",
         "description": "Job Management edit. Stored under jobs/{jobNo}/ in Supabase Storage; images / PDF up to 10 MB (checked against the bytes).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none."
+            },
+            "required": false,
+            "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none.",
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -192,7 +205,7 @@
             }
           },
           "409": {
-            "description": "The job is deleted (cancelled) — nothing is stored.",
+            "description": "The job is deleted (cancelled) — nothing is stored; or the same Idempotency-Key is still running.",
             "content": {
               "application/json": {
                 "schema": {
@@ -213,6 +226,16 @@
           },
           "415": {
             "description": "Not an allowed file type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used for a different route.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14387,6 +14410,13 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "maintenance": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ],
+                      "description": "present while MAINTENANCE_MODE=1 (every other path answers 503)"
                     },
                     "hasDatabaseUrl": {
                       "type": "boolean"

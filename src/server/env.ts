@@ -52,6 +52,16 @@ export function envProblems(): { required: string[]; optional: string[] } {
   if ((env.SMS_PROVIDER ?? '').trim() === 'log') optional.push('SMS_PROVIDER=log — OTP refused in production');
   if (!has('THAIBULKSMS_OTP_KEY') || !has('THAIBULKSMS_OTP_SECRET'))
     optional.push('THAIBULKSMS_OTP_KEY/SECRET missing — OTP tracking closed');
+  // MAINTENANCE_MODE=1 (+ optional MAINTENANCE_UNTIL, MAINTENANCE_BYPASS_SECRET) — src/lib/maintenance.ts
+  if ((env.MAINTENANCE_MODE ?? '').trim() === '1') {
+    optional.push(
+      'MAINTENANCE_MODE=1 — every page and API answers 503 (ระบบปิดปรับปรุง); unset it and redeploy to open',
+    );
+    if ((env.MAINTENANCE_BYPASS_SECRET ?? '').trim().length < 16)
+      optional.push(
+        'MAINTENANCE_BYPASS_SECRET missing or under 16 characters — nobody can check the system before opening',
+      );
+  }
   if (mode === 'log' || mode === 'off')
     optional.push(`ORIGIN_AUTH_MODE=${mode} — requests around Cloudflare are not refused`);
   return { required, optional };

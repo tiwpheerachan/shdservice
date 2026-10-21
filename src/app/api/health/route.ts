@@ -6,6 +6,7 @@ import { appUser } from '@/db/schema';
 import { ownerEmails } from '@/lib/access';
 import { userFromRequest, checked } from '@/server/auth';
 import { logError, scrubText } from '@/lib/log';
+import { maintenanceOn } from '@/lib/maintenance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,21 +29,24 @@ const migrations = pgSchema('drizzle').table('__drizzle_migrations', { hash: var
  * Always HTTP 200, with the verdict in the body ({"ok":false}): Render's health check
  * restarts an instance that fails, and restarting the web service does not fix
  * Supabase — it only turns a degraded site into no site (OneLink, same reason).
- * An uptime monitor asserts on the body instead.
+ * An uptime monitor asserts on the body instead. MAINTENANCE_MODE=1 adds `maintenance: true` (the proxy, which
+ * answers every other path 503 then, never sees this one).
  */
 export const GET = checked(async (request: NextRequest) => {
   // anonymous callers (uptime checks) get only up/down — config and counts are for System Admin
   const me = await userFromRequest(request).catch(() => null);
+  const maint = maintenanceOn() ? { maintenance: true } : {};
   if (!me?.isAdmin) {
     try {
       await db.select({ id: appUser.userId }).from(appUser).limit(1);
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, ...maint });
     } catch (e) {
       logError(e, 'health: database unreachable', {}, request);
-      return NextResponse.json({ ok: false });
+      return NextResponse.json({ ok: false, ...maint });
     }
   }
   const out: Record<string, unknown> = {
+    ...maint,
     hasDatabaseUrl: !!process.env.DATABASE_URL,
     hasCentralApiKey: !!process.env.CENTRAL_API_KEY,
     hasSsoClientSecret: !!process.env.SSO_CLIENT_SECRET,

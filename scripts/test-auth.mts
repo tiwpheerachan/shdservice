@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { safeNext, DEFAULT_AFTER_LOGIN } from '../src/lib/sso.ts';
 import { safePath } from '../src/lib/log.ts';
 import { hostCookie, SESSION_COOKIE } from '../src/lib/session.ts';
+import { NextRequest } from 'next/server';
+import { proxy } from '../src/proxy.ts';
+import { BYPASS_COOKIE } from '../src/lib/maintenance.ts';
+import { THEME_SCRIPT } from '../src/lib/theme-script-source.ts';
 
 const D = DEFAULT_AFTER_LOGIN;
 const cases: [string | null | undefined, string][] = [
@@ -123,6 +127,96 @@ console.log(`  checked ${handlers} handlers in ${routes.length} route files`);
 if (handlers < 40) {
   failed++;
   console.log(`  ✗ only ${handlers} handlers found — did the route layout change?`);
+}
+
+console.log('\nMaintenance mode (src/proxy.ts → src/lib/maintenance.ts)');
+{
+  const env = process.env as Record<string, string | undefined>;
+  const SECRET = 'a'.repeat(15) + 'Z';
+  const req = (path: string, cookie?: string) =>
+    proxy(new NextRequest(`https://app.example${path}`, { headers: cookie ? { cookie } : {} }));
+  const check = async (name: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+      console.log(`  ✓ ${name}`);
+    } catch (e) {
+      failed++;
+      console.log(`  ✗ ${name}: ${(e as Error).message}`);
+    }
+  };
+  try {
+    env.MAINTENANCE_MODE = '1';
+    env.MAINTENANCE_UNTIL = '21 ต.ค. <18:00>';
+    env.MAINTENANCE_BYPASS_SECRET = SECRET;
+    for (const path of ['/', '/jobs/list', '/track/AbC123', '/login']) {
+      await check(`${path} → 503 Thai page, no-store, Retry-After, script only by hash`, async () => {
+        const res = await req(path);
+        assert.equal(res.status, 503);
+        assert.equal(res.headers.get('cache-control'), 'no-store');
+        assert.ok(Number(res.headers.get('retry-after')) > 0);
+        const html = await res.text();
+        assert.match(html, /ระบบปิดปรับปรุง/);
+        assert.match(html, /กรุณากลับมาใหม่ภายหลัง/);
+        assert.match(html, /02-100-4578/);
+        assert.match(html, /21 ต\.ค\. &lt;18:00&gt;/, 'MAINTENANCE_UNTIL shown, escaped');
+        assert.ok(html.includes(`<script>${THEME_SCRIPT}</script>`), 'theme script byte for byte');
+        assert.equal(html.match(/<script/g)?.length, 1, 'no other script');
+        const csp = res.headers.get('content-security-policy') ?? '';
+        assert.match(csp, /script-src 'sha256-[^']+';/);
+        assert.doesNotMatch(csp, /script-src[^;]*unsafe/);
+      });
+    }
+    for (const path of ['/api/jobs', '/api/sso/login', '/api/track/session']) {
+      await check(`${path} → 503 JSON`, async () => {
+        const res = await req(path);
+        assert.equal(res.status, 503);
+        assert.ok(res.headers.get('retry-after'));
+        assert.match(((await res.json()) as { error: string }).error, /^ระบบปิดปรับปรุง/);
+      });
+    }
+    await check('wrong / short secret → still 503, no cookie', async () => {
+      for (const v of [SECRET.slice(0, -1) + 'Y', SECRET + 'x', '']) {
+        const res = await req(`/?maintenance_bypass=${v}`);
+        assert.equal(res.status, 503);
+        assert.equal(res.headers.get('set-cookie'), null);
+      }
+      const res = await req('/jobs/list', `${BYPASS_COOKIE}=${SECRET.slice(0, -1)}Y`);
+      assert.equal(res.status, 503);
+      env.MAINTENANCE_BYPASS_SECRET = 'short-secret';
+      assert.equal((await req('/?maintenance_bypass=short-secret')).status, 503, 'under 16 chars never opens');
+      env.MAINTENANCE_BYPASS_SECRET = SECRET;
+    });
+    await check('right secret → redirect without it + HttpOnly SameSite=Lax cookie', async () => {
+      const res = await req(`/jobs/list?x=1&maintenance_bypass=${SECRET}`);
+      assert.equal(res.status, 307);
+      assert.equal(res.headers.get('location'), 'https://app.example/jobs/list?x=1');
+      const c = res.headers.get('set-cookie') ?? '';
+      assert.ok(c.startsWith(`${BYPASS_COOKIE}=${SECRET};`), c);
+      assert.match(c, /HttpOnly/i);
+      assert.match(c, /SameSite=lax/i);
+      assert.match(c, /Path=\//);
+    });
+    await check('bypass cookie → the real app (login gate, CSP)', async () => {
+      const page = await req('/jobs/list', `${BYPASS_COOKIE}=${SECRET}`);
+      assert.equal(page.status, 307, 'no session → /login as usual');
+      assert.match(page.headers.get('location') ?? '', /\/login\?next=/);
+      const track = await req('/track/AbC123', `${BYPASS_COOKIE}=${SECRET}`);
+      assert.equal(track.status, 200);
+      assert.match(track.headers.get('content-security-policy') ?? '', /'nonce-/);
+    });
+    await check('MAINTENANCE_MODE unset → as before', async () => {
+      delete env.MAINTENANCE_MODE;
+      assert.equal((await req('/track/AbC123')).status, 200);
+      assert.equal((await req('/api/jobs')).status, 200);
+      assert.equal((await req('/jobs/list')).status, 307);
+      const res = await req(`/?maintenance_bypass=${SECRET}`);
+      assert.equal(res.headers.get('set-cookie'), null);
+    });
+  } finally {
+    delete env.MAINTENANCE_MODE;
+    delete env.MAINTENANCE_UNTIL;
+    delete env.MAINTENANCE_BYPASS_SECRET;
+  }
 }
 
 console.log(`\n${failed ? 'FAILED' : 'all passed'} (${failed} failed)`);

@@ -11,6 +11,10 @@ function apply(mode: ThemeMode) {
   const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.classList.toggle('dark', dark);
   document.documentElement.dataset.themeMode = mode;
+  // the browser bar follows the app's choice, not only the OS (layout.tsx viewport.themeColor)
+  document
+    .querySelectorAll('meta[name="theme-color"]')
+    .forEach((m) => m.setAttribute('content', dark ? '#0c111d' : '#f3f6f9'));
 }
 
 /**

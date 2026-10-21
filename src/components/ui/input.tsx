@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFieldControl } from './field';
+import { useUploading } from '@/lib/api';
 import { Checkbox as ShadcnCheckbox } from '@/components/shadcn/checkbox';
 
 const base =
@@ -34,11 +35,14 @@ export function FileInput({
 >) {
   const field = useFieldControl(props.id);
   const [name, setName] = React.useState('');
+  // one upload at a time: a second file picked while one is still going up would race it
+  const uploading = useUploading();
+  const busy = disabled || uploading;
   return (
     <label
       className={cn(
         'relative flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-within:border-primary focus-within:text-foreground',
-        disabled && 'pointer-events-none opacity-50',
+        busy && 'pointer-events-none opacity-50',
       )}
     >
       <Upload className="h-3.5 w-3.5 shrink-0" />
@@ -46,13 +50,14 @@ export function FileInput({
       <input
         type="file"
         className="sr-only"
-        disabled={disabled}
+        disabled={busy}
         {...props}
         {...field}
         onChange={(e) => {
           const f = e.target.files?.[0];
           setName(f?.name ?? '');
           onFile(f);
+          e.target.value = ''; // the same file can be chosen again (after a failed upload)
         }}
       />
     </label>

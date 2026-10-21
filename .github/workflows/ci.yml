@@ -90,8 +90,10 @@ jobs:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
 
   # Browser tests (playwright.config.ts): a production build in chromium against a throwaway
-  # postgres:17 and a fake SSO. Its own job so `check` stays fast. No env file is read and a
-  # non-local database is refused (tests/e2e/support/env.ts). (Modelled on OneLink.)
+  # postgres:17 and a fake SSO — every spec on a desktop, a phone (Pixel 7) and a tablet (iPad
+  # gen 7) viewport, ~40 s each after the build; all three are chromium (no WebKit: see the config).
+  # Its own job so `check` stays fast. No env file is read and a non-local database is refused
+  # (tests/e2e/support/env.ts). (Modelled on OneLink.)
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

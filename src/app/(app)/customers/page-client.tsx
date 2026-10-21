@@ -28,6 +28,7 @@ import {
 } from '@/components/shared/customer-form';
 import { api, postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form-errors';
 import { customerSchema } from '@/lib/validation/customer';
 import { useServerTable } from '@/lib/use-server-table';
@@ -51,6 +52,12 @@ function CustomersPageInner() {
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
   const fe = useFormErrors();
+  // typed into the dialog, not saved yet: a session running out keeps the page (sign in again in a new tab)
+  // instead of /login, and a link away asks first — as on every form
+  useUnsavedChanges(
+    () =>
+      open && !viewOnly && JSON.stringify(form) !== JSON.stringify(editing ? toCustomerForm(editing) : EMPTY_CUSTOMER),
+  );
 
   const openForm = (c: Customer | null, readOnly = false) => {
     setViewOnly(readOnly);

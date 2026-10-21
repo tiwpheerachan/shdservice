@@ -37,7 +37,7 @@
 2. ตารางที่ระบบใหม่สร้างเอง **ไม่ถูกลบ** และไม่มี FK ไปหาตารางเดิม: `job_symptom`, `track_*`, `idempotency_key`, `audit_log` (ลบไม่ได้ เพราะ trigger 0035 กันไว้), `document_profile`, `shipping_profile`
    → ถ้า dump ทับโปรเจกต์ Supabase เดิม แถวเก่าในตารางเหล่านี้จะไปผูกกับเลขงานหรือรหัสผู้ใช้ที่ตอนนี้เป็นของคนอื่นแล้ว
 3. migration รันตอน deploy ผ่าน Render `preDeployCommand: npm run db:migrate` แต่**ถ้า dump ทับโปรเจกต์เดิม Render จะไม่ยอมรัน** เพราะ journal บอกว่ารันแล้ว แต่ไม่มีคอลัมน์ `lark_id` → deploy ล้ม
-   ต้องรัน `ALLOW_PROD_DB=1 npm run db:migrate:reset` ด้วยมือ (dev ทำ) ระหว่างนั้นแอปตัวที่รันอยู่ใช้งานไม่ได้ จึงต้องปิด service ไว้ก่อน
+   ต้องรัน `ALLOW_PROD_DB=1 npm run db:migrate:reset` ด้วยมือ (dev ทำ) ระหว่างนั้นแอปตัวที่รันอยู่ใช้งานไม่ได้ จึงต้องเปิดโหมดปิดปรับปรุงไว้ก่อน (ขั้น 3)
 4. ไฟล์ที่อัปโหลดผ่านระบบใหม่เก็บไว้ที่ `jobs/{job_no}/…` ถ้าเลขงานถูกออกซ้ำหลัง dump ไฟล์จะไปโผล่ที่งานอื่น · ลิงก์ `/track` ที่ส่งให้ลูกค้าก่อน dump จะใช้ไม่ได้ (0012 สร้าง token ใหม่) · เอกสารที่พิมพ์จากระบบใหม่ก่อน dump จะมีเลขที่ไปซ้ำกับเอกสารใหม่
 
 👤 **ตัดสินใจ: โหลดเข้าที่ไหน**
@@ -74,7 +74,7 @@
 |---|---|---|---|
 | 1 | เจ้าของ | ประกาศหยุดใช้ระบบเก่า | |
 | 2 | ผู้ดูแลระบบเก่า | ตั้งระบบเก่าให้**อ่านอย่างเดียว** (`ALTER DATABASE SHDElectronicServiceDB SET READ_ONLY` หรือถอนสิทธิ์เขียนของ login ที่เว็บใช้) · จดเลขเอกสารล่าสุด J / Q / SO / WHI / WHO | ลองบันทึกในระบบเก่าแล้วต้องไม่ผ่าน |
-| 3 | dev | Render: Suspend service (กันคนเข้าใช้ และกัน auto-deploy) · ถ้าเลือก B: สั่ง backup โปรเจกต์ Supabase | |
+| 3 | dev | Render: เปิด**โหมดปิดปรับปรุง** (ดู "โหมดปิดปรับปรุง" ด้านล่าง) · ปิด Auto-Deploy (Settings → Auto-Deploy: Off) · ถ้าเลือก B: สั่ง backup โปรเจกต์ Supabase | เปิดหน้าใดก็ได้ / `/track` เห็น "ระบบปิดปรับปรุง" (HTTP 503) · `/api/health` มี `"maintenance":true` |
 | 4 | ผู้ดูแลระบบเก่า | backup `.bak` + SSMS Generate Scripts (data only + schema, UTF-16) → `setupdata/data.sql` · คัดลอก `FileUpload/` และ `ImagesProduct/` ชุดล่าสุด | |
 | 5 | dev | `python3 convert.py data.sql out` → ได้ `rowcounts.txt` ใหม่ · โหลดเข้า Postgres ชั่วคราว (ไม่ต้อง migrate) → `recon.sql` → `recon_legacy.txt` | ผลรวม rowcounts = จำนวน INSERT ใน data.sql |
 | 6 | dev | โหลดเข้าปลายทาง (`load_supabase.sh` ใช้ Session pooler port 5432 เท่านั้น) | สคริปต์เทียบ row count ผ่าน |
@@ -83,10 +83,19 @@
 | 9 | dev | `recon.sql` บนปลายทาง → `diff recon_legacy.txt recon_prod.txt` | ตามเกณฑ์ go / no-go |
 | 10 | dev | `npm run files:validate` → `npm run files:upload` → `validate` อีกรอบ | `uploadable = 0` |
 | 11 | เจ้าของ + dev | ผูกอีเมลผู้ใช้ที่เหลือ, ใส่สิทธิ์ที่จดไว้กลับ, ตรวจ `document_profile` / `shipping_profile` | `active_users_without_email` = 0 หรือเหลือแค่คนที่ยืนยันว่าไม่ใช้แล้ว |
-| 12 | dev | Resume Render · admin เปิด `/api/health` | DB ok, TZ = `Asia/Bangkok` |
-| 13 | หัวหน้าแผนก | ทดสอบเข้าใช้งาน และเปิดงาน / ใบเสนอราคา / ใบสั่งขาย / สต๊อกของแผนกตัวเองดู (**อย่าเพิ่งสร้างเอกสาร**) | ตัวเลขตรงกับระบบเก่า |
+| 12 | dev | admin เปิดลิงก์ bypass แล้วเปิด `/api/health` (ยังอยู่ในโหมดปิดปรับปรุง) | DB ok, TZ = `Asia/Bangkok` |
+| 13 | หัวหน้าแผนก | เปิดลิงก์ bypass ก่อน แล้วทดสอบเข้าใช้งาน และเปิดงาน / ใบเสนอราคา / ใบสั่งขาย / สต๊อกของแผนกตัวเองดู (**อย่าเพิ่งสร้างเอกสาร**) | ตัวเลขตรงกับระบบเก่า |
 | 14 | เจ้าของ | go / no-go | |
-| 15 | ทุกคน | เปิดใช้ · คีย์งานที่จดกระดาษไว้ระหว่างปิดระบบ | ดู "หลังเปิด" |
+| 15 | dev → ทุกคน | ลบ `MAINTENANCE_MODE` ใน Render → Save and deploy → เปิด Auto-Deploy คืน · เปิดใช้ · คีย์งานที่จดกระดาษไว้ระหว่างปิดระบบ | หน้าเว็บเปิดได้โดยไม่ใช้ bypass (ไม่ใช่ 503) · ดู "หลังเปิด" |
+
+### โหมดปิดปรับปรุง (`src/lib/maintenance.ts`)
+
+แทนการ Suspend: ทุกหน้า (รวม `/track` ของลูกค้า) ตอบ 503 พร้อมหน้า "ระบบปิดปรับปรุง" · ทุก `/api/*` ตอบ 503 JSON · `/api/health` ยังตอบ 200 (Render health check ผ่าน) · ไฟล์ static โหลดได้
+
+1. Render → Environment: `MAINTENANCE_MODE` = `1` · `MAINTENANCE_UNTIL` = เวลาที่คาดว่าจะเปิด เช่น `21 ต.ค. 18:00` (ไม่ใส่ก็ได้) · `MAINTENANCE_BYPASS_SECRET` = `openssl rand -hex 16` (อย่างน้อย 16 ตัว)
+2. **Save and deploy** — ค่า env มีผลหลัง deploy / restart เท่านั้น (รอ deploy เสร็จ ~ไม่กี่นาที)
+3. ทีมที่ต้องตรวจระบบก่อนเปิด: เปิด `https://<โดเมน>/?maintenance_bypass=<secret>` ครั้งเดียวต่อเบราว์เซอร์ → เข้าแอปจริงได้ 12 ชม. (cookie `__Host-os_maint`) · ส่ง secret ทางช่องทางส่วนตัวเท่านั้น
+4. เปิดระบบ: ลบ `MAINTENANCE_MODE` → Save and deploy · เปลี่ยน / ลบ `MAINTENANCE_BYPASS_SECRET` หลังใช้ (secret ผ่าน URL log มาแล้ว)
 
 ## เกณฑ์ go / no-go
 
@@ -164,7 +173,7 @@ ROLLBACK;
 
 ## แผนถอยกลับ
 
-- **ก่อนเปิดให้พนักงานใช้ (ขั้น 1–14):** no-go = ยังไม่มีใครเขียนข้อมูลในระบบใหม่ → ผู้ดูแลระบบเก่าเปิดสิทธิ์เขียนคืน (`SET READ_WRITE`) แล้วใช้ระบบเก่าต่อ · dev suspend Render · ถ้าเลือก B ให้กู้ backup จากขั้น 3
+- **ก่อนเปิดให้พนักงานใช้ (ขั้น 1–14):** no-go = ยังไม่มีใครเขียนข้อมูลในระบบใหม่ → ผู้ดูแลระบบเก่าเปิดสิทธิ์เขียนคืน (`SET READ_WRITE`) แล้วใช้ระบบเก่าต่อ · dev คงโหมดปิดปรับปรุงไว้ (หรือ suspend Render) · ถ้าเลือก B ให้กู้ backup จากขั้น 3
 - **หลังเปิดแล้ว:** ระบบเก่าเปิดค้างไว้แบบ**อ่านอย่างเดียว 👤 N วัน (แนะนำ 30 วัน)** เพื่อดูย้อนหลังและเทียบตัวเลข · ถอยกลับได้ถึง 👤 วันที่ … เท่านั้น
   - วิธีถอย: ดึงรายการเอกสารที่สร้างหลังเปิดจาก `audit_log` (`action IN ('CREATE','ISSUE','RECEIVE','APPROVE')` และ `at >=` เวลาเปิด) → คีย์กลับเข้าระบบเก่าด้วยมือ → เปิดสิทธิ์เขียนระบบเก่า
   - หลังวันที่กำหนด = ไม่ถอยแล้ว แก้ไปข้างหน้าอย่างเดียว · เก็บ `.bak` ชุดสุดท้ายไว้อย่างน้อย 👤 1 ปี

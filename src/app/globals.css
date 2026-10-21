@@ -1,7 +1,14 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* screen only: printing from dark mode prints the light palette (dark text on white paper) */
+@custom-variant dark {
+  @media screen {
+    &:where(.dark, .dark *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --color-background: hsl(var(--background));
@@ -34,7 +41,7 @@
 
   /* shadcn token names mapped onto the app palette (raw shadcn components in
      components/shadcn use these; the app kit in components/ui uses the names above) */
-  --color-popover: hsl(var(--card));
+  --color-popover: hsl(var(--popover));
   --color-popover-foreground: hsl(var(--card-foreground));
   --color-secondary: hsl(var(--muted));
   --color-secondary-foreground: hsl(var(--foreground));
@@ -131,6 +138,7 @@
     --foreground: 222 47% 12%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 12%;
+    --popover: 0 0% 100%; /* = card; dark lifts it off the card it opens over */
     --muted: 210 24% 95%;
     --muted-foreground: 215 16% 42%; /* 5.0:1 on muted, 5.7:1 on card */
     --border: 214 22% 89%;
@@ -156,44 +164,49 @@
     /* light-mode sidebar: clean, elevated white panel that matches the theme */
     --sidebar: 0 0% 100%;
     --sidebar-foreground: 222 40% 20%;
-    --sidebar-muted: 215 16% 48%;
+    --sidebar-muted: 215 16% 42%; /* 5.7:1 on the sidebar (48% was 3.9:1 for the menu counts) */
     --sidebar-accent: 214 32% 95%;
     --sidebar-border: 214 22% 90%;
   }
 
-  .dark {
-    --background: 222 40% 8%;
-    --foreground: 210 25% 94%;
-    --card: 222 34% 11%;
-    --card-foreground: 210 25% 94%;
-    --muted: 220 26% 16%;
-    --muted-foreground: 215 18% 62%;
-    --border: 218 24% 20%;
-    --input: 218 14% 46%; /* ≥ 3:1 on card / background / muted */
-    --ring: 213 94% 68%;
+  /* screen only — print keeps the light palette above (paper is white, backgrounds are not printed) */
+  @media screen {
+    .dark {
+      color-scheme: dark; /* native controls: radios, date pickers, select menus, scrollbars */
+      --background: 222 40% 8%;
+      --foreground: 210 25% 94%;
+      --card: 222 34% 11%;
+      --card-foreground: 210 25% 94%;
+      --popover: 222 32% 14%;
+      --muted: 220 26% 16%;
+      --muted-foreground: 215 18% 62%;
+      --border: 218 24% 24%; /* card edges / row dividers visible on the dark surfaces */
+      --input: 218 14% 46%; /* ≥ 3:1 on card / background / muted */
+      --ring: 213 94% 68%;
 
-    /* lighter than light mode's: text-primary on primary-soft 5.9:1 (solid buttons carry dark text) */
-    --primary: 213 94% 68%;
-    --primary-foreground: 222 47% 8%;
-    --primary-soft: 220 45% 18%;
-    --accent: 220 26% 17%;
-    --accent-foreground: 210 25% 94%;
+      /* lighter than light mode's: text-primary on primary-soft 5.9:1 (solid buttons carry dark text) */
+      --primary: 213 94% 68%;
+      --primary-foreground: 222 47% 8%;
+      --primary-soft: 220 45% 18%;
+      --accent: 220 26% 17%;
+      --accent-foreground: 210 25% 94%;
 
-    --success: 152 55% 50%;
-    --success-soft: 152 40% 15%;
-    --warning: 38 92% 58%;
-    --warning-soft: 36 45% 16%;
-    --danger: 0 85% 70%; /* on danger-soft 5.5:1; solid danger/success carry dark text (white fails) */
-    --danger-soft: 0 45% 17%;
-    --info: 199 90% 58%;
-    --info-soft: 199 45% 16%;
+      --success: 152 55% 50%;
+      --success-soft: 152 40% 15%;
+      --warning: 38 92% 58%;
+      --warning-soft: 36 45% 16%;
+      --danger: 0 85% 70%; /* on danger-soft 5.5:1; solid danger/success carry dark text (white fails) */
+      --danger-soft: 0 45% 17%;
+      --info: 199 90% 58%;
+      --info-soft: 199 45% 16%;
 
-    /* dark-mode sidebar: slightly elevated panel, distinct from the app bg */
-    --sidebar: 222 34% 11%;
-    --sidebar-foreground: 213 28% 88%;
-    --sidebar-muted: 215 16% 58%;
-    --sidebar-accent: 220 26% 17%;
-    --sidebar-border: 218 24% 18%;
+      /* dark-mode sidebar: slightly elevated panel, distinct from the app bg */
+      --sidebar: 222 34% 11%;
+      --sidebar-foreground: 213 28% 88%;
+      --sidebar-muted: 215 16% 58%;
+      --sidebar-accent: 220 26% 17%;
+      --sidebar-border: 218 24% 22%;
+    }
   }
 
   * {
@@ -265,12 +278,8 @@
   input[type='date']::-webkit-calendar-picker-indicator,
   input[type='datetime-local']::-webkit-calendar-picker-indicator,
   input[type='time']::-webkit-calendar-picker-indicator {
-    filter: invert(var(--cal-invert, 0));
-    opacity: 0.6;
+    opacity: 0.6; /* dark: color-scheme draws it light */
     cursor: pointer;
-  }
-  .dark {
-    --cal-invert: 1;
   }
 }
 

@@ -157,9 +157,13 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
   await page.goto(`/jobs/repair?job=${no}`);
   await expect(page.getByRole('textbox', { name: /^ชื่อลูกค้า/ })).toHaveValue(name);
   await expect(page.getByRole('textbox', { name: /^Serial No\./ })).toHaveValue(`SN-${no}`);
+  // the part line: a table row from md up, a card (list item) on a phone — only one of them is shown
   const parts = page.getByRole('region', { name: 'รายการอะไหล่' });
-  await expect(parts.getByRole('row', { name: new RegExp(part.code) })).toContainText('1,500.00');
-  await expect(parts.getByLabel(`จำนวน แบบ A ${part.code}`)).toHaveValue('1');
+  const line = parts
+    .getByRole('row', { name: new RegExp(part.code) })
+    .or(page.getByRole('listitem').filter({ hasText: part.code }));
+  await expect(line).toContainText('1,500.00');
+  await expect(line.getByLabel(`จำนวน แบบ A ${part.code}`)).toHaveValue('1');
   await expect(page.getByRole('link', { name: file })).toBeVisible();
   await expect(page.getByText(hint, { exact: true })).toBeVisible();
   await page.waitForLoadState('networkidle');

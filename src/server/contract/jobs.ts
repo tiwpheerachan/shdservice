@@ -329,8 +329,10 @@ export const attachmentAdd = defineOperation({
       .transform((v) => String(v ?? '').slice(0, 200))
       .meta({ type: 'string', description: 'Read up to 200 characters (the rest is dropped).' }),
   }),
-  invalid: { form: 400 },
+  headers: IDEMPOTENCY.headers,
+  invalid: { form: 400, ...IDEMPOTENCY.invalid },
   responses: {
+    ...IDEMPOTENCY.responses,
     200: jsonResponse(
       'Stored.',
       z.object({
@@ -341,7 +343,9 @@ export const attachmentAdd = defineOperation({
     ...SIGNED_IN,
     400: errorResponse('Not multipart/form-data, or no file.'),
     ...notFound('No such job.'),
-    409: errorResponse('The job is deleted (cancelled) — nothing is stored.'),
+    409: errorResponse(
+      'The job is deleted (cancelled) — nothing is stored; or the same Idempotency-Key is still running.',
+    ),
     413: errorResponse('File over 10 MB.'),
     415: errorResponse('Not an allowed file type.'),
     ...RATE_LIMITED,

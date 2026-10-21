@@ -292,7 +292,10 @@ function PartImage({
             className="hidden"
             accept="image/jpeg,image/png,image/webp"
             disabled={!code || uploading}
-            onChange={(e) => onPick(e.target.files?.[0])}
+            onChange={(e) => {
+              onPick(e.target.files?.[0]);
+              e.target.value = ''; // the same file can be chosen again
+            }}
           />
         </label>
       )}

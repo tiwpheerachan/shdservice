@@ -125,7 +125,7 @@ function kpiHref(g: { sub: string; label: string }, from: string, to: string, ty
 }
 /** a clickable TAT count — zero stays a quiet dash */
 function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
-  if (!n) return <span className="text-muted-foreground/30">–</span>;
+  if (!n) return <span className="text-muted-foreground">–</span>;
   return (
     <Link
       href={href}

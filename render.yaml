@@ -100,3 +100,15 @@ services:
       # migrations have run by then). Optional features only warn. Log line "env check …" lists them.
       - key: ENV_STRICT
         value: '1'
+      # ── maintenance mode (src/lib/maintenance.ts, ops/cutover.md) — leave unset normally ──
+      # 1 = every page and /api/* answers 503 "ระบบปิดปรับปรุง" (/api/health keeps answering, + maintenance: true).
+      # Render applies an env change only on the next deploy / restart ("Save and deploy").
+      - key: MAINTENANCE_MODE
+        sync: false
+      # optional text on the page, e.g. "21 ต.ค. 18:00"
+      - key: MAINTENANCE_UNTIL
+        sync: false
+      # optional, >= 16 chars (openssl rand -hex 16): https://<host>/?maintenance_bypass=<secret> lets that
+      # browser into the real app for 12 h. Change it after each use (it passes through URL logs once).
+      - key: MAINTENANCE_BYPASS_SECRET
+        sync: false

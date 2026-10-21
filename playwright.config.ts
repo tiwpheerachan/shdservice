@@ -34,7 +34,15 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // every spec on a desktop, a phone and a tablet (touch, the sidebar behind เปิดเมนู below lg) — all chromium:
+  // WebKit drops the app's Secure __Host- cookies over http://127.0.0.1, so it cannot sign in here; a shim would
+  // rewrite every cookie and redirect — what auth.spec checks. WebKit needs the app over https first.
+  // Desktop only: `npm run e2e -- --project=chromium`.
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'phone', use: { ...devices['Pixel 7'] } },
+    { name: 'tablet', use: { ...devices['iPad (gen 7)'], defaultBrowserType: 'chromium' } },
+  ],
   webServer: [
     {
       command: 'npx tsx tests/e2e/support/fake-sso.ts',

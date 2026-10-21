@@ -33,6 +33,28 @@ export function sessionExpired() {
   if (typeof window !== 'undefined' && !signingOut) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 
+// writes refused for an expired session (lib/api authedFetch), waiting for the dialog's answer
+let signIn: { promise: Promise<boolean>; resolve: (ok: boolean) => void } | null = null;
+/** a write got its final 401: the dialog opens and the write waits — true = signed in again and บันทึกอีกครั้ง
+ *  (the write is sent again), false = the dialog was closed (the save fails; pressing บันทึก later asks again) */
+export function waitForSignIn(): Promise<boolean> {
+  if (!signIn) {
+    let resolve!: (ok: boolean) => void;
+    const promise = new Promise<boolean>((r) => (resolve = r));
+    signIn = { promise, resolve };
+  }
+  const { promise } = signIn;
+  sessionExpired();
+  return promise;
+}
+/** a save is waiting in the session-expired dialog */
+export const waitingForSignIn = () => !!signIn;
+/** the dialog's answer to every waiting write */
+export function signedInAgain(ok: boolean) {
+  signIn?.resolve(ok);
+  signIn = null;
+}
+
 // the user's last press, and the in-app link it was on: the press itself renews the session (SessionTimer, on
 // pointerdown), so its 401 comes back while the tab still shows the page the link is leaving
 let pressed: { to: string | null; at: number } | null = null;
@@ -54,7 +76,7 @@ if (typeof window !== 'undefined')
  *  user was opening when the 401 hit: the link pressed in the last few seconds, or this page after any other
  *  press (a button, a search); without a press, this page after an idle expiry (filters included) — but none
  *  when signed out on another device: this tab's page is stale, the sign-in lands on the role's landing page.
- *  A form with unsaved edits is never thrown away for it: the dialog instead (sessionExpired).
+ *  A form with unsaved edits, or a save waiting for the sign-in, is never thrown away for it: the dialog instead.
  *  `signedOut` (ออกจากระบบ in another tab — /api/sso/me says so): ALWAYS /login?bye=1, no `next`, no dialog —
  *  the user left on purpose, and the next person must not sign in into this tab's page / typed data.
  *  `reason` = the 401's `reason` from /api/sso/me or /refresh: 'elsewhere' (signed out on another device)
@@ -62,7 +84,7 @@ if (typeof window !== 'undefined')
 export function toLogin(opts: { signedOut?: boolean; reason?: string } = {}) {
   if (typeof window === 'undefined' || signingOut) return;
   if (opts.signedOut) return hardNavigate('/login?bye=1');
-  if (hasUnsavedChanges()) return sessionExpired();
+  if (hasUnsavedChanges() || signIn) return sessionExpired(); // typed data / a save waiting: the page stays
   const here = window.location.pathname + window.location.search;
   const next =
     pressed && Date.now() - pressed.at < 5000 ? (pressed.to ?? here) : opts.reason === 'elsewhere' ? '' : here;

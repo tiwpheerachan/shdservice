@@ -4,6 +4,15 @@ import { originAuthMode, originAuthOk, originAuthSecret } from '@/lib/origin-aut
 import { THEME_SCRIPT } from '@/lib/theme-script-source';
 import { appOrigin } from '@/lib/sso';
 import { log, safePath } from '@/lib/log';
+import {
+  BYPASS_COOKIE,
+  BYPASS_PARAM,
+  MAINTENANCE_ERROR,
+  RETRY_AFTER_S,
+  bypassOk,
+  maintenanceHtml,
+  maintenanceOn,
+} from '@/lib/maintenance';
 
 // Proxy (Next 16's name for middleware; always the Node.js runtime). It only
 // checks that a session cookie is PRESENT — the real verification (signature,
@@ -14,6 +23,7 @@ import { log, safePath } from '@/lib/log';
 // It runs on EVERY path except /api/health, in these steps:
 //   1. origin guard  — the request must come through Cloudflare (X-Origin-Auth)
 //      + CSRF: cookie-carrying /api writes from another site are refused
+//   1b. maintenance  — MAINTENANCE_MODE=1: 503 page / JSON unless the browser has the bypass cookie
 //   2. CSP           — every page gets a per-request nonce CSP (withCsp); /track adds Turnstile
 //      and its no-store / no-referrer headers
 //   3. login gate    — the old matcher's pages need a session cookie
@@ -114,8 +124,47 @@ async function withCsp(request: NextRequest, track: boolean): Promise<NextRespon
   return res;
 }
 
+/**
+ * MAINTENANCE_MODE=1 (src/lib/maintenance.ts): 503 for everyone without the bypass cookie — a JSON error on
+ * /api/*, the self-contained Thai page elsewhere (its CSP allows only the theme script, by hash).
+ * ?maintenance_bypass=<secret> sets the cookie and redirects to the same URL without the secret.
+ */
+async function maintenance(request: NextRequest): Promise<NextResponse | null> {
+  if (!maintenanceOn()) return null;
+  const url = request.nextUrl;
+  const given = url.searchParams.get(BYPASS_PARAM);
+  if (bypassOk(given)) {
+    const to = url.clone();
+    to.searchParams.delete(BYPASS_PARAM);
+    const res = NextResponse.redirect(to);
+    res.headers.set('Cache-Control', 'no-store');
+    res.cookies.set(BYPASS_COOKIE, given!, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 12 * 60 * 60,
+    });
+    return res;
+  }
+  if (bypassOk(request.cookies.get(BYPASS_COOKIE)?.value)) return null;
+  const headers = { 'Cache-Control': 'no-store', 'Retry-After': String(RETRY_AFTER_S) };
+  if (/^\/api(?:\/|$)/.test(url.pathname))
+    return NextResponse.json({ error: MAINTENANCE_ERROR }, { status: 503, headers });
+  return new NextResponse(request.method === 'HEAD' ? null : maintenanceHtml(), {
+    status: 503,
+    headers: {
+      ...headers,
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': `default-src 'none'; script-src ${await themeScriptHash()}; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      'X-Robots-Tag': 'noindex, nofollow',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 export async function proxy(request: NextRequest) {
-  const blocked = guard(request);
+  const blocked = guard(request) ?? (await maintenance(request));
   if (blocked) return blocked;
   if (crossSiteWrite(request)) {
     log.warn('cross_site_write_refused', {

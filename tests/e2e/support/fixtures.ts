@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import { APP_ORIGIN, SSO_ORIGIN } from './env';
 
 /** Signs in the way a person does: /login → the SSO button → the (fake) SSO form → back to the app. */
@@ -15,6 +15,16 @@ export async function signIn(page: Page, email: string, loginUrl = '/login'): Pr
 export async function switchUser(page: Page, email: string): Promise<void> {
   await page.context().clearCookies();
   await signIn(page, email);
+}
+
+/** The sidebar's เมนูหลัก. Below lg (phones, a portrait tablet) it is a drawer behind the topbar's เปิดเมนู: opened. */
+export async function mainMenu(page: Page): Promise<Locator> {
+  const menu = page.getByRole('navigation', { name: 'เมนูหลัก' });
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole('button', { name: 'เปิดเมนู' }).click();
+    await expect(page.getByRole('dialog', { name: 'เมนู' })).toBeVisible();
+  }
+  return menu;
 }
 
 /**

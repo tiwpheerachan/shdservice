@@ -12,7 +12,7 @@ import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Checkbox } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { postJson, del, errMsg, uploadFile } from '@/lib/api';
+import { postJson, del, errMsg, uploadFile, useUploading } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { shippingProfileSchema } from '@/lib/validation/admin';
@@ -40,6 +40,7 @@ export default function ShippingProfilesPage() {
   const [form, setForm] = React.useState<FormValues>(EMPTY);
   const [saving, setSaving] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  const uploading = useUploading(); // the logo is still going up — no second one meanwhile
   const [pendingLogo, setPendingLogo] = React.useState<File | null>(null);
   const pendingUrl = React.useMemo(() => (pendingLogo ? URL.createObjectURL(pendingLogo) : ''), [pendingLogo]);
   React.useEffect(
@@ -300,7 +301,13 @@ export default function ShippingProfilesPage() {
                 className="hidden"
                 onChange={(e) => void onLogo(e.target.files?.[0])}
               />
-              <Button variant="outline" size="sm" type="button" onClick={() => fileRef.current?.click()}>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+              >
                 <Upload className="h-3.5 w-3.5" />
                 {editing ? 'อัปโหลดโลโก้' : pendingLogo ? 'เปลี่ยนไฟล์' : 'เลือกโลโก้'}
               </Button>

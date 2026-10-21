@@ -30,7 +30,7 @@ export default async function TrackLayout({ children }: { children: React.ReactN
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3.5">
           {/* width/height = the default logo's ratio (1252×320 at 32 px): its box is reserved before it loads */}
-          <img src={co.logoUrl} alt="" width={125} height={32} className="h-8 w-auto" />
+          <img src={co.logoUrl} alt="" width={125} height={32} className="h-8 w-auto dark:rounded-md" />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-sm font-semibold">{co.nameTh}</p>
             <p className="truncate text-2xs text-muted-foreground">ติดตามสถานะงานซ่อม</p>
