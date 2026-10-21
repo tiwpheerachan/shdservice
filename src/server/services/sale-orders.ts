@@ -6,8 +6,8 @@ import { AS, CONDITION_ID, ITEM_UNIT, STORE_LOCATION_ID } from '@/lib/status-ids
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, approveStatus, product, productNoneSerial, saleOutDt, saleOutHd } from '@/db/schema';
 import type { SaleOrder } from '@/data/types';
-import { HttpError, fullName, hasRight, rolesWithRight, type CurrentUser } from '@/server/auth';
-import { ADMIN_USER_TYPE } from '@/lib/modules';
+import { HttpError, fullName, grantsForUserType, hasRight, rolesWithRight, type CurrentUser } from '@/server/auth';
+import { ADMIN_USER_TYPE, checkGrant } from '@/lib/modules';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
@@ -76,7 +76,7 @@ function toSaleOrder(r: ListRow): SaleOrder {
     customer: r.customer ?? '',
     amount: num(r.amount),
     sales: fullName(r.salesFirst, r.salesLast),
-    approve: approveLabel(r.approve),
+    approve: r.status === RS.DELETED ? 'ยกเลิก' : approveLabel(r.approve), // list, export and filters alike
     stockDoc: r.stockDoc ?? '',
     tracking: r.tracking ?? '',
     approveId: r.approveId ?? 0,
@@ -228,7 +228,11 @@ export type SaleOrderDetail = SaleOrder & {
     subDistrict: string;
     district: string;
     province: string;
+    /** the customer's status now — an Inactive one gets the picker's notice on the form */
+    status: string;
   };
+  /** why it was cancelled (document_cancel_remark) */
+  cancelRemark: string;
   lines: SaleOrderLine[];
   totalBase: number;
   fee: number;
@@ -319,7 +323,9 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       subDistrict,
       district,
       province,
+      status: cust?.status ?? 'Active',
     },
+    cancelRemark: hd.documentCancelRemark ?? '',
     lines: dts.map(({ d, name }) => ({
       id: d.saleOutDtId,
       listNo: d.listNo ?? 0,
@@ -357,6 +363,13 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
  */
 export type SaleOrderInput = z.output<typeof saleOrderSave.body>;
 
+/** may be named พนักงานขาย: the user's role has Sale Order add, or is System Admin */
+async function sells(userId: number) {
+  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, userId)).limit(1);
+  const t = u?.t?.trim() || null;
+  return t === ADMIN_USER_TYPE || checkGrant(false, await grantsForUserType(t), 'Sale Order', 'add');
+}
+
 export async function saveSaleOrder(
   i: SaleOrderInput,
   by: Pick<CurrentUser, 'userId' | 'isAdmin'>,
@@ -381,6 +394,11 @@ export async function saveSaleOrder(
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
   const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
+  // … whose role sells (Sale Order add) or System Admin — the form lists the same (listStaff `sells`)
+  if (salesId !== cur?.salesId && !(await sells(salesId)))
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
+      fields: { salesId: 'พนักงานคนนี้ไม่มีสิทธิ์เพิ่มใบสั่งขาย' },
+    });
   const lines = i.lines ?? []; // never empty here: saleOrderSchema asks for a line
   const codes = lines.map((l) => str(l.code)).filter(Boolean);
   const prods = await db
@@ -392,6 +410,7 @@ export async function saveSaleOrder(
       capital: productNoneSerial.capitalPrice,
       wholesale: productNoneSerial.wholesalePrice,
       itemId: productNoneSerial.itemId,
+      status: product.recordStatus,
     })
     .from(product)
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
@@ -440,6 +459,10 @@ export async function saveSaleOrder(
       ) {
         return { kept: true, row: { ...o, saleOutDtId: undefined } };
       }
+      // a deleted / Inactive product is not sold any more — an old order's unchanged line (above) keeps it
+      if (l.p?.status === RS.DELETED) throw new HttpError(400, `รหัสสินค้า ${l.code} ถูกลบแล้ว — เลือกสินค้าอื่น`);
+      if (l.p?.status === RS.INACTIVE)
+        throw new HttpError(400, `รหัสสินค้า ${l.code} ปิดใช้งาน (Inactive) — เลือกสินค้าอื่น`);
       return {
         kept: false,
         row: {
@@ -502,9 +525,10 @@ export async function saveSaleOrder(
     };
     if (no && prev) {
       if (prev.recordStatus === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} แก้ไขไม่ได้`);
-      assertVersion(i.version, versionOf(prev.rowVersion, old));
+      // final states before the version: a save that lost to the approval says so, not "someone edited it"
       if (prev.approveStatusId === AS.APPROVED) throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว แก้ไขไม่ได้');
       if (prev.approveStatusId === AS.DENIED) throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว แก้ไขไม่ได้');
+      assertVersion(i.version, versionOf(prev.rowVersion, old));
       // only the creator sends it for approval (else an approver submits someone's draft and approves it)
       const own = by.isAdmin || prev.documentCreateBy === byUserId;
       // … and only the creator edits it while it waits: an approver could change it (the salesperson, a
@@ -621,6 +645,12 @@ export async function approveSaleOrder(
     if (hd.approveStatusId === AS.APPROVED) throw new HttpError(409, 'อนุมัติไปแล้ว');
     if (hd.approveStatusId === AS.DENIED)
       throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว อนุมัติหรือเปลี่ยนสถานะไม่ได้');
+    // sent back while this decision was on screen (another approver was first) — say what it is now
+    if (hd.approveStatusId === AS.REJECT)
+      throw new HttpError(
+        409,
+        'ใบสั่งขายถูกส่งกลับแก้ไขไปแล้ว (มีผู้ดำเนินการก่อน) — รอผู้สร้างแก้ไขแล้วส่งขออนุมัติใหม่',
+      );
     if (hd.approveStatusId !== AS.WAIT)
       throw new HttpError(409, 'ใบสั่งขายยังไม่ได้ส่งขออนุมัติ — ผู้สร้างต้องบันทึกแบบ "ส่งขออนุมัติ" ก่อน');
     assertVersion(version, versionOf(hd.rowVersion, await linesOf(tx, no)));
@@ -666,27 +696,40 @@ export async function approveSaleOrder(
   return (await getSaleOrder(no))!;
 }
 
-export async function setTracking(no: string, tracking: string, byUserId: number): Promise<SaleOrderDetail> {
+export async function setTracking(
+  no: string,
+  tracking: string,
+  byUserId: number,
+  /** the version the screen shows: another save since → 409, never a number overwritten unseen */
+  version?: unknown,
+): Promise<SaleOrderDetail> {
   await db.transaction(async (tx) => {
     const [before] = await tx
-      .select({ tracking: saleOutHd.deliveryTrackingNo, approve: saleOutHd.approveStatusId })
+      .select({
+        tracking: saleOutHd.deliveryTrackingNo,
+        approve: saleOutHd.approveStatusId,
+        rowVersion: saleOutHd.rowVersion,
+      })
       .from(saleOutHd)
       .where(eq(saleOutHd.saleOutHdNo, no))
       .for('update');
     if (!before) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
     if (before.approve !== AS.APPROVED) throw new HttpError(409, 'ใส่เลขพัสดุได้เมื่อใบสั่งขายอนุมัติแล้วเท่านั้น');
+    assertVersion(version, versionOf(before.rowVersion, await linesOf(tx, no)));
     assertValid(trackingSchema(before.tracking), { tracking });
+    const next = cleanTracking(tracking);
     await tx
       .update(saleOutHd)
-      .set({ deliveryTrackingNo: cleanTracking(tracking), deliveryDate: nowThai() })
+      // no number → no delivery date (SENTINEL = none, as on create)
+      .set({ deliveryTrackingNo: next, deliveryDate: next ? nowThai() : SENTINEL_TS })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Sale Order',
       entity: 'sale_out_hd',
       key: no,
-      summary: `บันทึกเลขพัสดุ ${cleanTracking(tracking)}`,
-      changes: { deliveryTrackingNo: [before.tracking ?? null, cleanTracking(tracking)] },
+      summary: `บันทึกเลขพัสดุ ${next}`,
+      changes: { deliveryTrackingNo: [before.tracking ?? null, next] },
     });
   });
   return (await getSaleOrder(no))!;

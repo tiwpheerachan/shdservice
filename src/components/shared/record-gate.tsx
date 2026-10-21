@@ -27,6 +27,9 @@ const NO_READONLY = ['checkbox', 'radio', 'file', 'button', 'submit', 'reset', '
  * the pickers, + / ลบ rows), except the save bar (ยกเลิก, พิมพ์), tabs and `data-readonly-keep`.
  * Done on the DOM, not per component, so no form can forget a control; the observer re-locks rows
  * added later and a `disabled` React turns back off. The API refuses the write regardless.
+ *
+ * `loading` with a record on screen (it is being read again — โหลดใหม่ after a 409): the whole form, the
+ * save button included, is disabled until the fresh record replaces it.
  */
 export function RecordGate({
   ready,
@@ -123,7 +126,9 @@ export function RecordGate({
             ดูอย่างเดียว — บัญชีนี้ไม่มีสิทธิ์แก้ไขหน้านี้
           </Badge>
         )}
-        {children}
+        <fieldset disabled={ready && loading} aria-busy={ready && loading} className="min-w-0 space-y-4">
+          {children}
+        </fieldset>
       </div>
     </>
   );

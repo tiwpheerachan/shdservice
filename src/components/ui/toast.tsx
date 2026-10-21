@@ -41,6 +41,8 @@ const push = (t: ToastInput) => {
 const Ctx = React.createContext<{ push: (t: ToastInput) => void }>({ push });
 
 export const useToast = () => React.useContext(Ctx);
+/** take down a toast pushed with this `id` (an action toast stays until closed) */
+export const dismissToast = (id: string) => toast.dismiss(id);
 
 const TONE: Record<ToastKind, string> = {
   success: 'border-success/30! bg-success-soft! text-success!',

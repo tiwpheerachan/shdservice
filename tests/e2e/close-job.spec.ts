@@ -83,7 +83,8 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
 
 test('a job whose requested part is not issued yet is not closed: field error, nothing stored', async ({ page }) => {
   const part = await newPart({ remain: 0, price: 120 });
-  const no = await newJob({ status: 11, service: 200, parts: 120 });
+  // repaired (closable — anything else is refused before the parts are even looked at), one part still owed
+  const no = await newJob({ status: 5, service: 200, parts: 120 });
   await newPartLine({ jobNo: no, code: part.code, price: 120, qty: 1, granted: 0 }); // เบิก, not issued
   const before = await closeState(no);
   const closes: string[] = [];
@@ -110,6 +111,15 @@ test('a job whose requested part is not issued yet is not closed: field error, n
 
   expect(await closeState(no)).toEqual(before); // the return fields written before the refusal rolled back too
   expect(await logsOf(no)).toEqual([]);
+});
+
+test('a job not in a closable status is said so as soon as it is loaded; no save button', async ({ page }) => {
+  const no = await newJob({ status: 2 }); // กำลังดำเนินการ — not repaired yet
+  await openClose(page, no);
+  const why = 'งานนี้อยู่ในสถานะ "กำลังดำเนินการ" — ปิดงานได้เมื่อซ่อมเสร็จ (หรือรับคืนจาก Out-Source) แล้ว';
+  await expect(page.getByRole('alert').filter({ hasText: why })).toBeVisible();
+  await expect(page.getByRole('note').filter({ hasText: why })).toBeVisible(); // in the save bar, instead of the button
+  await expect(page.getByRole('button', { name: 'ยืนยันปิดงาน' })).toHaveCount(0);
 });
 
 test('a closed job keeps its money for a role without Job Money After Close: inputs locked, the API says 409', async ({

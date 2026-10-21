@@ -42,7 +42,7 @@ export function QuotationStatusFields({
         />
       </Field>
       {/* a new sent / agreed status moves the job forward only — say so when this job stays where it is */}
-      <Field label="สถานะใบเสนอราคา" wide hint={jobNote || undefined}>
+      <Field label="สถานะใบเสนอราคา" wide hint={jobNote || undefined} error={errors.status}>
         <SearchSelect
           value={status}
           onChange={onStatus}

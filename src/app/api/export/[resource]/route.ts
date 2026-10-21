@@ -11,12 +11,13 @@ export const dynamic = 'force-dynamic';
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ resource: string }> }) => {
   await rateLimit(req, 'export', 5); // xlsx of up to 20k rows (MAX_ROWS) is the heaviest thing we do
   const { resource } = await parseParams(ctx, exportOp); // 404 "unknown export: …" before the session check
-  const { stream, filename } = await exportXlsx(req, resource, parseQuery(req, exportOp));
+  const { stream, filename, truncatedOf } = await exportXlsx(req, resource, parseQuery(req, exportOp));
   return new Response(stream, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
+      ...(truncatedOf ? { 'X-Export-Truncated': String(truncatedOf) } : {}),
     },
   });
 });

@@ -9,9 +9,8 @@ import type { OverdueAlerts, PendingSaleOrders } from '@/server/services/alerts'
 import { useApi } from '@/data/db';
 import { useAccess } from '@/lib/use-access';
 
-/** background refresh; opening the bell re-checks when the last answer is older than a minute */
+/** background refresh; opening the bell always re-checks (an approver opens it to see what is waiting now) */
 const POLL_MS = 5 * 60_000;
-const FRESH_MS = 60_000;
 
 /**
  * Topbar bell, two sections:
@@ -45,7 +44,7 @@ export function OverdueBell() {
       clearTimeout(t);
     };
   }, []);
-  const { data, error, mutate, ageMs } = useApi<OverdueAlerts>(allowed && idle ? '/api/alerts/overdue' : null, poll);
+  const { data, error, mutate } = useApi<OverdueAlerts>(allowed && idle ? '/api/alerts/overdue' : null, poll);
   const so = useApi<PendingSaleOrders>(approver && idle ? '/api/alerts/sale-orders-pending' : null, poll);
   const [open, setOpen] = React.useState(false);
   if (!allowed && !approver) return null;
@@ -66,8 +65,11 @@ export function OverdueBell() {
       onOpenChange={(v) => {
         setOpen(v);
         if (v) setIdle(true);
-        if (v && ageMs() > FRESH_MS) void mutate();
-        if (v && so.ageMs() > FRESH_MS) void so.mutate();
+        // every open re-checks (cheap); the last answer stays on screen meanwhile
+        if (v) {
+          void mutate();
+          void so.mutate();
+        }
       }}
     >
       <PopoverTrigger asChild>

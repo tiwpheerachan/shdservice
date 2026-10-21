@@ -4,7 +4,7 @@ import { db, type Tx } from '@/db/client';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, auditLog } from '@/db/schema';
 import { fullName } from '@/server/auth';
-import { nowThai, fmtDateTime } from '@/server/mappers/format';
+import { nowThai } from '@/server/mappers/format';
 import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 
 /**
@@ -148,7 +148,7 @@ export type AuditFilters = {
 
 const toRow = (r: typeof auditLog.$inferSelect): AuditRow => ({
   id: r.id,
-  at: fmtDateTime(r.at),
+  at: r.at.slice(0, 19).replace('T', ' '), // to the second: two lines in one minute must still read in order
   userId: r.userId,
   user: r.userName,
   action: r.action as AuditAction,

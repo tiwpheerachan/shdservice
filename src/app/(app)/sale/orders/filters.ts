@@ -8,8 +8,19 @@ export type Filters = {
   code: string;
   sales: string;
   approve: string;
+  /** '1' = แสดงใบที่ยกเลิก (cancelled orders are hidden by default) */
+  cancelled: string;
 };
-export const NO_FILTER: Filters = { no: '', customer: '', from: '', to: '', code: '', sales: '', approve: '' };
+export const NO_FILTER: Filters = {
+  no: '',
+  customer: '',
+  from: '',
+  to: '',
+  code: '',
+  sales: '',
+  approve: '',
+  cancelled: '',
+};
 export const WAITING = 'รออนุมัติ'; // approve_status 2 (its approve_name_th — the list filters by that name)
 /** the list's query (after page / pageSize / q / sort) */
 export const listParams = (f: Filters) => ({
@@ -20,4 +31,5 @@ export const listParams = (f: Filters) => ({
   to: f.to,
   sales: f.sales,
   approve: f.approve,
+  ...(f.cancelled ? { deleted: 'all' } : {}),
 });

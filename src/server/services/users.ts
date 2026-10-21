@@ -17,7 +17,16 @@ import {
 import type { User, Permission } from '@/data/types';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
-import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
+import { masterNameKey } from '@/lib/validation/admin';
+import {
+  RS,
+  statusFilter,
+  uiStatus,
+  fromUiStatus,
+  statusStamp,
+  type RecordStatus,
+  type StatusMode,
+} from '@/server/record-status';
 
 /** After any app_user write: the staff dropdown and the per-request user lookup must see it now. */
 function userChanged(email?: string | null) {
@@ -229,8 +238,9 @@ export async function staffOrKeep(
  * adds the people who have left but are still on jobs (engineer) / sale orders (sales), labelled
  * "(ไม่ใช้งานแล้ว)", so old periods can still be filtered by them.
  */
-type StaffRow = { id: number; name: string; userType: string; takesJobs: boolean };
-/** `takesJobs`: the role has Job Take — offered in มอบหมายงานนี้ให้ (the cache is dropped when permissions are saved) */
+type StaffRow = { id: number; name: string; userType: string; takesJobs: boolean; sells: boolean };
+/** `takesJobs`: the role has Job Take — offered in มอบหมายงานนี้ให้; `sells`: the role adds sale orders (or is System
+ *  Admin) — offered as พนักงานขาย (the cache is dropped when permissions are saved) */
 export function listStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
   return cached(usedAs ? `staff:${usedAs}` : 'staff', TTL_MASTER, () => loadStaff(usedAs));
 }
@@ -253,19 +263,28 @@ async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
     .from(appUser)
     .where(or(eq(appUser.recordStatus, RS.ACTIVE), used))
     .orderBy(asc(appUser.firstName), asc(appUser.lastName));
-  const takers = new Set(await rolesWithRight('Job Take'));
+  const [takers, sellers] = await Promise.all([
+    rolesWithRight('Job Take').then((r) => new Set(r)),
+    db
+      .select({ t: appConfig.userType })
+      .from(appConfig)
+      .where(and(eq(appConfig.moduleName, 'Sale Order'), eq(appConfig.canInsert, true)))
+      .then((r) => new Set(r.map((x) => x.t?.trim()))),
+  ]);
   return rows.map((r) => ({
     id: r.id,
     name: (fullName(r.first, r.last) || r.username || `#${r.id}`) + (r.status === RS.ACTIVE ? '' : ' (ไม่ใช้งานแล้ว)'),
     userType: r.userType?.trim() ?? '',
     takesJobs: takers.has(r.userType?.trim() ?? ''),
+    sells: r.userType?.trim() === ADMIN_USER_TYPE || sellers.has(r.userType?.trim()),
   }));
 }
 
 export type UpsertUserInput = {
   id?: string;
-  name: string;
-  role: string;
+  /** name / role / status left out on an edit = kept as stored (the row's quick actions send only what they change) */
+  name?: string;
+  role?: string;
   email?: string;
   username?: string;
   code?: string;
@@ -274,18 +293,31 @@ export type UpsertUserInput = {
   status?: string;
   avatar?: string;
   title?: string;
+  /** what the form loaded: a value another admin changed since → 409 stale, nothing written */
+  expect?: { name?: string | null; email?: string | null; role?: string | null; status?: string | null } | null;
 };
 
-/** the stored username / phone of the user being edited — userSchema lets unchanged legacy values pass */
-export async function userPrev(id: unknown): Promise<{ username: string | null; phone: string | null } | null> {
+/** the stored username / phone of the user being edited — userSchema lets unchanged legacy values pass —
+ *  and the name / role an edit that leaves them out keeps */
+export async function userPrev(
+  id: unknown,
+): Promise<{ username: string | null; phone: string | null; name: string; role: string } | null> {
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) return null;
-  const [row] = await db
-    .select({ username: appUser.username, phone: appUser.phoneNo })
-    .from(appUser)
-    .where(eq(appUser.userId, n))
-    .limit(1);
-  return row ?? null;
+  const [row] = await db.select().from(appUser).where(eq(appUser.userId, n)).limit(1);
+  if (!row) return null;
+  const u = toUser(row);
+  return { username: row.username, phone: row.phoneNo, name: u.name, role: u.role };
+}
+
+/** 409 stale: a value the form loaded no longer matches the stored user — another admin saved meanwhile */
+function assertLoaded(row: AppUserRow, expect: UpsertUserInput['expect']) {
+  if (!expect) return;
+  const now = toUser(row);
+  if (
+    (['name', 'email', 'role', 'status'] as const).some((k) => expect[k] != null && clean(expect[k]) !== clean(now[k]))
+  )
+    throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้ผู้ใช้นี้ — โหลดรายการใหม่แล้วทำอีกครั้ง', { stale: true });
 }
 
 /** An admin cannot lock themselves out: their own account is never disabled, deleted, given another role,
@@ -303,17 +335,23 @@ export const DELETED_USER_MSG = 'ผู้ใช้นี้ถูกลบ — 
 
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
 export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
-  const email = clean(input.email).toLowerCase();
-  const role = clean(input.role);
-  const userType = role === PENDING_ROLE ? null : role || null;
-  const rs = fromUiStatus(input.status);
-  const { first, last } = splitName(clean(input.name));
-  const username = clean(input.username);
-  const phone = clean(input.phone).replace(/[\s-]/g, '');
-
   const targetId = input.id ? Number(input.id) : NaN;
   const [before] = Number.isFinite(targetId) ? await db.select().from(appUser).where(eq(appUser.userId, targetId)) : [];
   if (Number.isFinite(targetId) && !before) throw new HttpError(404, 'user not found');
+
+  const email = clean(input.email).toLowerCase();
+  const role = clean(input.role);
+  // left out on an edit → as stored (a stale tab's ถอนสิทธิ์ must not write back the role it loaded)
+  const userType =
+    input.role === undefined && before ? before.userType?.trim() || null : role === PENDING_ROLE ? null : role || null;
+  const rs = input.status === undefined && before ? (before.recordStatus as RecordStatus) : fromUiStatus(input.status);
+  const name =
+    input.name === undefined && before
+      ? clean(fullName(before.firstName, before.lastName) || before.username)
+      : clean(input.name);
+  const { first, last } = splitName(name);
+  const username = clean(input.username);
+  const phone = clean(input.phone).replace(/[\s-]/g, '');
   if (before && (rs !== RS.ACTIVE || userType !== (before.userType?.trim() || null)))
     refuseSelf(before.userId, actorId);
   // (an empty email / username keeps the stored one — see userValues)
@@ -324,8 +362,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
   if (before?.recordStatus === RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
   // the page sends the full name it shows: unchanged → first / last stay as stored (splitName would move the
   // 2nd word of a two-word first name into last_name and log a fake audit change)
-  const keepName =
-    !!before && clean(input.name) === clean(fullName(before.firstName, before.lastName) || before.username);
+  const keepName = !!before && name === clean(fullName(before.firstName, before.lastName) || before.username);
 
   // "รออนุมัติ" (no role) is where a sign-up starts, never a role to give: only a user still pending keeps it
   if (!userType && (!before || before.userType?.trim()))
@@ -362,8 +399,8 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     const userValues = {
       firstName: keepName ? undefined : first,
       lastName: keepName ? undefined : last,
-      userType,
-      ...statusStamp(rs, actorId),
+      userType: input.role === undefined ? undefined : userType,
+      ...(input.status === undefined ? {} : statusStamp(rs, actorId)),
       deleted: false,
       emailAddress: email || undefined,
       // optional contact fields: sent empty = cleared; not sent at all = left as stored
@@ -375,10 +412,14 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       username: username || undefined,
     };
     const row = await db.transaction(async (tx) => {
+      // compared under the row lock: two admins saving at once are serialized, the second sees the first
+      const [locked] = await tx.select().from(appUser).where(eq(appUser.userId, targetId)).for('update');
+      if (!locked) throw new HttpError(404, 'user not found');
+      assertLoaded(locked, input.expect);
       const [row] = await tx.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
       if (!row) throw new HttpError(404, 'user not found');
       // recordStatus stays in the diff: disable / re-enable is what an audit must show
-      const changes = diff(before as Record<string, unknown>, userValues as Record<string, unknown>, {
+      const changes = diff(locked as Record<string, unknown>, userValues as Record<string, unknown>, {
         skip: ['deleted', 'isActive'],
       });
       // saved with nothing changed (e.g. opening your own account and pressing บันทึก) → no audit line
@@ -386,7 +427,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
         await audit(tx, actorId, {
           ...userAuditLine(
             fullName(first, last),
-            { userType: before.userType?.trim() || null, rs: before.recordStatus },
+            { userType: locked.userType?.trim() || null, rs: locked.recordStatus },
             { userType, rs },
           ),
           module: 'Admin',
@@ -520,35 +561,74 @@ export async function listPermissions(): Promise<Permission[]> {
   }));
 }
 
+type Grants = { add: boolean; edit: boolean; del: boolean; view: boolean };
+/** V A E D of a grant row — the audit's and the 409's notation */
+const pack = (g: Grants | undefined) =>
+  g ? `${g.view ? 'V' : '-'}${g.add ? 'A' : '-'}${g.edit ? 'E' : '-'}${g.del ? 'D' : '-'}` : null;
+
+/**
+ * The permissions page's save: one item per (role, menu) the admin changed. `was` = the row as the page loaded it:
+ * the save is a compare-and-set under a lock on the role — a row another admin changed since (stored ≠ `was`, and
+ * not already what this save sets) → 409 naming those menus, nothing written. Without `was` the row is set as sent.
+ * Audited per role, only rows that really change, under the admin who changed them.
+ */
 export async function savePermissions(
-  items: { role: string; menu: string; add: boolean; edit: boolean; del: boolean; view: boolean }[],
+  items: (Grants & { role: string; menu: string; was?: Grants | null })[],
   actorId = 0,
 ): Promise<number> {
-  let n = 0;
   await db.transaction(async (tx) => {
+    // locked by the name as masterNameKey sees it: "QA X" and "qa x" created at the same instant queue here
+    for (const key of [...new Set(items.map((it) => masterNameKey(it.role)))].sort())
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`app_config:${key}`}))`);
     const beforeRows = await tx.select().from(appConfig);
-    const beforeMap = new Map(beforeRows.map((r) => [`${r.userType?.trim()}::${r.moduleName?.trim()}`, r]));
+    // a new role that is an existing one in other case / spacing → refused, not a second role
+    const roles = new Set(beforeRows.map((r) => r.userType?.trim() ?? ''));
+    for (const it of items) {
+      const twin = roles.has(it.role) ? null : [...roles].find((r) => masterNameKey(r) === masterNameKey(it.role));
+      if (twin) throw new HttpError(409, `มีตำแหน่ง "${twin}" อยู่แล้ว — ชื่อต่างกันแค่ตัวพิมพ์เล็ก/ใหญ่หรือช่องว่าง`);
+    }
+    const beforeMap = new Map(
+      beforeRows.map((r) => [
+        `${r.userType?.trim()}::${r.moduleName?.trim()}`,
+        { add: !!r.canInsert, edit: !!r.canEdit, del: !!r.canDelete, view: !!r.canView },
+      ]),
+    );
+    const off: Grants = { add: false, edit: false, del: false, view: false };
+    const stale = items.filter((it) => {
+      const now = pack(beforeMap.get(`${it.role}::${it.menu}`) ?? off);
+      return it.was && now !== pack(it.was) && now !== pack(it);
+    });
+    if (stale.length)
+      throw new HttpError(
+        409,
+        `ผู้ดูแลระบบคนอื่นเพิ่งแก้สิทธิ์ ${stale.map((it) => `${it.role} · ${it.menu}`).join(', ')} — โหลดใหม่แล้วติ๊กอีกครั้ง`,
+        { stale: true },
+      );
     /** role → menu → [was, now]: one audit entry per role, keyed by that role */
     const changed = new Map<string, Record<string, [unknown, unknown]>>();
     // one upsert on ix_user_type_and_module_name (unique (user_type, module_name)) instead of a
     // SELECT + UPDATE/INSERT per row; a pair sent twice keeps its last value
-    const rows = new Map(
-      items.map((it) => [
-        `${it.role}\0${it.menu}`,
-        {
-          userType: it.role,
-          moduleName: it.menu,
-          canInsert: it.add,
-          canEdit: it.edit,
-          canDelete: it.del,
-          canView: it.view,
-        },
-      ]),
-    );
+    const rows = new Map(items.map((it) => [`${it.role}::${it.menu}`, it]));
+    for (const [key, it] of rows) {
+      const was = pack(beforeMap.get(key));
+      if (was === pack(it)) continue;
+      const menus = changed.get(it.role) ?? {};
+      menus[it.menu] = [was, pack(it)];
+      changed.set(it.role, menus);
+    }
     if (rows.size) {
       await tx
         .insert(appConfig)
-        .values([...rows.values()])
+        .values(
+          [...rows.values()].map((it) => ({
+            userType: it.role,
+            moduleName: it.menu,
+            canInsert: it.add,
+            canEdit: it.edit,
+            canDelete: it.del,
+            canView: it.view,
+          })),
+        )
         .onConflictDoUpdate({
           target: [appConfig.userType, appConfig.moduleName],
           set: {
@@ -558,31 +638,6 @@ export async function savePermissions(
             canView: sql`excluded.can_view`,
           },
         });
-    }
-    for (const it of items) {
-      const values = { canInsert: it.add, canEdit: it.edit, canDelete: it.del, canView: it.view };
-      const b = beforeMap.get(`${it.role}::${it.menu}`);
-      const pack = (
-        g:
-          | {
-              canInsert?: boolean | null;
-              canEdit?: boolean | null;
-              canDelete?: boolean | null;
-              canView?: boolean | null;
-            }
-          | undefined,
-      ) =>
-        g
-          ? `${g.canView ? 'V' : '-'}${g.canInsert ? 'A' : '-'}${g.canEdit ? 'E' : '-'}${g.canDelete ? 'D' : '-'}`
-          : null;
-      const was = pack(b);
-      const now = pack(values);
-      if (was !== now) {
-        const menus = changed.get(it.role) ?? {};
-        menus[it.menu] = [was, now];
-        changed.set(it.role, menus);
-      }
-      n++;
     }
     for (const [role, menus] of changed) {
       await audit(tx, actorId, {
@@ -595,9 +650,43 @@ export async function savePermissions(
       });
     }
   });
+  permissionsChanged();
+  return items.length;
+}
+
+function permissionsChanged() {
   invalidateGrantCache();
   invalidate('roles');
   invalidate('modules');
-  invalidate('staff'); // takesJobs follows Job Take
+  invalidate('staff'); // takesJobs follows Job Take, sells Sale Order add
+}
+
+/** ลบตำแหน่ง: its app_config rows go; refused while a (not deleted) user still has the role, and for System Admin */
+export async function deleteRole(role: string, actorId = 0): Promise<number> {
+  if (role === ADMIN_USER_TYPE) throw new HttpError(409, 'ลบตำแหน่ง System Admin ไม่ได้');
+  const n = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`app_config:${masterNameKey(role)}`}))`);
+    // ponytail: a user given this role in the same instant (upsertUser checks the cached role list) can slip by
+    const [held] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(appUser)
+      .where(and(sql`btrim(${appUser.userType}) = ${role}`, ne(appUser.recordStatus, RS.DELETED)));
+    if (held?.n)
+      throw new HttpError(409, `ยังมีผู้ใช้ ${held.n} คนในตำแหน่ง ${role} — เปลี่ยนตำแหน่งของผู้ใช้เหล่านั้นก่อน`);
+    const gone = await tx
+      .delete(appConfig)
+      .where(sql`btrim(${appConfig.userType}) = ${role}`)
+      .returning({ menu: appConfig.moduleName });
+    if (gone.length)
+      await audit(tx, actorId, {
+        action: 'DELETE',
+        module: 'Admin',
+        entity: 'app_config',
+        key: role,
+        summary: `ลบตำแหน่ง ${role} (${gone.length} แถวสิทธิ์)`,
+      });
+    return gone.length;
+  });
+  permissionsChanged();
   return n;
 }

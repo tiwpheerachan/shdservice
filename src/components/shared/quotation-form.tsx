@@ -12,7 +12,8 @@ import type { JobDetail } from '@/lib/use-job';
 import { quoteJobNote } from '@/lib/quote-job';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { computeTotals, parseDiscount, quotationSchema, quotedParts } from '@/lib/validation/quotation';
+import { computeTotals, parseDiscount, quotationSchema, quotedParts, quotedPartsKey } from '@/lib/validation/quotation';
+import { QS } from '@/lib/status-ids';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import {
@@ -31,6 +32,7 @@ export type QuotationLoaded = {
   date: string;
   type: string;
   status: string;
+  statusId?: number;
   customerCode?: string;
   contactName: string;
   jobRef: string;
@@ -73,7 +75,12 @@ export type QuotationPayload = {
   vatRate: number;
   remark: string;
   status: string;
+  /** a new quotation filled from its job: the job's quoted parts it copied (the server refuses a stale copy) */
+  jobParts?: string;
 };
+
+/** a quotation the customer can still answer, or has agreed to */
+const OPEN_QUOTE = new Set<number>([QS.WAIT, QS.SENT, QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
 
 export type QuotationFormHandle = {
   payload: () => QuotationPayload;
@@ -81,7 +88,7 @@ export type QuotationFormHandle = {
   /** check before saving (lib/validation/quotation) — shows the errors; true = OK */
   validate: () => boolean;
   /** API field errors → under the fields; false for any other error */
-  fromApi: (err: unknown) => boolean;
+  fromApi: (err: unknown, reload?: () => void) => boolean;
 };
 
 // quotation_status names (DB) → badge tone (list + report)
@@ -139,6 +146,8 @@ export const QuotationForm = React.forwardRef<
   const [job, setJob] = React.useState<JobDetail | null>(initial?.job ?? null);
   const date = initial?.date ?? '';
   const idRef = React.useRef((initial?.lines.length ?? 0) + 1);
+  // the job's quoted parts the lines were filled from (sent with a new quotation's save)
+  const [jobParts, setJobParts] = React.useState<string>();
 
   // the form as it opened (a loaded quotation, or empty / filled from ?job=) — anything else is an
   // unsaved edit
@@ -170,8 +179,10 @@ export const QuotationForm = React.forwardRef<
 
   // the job's parts flagged "เสนอ" in the repair screen, from set A or set B (= the quotation type)
   // always replaced — otherwise switching A → B with nothing quoted in B would keep A's lines on a B quotation
-  const fillQuoted = (j: JobDetail, t: 'A' | 'B') =>
+  const fillQuoted = (j: JobDetail, t: 'A' | 'B') => {
     setLines(quotedParts(j.parts, t).map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
+    setJobParts(quotedPartsKey(j.parts, t));
+  };
   // a job → customer + device info (+ its quoted parts become lines)
   const applyJob = React.useCallback(
     async (j: JobDetail, withParts: boolean) => {
@@ -181,13 +192,29 @@ export const QuotationForm = React.forwardRef<
       if (withParts) {
         fillQuoted(j, type);
         if (j.serviceCost) setService(j.serviceCost);
-      }
+      } else setJobParts(undefined); // the lines are not this job's copy
+      // a hint, not a stop: the job already has quotations still open (a second one may be an alternative)
+      if (mode === 'new')
+        api<{ rows: { no: string; status: string; statusId: number }[] }>(
+          `/api/data/quotations${qs({ paged: 1, pageSize: 20, jobNo: j.no })}`,
+        )
+          .then((d) => {
+            const open = d.rows.filter((q) => OPEN_QUOTE.has(q.statusId) && q.status !== 'พ้นกำหนดเสนอราคา');
+            if (open.length)
+              push({
+                kind: 'warning',
+                title: `งาน ${j.no} มีใบเสนอราคาที่ยังเปิดอยู่ ${open.length} ใบ`,
+                desc: open.map((q) => `${q.no} (${q.status})`).join(', '),
+              });
+          })
+          .catch(() => {}); // only a hint
       if (j.customer) {
-        const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: j.customer.code })}`);
-        setCustomer(c.rows[0] ?? null);
+        const { code } = j.customer;
+        const c = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
+        setCustomer(c.rows.find((r) => r.code === code) ?? null);
       }
     },
-    [mode, type],
+    [mode, type, push],
   );
 
   // the job number typed in the form (Enter / leaving the box)
@@ -269,6 +296,7 @@ export const QuotationForm = React.forwardRef<
     vatRate,
     remark,
     status,
+    jobParts: mode === 'new' ? jobParts : undefined,
   });
   React.useImperativeHandle(ref, () => ({
     customer: () => customer,
@@ -344,6 +372,7 @@ export const QuotationForm = React.forwardRef<
             status={status}
             onStatus={(v) => {
               setStatus(v);
+              fe.clear('status');
               const note = jobNoteOf(v);
               if (note) push({ kind: 'info', title: 'บันทึกได้ แต่สถานะงานจะไม่เปลี่ยน', desc: note });
             }}

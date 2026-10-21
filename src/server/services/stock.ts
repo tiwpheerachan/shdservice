@@ -415,7 +415,11 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
 type QtyDelta = { available?: number; used?: number; booking?: number };
 type StockRow = typeof productNoneSerial.$inferSelect;
 
-const noStockRow = (productId: number) => new HttpError(400, `ไม่มีข้อมูลสต๊อกของสินค้า #${productId}`);
+const codeOf = async (tx: Tx, productId: number) =>
+  (await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId)))[0]?.code ??
+  `#${productId}`;
+const noStockRow = async (tx: Tx, productId: number) =>
+  new HttpError(400, `ไม่มีข้อมูลสต๊อกของอะไหล่ ${await codeOf(tx, productId)}`);
 
 /** The counters after a delta — the one rule adjustQty and stockMove share. */
 function nextQty(row: StockRow, d: QtyDelta) {
@@ -430,8 +434,7 @@ function nextQty(row: StockRow, d: QtyDelta) {
 
 /** 409 "สต๊อก X ไม่พอ (คงเหลือ N)" — N = what the row held before this line. */
 async function notEnough(tx: Tx, productId: number, remain: number | null) {
-  const [p] = await tx.select({ code: product.productCode }).from(product).where(eq(product.productId, productId));
-  return new HttpError(409, `สต๊อก ${p?.code ?? `#${productId}`} ไม่พอ (คงเหลือ ${remain ?? 0})`);
+  return new HttpError(409, `สต๊อก ${await codeOf(tx, productId)} ไม่พอ (คงเหลือ ${remain ?? 0})`);
 }
 
 async function adjustQty(tx: Tx, productId: number, d: QtyDelta, opts: { allowNegative?: boolean } = {}) {
@@ -440,7 +443,7 @@ async function adjustQty(tx: Tx, productId: number, d: QtyDelta, opts: { allowNe
     .from(productNoneSerial)
     .where(eq(productNoneSerial.productId, productId))
     .for('update');
-  if (!row) throw noStockRow(productId);
+  if (!row) throw await noStockRow(tx, productId);
   const next = nextQty(row, d);
   if (next.quantityRemain < 0 && !opts.allowNegative) throw await notEnough(tx, productId, row.quantityRemain);
   await tx.update(productNoneSerial).set(next).where(eq(productNoneSerial.itemId, row.itemId));
@@ -464,13 +467,15 @@ async function stockMove(tx: Tx, productIds: number[]) {
     : [];
   const byProduct = new Map<number, StockRow>();
   for (const r of rows) if (r.productId != null && !byProduct.has(r.productId)) byProduct.set(r.productId, r);
+  // the 409 says what is on hand, not what an earlier line of this movement left in memory
+  const onhand = new Map(rows.map((r) => [r.itemId, r.quantityRemain]));
   const changed = new Set<StockRow>();
   return {
     async adjust(productId: number, d: QtyDelta) {
       const row = byProduct.get(productId);
-      if (!row) throw noStockRow(productId);
+      if (!row) throw await noStockRow(tx, productId);
       const next = nextQty(row, d);
-      if (next.quantityRemain < 0) throw await notEnough(tx, productId, row.quantityRemain);
+      if (next.quantityRemain < 0) throw await notEnough(tx, productId, onhand.get(row.itemId) ?? null);
       Object.assign(row, next);
       changed.add(row);
     },
@@ -492,14 +497,41 @@ async function stockMove(tx: Tx, productIds: number[]) {
   };
 }
 
+/** `price` = ราคาขาย (retail — what the pickers show); `deleted` = ยกเลิกแล้ว: no new movement or request (gone());
+ *  `inactive` = ปิดใช้งาน: still moves, but no new / bigger job request (jobs.ts) */
 async function productsByCode(tx: Tx, codes: string[]) {
-  if (!codes.length) return new Map<string, { id: number; name: string }>();
+  type P = { id: number; name: string; price: number; deleted: boolean; inactive: boolean };
+  if (!codes.length) return new Map<string, P>();
   const rows = await tx
-    .select({ id: product.productId, code: product.productCode, name: product.productName })
+    .select({
+      id: product.productId,
+      code: product.productCode,
+      name: product.productName,
+      price: productNoneSerial.retailPrice,
+      rs: product.recordStatus,
+    })
     .from(product)
-    .where(inArray(product.productCode, codes));
-  return new Map(rows.map((r) => [r.code ?? '', { id: r.id, name: r.name ?? '' }]));
+    .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
+    .where(inArray(product.productCode, codes))
+    .orderBy(desc(productNoneSerial.itemId)); // a legacy second stock row: the Map keeps the lowest item_id, as stockMove
+  return new Map<string, P>(
+    rows.map((r) => [
+      r.code ?? '',
+      {
+        id: r.id,
+        name: r.name ?? '',
+        price: num(r.price),
+        deleted: r.rs === RS.DELETED,
+        inactive: r.rs === RS.INACTIVE,
+      },
+    ]),
+  );
 }
+
+/** a product deleted (ยกเลิก) since: nothing new is received, issued or requested for it — what it already
+ *  issued may still come back (returnFromJob) and a request for it may still be cancelled */
+const gone = (code: string | null) =>
+  new HttpError(409, `อะไหล่ ${code} ถูกยกเลิกแล้ว — รับเข้า จ่ายออก หรือเบิกเพิ่มไม่ได้`);
 
 /** stockMove's lock alone, for a write that then calls adjustQty itself (jobs.ts): adjustQty re-locks rows
  *  this tx already holds, so the product_id order holds. */
@@ -575,6 +607,7 @@ async function moveByCode(
       for (const l of lines) {
         const p = map.get(l.code);
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${l.code}`);
+        if (p.deleted) throw gone(l.code);
         await stock.adjust(p.id, { [counter]: l.qty });
       }
       await stock.flush();
@@ -759,14 +792,15 @@ export const JOB_CLOSED_STATUSES: number[] = [
 ];
 
 /** No part goes out to a closed / cancelled job (returns from it stay allowed). In a transaction the
- *  job row is share-locked first (job → request rows → stock, the order the repair save locks in). */
+ *  job row is locked first (job → request rows → stock, the order the repair save locks in) — for update:
+ *  the issue moves the job's status in the same transaction (followParts). */
 export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = db) {
   const [j] = await x
     .select({ id: job.jobStatusId, name: jobStatus.jobStatusName })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
     .where(eq(job.jobNo, jobNo))
-    .for('share', { of: job });
+    .for('update', { of: job });
   if (j?.id != null && JOB_CLOSED_STATUSES.includes(j.id))
     throw new HttpError(
       409,
@@ -774,7 +808,8 @@ export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = d
     );
 }
 
-/** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows. */
+/** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows; every request issued → the job's status moves
+ *  (followParts) in the SAME transaction — done after, a save in between adopted the moved version. */
 export async function issueForJob(
   i: { jobNo: string; remark?: string; payTo?: string; lines: { logId: number; qty: number }[] },
   byUserId: number,
@@ -810,12 +845,16 @@ export async function issueForJob(
       const now = nowThai();
       for (const l of lines) {
         const r = byId.get(l.logId);
-        if (!r || r.orderStatusId !== PART.REQUESTED || !r.isSpecial)
-          throw new HttpError(400, `รายการเบิก #${l.logId} ไม่อยู่ในสถานะรอเบิก`);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!r.isSpecial) throw new HttpError(400, `${r.sparePartCode} ไม่ได้ติ๊ก "เบิก" — ไม่ใช่รายการขอเบิก`);
+        // issued / cancelled since the list was loaded
+        if (r.orderStatusId !== PART.REQUESTED)
+          throw new HttpError(409, `${r.sparePartCode} ไม่อยู่ในสถานะรอเบิกแล้ว — โหลดรายการใหม่`);
         const need = (r.requestQty ?? 0) - (r.grantQty ?? 0);
         if (l.qty > need) throw new HttpError(400, `จ่ายเกินจำนวนที่ขอ (${r.sparePartCode})`);
         const p = map.get(r.sparePartCode ?? '');
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
+        if (p.deleted) throw gone(r.sparePartCode);
         await stock.adjust(p.id, { used: l.qty, booking: -l.qty });
         const granted = (r.grantQty ?? 0) + l.qty;
         await tx
@@ -855,7 +894,16 @@ export async function issueForJob(
             sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
           ),
         );
-      return { no, total: mvLines.reduce((s, l) => s + l.qty, 0), allGranted: (pending?.n ?? 0) === 0 };
+      const allGranted = (pending?.n ?? 0) === 0;
+      // jobs.ts imports this module — loaded when called, not at import (no import cycle)
+      const moved = allGranted && (await (await import('./jobs')).followParts(tx, i.jobNo, byUserId));
+      // a partial issue writes no job column: the version moves anyway, a repair page opened before is stale (0036)
+      if (!moved)
+        await tx
+          .update(job)
+          .set({ rowVersion: sql`${job.rowVersion} + 1` })
+          .where(eq(job.jobNo, i.jobNo));
+      return { no, total: mvLines.reduce((s, l) => s + l.qty, 0), allGranted };
     })
     .finally(productsChanged);
 }
@@ -886,12 +934,7 @@ export async function jobsWithReturnableParts(limit = 300): Promise<string[]> {
   const rows = await db
     .select({ jobNo: jobOrderSparePartLog.jobNo, last: sql<string>`max(${jobOrderSparePartLog.grantDate})` })
     .from(jobOrderSparePartLog)
-    .where(
-      and(
-        inArray(jobOrderSparePartLog.orderStatusId, [PART.GRANTED, PART.RETURN_REQUESTED]),
-        sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
-      ),
-    )
+    .where(returnableLine)
     .groupBy(jobOrderSparePartLog.jobNo)
     .orderBy(sql`max(${jobOrderSparePartLog.grantDate}) desc`)
     .limit(limit);
@@ -899,6 +942,13 @@ export async function jobsWithReturnableParts(limit = 300): Promise<string[]> {
 }
 
 /* ---- return from job (รับคืนจากการเบิก, inventory_type 2) ---- */
+/** a line stock may take parts back from: issued (จ่ายแล้ว / ขอคืน) or partly issued (still รอเบิก for the rest) —
+ *  with issued pieces not yet back */
+const RETURNABLE: number[] = [PART.GRANTED, PART.RETURN_REQUESTED, PART.REQUESTED];
+const returnableLine = and(
+  inArray(jobOrderSparePartLog.orderStatusId, RETURNABLE),
+  sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
+);
 export type ReturnLine = {
   logId: number;
   jobNo: string;
@@ -925,13 +975,7 @@ export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> 
     .from(jobOrderSparePartLog)
     .leftJoin(product, eq(product.productCode, jobOrderSparePartLog.sparePartCode))
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
-    .where(
-      and(
-        eq(jobOrderSparePartLog.jobNo, jobNo),
-        inArray(jobOrderSparePartLog.orderStatusId, [PART.GRANTED, PART.RETURN_REQUESTED]),
-        sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
-      ),
-    )
+    .where(and(eq(jobOrderSparePartLog.jobNo, jobNo), returnableLine))
     .orderBy(asc(jobOrderSparePartLog.jobOrderLogId));
   return rows.map((r) => ({
     logId: r.logId,
@@ -942,7 +986,7 @@ export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> 
     granted: r.granted ?? 0,
     returned: r.returned ?? 0,
     returnable: Math.max(0, (r.granted ?? 0) - (r.returned ?? 0)),
-    status: PART_STATUS_NAME[r.statusId ?? 3] ?? '',
+    status: r.statusId === PART.REQUESTED ? 'เบิกบางส่วน' : (PART_STATUS_NAME[r.statusId ?? 3] ?? ''),
   }));
 }
 
@@ -988,14 +1032,18 @@ export async function returnFromJob(
       const now = nowThai();
       for (const l of lines) {
         const r = byId.get(l.logId);
-        if (!r || (r.orderStatusId !== PART.GRANTED && r.orderStatusId !== PART.RETURN_REQUESTED))
-          throw new HttpError(400, `รายการ #${l.logId} ไม่อยู่ในสถานะที่รับคืนได้`);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!RETURNABLE.includes(r.orderStatusId ?? -1))
+          throw new HttpError(409, `${r.sparePartCode} ไม่อยู่ในสถานะที่รับคืนได้ — โหลดรายการใหม่`);
         const returnable = (r.grantQty ?? 0) - (r.returnQty ?? 0);
         if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
         const p = map.get(r.sparePartCode ?? '');
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
         await stock.adjust(p.id, { used: -l.qty });
         const returned = (r.returnQty ?? 0) + l.qty;
+        // a partly issued line still waits for the rest: it stays รอเบิก, charged for what it will use
+        const partly = r.orderStatusId === PART.REQUESTED;
+        const using = Math.max(0, (partly ? (r.requestQty ?? 0) : (r.grantQty ?? 0)) - returned);
         await tx
           .update(jobOrderSparePartLog)
           .set({
@@ -1003,10 +1051,8 @@ export async function returnFromJob(
             returnDate: now,
             returnBy: byUserId,
             returnStockId: STORE_LOCATION_ID,
-            orderStatusId: returned >= (r.grantQty ?? 0) ? PART.RETURNED : r.orderStatusId,
-            ...(r.isQuotation
-              ? { sparePartTotalPrice: money(num(r.sparePartUnitPrice) * Math.max(0, (r.grantQty ?? 0) - returned)) }
-              : {}),
+            orderStatusId: !partly && returned >= (r.grantQty ?? 0) ? PART.RETURNED : r.orderStatusId,
+            ...(r.isQuotation ? { sparePartTotalPrice: money(num(r.sparePartUnitPrice) * using) } : {}),
           })
           .where(eq(jobOrderSparePartLog.jobOrderLogId, r.jobOrderLogId));
         mvLines.push({ code: r.sparePartCode ?? '', qty: l.qty });
@@ -1030,8 +1076,13 @@ export async function returnFromJob(
         const parts = await partsTotalOf(tx, i.jobNo);
         const rest = num(j.serviceCost) + num(j.serviceToolCost) + num(j.deliveryCost) + num(j.cartonBoxCost);
         costs = { sparePartTotalCost: money(parts), jobTotalCost: money(parts + rest) };
-        await tx.update(job).set(costs).where(eq(job.jobNo, i.jobNo));
       }
+      // the version moves even when the costs stay (one UPDATE: +1 either way, 0036) — a repair page opened before is stale
+      if (j)
+        await tx
+          .update(job)
+          .set({ ...costs, rowVersion: sql`${job.rowVersion} + 1` })
+          .where(eq(job.jobNo, i.jobNo));
       await audit(tx, byUserId, {
         action: 'RETURN',
         module: 'Job ReturnStock',
@@ -1487,13 +1538,14 @@ export type ProductLite = Pick<
   Product,
   'sysCode' | 'mfgCode' | 'name' | 'nameEn' | 'nameCn' | 'onhand' | 'price' | 'status' | 'category' | 'brand'
 >;
-export function listProductsLite(q = ''): Promise<ProductLite[]> {
+export function listProductsLite(q = '', mode: 'active' | 'exclude' = 'active'): Promise<ProductLite[]> {
   // no term = the whole catalog (stock receive / pick grids); with a term = the picker's server search.
+  // `exclude` = INACTIVE too (stock receive: a part no new document may use still arrives).
   // Both memoised; productsChanged() drops every key.
   const term = q.trim();
-  return cached(`master:products:lite:${term}`, TTL_MASTER, () => loadProductsLite(term));
+  return cached(`master:products:lite:${mode}:${term}`, TTL_MASTER, () => loadProductsLite(term, mode));
 }
-async function loadProductsLite(term: string): Promise<ProductLite[]> {
+async function loadProductsLite(term: string, mode: 'active' | 'exclude'): Promise<ProductLite[]> {
   const rows = await db
     .select({
       sysCode: product.productCode,
@@ -1505,12 +1557,13 @@ async function loadProductsLite(term: string): Promise<ProductLite[]> {
       price: productNoneSerial.retailPrice,
       category: category.categoryName,
       brand: manufacturer.manufacturerName,
+      rs: product.recordStatus,
     })
     .from(product)
     .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId))
     .leftJoin(category, eq(category.categoryId, product.categoryId))
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
-    .where(and(eq(product.recordStatus, 'ACTIVE'), term ? productSearch(term) : undefined))
+    .where(and(statusFilter(product.recordStatus, mode), term ? productSearch(term) : undefined))
     .orderBy(asc(product.productCode));
   return rows.map((r) => ({
     sysCode: r.sysCode ?? '',
@@ -1520,7 +1573,7 @@ async function loadProductsLite(term: string): Promise<ProductLite[]> {
     nameCn: r.nameCn ?? '',
     onhand: r.onhand ?? 0,
     price: num(r.price),
-    status: 'Active',
+    status: uiStatus(r.rs),
     category: r.category ?? '',
     brand: r.brand ?? '',
   }));

@@ -25,6 +25,8 @@ export type Line = {
   status: string;
   total?: number; // the stored line total (what the job is charged for it)
   locked?: boolean; // already issued / returned — read-only
+  /** partly issued (เบิกบางส่วน): only แบบ A's qty, down to `granted` at least (saveRepair cancels the rest) */
+  issued?: { granted: number; requested: number };
   waiting?: boolean; // requested from stock (เบิก) and not all issued yet
 };
 
@@ -54,7 +56,9 @@ export const chargedTotal = (lines: Line[]) => lines.reduce((s, l) => s + (l.loc
 
 /** the server refuses the change to ซ่อมเสร็จ / ไม่ซ่อม while parts are not issued — the message, else undefined */
 export function partsBlockOf(lines: Line[], status: string, jobStatus: string | undefined) {
-  const notIssued = lines.filter((l) => (l.locked ? l.waiting : l.aPick && l.aQty > 0));
+  const notIssued = lines.filter((l) =>
+    l.issued ? l.aQty > l.issued.granted : l.locked ? l.waiting : l.aPick && l.aQty > 0,
+  );
   const statusChange = status !== jobStatus && notIssued.length > 0;
   return statusChange && REPAIRED.includes(status)
     ? partsNotIssuedMsg(notIssued)

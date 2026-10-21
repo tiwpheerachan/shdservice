@@ -172,14 +172,14 @@ async function seed() {
     DELETE FROM inventory_hd WHERE inventory_no LIKE 'TDW%';
     DELETE FROM color WHERE color_name = 'TD color';
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date) VALUES
-      ('${JOB_CLOSE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
+      ('${JOB_CLOSE}', 5, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_PARTS}', 11, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_REPAIR}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_EDIT}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01'),
       ('${JOB_QUOTE}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01');
     INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_repaired_date) VALUES
       ('${JOB_OUT}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01'),
-      ('${JOB_NOREPAIR}', 2, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01'),
+      ('${JOB_NOREPAIR}', 5, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', '1900-01-01'),
       ('${JOB_OUT_CLOSED}', 20, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '2026-01-02', '2026-01-01');
     INSERT INTO job_send_forward_dt (job_no, send_to_name, send_date, send_by, receive_date, receive_by, receive_detail, send_status)
       VALUES ('${JOB_OUT_CLOSED}', 'TD Vendor', '2025-12-20', 9101, '1900-01-01', -1, '', 'ส่งเครื่องซ่อมแล้ว');
@@ -1879,7 +1879,7 @@ try {
   }
   console.log('\nRound 1 — jobs (repair / close / out-source / job list)');
   {
-    const { markPartsIssued, listJobs } = await import('@/server/services/jobs');
+    const { listJobs } = await import('@/server/services/jobs');
     const { invalidate } = await import('@/server/cache');
     const { OUTSOURCE_STATUS_ONLY, RECEIVE_DATE_REQUIRED, STATUS_CLOSE_ONLY } = await import('@/lib/validation/job');
     const job = (no: string, status: number, customer = `${CUSTOMER} ลูกค้า ทดสอบโดเมน`) =>
@@ -1956,7 +1956,6 @@ try {
       ).rows;
       const r = await issueForJob({ jobNo: 'TDJ0204', lines: [{ logId: log.id, qty: 1 }] }, U.admin.id);
       assert.ok(r.allGranted);
-      await markPartsIssued('TDJ0204', U.admin.id); // what POST /api/stock/issue calls next
       assert.equal((await jobRow('TDJ0204')).s, 10);
       assert.deepEqual(await logRows('TDJ0204'), [10]);
     });
@@ -2947,7 +2946,7 @@ try {
   }
   console.log('\nRound 3 — jobs (closed-job status / เสนอ-only parts / out-source receive / close / export / phone)');
   {
-    const { saveSwapRefund, markPartsIssued, listJobs } = await import('@/server/services/jobs');
+    const { saveSwapRefund, listJobs } = await import('@/server/services/jobs');
     const { REOPEN_LOCKED, returnDetailOf } = await import('@/lib/validation/job');
     const { exportXlsx } = await import('@/server/export');
     const ExcelJS = (await import('exceljs')).default;
@@ -2993,7 +2992,6 @@ try {
         )
       ).rows;
       await issueForJob({ jobNo: 'TDJ0402', lines: [{ logId: log.id, qty: 1 }] }, U.admin.id);
-      await markPartsIssued('TDJ0402', U.admin.id); // what POST /api/stock/issue calls next
       assert.equal((await jobRow('TDJ0402')).s, 10);
       assert.deepEqual(await logRows('TDJ0402'), [10]);
     });
@@ -3124,6 +3122,9 @@ try {
     await test('R4 jobs: only เบิก lines are charged — เบิก 200 + เสนอ-only 250 → 200; ticking เบิก on the second → 450', async () => {
       await setStock(P.a.code, 10);
       await setStock(P.b.code, 10);
+      // a new line is priced at the part's ราคาขาย (saveRepair never takes the page's price)
+      await pool.query(`UPDATE product_none_serial SET retail_price = CASE product_id WHEN 9201 THEN 200 ELSE 250 END
+                         WHERE product_id IN (9201, 9202)`);
       const line = (code: string, price: number, pick: boolean, logId?: number) => ({
         logId,
         code,
@@ -3449,7 +3450,10 @@ try {
       ).rows;
       assert.deepEqual(hd, { rs: 'ACTIVE', doc: true });
       const waiting = await order();
-      assert.equal((await records(U.admin, { table: 'sale_orders', id: waiting, status: 'DELETED' })).status, 200);
+      assert.equal(
+        (await records(U.admin, { table: 'sale_orders', id: waiting, status: 'DELETED', remark: 'TD ยกเลิก' })).status,
+        200,
+      );
     });
 
     await test('R5 records: restoring a deleted job puts back its status before the delete (job_log), else 1 งานใหม่', async () => {
@@ -4387,6 +4391,11 @@ try {
         U.admin.id,
       );
     const statusIdOf = async (no: string) => (await getJob(no))!.statusId;
+    // a new quotation starts as draft / sent: create it waiting, then save the status under test
+    const quoteAs = async (jobNo: string, status: string) => {
+      const q = await quote(jobNo, 'รอเสนอราคา');
+      return quote(jobNo, status, { no: q.no, version: q.version });
+    };
 
     await test('R6 quotation → job: sent → 4, agreed (3 / 6) → 12, agreed waiting parts → 3; history says why; never back / never a later or closed job', async () => {
       // 1 งานใหม่ → เสนอราคาแล้ว → 4, with the reason in the history line + job_log
@@ -4415,14 +4424,14 @@ try {
       assert.deepEqual([await statusIdOf('J9900701'), await logRows('J9900701')], [3, [4, 12, 3]]);
 
       // the other earlier statuses move too
-      await quote('J9900702', 'ลูกค้าตกลงซ่อม รอชำระเงิน'); // 2 → 12
+      await quoteAs('J9900702', 'ลูกค้าตกลงซ่อม รอชำระเงิน'); // 2 → 12
       await quote('J9900703', 'เสนอราคาแล้ว'); // 13 → 4
-      await quote('J9900704', 'ลูกค้าตกลงซ่อม รออะไหล่'); // 16 → 3
-      // further along (10) / closed (20): never moved
-      await quote('J9900705', 'ลูกค้าตกลงซ่อม');
-      await quote('J9900706', 'ลูกค้าตกลงซ่อม');
+      await quoteAs('J9900704', 'ลูกค้าตกลงซ่อม รออะไหล่'); // 16 → 3
+      // further along (10): never moved; closed (20): no quotation at all
+      await quoteAs('J9900705', 'ลูกค้าตกลงซ่อม');
+      assert.equal(await statusOf(quote('J9900706', 'รอเสนอราคา')), 409);
       // declined / cancelled / expired: no automatic change
-      for (const st of ['ลูกค้าไม่ตกลงซ่อม', 'ยกเลิกใบเสนอราคา', 'พ้นกำหนดเสนอราคา']) await quote('J9900707', st);
+      for (const st of ['ลูกค้าไม่ตกลงซ่อม', 'ยกเลิกใบเสนอราคา', 'พ้นกำหนดเสนอราคา']) await quoteAs('J9900707', st);
       const now = await Promise.all(
         ['J9900702', 'J9900703', 'J9900704', 'J9900705', 'J9900706', 'J9900707'].map(statusIdOf),
       );
@@ -5186,7 +5195,7 @@ try {
       }
     });
 
-    await test('SEC L3 restore: out of DELETED needs del (edit alone → 403, row stays DELETED); ACTIVE ↔ INACTIVE needs edit only', async () => {
+    await test('SEC L3 restore: a deleted customer comes back by System Admin only (edit / del → 403, row stays DELETED); ACTIVE ↔ INACTIVE needs edit only', async () => {
       await pool.query(`
         DELETE FROM customer WHERE customer_id IN (9951, 9952) OR customer_code IN ('TDC951', 'TDC952');
         INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status) VALUES
@@ -5206,12 +5215,14 @@ try {
           ).rows[0]?.rs;
         const refused = await records(U.viewer, { table: 'customers', id: 'TDC951', status: 'ACTIVE' });
         assert.equal(refused.status, 403);
-        assert.match(String(refused.body.error), /สิทธิ์ลบ/);
+        assert.equal(refused.body.error, 'กู้คืนลูกค้าที่ลบแล้วได้เฉพาะผู้ดูแลระบบ');
         assert.equal(await rsOf('TDC951'), 'DELETED');
         assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'INACTIVE' })).status, 200);
         assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'ACTIVE' })).status, 200);
-        // TD Job Clerk holds Customer del
-        assert.equal((await records(U.clerk, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 200);
+        // TD Job Clerk holds Customer del — still not enough (owner 2026-10-21: the dialog says ผู้ดูแลระบบ)
+        assert.equal((await records(U.clerk, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 403);
+        assert.equal(await rsOf('TDC951'), 'DELETED');
+        assert.equal((await records(U.admin, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 200);
         assert.equal(await rsOf('TDC951'), 'ACTIVE');
       } finally {
         await pool.query(

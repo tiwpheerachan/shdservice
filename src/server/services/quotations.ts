@@ -1,11 +1,24 @@
 import 'server-only';
 import { cached } from '@/server/cache';
-import { and, asc, count, desc, eq, gte, ilike, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, inArray, lt, lte, ne, not, or, sql } from 'drizzle-orm';
 import type { PgSelect } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
-import { QS } from '@/lib/status-ids';
+import { JS, QS } from '@/lib/status-ids';
+import { QUOTE_VALID_DAYS } from '@/lib/company';
+import { addDays, today } from '@/lib/dates';
+import { quoteExpired } from '@/lib/quote-expiry';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
-import { appUser, customer, job, manufacturer, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
+import {
+  appUser,
+  customer,
+  job,
+  jobStatus,
+  manufacturer,
+  product,
+  quotationDt,
+  quotationHd,
+  quotationStatus,
+} from '@/db/schema';
 import type { Quotation } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
@@ -16,8 +29,9 @@ import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/map
 import { customerForDocument, getCustomerByCode } from './customers';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { followQuotation, getJob } from './jobs';
+import { JOB_CLOSED_STATUSES } from './stock';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
-import { computeTotals, quotationSchema } from '@/lib/validation/quotation';
+import { computeTotals, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 import type { z } from 'zod';
@@ -26,6 +40,7 @@ import type { quotationSave } from '@/server/contract/sales';
 /** quotation_status ids (from the dump) */
 export { QS };
 const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
+const EXPIRED_NAME = 'พ้นกำหนดเสนอราคา';
 
 /** UI type labels ↔ legacy quotation_type values */
 const TYPE_LABEL: Record<string, Quotation['type']> = { Normal: 'Type A (Normal)', VIP: 'Type B (VIP)' };
@@ -63,6 +78,7 @@ const listSelect = {
   discount: quotationHd.discountAmount,
   vat: quotationHd.vatAmount,
   approveDate: quotationHd.customerApproveDate,
+  jobStatusId: job.jobStatusId,
   createBy: appUser.firstName,
   createByLast: appUser.lastName,
 };
@@ -78,7 +94,8 @@ function toQuotation(r: ListRow): Quotation {
     imei: r.imei ?? '',
     brandModel: [r.brand, r.modelName].filter(Boolean).join(' '),
     amount: num(r.amount),
-    status: r.status?.trim() ?? '',
+    // sent but past its validity reads as expired — the list, its filter (quotationWhere) and the export alike
+    status: quoteExpired(r.statusId, r.date, r.jobStatusId) ? EXPIRED_NAME : (r.status?.trim() ?? ''),
     statusId: r.statusId ?? 0,
     customerCode: r.customerCode ?? '',
     warranty: r.warranty ?? '',
@@ -138,8 +155,19 @@ export const quotationFiltersFromQuery = (f: Record<string, string>, deleted: St
   brand: f.brand,
 });
 
+/** quoteExpired (src/lib/quote-expiry.ts) in SQL: sent, and created before the validity window or its job says so */
+const sentExpired = () =>
+  and(
+    eq(quotationHd.quotationStatusId, QS.SENT),
+    or(
+      lt(quotationHd.createDate, `${addDays(today(), -QUOTE_VALID_DAYS)} 00:00:00`),
+      eq(job.jobStatusId, JS.QUOTE_EXPIRED),
+    ),
+  );
+
 export function quotationWhere(q: string, f: QuotationFilters) {
   const term = q.trim();
+  const status = f.status?.trim();
   const from = ymd(f.from),
     to = ymd(f.to);
   return and(
@@ -154,7 +182,15 @@ export function quotationWhere(q: string, f: QuotationFilters) {
         )
       : undefined,
     // trimmed: the table pads some names ("รอเสนอราคา" + 24 spaces) — an exact match misses them
-    f.status ? sql`trim(${quotationStatus.quotationStatusName}) = ${f.status.trim()}` : undefined,
+    // the status as the list shows it: expired = stored พ้นกำหนด or sent past its validity (and no longer "sent")
+    !status
+      ? undefined
+      : status === EXPIRED_NAME
+        ? or(eq(quotationHd.quotationStatusId, QS.EXPIRED), sentExpired())
+        : and(
+            sql`trim(${quotationStatus.quotationStatusName}) = ${status}`,
+            status === 'เสนอราคาแล้ว' ? not(sentExpired()!) : undefined,
+          ),
     from ? gte(quotationHd.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(quotationHd.createDate, `${to} 23:59:59`) : undefined,
     f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
@@ -259,6 +295,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   ]);
   return {
     ...toQuotation(r),
+    status: r.status?.trim() ?? '', // the form edits the stored status (the edit page derives "expired" itself)
     contactName: hd.customerContactName ?? '',
     customerDetail: cust,
     job: jb,
@@ -308,9 +345,29 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   assertValid(quotationSchema(i.no ? (before?.jobNo ?? '') : undefined), i);
   const jobNo = cleanCode(i.jobNo); // stored upper-case
   const [found] = jobNo
-    ? await db.select({ profileId: job.documentProfileId }).from(job).where(eq(job.jobNo, jobNo)).limit(1)
+    ? await db
+        .select({
+          profileId: job.documentProfileId,
+          statusId: job.jobStatusId,
+          status: jobStatus.jobStatusName,
+          recordStatus: job.recordStatus,
+        })
+        .from(job)
+        .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
+        .where(eq(job.jobNo, jobNo))
+        .limit(1)
     : [];
   if (jobNo && !found) throw new HttpError(400, 'ไม่พบหมายเลขงาน', { fields: { jobNo: `ไม่พบหมายเลขงาน ${jobNo}` } });
+  // a quotation is raised for (or moved to) an open job only — not one closed, cancelled or the customer declined
+  if (
+    found &&
+    jobNo !== cleanCode(before?.jobNo) &&
+    (found.recordStatus === RS.DELETED || JOB_CLOSED_STATUSES.includes(found.statusId ?? -1))
+  )
+    throw new HttpError(
+      409,
+      `งาน ${jobNo} อยู่ในสถานะ "${clean(found.status) || found.statusId}" (ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อม) — ออกใบเสนอราคาให้งานนี้ไม่ได้`,
+    );
   const cust = await customerForDocument(str(i.customerCode), before?.customerCode);
   if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
   const lines = (i.lines ?? [])
@@ -328,6 +385,25 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         total: Math.round((qty * price - disc) * 100) / 100,
       };
     });
+  // a deleted / Inactive product goes on no new line (owner 2026-10-21) — a code the quotation already had keeps it
+  const had = i.no
+    ? (await db.select({ c: quotationDt.itemCode }).from(quotationDt).where(eq(quotationDt.quotationNo, i.no))).map(
+        (r) => str(r.c),
+      )
+    : [];
+  const added = lines.map((l) => str(l.code).slice(0, 50)).filter((c) => c && !had.includes(c));
+  const [off] = added.length
+    ? await db
+        .select({ code: product.productCode, rs: product.recordStatus })
+        .from(product)
+        .where(and(inArray(product.productCode, added), ne(product.recordStatus, RS.ACTIVE)))
+        .limit(1)
+    : [];
+  if (off)
+    throw new HttpError(
+      409,
+      `รหัสสินค้า ${off.code} ${off.rs === RS.DELETED ? 'ถูกลบแล้ว' : 'ปิดใช้งาน (Inactive)'} — เลือกสินค้าอื่น`,
+    );
   const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
   const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
   const service = num(i.serviceAmount);
@@ -338,6 +414,12 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
+  // the new-quotation form copied the job's quoted parts when it opened — they changed since → its copy is stale
+  if (!i.no && jobNo && i.jobParts != null) {
+    const j = await getJob(jobNo);
+    if (j && quotedPartsKey(j.parts, type === 'VIP' ? 'B' : 'A') !== i.jobParts)
+      throw new HttpError(409, `รายการอะไหล่ของงานเปลี่ยนแล้ว (${jobNo}) — โหลดใหม่ก่อนบันทึก`);
+  }
   // a quotation raised from a job is issued under the job's profile unless the user picked another
   const jobProfileId = !i.no ? (found?.profileId ?? undefined) : undefined;
 
@@ -398,6 +480,12 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);
       statusChanged = prev.quotationStatusId !== statusId;
       wasAgreed = AGREED.has(prev.quotationStatusId ?? 0);
+      // the job points at its agreed quotation (and followed it): moving it would leave both jobs pointing at it
+      if (wasAgreed && clean(prev.referenceJobNo) && cleanCode(prev.referenceJobNo) !== jobNo)
+        throw new HttpError(
+          409,
+          `ใบเสนอราคานี้ลูกค้าตกลงแล้ว (งาน ${clean(prev.referenceJobNo)}) — ย้ายไปงานอื่นไม่ได้ เปลี่ยนสถานะใบนี้ก่อน`,
+        );
       const upd = {
         ...values,
         customerApproveDate:
@@ -442,12 +530,56 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     }
     if (linesChanged && dtRows.length)
       await tx.insert(quotationDt).values(dtRows.map((r) => ({ ...r, quotationNo: no! })));
-    // customer agreed → remember the approved quotation on the job
-    if (AGREED.has(statusId) && values.referenceJobNo) {
-      await tx.update(job).set({ quotationNoApproved: no }).where(eq(job.jobNo, values.referenceJobNo));
+    // customer agreed → the job remembers it: one agreed quotation per job, checked under the job's row lock
+    // (taken after the quotation row, as followQuotation does) so two approvals at once queue and the second
+    // sees the first
+    const pointTo = async (jobNo: string, from: string, to: string) => {
+      await tx.update(job).set({ quotationNoApproved: to }).where(eq(job.jobNo, jobNo));
+      await audit(tx, byUserId, {
+        action: 'UPDATE',
+        module: 'Job Management',
+        entity: 'job',
+        key: jobNo,
+        summary: to
+          ? `ใบเสนอราคาที่ลูกค้าตกลง → ${to}`
+          : `ใบเสนอราคา ${from} ไม่ใช่ใบที่ลูกค้าตกลงแล้ว (${statusName})`,
+        changes: { quotationNoApproved: [from, to] },
+      });
+    };
+    if (AGREED.has(statusId) && jobNo) {
+      const [j] = await tx
+        .select({ approved: job.quotationNoApproved, st: job.jobStatusId, rs: job.recordStatus })
+        .from(job)
+        .where(eq(job.jobNo, jobNo))
+        .for('update');
+      // agreeing now on a job already closed / cancelled / declined: the quotation would say agreed, the job not
+      if (!wasAgreed && j && (j.rs === RS.DELETED || JOB_CLOSED_STATUSES.includes(j.st ?? -1)))
+        throw new HttpError(
+          409,
+          `งาน ${jobNo} ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อมไปแล้ว — เปลี่ยนเป็นลูกค้าตกลงซ่อมไม่ได้ (เปิดงานกลับก่อน)`,
+        );
+      const [other] = await tx
+        .select({ no: quotationHd.quotationNo })
+        .from(quotationHd)
+        .where(
+          and(
+            eq(quotationHd.referenceJobNo, jobNo),
+            ne(quotationHd.quotationNo, no),
+            inArray(quotationHd.quotationStatusId, [...AGREED]),
+            ne(quotationHd.recordStatus, RS.DELETED),
+          ),
+        )
+        .limit(1);
+      if (other) throw new HttpError(409, `งานนี้มีใบเสนอราคาที่ลูกค้าตกลงแล้ว (${other.no}) — เปลี่ยนสถานะใบนั้นก่อน`);
+      if ((j?.approved ?? '') !== no) await pointTo(jobNo, j?.approved ?? '', no);
     } else if (wasAgreed && !AGREED.has(statusId)) {
-      // no longer agreed (declined / cancelled …) → a job still naming it as the approved one forgets it
-      await tx.update(job).set({ quotationNoApproved: '' }).where(eq(job.quotationNoApproved, no!));
+      // no longer agreed (declined / cancelled …) → only a job still naming it as the approved one forgets it
+      const named = await tx
+        .select({ jobNo: job.jobNo })
+        .from(job)
+        .where(eq(job.quotationNoApproved, no))
+        .for('update');
+      for (const n of named) await pointTo(n.jobNo, no, '');
     }
     // sent / agreed moves the job forward (owner 2026-10-16) — only when the status was set now: an unchanged
     // re-save never touches the job

@@ -27,10 +27,12 @@ export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, userSave);
 
-  // same rules as the user form (lib/validation/admin); an unchanged legacy username / phone passes
-  assertValid(userSchema(await userPrev(body.id)), body);
-  const name = str(body.name);
-  const role = str(body.role);
+  // same rules as the user form (lib/validation/admin); an unchanged legacy username / phone passes; an edit
+  // that leaves name / role out keeps the stored ones (the row's อนุมัติ / ถอนสิทธิ์ / คืนสิทธิ์ send only what they change)
+  const prev = await userPrev(body.id);
+  assertValid(userSchema(prev), prev ? { ...body, name: body.name ?? prev.name, role: body.role ?? prev.role } : body);
+  const name = body.name == null ? undefined : str(body.name);
+  const role = body.role == null ? undefined : str(body.role);
   const email = str(body.email).toLowerCase();
 
   // Enrich avatar/title (and fill blanks) from the directory when we have an email.
@@ -49,6 +51,7 @@ export const POST = handle(async (req: NextRequest) => {
       status: str(body.status) || undefined,
       avatar: str(body.avatar) || prof?.avatar || undefined,
       title: str(body.title) || prof?.title || undefined,
+      expect: body.expect,
     },
     me.userId,
   );

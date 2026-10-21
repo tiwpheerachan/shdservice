@@ -54,6 +54,11 @@ const JobBody = z
   })
   .meta({ id: 'JobInput' });
 
+/** a workflow page's shared job sections, sent with its action (one request: they save — or not — with it) */
+const pageJob = JobBody.optional();
+const PAGE_JOB =
+  " `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).";
+
 /** ปิดงาน's fields without a stored job: the receipt no and the return parcel no are only text here */
 const close = closeSchema().shape;
 const CloseBody = z.looseObject({
@@ -65,6 +70,7 @@ const CloseBody = z.looseObject({
     .meta({ description: 'Left out when nobody paid (an in-warranty job).' }),
   refund: close.refund.meta({ description: 'The deposit given back.' }),
   return: close.return.extend({ tracking: optText, shipperId: optNum }),
+  job: pageJob,
   version,
 });
 
@@ -76,6 +82,8 @@ const SwapBody = z.looseObject({
   refundRef: optText,
   newModel: optText,
   detail: optText,
+  job: pageJob,
+  version,
 });
 
 export const jobGet = defineOperation({
@@ -180,7 +188,8 @@ export const jobClose = defineOperation({
   tags,
   summary: 'Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)',
   description:
-    'Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund.',
+    'Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund.' +
+    PAGE_JOB,
   params: jobNo,
   body: CloseBody,
   responses: {
@@ -197,11 +206,13 @@ export const jobOutsource = defineOperation({
   path: '/jobs/{no}/outsource',
   tags,
   summary: 'Send to / receive back from an outside repairer (ส่งซ่อม Out-Source)',
-  description: 'Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts).',
+  description: 'Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts).' + PAGE_JOB,
   params: jobNo,
   body: outsourceActionSchema.safeExtend({
     engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
     receive: outsourceActionSchema.shape.receive.unwrap().extend({ from: optText }).optional(),
+    job: pageJob,
+    version,
   }),
   responses: {
     200: answer('Saved; the job as stored now.'),
@@ -222,7 +233,8 @@ export const jobRepair = defineOperation({
   tags,
   summary: 'Save the repair (บันทึกงานซ่อม): details, costs, part requests, status',
   description:
-    'Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it.',
+    'Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it.' +
+    PAGE_JOB,
   params: jobNo,
   body: repairActionSchema.extend({
     engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
@@ -237,6 +249,7 @@ export const jobRepair = defineOperation({
         }),
       )
       .optional(),
+    job: pageJob,
     version,
   }),
   responses: {
@@ -254,7 +267,8 @@ export const jobSwapRefund = defineOperation({
   tags,
   summary: 'Record a swap or a refund (Swap / Refund)',
   description:
-    'Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required.',
+    'Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required.' +
+    PAGE_JOB,
   params: jobNo,
   body: SwapBody,
   responses: {
@@ -270,15 +284,15 @@ export const trackLinkGet = defineOperation({
   method: 'get',
   path: '/jobs/{no}/track-link',
   tags,
-  summary: "The customer's tracking link: its state, and the URL only when this call issued the first one",
+  summary: "The customer's tracking link: its state (read-only)",
   description:
-    'Job Management view reads the state. The first link is issued (and audited) only for a caller who also has Job Management edit. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.',
+    'Job Management view. Never issues a link: only a hash of a link is stored, so an existing link is never shown again — POST issues one (the first one too).',
   params: jobNo,
   responses: {
     200: jsonResponse(
       'State of the link.',
       z.object({
-        url: s.meta({ description: '"" unless this call issued the job\'s first link.' }),
+        url: s.meta({ description: 'Always "" (kept for older clients) — POST returns a link.' }),
         ready: z.boolean().meta({ description: 'Always true (kept for older clients; every job can be tracked).' }),
         status: LinkStatus,
       }),

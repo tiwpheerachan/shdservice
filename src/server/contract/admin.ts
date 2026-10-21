@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { documentProfileSchema, shippingProfileSchema, userFields } from '@/lib/validation/admin';
+import { maxText } from '@/lib/validation';
 import { CONFLICT, JSON_BODY, Ok, SIGNED_IN, choice, errorResponse, flag, jsonResponse, notFound } from './common';
 import { defineOperation } from './registry';
+import { PAGE_MODULES, RIGHTS } from '@/lib/modules';
 import { DocumentProfile, MasterRow, Model, Permission, ShippingProfile, Symptom, SystemUser } from './shapes';
 
 /** System Admin screens: users, permissions, record status, master data, document / courier profiles. */
@@ -54,9 +56,13 @@ export const userSave = defineOperation({
   path: '/admin/users',
   tags,
   summary: 'Create or update a system user and give them a role',
-  description: `${ADMIN} Rules: \`userSchema(prev)\` in src/lib/validation/admin.ts, run by the route against the stored user. Blank code / branch / phone / avatar / title are filled from the Lark directory by email.`,
+  description: `${ADMIN} Rules: \`userSchema(prev)\` in src/lib/validation/admin.ts, run by the route against the stored user. Blank code / branch / phone / avatar / title are filled from the Lark directory by email. An edit that leaves name / role / status out keeps them as stored (the row's quick actions send only what they change).`,
   body: userFields.extend({
     id: sn.meta({ description: 'Set = edit that user.' }),
+    expect: z.object({ name: sn, email: sn, role: sn, status: sn }).nullish().meta({
+      description:
+        'The values the form loaded (as GET /admin/users shows them): one that no longer matches the stored user → 409 `details.stale`, nothing written.',
+    }),
     name: sn,
     role: sn.meta({ description: 'user_type — one of the roles in app_config' }),
     username: sn,
@@ -86,22 +92,29 @@ export const permissionsGet = defineOperation({
   },
 });
 
+/** what a permission row may be about: a module with a page here, or a special right */
+const MENUS = new Set<string>([...PAGE_MODULES, ...Object.keys(RIGHTS)]);
+const grants = z.object({ add: bool, edit: bool, del: bool, view: bool });
+
 export const permissionsSave = defineOperation({
   method: 'post',
   path: '/admin/permissions',
   tags,
   summary: 'Upsert permission rows by (role, menu)',
-  description: `${ADMIN} Items without a role or menu are dropped; none left, or \`items\` not a list of objects → 400 "no items".`,
+  description: `${ADMIN} Items without a role or menu are dropped; none left, or \`items\` not a list of objects → 400 "no items". A menu that is neither a page module nor a special right, or a role name over 50 characters → 400. With \`was\` (the row as the page loaded it) an item is a compare-and-set: a row another admin changed since → 409 \`details.stale\` naming the menus, nothing written.`,
   body: z.object({
     items: z.array(
       z.object(
         {
-          role: str,
-          menu: str.meta({ description: 'module name, or a special right' }),
+          role: str.refine((v) => v.length <= 50, 'ชื่อตำแหน่งยาวเกิน 50 ตัวอักษร'),
+          menu: str
+            .refine((v) => !v || MENUS.has(v), 'ไม่มีเมนูนี้ในระบบ')
+            .meta({ description: 'module name, or a special right' }),
           add: bool,
           edit: bool,
           del: bool,
           view: bool,
+          was: grants.nullish().meta({ description: 'The row as the page loaded it (no row = all false).' }),
         },
         { error: 'no items' },
       ),
@@ -113,6 +126,23 @@ export const permissionsSave = defineOperation({
     200: jsonResponse('Rows written.', z.object({ ok: z.literal(true), saved: n })),
     ...SIGNED_IN,
     ...JSON_BODY,
+    ...CONFLICT,
+  },
+});
+
+export const permissionsDelete = defineOperation({
+  method: 'delete',
+  path: '/admin/permissions',
+  tags,
+  summary: 'Delete a role (its permission rows)',
+  description: `${ADMIN} Refused (409) while a user that is not deleted still has the role, and for System Admin.`,
+  query: z.object({ role: z.string({ error: 'role required' }).trim().min(1, 'role required') }),
+  invalid: { query: 400 },
+  responses: {
+    200: jsonResponse('Rows removed.', z.object({ ok: z.literal(true), deleted: n })),
+    ...SIGNED_IN,
+    400: errorResponse('`role` missing.'),
+    ...CONFLICT,
   },
 });
 
@@ -149,6 +179,9 @@ export const recordStatus = defineOperation({
     ),
     status: choice(['ACTIVE', 'INACTIVE', 'DELETED']).meta({ description: 'Anything else: decided by `deleted`.' }),
     deleted: flag.meta({ description: 'Without `status`: `true` = DELETED, otherwise ACTIVE.' }),
+    remark: maxText(100, 'เหตุผล').meta({
+      description: 'Cancelling a sale order: the reason (document_cancel_remark). Other tables ignore it.',
+    }),
   }),
   invalid: { body: 400 },
   responses: {
@@ -192,6 +225,10 @@ export const masterSave = defineOperation({
     brand: text.meta({ description: 'models' }),
     price: text.meta({ description: 'models' }),
     status: text,
+    expect: z.object({ name: text, detail: text, status: text, brand: text, price: text }).nullish().meta({
+      description:
+        'The row as the edit dialog loaded it (simple lists and symptoms: name, detail, status; `models`: name, brand, price, status) — changed since → 409 `details.stale`, nothing written.',
+    }),
   }),
   invalid: { params: 404 },
   responses: {

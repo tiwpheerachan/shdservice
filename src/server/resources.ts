@@ -162,7 +162,9 @@ export async function readResource(
       return recentJobNos(clampInt(sp.get('limit'), 50, 1000));
     }
     case 'products': {
-      if (sp.get('fields') === 'lite') return listProductsLite(p.q);
+      // lite: ACTIVE (pickers), INACTIVE too only when asked (stock receive) — never DELETED
+      if (sp.get('fields') === 'lite')
+        return listProductsLite(p.q, sp.get('deleted') === 'exclude' ? 'exclude' : 'active');
       return paged ? pageProducts(p, productFiltersFromQuery(p.f, deleted)) : listProducts({ deleted, q: p.q });
     }
     case 'product_stats':

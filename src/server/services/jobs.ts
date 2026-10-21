@@ -26,6 +26,7 @@ import { JOB_GROUP, JS, STORE_LOCATION_ID } from '@/lib/status-ids';
 import { SEND_STATUS } from '@/lib/outsource-status';
 import {
   appUser,
+  customer,
   documentAttach,
   job,
   jobCallLog,
@@ -97,11 +98,14 @@ import {
   partCharge,
   NOT_ENGINEER,
   REFUND_DETAIL,
+  CLOSABLE_IDS,
+  notClosableMsg,
   type JobCheck,
   type JobRequiredKey,
 } from '@/lib/validation/job';
 import { cleanTracking } from '@/lib/validation';
 import { callLogSchema } from '@/lib/validation/stock';
+import { asciiDigits } from '@/lib/validation/customer';
 import { assertValid } from '@/server/validate';
 import type { jobClose, jobCreate, jobOutsource, jobRepair, jobSwapRefund } from '@/server/contract/jobs';
 import { clean, cleanCode, cleanText, summary, type FieldErrors } from '@/lib/validation';
@@ -213,6 +217,19 @@ async function lockJob(tx: Tx, jobNo: string, allowDeleted = false): Promise<Job
   return r;
 }
 
+/** row_version as this transaction left it */
+const versionNow = async (tx: Tx, jobNo: string) =>
+  (await tx.select({ v: job.rowVersion }).from(job).where(eq(job.jobNo, jobNo)))[0]?.v ?? 0;
+
+/**
+ * The job as stored now, with the version THIS save's transaction wrote (versionNow). Read after the commit, the
+ * row may already carry someone else's save (a stock issue moving the status): a page adopting that version
+ * would send it back with its own stale fields and pass — with ours, its next save is a 409 instead.
+ */
+async function savedJob(jobNo: string, version: number): Promise<JobDetail> {
+  return { ...(await getJob(jobNo))!, version };
+}
+
 /** an out-source send not yet recorded as received (saveOutsource's open row) */
 const outsourceOpen = (jobNo: string) =>
   and(eq(jobSendForwardDt.jobNo, jobNo), eq(jobSendForwardDt.sendStatus, SEND_STATUS.SENT));
@@ -300,12 +317,20 @@ async function setStatus(
       await stampRepairedIfMissing(tx, jobNo, extra.jobClosedDate, byUserId);
     }
   }
+  // reopened: no longer closed — a close date left behind would count it as closed (dashboard, export)
+  const reopened = fromGroup === FINISHED_GROUP && group !== FINISHED_GROUP;
+  const [was] = reopened
+    ? await tx.select({ d: job.jobClosedDate, by: job.jobClosedBy }).from(job).where(eq(job.jobNo, jobNo))
+    : [];
+  if (reopened) Object.assign(extra, { jobClosedDate: SENTINEL_TS, jobClosedBy: 0 });
   await tx
     .update(job)
     .set({ jobStatusId: statusId, ...extra })
     .where(eq(job.jobNo, jobNo));
   await logStatus(tx, jobNo, statusId, byUserId);
-  await audit(tx, byUserId, statusEntry(jobNo, name, current ?? null, statusId, why));
+  const entry = statusEntry(jobNo, name, current ?? null, statusId, why);
+  if (was) Object.assign(entry.changes!, { jobClosedDate: [was.d, SENTINEL_TS], jobClosedBy: [was.by, 0] });
+  await audit(tx, byUserId, entry);
   return true;
 }
 
@@ -332,10 +357,13 @@ export async function followQuotation(
 /* ------------------------------------------------------------------ *
  * List (server-side paging)
  * ------------------------------------------------------------------ */
+/** the customer as they are NOW ("code name phone", as customer_detail is built) — the opening snapshot without one */
+const customerText = sql<string>`coalesce(nullif(btrim(concat_ws(' ', btrim(${customer.customerCode}), btrim(${customer.customerName}), btrim(${customer.phoneNumber}))), ''), ${job.customerDetail})`;
+
 const listSelect = {
   no: job.jobNo,
   openDate: job.jobCreateDate,
-  customer: job.customerDetail,
+  customer: customerText,
   customerId: job.customerId,
   so: job.jobReferenceNo,
   brand: manufacturer.manufacturerName,
@@ -437,7 +465,8 @@ const baseQuery = () =>
     .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
     .leftJoin(eng, eq(eng.userId, job.engineerId))
     .leftJoin(opener, eq(opener.userId, job.jobCreateBy))
-    .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId));
+    .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
+    .leftJoin(customer, eq(customer.customerId, job.customerId));
 
 const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   no: job.jobNo,
@@ -540,12 +569,25 @@ export const overdueWhere = and(isOpenJob, sql`${effectiveDue} < ${thaiToday}`);
 export const daysOverdue = sql<number>`(${thaiToday} - ${effectiveDue})`.mapWith(Number);
 
 /** a phone's digits as stored ("+66 89 999 3466" → "0899993466": the country code typed for the leading 0) */
-const phoneDigits = (v: string) => v.replace(/\D/g, '').replace(/^66(?=\d{8,9}$)/, '0');
+const phoneDigits = (v: string) =>
+  asciiDigits(v)
+    .replace(/\D/g, '')
+    .replace(/^66(?=\d{8,9}$)/, '0');
+/** customer.phone_number as digits — the expression of drizzle/0024's index (customers.ts phoneDigits) */
+const customerPhoneHas = (digits: string) =>
+  sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g') LIKE ${'%' + digits + '%'}`;
+/**
+ * Jobs of the customers whose CURRENT name / phone matches: customer_detail is the text as it was when the job
+ * was opened (rebuilt only when the job moves to another customer). ARRAY(…) runs once, then the job side is an
+ * index lookup by customer_id (ix_job_customer) inside the same BitmapOr as the customer_detail matches.
+ */
+const customerNow = (cond: SQL | undefined) =>
+  sql`${job.customerId} = ANY(ARRAY(select ${customer.customerId} from ${customer} where ${cond}))`;
 
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   // a phone typed as digits ("0814969925") also finds "081-4969925" — same match as f.phone below
-  const termDigits = /^[\d\s()+-]+$/.test(term) ? phoneDigits(term) : '';
+  const termDigits = /^[\d๐-๙\s()+-]+$/.test(term) ? phoneDigits(term) : '';
   const phone = phoneDigits(f.phone ?? '');
   const from = ymd(f.from),
     to = ymd(f.to),
@@ -566,6 +608,12 @@ export function jobWhere(q: string, f: JobFilters) {
           termDigits.length >= 4
             ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + termDigits + '%'}`
             : undefined,
+          customerNow(
+            or(
+              ilike(customer.customerName, likeTerm(term)),
+              termDigits.length >= 4 ? customerPhoneHas(termDigits) : undefined,
+            ),
+          ),
         )
       : undefined,
     f.status ? eq(jobStatus.jobStatusName, f.status) : undefined,
@@ -597,10 +645,7 @@ export function jobWhere(q: string, f: JobFilters) {
       ? and(isOpenJob, or(eq(job.jobStatusId, JS.NEW), sql`coalesce(${job.engineerId}, 0) <= 0`))
       : undefined,
     f.closable
-      ? or(
-          eq(jobStatus.jobStatusGroup, JOB_GROUP.REPAIRED),
-          inArray(job.jobStatusId, [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP]),
-        )
+      ? or(eq(jobStatus.jobStatusGroup, JOB_GROUP.REPAIRED), inArray(job.jobStatusId, CLOSABLE_IDS))
       : undefined,
     // ---- job-list filter bar ----
     f.no ? ilike(job.jobNo, likeTerm(f.no.trim())) : undefined,
@@ -612,11 +657,21 @@ export function jobWhere(q: string, f: JobFilters) {
     f.model ? eq(job.productModelName, f.model) : undefined,
     f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
     f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
-    f.customer ? ilike(job.customerDetail, likeTerm(f.customer.trim())) : undefined,
+    f.customer
+      ? or(
+          ilike(job.customerDetail, likeTerm(f.customer.trim())),
+          customerNow(ilike(customer.customerName, likeTerm(f.customer.trim()))),
+        )
+      : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
     phone
-      ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + phone + '%'}`
-      : undefined,
+      ? or(
+          sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + phone + '%'}`,
+          customerNow(customerPhoneHas(phone)),
+        )
+      : f.phone?.trim()
+        ? sql`false` // a phone box with no digit in it matches nothing, not every job
+        : undefined,
     f.tracking ? ilike(job.jobReceptionTrackingNo, likeTerm(f.tracking.trim())) : undefined,
     f.imei
       ? or(ilike(job.productImeiNo, likeTerm(f.imei.trim())), ilike(job.productSerial, likeTerm(f.imei.trim())))
@@ -1655,113 +1710,132 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
 }
 
 export async function updateJob(jobNo: string, i: JobInput, byUserId: number): Promise<JobDetail> {
+  const edit = await prepJobEdit(jobNo, i);
+  const v = await db.transaction(async (tx) => {
+    const existing = await lockJob(tx, jobNo);
+    assertVersion(i.version, existing.rowVersion);
+    await applyJobEdit(tx, jobNo, existing, edit, byUserId);
+    return versionNow(tx, jobNo);
+  });
+  return savedJob(jobNo, v);
+}
+
+/** แก้ไขข้อมูลงาน's checks and lookups, before any transaction — also the `job` a workflow page sends with its action */
+async function prepJobEdit(jobNo: string, i: JobInput) {
   const was = await jobNow(jobNo);
   if (!was) throw jobNotFound(jobNo);
   assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
   const cust = i.customerCode ? await customerForDocument(str(i.customerCode), was.customerId) : null;
   const lk = await lookups(i, was.shipper, jobNo);
-  const c = costFields(i);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   await assertPageStatus(newStatus, was.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
   const engineerId = i.engineerId !== undefined ? int(i.engineerId, 0) : undefined;
+  return { i, was, cust, lk, c: costFields(i), newStatus, engineerId };
+}
 
-  await db.transaction(async (tx) => {
-    const existing = await lockJob(tx, jobNo);
-    assertVersion(i.version, existing.rowVersion);
-    // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
-    const prevEng = existing.engineerId ?? 0;
-    const assigning = engineerId !== undefined && engineerId > 0 && engineerId !== prevEng;
-    // มอบหมายงานนี้ให้ cleared (the form sends 0): the job has nobody on it again
-    const unassigning = engineerId !== undefined && engineerId <= 0 && prevEng > 0;
-    if (assigning && prevEng > 0 && !i.takeOver) throw await takeOverError([{ no: jobNo, eng: prevEng }]);
-    if (assigning) await assertAssignee(engineerId);
-    // blank stays blank: a legacy job with no channel / reception type is not given the default by a re-save
-    const orBlank = (v: unknown, dflt: string, stored: string | null) => clean(v) || (clean(stored) ? dflt : '');
-    const values = {
-      // the customer text is rebuilt only when the customer changes (its phone may have changed since)
-      ...(cust && cust.id !== existing.customerId
-        ? { customerId: cust.id, customerDetail: customerDetailOf(cust) }
-        : {}),
-      // the due date is written (and becomes "picked by a user") only when it was changed: saving
-      // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
-      ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
-        ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
-        : {}),
-      ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
-      jobTypeDetail: clean(i.jobTypeDetail),
-      productImeiNo: cleanCode(i.imei),
-      productSerial: cleanSerial(i.serial),
-      ...(lk.productTypeId ? { productTypeId: lk.productTypeId } : {}),
-      ...(lk.brandId ? { productBrandId: lk.brandId } : {}),
-      // the model's name follows only a changed model (a legacy free-text name stays)
-      ...(lk.modelId && lk.modelId !== existing.productModelId
-        ? { productModelId: lk.modelId, productModelName: (lk.modelName ?? '').slice(0, 50) }
-        : {}),
-      productModelDetail: clean(i.modelDetail),
-      // the form has no color field: not sent = keep it
-      ...(i.color !== undefined ? { productColor: clean(i.color).slice(0, 50) } : {}),
-      ...(lk.symIds.length ? { productSymptomId: lk.symIds[0] } : {}),
-      productSymptomOther: clean(i.symptomOther),
-      productEquipment: clean(i.equipment),
-      productFault: clean(i.fault),
-      estimateCost: money(num(i.estimateCost)),
-      depositCost: money(num(i.depositCost)),
-      serviceCost: money(c.service),
-      serviceToolCost: money(c.tool),
-      deliveryCost: money(c.delivery),
-      cartonBoxCost: money(c.box),
-      jobReferenceNo: cleanCode(i.so),
-      jobRemark: cleanText(i.remark),
-      ...(engineerId !== undefined ? { engineerId } : {}),
-      productWarranty: clean(i.warranty),
-      productSaleOutChannel: orBlank(i.channel, NO_CHANNEL, existing.productSaleOutChannel),
-      productSaleOrderDate: dateOrNull(i.saleOrderDate),
-      productWarrantyMonth: int(i.warrantyMonth, 0),
-      productExpireDate: dateOrNull(i.expireDate),
-      jobReceptionType: orBlank(i.receptionType, NO_RECEPTION_TYPE, existing.jobReceptionType),
-      jobReceptionDate: dateOrNull(i.receptionDate),
-      jobReceptionTrackingNo: cleanTracking(i.receptionTrackingNo),
-      jobReceptionShipper: clean(i.receptionShipper).slice(0, 50), // a profile name (≤ 200) — safety net
-      productSaleOutShopName: clean(i.shopName),
-      ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
-    };
-    const changed = withTotal(existing, changedOnly(existing, values));
-    const toWrite = (await moneyLocked(existing.jobStatusId, byUserId)) ? keepMoney(existing, changed) : changed;
-    if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
-    // one history row per real change: the assignment has its own (ASSIGN), not also "แก้ไขข้อมูลงาน (ช่าง…)"
-    const changes = diff(existing as Record<string, unknown>, toWrite as Record<string, unknown>, {
-      skip: ['engineerId'],
-    });
-    if (changes)
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Job Management',
-        entity: 'job',
-        key: jobNo,
-        summary: 'แก้ไขข้อมูลงาน',
-        changes,
-      });
-    if (assigning || unassigning) await auditAssign(tx, byUserId, jobNo, prevEng, engineerId ?? 0, 'Job Management');
-    // job_symptom rewritten only when the set changes (a legacy job has only product_symptom_id: that one = no change)
-    if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) {
-      const rows = await tx.select({ id: jobSymptom.symptomId }).from(jobSymptom).where(eq(jobSymptom.jobNo, jobNo));
-      const now = rows.length
-        ? rows.map((r) => r.id)
-        : (existing.productSymptomId ?? 0) > 0
-          ? [existing.productSymptomId]
-          : [];
-      const key = (ids: (number | null)[]) => [...ids].sort().join(',');
-      if (key(now) !== key(lk.symIds)) await writeSymptoms(tx, jobNo, lk.symIds);
-    }
-    if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing.jobStatusId);
-    // assigned here = the same as /jobs/assign: a new job moves to อยู่ระหว่างดำเนินการ (+ job_log)
-    if (assigning && (newStatus ?? existing.jobStatusId) === JS.NEW)
-      await setStatus(tx, jobNo, JS.IN_PROGRESS, byUserId, JS.NEW);
-    // the reverse: nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (shows up to be assigned again)
-    if (unassigning && (newStatus ?? existing.jobStatusId) === JS.IN_PROGRESS)
-      await setStatus(tx, jobNo, JS.NEW, byUserId, JS.IN_PROGRESS, 'ไม่มีผู้รับงาน');
+/**
+ * แก้ไขข้อมูลงาน's writes, under the caller's job lock and version check (updateJob, or a workflow page's action:
+ * its shared job sections then commit — or roll back — with the action). Returns the job row as it is now.
+ */
+async function applyJobEdit(
+  tx: Tx,
+  jobNo: string,
+  existing: JobRow,
+  edit: Awaited<ReturnType<typeof prepJobEdit>>,
+  byUserId: number,
+): Promise<JobRow> {
+  const { i, was, cust, lk, c, newStatus, engineerId } = edit;
+  // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
+  const prevEng = existing.engineerId ?? 0;
+  const assigning = engineerId !== undefined && engineerId > 0 && engineerId !== prevEng;
+  // มอบหมายงานนี้ให้ cleared (the form sends 0): the job has nobody on it again
+  const unassigning = engineerId !== undefined && engineerId <= 0 && prevEng > 0;
+  if (assigning && prevEng > 0 && !i.takeOver) throw await takeOverError([{ no: jobNo, eng: prevEng }]);
+  if (assigning) await assertAssignee(engineerId);
+  // blank stays blank: a legacy job with no channel / reception type is not given the default by a re-save
+  const orBlank = (v: unknown, dflt: string, stored: string | null) => clean(v) || (clean(stored) ? dflt : '');
+  const values = {
+    // the customer text is rebuilt only when the customer changes (its phone may have changed since)
+    ...(cust && cust.id !== existing.customerId ? { customerId: cust.id, customerDetail: customerDetailOf(cust) } : {}),
+    // the due date is written (and becomes "picked by a user") only when it was changed: saving
+    // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
+    ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
+      ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
+      : {}),
+    ...(lk.jobTypeId ? { jobTypeId: lk.jobTypeId } : {}),
+    jobTypeDetail: clean(i.jobTypeDetail),
+    productImeiNo: cleanCode(i.imei),
+    productSerial: cleanSerial(i.serial),
+    ...(lk.productTypeId ? { productTypeId: lk.productTypeId } : {}),
+    ...(lk.brandId ? { productBrandId: lk.brandId } : {}),
+    // the model's name follows only a changed model (a legacy free-text name stays)
+    ...(lk.modelId && lk.modelId !== existing.productModelId
+      ? { productModelId: lk.modelId, productModelName: (lk.modelName ?? '').slice(0, 50) }
+      : {}),
+    productModelDetail: clean(i.modelDetail),
+    // the form has no color field: not sent = keep it
+    ...(i.color !== undefined ? { productColor: clean(i.color).slice(0, 50) } : {}),
+    ...(lk.symIds.length ? { productSymptomId: lk.symIds[0] } : {}),
+    productSymptomOther: clean(i.symptomOther),
+    productEquipment: clean(i.equipment),
+    productFault: clean(i.fault),
+    estimateCost: money(num(i.estimateCost)),
+    depositCost: money(num(i.depositCost)),
+    serviceCost: money(c.service),
+    serviceToolCost: money(c.tool),
+    deliveryCost: money(c.delivery),
+    cartonBoxCost: money(c.box),
+    jobReferenceNo: cleanCode(i.so),
+    jobRemark: cleanText(i.remark),
+    ...(engineerId !== undefined ? { engineerId } : {}),
+    productWarranty: clean(i.warranty),
+    productSaleOutChannel: orBlank(i.channel, NO_CHANNEL, existing.productSaleOutChannel),
+    productSaleOrderDate: dateOrNull(i.saleOrderDate),
+    productWarrantyMonth: int(i.warrantyMonth, 0),
+    productExpireDate: dateOrNull(i.expireDate),
+    jobReceptionType: orBlank(i.receptionType, NO_RECEPTION_TYPE, existing.jobReceptionType),
+    jobReceptionDate: dateOrNull(i.receptionDate),
+    jobReceptionTrackingNo: cleanTracking(i.receptionTrackingNo),
+    jobReceptionShipper: clean(i.receptionShipper).slice(0, 50), // a profile name (≤ 200) — safety net
+    productSaleOutShopName: clean(i.shopName),
+    ...(i.isBounce !== undefined ? { isJobBounce: !!i.isBounce } : {}),
+  };
+  const changed = withTotal(existing, changedOnly(existing, values));
+  const toWrite = (await moneyLocked(existing.jobStatusId, byUserId)) ? keepMoney(existing, changed) : changed;
+  if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
+  // one history row per real change: the assignment has its own (ASSIGN), not also "แก้ไขข้อมูลงาน (ช่าง…)"
+  const changes = diff(existing as Record<string, unknown>, toWrite as Record<string, unknown>, {
+    skip: ['engineerId'],
   });
-  return (await getJob(jobNo))!;
+  if (changes)
+    await audit(tx, byUserId, {
+      action: 'UPDATE',
+      module: 'Job Management',
+      entity: 'job',
+      key: jobNo,
+      summary: 'แก้ไขข้อมูลงาน',
+      changes,
+    });
+  if (assigning || unassigning) await auditAssign(tx, byUserId, jobNo, prevEng, engineerId ?? 0, 'Job Management');
+  // job_symptom rewritten only when the set changes (a legacy job has only product_symptom_id: that one = no change)
+  if (lk.symIds.length || (i.symptoms && i.symptoms.length === 0)) {
+    const rows = await tx.select({ id: jobSymptom.symptomId }).from(jobSymptom).where(eq(jobSymptom.jobNo, jobNo));
+    const now = rows.length
+      ? rows.map((r) => r.id)
+      : (existing.productSymptomId ?? 0) > 0
+        ? [existing.productSymptomId]
+        : [];
+    const key = (ids: (number | null)[]) => [...ids].sort().join(',');
+    if (key(now) !== key(lk.symIds)) await writeSymptoms(tx, jobNo, lk.symIds);
+  }
+  if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, existing.jobStatusId);
+  // assigned here = the same as /jobs/assign: a new job moves to อยู่ระหว่างดำเนินการ (+ job_log)
+  if (assigning && (newStatus ?? existing.jobStatusId) === JS.NEW)
+    await setStatus(tx, jobNo, JS.IN_PROGRESS, byUserId, JS.NEW);
+  // the reverse: nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (shows up to be assigned again)
+  if (unassigning && (newStatus ?? existing.jobStatusId) === JS.IN_PROGRESS)
+    await setStatus(tx, jobNo, JS.NEW, byUserId, JS.IN_PROGRESS, 'ไม่มีผู้รับงาน');
+  return (await tx.select().from(job).where(eq(job.jobNo, jobNo)))[0]!;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1779,12 +1853,18 @@ export async function assignJobs(
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
-      .select({ no: job.jobNo, status: job.jobStatusId, eng: job.engineerId })
+      .select({ no: job.jobNo, status: job.jobStatusId, eng: job.engineerId, rs: job.recordStatus })
       .from(job)
       .where(inArray(job.jobNo, jobNos))
       .orderBy(job.jobNo)
       .for('update');
-    if (!rows.length) return;
+    const missing = jobNos.filter((no) => !rows.some((r) => r.no === no));
+    if (missing.length) throw new HttpError(404, `ไม่พบหมายเลขงาน ${missing.join(', ')}`);
+    // a closed or deleted job takes nobody new (its record of who repaired it stays)
+    const shut: string[] = [];
+    for (const r of rows)
+      if (r.rs === RS.DELETED || (await statusGroup(r.status ?? -1)) === FINISHED_GROUP) shut.push(r.no);
+    if (shut.length) throw new HttpError(409, `งานปิดแล้วหรือถูกยกเลิก มอบหมายไม่ได้: ${shut.join(', ')}`);
     const taken = rows.filter((r) => (r.eng ?? 0) > 0 && r.eng !== engineerId);
     if (taken.length && !takeOver) throw await takeOverError(taken.map((r) => ({ no: r.no, eng: r.eng ?? 0 })));
     // one UPDATE for the whole batch; only NEW jobs also change status
@@ -1883,6 +1963,34 @@ function repairStatus(status: JobRow['jobStatusId'], picked: number | undefined,
 
 const PART_QTY_REQUIRED = 'ระบุจำนวนที่ต้องการเบิก/เสนอ';
 
+type PartRow = typeof jobOrderSparePartLog.$inferSelect;
+/** 409 on the page's row `i` (under its แบบ A qty) — or the whole save when the row is not on the page */
+const partConflict = (msg: string, i?: number) =>
+  new HttpError(409, msg, i === undefined ? undefined : { fields: { [`parts.${i}.a.qty`]: msg } });
+/** a line stock has issued from: the repair page may only bring a partly issued request down to what was issued
+ *  (`more` = its quantity was raised: more of the part is a new line) */
+function issuedLine(e: PartRow, i?: number, more = false) {
+  const [code, req, got, back] = [e.sparePartCode, e.requestQty ?? 0, e.grantQty ?? 0, e.returnQty ?? 0];
+  return partConflict(
+    more
+      ? `${code} จ่ายไปแล้ว ${got} ชิ้น — เพิ่มจำนวนในรายการนี้ไม่ได้ ถ้าต้องการเพิ่ม ให้เพิ่มเป็นรายการใหม่`
+      : e.orderStatusId === PART.REQUESTED
+        ? `${code} จ่ายไปแล้ว ${got} จาก ${req} ชิ้น — ลดจำนวนได้ถึง ${got} (ยกเลิกส่วนที่เหลือ) ลด/ลบส่วนที่จ่ายแล้วไม่ได้ ให้สต๊อกรับคืนก่อน`
+        : got > back
+          ? `${code} จ่ายไปแล้ว ${got - back} ชิ้น — ลด/ลบไม่ได้ ให้สต๊อกรับคืนก่อน`
+          : `${code} รับคืนเข้าสต๊อกแล้ว — รายการนี้แก้ไข/ลบไม่ได้ (เพิ่มรายการใหม่แทน)`,
+    i,
+  );
+}
+/** a deleted or Inactive (owner 2026-10-21) part: no new line, no bigger request */
+function assertPartOn(p: { deleted: boolean; inactive: boolean } | undefined, code: string | null, i: number) {
+  if (p?.deleted || p?.inactive)
+    throw partConflict(
+      `อะไหล่ ${code} ${p.deleted ? 'ถูกยกเลิกแล้ว' : 'ปิดใช้งาน (Inactive)'} — เบิก/เสนอเพิ่มไม่ได้`,
+      i,
+    );
+}
+
 /**
  * Column mapping inferred from the dump: request_qty / is_quotation / is_special
  * (+ the *_b twins) — is_quotation = "เสนอ" (in the quotation), is_special = "เบิก"
@@ -1924,36 +2032,47 @@ async function syncPartLines(
       if (!(p[k].pick || p[k].quote) || qty > 0) continue;
       const [pick, quote, q] = stored[k];
       if (e && !!pick === !!p[k].pick && !!quote === !!p[k].quote && (q ?? 0) === qty) continue;
-      fields[`parts.${i}.${k}.qty`] = PART_QTY_REQUIRED;
+      // a partly issued line comes down to what stock issued, never to 0
+      const got = k === 'a' && e?.orderStatusId === PART.REQUESTED ? (e.grantQty ?? 0) : 0;
+      fields[`parts.${i}.${k}.qty`] = got
+        ? `${e!.sparePartCode} จ่ายไปแล้ว ${got} ชิ้น — จำนวนต่ำสุดคือ ${got}`
+        : PART_QTY_REQUIRED;
     }
   });
   if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
   const keep = new Set(parts.map((p) => p.logId).filter((x): x is number => !!x));
   const codes = parts.map((p) => str(p.code)).filter(Boolean);
-  // still-pending rows are the only existing ones whose booking can move (cancel / re-book)
-  const pending = existing.filter((e) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0);
-  const map = await productsByCode(tx, [...codes, ...pending.map((e) => e.sparePartCode ?? '')]);
+  // nothing issued yet: the line is the page's (cancel / re-book / rewrite)
+  const isPending = (e: PartRow) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0;
+  // requested rows hold booking (pending, or partly issued — its rest may be cancelled)
+  const requested = existing.filter((e) => e.orderStatusId === PART.REQUESTED);
+  const map = await productsByCode(tx, [...codes, ...requested.map((e) => e.sparePartCode ?? '')]);
   await lockStock(
     tx,
     [...map.values()].map((p) => p.id),
   );
 
-  // rows removed in the UI: cancel while still pending (nothing issued yet)
-  for (const e of pending) {
-    if (!keep.has(e.jobOrderLogId)) {
-      if (locked) throw partsLocked();
-      await tx
-        .update(jobOrderSparePartLog)
-        .set({ orderStatusId: PART.CANCELLED })
-        .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
-      const prod = map.get(e.sparePartCode ?? '');
-      if (prod && e.isSpecial) await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
-      partsChanged = true;
-    }
+  // rows removed in the UI: cancel while still pending; one stock has issued from is refused, never ignored
+  for (const e of existing) {
+    if (keep.has(e.jobOrderLogId) || e.orderStatusId === PART.CANCELLED) continue;
+    if (!isPending(e)) throw issuedLine(e);
+    if (locked) throw partsLocked();
+    await tx
+      .update(jobOrderSparePartLog)
+      .set({ orderStatusId: PART.CANCELLED })
+      .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
+    const prod = map.get(e.sparePartCode ?? '');
+    if (prod && e.isSpecial) await adjustQty(tx, prod.id, { booking: -(e.requestQty ?? 0) }, { allowNegative: true });
+    partsChanged = true;
   }
 
-  for (const p of parts) {
-    const price = num(p.unitPrice);
+  for (const [i, p] of parts.entries()) {
+    const e = p.logId ? existing.find((x) => x.jobOrderLogId === p.logId) : undefined;
+    if (p.logId && !e) continue;
+    const prod = map.get(e ? (e.sparePartCode ?? '') : str(p.code));
+    // ราคา/หน่วย is not a field on the page: a new line takes the part's ราคาขาย (what the picker showed), a
+    // stored one keeps its own — never the price the browser sent
+    const price = e ? num(e.sparePartUnitPrice) : (prod?.price ?? 0);
     const qtyA = Math.max(0, int(p.a.qty, 0));
     const qtyB = Math.max(0, int(p.b.qty, 0));
     const useA = (p.a.pick || p.a.quote) && qtyA > 0;
@@ -1973,41 +2092,67 @@ async function syncPartLines(
       sparePartTotalPriceB: money(useB ? totalB : 0),
     };
 
-    if (p.logId) {
-      const e = existing.find((x) => x.jobOrderLogId === p.logId);
-      if (!e) continue;
-      // a closed job: the line as loaded passes untouched, anything else is a money change
-      const asLoaded =
-        price === num(e.sparePartUnitPrice) &&
+    if (e) {
+      // only แบบ A's quantity moved (the ticks and แบบ B as stored)
+      const onlyQtyA =
         !!p.a.pick === !!e.isSpecial &&
         !!p.a.quote === !!e.isQuotation &&
-        qtyA === (e.requestQty ?? 0) &&
         !!p.b.pick === !!e.isSpecialB &&
         !!p.b.quote === !!e.isQuotationB &&
         qtyB === (e.requestQtyB ?? 0);
+      // a closed job: the line as loaded passes untouched, anything else is a money change
+      const asLoaded = onlyQtyA && qtyA === (e.requestQty ?? 0);
       if (locked && !asLoaded) throw partsLocked();
-      if (!locked && e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0) {
+      if (!locked && isPending(e)) {
         // still editable: re-book the delta on the row's own part (never the code the page sent)
-        const prod = map.get(e.sparePartCode ?? '');
         const before = e.isSpecial ? (e.requestQty ?? 0) : 0;
         const after = values.isSpecial ? values.requestQty : 0;
+        if (after > before) assertPartOn(prod, e.sparePartCode, i);
         if (prod && after !== before)
           await adjustQty(tx, prod.id, { booking: after - before }, { allowNegative: true });
         // the line as loaded is not written again (a legacy row keeps its stored prices)
         if (!asLoaded) {
-          await tx.update(jobOrderSparePartLog).set(values).where(eq(jobOrderSparePartLog.jobOrderLogId, p.logId));
+          await tx
+            .update(jobOrderSparePartLog)
+            .set(values)
+            .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
           partsChanged = true;
         }
         partsTotal += useA ? totalA : 0;
-      } else {
+      } else if (asLoaded) {
         partsTotal += num(e.sparePartTotalPrice);
+      } else if (
+        // partly issued: the request comes down, at most to what stock issued — the rest is cancelled (its
+        // booking released); at that floor the line is issued in full
+        e.orderStatusId === PART.REQUESTED &&
+        onlyQtyA &&
+        qtyA >= (e.grantQty ?? 0) &&
+        qtyA < (e.requestQty ?? 0)
+      ) {
+        if (prod) await adjustQty(tx, prod.id, { booking: qtyA - (e.requestQty ?? 0) }, { allowNegative: true });
+        const total = partCharge({ ...p.a, qty: Math.max(0, qtyA - (e.returnQty ?? 0)) }, price);
+        const issued = qtyA <= (e.grantQty ?? 0);
+        await tx
+          .update(jobOrderSparePartLog)
+          .set({
+            requestQty: qtyA,
+            sparePartTotalPrice: money(total),
+            ...(issued
+              ? { orderStatusId: (e.returnQty ?? 0) >= (e.grantQty ?? 0) ? PART.RETURNED : PART.GRANTED }
+              : {}),
+          })
+          .where(eq(jobOrderSparePartLog.jobOrderLogId, e.jobOrderLogId));
+        partsChanged = true;
+        partsTotal += total;
+      } else {
+        throw issuedLine(e, i, onlyQtyA && qtyA > (e.requestQty ?? 0));
       }
       continue;
     }
     if (!useA && !useB) continue;
     if (locked) throw partsLocked();
-    const prod = map.get(str(p.code));
     if (!prod) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${p.code}`);
+    assertPartOn(prod, str(p.code), i);
     if (values.isSpecial) await adjustQty(tx, prod.id, { booking: values.requestQty }, { allowNegative: true });
     await tx.insert(jobOrderSparePartLog).values({
       jobNo,
@@ -2054,12 +2199,15 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
   await assertPageStatus(newStatus, cur.status, REPAIR_STATUS_IDS, REPAIR_STATUS_ONLY);
   // nobody on the job yet: who saves the repair takes it when their role has Job Take (another role does not)
   const meTakes = !(cur.eng && cur.eng > 0) && (await userHasRight(byUserId, 'Job Take'));
+  const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
 
-  await db.transaction(async (tx) => {
-    const j = await lockJob(tx, jobNo);
-    const status = j.jobStatusId;
+  const v = await db.transaction(async (tx) => {
+    let j = await lockJob(tx, jobNo);
     // a page loaded before someone else's save would cancel the part requests added since (it sends the lines it knows)
     assertVersion(i.version, j.rowVersion);
+    // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
+    if (edit) j = await applyJobEdit(tx, jobNo, j, edit, byUserId);
+    const status = j.jobStatusId;
     const locked = await moneyLocked(status, byUserId);
     const parts = i.parts
       ? await syncPartLines(tx, jobNo, i.parts, locked, byUserId)
@@ -2090,29 +2238,40 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     // ---- status ----
     const target = repairStatus(status, newStatus, parts.newRequests, takes);
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
+    else if (parts.partsChanged) await followParts(tx, jobNo, byUserId);
+    return versionNow(tx, jobNo);
   });
-  return (await getJob(jobNo))!;
+  return savedJob(jobNo, v);
 }
 
-/** Called by stock after issuing all pending requests of a job: เริ่มเบิก / รออะไหล่ → เบิกจ่ายอะไหล่ครบแล้ว. */
-export async function markPartsIssued(jobNo: string, byUserId: number) {
-  await db.transaction(async (tx) => {
-    const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
-    if (!cur || (cur.status !== JS.PARTS_REQUESTED && cur.status !== JS.WAIT_PARTS)) return;
-    // recount under the job lock: a repair saved since the issue may have requested more parts
-    const [waiting] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(jobOrderSparePartLog)
-      .where(
-        and(
-          eq(jobOrderSparePartLog.jobNo, jobNo),
-          eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
-          eq(jobOrderSparePartLog.isSpecial, true), // เสนอ-only lines are not for stock (listPartRequests)
-          sql`coalesce(${jobOrderSparePartLog.requestQty},0) > coalesce(${jobOrderSparePartLog.grantQty},0)`,
-        ),
-      );
-    if ((waiting?.n ?? 0) === 0) await setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, cur.status);
-  });
+/**
+ * The parts-driven statuses follow the job's part lines after they changed (บันทึกซ่อม with no status picked, stock's
+ * issueForJob — in their transaction, the job row locked): every request issued → เริ่มเบิก / รออะไหล่ → เบิกจ่าย
+ * อะไหล่ครบแล้ว; a request still waiting → เบิกจ่ายอะไหล่ครบแล้ว → เริ่มเบิกอะไหล่. Any other status stays.
+ */
+/** true = the job's status moved (its row, and so its version, was written) */
+export async function followParts(tx: Tx, jobNo: string, byUserId: number): Promise<boolean> {
+  const [cur] = await tx.select({ status: job.jobStatusId }).from(job).where(eq(job.jobNo, jobNo)).for('update');
+  const s = cur?.status;
+  if (s !== JS.PARTS_REQUESTED && s !== JS.WAIT_PARTS && s !== JS.PARTS_ISSUED) return false;
+  if ((await waitingParts(tx, jobNo)).length)
+    return s === JS.PARTS_ISSUED && setStatus(tx, jobNo, JS.PARTS_REQUESTED, byUserId, s);
+  // nothing waiting — "issued in full" only when a part did go out (a cancelled last request is not)
+  const [out] = await tx
+    .select({ id: jobOrderSparePartLog.jobOrderLogId })
+    .from(jobOrderSparePartLog)
+    .where(
+      and(
+        eq(jobOrderSparePartLog.jobNo, jobNo),
+        eq(jobOrderSparePartLog.isSpecial, true),
+        sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
+      ),
+    )
+    .limit(1);
+  if (out && s !== JS.PARTS_ISSUED) return setStatus(tx, jobNo, JS.PARTS_ISSUED, byUserId, s);
+  // the only request cancelled before anything went out: the job is simply in progress again
+  if (!out && s === JS.PARTS_REQUESTED) return setStatus(tx, jobNo, JS.IN_PROGRESS, byUserId, s);
+  return false;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2277,9 +2436,14 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     .limit(1);
   const sendBy = await staffOrKeep(i.send?.by, lastRow?.sendBy, 'send.by', byUserId);
   const receiveBy = await staffOrKeep(i.receive?.by, lastRow?.receiveBy, 'receive.by', byUserId);
+  const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
 
-  await db.transaction(async (tx) => {
-    const before = await lockJob(tx, jobNo);
+  const v = await db.transaction(async (tx) => {
+    let before = await lockJob(tx, jobNo);
+    // a page loaded before someone else's save would overwrite the open send row with what it showed
+    assertVersion(i.version, before.rowVersion);
+    // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
+    if (edit) before = await applyJobEdit(tx, jobNo, before, edit, byUserId);
     const status = before.jobStatusId;
     const open = await tx
       .select()
@@ -2324,8 +2488,9 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     const implied = await writeSendRow(tx, jobNo, i, open[0], last, { back, sendBy, receiveBy, byUserId });
     const target = newStatus ?? implied;
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
+    return versionNow(tx, jobNo);
   });
-  return (await getJob(jobNo))!;
+  return savedJob(jobNo, v);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2372,8 +2537,12 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i.refundDate ? `วันที่คืนเงิน: ${str(i.refundDate)}` : '',
     i.detail ? `รายละเอียด: ${clean(i.detail)}` : '',
   ].filter(Boolean);
-  await db.transaction(async (tx) => {
-    const before = await lockJob(tx, jobNo);
+  const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
+  const v = await db.transaction(async (tx) => {
+    let before = await lockJob(tx, jobNo);
+    assertVersion(i.version, before.rowVersion); // absent = last write wins
+    // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
+    if (edit) before = await applyJobEdit(tx, jobNo, before, edit, byUserId);
     const swapValues = {
       ...(i.inspection !== undefined ? { engineerRepairDetail: cleanText(i.inspection) } : {}),
       swapRefundDetail: lines.join('\n'),
@@ -2405,8 +2574,9 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
         changes,
       });
     if (newStatus !== undefined) await setStatus(tx, jobNo, newStatus, byUserId, before.jobStatusId);
+    return versionNow(tx, jobNo);
   });
-  return (await getJob(jobNo))!;
+  return savedJob(jobNo, v);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2426,32 +2596,36 @@ const RETURN_COLS = [
   'returnShipperId',
 ] as const;
 
-export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): Promise<JobDetail> {
-  const [cur] = await db
-    .select({
-      status: job.jobStatusId,
-      payNo: job.jobPaymentNo,
-      tracking: job.returnCustomerTrackingNo,
-      total: job.jobTotalCost,
-      deposit: job.depositCost,
-      paid: job.jobPaymentAmount,
-    })
-    .from(job)
-    .where(eq(job.jobNo, jobNo));
-  if (!cur) throw jobNotFound(jobNo);
+/** ปิดงาน's rules against the job as it is (its money after the page's job sections) */
+async function assertClose(j: JobRow, i: CloseInput, byUserId: number) {
   // deposit more than the total: the refund is asked for while nothing is recorded yet (a closed job's
   // money is locked — it keeps what it has)
-  const back = jobBalance(num(cur.total), num(cur.deposit), 0).refund;
-  const required = back > 0 && num(cur.paid) === 0 && !(await moneyLocked(cur.status, byUserId));
-  assertValid(closeSchema({ payNo: cur.payNo, tracking: cur.tracking, refund: { max: back, required } }), i);
+  const back = jobBalance(num(j.jobTotalCost), num(j.depositCost), 0).refund;
+  const required = back > 0 && num(j.jobPaymentAmount) === 0 && !(await moneyLocked(j.jobStatusId, byUserId));
+  const prev = { payNo: j.jobPaymentNo, tracking: j.returnCustomerTrackingNo, refund: { max: back, required } };
+  assertValid(closeSchema(prev), i);
+}
+
+export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): Promise<JobDetail> {
+  const [cur] = await db.select().from(job).where(eq(job.jobNo, jobNo));
+  if (!cur) throw jobNotFound(jobNo);
+  if (!i.job) await assertClose(cur, i, byUserId); // with `job`: once it is in (in the transaction)
   let newStatus = await statusIdByName(i.status);
   // "รอลงเลขที่พัสดุ" + a parcel no. typed now = it is in: the guide's path (close as 7, add the no. later)
   if (newStatus === JS.CLOSED_WAIT_TRACKING && cleanTracking(i.return?.tracking)) newStatus = JS.CLOSED_TRACKED;
-  await db.transaction(async (tx) => {
-    const before = await lockJob(tx, jobNo);
+  const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
+  const v = await db.transaction(async (tx) => {
+    let before = await lockJob(tx, jobNo);
     // a page loaded before someone else's save would close on what it showed (absent = last write wins)
     assertVersion(i.version, before.rowVersion);
+    // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
+    if (edit) await assertClose((before = await applyJobEdit(tx, jobNo, before, edit, byUserId)), i, byUserId);
     const status = before.jobStatusId;
+    // only what the page's job search offers (closable) — a closed job saves again (parcel no. added later);
+    // an open job closed here would be stamped repaired by the cashier (setStatus)
+    const shut = notClosableMsg(status, await statusGroup(status ?? -1), await statusName(status ?? -1));
+    // still out at the vendor: 400 with what to do (setStatus' check)
+    if (shut) throw new HttpError(status === JS.OUTSOURCE_SENT ? 400 : 409, shut, { fields: { status: shut } });
     const pay: Partial<NonNullable<CloseInput['payment']>> = i.payment ?? {};
     const ret = i.return ?? {};
     // a refund stored as a negative payment (Swap/Refund, คืนมัดจำ) is never wiped by a payment of nothing
@@ -2504,8 +2678,9 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
         changes,
       });
     await setStatus(tx, jobNo, newStatus, byUserId, status);
+    return versionNow(tx, jobNo);
   });
-  return (await getJob(jobNo))!;
+  return savedJob(jobNo, v);
 }
 
 /* ------------------------------------------------------------------ *

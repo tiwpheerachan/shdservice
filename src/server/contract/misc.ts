@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, notFound, redirect } from './common';
 import { defineOperation, type Operation } from './registry';
+import { moneyField } from '@/lib/validation';
 
 /** Lookups, files, uploads, health, sign-in (SSO) and this document itself. */
 
@@ -73,7 +74,7 @@ export const upload = defineOperation({
   tags: ['Files'],
   summary: 'Upload a product image, a payment slip or a profile logo',
   description:
-    "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
+    "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (a denied / cancelled order's slip is final, an approved one's too once it has a slip — an approved order without one takes it, with `paymentAmount`; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
   form: z.object({
     kind: choice(['product-image', 'sale-order-slip', 'job-slip', 'profile-logo', 'shipper-logo']).meta({
       description: 'Anything else → 400 "unknown kind" (after the file checks).',
@@ -92,6 +93,11 @@ export const upload = defineOperation({
       )
       .pipe(z.string().min(1, 'id required'))
       .meta({ type: 'string', description: 'product code / sale order no / job no / profile id' }),
+    paymentAmount: moneyField('จำนวนเงินที่ชำระ', 10_000_000).meta({
+      type: 'string',
+      description:
+        'sale-order-slip: the amount paid, recorded with the slip (≤ the order total). Other kinds ignore it.',
+    }),
   }),
   invalid: { form: 400 },
   responses: {
@@ -100,10 +106,12 @@ export const upload = defineOperation({
       z.object({ ok: z.literal(true), path: s.meta({ description: 'storage path (open with GET /files)' }), file: s }),
     ),
     ...SIGNED_IN,
-    400: errorResponse('Not multipart, no file / id, or an unknown kind.'),
+    400: errorResponse(
+      'Not multipart, no file / id, an unknown kind, or a paid amount that is not money / over the order total.',
+    ),
     ...notFound('No such product / order / job / profile.'),
     409: errorResponse(
-      'The sale order is approved, denied or cancelled, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.',
+      'The sale order is denied or cancelled, or approved with a slip already, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.',
     ),
     413: errorResponse('File over 10 MB, or an image over 40 megapixels.'),
     415: errorResponse('Not an allowed file type (checked against the bytes).'),

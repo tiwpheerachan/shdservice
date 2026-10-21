@@ -253,6 +253,20 @@
       "when": 1757900035000,
       "tag": "0035_audit_log_no_truncate",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1757900036000,
+      "tag": "0036_row_version_explicit_bump",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1757900037000,
+      "tag": "0037_role_rights_2026_10_21",
+      "breakpoints": true
     }
   ]
 }

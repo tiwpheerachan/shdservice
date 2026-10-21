@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
-import { Plus, MapPin } from 'lucide-react';
+import { Plus, MapPin, RotateCcw } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { RowActions } from '@/components/shared/row-actions';
 import { FilterBar } from '@/components/shared/filter-bar';
@@ -13,8 +13,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Field } from '@/components/ui/field';
-import { Input, Select } from '@/components/ui/input';
-import { useToast } from '@/components/ui/toast';
+import { Checkbox, Input, Select } from '@/components/ui/input';
+import { dismissToast, useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+
+/** the "edited by someone else" toast: one at a time, taken down when the dialog closes or reopens */
+const STALE_TOAST = 'customer-stale';
 import { CUSTOMER_TYPES } from '@/data/options';
 import type { Customer } from '@/data/types';
 import { useApi, useCustomersPage, useProvinces } from '@/data/db';
@@ -26,7 +30,7 @@ import {
   type CustomerFormValues,
   type CustomerConflict,
 } from '@/components/shared/customer-form';
-import { api, postJson, errMsg, qs, exportXlsx, ApiError } from '@/lib/api';
+import { api, postJson, errMsg, qs, exportXlsx, ApiError, isStale } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form-errors';
@@ -38,12 +42,24 @@ import { ExportButton } from '@/components/shared/export-button';
 function CustomersPageInner() {
   const { push } = useToast();
   const router = useRouter();
-  const { add: canAdd, edit: canEdit } = useAccess().forPath('/customers');
+  const access = useAccess();
+  const { add: canAdd, edit: canEdit, del: canDel } = access.forPath('/customers');
+  const confirm = useConfirm();
+  const canJobs = access.canPath('/jobs/list'); // ประวัติงานซ่อม opens the job list (Manager has no job view)
 
   // server-side paging / search over the customer table (43k rows)
   const { draft, setD, filters: filter, apply, reset, narrowed, pageArgs, server } = useServerTable(NO_FILTER);
   const { data: PROVINCES, ...provincesLookup } = useProvinces();
-  const { rows: CUSTOMERS, total, loading, refetch, error: loadError } = useCustomersPage({ ...pageArgs, ...filter });
+  // แสดงรายการที่ลบ (System Admin): the deleted customers instead of the live list; กู้คืน puts one back
+  const [showDeleted, setShowDeleted] = React.useState(false);
+  const deletedView = access.isAdmin && showDeleted;
+  const {
+    rows: CUSTOMERS,
+    total,
+    loading,
+    refetch,
+    error: loadError,
+  } = useCustomersPage({ ...pageArgs, ...filter }, deletedView ? 'only' : 'exclude');
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Customer | null>(null);
@@ -59,7 +75,12 @@ function CustomersPageInner() {
       open && !viewOnly && JSON.stringify(form) !== JSON.stringify(editing ? toCustomerForm(editing) : EMPTY_CUSTOMER),
   );
 
+  const closeForm = () => {
+    setOpen(false);
+    dismissToast(STALE_TOAST);
+  };
   const openForm = (c: Customer | null, readOnly = false) => {
+    dismissToast(STALE_TOAST); // it sat over the dialog's บันทึกข้อมูล button
     setViewOnly(readOnly);
     setEditing(c);
     setConflicts(null);
@@ -74,13 +95,30 @@ function CustomersPageInner() {
   const sp = useSearchParams();
   const editCode = sp.get('edit')?.trim() ?? '';
   const editLinkOpened = React.useRef(false);
-  useApi<{ rows: Customer[] }>(editCode ? `/api/customers/lookup${qs({ q: editCode })}` : null, {
+  useApi<{ rows: Customer[] }>(editCode ? `/api/customers/lookup${qs({ q: editCode, deleted: 'all' })}` : null, {
     fresh: true,
     onSuccess: (d) => {
       if (editLinkOpened.current) return;
       editLinkOpened.current = true;
-      const hit = d.rows.find((c) => c.code === editCode) ?? d.rows[0];
-      if (hit) openForm(hit, !canEdit);
+      // the exact code only — a deleted customer (non-admin) is not found, never another one in its place
+      const hit = d.rows.find((c) => c.code === editCode.toUpperCase());
+      if (!hit) {
+        push({ kind: 'error', title: 'ไม่พบลูกค้า', desc: `${editCode} — อาจถูกลบแล้ว` });
+        return;
+      }
+      // only an admin gets a deleted one here (deleted=all): it opens to look at, not as an edit that can never save
+      void api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: editCode })}`)
+        .then((live) => live.rows.some((c) => c.code === hit.code))
+        .catch(() => true)
+        .then((alive) => {
+          openForm(hit, !canEdit || !alive);
+          if (!alive)
+            push({
+              kind: 'info',
+              title: `${hit.code} ถูกลบแล้ว`,
+              desc: 'ดูได้อย่างเดียว — กู้คืนได้ที่ "แสดงรายการที่ลบ"',
+            });
+        });
     },
   });
   const [newLinkHandled, setNewLinkHandled] = React.useState(false);
@@ -108,9 +146,71 @@ function CustomersPageInner() {
         setConflicts(details.conflicts);
         fe.setErrors(apiFieldErrors(e) ?? {});
         focusFirstInvalid();
+      } else if (isStale(e) && editing) {
+        refetch(); // the list's row is the stored one again — reopening the dialog shows it
+        // "โหลดใหม่" reads this customer into the open dialog (a page reload lost the dialog and the filters)
+        push({
+          id: STALE_TOAST,
+          kind: 'error',
+          title: errMsg(e),
+          desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — "โหลดใหม่" ดึงข้อมูลล่าสุดของลูกค้ารายนี้มาแทนที่พิมพ์ไว้',
+          action: {
+            label: 'โหลดใหม่',
+            onClick: () =>
+              void api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: editing.code })}`)
+                .then((d) => {
+                  const hit = d.rows.find((c) => c.code === editing.code);
+                  if (hit) openForm(hit);
+                  else push({ kind: 'error', title: 'ไม่พบลูกค้า', desc: `${editing.code} — อาจถูกลบแล้ว` });
+                })
+                .catch((err) => push({ kind: 'error', title: 'โหลดข้อมูลลูกค้าไม่สำเร็จ', desc: errMsg(err) })),
+          },
+        });
       } else if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ลบ = soft delete (record_status DELETED): hidden everywhere, restorable by System Admin — the server checks the
+  // same Customer delete right
+  const deleteCustomer = async (r: Customer) => {
+    const ok = await confirm({
+      tone: 'danger',
+      title: `ลบลูกค้า ${r.code}?`,
+      description: (
+        <>
+          <span className="font-medium">{r.name}</span> จะถูกซ่อนจากรายการและการค้นหาลูกค้าทุกที่ (ไม่ได้ลบข้อมูลทิ้ง)
+          งานและเอกสารเดิมของลูกค้ายังอยู่ครบ
+          <br />
+          การกู้คืนต้องทำโดยผู้ดูแลระบบ
+        </>
+      ),
+      confirmLabel: 'ลบลูกค้า',
+    });
+    if (!ok) return;
+    try {
+      await postJson('/api/admin/records', { table: 'customers', id: r.code, status: 'DELETED' });
+      push({ kind: 'success', title: 'ลบลูกค้าแล้ว', desc: `${r.code} · ${r.name}` });
+      refetch();
+    } catch (e) {
+      push({ kind: 'error', title: 'ลบไม่สำเร็จ', desc: errMsg(e) });
+    }
+  };
+
+  const restoreCustomer = async (r: Customer) => {
+    const ok = await confirm({
+      title: `กู้คืนลูกค้า ${r.code}?`,
+      description: `${r.name} จะกลับมาในรายการและการค้นหาลูกค้าทุกที่อีกครั้ง`,
+      confirmLabel: 'กู้คืน',
+    });
+    if (!ok) return;
+    try {
+      await postJson('/api/admin/records', { table: 'customers', id: r.code, status: 'ACTIVE' });
+      push({ kind: 'success', title: 'กู้คืนลูกค้าแล้ว', desc: `${r.code} · ${r.name}` });
+      refetch();
+    } catch (e) {
+      push({ kind: 'error', title: 'กู้คืนไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
@@ -154,25 +254,35 @@ function CustomersPageInner() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
-      cell: (r) => (
-        <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
-          {r.status}
-        </Badge>
-      ),
+      cell: (r) =>
+        deletedView ? (
+          <Badge tone="neutral">ลบแล้ว</Badge>
+        ) : (
+          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
+            {r.status}
+          </Badge>
+        ),
     },
     {
       key: 'action',
       header: 'จัดการ',
-      width: '110px',
+      width: '130px',
       align: 'center',
       sortable: false,
-      cell: (r) => (
-        <RowActions
-          onView={() => openForm(r, true)}
-          onEdit={canEdit ? () => openForm(r) : undefined}
-          onHistory={() => router.push(`/jobs/list?customer=${encodeURIComponent(r.code)}`)}
-        />
-      ),
+      cell: (r) =>
+        deletedView ? (
+          <Button variant="outline" size="sm" onClick={() => void restoreCustomer(r)}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            กู้คืน
+          </Button>
+        ) : (
+          <RowActions
+            onView={() => openForm(r, true)}
+            onEdit={canEdit ? () => openForm(r) : undefined}
+            onHistory={canJobs ? () => router.push(`/jobs/list?customer=${encodeURIComponent(r.code)}`) : undefined}
+            onDelete={canDel ? () => void deleteCustomer(r) : undefined}
+          />
+        ),
     },
   ];
 
@@ -183,6 +293,12 @@ function CustomersPageInner() {
         description="ฐานข้อมูลลูกค้าบุคคลและนิติบุคคล ใช้อ้างอิงตอนเปิดงานและออกเอกสาร"
         actions={
           <>
+            {access.isAdmin && (
+              <label className="inline-flex items-center gap-2 text-sm">
+                <Checkbox checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />
+                แสดงรายการที่ลบ
+              </label>
+            )}
             <ExportButton run={() => exportXlsx('customers', { ...filter })} />
             {canAdd && (
               <Button size="sm" onClick={() => openForm(null)}>
@@ -259,12 +375,12 @@ function CustomersPageInner() {
         error={loadError}
         onRetry={refetch}
         rowKey={(r) => r.code}
-        server={{ ...server, total }}
+        server={{ ...server, total, resetKey: server.resetKey + deletedView }}
       />
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closeForm}
         title={viewOnly ? 'ข้อมูลลูกค้า' : editing ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
         description={
           viewOnly
@@ -276,7 +392,7 @@ function CustomersPageInner() {
         size="xl"
         footer={
           <>
-            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+            <Button variant="outline" size="sm" onClick={closeForm}>
               {viewOnly ? 'ปิด' : 'ยกเลิก'}
             </Button>
             {!viewOnly && (

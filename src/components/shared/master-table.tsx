@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { Plus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, RotateCcw } from 'lucide-react';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { PageHeader } from './page-header';
 import { RowActions } from './row-actions';
@@ -14,7 +15,8 @@ import { Input, Select, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import type { MasterRow } from '@/data/types';
-import { postJson, errMsg, exportXlsx } from '@/lib/api';
+import { postJson, errMsg, exportXlsx, isStale } from '@/lib/api';
+import { useTable } from '@/data/db';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { MASTER_DETAIL_MAX, masterSchema } from '@/lib/validation/admin';
@@ -42,6 +44,17 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const { isAdmin } = useAccess();
+  const router = useRouter();
+  // รายการที่ลบ (System Admin): the deleted rows, loaded only while shown; กู้คืน puts one back
+  const [view, setView] = React.useState<'active' | 'deleted'>('active');
+  const deleted = useTable<MasterRow & { group?: string }>(
+    config.kind,
+    undefined,
+    'only',
+    {},
+    undefined,
+    view === 'deleted',
+  );
   // local copy for instant feedback after a save; a fresh list from the server replaces it
   // (adjusted while rendering when config.rows changes — not in an effect pass)
   const [rows, setRows] = React.useState(config.rows);
@@ -61,10 +74,12 @@ export function MasterTable({ config }: { config: MasterConfig }) {
   const { draft, setD, filters: filter, apply, reset } = useFilterDraft<MasterFilter>(NO_FILTER);
   const visible = React.useMemo(() => {
     const term = filter.name.trim().toLowerCase();
-    return rows.filter(
-      (r) => (!term || r.name.toLowerCase().includes(term)) && (!filter.status || r.status === filter.status),
+    return (view === 'deleted' ? deleted.data : rows).filter(
+      (r) =>
+        (!term || r.name.toLowerCase().includes(term)) &&
+        (view === 'deleted' || !filter.status || r.status === filter.status),
     );
-  }, [rows, filter]);
+  }, [rows, filter, view, deleted.data]);
 
   // group options = configured list ∪ values already in the DB
   const groupOptions = React.useMemo(() => {
@@ -107,6 +122,8 @@ export function MasterTable({ config }: { config: MasterConfig }) {
     try {
       const d = await postJson<{ row: MasterRow & { group?: string } }>(`/api/masters/${config.kind}`, {
         id: editing?.id,
+        // the row as the dialog loaded it: another admin's save since → 409 stale instead of being overwritten
+        expect: editing && { name: editing.name, detail: editing.detail ?? '', status: editing.status },
         name: form.name.trim(),
         detail: form.detail,
         group: form.group,
@@ -121,9 +138,27 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         desc: `${config.title} — ${d.row.name}`,
       });
     } catch (e) {
+      if (isStale(e)) router.refresh(); // the list as stored now
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const restore = async (r: MasterRow) => {
+    const ok = await confirm({
+      title: `กู้คืน${config.title} "${r.name}"?`,
+      description: 'รายการนี้จะกลับมาในหน้านี้และเป็นตัวเลือกในทุกฟอร์มอีกครั้ง',
+      confirmLabel: 'กู้คืน',
+    });
+    if (!ok) return;
+    try {
+      await postJson('/api/admin/records', { table: config.kind, id: r.id, status: 'ACTIVE' });
+      push({ kind: 'success', title: 'กู้คืนแล้ว', desc: r.name });
+      deleted.refetch();
+      router.refresh();
+    } catch (e) {
+      push({ kind: 'error', title: 'กู้คืนไม่สำเร็จ', desc: errMsg(e) });
     }
   };
 
@@ -163,7 +198,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         <>
           รายการนี้จะหายจากหน้านี้และจากตัวเลือกในทุกฟอร์ม ข้อมูลเก่าที่เคยใช้ค่านี้ยังแสดงชื่อได้ตามเดิม
           <br />
-          การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่ต้องการหยุดใช้ชั่วคราว ให้เปลี่ยนสถานะเป็น Inactive แทน
+          กู้คืนได้จากแท็บ "รายการที่ลบ" — ถ้าแค่ต้องการหยุดใช้ชั่วคราว ให้เปลี่ยนสถานะเป็น Inactive แทน
         </>
       ),
       confirmLabel: 'ลบ',
@@ -234,24 +269,27 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       key: 'status',
       header: 'สถานะ',
       width: '110px',
-      cell: (r) => (
-        // a switch: its state is announced (on = Active), not only shown by the badge's colour / text;
-        // min-h-6 = a 24px target, -my-0.5 keeps the row its height; on touch screens 44px, the -my-2.5
-        // taking it into the cell's padding (still no taller row)
-        <button
-          type="button"
-          role="switch"
-          aria-checked={r.status === 'Active'}
-          aria-label={`${r.status} — สถานะของ ${r.name}`}
-          onClick={() => toggleStatus(r.id)}
-          title="คลิกเพื่อสลับสถานะ"
-          className="-my-0.5 inline-flex min-h-6 items-center rounded-full pointer-coarse:-my-2.5 pointer-coarse:min-h-11"
-        >
-          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
-            {r.status}
-          </Badge>
-        </button>
-      ),
+      cell: (r) =>
+        view === 'deleted' ? (
+          <Badge tone="neutral">ลบแล้ว</Badge>
+        ) : (
+          // a switch: its state is announced (on = Active), not only shown by the badge's colour / text;
+          // min-h-6 = a 24px target, -my-0.5 keeps the row its height; on touch screens 44px, the -my-2.5
+          // taking it into the cell's padding (still no taller row)
+          <button
+            type="button"
+            role="switch"
+            aria-checked={r.status === 'Active'}
+            aria-label={`${r.status} — สถานะของ ${r.name}`}
+            onClick={() => toggleStatus(r.id)}
+            title="คลิกเพื่อสลับสถานะ"
+            className="-my-0.5 inline-flex min-h-6 items-center rounded-full pointer-coarse:-my-2.5 pointer-coarse:min-h-11"
+          >
+            <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
+              {r.status}
+            </Badge>
+          </button>
+        ),
     },
     {
       key: 'action',
@@ -259,7 +297,15 @@ export function MasterTable({ config }: { config: MasterConfig }) {
       width: '110px',
       align: 'center',
       sortable: false,
-      cell: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={isAdmin ? () => remove(r) : undefined} />,
+      cell: (r) =>
+        view === 'deleted' ? (
+          <Button variant="outline" size="sm" onClick={() => restore(r)}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            กู้คืน
+          </Button>
+        ) : (
+          <RowActions onEdit={() => openEdit(r)} onDelete={isAdmin ? () => remove(r) : undefined} />
+        ),
     },
   ];
 
@@ -280,6 +326,25 @@ export function MasterTable({ config }: { config: MasterConfig }) {
           </>
         }
       />
+
+      {isAdmin && (
+        <div className="mb-3 inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
+          {(['active', 'deleted'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              aria-pressed={view === v}
+              className={
+                'rounded-md px-3.5 py-1.5 font-medium transition-colors ' +
+                (view === v ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground')
+              }
+            >
+              {v === 'active' ? 'รายการ' : 'รายการที่ลบ'}
+            </button>
+          ))}
+        </div>
+      )}
 
       <FilterBar onSearch={apply} onReset={reset}>
         <Field label={config.nameLabel}>
@@ -302,6 +367,9 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         searchable={false}
         columns={columns}
         rows={visible}
+        loading={view === 'deleted' && deleted.loading}
+        error={view === 'deleted' ? deleted.error : null}
+        onRetry={deleted.refetch}
         rowKey={(r) => r.id}
         footerNote={
           <span className="hidden sm:inline">

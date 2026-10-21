@@ -52,15 +52,17 @@ export function useFormErrors() {
   );
 
   /** an API answer with field errors → shown under the fields; a stale-version 409 → toast with
-   *  "โหลดใหม่" (saving again would overwrite the other user's edit); false for any other error */
+   *  "โหลดใหม่" (saving again would overwrite the other user's edit); false for any other error.
+   *  `reload`: a record page's own re-read (useRecord) — the form locks while it runs and nothing asks to
+   *  leave the page; without it, the whole page is reloaded */
   const fromApi = React.useCallback(
-    (err: unknown) => {
+    (err: unknown, reload?: () => void) => {
       if (isStale(err)) {
         push({
           kind: 'error',
           title: (err as ApiError).message,
           desc: 'ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น — โหลดข้อมูลล่าสุดแล้วแก้ไขอีกครั้ง',
-          action: { label: 'โหลดใหม่', onClick: () => window.location.reload() },
+          action: { label: 'โหลดใหม่', onClick: () => (reload ? reload() : window.location.reload()) },
         });
         return true;
       }

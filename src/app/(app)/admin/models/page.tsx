@@ -17,7 +17,7 @@ import type { Model } from '@/data/types';
 import { useModelsPage, useManufacturers } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { useServerTable } from '@/lib/use-server-table';
-import { postJson, errMsg, exportXlsx } from '@/lib/api';
+import { postJson, errMsg, exportXlsx, isStale } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { modelSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
@@ -75,6 +75,13 @@ export default function ModelsPage() {
     try {
       const d = await postJson<{ row: Model }>('/api/masters/models', {
         code: editing?.code || undefined,
+        // the row as the dialog loaded it: another admin's save since → 409 stale instead of being overwritten
+        expect: editing && {
+          name: editing.name,
+          brand: editing.brand,
+          price: String(editing.price ?? 0),
+          status: editing.status,
+        },
         name: form.name.trim(),
         brand: form.brand,
         price: form.price,
@@ -84,6 +91,7 @@ export default function ModelsPage() {
       push({ kind: 'success', title: 'บันทึกรุ่นสินค้าแล้ว', desc: `${d.row.code} · ${d.row.name}` });
       refetch();
     } catch (e) {
+      if (isStale(e)) refetch(); // the list as stored now; the dialog stays open
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);

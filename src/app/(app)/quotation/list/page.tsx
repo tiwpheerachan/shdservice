@@ -19,7 +19,6 @@ import { baht } from '@/lib/utils';
 import { useServerTable } from '@/lib/use-server-table';
 import { useAccess } from '@/lib/use-access';
 import { exportXlsx } from '@/lib/api';
-import { quoteExpired } from '@/lib/quote-expiry';
 import { cleanCode } from '@/lib/validation';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 import { ExportButton } from '@/components/shared/export-button';
@@ -153,17 +152,12 @@ export default function QuotationListPage() {
       key: 'status',
       header: 'สถานะ',
       width: '140px',
-      cell: (r) =>
-        // sent but past its validity — the same rule as the print and /track (the list row has no job status)
-        r.statusId === 2 && quoteExpired(r.statusId, r.date, null) ? (
-          <Badge tone="danger" dot>
-            หมดอายุ
-          </Badge>
-        ) : (
-          <Badge tone={TONE[r.status] ?? 'neutral'} dot>
-            {r.status}
-          </Badge>
-        ),
+      // the server's status: sent but past its validity already reads พ้นกำหนดเสนอราคา (src/lib/quote-expiry.ts)
+      cell: (r) => (
+        <Badge tone={TONE[r.status] ?? 'neutral'} dot>
+          {r.status}
+        </Badge>
+      ),
     },
     {
       key: 'action',

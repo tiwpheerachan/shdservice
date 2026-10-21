@@ -16,7 +16,7 @@ import {
   JobScreen,
   useJobForm,
   fromJob,
-  saveCommonSections,
+  commonSections,
   useWorkflowErrors,
 } from '@/components/shared/job-form';
 import { Tabs } from '@/components/ui/tabs';
@@ -61,7 +61,7 @@ function OutsourceForm() {
   const { userId: meId, can } = useAccess();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
-  const { s: form, reset, adopt, set } = useJobForm();
+  const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const [tab, setTab] = React.useState('device');
   const [saving, setSaving] = React.useState(false);
@@ -159,8 +159,12 @@ function OutsourceForm() {
     if (!act.check(receiving || back ? receiveSchema : outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
-      adopt(await saveCommonSections(job.no, form, canEdit));
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, body);
+      // the version the page loaded: someone else's save since → 409 (reload), not overwritten
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, {
+        ...body,
+        job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
+        version: form.version,
+      });
       setJob(r.job);
       push({ kind: 'success', title: 'บันทึกข้อมูลส่งซ่อมต่อแล้ว', desc: `${r.job.no} · ${r.job.status}` });
     } catch (e) {

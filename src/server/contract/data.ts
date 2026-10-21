@@ -136,7 +136,7 @@ resource(
   'staff',
   'Staff names for pickers (ผู้รับ / ช่าง / พนักงานขาย)',
   ANY,
-  list(z.object({ id: n, name: s, userType: s, takesJobs: z.boolean() })),
+  list(z.object({ id: n, name: s, userType: s, takesJobs: z.boolean(), sells: z.boolean() })),
   { usedAs: choice(['engineer', 'sales']) },
 );
 resource('provinces', 'Provinces', ANY, list(z.object({ id: n, name: s })));
@@ -202,7 +202,12 @@ resource(
       }),
     ),
   ]),
-  { ...productFilters, fields: choice(['lite']).meta({ description: "`lite` = the picker's short rows" }) },
+  {
+    ...productFilters,
+    fields: choice(['lite']).meta({
+      description: "`lite` = the picker's short rows: ACTIVE only; `deleted=exclude` adds INACTIVE (stock receive)",
+    }),
+  },
   Product.extend({ value: n }),
 );
 resource(
@@ -398,7 +403,7 @@ export const exportXlsx = defineOperation({
   tags,
   summary: 'Download a list as Excel (.xlsx), with the same filters as GET /data/{resource}',
   description:
-    "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx` and says so in its last row. ราคาทุน only with Product Cost.",
+    "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
   params: z.object({
     resource: z.enum(
       [
@@ -422,11 +427,26 @@ export const exportXlsx = defineOperation({
       { error: (issue) => `unknown export: ${String(issue.input)}` },
     ),
   }),
-  query: z.looseObject({ q, deleted: deletedMode, status: s.optional(), from: ymd, to: ymd }),
+  query: z.looseObject({
+    q,
+    deleted: deletedMode,
+    status: s.optional(),
+    from: ymd,
+    to: ymd,
+    file: s
+      .optional()
+      .meta({ description: 'The file name (a-z 0-9 -, e.g. the report: `repair-job`); else the resource.' }),
+  }),
   invalid: { params: 404 },
   responses: {
     200: {
-      description: 'The workbook (`Content-Disposition: attachment; filename="<resource>-<date>.xlsx"`).',
+      description: 'The workbook (`Content-Disposition: attachment; filename="<file or resource>-<date>.xlsx"`).',
+      headers: {
+        'X-Export-Truncated': {
+          schema: { type: 'string' },
+          description: 'Only on a file cut at 20,000 rows: how many rows the filters match in all.',
+        },
+      },
       content: {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
           schema: { type: 'string', format: 'binary' },

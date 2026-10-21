@@ -47,8 +47,9 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   const [note, setNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const idRef = React.useRef(0);
-  // files queued for a job not saved yet are an unsaved edit (they upload with the job)
-  useUnsavedChanges(rows.some((r) => r.pending));
+  // files queued for a job not saved yet are an unsaved edit (they upload with the job), and so is a file
+  // picked but not "แนบไฟล์"-ed yet
+  useUnsavedChanges(rows.some((r) => r.pending) || !!file);
 
   // shrunk photo, progress, "ลองอีกครั้ง" on a failure (the file is kept) — lib/api upload
   const upload = (target: string, f: File, remark: string) =>
@@ -60,7 +61,9 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
 
   React.useImperativeHandle(ref, () => ({
     uploadPending: async (target: string) => {
-      const pending = rows.filter((r) => r.pending);
+      // a file picked but not "แนบไฟล์"-ed yet goes with the job too (it was dropped without a word)
+      const picked = file ? [{ name: file.name, note, pending: file }] : [];
+      const pending = [...rows.filter((r) => r.pending), ...picked];
       for (const r of pending) {
         try {
           await upload(target, r.pending!, r.note);
@@ -71,6 +74,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
       // the queue belonged to that job — the next new job starts with none (a failed file was toasted
       // and can be attached from the job's edit screen)
       setRows((all) => all.filter((r) => !r.pending));
+      setFile(null);
+      setNote('');
     },
   }));
 

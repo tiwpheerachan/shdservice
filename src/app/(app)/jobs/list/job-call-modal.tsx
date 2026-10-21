@@ -27,7 +27,7 @@ export function useJobCallModal() {
     let customer: Customer | null = null;
     try {
       const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
-      customer = d.rows[0] ?? null;
+      customer = d.rows.find((c) => c.code === code) ?? null;
     } catch {
       customer = null;
     }

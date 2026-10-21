@@ -56,6 +56,8 @@ export type SaleOrderLoaded = {
   creatorIds?: number[];
   paymentType?: string;
   paymentAmount?: number;
+  /** net amount (lines + fee) */
+  amount?: number;
   fee?: number;
   remark?: string;
   slip: string;
@@ -69,7 +71,11 @@ export type SaleOrderLoaded = {
     phone: string;
     line: string;
     email: string;
+    /** the customer's status now — an Inactive one gets the picker's notice */
+    status?: string;
   };
+  /** why it was cancelled */
+  cancelRemark?: string;
   lines: { code: string; name: string; type: 'SparePart' | 'Service'; qty: number; price: number }[];
 };
 
@@ -91,7 +97,7 @@ export type SaleOrderFormHandle = {
   /** check before saving (lib/validation/sale-order) — shows the errors; true = OK */
   validate: () => boolean;
   /** API field errors → under the fields; false for any other error */
-  fromApi: (err: unknown) => boolean;
+  fromApi: (err: unknown, reload?: () => void) => boolean;
   /** upload a slip chosen before the SO existed (new page calls this after create) */
   uploadPendingSlip: (soNo: string) => Promise<void>;
 };
@@ -126,7 +132,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             email: c.email,
             line: c.line,
             taxId: c.taxId,
-            status: 'Active',
+            status: (c.status ?? 'Active') as Customer['status'],
           }
         : null;
     });
@@ -137,11 +143,16 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       pickedSalesId ||
       (initial
         ? initial.salesId || (STAFF.find((x) => x.name === initial.sales)?.id ?? 0)
-        : userId && STAFF.some((x) => x.id === userId)
+        : userId && STAFF.some((x) => x.id === userId && x.sells)
           ? userId
           : 0);
-    // the order's salesperson who has left is not in the staff list — still shown (and kept) as picked
-    const salesOptions = STAFF.map((u) => ({ value: String(u.id), label: u.name, sub: u.userType || undefined }));
+    // who sells (Sale Order add, or System Admin) — plus the order's own salesperson; the server allows the same.
+    // The order's salesperson who has left is not in the staff list — still shown (and kept) as picked
+    const salesOptions = STAFF.filter((u) => u.sells || u.id === initial?.salesId).map((u) => ({
+      value: String(u.id),
+      label: u.name,
+      sub: u.userType || undefined,
+    }));
     if (initial?.salesId && !STAFF.some((x) => x.id === initial.salesId))
       salesOptions.push({
         value: String(initial.salesId),
@@ -306,6 +317,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           errors={fe.errors}
           clear={fe.clear}
           showZero={!!initial}
+          stockNote={initial?.approveId === 2 && !initial.cancelled}
         />
 
         <Section title="การชำระเงินและเอกสาร" icon={Wallet}>

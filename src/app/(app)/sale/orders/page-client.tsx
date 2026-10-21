@@ -28,6 +28,11 @@ function SaleOrderList() {
   const { data: USERS, ...staffLookup } = useStaff('sales');
   const { draft, setDraft, setD, filters, setFilters, apply, reset, narrowed, table, pageArgs, server } =
     useServerTable(NO_FILTER);
+  const toggleCancelled = () => {
+    const cancelled = filters.cancelled ? '' : '1';
+    setDraft((f) => ({ ...f, cancelled }));
+    setFilters((f) => ({ ...f, cancelled }));
+  };
   const showWaiting = () => {
     setDraft((f) => ({ ...f, approve: WAITING }));
     setFilters((f) => ({ ...f, approve: WAITING }));
@@ -90,8 +95,9 @@ function SaleOrderList() {
       header: 'สถานะอนุมัติ',
       width: '160px',
       cell: (r) => (
-        <Badge tone={TONE[r.approve] ?? 'neutral'} dot>
-          {r.approve}
+        // a cancelled order keeps its last approve status in the row — it is shown as what it is now
+        <Badge tone={r.cancelled ? 'neutral' : (TONE[r.approve] ?? 'neutral')} dot>
+          {r.cancelled ? 'ยกเลิก' : r.approve}
         </Badge>
       ),
     },
@@ -133,20 +139,10 @@ function SaleOrderList() {
             <Button size="sm" variant="outline" onClick={showWaiting} aria-pressed={filters.approve === WAITING}>
               {WAITING}
             </Button>
-            <ExportButton
-              run={() =>
-                exportXlsx('sale_orders', {
-                  q: table.q,
-                  no: filters.no,
-                  customer: filters.customer,
-                  code: filters.code,
-                  from: filters.from,
-                  to: filters.to,
-                  sales: filters.sales,
-                  approve: filters.approve,
-                })
-              }
-            />
+            <Button size="sm" variant="outline" onClick={toggleCancelled} aria-pressed={!!filters.cancelled}>
+              แสดงใบที่ยกเลิก
+            </Button>
+            <ExportButton run={() => exportXlsx('sale_orders', { q: table.q, ...listParams(filters) })} />
             {canAdd && (
               <Link href="/sale/orders/new">
                 <Button size="sm">

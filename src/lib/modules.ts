@@ -35,6 +35,21 @@ export const PAGE_MODULES: readonly Module[] = [
   'Sale Order',
 ];
 
+/** a page module the way the sidebar names its menu — what messages say instead of the app_config key */
+export const MODULE_LABELS: Record<Exclude<Module, Right>, string> = {
+  'Job Management': 'ข้อมูลงานบริการ',
+  'Job Assign': 'จนท.รับมอบหมายงาน',
+  'Job Repair': 'บันทึกงานซ่อม',
+  'Job Closing': 'ปิดงาน-ส่งคืนสินค้า',
+  Product: 'รายการอะไหล่',
+  'Product Onhand': 'ประวัติการเคลื่อนไหวอะไหล่',
+  'Product Receive Stock': 'รับเข้าอะไหล่',
+  'Product Pick Stock': 'ตัดจ่ายอะไหล่',
+  Customer: 'ข้อมูลลูกค้า',
+  Quotation: 'ข้อมูลเสนอราคา',
+  'Sale Order': 'ข้อมูลใบสั่งขาย',
+};
+
 /**
  * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
  * permissions page, section สิทธิ์พิเศษ). Rules read these, never a role name.

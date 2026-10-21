@@ -15,20 +15,28 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
   if (isSimpleKind(kind)) {
     const row = await saveSimple(
       kind,
-      { id: b.id, name: b.name ?? '', detail: b.detail, extra: b.extra, days: b.days, status: b.status },
+      {
+        id: b.id,
+        name: b.name ?? '',
+        detail: b.detail,
+        extra: b.extra,
+        days: b.days,
+        status: b.status,
+        expect: b.expect,
+      },
       me.userId,
     );
     return NextResponse.json({ ok: true, row });
   }
   if (kind === 'symptoms') {
     const row = await saveSymptom(
-      { id: b.id, name: b.name ?? '', detail: b.detail, group: b.group, status: b.status },
+      { id: b.id, name: b.name ?? '', detail: b.detail, group: b.group, status: b.status, expect: b.expect },
       me.userId,
     );
     return NextResponse.json({ ok: true, row });
   }
   const row = await saveModel(
-    { code: b.code, name: b.name ?? '', brand: b.brand ?? '', price: b.price, status: b.status },
+    { code: b.code, name: b.name ?? '', brand: b.brand ?? '', price: b.price, status: b.status, expect: b.expect },
     me.userId,
   );
   return NextResponse.json({ ok: true, row });

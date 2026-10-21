@@ -10,6 +10,7 @@ import {
   RATE_LIMITED,
   SIGNED_IN,
   byNo,
+  choice,
   jsonResponse,
   notFound,
   version,
@@ -21,7 +22,6 @@ import { Customer, QuotationDetail, SaleOrderDetail } from './shapes';
 
 const s = z.string();
 const n = z.number();
-const money = z.union([s, n]);
 /** a field the pages always send as text / a number (never null) */
 const optText = s.optional();
 const optNum = n.optional();
@@ -76,8 +76,13 @@ export const customerLookup = defineOperation({
   tags: ['Customers'],
   summary: 'Find customers by code, tax id, name or phone (job / quotation / sale-order forms)',
   description:
-    'An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one.',
-  query: z.object({ q: s.optional() }),
+    'An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its code).',
+  query: z.object({
+    q: s.optional(),
+    deleted: choice(['all']).meta({
+      description: '`all` = an exact code may answer a DELETED customer (System Admin only; anyone else as left out).',
+    }),
+  }),
   responses: {
     200: jsonResponse('Matches (empty without `q`).', z.object({ rows: z.array(Customer) })),
     ...SIGNED_IN,
@@ -118,17 +123,17 @@ export const quotationSave = defineOperation({
         .array(
           quotationLine.extend({
             id: optNum,
-            itemType: optText.meta({ description: '`SparePart` | `Service` | `Delivery`' }),
             code: optText,
-            unit: optText,
-            discount: money.optional(),
-            discountPercent: money.optional(),
           }),
         )
         .optional(),
       discountType: optText,
       discountUnit: optText.meta({ description: '`บาท` or `%`' }),
-      status: optText,
+      status: optText.meta({ description: 'A new quotation: `รอเสนอราคา` (default) or `เสนอราคาแล้ว`.' }),
+      jobParts: optText.meta({
+        description:
+          "A new quotation filled from its job: quotedPartsKey of the job's parts it copied — they changed since → 409.",
+      }),
       version,
     })
     .meta({ id: 'QuotationInput' }),
@@ -228,6 +233,7 @@ export const saleOrderTracking = defineOperation({
       .optional()
       .transform((v) => String(v ?? ''))
       .meta({ type: 'string', description: 'A number is read as its digits; left out = none.' }),
+    version,
   }),
   responses: {
     200: order('Saved.'),

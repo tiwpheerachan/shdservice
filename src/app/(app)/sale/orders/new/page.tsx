@@ -38,6 +38,7 @@ export default function NewSaleOrderPage() {
       <PageHeader title="สร้างใบสั่งขาย" description="เมนูขาย » ใบสั่งขาย" />
       <SaleOrderForm ref={form} />
       <FormActions
+        cancelLabel="กลับ"
         saveLabel="บันทึกใบสั่งขาย"
         onSave={save}
         saving={saving}

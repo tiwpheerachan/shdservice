@@ -211,19 +211,24 @@ export default function ProductsPage() {
     },
     {
       key: 'onhand',
-      header: 'คงเหลือ (พร้อมใช้)',
+      // quantity_remain = on the shelf; what jobs have asked for (เบิก, not issued yet) is shown under it —
+      // "พร้อมใช้" would be remain − booking, which the ใกล้หมด / หมด filters and the sort do not use
+      header: 'คงเหลือ',
       align: 'right',
       width: '130px',
       value: (r) => r.onhand,
       cell: (r) => (
-        <span
-          className={cn(
-            'num font-semibold',
-            r.onhand === 0 ? 'text-danger' : r.onhand <= 3 ? 'text-warning' : 'text-foreground',
-          )}
-        >
-          {int(r.onhand)}
-        </span>
+        <>
+          <span
+            className={cn(
+              'num font-semibold',
+              r.onhand === 0 ? 'text-danger' : r.onhand <= 3 ? 'text-warning' : 'text-foreground',
+            )}
+          >
+            {int(r.onhand)}
+          </span>
+          {!!r.reserved && <span className="block text-2xs text-muted-foreground">จองแล้ว {int(r.reserved)}</span>}
+        </>
       ),
     },
     {

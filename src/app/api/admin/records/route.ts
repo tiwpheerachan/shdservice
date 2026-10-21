@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { can, handle, parseBody, requireAdmin, requireCan } from '@/server/auth';
+import { can, handle, hasRight, parseBody, requireAdmin, requireCan } from '@/server/auth';
 import { recordStatus } from '@/server/contract/admin';
 import { setRecordStatus, RECORD_MODULES } from '@/server/services/records';
 import { RS, type RecordStatus } from '@/server/record-status';
@@ -12,11 +12,11 @@ export const dynamic = 'force-dynamic';
  * Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete —
  * nothing is ever removed). Accepts `status`, or the older `deleted` boolean.
  * Permission: DELETED needs `del` on the table's module (users / masters: admin);
- * ACTIVE ↔ INACTIVE needs `edit`; out of DELETED (กู้คืน) needs `del` as well. A missing id / unknown
+ * ACTIVE ↔ INACTIVE needs `edit`; out of DELETED (กู้คืน) needs `del` as well (customers: System Admin only). A missing id / unknown
  * table is a 400 before the permission check.
  */
 export const POST = handle(async (req: NextRequest) => {
-  const { table, id, status, deleted } = await parseBody(req, recordStatus);
+  const { table, id, status, deleted, remark } = await parseBody(req, recordStatus);
   const rs: RecordStatus = status ?? (deleted === true ? RS.DELETED : RS.ACTIVE);
 
   if (table === 'users') {
@@ -32,8 +32,19 @@ export const POST = handle(async (req: NextRequest) => {
   const user =
     permModule === null
       ? await requireAdmin(req)
-      : await requireCan(req, permModule, rs === RS.DELETED ? 'del' : 'edit');
-  // out of DELETED (กู้คืน) is the reverse of a delete → `del` too (checked against the locked row)
-  await setRecordStatus(table, id, rs, user.userId, permModule === null || (await can(user, permModule, 'del')));
+      : // cancelling a sale order is its creator's own step (edit) — who else may is decided on the locked row
+        // (creator / SO Approve / System Admin); every other delete needs `del`
+        await requireCan(req, permModule, rs === RS.DELETED && table !== 'sale_orders' ? 'del' : 'edit');
+  // out of DELETED (กู้คืน) is the reverse of a delete → `del` too (checked against the locked row);
+  // a deleted customer (PDPA: erased on request) is System Admin's alone, as its list / lookup are
+  await setRecordStatus(
+    table,
+    id,
+    rs,
+    user.userId,
+    table === 'customers' ? user.isAdmin : permModule === null || (await can(user, permModule, 'del')),
+    table !== 'sale_orders' || user.isAdmin || (await hasRight(user, 'SO Approve')),
+    remark,
+  );
   return NextResponse.json({ ok: true, status: rs });
 });

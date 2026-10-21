@@ -7,6 +7,7 @@ import { useProductsPage, useProductStats, useCategories, useManufacturers } fro
 import type { Column } from '@/components/ui/data-table';
 import { baht, int, cn } from '@/lib/utils';
 import { exportXlsx } from '@/lib/api';
+import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import * as React from 'react';
 
@@ -72,7 +73,9 @@ export default function Page() {
     f.stock === 'มีสินค้า' ? 'in' : f.stock === 'ใกล้หมด (≤3)' ? 'low' : f.stock === 'หมดสต๊อก' ? 'out' : '';
   // ACTIVE products only; filters + KPIs on the server, table paged
   const filters = { category: f.category, brand: f.brand, stock: stockKey, status: 'Active' };
-  const { data: sum } = useProductStats({ ...filters, q: table.q || f.q });
+  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const access = useReportAccess(null, 'Product');
+  const { data: sum, error: sumError } = useProductStats({ ...filters, q: table.q || f.q });
   const {
     rows,
     total,
@@ -113,8 +116,18 @@ export default function Page() {
         { kind: 'text', key: 'q', label: 'รหัส / ชื่ออะไหล่', placeholder: 'P02534' },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx('products', { ...filters, q: table.q || f.q, deleted: 'active' })}
-      kpis={[
+      onExport={
+        access.canExport
+          ? () =>
+              exportXlsx('products', {
+                ...filters,
+                q: table.q || f.q,
+                deleted: 'active',
+                file: 'report-product-onhand',
+              })
+          : undefined
+      }
+      kpis={kpisOr(sumError, [
         // productStats sums max(0, คงเหลือ) — a negative line in the table is not subtracted here
         {
           label: 'จำนวนคงเหลือรวม',
@@ -130,11 +143,12 @@ export default function Page() {
         },
         { label: 'ใกล้หมด (≤ 3)', value: int(low), tone: 'warning' },
         { label: 'หมดสต๊อก', value: int(out), tone: 'danger' },
-      ]}
+      ])}
       columns={columns}
       rows={rows}
       loading={loading}
-      error={loadError}
+      error={access.canTable ? loadError : null}
+      emptyText={access.emptyText}
       onRetry={retryLoad}
       rowKey={(r) => r.sysCode}
       server={{ ...server, total }}

@@ -5,7 +5,7 @@ import { nowThai } from '@/server/mappers/format';
 /**
  * One soft-delete convention for the whole app (drizzle/0003_record_status.sql):
  *   ACTIVE   — normal
- *   INACTIVE — kept in lists (badge "Inactive"), hidden from dropdowns
+ *   INACTIVE — kept in lists and pickers with an "Inactive" badge (a picked one shows a warning)
  *   DELETED  — hidden everywhere; restore is done in SQL only (by decision)
  * The legacy flags (is_active / document_status / app_user.deleted) are written
  * alongside so the old reports stay consistent.

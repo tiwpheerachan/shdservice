@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { getSaleOrder } from '@/server/services/sale-orders';
 import { ShippingLabel } from '@/components/print/shipping-label';
 import { profileForDocument } from '@/server/services/document-profiles';
+import { SO_CANCELLED } from '@/lib/validation/sale-order';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,13 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   if (!user || !(await canViewAny(user, ['Sale Order', 'Product Pick Stock']))) notFound();
   const o = await getSaleOrder(no.toUpperCase());
   if (!o) notFound();
+  // a cancelled order is not a document any more — refused here, not only by hiding the button
+  if (o.cancelled)
+    return (
+      <p role="alert" className="mx-auto max-w-md rounded-md bg-white p-6 text-center text-lg font-medium">
+        {SO_CANCELLED} — พิมพ์ไม่ได้
+      </p>
+    );
   const c = o.customerDetail;
   const co = await profileForDocument(o.documentProfileId);
   return (

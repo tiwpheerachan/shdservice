@@ -46,7 +46,7 @@ import {
   useStaff,
 } from '@/data/db';
 import { baht, cn } from '@/lib/utils';
-import { patchJson, isStale, errMsg } from '@/lib/api';
+import { isStale, errMsg } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
 import { useAccess } from '@/lib/use-access';
 import { RIGHTS } from '@/lib/modules';
@@ -289,24 +289,12 @@ export function toJobInput(s: JobFormState) {
 }
 
 /**
- * The job screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) also show the
- * editable product / other-info / cost sections. Persist those through the
- * generic PATCH first so nothing typed there is lost; the page then posts its
- * own action. Skipped (not failed) when the user lacks "Job Management" edit.
+ * The job screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) also show the editable product / other-info /
+ * cost sections: sent as the action's `job` — one request, so they save (or are refused) together with the action.
+ * Left out (not failed) when the user lacks "Job Management" edit.
  */
-export async function saveCommonSections(
-  jobNo: string,
-  s: JobFormState,
-  allowed: boolean,
-): Promise<Partial<JobFormState>> {
-  if (!allowed) return {};
-  const body = toJobInput(s);
-  const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(jobNo)}`, {
-    ...body,
-    status: undefined,
-  });
-  // the page `adopt`s this: if its own action then fails, a second try must not trip over our own save
-  return { version: d.job.version };
+export function commonSections(s: JobFormState, allowed: boolean) {
+  return allowed ? { ...toJobInput(s), status: undefined, version: undefined } : undefined;
 }
 
 type Ctx = {
@@ -1054,6 +1042,7 @@ export function FormActions({
   extra,
   saving = false,
   cancelHref,
+  cancelLabel = 'ยกเลิก',
   denied,
 }: {
   onSave: () => void;
@@ -1062,6 +1051,8 @@ export function FormActions({
   saving?: boolean;
   /** "ยกเลิก" → this list page (asks first when something is unsaved) */
   cancelHref: string;
+  /** "กลับ" where "ยกเลิก" would read as cancelling the document itself (a sale order can be cancelled) */
+  cancelLabel?: string;
   /** the role lacks the grant to save here: this note (always on screen in the sticky bar) replaces
    *  the save button, so a view-only user is told before typing instead of by a 403 at save */
   denied?: string;
@@ -1074,7 +1065,7 @@ export function FormActions({
     >
       {extra}
       <Button variant="outline" size="md" type="button" onClick={() => void leave(cancelHref)}>
-        ยกเลิก
+        {cancelLabel}
       </Button>
       {denied ? (
         <p role="note" className="order-first mr-auto flex items-center gap-1.5 text-sm font-medium text-warning">

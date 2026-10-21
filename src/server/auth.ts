@@ -21,6 +21,7 @@ import {
   type Action,
   type Grant,
   type GrantMap,
+  MODULE_LABELS,
   type Module,
   type Right,
 } from '@/lib/modules';
@@ -233,11 +234,12 @@ export async function requireCan(req: NextRequest, module: Module | null, action
   if (!(await can(u, module, action))) {
     // a special right (Report, …) names the right the way the permission screen does
     if (module && module in RIGHTS) throw new HttpError(403, noRight(module as Right));
-    throw new HttpError(403, `ไม่มีสิทธิ์${ACTION_TH[action]}ใน ${module ?? 'ส่วนนี้'}`);
+    const menu = module && `เมนู "${MODULE_LABELS[module as keyof typeof MODULE_LABELS] ?? module}"`;
+    throw new HttpError(403, `ไม่มีสิทธิ์${ACTION_TH[action]}ใน${menu || 'ส่วนนี้'}`);
   }
   return u;
 }
-/** the action in the 403 message — the module keeps its permission-screen name */
+/** the action in the 403 message — the module is named by its Thai menu (MODULE_LABELS) */
 const ACTION_TH: Record<Action, string> = { add: 'เพิ่ม', edit: 'แก้ไข', del: 'ลบ', view: 'ดู' };
 
 /** Every job screen — a job (and its calls/attachments) is readable from any of them. */

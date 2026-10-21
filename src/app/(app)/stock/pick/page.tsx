@@ -118,11 +118,16 @@ export default function PickPage() {
           ? { error: pickOrders.error, refetch: () => void pickOrders.mutate() }
           : undefined;
   const isReturn = kind === 'return';
-  const RECIPIENTS = React.useMemo(() => [STORE_LOCATION_NAME, ...STAFF.map((s) => s.name)], [STAFF]);
+  // จ่ายออกอื่นๆ takes parts out of the store — never back to it (the API refuses it too)
+  const RECIPIENTS = React.useMemo(
+    () => [...(kind === 'other' ? [] : [STORE_LOCATION_NAME]), ...STAFF.map((s) => s.name)],
+    [STAFF, kind],
+  );
 
   // another document type → its reference and lines start over (the change event does it)
   const changeDocType = (t: string) => {
     setDocType(t);
+    setPayTo((p) => (p === STORE_LOCATION_NAME ? '' : p)); // not a destination of every type (RECIPIENTS)
     setRef('');
     setLines([]);
     setLoaded(false);

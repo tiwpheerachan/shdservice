@@ -9,8 +9,9 @@ const SHEET_PX = 820;
 /**
  * Print toolbar (hidden on paper) + auto-open the print dialog once fonts are ready.
  * On a phone the 210 mm sheet is scaled down to the screen (screen only — the print stays A4 / A5).
+ * `paper`: the sheet the page's @page sets (the shipping label: A5 แนวนอน), named in the toolbar.
  */
-export function AutoPrint() {
+export function AutoPrint({ paper = 'A4' }: { paper?: string }) {
   React.useEffect(() => {
     const fit = () =>
       document.documentElement.style.setProperty(
@@ -30,7 +31,7 @@ export function AutoPrint() {
   return (
     <div className="no-print mb-4 flex items-center justify-between rounded-lg border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm">
       <span className="text-neutral-600">
-        ตัวอย่างก่อนพิมพ์ — กระดาษ A4 · ใช้ "บันทึกเป็น PDF" ในหน้าต่างพิมพ์หากต้องการไฟล์
+        ตัวอย่างก่อนพิมพ์ — กระดาษ {paper} · ใช้ "บันทึกเป็น PDF" ในหน้าต่างพิมพ์หากต้องการไฟล์
       </span>
       <div className="flex gap-2">
         <button

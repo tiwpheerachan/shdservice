@@ -49,7 +49,7 @@ export function ShippingLabel({
         @media print { .so-sheet { box-shadow: none; margin: 0; } }
       `}</style>
       <div className="mx-auto w-[210mm]">
-        <AutoPrint />
+        <AutoPrint paper="A5 แนวนอน" />
       </div>
       <div className="so-sheet text-[12.5px] leading-[1.35]">
         <div className="so-frame">

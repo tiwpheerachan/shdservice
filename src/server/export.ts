@@ -9,20 +9,22 @@ import { parseStatusMode } from '@/server/record-status';
 import { noRight, type Module } from '@/lib/modules';
 import { listSimple, isSimpleKind, listSymptoms, listModels } from '@/server/services/masters';
 import { listSystemUsers } from '@/server/services/users';
-import { listCustomers, customerFiltersFromQuery } from '@/server/services/customers';
+import { listCustomers, customerFiltersFromQuery, pageCustomers } from '@/server/services/customers';
 import {
   canSeeCost,
   pageProducts,
   listMovements,
   listIssuedLines,
+  pageMovements,
+  pageIssuedLines,
   productFiltersFromQuery,
 } from '@/server/services/stock';
-import { audit, listAudit } from '@/server/audit';
+import { audit, listAudit, pageAudit } from '@/server/audit';
 import { db } from '@/db/client';
 import { clientIp } from '@/lib/client-ip';
-import { listJobs, filtersFromQuery } from '@/server/services/jobs';
-import { listQuotations, quotationFiltersFromQuery } from '@/server/services/quotations';
-import { listSaleOrders, saleOrderFiltersFromQuery } from '@/server/services/sale-orders';
+import { listJobs, filtersFromQuery, pageJobs } from '@/server/services/jobs';
+import { listQuotations, quotationFiltersFromQuery, pageQuotations } from '@/server/services/quotations';
+import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
 import { fieldLabel } from '@/lib/field-labels';
 import { logError } from '@/lib/log';
@@ -329,6 +331,50 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
   throw new HttpError(404, `unknown export: ${resource}`);
 }
 
+/** How many rows the filters match in all, for a file that hit the cap: the paged list's own count under the same
+ *  filters (the route answers it as X-Export-Truncated, the button says "ส่งออกได้ 20,000 จาก N แถว"). */
+async function totalRows(sp: URLSearchParams, resource: string, user: CurrentUser): Promise<number> {
+  const p = { ...parsePageQuery(sp), page: 1, pageSize: 1 };
+  const mode = parseStatusMode(sp.get('deleted'));
+  const f = p.f;
+  switch (resource) {
+    case 'jobs':
+      return (await pageJobs(p, filtersFromQuery(f))).total;
+    case 'quotations':
+      return (await pageQuotations(p, quotationFiltersFromQuery(f, mode))).total;
+    case 'sale_orders':
+      return (await pageSaleOrders(p, saleOrderFiltersFromQuery(f, mode))).total;
+    case 'customers':
+      return (
+        await pageCustomers(
+          p,
+          !user.isAdmin && (mode === 'only' || mode === 'all') ? 'exclude' : mode,
+          customerFiltersFromQuery(f),
+        )
+      ).total;
+    case 'products':
+      return (await pageProducts(p, productFiltersFromQuery(f, mode))).total;
+    case 'movements':
+      return (await pageMovements(p, { from: f.from, to: f.to, type: f.type, code: f.code, doc: f.doc, ref: f.ref }))
+        .total;
+    case 'issued_lines':
+      return (await pageIssuedLines(p, { from: f.from, to: f.to, category: f.category, code: f.code })).total;
+    case 'audit_log':
+      return (
+        await pageAudit(p, {
+          from: f.from,
+          to: f.to,
+          user: f.user,
+          module: f.module,
+          entity: f.entity,
+          key: f.key,
+          action: f.action,
+        })
+      ).total;
+  }
+  return MAX_ROWS; // the small lists (masters, users) never reach the cap
+}
+
 /** One export at a time per process: a second concurrent one answers 429 instead of doubling the memory. */
 let exporting = false;
 
@@ -342,7 +388,12 @@ export async function exportXlsx(
   req: NextRequest,
   resource: string,
   query: Record<string, unknown> = parseQuery(req, exportOperation),
-): Promise<{ stream: ReadableStream<Uint8Array>; filename: string }> {
+): Promise<{
+  stream: ReadableStream<Uint8Array>;
+  filename: string;
+  /** the rows the filters match, when the file stops at MAX_ROWS */
+  truncatedOf?: number;
+}> {
   const spec = SPECS[resource];
   if (!spec) throw new HttpError(404, `unknown export: ${resource}`);
   const user = spec.module === null ? await requireAdmin(req) : await requireCan(req, spec.module, 'view');
@@ -352,15 +403,19 @@ export async function exportXlsx(
   exporting = true;
   let rows: Row[];
   let cols: Col[];
+  let total = 0;
   try {
     rows = await loadRows(searchOf(query), resource, user);
+    total = rows.length >= MAX_ROWS ? await totalRows(searchOf(query), resource, user) : rows.length;
     // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
     cols =
       resource === 'products' && !(await canSeeCost(user))
         ? spec.cols.filter((c) => c.key !== 'capitalPrice')
         : spec.cols;
     // who took which data out, before a byte leaves: no record, no file
-    const filters = Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined && v !== ''));
+    const filters = Object.fromEntries(
+      Object.entries(query).filter(([k, v]) => v !== undefined && v !== '' && k !== 'file'),
+    );
     await audit(db, user.userId, {
       action: 'EXPORT',
       module: spec.module ?? 'Admin',
@@ -397,7 +452,7 @@ export async function exportXlsx(
   head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF9' } };
   head.commit();
 
-  const truncated = rows.length >= MAX_ROWS;
+  const truncated = total > MAX_ROWS;
   void (async () => {
     let n = 0;
     for (const r of rows.slice(0, MAX_ROWS)) {
@@ -428,8 +483,11 @@ export async function exportXlsx(
     })
     .finally(release);
   const stamp = today(); // Thai calendar date in the file name
+  // ?file= the report's own name (repair-job, close-job … — every job report exports `jobs`); a-z 0-9 - only
+  const file = typeof query.file === 'string' && /^[a-z0-9-]{1,40}$/.test(query.file) ? query.file : resource;
   return {
     stream: Readable.toWeb(out) as ReadableStream<Uint8Array>,
-    filename: `${resource}-${stamp}${truncated ? '-partial' : ''}.xlsx`,
+    filename: `${file}-${stamp}${truncated ? '-partial' : ''}.xlsx`,
+    truncatedOf: truncated ? total : undefined,
   };
 }

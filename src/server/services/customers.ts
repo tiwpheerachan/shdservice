@@ -1,6 +1,6 @@
 import 'server-only';
 import { cached, TTL_STATIC } from '@/server/cache';
-import { and, asc, count, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { orderBy, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import { db } from '@/db/client';
 import type { Tx } from '@/db/client';
@@ -13,6 +13,7 @@ import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 import {
+  asciiDigits,
   customerSchema,
   conflictErrors,
   localPhone,
@@ -128,6 +129,9 @@ const SORT = {
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
+const cardDigits = sql`regexp_replace(coalesce(${customer.customerCardId}, ''), '\\D', '', 'g')`;
+/** digits only — Thai digits ๐-๙ typed in a search box count as 0-9 */
+const digits = (v: unknown) => asciiDigits(str(v)).replace(/\D/g, '');
 // "+66 89 999 3466" typed → also "0899993466", and "0899993466" also finds a stored "+66 89 999 3466"
 const phoneHas = (digits: string) =>
   or(...phoneDigitVariants(digits).map((d) => sql`${phoneDigits} LIKE ${'%' + d + '%'}`));
@@ -143,7 +147,7 @@ const nameText = sql`regexp_replace(regexp_replace(${customer.customerName}, '[\
 function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {}) {
   const active = statusFilter(customer.recordStatus, deleted);
   const term = q.trim();
-  const termDigits = term.replace(/\D/g, '');
+  const termDigits = digits(term);
   const search = term
     ? or(
         ilike(customer.customerCode, likeTerm(term)),
@@ -152,19 +156,25 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
         termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
         ilike(customer.email, likeTerm(term)),
         ilike(customer.customerCardId, likeTerm(term)),
+        // a tax id typed with dashes ("0-1055-56616-06-9"), or a legacy one stored with them
+        // ponytail: no index on the digits of the card id — a seq scan for digit-only terms; an expression index like drizzle/0024 if it shows
+        termDigits.length >= 5 && /^[\d๐-๙\s-]+$/.test(term)
+          ? sql`${cardDigits} LIKE ${likeTerm(termDigits)}`
+          : undefined,
       )
     : undefined;
   const like = (v?: string) => (v && v.trim() ? likeTerm(v.trim()) : null);
-  const phone = f.phone ? f.phone.replace(/\D/g, '') : '';
-  const taxId = f.taxId ? f.taxId.replace(/\D/g, '') : ''; // digits only, like phone: "0-1055-…" typed finds it
+  // digits only, both sides: "0-1055-…" typed finds it; a box with no digit at all finds nothing (not every row)
+  const byDigits = (v: string | undefined, has: (d: string) => SQL | undefined) =>
+    !str(v) ? undefined : digits(v) ? has(digits(v)) : sql`false`;
   return and(
     active,
     search,
     like(f.code) ? ilike(customer.customerCode, like(f.code)!) : undefined,
     clean(f.name) ? ilike(nameText, likeTerm(clean(f.name))) : undefined,
-    phone ? phoneHas(phone) : undefined,
+    byDigits(f.phone, phoneHas),
     like(f.email) ? ilike(customer.email, like(f.email)!) : undefined,
-    taxId ? sql`regexp_replace(${customer.customerCardId}, '\\D', '', 'g') LIKE ${likeTerm(taxId)}` : undefined,
+    byDigits(f.taxId, (d) => sql`${cardDigits} LIKE ${likeTerm(d)}`),
     f.type ? eq(customer.customerType, f.type) : undefined,
     f.province && /^\d+$/.test(f.province) ? eq(customer.cityId, Number(f.province)) : undefined,
     f.status === 'Active'
@@ -202,21 +212,28 @@ export async function pageCustomers(
   };
 }
 
-export async function getCustomerByCode(code: string): Promise<Customer | null> {
-  const rows = await db.select().from(customer).where(eq(customer.customerCode, code)).limit(1);
+/** `deleted`: 'exclude' for a picker (a deleted customer is System Admin's alone); 'all' for the documents already on it */
+export async function getCustomerByCode(code: string, deleted: DeletedMode = 'all'): Promise<Customer | null> {
+  const rows = await db
+    .select()
+    .from(customer)
+    .where(and(eq(customer.customerCode, code), statusFilter(customer.recordStatus, deleted)))
+    .limit(1);
   return rows[0] ? toCustomer(rows[0]) : null;
 }
 
 /**
  * The customer a document is written for (getCustomerByCode still returns a deleted one — old documents show
- * theirs): one deleted while the form was open gets nothing new (409). `current` = the customer already on the
- * document (its id or code): an edit that keeps it still saves.
+ * theirs): one deleted or set Inactive (owner 2026-10-21) gets nothing new (409). `current` = the customer
+ * already on the document (its id or code): an edit that keeps it still saves.
  */
 export async function customerForDocument(code: string, current?: number | string | null): Promise<Customer | null> {
   const [r] = await db.select().from(customer).where(eq(customer.customerCode, code)).limit(1);
-  if (r?.recordStatus === RS.DELETED && current !== r.customerId && current !== r.customerCode)
-    throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
-  return r ? toCustomer(r) : null;
+  if (!r || current === r.customerId || current === r.customerCode) return r ? toCustomer(r) : null;
+  if (r.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
+  if (r.recordStatus === RS.INACTIVE)
+    throw new HttpError(409, 'ลูกค้ารายนี้ปิดใช้งาน (Inactive) — เปิดใช้งานก่อน หรือเลือกรายอื่น');
+  return toCustomer(r);
 }
 
 export async function getCustomerById(id: number): Promise<Customer | null> {
@@ -253,7 +270,13 @@ async function composeAddress(tx: Tx, i: CustomerInput): Promise<string> {
     if (c) parts.push(withPrefix(bkk ? '' : 'จ.', c.n));
   }
   parts.push(str(i.postalCode));
-  return parts.filter(Boolean).join(' ').slice(0, 200);
+  const line = parts.filter(Boolean).join(' ');
+  // customer_address is varchar(200): refused, never cut (a cut drops the province / postal code at the end)
+  if (line.length > 200) {
+    const m = `ที่อยู่รวม (เลขที่ ซอย-ถนน ตำบล อำเภอ จังหวัด รหัสไปรษณีย์) ยาวเกิน 200 ตัวอักษร — ย่อลงอีก ${line.length - 200} ตัว`;
+    throw new HttpError(400, m, { fields: { address1: m } });
+  }
+  return line;
 }
 
 /** ตำบล / อำเภอ / จังหวัด names for a customer's ids — blanks when not picked (legacy customers). */
@@ -294,7 +317,6 @@ export type CustomerConflict = {
   taxId: string;
 };
 
-const digits = (v: unknown) => str(v).replace(/\D/g, '');
 const normEmail = (v: unknown) => str(v).toLowerCase();
 
 /**
@@ -305,6 +327,7 @@ const normEmail = (v: unknown) => str(v).toLowerCase();
 export async function findCustomerConflicts(
   v: { phone?: string; email?: string; taxId?: string },
   excludeCode?: string,
+  q: Tx | typeof db = db,
 ): Promise<CustomerConflict[]> {
   const phone = digits(v.phone);
   const email = normEmail(v.email);
@@ -338,13 +361,13 @@ export async function findCustomerConflicts(
     checks.push({
       field: 'taxId',
       value: taxId,
-      cond: sql`regexp_replace(coalesce(${customer.customerCardId},''), '\\D', '', 'g') = ${taxId}`,
+      cond: sql`${cardDigits} = ${taxId}`,
     });
   if (!checks.length) return [];
   // one query per field, in parallel
   const found = await Promise.all(
     checks.map((c) =>
-      db
+      q
         .select({
           code: customer.customerCode,
           name: customer.customerName,
@@ -376,6 +399,23 @@ export async function findCustomerConflicts(
         taxId: r.taxId ?? '',
       })),
   );
+}
+
+/**
+ * The keys a save claims (pg_advisory_xact_lock), normalised as findCustomerConflicts compares: two saves that would
+ * clash share at least one — the whole phone field (0-form), each mobile in it, the e-mail, the tax id digits.
+ */
+function identityKeys(v: { phone?: string; email?: string; taxId?: string }): string[] {
+  const phone = digits(v.phone);
+  const taxId = digits(v.taxId);
+  const keys = new Set<string>();
+  if (phone.length >= 6) {
+    keys.add(`phone:${phoneDigitVariants(phone).find((d) => d.startsWith('0')) ?? phone}`);
+    for (const m of phonesIn(str(v.phone))) keys.add(`mobile:${m}`);
+  }
+  if (normEmail(v.email)) keys.add(`email:${normEmail(v.email)}`);
+  if (taxId.length >= 5) keys.add(`tax:${taxId}`);
+  return [...keys].sort(); // one order for every save — two never wait on each other's second key
 }
 
 /** The columns a save writes from the form, cleaned (phone / one-line address / status apart). */
@@ -423,18 +463,23 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     email: !prev || normEmail(prev.email) !== normEmail(i.email) ? str(i.email) : undefined,
     taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? taxId : undefined,
   };
-  const conflicts = await findCustomerConflicts(check, i.code);
-  const [first] = conflicts;
-  if (first) {
-    const label = { phone: 'เบอร์โทรศัพท์', email: 'อีเมล', taxId: 'เลขบัตร/ผู้เสียภาษี' };
-    // an edit is not "creating" anything: it says whose number it is
-    const message = prev
-      ? `${label[first.field]}นี้เป็นของลูกค้า ${first.code} ${first.name} แล้ว`
-      : `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`;
-    throw new HttpError(409, message, { conflicts, fields: conflictErrors(conflicts) });
-  }
 
   return db.transaction(async (tx) => {
+    // no unique index (legacy rows hold real duplicates): two saves claiming the same value at once queue on its
+    // key, and the second one checks after the first committed — before the row lock below, so never a deadlock
+    for (const k of identityKeys(check))
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`customer:${k}`}, 0))`);
+    const conflicts = await findCustomerConflicts(check, i.code, tx);
+    const [first] = conflicts;
+    if (first) {
+      const label = { phone: 'เบอร์โทรศัพท์', email: 'อีเมล', taxId: 'เลขบัตร/ผู้เสียภาษี' };
+      // an edit is not "creating" anything: it says whose number it is
+      const message = prev
+        ? `${label[first.field]}นี้เป็นของลูกค้า ${first.code} ${first.name} แล้ว`
+        : `${label[first.field]}นี้มีลูกค้าอยู่แล้ว (${first.code} ${first.name}) — ห้ามสร้างซ้ำ`;
+      throw new HttpError(409, message, { conflicts, fields: conflictErrors(conflicts) });
+    }
+
     // cleaned values (customerSchema checked their length against the columns — nothing is cut)
     const cols = { ...columnsOf(i), phoneNumber: phone };
     const address = () =>

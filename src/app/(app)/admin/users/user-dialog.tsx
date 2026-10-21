@@ -10,7 +10,7 @@ import { Input, Select } from '@/components/ui/input';
 import { PeoplePicker, type Person } from '@/components/shared/people-picker';
 import { useToast } from '@/components/ui/toast';
 import type { User } from '@/data/types';
-import { errMsg, postJson } from '@/lib/api';
+import { errMsg, isStale, postJson } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { userSchema } from '@/lib/validation/admin';
 import { PENDING_ROLE } from '@/lib/access';
@@ -70,8 +70,12 @@ export function useUserDialog(refetch: () => void) {
   useClearOnChange(fe.clear, form);
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
-  // the stored username / phone of the user being edited: an unchanged legacy value still saves
-  const [prev, setPrev] = React.useState<{ username?: string; phone?: string; role?: string } | null>(null);
+  // the user being edited as loaded: an unchanged legacy username / phone still saves; name / email / role /
+  // status go along as `expect` — another admin's change since → 409 stale instead of being undone
+  const [prev, setPrev] = React.useState<Pick<
+    User,
+    'username' | 'phone' | 'role' | 'name' | 'email' | 'status'
+  > | null>(null);
   const openAdd = () => {
     setPrev(null);
     setForm(EMPTY);
@@ -81,7 +85,7 @@ export function useUserDialog(refetch: () => void) {
   };
 
   const openEdit = (r: User) => {
-    setPrev({ username: r.username, phone: r.phone, role: r.role });
+    setPrev({ username: r.username, phone: r.phone, role: r.role, name: r.name, email: r.email, status: r.status });
     setForm(toForm(r));
     fe.setErrors({});
     setEditing(true);
@@ -106,7 +110,10 @@ export function useUserDialog(refetch: () => void) {
     if (fe.report(fe.run(userSchema(prev), form))) return; // the API checks the same
     setSaving(true);
     try {
-      const data = await postUser(form);
+      const data = await postUser({
+        ...form,
+        expect: prev && { name: prev.name, email: prev.email, role: prev.role, status: prev.status },
+      });
       push({
         kind: 'success',
         title: data.created ? 'เพิ่มผู้ใช้งานแล้ว' : 'บันทึกการแก้ไขแล้ว',
@@ -115,6 +122,7 @@ export function useUserDialog(refetch: () => void) {
       setOpen(false);
       refetch();
     } catch (e) {
+      if (isStale(e)) refetch();
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);

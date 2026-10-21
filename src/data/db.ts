@@ -236,9 +236,10 @@ export type AuditRow = {
 export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>('audit_log', params, 'all');
 export const useAuditModules = () => useTable<string>('audit_modules', undefined, 'exclude', {}, TTL_MASTER);
 /** The whole ACTIVE catalog, lite fields only (code/name/onhand/price/brand/category) — for the screens whose
- *  lines ARE the catalog (รับเข้า, จ่ายออกอื่นๆ). Part pickers search instead: useProductSearch. */
-export const useProducts = (enabled = true) =>
-  useTable<Product>('products', { column: 'sysCode' }, 'active', { fields: 'lite' }, TTL_DEFAULT, enabled);
+ *  lines ARE the catalog (รับเข้า, จ่ายออกอื่นๆ). Part pickers search instead: useProductSearch.
+ *  `mode` 'exclude' = Inactive too (รับเข้า: stock still arrives for a part no new document may use). */
+export const useProducts = (enabled = true, mode: DeletedMode = 'active') =>
+  useTable<Product>('products', { column: 'sysCode' }, mode, { fields: 'lite' }, TTL_DEFAULT, enabled);
 /** ACTIVE products (lite rows) whose code / part no / TH·EN·CN name contains `q`, searched on the server;
  *  '' = nothing loaded. Same rows and cache rules as useProducts (re-read after any write). */
 export const useProductSearch = (q: string, opts: ApiOpts<Product[]> = {}) =>
@@ -273,7 +274,7 @@ export function useDashboard(range: DashRange = {}) {
 }
 
 /* ---- lookups ---- */
-export type Staff = { id: number; name: string; userType: string; takesJobs: boolean };
+export type Staff = { id: number; name: string; userType: string; takesJobs: boolean; sells: boolean };
 /** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
   useTable<Staff>('staff', undefined, 'exclude', usedAs ? { usedAs } : {}, TTL_MASTER);

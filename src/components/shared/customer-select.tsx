@@ -64,12 +64,18 @@ export function CustomerSelect({
   const pickByCode = async (code: string) => {
     try {
       const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
-      const hit = d.rows.find((c) => c.code === code) ?? d.rows[0] ?? null;
+      // the exact code only — a customer deleted meanwhile is not found, never another one in its place
+      const hit = d.rows.find((c) => c.code === code) ?? null;
+      // Inactive goes on no new document (owner 2026-10-21) — re-reading the one already on it still works
+      if (hit?.status === 'Inactive' && hit.code !== value?.code) {
+        push({ kind: 'error', title: 'ลูกค้ารายนี้ปิดใช้งาน', desc: `${code} — เปิดใช้งานก่อน หรือเลือกรายอื่น` });
+        return null;
+      }
       if (hit) {
         onChange(hit);
         setMode('existing');
         setConflicts(null);
-      }
+      } else push({ kind: 'error', title: 'ไม่พบลูกค้า', desc: `${code} — อาจถูกลบแล้ว` });
       return hit;
     } catch (e) {
       push({ kind: 'error', title: 'โหลดข้อมูลลูกค้าไม่สำเร็จ', desc: errMsg(e) });
@@ -139,6 +145,14 @@ export function CustomerSelect({
             <Input readOnly value={c.email ?? ''} placeholder="—" />
           </Field>
         </FieldGrid>
+        {c.status === 'Inactive' && (
+          // the search no longer offers one: this is a document already on it (it still saves) or a new one
+          // prefilled with it (the server refuses it, 409)
+          <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
+            <Badge tone="warning">Inactive</Badge>
+            ลูกค้ารายนี้ปิดใช้งาน (Inactive) — เอกสารเดิมของลูกค้ารายนี้ยังบันทึกได้ เอกสารใหม่ต้องเลือกรายอื่น
+          </p>
+        )}
         {!readOnly && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             <span>ข้อมูลลูกค้าเป็นข้อมูลกลาง แก้ไขได้ที่หน้า ข้อมูลลูกค้า</span>
@@ -252,7 +266,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
       onSuccess: (d) => {
         const term = q.trim().toUpperCase();
         if (!/^C\d{5}$/.test(term)) return;
-        const hit = d.rows.find((r) => r.code === term);
+        const hit = d.rows.find((r) => r.code === term && r.status !== 'Inactive');
         if (hit) pick(hit);
       },
     },
@@ -338,16 +352,18 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">ไม่พบลูกค้าที่ตรงกับ "{q.trim()}"</p>
             )}
             {rows.map((c) => (
+              // Inactive goes on no new document (owner 2026-10-21): shown, so nobody adds them again, not choosable
               <CommandPrimitive.Item
                 key={c.code}
                 value={c.code}
+                disabled={c.status === 'Inactive'}
                 onSelect={() => pick(c)}
-                className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+                className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
               >
                 <span className="num w-16 shrink-0 font-medium">{c.code}</span>
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
                 <span className="num shrink-0 text-xs text-muted-foreground">{c.phone}</span>
-                {c.status === 'Inactive' && <Badge tone="neutral">Inactive</Badge>}
+                {c.status === 'Inactive' && <Badge tone="neutral">ปิดใช้งาน</Badge>}
               </CommandPrimitive.Item>
             ))}
           </CommandPrimitive.List>

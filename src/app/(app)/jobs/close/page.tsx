@@ -11,7 +11,7 @@ import {
   JobScreen,
   useJobForm,
   fromJob,
-  saveCommonSections,
+  commonSections,
   useWorkflowErrors,
   useMoneyLock,
 } from '@/components/shared/job-form';
@@ -39,14 +39,14 @@ import {
 } from '@/components/jobs/close-money';
 import { postJson, errMsg, uploadFile } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { closePaymentEdited, closeSchema, jobBalance, partsWaitingMsg } from '@/lib/validation/job';
+import { closePaymentEdited, closeSchema, jobBalance, notClosableMsg, partsWaitingMsg } from '@/lib/validation/job';
 
 function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS, ...shippersLookup } = useShippers();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
-  const { s: form, reset, adopt } = useJobForm();
+  const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
   const confirm = useConfirm();
@@ -75,6 +75,8 @@ function CloseForm() {
     }
   };
 
+  // a status ปิดงาน refuses (closeJob): said as soon as the job is loaded, not after the form is filled
+  const shut = job ? notClosableMsg(job.statusId, job.statusGroup, job.status) : '';
   const net = netOf(costRows(job));
   // a part requested from stock (เบิก) not issued yet → the server refuses a close of an open job (setStatus)
   const waiting = job?.parts.filter((p) => p.statusId === 1 && p.isSpecial && p.requested > p.granted) ?? [];
@@ -148,12 +150,11 @@ function CloseForm() {
       return;
     setSaving(true);
     try {
-      const common = await saveCommonSections(job.no, form, canEdit);
-      adopt(common);
-      // the version as of now: someone else's save since the page loaded → 409 (reload)
+      // the version the page loaded: someone else's save since → 409 (reload)
       const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
         ...body,
-        version: common.version ?? form.version,
+        job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
+        version: form.version,
       });
       setJob(r.job);
       push({ kind: 'success', title: 'ปิดงานและบันทึกการส่งคืนเรียบร้อย', desc: `${r.job.no} · ${r.job.status}` });
@@ -197,6 +198,14 @@ function CloseForm() {
       />
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="close-job-no">
+        {shut && (
+          <p
+            role="alert"
+            className="rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-warning"
+          >
+            {shut}
+          </p>
+        )}
         <CustomerSection readOnly />
 
         <CloseJobInfoSection job={job} />
@@ -243,7 +252,7 @@ function CloseForm() {
           onSave={save}
           saving={saving}
           cancelHref="/jobs/list"
-          denied={can('Job Closing', 'edit') ? undefined : VIEW_ONLY}
+          denied={can('Job Closing', 'edit') ? shut || undefined : VIEW_ONLY}
         />
       </RecordGate>
     </>

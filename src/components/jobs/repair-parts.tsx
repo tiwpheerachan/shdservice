@@ -49,7 +49,7 @@ export function RepairPartsSection({
     setLines((s) => s.filter((x) => x.id !== l.id));
   };
   const pick = (p: PickableProduct) => {
-    const open = lines.find((l) => !l.locked && l.code === p.sysCode);
+    const open = lines.find((l) => !l.locked && !l.issued && l.code === p.sysCode);
     setDup(open?.id ?? null);
     if (!open) onAdd(p); // an issued line of it → a new line is the way to ask for more
   };
@@ -96,8 +96,18 @@ export function RepairPartsSection({
   );
 }
 
+/** a partly issued line: what may still change (saveRepair's rule) */
+function IssuedHint({ l }: { l: Line }) {
+  if (!l.issued) return null;
+  return (
+    <p className="mt-1 text-2xs text-muted-foreground">
+      จ่ายแล้ว {l.issued.granted} จาก {l.issued.requested} — ลดจำนวนเหลือ {l.issued.granted} เพื่อยกเลิกส่วนที่เหลือ
+    </p>
+  );
+}
+
 function RemoveLine({ line, lock, remove }: { line: Line; lock?: string; remove: (l: Line) => void }) {
-  if (line.locked || lock) return null;
+  if (line.locked || line.issued || lock) return null;
   return (
     <button
       onClick={() => remove(line)}
@@ -134,6 +144,8 @@ function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
             const { pick, quote, qty } = planOf(l, k);
             const off = l.locked || !!lock;
             const T = k.toUpperCase();
+            const fixed = off || !!l.issued; // a partly issued line: only แบบ A's qty moves (down)
+            const range = k === 'a' && l.issued ? l.issued : undefined;
             return (
               <div key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="w-14 text-muted-foreground">แบบ {T}</span>
@@ -141,7 +153,7 @@ function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
                   <Checkbox
                     aria-label={`เบิก แบบ ${T} ${l.code}`}
                     checked={pick}
-                    disabled={off}
+                    disabled={fixed}
                     onChange={() => {
                       upd(l.id, tickPlan(l, k, 'pick'));
                       act.clear(`parts.${i}.${k}.qty`);
@@ -153,7 +165,7 @@ function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
                   <Checkbox
                     aria-label={`เสนอ แบบ ${T} ${l.code}`}
                     checked={quote}
-                    disabled={off}
+                    disabled={fixed}
                     onChange={() => {
                       upd(l.id, tickPlan(l, k, 'quote'));
                       act.clear(`parts.${i}.${k}.qty`);
@@ -162,12 +174,12 @@ function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
                   เสนอ
                 </label>
                 <NumberInput
-                  min={0}
-                  max={1000}
+                  min={range?.granted ?? 0}
+                  max={range?.requested ?? 1000}
                   placeholder="0"
                   aria-label={`จำนวน แบบ ${T} ${l.code}`}
                   value={qty}
-                  disabled={off}
+                  disabled={range ? off : fixed}
                   aria-invalid={!!act.errors[`parts.${i}.${k}.qty`] || undefined}
                   onChange={(n) => {
                     upd(l.id, k === 'a' ? { aQty: n } : { bQty: n });
@@ -182,6 +194,7 @@ function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
           <Badge tone={partTone(statusOf(l))} dot>
             {statusOf(l)}
           </Badge>
+          <IssuedHint l={l} />
         </li>
       ))}
       {lines.length > 0 && (
@@ -209,13 +222,15 @@ function PlanCells({
 }: Omit<RowProps, 'lines' | 'remove' | 'dup'> & { l: Line; i: number; k: 'a' | 'b' }) {
   const { pick, quote, qty } = planOf(l, k);
   const T = k.toUpperCase();
+  const fixed = l.locked || !!lock || !!l.issued; // a partly issued line: only แบบ A's qty moves (down)
+  const range = k === 'a' && l.issued ? l.issued : undefined;
   return (
     <>
       <td className="border-l border-border px-2 py-2 text-center">
         <Checkbox
           aria-label={`เบิก แบบ ${T} ${l.code}`}
           checked={pick}
-          disabled={l.locked || !!lock}
+          disabled={fixed}
           onChange={() => {
             upd(l.id, tickPlan(l, k, 'pick'));
             act.clear(`parts.${i}.${k}.qty`);
@@ -226,7 +241,7 @@ function PlanCells({
         <Checkbox
           aria-label={`เสนอ แบบ ${T} ${l.code}`}
           checked={quote}
-          disabled={l.locked || !!lock}
+          disabled={fixed}
           onChange={() => {
             upd(l.id, tickPlan(l, k, 'quote'));
             act.clear(`parts.${i}.${k}.qty`);
@@ -235,12 +250,12 @@ function PlanCells({
       </td>
       <td className="px-2 py-2">
         <NumberInput
-          min={0}
-          max={1000}
+          min={range?.granted ?? 0}
+          max={range?.requested ?? 1000}
           placeholder="0"
           aria-label={`จำนวน แบบ ${T} ${l.code}`}
           value={qty}
-          disabled={l.locked || !!lock}
+          disabled={range ? l.locked || !!lock : fixed}
           aria-invalid={!!act.errors[`parts.${i}.${k}.qty`] || undefined}
           onChange={(n) => {
             upd(l.id, k === 'a' ? { aQty: n } : { bQty: n });
@@ -321,6 +336,7 @@ function PartsTable({ lines, lock, act, upd, remove, dup }: RowProps) {
                   <Badge tone={partTone(statusOf(l))} dot>
                     {statusOf(l)}
                   </Badge>
+                  <IssuedHint l={l} />
                 </td>
                 <td className="px-2 py-2 text-center">
                   <RemoveLine line={l} lock={lock} remove={remove} />

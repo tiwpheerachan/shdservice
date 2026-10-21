@@ -44,6 +44,7 @@ export function SaleOrderLines({
   errors,
   clear,
   showZero,
+  stockNote = false,
 }: {
   lines: SaleOrderLine[];
   setLines: React.Dispatch<React.SetStateAction<SaleOrderLine[]>>;
@@ -53,6 +54,8 @@ export function SaleOrderLines({
   clear: (key: string) => void;
   /** a loaded order shows its 0 prices as 0 */
   showZero: boolean;
+  /** the stock left per line on a read-only form too (a waiting order: the approver checks it before approving) */
+  stockNote?: boolean;
 }) {
   const [item, setItem] = React.useState<PickedItem | null>(null); // the part chosen, not added yet
   const [qty, setQty] = React.useState(1);
@@ -124,7 +127,7 @@ export function SaleOrderLines({
                     <td className="num px-3 py-2 font-medium">{l.code}</td>
                     <td className="px-3 py-2">
                       <span className="line-clamp-2 max-w-[320px]">{l.name}</span>
-                      {!readOnly && l.type === 'SparePart' && <StockNote code={l.code} qty={l.qty} />}
+                      {(!readOnly || stockNote) && l.type === 'SparePart' && <StockNote code={l.code} qty={l.qty} />}
                     </td>
                     <td className="px-3 py-2">
                       <NumberInput

@@ -342,7 +342,7 @@ try {
   await expect([200], `/api/stock/movements/${whi}`);
   await expect([201], '/api/stock/issue', {
     method: 'POST',
-    body: { type: 'other', payTo: 'คลังสินค้าดี', lines: [{ code: 'TDP1', qty: 1 }] },
+    body: { type: 'other', payTo: 'TD td-admin', lines: [{ code: 'TDP1', qty: 1 }] },
   });
   await expect([200, 409], '/api/stock/pick-lines?type=job&ref=TDJ0002');
   await expect([200], `/api/stock/pick-lines?type=sale&ref=${soNo}`);
@@ -361,6 +361,7 @@ try {
     method: 'POST',
     body: { items: [{ role: 'TD Api', menu: 'Customer', view: true }] },
   });
+  await expect([200], '/api/admin/permissions?role=TD%20Api', { method: 'DELETE' }); // nobody holds it
   if (customerCode)
     await expect([200], '/api/admin/records', {
       method: 'POST',
@@ -464,6 +465,150 @@ try {
     as: null,
   });
   await refuses(404, { error: 'unknown master: nope' }, '/api/masters/nope', { method: 'POST', body: { name: 'x' } });
+
+  console.log('\nDeleting through /api/admin/records — what a delete would leave behind is refused');
+  const del = (table: string, id: string, as?: Who, status = 'DELETED', remark = 'TD เหตุผล') =>
+    call('/api/admin/records', {
+      method: 'POST',
+      body: { table, id, status, ...(table === 'sale_orders' ? { remark } : {}) },
+      ...(as === undefined ? {} : { as }),
+    });
+  await test('a job with a part waiting for stock / issued and not back → 409, the job stays', async () => {
+    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRDEL';
+      DELETE FROM job_log WHERE job_no = 'TDJRDEL';
+      DELETE FROM job WHERE job_no = 'TDJRDEL';
+      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJRDEL', 11, 'ACTIVE');
+      INSERT INTO job_order_spare_part_log (job_no, order_status_id, request_qty, grant_qty, return_qty)
+        VALUES ('TDJRDEL', 1, 3, 1, 0)`);
+    const r = await del('jobs', 'TDJRDEL');
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.match(String(r.body.error), /อะไหล่รอเบิก/);
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM job WHERE job_no = 'TDJRDEL'`);
+    assert.equal(rows[0].rs, 'ACTIVE');
+    // every part back / cancelled → the delete goes through
+    await pool.query(
+      `UPDATE job_order_spare_part_log SET order_status_id = 5, return_qty = 1 WHERE job_no = 'TDJRDEL'`,
+    );
+    assert.equal((await del('jobs', 'TDJRDEL')).status, 200);
+  });
+  await test('a part a job is still waiting for → 409 naming the job; the part stays', async () => {
+    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRPART';
+      DELETE FROM job_log WHERE job_no = 'TDJRPART'; DELETE FROM job WHERE job_no = 'TDJRPART';
+      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJRPART', 11, 'ACTIVE');
+      INSERT INTO job_order_spare_part_log (job_no, spare_part_code, order_status_id, request_qty, grant_qty, return_qty)
+        VALUES ('TDJRPART', 'TDP1', 1, 1, 0, 0)`);
+    const r = await del('products', 'TDP1');
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.match(String(r.body.error), /TDP1 มีงานรอเบิกอยู่ \(.*J/);
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM product WHERE product_code = 'TDP1'`);
+    assert.equal(rows[0].rs, 'ACTIVE');
+    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRPART'`);
+  });
+  await test("a job's agreed quotation → 409 (the job would point at a deleted document)", async () => {
+    await pool.query(`DELETE FROM job WHERE job_no = 'TDJRQ'; DELETE FROM quotation_hd WHERE quotation_no = 'TDQRDEL';
+      INSERT INTO quotation_hd (quotation_no, record_status) VALUES ('TDQRDEL', 'ACTIVE');
+      INSERT INTO job (job_no, job_status_id, record_status, quotation_no_approved) VALUES ('TDJRQ', 12, 'ACTIVE', 'TDQRDEL')`);
+    const r = await del('quotations', 'TDQRDEL');
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.match(String(r.body.error), /TDJRQ/);
+    await pool.query(`UPDATE job SET quotation_no_approved = NULL WHERE job_no = 'TDJRQ'`);
+    assert.equal((await del('quotations', 'TDQRDEL')).status, 200);
+  });
+  await test('a quotation / sale order cannot be set INACTIVE → 400 (a document is ACTIVE or DELETED)', async () => {
+    const r = await del('quotations', 'TDQRDEL', undefined, 'INACTIVE');
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+  await test("someone else's pending sale order: only its creator, an approver or an admin may cancel it", async () => {
+    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL';
+      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+        VALUES ('TDSORDEL', 2, 9107, 'ACTIVE');
+      DELETE FROM app_config WHERE user_type = 'TD Canceller';
+      INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+        VALUES ('TD Canceller', 'Sale Order', true, true, true, true);
+      DELETE FROM app_user WHERE email_address = 'td-canceller@example.invalid';
+      INSERT INTO app_user (username, password, first_name, user_type, is_active, email_address, record_status,
+                            session_version)
+        VALUES ('td-canceller', '', 'TD Canceller', 'TD Canceller', true, 'td-canceller@example.invalid', 'ACTIVE',
+                ${SV})`);
+    const r = await del('sale_orders', 'TDSORDEL', { email: 'td-canceller@example.invalid' });
+    assert.equal(r.status, 403, JSON.stringify(r.body));
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL'`);
+    assert.equal(rows[0].rs, 'ACTIVE');
+    assert.equal((await del('sale_orders', 'TDSORDEL')).status, 200); // System Admin
+    // its creator cancels it with Sale Order edit alone (no delete right — the TD Seller role)
+    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2';
+      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+        VALUES ('TDSORDEL2', 1, 9107, 'ACTIVE')`);
+    const own = await del('sale_orders', 'TDSORDEL2', { email: 'td-seller@example.invalid' });
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    // a second cancel (another person, a stale page) is refused — the first one's who / why stay
+    const again = await del('sale_orders', 'TDSORDEL2', undefined, 'DELETED', 'ทับเหตุผล');
+    assert.equal(again.status, 409, JSON.stringify(again.body));
+    const { rows: kept } = await pool.query(
+      `SELECT document_cancel_remark AS r, document_cancel_by AS b FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2'`,
+    );
+    assert.deepEqual(kept[0], { r: 'TD เหตุผล', b: 9107 });
+    // the detail carries the reason; the list / export read ยกเลิก, not the last approval step
+    const got = await call('/api/sale-orders/TDSORDEL2');
+    const order = got.body.order as { cancelRemark: string; approve: string };
+    assert.deepEqual([order.cancelRemark, order.approve], ['TD เหตุผล', 'ยกเลิก']);
+  });
+  // QA follow-ups 2026-10-21: only System Admin restores a deleted customer (the delete dialog says so)
+  await test('restoring a deleted customer: Customer del alone → 403, System Admin → 200', async () => {
+    await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCRST';
+      INSERT INTO customer (customer_code, customer_name, phone_number, record_status)
+        VALUES ('TDCRST', 'TD ลูกค้าลบแล้ว', '02-000-0901', 'DELETED')`);
+    const clerk = await del('customers', 'TDCRST', { email: 'td-clerk@example.invalid' }, 'ACTIVE');
+    assert.deepEqual([clerk.status, clerk.body.error], [403, 'กู้คืนลูกค้าที่ลบแล้วได้เฉพาะผู้ดูแลระบบ']);
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM customer WHERE customer_code = 'TDCRST'`);
+    assert.equal(rows[0].rs, 'DELETED');
+    assert.equal((await del('customers', 'TDCRST', undefined, 'ACTIVE')).status, 200);
+  });
+  await test('the customer lookup offers a deleted customer to nobody unless System Admin asks deleted=all', async () => {
+    await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCLKD';
+      INSERT INTO customer (customer_code, customer_name, phone_number, record_status)
+        VALUES ('TDCLKD', 'TD ลูกค้าลบแล้ว 2', '02-000-0902', 'DELETED')`);
+    const codes = async (url: string, as?: Who) =>
+      ((await call(url, as === undefined ? {} : { as })).body.rows as { code: string }[]).map((r) => r.code);
+    assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD'), [], 'admin, a picker');
+    assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all'), ['TDCLKD'], 'admin, ?edit=');
+    const clerk = { email: 'td-clerk@example.invalid' };
+    assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all', clerk), [], 'non-admin asking');
+  });
+  await test('stock receive lists INACTIVE parts (deleted=exclude) — pickers stay ACTIVE; receiving one → 201', async () => {
+    await pool.query(`DELETE FROM product_none_serial WHERE product_id = 9298 OR item_id = 9298; DELETE FROM product WHERE product_id = 9298;
+      INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9298, 'TDPRCV', 'TD ปิดใช้งาน', 'INACTIVE');
+      INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain)
+        VALUES (9298, 9298, 0, 0, 0, 0)`);
+    const lite = async (deleted: string) =>
+      (await call(`/api/data/products?fields=lite&q=TDPRCV${deleted}`)).body as unknown as {
+        sysCode: string;
+        status: string;
+      }[];
+    assert.deepEqual(
+      (await lite('&deleted=exclude')).map((r) => [r.sysCode, r.status]),
+      [['TDPRCV', 'Inactive']],
+    );
+    assert.deepEqual(await lite('&deleted=active'), [], 'picker search');
+    assert.deepEqual(await lite(''), [], 'no mode');
+    const r = await call('/api/stock/receive', {
+      method: 'POST',
+      body: { date: today(), lines: [{ code: 'TDPRCV', qty: 1 }] },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+  });
+  await test('cancelling a sale order needs a reason → 400 under remark, nothing changed', async () => {
+    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL3';
+      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+        VALUES ('TDSORDEL3', 1, 9107, 'ACTIVE')`);
+    for (const remark of ['', '   ']) {
+      const r = await del('sale_orders', 'TDSORDEL3', undefined, 'DELETED', remark);
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+    }
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL3'`);
+    assert.equal(rows[0].rs, 'ACTIVE');
+  });
+
   await refuses(404, { error: 'unknown export: nope' }, '/api/export/nope');
   await refuses(400, { error: 'kind required' }, '/api/documents/profile', { method: 'POST', body: { kind: 'x' } });
   await refuses(400, { error: 'no required' }, '/api/documents/profile', { method: 'POST', body: { kind: 'job' } });

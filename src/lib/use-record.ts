@@ -18,6 +18,8 @@ import { recordNo } from '@/data/keys';
  *  - `onRecord`: every record that arrives — loaded (URL or search) or saved through `setData` —
  *    e.g. to fill the page's form from it (an event, not an effect watching the data)
  *  - `setData`: the saved record the API answered with, shown without another read
+ *  - `loading`: also while the record on screen is read again (โหลดใหม่ after a 409, `reload`) — <RecordGate>
+ *    locks the form until it lands, so nothing typed meanwhile is overwritten by it or saved over it
  *
  * The URL's record may come with the page (<Prefetched>, src/server/prefetch.ts — the record itself, as
  * `pick` returns it): then it is not read again on mount, and `onRecord` gets it as if it had just loaded.
@@ -43,7 +45,7 @@ export function useRecord<T>(opts: {
   const [prefetched] = React.useState(() => (key ? (fallback?.[key] as T | undefined) : undefined));
 
   const { pick, onLoaded, onMissing, onRecord } = opts;
-  const { data, error, isLoading, mutate } = useSWR<T>(key, async (url: string) => pick((await api(url)) as never), {
+  const { data, error, isValidating, mutate } = useSWR<T>(key, async (url: string) => pick((await api(url)) as never), {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
     shouldRetryOnError: false,
@@ -90,7 +92,7 @@ export function useRecord<T>(opts: {
   };
   const reload = React.useCallback(() => mutate(), [mutate]);
 
-  return { no, data: data ?? null, loading: isLoading, error: error ? errMsg(error) : null, find, setData, reload };
+  return { no, data: data ?? null, loading: isValidating, error: error ? errMsg(error) : null, find, setData, reload };
 }
 
 /** its children remounted for each record number `of(searchParams)` names (see useRecord) — inside a <Suspense> */

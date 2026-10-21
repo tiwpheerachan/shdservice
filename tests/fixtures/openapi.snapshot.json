@@ -1061,7 +1061,7 @@
           "Jobs"
         ],
         "summary": "Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)",
-        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund.",
+        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -1207,6 +1207,9 @@
                       "nullable": true
                     }
                   },
+                  "job": {
+                    "$ref": "#/components/schemas/JobInput"
+                  },
                   "version": {
                     "anyOf": [
                       {
@@ -1348,7 +1351,7 @@
           "Jobs"
         ],
         "summary": "Send to / receive back from an outside repairer (ส่งซ่อม Out-Source)",
-        "description": "Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts).",
+        "description": "Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts). `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -1445,6 +1448,23 @@
                   "engineerSymptom": {
                     "type": "string",
                     "description": "อาการเสียที่ตรวจพบ (a symptom name)"
+                  },
+                  "job": {
+                    "$ref": "#/components/schemas/JobInput"
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "row_version the form loaded (an edit) — 409 `stale` if it moved since; left out = no check."
                   }
                 },
                 "additionalProperties": {
@@ -1569,7 +1589,7 @@
           "Jobs"
         ],
         "summary": "Save the repair (บันทึกงานซ่อม): details, costs, part requests, status",
-        "description": "Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it.",
+        "description": "Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -1743,6 +1763,9 @@
                     "type": "string",
                     "description": "อาการเสียที่ตรวจพบ (a symptom name)"
                   },
+                  "job": {
+                    "$ref": "#/components/schemas/JobInput"
+                  },
                   "version": {
                     "anyOf": [
                       {
@@ -1883,7 +1906,7 @@
           "Jobs"
         ],
         "summary": "Record a swap or a refund (Swap / Refund)",
-        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required.",
+        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -1968,6 +1991,23 @@
                   },
                   "detail": {
                     "type": "string"
+                  },
+                  "job": {
+                    "$ref": "#/components/schemas/JobInput"
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "row_version the form loaded (an edit) — 409 `stale` if it moved since; left out = no check."
                   }
                 },
                 "additionalProperties": {
@@ -2091,8 +2131,8 @@
         "tags": [
           "Jobs"
         ],
-        "summary": "The customer's tracking link: its state, and the URL only when this call issued the first one",
-        "description": "Job Management view reads the state. The first link is issued (and audited) only for a caller who also has Job Management edit. Only a hash of a link is stored, so an existing link is never shown again — POST makes a new one.",
+        "summary": "The customer's tracking link: its state (read-only)",
+        "description": "Job Management view. Never issues a link: only a hash of a link is stored, so an existing link is never shown again — POST issues one (the first one too).",
         "parameters": [
           {
             "schema": {
@@ -2115,7 +2155,7 @@
                   "properties": {
                     "url": {
                       "type": "string",
-                      "description": "\"\" unless this call issued the job's first link."
+                      "description": "Always \"\" (kept for older clients) — POST returns a link."
                     },
                     "ready": {
                       "type": "boolean",
@@ -2708,7 +2748,7 @@
           "Customers"
         ],
         "summary": "Find customers by code, tax id, name or phone (job / quotation / sale-order forms)",
-        "description": "An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one.",
+        "description": "An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its code).",
         "parameters": [
           {
             "schema": {
@@ -2716,6 +2756,19 @@
             },
             "required": false,
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ],
+              "description": "`all` = an exact code may answer a DELETED customer (System Admin only; anyone else as left out)."
+            },
+            "required": false,
+            "description": "`all` = an exact code may answer a DELETED customer (System Admin only; anyone else as left out).",
+            "name": "deleted",
             "in": "query"
           }
         ],
@@ -3493,6 +3546,20 @@
                   "tracking": {
                     "type": "string",
                     "description": "A number is read as its digits; left out = none."
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "row_version the form loaded (an edit) — 409 `stale` if it moved since; left out = no check."
                   }
                 }
               }
@@ -5175,7 +5242,7 @@
           "Files"
         ],
         "summary": "Upload a product image, a payment slip or a profile logo",
-        "description": "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (an approved / denied / cancelled order's slip is final; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
+        "description": "The permission follows `kind`: product-image → Product edit; sale-order-slip → Sale Order edit (a denied / cancelled order's slip is final, an approved one's too once it has a slip — an approved order without one takes it, with `paymentAmount`; a waiting one is its creator's); job-slip → Job Closing edit (a cancelled job's slip is refused; a closed job's needs Job Money After Close, and its previous slip is kept); profile-logo / shipper-logo → System Admin. Photos are resized server-side; replacing a file removes the previous one.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5202,6 +5269,10 @@
                   "id": {
                     "type": "string",
                     "description": "product code / sale order no / job no / profile id"
+                  },
+                  "paymentAmount": {
+                    "type": "string",
+                    "description": "sale-order-slip: the amount paid, recorded with the slip (≤ the order total). Other kinds ignore it."
                   }
                 },
                 "required": [
@@ -5244,7 +5315,7 @@
             }
           },
           "400": {
-            "description": "Not multipart, no file / id, or an unknown kind.",
+            "description": "Not multipart, no file / id, an unknown kind, or a paid amount that is not money / over the order total.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5284,7 +5355,7 @@
             }
           },
           "409": {
-            "description": "The sale order is approved, denied or cancelled, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.",
+            "description": "The sale order is denied or cancelled, or approved with a slip already, or the job is cancelled / closed (without Job Money After Close) — its slip cannot change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9236,10 +9307,10 @@
               "enum": [
                 "lite"
               ],
-              "description": "`lite` = the picker's short rows"
+              "description": "`lite` = the picker's short rows: ACTIVE only; `deleted=exclude` adds INACTIVE (stock receive)"
             },
             "required": false,
-            "description": "`lite` = the picker's short rows",
+            "description": "`lite` = the picker's short rows: ACTIVE only; `deleted=exclude` adds INACTIVE (stock receive)",
             "name": "fields",
             "in": "query"
           }
@@ -10831,13 +10902,17 @@
                       },
                       "takesJobs": {
                         "type": "boolean"
+                      },
+                      "sells": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "id",
                       "name",
                       "userType",
-                      "takesJobs"
+                      "takesJobs",
+                      "sells"
                     ]
                   }
                 }
@@ -11205,7 +11280,7 @@
           "Data"
         ],
         "summary": "Download a list as Excel (.xlsx), with the same filters as GET /data/{resource}",
-        "description": "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx` and says so in its last row. ราคาทุน only with Product Cost.",
+        "description": "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
         "parameters": [
           {
             "schema": {
@@ -11284,11 +11359,29 @@
             "required": false,
             "name": "to",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The file name (a-z 0-9 -, e.g. the report: `repair-job`); else the resource."
+            },
+            "required": false,
+            "description": "The file name (a-z 0-9 -, e.g. the report: `repair-job`); else the resource.",
+            "name": "file",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "The workbook (`Content-Disposition: attachment; filename=\"<resource>-<date>.xlsx\"`).",
+            "description": "The workbook (`Content-Disposition: attachment; filename=\"<file or resource>-<date>.xlsx\"`).",
+            "headers": {
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Only on a file cut at 20,000 rows: how many rows the filters match in all."
+              }
+            },
             "content": {
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
                 "schema": {
@@ -11803,7 +11896,7 @@
           "Admin"
         ],
         "summary": "Upsert permission rows by (role, menu)",
-        "description": "System Admin only. Items without a role or menu are dropped; none left, or `items` not a list of objects → 400 \"no items\".",
+        "description": "System Admin only. Items without a role or menu are dropped; none left, or `items` not a list of objects → 400 \"no items\". A menu that is neither a page module nor a special right, or a role name over 50 characters → 400. With `was` (the row as the page loaded it) an item is a compare-and-set: a row another admin changed since → 409 `details.stale` naming the menus, nothing written.",
         "requestBody": {
           "required": true,
           "content": {
@@ -11834,6 +11927,25 @@
                         },
                         "view": {
                           "type": "boolean"
+                        },
+                        "was": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "add": {
+                              "type": "boolean"
+                            },
+                            "edit": {
+                              "type": "boolean"
+                            },
+                            "del": {
+                              "type": "boolean"
+                            },
+                            "view": {
+                              "type": "boolean"
+                            }
+                          },
+                          "description": "The row as the page loaded it (no row = all false)."
                         }
                       }
                     }
@@ -11902,6 +12014,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict: `details.stale` = someone saved this record after you loaded it (row_version); otherwise a duplicate value, a state that no longer allows this, or a concurrent save — reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Body over 1 MB.",
             "content": {
@@ -11914,6 +12036,101 @@
           },
           "415": {
             "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a role (its permission rows)",
+        "description": "System Admin only. Refused (409) while a user that is not deleted still has the role, and for System Admin.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "role",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rows removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "deleted": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`role` missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: `details.stale` = someone saved this record after you loaded it (row_version); otherwise a duplicate value, a state that no longer allows this, or a concurrent save — reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11990,6 +12207,11 @@
                   "deleted": {
                     "type": "boolean",
                     "description": "Without `status`: `true` = DELETED, otherwise ACTIVE."
+                  },
+                  "remark": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Cancelling a sale order: the reason (document_cancel_remark). Other tables ignore it."
                   }
                 },
                 "required": [
@@ -12514,7 +12736,7 @@
           "Admin"
         ],
         "summary": "Create or update a system user and give them a role",
-        "description": "System Admin only. Rules: `userSchema(prev)` in src/lib/validation/admin.ts, run by the route against the stored user. Blank code / branch / phone / avatar / title are filled from the Lark directory by email.",
+        "description": "System Admin only. Rules: `userSchema(prev)` in src/lib/validation/admin.ts, run by the route against the stored user. Blank code / branch / phone / avatar / title are filled from the Lark directory by email. An edit that leaves name / role / status out keeps them as stored (the row's quick actions send only what they change).",
         "requestBody": {
           "required": true,
           "content": {
@@ -12538,6 +12760,29 @@
                     "type": "string",
                     "nullable": true,
                     "description": "Set = edit that user."
+                  },
+                  "expect": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "email": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "role": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "status": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "description": "The values the form loaded (as GET /admin/users shows them): one that no longer matches the stored user → 409 `details.stale`, nothing written."
                   },
                   "name": {
                     "type": "string",
@@ -12992,6 +13237,28 @@
                   },
                   "status": {
                     "type": "string"
+                  },
+                  "expect": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "brand": {
+                        "type": "string"
+                      },
+                      "price": {
+                        "type": "string"
+                      }
+                    },
+                    "description": "The row as the edit dialog loaded it (simple lists and symptoms: name, detail, status; `models`: name, brand, price, status) — changed since → 409 `details.stale`, nothing written."
                   }
                 }
               }
@@ -16023,38 +16290,44 @@
                     }
                   ]
                 },
-                "id": {
-                  "type": "number"
-                },
                 "itemType": {
-                  "type": "string",
-                  "description": "`SparePart` | `Service` | `Delivery`"
-                },
-                "code": {
                   "type": "string"
                 },
                 "unit": {
-                  "type": "string"
+                  "type": "string",
+                  "nullable": true
                 },
                 "discount": {
                   "anyOf": [
                     {
+                      "type": "number"
+                    },
+                    {
                       "type": "string"
                     },
                     {
-                      "type": "number"
+                      "nullable": true
                     }
                   ]
                 },
                 "discountPercent": {
                   "anyOf": [
                     {
+                      "type": "number"
+                    },
+                    {
                       "type": "string"
                     },
                     {
-                      "type": "number"
+                      "nullable": true
                     }
                   ]
+                },
+                "id": {
+                  "type": "number"
+                },
+                "code": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -16085,6 +16358,9 @@
               },
               {
                 "type": "string"
+              },
+              {
+                "nullable": true
               }
             ]
           },
@@ -16130,7 +16406,12 @@
             "description": "`บาท` or `%`"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "A new quotation: `รอเสนอราคา` (default) or `เสนอราคาแล้ว`."
+          },
+          "jobParts": {
+            "type": "string",
+            "description": "A new quotation filled from its job: quotedPartsKey of the job's parts it copied — they changed since → 409."
           },
           "version": {
             "anyOf": [
@@ -16237,6 +16518,10 @@
               },
               "province": {
                 "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "description": "the customer's status now (Active / Inactive …)"
               }
             },
             "required": [
@@ -16249,8 +16534,13 @@
               "email",
               "subDistrict",
               "district",
-              "province"
+              "province",
+              "status"
             ]
+          },
+          "cancelRemark": {
+            "type": "string",
+            "description": "why it was cancelled (empty unless cancelled)"
           },
           "lines": {
             "type": "array",
@@ -16359,6 +16649,7 @@
           "stockDoc",
           "tracking",
           "customerDetail",
+          "cancelRemark",
           "lines",
           "totalBase",
           "fee",

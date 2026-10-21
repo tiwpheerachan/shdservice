@@ -15,7 +15,7 @@ import {
   JobScreen,
   useJobForm,
   fromJob,
-  saveCommonSections,
+  commonSections,
   useWorkflowErrors,
   useMoneyLock,
 } from '@/components/shared/job-form';
@@ -66,7 +66,9 @@ function repairStateOf(job: JobDetail, lastId: number): { detail: RepairDetail; 
       bQty: p.requestQtyB,
       status: p.status,
       total: p.total,
-      locked: p.statusId !== 1 || p.granted > 0,
+      locked: p.statusId !== 1,
+      // partly issued: แบบ A's qty may come down to what stock issued (the rest is cancelled) — nothing else
+      issued: p.statusId === 1 && p.granted > 0 ? { granted: p.granted, requested: p.requested } : undefined,
       waiting: p.statusId === 1 && p.isSpecial && p.requested > p.granted,
     })),
   };
@@ -85,7 +87,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
       if (b?.no !== j.no || b.version !== j.version) prefill(j);
     },
   });
-  const { s: form, reset, adopt } = useJobForm();
+  const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
   const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (Job Money After Close may change them)
@@ -132,14 +134,12 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     if (partsBlock) return push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: partsBlock });
     setSaving(true);
     try {
-      // product / other-info sections shown on this screen are saved too
-      const common = await saveCommonSections(job.no, form, canEdit);
-      adopt(common);
-      // the version as of now: someone else's save since the page loaded → 409 (reload) instead of
+      // the version the page loaded: someone else's save since → 409 (reload) instead of
       // silently cancelling the part requests they added
       const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
         ...body,
-        version: common.version ?? form.version,
+        job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
+        version: form.version,
       });
       setJob(d.job);
       push({ kind: 'success', title: 'บันทึกงานซ่อมเรียบร้อย', desc: `${d.job.no} · ${d.job.status}` });

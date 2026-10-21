@@ -19,8 +19,8 @@ import { cn } from '@/lib/utils';
  * is in; an expired link cannot be copied — issue a new one. "ดูหน้าที่ลูกค้าเห็น" by a
  * signed-in staff member does not count as the customer's open.
  *
- * Only the link's hash is stored (drizzle/0025): the server returns a link once — when it
- * issues the job's first one, or on "สร้างลิงก์ใหม่" — and it stays copyable only while this
+ * Only the link's hash is stored (drizzle/0025): the server returns a link once — on "สร้างลิงก์ใหม่"
+ * (the first one too: opening a page never issues one) — and it stays copyable only while this
  * page is open. After that the box says so and offers a new link instead.
  */
 type LinkStatus = {
@@ -112,7 +112,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
       push({
         kind: 'success',
         title: 'สร้างลิงก์ใหม่แล้ว',
-        desc: 'คัดลอกส่งลูกค้าได้เลย (แสดงจนกว่าจะออกจากหน้านี้) · ใช้ได้ 1 วันจนกว่าลูกค้าจะเปิด · ลิงก์เดิมใช้ไม่ได้แล้ว',
+        desc: `คัดลอกส่งลูกค้าได้เลย (แสดงจนกว่าจะออกจากหน้านี้) · ใช้ได้ 1 วันจนกว่าลูกค้าจะเปิด${status?.issuedAt ? ' · ลิงก์เดิมใช้ไม่ได้แล้ว' : ''}`,
       });
     } catch (e) {
       push({ kind: 'error', title: 'สร้างลิงก์ใหม่ไม่สำเร็จ', desc: errMsg(e) });
@@ -123,8 +123,11 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
 
   if (link.loading || link.error || !link.data) return null;
 
+  const never = !status?.issuedAt; // no link issued for this job yet
   const hint = !ready ? (
     <span>ยังใช้ไม่ได้สำหรับงานนี้</span>
+  ) : never ? (
+    <span>ยังไม่ได้ออกลิงก์ให้งานนี้</span>
   ) : state === 'expired' ? (
     <span className="inline-flex flex-wrap items-center gap-1.5 font-medium text-danger">
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -185,10 +188,12 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
           </>
         ) : (
           <p className="min-w-0 flex-1 basis-60 rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
-            ระบบไม่เก็บลิงก์ไว้ (เพื่อความปลอดภัย) จึงแสดงลิงก์ที่ออกไปแล้วซ้ำไม่ได้ —{' '}
-            {canEdit
-              ? 'กด “สร้างลิงก์ใหม่” เพื่อรับลิงก์ที่คัดลอกส่งลูกค้าได้ (ลิงก์เดิมจะใช้ไม่ได้ทันที)'
-              : 'แจ้งผู้มีสิทธิ์แก้ไขงานเพื่อสร้างลิงก์ใหม่'}
+            {never ? 'ยังไม่มีลิงก์ —' : 'ระบบไม่เก็บลิงก์ไว้ (เพื่อความปลอดภัย) จึงแสดงลิงก์ที่ออกไปแล้วซ้ำไม่ได้ —'}{' '}
+            {never && canEdit
+              ? 'กด “สร้างลิงก์ใหม่” เพื่อออกลิงก์ที่คัดลอกส่งลูกค้าได้'
+              : canEdit
+                ? 'กด “สร้างลิงก์ใหม่” เพื่อรับลิงก์ที่คัดลอกส่งลูกค้าได้ (ลิงก์เดิมจะใช้ไม่ได้ทันที)'
+                : 'แจ้งผู้มีสิทธิ์แก้ไขงานเพื่อสร้างลิงก์ใหม่'}
           </p>
         )}
         {canEdit && (

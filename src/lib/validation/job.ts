@@ -3,6 +3,7 @@ import { addDays, today } from '@/lib/dates';
 import { CHANNELS, CLOSE_STATUS_OPTIONS, JOB_STATUS_OPTIONS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
 import { rightLabel } from '@/lib/modules';
+import { JOB_GROUP, JS } from '@/lib/status-ids';
 // only used inside the factories below (sale-order.ts imports isFilled from here — no top-level use, no cycle problem)
 
 /**
@@ -382,6 +383,18 @@ export const OUTSOURCE_STATUS_ONLY = 'หน้านี้เลือกได
 export const OUTSOURCE_NOT_BACK =
   'งานนี้ส่งซ่อมภายนอกอยู่ — บันทึก "รับคืนจาก Out-Source แล้ว" (วันที่รับคืน) ที่หน้า บันทึกงานส่งซ่อมต่อ (Out-Source) ก่อนปิดงาน';
 
+/** what ปิดงาน closes from besides the Repaired group (its job search `closable`, closeJob): back from out-source
+ *  (the receive stamps the repair) and a close still waiting for its parcel no. / the customer's pickup */
+export const CLOSABLE_IDS: number[] = [JS.OUTSOURCE_RECEIVED, JS.CLOSED_WAIT_TRACKING, JS.CLOSED_WAIT_PICKUP];
+
+/** why ปิดงาน refuses a job in this status (closeJob; the page says it as soon as the job is loaded) — '' = closable.
+ *  A closed job saves again (the parcel no. added later). */
+export function notClosableMsg(statusId: number | null, group: string, statusName: string): string {
+  if (group === JOB_GROUP.REPAIRED || group === JOB_GROUP.FINISHED || CLOSABLE_IDS.includes(statusId ?? -1)) return '';
+  if (statusId === JS.OUTSOURCE_SENT) return OUTSOURCE_NOT_BACK; // still out at the vendor: what to do
+  return `งานนี้อยู่ในสถานะ "${statusName}" — ปิดงานได้เมื่อซ่อมเสร็จ (หรือรับคืนจาก Out-Source) แล้ว`;
+}
+
 /**
  * Statuses only one path sets (setStatus guards; the workflow pages offer neither): a closed one (Finished) only
  * through ปิดงาน-ส่งคืนสินค้า (the Job Closing right, return info, deposit refund), ยกเลิกข้อมูล (0) only by
@@ -461,6 +474,9 @@ export const STATUS_CLOSED_TRACKED = 'ปิดงาน-ส่งคืนส�
 export const STATUS_CLOSED_WAIT_TRACKING = 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)';
 export const TRACKING_REQUIRED = 'สถานะ "ลงเลขที่พัสดุแล้ว" ต้องมีหมายเลขพัสดุ — บันทึกที่หน้า ปิดงาน-ส่งคืนสินค้า';
 
+/** a line stock issued part of keeps its ticks and cannot be removed — only its qty comes down (saveRepair) */
+const PARTLY_ISSUED = 'รายการที่จ่ายไปบางส่วนแล้ว: ลดจำนวนเหลือเท่าที่จ่าย เพื่อยกเลิกส่วนที่เหลือ';
+
 /**
  * ซ่อมเสร็จ while parts requested from stock (เบิก) are not issued yet (setStatus; the repair page shows it
  * first, before anything is saved — stock only sees a request once the job is saved, so it says to save first)
@@ -469,7 +485,7 @@ export const partsNotIssuedMsg = (parts: { code: string; name?: string }[]) =>
   `ยังเปลี่ยนเป็น "ซ่อมเสร็จ" ไม่ได้ — อะไหล่ที่ติ๊ก "เบิก" ยังไม่ได้จ่ายจากสต๊อก (${[
     ...new Set(parts.map((p) => [p.code, p.name].filter(Boolean).join(' '))),
   ].join(', ')}): บันทึกเป็น "รออะไหล่" ก่อน เพื่อส่งคำขอเบิกให้สต๊อก แล้วเปลี่ยนเป็น "ซ่อมเสร็จ" เมื่อสต๊อกจ่ายแล้ว ` +
-  '— หรือเอาติ๊ก "เบิก" ออก / ลบรายการอะไหล่นั้น';
+  `— หรือเอาติ๊ก "เบิก" ออก / ลบรายการอะไหล่นั้น (${PARTLY_ISSUED})`;
 
 /**
  * Closed / declined / no-fault (Finished, 6, 22) while a part requested from stock (เบิก) is not issued: its
@@ -479,7 +495,9 @@ export const partsNotIssuedMsg = (parts: { code: string; name?: string }[]) =>
 export const partsWaitingMsg = (parts: { code: string; name?: string }[], status: string) =>
   `ยังเปลี่ยนเป็น "${status}" ไม่ได้ — อะไหล่ที่ติ๊ก "เบิก" ยังไม่ได้จ่ายจากสต๊อก (${[
     ...new Set(parts.map((p) => [p.code, p.name].filter(Boolean).join(' '))),
-  ].join(', ')}): ยกเลิกรายการอะไหล่นั้นที่หน้า บันทึกงานซ่อม (เอาติ๊ก "เบิก" ออก / ลบรายการ) หรือรอสต๊อกจ่ายก่อน`;
+  ].join(
+    ', ',
+  )}): ยกเลิกรายการอะไหล่นั้นที่หน้า บันทึกงานซ่อม (เอาติ๊ก "เบิก" ออก / ลบรายการ — ${PARTLY_ISSUED}) หรือรอสต๊อกจ่ายก่อน`;
 
 /** a closed job (Finished) goes back to an open status only with the special right Job Reopen (setStatus) */
 export const REOPEN_LOCKED = `งานปิดแล้ว — เปิดงานกลับได้เฉพาะผู้มี${rightLabel('Job Reopen')}`;

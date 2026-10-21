@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import type { User } from '@/data/types';
-import { postJson } from '@/lib/api';
+import { isStale, postJson } from '@/lib/api';
 import { postUser, toForm, type UserForm } from './user-dialog';
 
 /** the row buttons: อนุมัติ / ถอนสิทธิ์ / คืนสิทธิ์ (quickSet) and ลบ / กู้คืน (softSet); `busyId` = the row in flight */
@@ -16,11 +16,16 @@ export function useUserActions(refetch: () => void) {
   const quickSet = async (r: User, patch: Partial<UserForm>, okTitle: string) => {
     setBusyId(r.id);
     try {
-      await postUser({ ...toForm(r), ...patch });
+      // only the fields it changes, with the values the row showed for them: a stale row never writes back
+      // a role / status another admin changed meanwhile (409 stale instead — the list reloads)
+      const loaded = toForm(r);
+      const keys = Object.keys(patch) as (keyof UserForm)[];
+      await postUser({ id: r.id, ...patch, expect: Object.fromEntries(keys.map((k) => [k, loaded[k]])) });
       push({ kind: 'success', title: okTitle, desc: r.name });
       refetch();
       return true;
     } catch (e) {
+      if (isStale(e)) refetch();
       push({
         kind: 'error',
         title: 'ทำรายการไม่สำเร็จ',

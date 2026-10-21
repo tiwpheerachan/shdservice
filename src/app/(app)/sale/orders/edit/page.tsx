@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
 import { mutate } from 'swr';
-import { Truck } from 'lucide-react';
+import { Truck, Wallet } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import {
   SaleOrderForm,
@@ -17,12 +17,13 @@ import { FormActions, JobLookupBar, VIEW_ONLY } from '@/components/shared/job-fo
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
-import { Input, Textarea } from '@/components/ui/input';
+import { FileInput, Input, Textarea } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { ApiError, postJson, errMsg } from '@/lib/api';
+import { ApiError, postJson, errMsg, upload } from '@/lib/api';
+import { baht } from '@/lib/utils';
 import { RecordKey, useRecord } from '@/lib/use-record';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
@@ -71,16 +72,50 @@ function EditSaleOrder() {
       setLoaded(d.order);
       push({ kind: 'success', title: 'บันทึกการแก้ไขใบสั่งขายแล้ว', desc: d.order.no });
     } catch (e) {
-      if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!form.current?.fromApi(e, () => void reload()))
+        push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
   };
 
-  // ปฏิเสธ / ส่งกลับแก้ไข need a reason (the server refuses without one) — asked in this dialog
-  const [asking, setAsking] = React.useState<'deny' | 'reject' | null>(null);
+  // ปฏิเสธ / ส่งกลับแก้ไข need a reason (the server refuses without one), ยกเลิก asks one too — in this dialog
+  const [asking, setAsking] = React.useState<'deny' | 'reject' | 'cancel' | null>(null);
   const [reason, setReason] = React.useState('');
-  const LABEL = { approve: 'อนุมัติ', deny: 'ปฏิเสธ', reject: 'ส่งกลับแก้ไข' } as const;
+  const LABEL = { approve: 'อนุมัติ', deny: 'ปฏิเสธ', reject: 'ส่งกลับแก้ไข', cancel: 'ยกเลิก' } as const;
+
+  // ยกเลิกใบสั่งขาย = soft delete through the records API (it re-checks who may, and refuses an approved one)
+  const cancelOrder = async () => {
+    setSaving(true);
+    try {
+      await postJson('/api/admin/records', { table: 'sale_orders', id: no, status: 'DELETED', remark: reason });
+      void mutate('/api/alerts/sale-orders-pending'); // a waiting one leaves the bell
+      setAsking(null);
+      setReason('');
+      push({ kind: 'success', title: 'ยกเลิกใบสั่งขายแล้ว', desc: no });
+    } catch (e) {
+      push({ kind: 'error', title: 'ยกเลิกไม่สำเร็จ', desc: errMsg(e) });
+      if (!(e instanceof ApiError && e.status === 409)) return;
+      setAsking(null);
+    } finally {
+      setSaving(false);
+    }
+    void reload(); // the order as it is now: cancelled, or (409) approved meanwhile
+  };
+
+  // an approved order without a slip: the customer paid later — the slip (and amount) is added once
+  const [paidLater, setPaidLater] = React.useState('');
+  const attachSlip = async (f: File | undefined) => {
+    if (!f || !no) return;
+    try {
+      await upload('/api/upload', { kind: 'sale-order-slip', id: no, paymentAmount: paidLater }, f);
+      push({ kind: 'success', title: 'แนบสลิปการชำระเงินแล้ว', desc: f.name });
+      setPaidLater('');
+    } catch (e) {
+      push({ kind: 'error', title: 'แนบสลิปไม่สำเร็จ', desc: errMsg(e) });
+    }
+    void reload();
+  };
 
   // อนุมัติ → ตัดสต๊อก (WHO type 4) ทันที ตามพฤติกรรมระบบเดิม
   const decide = async (decision: 'approve' | 'deny' | 'reject', remark = '') => {
@@ -131,13 +166,16 @@ function EditSaleOrder() {
     if (te.report(te.run(trackingSchema(loaded?.tracking), { tracking }))) return;
     setSaving(true);
     try {
+      // the version on screen: another user saved a number since → 409, and the reload shows theirs
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/tracking`, {
         tracking,
+        version: loaded?.version,
       });
       setLoaded(d.order);
       push({ kind: 'success', title: 'บันทึกเลขพัสดุแล้ว', desc: d.order.tracking || no });
     } catch (e) {
       if (!te.fromApi(e)) push({ kind: 'error', title: 'บันทึกเลขพัสดุไม่สำเร็จ', desc: errMsg(e) });
+      if (e instanceof ApiError && e.status === 409) void reload();
     } finally {
       setSaving(false);
     }
@@ -155,6 +193,14 @@ function EditSaleOrder() {
   // a waiting order is edited only by its creator (System Admin may) — the server refuses anyone else
   const waitingLocked = approveId === 2 && !isAdmin && userId !== loaded?.createdById;
   const canEditTracking = isAdmin || can('Sale Order', 'edit');
+  // who may cancel — the records API's rule: Sale Order delete, and System Admin / SO Approve, or the creator
+  // while it is not denied; never an approved (stock issued) or cancelled one
+  const canCancel =
+    !!loaded &&
+    !loaded.cancelled &&
+    approveId !== 4 &&
+    can('Sale Order', 'edit') &&
+    (isAdmin || has('SO Approve') || (userId === loaded.createdById && approveId !== 5));
 
   return (
     <>
@@ -171,10 +217,14 @@ function EditSaleOrder() {
           <div className="surface flex flex-col gap-2 p-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="font-medium">สถานะ</span>
-              <Badge tone={SO_TONE[loaded.approve] ?? 'neutral'} dot className="px-3 py-1 text-sm">
-                {loaded.approve}
+              <Badge
+                tone={loaded.cancelled ? 'neutral' : (SO_TONE[loaded.approve] ?? 'neutral')}
+                dot
+                className="px-3 py-1 text-sm"
+              >
+                {loaded.cancelled ? 'ยกเลิก' : loaded.approve}
               </Badge>
-              {approveId === 2 && !canApprove && (
+              {approveId === 2 && !canApprove && !loaded.cancelled && (
                 <span className="text-muted-foreground">
                   รออนุมัติจาก: {loaded.approverRoles?.join(', ') || 'System Admin'}
                   {selfReason && ` — ${selfReason.split(' — ')[0]}`}
@@ -190,6 +240,12 @@ function EditSaleOrder() {
                 </span>
               )}
             </div>
+            {loaded.cancelled && (
+              <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                {SO_CANCELLED} — แก้ไข อนุมัติ หรือพิมพ์ไม่ได้
+                {loaded.cancelRemark && ` · เหตุผล: ${loaded.cancelRemark}`}
+              </p>
+            )}
             {decided && (
               <p role="note" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
                 {approveId === 3 ? 'ส่งกลับแก้ไข' : 'ปฏิเสธ'}: {loaded.approveRemark || '(ไม่ได้ระบุเหตุผล)'}
@@ -231,7 +287,41 @@ function EditSaleOrder() {
             </div>
           </Section>
         )}
+        {approveId === 4 && !loaded?.cancelled && !loaded?.slip && can('Sale Order', 'edit') && (
+          <Section
+            title="แนบสลิปการชำระเงิน"
+            icon={Wallet}
+            description="ใบนี้อนุมัติแล้วแต่ยังไม่มีสลิป — แนบได้ครั้งเดียว"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Field
+                label="จำนวนเงินที่ชำระ (บาท)"
+                className="sm:max-w-xs"
+                hint={`ยอดรวม ${baht(loaded?.amount ?? 0)} — เว้นว่างได้`}
+              >
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={loaded?.amount}
+                  inputMode="decimal"
+                  value={paidLater}
+                  onChange={(e) => setPaidLater(e.target.value)}
+                  className="num text-right"
+                />
+              </Field>
+              <Field label="สลิปหลักฐานการโอน" className="flex-1">
+                <FileInput
+                  placeholder="แนบสลิปการชำระเงิน (JPG, PNG, PDF)"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf"
+                  onFile={attachSlip}
+                />
+              </Field>
+            </div>
+          </Section>
+        )}
         <FormActions
+          cancelLabel="กลับ"
           saveLabel="บันทึกการแก้ไข"
           onSave={save}
           saving={saving}
@@ -255,8 +345,13 @@ function EditSaleOrder() {
                 no={no ?? ''}
                 profileId={loaded?.documentProfileId}
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
-                disabled={!no}
+                disabled={!no || loaded?.cancelled}
               />
+              {canCancel && (
+                <Button variant="outline" size="md" type="button" onClick={() => setAsking('cancel')} disabled={saving}>
+                  ยกเลิกใบสั่งขาย
+                </Button>
+              )}
               {loaded && approveId === 2 && canApprove && !loaded.cancelled ? (
                 <>
                   <Button
@@ -285,23 +380,25 @@ function EditSaleOrder() {
         onClose={() => setAsking(null)}
         title={asking ? `${LABEL[asking]}ใบสั่งขาย ${no}` : ''}
         description={
-          asking === 'deny'
-            ? 'ใบนี้จะถูกปฏิเสธ ไม่ตัดสต๊อก และอนุมัติภายหลังไม่ได้'
-            : 'ใบจะถูกส่งกลับให้ผู้สร้างแก้ไข แล้วส่งขออนุมัติใหม่'
+          asking === 'cancel'
+            ? 'ใบนี้จะถูกยกเลิก ไม่ตัดสต๊อก แก้ไข อนุมัติ หรือพิมพ์ไม่ได้อีก — ยังค้นดูได้ที่รายการใบสั่งขาย "แสดงใบที่ยกเลิก"'
+            : asking === 'deny'
+              ? 'ใบนี้จะถูกปฏิเสธ ไม่ตัดสต๊อก และอนุมัติภายหลังไม่ได้'
+              : 'ใบจะถูกส่งกลับให้ผู้สร้างแก้ไข แล้วส่งขออนุมัติใหม่'
         }
         size="sm"
         footer={
           <>
             <Button variant="outline" size="sm" onClick={() => setAsking(null)}>
-              ยกเลิก
+              {asking === 'cancel' ? 'ไม่ยกเลิก' : 'ยกเลิก'}
             </Button>
             <Button
               variant="danger"
               size="sm"
               disabled={saving || !reason.trim()}
-              onClick={() => asking && decide(asking, reason)}
+              onClick={() => (asking === 'cancel' ? cancelOrder() : asking && decide(asking, reason))}
             >
-              {asking ? LABEL[asking] : ''}
+              {asking === 'cancel' ? 'ยกเลิกใบสั่งขาย' : asking ? LABEL[asking] : ''}
             </Button>
           </>
         }

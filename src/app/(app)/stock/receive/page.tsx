@@ -17,7 +17,7 @@ import { int } from '@/lib/utils';
 import { useFilterDraft } from '@/lib/use-filter-draft';
 import { postJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
-import { today } from '@/lib/dates';
+import { addDays, today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { receiveSchema } from '@/lib/validation/stock';
 import type { Product } from '@/data/types';
@@ -54,10 +54,10 @@ export default function ReceivePage() {
   const { push } = useToast();
   const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
   const { name: me } = useAccess();
-  const { data: PRODUCTS, loading, error: productsError, refetch } = useProducts();
+  const { data: PRODUCTS, loading, error: productsError, refetch } = useProducts(true, 'exclude'); // Inactive parts are still received (owner rule)
   const { data: BRANDS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
-  // every active part is a candidate line (qty typed per line); a fresh product list — loaded, or
+  // every non-deleted part is a candidate line (qty typed per line); a fresh product list — loaded, or
   // re-read after a receipt is saved — starts the lines over (adjusted while rendering)
   const [rows, setRows] = React.useState<Row[]>(() => toRows(PRODUCTS));
   const [rowsFrom, setRowsFrom] = React.useState(PRODUCTS);
@@ -148,8 +148,8 @@ export default function ReceivePage() {
       header: 'สถานะ',
       width: '100px',
       cell: (r) => (
-        <Badge tone="success" dot>
-          {r.status}
+        <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
+          {r.status === 'Active' ? r.status : 'ปิดใช้งาน'}
         </Badge>
       ),
     },
@@ -211,7 +211,13 @@ export default function ReceivePage() {
             />
           </Field>
           <Field label="วันที่รับเข้า" required error={fe.errors.date}>
-            <Input type="date" max={today()} value={date} onChange={(e) => setDate(e.target.value)} />
+            <Input
+              type="date"
+              min={addDays(today(), -365)}
+              max={today()}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
           </Field>
           <Field label="รับเข้าคลัง" required>
             <Select defaultValue="คลังสินค้าดี">

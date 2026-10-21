@@ -9,6 +9,7 @@ import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import { SO_TONE as TONE } from '@/components/shared/sale-order-form';
 
@@ -58,7 +59,9 @@ export default function Page() {
   const { data: STAFF, ...staffLookup } = useStaff('sales');
   const salesId = STAFF.find((s) => s.name === f.sales)?.id;
   const filters = { from: f.from, to: f.to, sales: salesId ?? f.sales, approve: f.approve };
-  const { data: sum } = useSaleOrderSummary({ ...filters, q: table.q });
+  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const access = useReportAccess(['Sale Order', 'Product Pick Stock'], 'Sale Order');
+  const { data: sum, error: sumError } = useSaleOrderSummary({ ...filters, q: table.q });
   const {
     rows: SALE_ORDERS,
     total: totalRows,
@@ -86,8 +89,12 @@ export default function Page() {
         { kind: 'select', key: 'approve', label: 'สถานะอนุมัติ', options: ['ทั้งหมด', ...Object.keys(TONE)] },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx('sale_orders', { ...filters, q: table.q })}
-      kpis={[
+      onExport={
+        access.canExport
+          ? () => exportXlsx('sale_orders', { ...filters, q: table.q, file: 'report-sale-order' })
+          : undefined
+      }
+      kpis={kpisOr(sumError, [
         { label: 'ใบสั่งขายทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },
         { label: 'อนุมัติแล้ว', value: int(S?.approved ?? 0), tone: 'success' },
         {
@@ -96,11 +103,12 @@ export default function Page() {
           sub: S?.notApprovedAmount ? `ไม่รวมที่ยังไม่อนุมัติ/ถูกปฏิเสธ ${baht(S.notApprovedAmount)}` : undefined,
         },
         { label: 'ยอดเฉลี่ย/ใบ (อนุมัติแล้ว)', value: baht(avg) },
-      ]}
+      ])}
       columns={columns}
       rows={SALE_ORDERS}
       loading={loading}
-      error={loadError}
+      error={access.canTable ? loadError : null}
+      emptyText={access.emptyText}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ ...server, total: totalRows }}

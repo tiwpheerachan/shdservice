@@ -8,14 +8,19 @@ import { PrintButton } from '@/components/shared/print-button';
 import { FormActions, JobLookupBar, VIEW_ONLY } from '@/components/shared/job-form';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+import { Badge } from '@/components/ui/badge';
 import { postJson, errMsg } from '@/lib/api';
 import { useRecord } from '@/lib/use-record';
 import { quotationKey } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { quoteJobNote } from '@/lib/quote-job';
+import { quoteExpired } from '@/lib/quote-expiry';
+import { QUOTE_VALID_DAYS } from '@/lib/company';
 
 function EditQuotation() {
   const { push } = useToast();
+  const confirm = useConfirm();
   const { can } = useAccess();
   const sp = useSearchParams();
   const initialNo = sp.get('no') ?? '';
@@ -30,6 +35,7 @@ function EditQuotation() {
     loading,
     error,
     find: load,
+    reload,
   } = useRecord<QuotationLoaded>({
     url: quotationKey,
     pick: (d: { quotation: QuotationLoaded }) => d.quotation,
@@ -43,11 +49,25 @@ function EditQuotation() {
   });
   const no = loaded?.no ?? '';
   const [saving, setSaving] = React.useState(false);
+  // sent and past its validity — the list shows it as พ้นกำหนดเสนอราคา (same rule: src/lib/quote-expiry.ts)
+  const expired = !!loaded && quoteExpired(loaded.statusId, loaded.date, loaded.job?.statusId ?? null);
 
   const save = async () => {
     const p = form.current?.payload();
     if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
     if (!form.current?.validate()) return;
+    // the customer answers an expired quotation: only on purpose (the old price may no longer hold)
+    if (
+      expired &&
+      p.status !== loaded?.status &&
+      p.status.startsWith('ลูกค้าตกลงซ่อม') &&
+      !(await confirm({
+        title: 'ใบเสนอราคานี้พ้นกำหนดแล้ว',
+        description: `ออกเมื่อ ${loaded?.date} เกินระยะยืนราคา ${QUOTE_VALID_DAYS} วัน — ยืนยันว่าลูกค้าตกลงซ่อมตามราคาในใบนี้?`,
+        confirmLabel: 'ยืนยัน ลูกค้าตกลงซ่อม',
+      }))
+    )
+      return;
     setSaving(true);
     try {
       const d = await postJson<{ quotation: QuotationLoaded }>('/api/quotations', {
@@ -61,7 +81,8 @@ function EditQuotation() {
       const note = p.status !== loaded?.status ? quoteJobNote(p.status, d.quotation.job) : '';
       if (note) push({ kind: 'info', title: 'สถานะงานไม่เปลี่ยน', desc: note });
     } catch (e) {
-      if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+      if (!form.current?.fromApi(e, () => void reload()))
+        push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
     }
@@ -69,7 +90,17 @@ function EditQuotation() {
 
   return (
     <>
-      <PageHeader title="แก้ไขใบเสนอราคา" description="ระบุหมายเลขใบเสนอราคาเพื่อเรียกข้อมูลมาแก้ไข" />
+      <PageHeader
+        title="แก้ไขใบเสนอราคา"
+        description="ระบุหมายเลขใบเสนอราคาเพื่อเรียกข้อมูลมาแก้ไข"
+        actions={
+          expired && (
+            <Badge tone="danger" dot>
+              พ้นกำหนดเสนอราคา
+            </Badge>
+          )
+        }
+      />
       <JobLookupBar
         id="quotation-no"
         label="ระบุ หมายเลขใบเสนอราคา"

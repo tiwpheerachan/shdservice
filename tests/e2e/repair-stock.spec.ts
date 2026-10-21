@@ -178,3 +178,39 @@ test('picking a part again points at its open line instead of adding a second on
   await expect(qty).toHaveCount(2);
   await expect(page.getByRole('status').filter({ hasText: `${part.code} อยู่ในรายการแล้ว (แถว 2)` })).toBeVisible();
 });
+
+test('a stale save → โหลดใหม่: the form and its save button are locked until the job is back, then what is typed saves', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 2 });
+  await signIn(page, ENGINEER_EMAIL);
+  await page.goto(`/jobs/repair?job=${no}`);
+  const cost = page.locator('#cost-serviceCost');
+  const saveButton = page.getByRole('button', { name: 'บันทึกงานซ่อม' });
+  await expect(cost).toBeEditable();
+  await rows(`UPDATE job SET service_cost = 120 WHERE job_no = $1`, [no]); // someone else saved it meanwhile
+  await cost.fill('300');
+  await save(page, 'บันทึกงานซ่อม');
+  await expect(page.getByText('ระบบไม่บันทึก เพื่อไม่ให้ทับการแก้ไขนั้น', { exact: false })).toBeVisible();
+
+  // the re-read held until released: the screen must stay locked while it is in flight
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(`**/api/jobs/${no}`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await held;
+    await route.continue();
+  });
+  await page.getByRole('button', { name: 'โหลดใหม่' }).click();
+  await expect(saveButton).toBeDisabled();
+  await expect(cost).toBeDisabled();
+  release();
+  await expect(saveButton).toBeEnabled();
+  await expect(cost).toHaveValue(/^120(\.00)?$/); // the stored job replaced the form
+  await page.unroute(`**/api/jobs/${no}`);
+
+  await cost.fill('300');
+  await save(page, 'บันทึกงานซ่อม');
+  await expect(page.getByText('บันทึกงานซ่อมเรียบร้อย')).toBeVisible();
+  expect((await one<{ c: number }>(`SELECT service_cost::float AS c FROM job WHERE job_no = $1`, [no])).c).toBe(300);
+});

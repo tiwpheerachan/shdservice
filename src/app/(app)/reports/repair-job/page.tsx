@@ -9,6 +9,7 @@ import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { kpisOr, useReportAccess, JOB_SCREENS } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 
@@ -80,7 +81,9 @@ export default function Page() {
     engineer: engineerId ? String(engineerId) : f.engineer,
     symptom: f.symptom,
   };
-  const { data: sum } = useJobSummary({ ...filters, q: table.q });
+  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const access = useReportAccess(JOB_SCREENS, 'Job Management');
+  const { data: sum, error: sumError } = useJobSummary({ ...filters, q: table.q });
   const {
     rows: JOBS,
     total: totalRows,
@@ -125,17 +128,20 @@ export default function Page() {
         },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx('jobs', { ...filters, q: table.q })}
-      kpis={[
+      onExport={
+        access.canExport ? () => exportXlsx('jobs', { ...filters, q: table.q, file: 'report-repair-job' }) : undefined
+      }
+      kpis={kpisOr(sumError, [
         { label: 'งานที่ดำเนินการ', value: int(count), tone: 'primary' },
         { label: 'ซ่อมสำเร็จ', value: int(done), tone: 'success' },
         { label: 'มูลค่างานซ่อมรวม', value: baht(total) },
         { label: 'อัตราซ่อมสำเร็จ', value: `${doneRate}%`, tone: 'success' },
-      ]}
+      ])}
       columns={columns}
       rows={JOBS}
       loading={loading}
-      error={loadError}
+      error={access.canTable ? loadError : null}
+      emptyText={access.emptyText}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ ...server, total: totalRows }}

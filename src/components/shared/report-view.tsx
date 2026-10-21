@@ -11,6 +11,7 @@ import { Input, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions } from './search-select';
 import { ExportButton } from './export-button';
 import { cn } from '@/lib/utils';
+import { invalidateLists } from '@/data/db';
 
 export type ReportFilter =
   | { kind: 'text'; key?: string; label: string; placeholder?: string; value?: string }
@@ -45,6 +46,7 @@ export function ReportView<T extends Record<string, unknown>>({
   onApply,
   server,
   onExport,
+  emptyText,
 }: {
   title: string;
   description: string;
@@ -64,6 +66,8 @@ export function ReportView<T extends Record<string, unknown>>({
   server?: ServerTable;
   /** download the whole report (same filters) as .xlsx */
   onExport?: () => Promise<unknown>;
+  /** what the empty table says (e.g. the menu right the table needs) */
+  emptyText?: string;
 }) {
   // the defaults the filters declare change (a page passes new ones) → the form starts over from
   // them: adjusted while rendering (React's "state from props" pattern), not in an effect pass
@@ -107,6 +111,8 @@ export function ReportView<T extends Record<string, unknown>>({
         title="เงื่อนไขการออกรายงาน"
         onSearch={() => {
           onApply?.(clean(values));
+          // the same filters keep the same keys, so nothing would refetch: read them again (a revoked Report → its 403)
+          invalidateLists();
         }}
         onReset={() => {
           const d = defaultsOf(filters);
@@ -167,6 +173,7 @@ export function ReportView<T extends Record<string, unknown>>({
         onRetry={onRetry}
         rowKey={rowKey}
         server={server}
+        emptyText={emptyText}
       />
     </>
   );

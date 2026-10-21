@@ -196,6 +196,8 @@ export function CustomerFields({
   const { PROVINCES, districts, subDistricts, lookups } = useAddressLists(form.cityId, form.districtId);
   // a hint only, never an error — the master's code is wrong for some ตำบล (Mueang Chiang Mai: all 50000)
   const postalHint = subDistricts.find((s) => s.id === form.subDistrictId)?.postal?.trim();
+  // no maxLength on the text boxes (it cut a paste silently): the rules say it in Thai; a count once near the limit
+  const count = (v: string, max: number) => (v.length > max - 20 ? `${v.length} / ${max} ตัวอักษร` : undefined);
   return (
     <FieldGrid cols={2}>
       <Field label="รหัสลูกค้า">
@@ -219,14 +221,13 @@ export function CustomerFields({
         </div>
       </Field>
 
-      <Field label="ชื่อลูกค้า" required wide error={errors.name}>
-        <Input maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} />
+      <Field label="ชื่อลูกค้า" required wide error={errors.name} hint={count(form.name, 200)}>
+        <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
       </Field>
 
       <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี" wide error={errors.taxId}>
         <Input
           inputMode="numeric"
-          maxLength={17}
           placeholder="13 หลัก"
           value={form.taxId}
           onChange={(e) => set('taxId', e.target.value)}
@@ -241,30 +242,26 @@ export function CustomerFields({
         hint={
           editing && (editing.cityId ?? -1) <= 0 && form.address1
             ? 'ที่อยู่เดิมจากระบบเก่ายังไม่แยกจังหวัด/อำเภอ — ถ้าจะเลือกจังหวัดด้านล่าง กรุณาตัดส่วนตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ออกจากช่องนี้ก่อน ไม่เช่นนั้นที่อยู่จะซ้ำ'
-            : undefined
+            : count(form.address1, 100)
         }
       >
         <Textarea
           rows={2}
-          maxLength={100}
           value={form.address1}
           onChange={(e) => set('address1', e.target.value)}
           placeholder="บ้านเลขที่ / หมู่ / หมู่บ้าน / อาคาร"
         />
       </Field>
 
-      <Field label="ซอย - ถนน" error={errors.address2}>
-        <Input
-          maxLength={100}
-          value={form.address2}
-          onChange={(e) => set('address2', e.target.value)}
-          placeholder="ซอย / ถนน"
-        />
+      <Field label="ซอย - ถนน" error={errors.address2} hint={count(form.address2, 100)}>
+        <Input value={form.address2} onChange={(e) => set('address2', e.target.value)} placeholder="ซอย / ถนน" />
       </Field>
       <Field label="จังหวัด" lookup={lookups.provinces}>
         <SearchSelect
           value={form.cityId > 0 ? String(form.cityId) : ''}
-          onChange={(v) => setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1 }))}
+          onChange={(v) =>
+            setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1, postalCode: '' }))
+          }
           options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
           placeholder="- - เลือกจังหวัด - -"
           emptyLabel="- - เลือกจังหวัด - -"
@@ -274,7 +271,7 @@ export function CustomerFields({
       <Field label="เขต / อำเภอ" lookup={lookups.districts}>
         <SearchSelect
           value={form.districtId > 0 ? String(form.districtId) : ''}
-          onChange={(v) => setForm((f) => ({ ...f, districtId: Number(v) || -1, subDistrictId: -1 }))}
+          onChange={(v) => setForm((f) => ({ ...f, districtId: Number(v) || -1, subDistrictId: -1, postalCode: '' }))}
           options={districts.map((d) => ({ value: String(d.id), label: d.name }))}
           disabled={form.cityId <= 0}
           searchPlaceholder="พิมพ์ชื่อเขต / อำเภอ…"
@@ -305,7 +302,6 @@ export function CustomerFields({
       >
         <Input
           inputMode="numeric"
-          maxLength={5}
           value={form.postalCode}
           onChange={(e) => set('postalCode', e.target.value)}
           className="num"
@@ -324,20 +320,14 @@ export function CustomerFields({
               : 'นิติบุคคล / ตัวแทน ใช้เบอร์สำนักงานได้ — มือถือใช้รับ OTP ติดตามงาน'
         }
       >
-        <Input
-          inputMode="tel"
-          maxLength={50}
-          value={form.phone}
-          onChange={(e) => set('phone', e.target.value)}
-          className="num"
-        />
+        <Input inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} className="num" />
       </Field>
 
       <Field label="Email" error={errors.email}>
-        <Input type="email" maxLength={50} value={form.email} onChange={(e) => set('email', e.target.value)} />
+        <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
       </Field>
       <Field label="Line ID" error={errors.line}>
-        <Input maxLength={21} value={form.line} onChange={(e) => set('line', e.target.value)} />
+        <Input value={form.line} onChange={(e) => set('line', e.target.value)} />
       </Field>
 
       <Field label="ใช้กลุ่มราคา" error={errors.priceGroup}>

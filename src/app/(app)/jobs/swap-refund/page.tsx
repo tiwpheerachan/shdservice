@@ -16,7 +16,7 @@ import {
   JobScreen,
   useJobForm,
   fromJob,
-  saveCommonSections,
+  commonSections,
   useWorkflowErrors,
   useMoneyLock,
 } from '@/components/shared/job-form';
@@ -40,7 +40,7 @@ function SwapRefundForm() {
   const { push } = useToast();
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
-  const { s: form, reset, adopt, set } = useJobForm();
+  const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
   const { can } = useAccess();
   const lock = useMoneyLock(); // a closed job: the refund stays as recorded (Job Money After Close may change it)
@@ -119,13 +119,17 @@ function SwapRefundForm() {
             status: d.status || undefined,
           };
     const canEdit = can('Job Management', 'edit');
-    // a refund may not exceed the job's total (the cost sections are saved first); unchanged stored values pass
+    // the job's total with the cost sections as typed (they save with the action); unchanged stored values pass
     const total = form.partsCost + form.serviceCost + form.toolCost + form.deliveryCost + form.boxCost;
     if (!act.check(swapRefundSchema({ total, prev: saved?.d }), body, canEdit)) return;
     setSaving(true);
     try {
-      adopt(await saveCommonSections(job.no, form, canEdit));
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, body);
+      // the version the page loaded: someone else's save since → 409 (reload), not overwritten
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, {
+        ...body,
+        job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
+        version: form.version,
+      });
       setJob(r.job);
       push({
         kind: 'success',

@@ -3,7 +3,7 @@ import { cleanCode, codeField, isoDateString, maxText } from './index';
 import { noRepeatedLine, REPEATED_LINE } from './job';
 import { JOB_NO_RE } from './quotation';
 import { trackingField } from './sale-order';
-import { today } from '@/lib/dates';
+import { addDays, today } from '@/lib/dates';
 
 /**
  * Bodies of the stock in/out, assign, SO approve / tracking and call log routes. Bounds, not business
@@ -26,7 +26,10 @@ const lines = <T extends z.ZodRawShape>(shape: T) =>
 
 /** รับเข้า: supplier + remark share inventory_remark varchar(100) as "Supplier: X · remark" (10 + 40 + 3 + 47) */
 export const receiveSchema = z.looseObject({
-  date: isoDateString('ต้องระบุวันที่รับเข้า').refine((d) => d <= today(), 'วันที่รับเข้าต้องไม่เกินวันนี้'),
+  // back-dating within a year (a late-keyed delivery); older is a typo (2025 → 2015) that would sit in old reports
+  date: isoDateString('ต้องระบุวันที่รับเข้า')
+    .refine((d) => d <= today(), 'วันที่รับเข้าต้องไม่เกินวันนี้')
+    .refine((d) => d >= addDays(today(), -365), 'วันที่รับเข้าย้อนหลังได้ไม่เกิน 1 ปี'),
   poRef: codeField(/^[A-Z0-9][A-Z0-9/-]{0,49}$/, 'เลขที่ PO ใช้ได้เฉพาะ A-Z 0-9 / - (ไม่เกิน 50 ตัว)'),
   supplier: maxText(40, 'Supplier '),
   remark: maxText(47, 'หมายเหตุ '),

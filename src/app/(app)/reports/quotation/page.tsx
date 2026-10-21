@@ -10,6 +10,7 @@ import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
 
@@ -63,7 +64,9 @@ export default function Page() {
     server,
   } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), type: '', status: '' });
   const filters = { from: f.from, to: f.to, status: f.status, type: f.type };
-  const { data: sum } = useQuotationSummary({ ...filters, q: table.q });
+  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const access = useReportAccess(['Quotation'], 'Quotation');
+  const { data: sum, error: sumError } = useQuotationSummary({ ...filters, q: table.q });
   const { data: STATUSES } = useQuotationStatuses();
   const {
     rows: QUOTATIONS,
@@ -91,8 +94,12 @@ export default function Page() {
         },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx('quotations', { ...filters, q: table.q })}
-      kpis={[
+      onExport={
+        access.canExport
+          ? () => exportXlsx('quotations', { ...filters, q: table.q, file: 'report-quotation' })
+          : undefined
+      }
+      kpis={kpisOr(sumError, [
         { label: 'ใบเสนอราคาทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },
         { label: 'ลูกค้าตกลงซ่อม', value: int(S?.agreed ?? 0), tone: 'success' },
         {
@@ -101,11 +108,12 @@ export default function Page() {
           sub: S?.cancelledAmount ? `ไม่รวมใบที่ยกเลิก ${baht(S.cancelledAmount)}` : undefined,
         },
         { label: 'มูลค่าที่ตกลง', value: baht(approvedTotal), tone: 'success' },
-      ]}
+      ])}
       columns={columns}
       rows={QUOTATIONS}
       loading={loading}
-      error={loadError}
+      error={access.canTable ? loadError : null}
+      emptyText={access.emptyText}
       onRetry={retryLoad}
       rowKey={(r) => r.no}
       server={{ ...server, total: totalRows }}

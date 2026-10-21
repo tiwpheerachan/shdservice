@@ -8,6 +8,7 @@ import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { exportXlsx } from '@/lib/api';
+import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 
 type Row = IssuedLine;
@@ -45,7 +46,9 @@ export default function Page() {
   } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), category: '', code: '' });
   // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ) minus รับคืนจากการเบิก — paged + KPIs on the server
   const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
-  const { data: sum } = useIssuedStats({ ...filters, q: table.q });
+  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const access = useReportAccess(null, 'Report');
+  const { data: sum, error: sumError } = useIssuedStats({ ...filters, q: table.q });
   const {
     rows,
     total,
@@ -75,8 +78,12 @@ export default function Page() {
         { kind: 'text', key: 'code', label: 'รหัสอะไหล่', placeholder: 'P02534' },
       ]}
       onApply={setF}
-      onExport={() => exportXlsx('issued_lines', { ...filters, q: table.q })}
-      kpis={[
+      onExport={
+        access.canExport
+          ? () => exportXlsx('issued_lines', { ...filters, q: table.q, file: 'report-product-used' })
+          : undefined
+      }
+      kpis={kpisOr(sumError, [
         { label: 'รายการเคลื่อนไหว', value: int(S?.lines ?? 0), tone: 'primary' },
         { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(qty)} ชิ้น` },
         {
@@ -85,11 +92,12 @@ export default function Page() {
           sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
         },
         { label: 'อะไหล่ที่ใช้บ่อยสุด', value: top },
-      ]}
+      ])}
       columns={columns}
       rows={rows}
       loading={loading}
-      error={loadError}
+      error={access.canTable ? loadError : null}
+      emptyText={access.emptyText}
       onRetry={retryLoad}
       rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
       server={{ ...server, total }}

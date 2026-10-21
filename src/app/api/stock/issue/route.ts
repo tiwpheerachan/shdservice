@@ -3,7 +3,6 @@ import { handle, parseBody, requireCan, HttpError } from '@/server/auth';
 import { stockIssue } from '@/server/contract/stock';
 import { idempotent } from '@/server/idempotency';
 import { issueForJob, issueForSaleOrder, issueOther, returnFromJob } from '@/server/services/stock';
-import { markPartsIssued } from '@/server/services/jobs';
 import { listStaff } from '@/server/services/users';
 import { cleanCode } from '@/lib/validation';
 import { STORE_LOCATION_NAME } from '@/lib/status-ids';
@@ -22,6 +21,11 @@ export const POST = handle(async (req: NextRequest) => {
 async function issue(req: NextRequest, userId: number) {
   const body = await parseBody(req, stockIssue); // issueSchema
   const b = { ...body, ref: cleanCode(body.ref), remark: body.remark ?? undefined };
+  // จ่ายออกอื่นๆ takes parts OUT of the good-stock store: the store is never where they go
+  if (b.type === 'other' && b.payTo === STORE_LOCATION_NAME) {
+    const msg = `จ่ายออกอื่นๆ ต้องเลือกผู้รับ — จ่ายให้ "${STORE_LOCATION_NAME}" (คลังต้นทาง) ไม่ได้`;
+    throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { payTo: msg } });
+  }
   // จ่ายให้ / รับคืนจาก: the pick page's list — the good-stock store or a current staff member
   if (b.payTo !== STORE_LOCATION_NAME && !(await listStaff()).some((s) => s.name === b.payTo)) {
     const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือก${b.type === 'return' ? 'ผู้คืน' : 'ผู้รับ'}จากรายการ`;
@@ -29,7 +33,8 @@ async function issue(req: NextRequest, userId: number) {
   }
   if (b.type === 'job') {
     if (!b.ref) throw new HttpError(400, 'ต้องระบุหมายเลขงาน');
-    const r = await issueForJob(
+    // every request issued → the job's status moves in the same transaction (issueForJob)
+    return issueForJob(
       {
         jobNo: b.ref,
         remark: b.remark,
@@ -38,8 +43,6 @@ async function issue(req: NextRequest, userId: number) {
       },
       userId,
     );
-    if (r.allGranted) await markPartsIssued(b.ref, userId);
-    return r;
   }
   if (b.type === 'sale') {
     if (!b.ref) throw new HttpError(400, 'ต้องระบุเลขใบสั่งขาย');

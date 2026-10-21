@@ -143,6 +143,8 @@ export async function exportXlsx(
   const res = await authedFetch(`/api/export/${resource}${qs(params)}`, {});
   if (!res.ok) throw await failure(res);
   saveBlob(await res.blob(), filenameOf(res.headers.get('content-disposition')) ?? `${resource}.xlsx`);
+  // a file cut at the 20,000-row cap: how many rows matched (the button warns)
+  return { truncatedOf: Number(res.headers.get('x-export-truncated')) || 0 };
 }
 
 /** filename from Content-Disposition (RFC 5987 filename*=UTF-8'' first, then filename="…") */

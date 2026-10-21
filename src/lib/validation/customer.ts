@@ -15,6 +15,8 @@ export const normalizePhone = (v: unknown) =>
 /** "+66 89 999 3466" → "089 999 3466": numbers are kept 0-prefixed, so a search or duplicate check on
  *  "0899993466" finds them — applied to a new / changed phone only (an untouched legacy value stays as it is) */
 export const localPhone = (v: string) => v.replace(/(^|[/,]\s*)\+?66[\s-]*(?=[1-9])/g, '$10');
+/** Thai digits ๐-๙ typed in a search box count as 0-9 */
+export const asciiDigits = (v: string) => v.replace(/[๐-๙]/g, (d) => String(d.charCodeAt(0) - 0x0e50));
 /** the same number written both ways (digits only): 0899993466 ↔ 66899993466 */
 export const phoneDigitVariants = (d: string) =>
   d.length < 6 ? [d] : d.startsWith('0') ? [d, '66' + d.slice(1)] : d.startsWith('66') ? [d, '0' + d.slice(2)] : [d];

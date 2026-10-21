@@ -324,7 +324,9 @@ export const SaleOrderDetail = z
       subDistrict: s,
       district: s,
       province: s,
+      status: s.meta({ description: "the customer's status now (Active / Inactive …)" }),
     }),
+    cancelRemark: s.meta({ description: 'why it was cancelled (empty unless cancelled)' }),
     lines: z.array(
       z.object({
         id: n.optional(),
