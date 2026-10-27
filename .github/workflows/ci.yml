@@ -91,12 +91,17 @@ jobs:
 
   # Browser tests (playwright.config.ts): a production build in chromium against a throwaway
   # postgres:17 and a fake SSO — every spec on a desktop, a phone (Pixel 7) and a tablet (iPad
-  # gen 7) viewport, ~40 s each after the build; all three are chromium (no WebKit: see the config).
-  # Its own job so `check` stays fast. No env file is read and a non-local database is refused
-  # (tests/e2e/support/env.ts). (Modelled on OneLink.)
+  # gen 7) viewport; all three are chromium (no WebKit: see the config). One job per viewport, side
+  # by side, each with its own database: the whole run (the บทสอน walk of every page included) is
+  # ~20 min on one runner. Its own job so `check` stays fast. No env file is read and a non-local
+  # database is refused (tests/e2e/support/env.ts). (Modelled on OneLink.)
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, phone, tablet]
 
     services:
       postgres:
@@ -152,14 +157,14 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: E2E
-        run: npm run e2e
+        run: npm run e2e -- --project=${{ matrix.project }}
 
       # traces hold the (fake-SSO, test-only) session cookies — kept 7 days
       - name: Upload report and traces
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: |
             playwright-report/
             test-results/
