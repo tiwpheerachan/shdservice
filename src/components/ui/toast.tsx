@@ -13,6 +13,8 @@ type ToastInput = {
   desc?: string;
   id?: string;
   action?: { label: string; onClick: () => void };
+  /** default bottom-right; 'top-center' keeps a note clear of a form and its save bar (the บทสอน's) */
+  position?: 'top-center';
 };
 
 /**
@@ -32,6 +34,7 @@ const push = (t: ToastInput) => {
   fn(t.title, {
     description: desc,
     id: t.id,
+    position: t.position,
     // an error needs reading (and maybe acting on): 8 s, not the 3.6 s a "saved" gets (WCAG 2.2.1)
     ...(t.kind === 'error' && { duration: 8000 }),
     ...(t.action && { action: t.action, duration: Infinity }),

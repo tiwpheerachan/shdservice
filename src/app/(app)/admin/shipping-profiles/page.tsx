@@ -15,6 +15,7 @@ import { useConfirm } from '@/components/ui/confirm';
 import { postJson, del, errMsg, isStale, uploadFile, useUploading } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { useTourRestore } from '@/components/tour/tour';
 import { shippingProfileSchema } from '@/lib/validation/admin';
 
 /** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
@@ -60,6 +61,7 @@ export default function ShippingProfilesPage() {
 
   const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
   useClearOnChange(fe.clear, form);
+  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
@@ -292,7 +294,7 @@ export default function ShippingProfilesPage() {
             group="group"
             hint={
               editing
-                ? 'PNG/JPG พื้นขาวหรือโปร่งใส แนะนำสูงอย่างน้อย 120px'
+                ? 'SVG (คมที่สุด) หรือ PNG/JPG พื้นขาวหรือโปร่งใส แนะนำสูงอย่างน้อย 120px'
                 : pendingLogo
                   ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก`
                   : 'เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก'
@@ -309,7 +311,7 @@ export default function ShippingProfilesPage() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
                 className="hidden"
                 onChange={(e) => void onLogo(e.target.files?.[0])}
               />
@@ -319,6 +321,7 @@ export default function ShippingProfilesPage() {
                 type="button"
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
+                data-tour-block // uploads (editing) / picks a file: never during a บทสอน
               >
                 <Upload className="h-3.5 w-3.5" />
                 {editing ? 'อัปโหลดโลโก้' : pendingLogo ? 'เปลี่ยนไฟล์' : 'เลือกโลโก้'}

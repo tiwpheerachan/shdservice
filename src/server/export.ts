@@ -256,8 +256,17 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
           (!f.name || m.name.toLowerCase().includes(f.name.toLowerCase())) &&
           (!f.status || m.status === f.status),
       );
-    case 'users':
-      return listSystemUsers(mode);
+    case 'users': {
+      // the page's filter bar (admin/users: evaluated in the browser over the whole list) — the same rules here
+      const has = (v: string, t = '') => !t.trim() || v.toLowerCase().includes(t.trim().toLowerCase());
+      return (await listSystemUsers(mode)).filter(
+        (u) =>
+          has(u.name, f.name) &&
+          has(u.username, f.username) &&
+          (!f.role || u.role === f.role) &&
+          (!f.status || u.status === f.status),
+      );
+    }
     case 'customers':
       return listCustomers({
         q: p.q,

@@ -21,6 +21,7 @@ import { postJson, errMsg, exportXlsx, isStale } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { modelSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
+import { useTourRestore } from '@/components/tour/tour';
 
 type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
 // filter bar (applied on ค้นหา) — same params go to the table query and the Excel export
@@ -42,6 +43,7 @@ export default function ModelsPage() {
   const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
+  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
 
   const openForm = (m: Model | null, readOnly = false) => {
     setViewOnly(readOnly);
@@ -239,6 +241,7 @@ export default function ModelsPage() {
             </Field>
             <Field label="ยี่ห้อ" required error={fe.errors.brand} lookup={brandsLookup}>
               <SearchSelect
+                placeholder="- - เลือกยี่ห้อ - -"
                 value={form.brand}
                 onChange={(v) => set('brand', v)}
                 options={strOptions(brandOptions)}

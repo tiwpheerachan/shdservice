@@ -18,6 +18,7 @@ import {
   commonSections,
   useWorkflowErrors,
   useMoneyLock,
+  JobEditLock,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { useToast } from '@/components/ui/toast';
@@ -32,6 +33,7 @@ import { RepairDetailSection, RepairJobInfoSection, type RepairDetail } from '@/
 import { type Line, chargedTotal, partsBlockOf } from '@/components/jobs/repair-lines';
 import { postJson, errMsg } from '@/lib/api';
 import { repairActionSchema } from '@/lib/validation/job';
+import { useTourRestore } from '@/components/tour/tour';
 
 const NO_DETAIL: RepairDetail = {
   engineerSymptom: '',
@@ -98,6 +100,14 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(saved?.lines.length ?? 0);
   useUnsavedChanges(!!saved && JSON.stringify({ detail, lines }) !== JSON.stringify(saved));
+  // a บทสอน leaves the part lines and repair details as it found them
+  useTourRestore(
+    () => ({ detail, lines }),
+    (v) => {
+      setDetail(v.detail);
+      setLines(v.lines);
+    },
+  );
 
   // prefill form, repair details and spare-part requests from the loaded job
   function prefill(job: JobDetail) {
@@ -196,14 +206,19 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
 
         <RepairJobInfoSection job={job} />
 
-        <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+        <JobEditLock locked={!can('Job Management', 'edit')}>
+          <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+        </JobEditLock>
 
         <RepairPartsSection lines={lines} setLines={setLines} onAdd={addPart} lock={lock} act={act} />
 
         <RepairDetailSection job={job} detail={detail} setDetail={setDetail} act={act} partsBlock={partsBlock} />
 
+        {/* the costs save with the repair itself (body), the rest of the shared sections only with the right */}
         <CostSummary partsTotal={charged} action={act} />
-        <OtherInfoSection />
+        <JobEditLock locked={!can('Job Management', 'edit')}>
+          <OtherInfoSection />
+        </JobEditLock>
         <AttachmentSection jobNo={job?.no} files={job?.attachments} />
         <JobHistorySection job={job} />
 

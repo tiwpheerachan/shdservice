@@ -23,6 +23,7 @@ import {
   optimizeImage,
   ImageTooLargeError,
   fileProblem,
+  LOGO_TYPES,
   MAX_FILE_BYTES,
 } from '@/server/storage';
 
@@ -49,10 +50,15 @@ export const POST = handle(async (req: NextRequest) => {
   // 400 "expected multipart/form-data" / "file required" / "id required"; id upper-cased; an unknown kind
   // reads as none — refused below ("unknown kind"), after the file checks
   const { kind, id, file, paymentAmount } = await parseForm(req, upload);
-  // images only for pictures/logos; slips may also be PDF. Checked against the bytes BEFORE sharp sees them.
+  // images only for pictures; logos may also be SVG; slips may also be PDF. Checked against the bytes BEFORE sharp
+  // sees them.
   const problem = await fileProblem(
     file,
-    kind === 'product-image' || kind === 'profile-logo' || kind === 'shipper-logo' ? IMAGE_TYPES : undefined,
+    kind === 'profile-logo' || kind === 'shipper-logo'
+      ? LOGO_TYPES
+      : kind === 'product-image'
+        ? IMAGE_TYPES
+        : undefined,
   );
   if (problem) throw new HttpError(problem.startsWith('ไฟล์ใหญ่') ? 413 : 415, problem);
 

@@ -29,6 +29,7 @@ import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
+import { useTourRestore } from '@/components/tour/tour';
 
 function EditSaleOrder() {
   const { push } = useToast();
@@ -162,6 +163,14 @@ function EditSaleOrder() {
     setTrackingOf(loaded);
     setTracking(loaded?.tracking ?? '');
   }
+  // a บทสอน that typed a reason (the cancel dialog it opens) or a parcel no. leaves both as they were
+  useTourRestore(
+    () => ({ reason, tracking }),
+    (v) => {
+      setReason(v.reason);
+      setTracking(v.tracking);
+    },
+  );
   const saveTracking = async () => {
     if (te.report(te.run(trackingSchema(loaded?.tracking), { tracking }))) return;
     setSaving(true);
@@ -277,6 +286,7 @@ function EditSaleOrder() {
                   type="button"
                   onClick={saveTracking}
                   disabled={saving || tracking.trim() === (loaded?.tracking ?? '')}
+                  data-tour-block // saves: a บทสอน lets the box be tried, never this
                 >
                   บันทึกเลขพัสดุ
                 </Button>

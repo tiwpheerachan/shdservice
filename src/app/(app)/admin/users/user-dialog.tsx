@@ -14,6 +14,7 @@ import { errMsg, isStale, postJson } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { userSchema } from '@/lib/validation/admin';
 import { PENDING_ROLE } from '@/lib/access';
+import { useTourRestore } from '@/components/tour/tour';
 
 export type UserForm = {
   id: string;
@@ -68,6 +69,7 @@ export function useUserDialog(refetch: () => void) {
 
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
+  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // the user being edited as loaded: an unchanged legacy username / phone still saves; name / email / role /

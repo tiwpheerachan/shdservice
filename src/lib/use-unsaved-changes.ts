@@ -87,6 +87,7 @@ export function useUnsavedChangesGuard() {
     let replaying = false;
     const onClick = (e: MouseEvent) => {
       if (replaying || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (document.documentElement.hasAttribute('data-tour')) return; // a บทสอน: no link is followed, nothing to ask
       const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
       if (!(a instanceof HTMLAnchorElement) || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
       const to = new URL(a.href, window.location.href);

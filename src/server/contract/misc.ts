@@ -1,5 +1,15 @@
 import { z } from 'zod';
-import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, notFound, redirect } from './common';
+import {
+  JSON_BODY,
+  Ok,
+  RATE_LIMITED,
+  SIGNED_IN,
+  choice,
+  errorResponse,
+  jsonResponse,
+  notFound,
+  redirect,
+} from './common';
 import { defineOperation, type Operation } from './registry';
 import { moneyField } from '@/lib/validation';
 
@@ -225,6 +235,20 @@ const signedOut = jsonResponse(
   }),
 );
 const dbDown = errorResponse('The database did not answer — unknown, not signed out: keep the last answer and retry.');
+
+export const meTour = defineOperation({
+  method: 'post',
+  path: '/me/tour',
+  tags: ['Sign-in'],
+  summary: 'Remember a step-by-step tutorial (บทสอน) answer for the signed-in user',
+  description:
+    '`seen` = the page path whose "ดูวิธีใช้หน้านี้ไหม?" was answered; `off` = never ask again on any page. Any approved user; only their own row.',
+  body: z.object({
+    seen: s.max(100).optional().meta({ example: '/jobs/new' }),
+    off: b.optional(),
+  }),
+  responses: { 200: jsonResponse('Remembered.', Ok), ...SIGNED_IN, ...JSON_BODY },
+});
 
 export const ssoMe = defineOperation({
   method: 'get',

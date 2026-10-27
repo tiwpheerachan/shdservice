@@ -35,6 +35,7 @@ import { jobNoParam } from '@/data/keys';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { parseSwap, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
+import { useTourRestore } from '@/components/tour/tour';
 
 function SwapRefundForm() {
   const { push } = useToast();
@@ -67,6 +68,14 @@ function SwapRefundForm() {
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState<{ mode: string; d: typeof d } | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify({ mode, d }) !== JSON.stringify(saved));
+  // a บทสอน leaves Swap / Refund and its fields as it found them
+  useTourRestore(
+    () => ({ mode, d }),
+    (v) => {
+      setMode(v.mode);
+      setD(v.d);
+    },
+  );
 
   function prefill(job: JobDetail) {
     reset(fromJob(job));
@@ -217,13 +226,14 @@ function SwapRefundForm() {
         </Tabs>
 
         <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
-          <div className="mb-4 flex gap-2">
+          <div role="group" aria-label="Swap หรือ Refund" className="mb-4 flex gap-2">
             {[
               { k: 'swap', l: 'Swap — เปลี่ยนเครื่องใหม่' },
               { k: 'refund', l: 'Refund — คืนเงิน' },
             ].map((o) => (
               <button
                 key={o.k}
+                aria-pressed={mode === o.k}
                 onClick={() => setMode(o.k)}
                 className={
                   'flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ' +

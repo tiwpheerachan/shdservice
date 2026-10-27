@@ -18,6 +18,7 @@ import {
   fromJob,
   commonSections,
   useWorkflowErrors,
+  JobEditLock,
 } from '@/components/shared/job-form';
 import { Tabs } from '@/components/ui/tabs';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
@@ -38,6 +39,7 @@ import { useAccess } from '@/lib/use-access';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/job';
+import { useTourRestore } from '@/components/tour/tour';
 
 // ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
 const OTHER = 'อื่นๆ (ระบุ)';
@@ -59,6 +61,7 @@ function OutsourceForm() {
     ? JOB_STATUSES.filter((x) => OUTSOURCE_IDS.includes(x.id)).map((x) => x.name)
     : OUTSOURCE_FALLBACK;
   const { userId: meId, can } = useAccess();
+  const jobLocked = !can('Job Management', 'edit'); // the shared job sections: commonSections leaves them out
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, set } = useJobForm();
@@ -98,6 +101,7 @@ function OutsourceForm() {
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState<typeof d | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
+  useTourRestore(() => d, setD); // a บทสอน leaves the send / receive fields as it found them
 
   // prefill from the job + its latest job_send_forward_dt row
   // the vendor list can arrive after the job: a saved "ส่งไปยัง" that turns out to be a known
@@ -155,7 +159,7 @@ function OutsourceForm() {
           : undefined,
       status: d.status || undefined,
     };
-    const canEdit = can('Job Management', 'edit');
+    const canEdit = !jobLocked;
     if (!act.check(receiving || back ? receiveSchema : outsourceActionSchema, body, canEdit)) return;
     setSaving(true);
     try {
@@ -246,11 +250,15 @@ function OutsourceForm() {
           ]}
         >
           {tab === 'device' ? (
-            <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+            <JobEditLock locked={jobLocked}>
+              <ProductSection title="ข้อมูลเครื่องซ่อม" variant="repair" />
+            </JobEditLock>
           ) : (
             <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
               <FieldGrid>
-                <MainSymptomField />
+                <JobEditLock locked={jobLocked} className="col-span-full">
+                  <MainSymptomField />
+                </JobEditLock>
                 <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={act.errors.symptomOther}>
                   <Textarea
                     rows={2}
@@ -322,13 +330,9 @@ function OutsourceForm() {
 
         <Section title="รายละเอียด การรับคืนงานซ่อม" icon={PackageCheck}>
           <FieldGrid>
-            <Field label="รับจาก" className="lg:col-span-2" lookup={vendorsLookup}>
-              <SearchSelect
-                value={d.recvFrom}
-                onChange={(v) => upd({ recvFrom: v })}
-                options={strOptions(d.recvFrom && !VENDORS.includes(d.recvFrom) ? [d.recvFrom, ...VENDORS] : VENDORS)}
-                searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
-              />
+            {/* the vendor it was sent to: job_send_forward_dt has no column of its own for it */}
+            <Field label="รับจาก" className="lg:col-span-2">
+              <ReadOnly>{d.recvFrom || '—'}</ReadOnly>
             </Field>
             <Field label="วันที่รับ" required={!!open} error={act.errors['receive.date']}>
               <Input type="date" value={d.recvDate} onChange={(e) => upd({ recvDate: e.target.value })} />
@@ -364,7 +368,9 @@ function OutsourceForm() {
           </FieldGrid>
         </Section>
 
-        <CostSummary />
+        <JobEditLock locked={jobLocked}>
+          <CostSummary />
+        </JobEditLock>
         <AttachmentSection jobNo={job?.no} files={job?.attachments} />
 
         <FormActions

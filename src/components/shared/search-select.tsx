@@ -25,7 +25,7 @@ export function SearchSelect({
   options,
   value,
   onChange,
-  placeholder = '- - Please Select - -',
+  placeholder = '- - เลือก - -',
   emptyLabel,
   searchPlaceholder = 'พิมพ์เพื่อค้นหา…',
   minWidth = 280,

@@ -142,6 +142,7 @@ try {
     if (PAGED.includes(name)) await expect([200], `/api/data/${name}?paged=1&pageSize=5`);
   }
   await expect([200], '/api/data/products?fields=lite&q=TDP');
+  await expect([200], '/api/data/quotations?paged=1&no=TDQ&customer=ทดสอบ&customerCode=TDC&imei=35');
   await expect([200], '/api/data/job_nos?mode=pending_parts');
   await expect([200], '/api/data/staff?usedAs=engineer');
   await expect([401], '/api/data/jobs', { as: null });
@@ -241,6 +242,28 @@ try {
     assert.equal(r.status, 200);
     linkToken = String(r.body.url).split('/track/')[1] ?? '';
     assert.ok(linkToken);
+  });
+  await test('GET /api/jobs/checks → 200: a Serial already on another job is named (the job edited left out)', async () => {
+    await pool.query(`UPDATE job SET product_serial = 'TDCHK0001SERIAL' WHERE job_no = 'TDJ0004'`);
+    const other = await call('/api/jobs/checks?serial=tdchk0001serial&so=&brand=&shop=&customer=&job=TDJXXXX');
+    assert.equal(other.status, 200, JSON.stringify(other.body));
+    const serial = other.body.serial as { jobs: { no: string }[]; looksLike: string | null; unusual: boolean };
+    assert.deepEqual(
+      serial.jobs.map((j) => j.no),
+      ['TDJ0004'],
+    );
+    const self = await call('/api/jobs/checks?serial=TDCHK0001SERIAL&job=TDJ0004');
+    assert.deepEqual((self.body.serial as { jobs: unknown[] }).jobs, [], 'the job being edited is not "another job"');
+  });
+  await test('POST /api/me/tour → 200: a page answered, then never ask again (kept per account)', async () => {
+    assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
+    assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
+    assert.equal((await call('/api/me/tour', { method: 'POST', body: { off: true } })).status, 200);
+    const { rows } = await pool.query(
+      `SELECT t.seen, t.off FROM app_user_tour t JOIN app_user u USING (user_id) WHERE lower(u.email_address) = lower($1)`,
+      [ADMIN.email],
+    );
+    assert.deepEqual(rows, [{ seen: ['/jobs/new'], off: true }], 'the path once, off kept');
   });
 
   console.log('\nCustomers, quotations, sale orders');

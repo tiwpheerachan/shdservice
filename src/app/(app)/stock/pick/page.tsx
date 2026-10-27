@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Save, Search } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { Button } from '@/components/ui/button';
-import { TableScroll } from '@/components/ui/data-table';
+import { DataTable, type Column } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, NumberInput } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import { isoDateTime } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { issueSchema } from '@/lib/validation/stock';
 import { STORE_LOCATION_NAME } from '@/lib/status-ids';
+import { useTourRestore } from '@/components/tour/tour';
 
 const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
 /** รับคืนจากการเบิก is by job: a WHO document no. (or a job nothing went out to) has nothing to return */
@@ -86,6 +87,19 @@ export default function PickPage() {
   const [find, setFind] = React.useState(''); // จ่ายออกอื่นๆ: narrows the shown lines (typed quantities stay)
   const [payTo, setPayTo] = React.useState('');
   const [remark, setRemark] = React.useState('');
+  // บทสอน: the document type, its reference, the lines (Get Data / quantities) and the footer go back
+  useTourRestore(
+    () => ({ docType, ref, lines, loaded, find, payTo, remark }),
+    (v) => {
+      setDocType(v.docType);
+      setRef(v.ref);
+      setLines(v.lines);
+      setLoaded(v.loaded);
+      setFind(v.find);
+      setPayTo(v.payTo);
+      setRemark(v.remark);
+    },
+  );
   // document date preview: when the screen opened, Thai time (browser only — no hydration mismatch)
   const openedAt = useMountTime();
   const docDate = openedAt ? isoDateTime(openedAt, { seconds: true }) : '';
@@ -253,6 +267,62 @@ export default function PickPage() {
   const shown = hit
     ? lines.filter((l) => hit.has(l.code) || l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
     : lines;
+  const columns: Column<Line>[] = [
+    { key: 'i', header: '#', width: '40px', align: 'center', sortable: false, cell: (_, i) => i + 1 },
+    { key: 'docNo', header: 'Document No.', cell: (l) => <span className="num">{l.docNo}</span> },
+    { key: 'code', header: 'Item Code', cell: (l) => <span className="num font-medium">{l.code}</span> },
+    {
+      key: 'name',
+      header: 'Item Name',
+      cell: (l) => <span className="line-clamp-1 max-w-[320px]">{l.name}</span>,
+    },
+    {
+      key: 'pickStatus',
+      header: 'สถานะการเบิก',
+      cell: (l) => (
+        <Badge tone={l.pickStatus === 'รออะไหล่' ? 'danger' : isReturn ? 'info' : 'warning'} dot>
+          {l.pickStatus}
+        </Badge>
+      ),
+    },
+    {
+      key: 'onhand',
+      header: 'คงเหลือ',
+      align: 'right',
+      cell: (l) => (
+        <span className={cn('font-medium', l.onhand === 0 ? 'text-danger' : l.onhand <= 3 ? 'text-warning' : '')}>
+          {int(l.onhand)}
+        </span>
+      ),
+    },
+    { key: 'need', header: isReturn ? 'รับคืนได้' : 'ต้องการ', align: 'right', cell: (l) => int(l.need) },
+    {
+      key: 'issue',
+      header: isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก',
+      align: 'right',
+      sortable: false,
+      cell: (l) => (
+        <>
+          <NumberInput
+            aria-label={`${isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก'} ${l.code}`}
+            min={0}
+            max={maxOf(l)}
+            aria-invalid={!!overMsg(l) || undefined}
+            placeholder="0"
+            value={l.issue}
+            disabled={!isReturn && l.onhand === 0}
+            onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
+            className="ml-auto h-8 w-24"
+          />
+          {overMsg(l) && (
+            <p role="alert" className="mt-1 text-2xs text-danger">
+              {overMsg(l)}
+            </p>
+          )}
+        </>
+      ),
+    },
+  ];
   useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 
   // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
@@ -378,119 +448,58 @@ export default function PickPage() {
         </FieldGrid>
       </div>
 
-      {/* items table */}
-      <div className="surface overflow-hidden">
-        {kind === 'other' && lines.length > 0 && (
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <Input
-              type="search"
-              aria-label="ค้นหาอะไหล่ (รหัส หรือชื่อ)"
-              placeholder="ค้นหารหัส หรือชื่ออะไหล่…"
-              value={find}
-              onChange={(e) => setFind(e.target.value)}
-              className="h-8 max-w-sm"
-            />
-            <span className="num text-2xs text-muted-foreground">
-              {term ? `${shown.length} / ${lines.length}` : lines.length} รายการ
+      {/* items table — DataTable pages it (จ่ายออกอื่นๆ = every in-stock part, ~hundreds of rows); quantities
+          typed on another page or in a row the search hides stay in `lines` and are saved */}
+      {fe.errors.lines && (
+        <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+          {fe.errors.lines}
+        </p>
+      )}
+      <DataTable
+        label="รายการเบิกอะไหล่"
+        searchable={false}
+        toolbar={
+          kind === 'other' && lines.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Input
+                type="search"
+                aria-label="ค้นหาอะไหล่ (รหัส หรือชื่อ)"
+                placeholder="ค้นหารหัส หรือชื่ออะไหล่…"
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+                className="h-8 w-72 max-w-full"
+              />
+            </div>
+          ) : undefined
+        }
+        narrowed={!!term}
+        onClearFilters={() => setFind('')}
+        columns={columns}
+        rows={shown}
+        rowKey={(l) => String(l.logId ?? l.dtId ?? l.code)}
+        emptyText={
+          loaded
+            ? kind === 'other'
+              ? 'ไม่มีอะไหล่ที่มีของในสต๊อก'
+              : isReturn
+                ? `ไม่มีอะไหล่ที่รับคืนได้ — ${RETURN_REF_HINT}`
+                : 'ไม่มีรายการค้างจ่าย'
+            : kind === 'other'
+              ? 'กด Get Data เพื่อดึงรายการอะไหล่ที่มีของในสต๊อก'
+              : kind === 'sale'
+                ? 'เลือกใบสั่งขายแล้วกด Get Data เพื่อดึงรายการ'
+                : 'เลือกหรือพิมพ์เลขงานแล้วกด Get Data เพื่อดึงรายการ'
+        }
+        footerNote={
+          lines.length > 0 && (
+            <span>
+              · {isReturn ? 'รวมจำนวนรับคืน' : 'รวมจำนวนจ่ายออก'}{' '}
+              <span className="num font-semibold text-primary">{int(totalIssue)} ชิ้น</span>
             </span>
-          </div>
-        )}
-        {fe.errors.lines && (
-          <p role="alert" className="border-b border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-            {fe.errors.lines}
-          </p>
-        )}
-        <TableScroll label="รายการเบิกอะไหล่">
-          <table className="w-full min-w-[880px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 px-3 py-2.5 text-center">#</th>
-                <th className="px-3 py-2.5 text-left">Document No.</th>
-                <th className="px-3 py-2.5 text-left">Item Code</th>
-                <th className="px-3 py-2.5 text-left">Item Name</th>
-                <th className="px-3 py-2.5 text-left">สถานะการเบิก</th>
-                <th className="px-3 py-2.5 text-right">คงเหลือ</th>
-                <th className="px-3 py-2.5 text-right">{isReturn ? 'รับคืนได้' : 'ต้องการ'}</th>
-                <th className="px-3 py-2.5 text-right">{isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                    {lines.length
-                      ? `ไม่พบอะไหล่ที่ตรงกับ "${find.trim()}"`
-                      : loaded
-                        ? kind === 'other'
-                          ? 'ไม่มีอะไหล่ที่มีของในสต๊อก'
-                          : isReturn
-                            ? `ไม่มีอะไหล่ที่รับคืนได้ — ${RETURN_REF_HINT}`
-                            : 'ไม่มีรายการค้างจ่าย'
-                        : kind === 'other'
-                          ? 'กด Get Data เพื่อดึงรายการอะไหล่ที่มีของในสต๊อก'
-                          : kind === 'sale'
-                            ? 'เลือกใบสั่งขายแล้วกด Get Data เพื่อดึงรายการ'
-                            : 'เลือกหรือพิมพ์เลขงานแล้วกด Get Data เพื่อดึงรายการ'}
-                  </td>
-                </tr>
-              ) : (
-                shown.map((l, i) => (
-                  <tr
-                    key={l.logId ?? l.dtId ?? l.code}
-                    className="border-b border-border/70 last:border-0 hover:bg-accent/50"
-                  >
-                    <td className="num px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                    <td className="num px-3 py-2">{l.docNo}</td>
-                    <td className="num px-3 py-2 font-medium">{l.code}</td>
-                    <td className="px-3 py-2">
-                      <span className="line-clamp-1 max-w-[320px]">{l.name}</span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge tone={l.pickStatus === 'รออะไหล่' ? 'danger' : isReturn ? 'info' : 'warning'} dot>
-                        {l.pickStatus}
-                      </Badge>
-                    </td>
-                    <td
-                      className={cn(
-                        'num px-3 py-2 text-right font-medium',
-                        l.onhand === 0 ? 'text-danger' : l.onhand <= 3 ? 'text-warning' : '',
-                      )}
-                    >
-                      {int(l.onhand)}
-                    </td>
-                    <td className="num px-3 py-2 text-right">{int(l.need)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <NumberInput
-                        aria-label={`${isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก'} ${l.code}`}
-                        min={0}
-                        max={maxOf(l)}
-                        aria-invalid={!!overMsg(l) || undefined}
-                        placeholder="0"
-                        value={l.issue}
-                        disabled={!isReturn && l.onhand === 0}
-                        onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
-                        className="ml-auto h-8 w-24"
-                      />
-                      {overMsg(l) && (
-                        <p role="alert" className="mt-1 text-2xs text-danger">
-                          {overMsg(l)}
-                        </p>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </TableScroll>
-        {lines.length > 0 && (
-          <div className="flex justify-end gap-3 border-t border-border px-3 py-2.5 text-sm">
-            <span className="text-muted-foreground">{isReturn ? 'รวมจำนวนรับคืน' : 'รวมจำนวนจ่ายออก'}</span>
-            <span className="num font-semibold text-primary">{int(totalIssue)} ชิ้น</span>
-          </div>
-        )}
-      </div>
+          )
+        }
+      />
 
       {/* footer */}
       <div className="surface p-4">

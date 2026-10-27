@@ -829,7 +829,7 @@ try {
         {
           customerCode: CUSTOMER,
           jobType: 'งานซ่อม',
-          so: 'TD-SO',
+          so: '260901TDSO0001',
           channel: 'SHOPEE',
           saleOrderDate: '2026-10-01',
           warrantyMonth: 12,
@@ -871,7 +871,7 @@ try {
         {
           customerCode: CUSTOMER,
           jobType: jt!.n,
-          so: 'TD-SO-TRAIL',
+          so: '260901TDSO0002',
           channel: 'SHOPEE',
           saleOrderDate: '2026-10-01',
           warrantyMonth: 12,
@@ -1271,6 +1271,19 @@ try {
     assert.deepEqual([(await card('quotation_summary', qt)).total, await rowsTotal('quotations', qt)], [1, 1]);
     const used = { ...MARCH, q: 'TDW0002' };
     assert.deepEqual([(await card('issued_stats', used)).lines, await rowsTotal('issued_lines', used)], [1, 1]);
+  });
+  await test('quotation list boxes: each its own condition (contains), ANDed — table and card alike', async () => {
+    // TDQ0001 + TDQ0002: both of CUSTOMER (TDC001, ลูกค้า ทดสอบโดเมน), no job → no IMEI
+    const both = { ...APRIL, customer: 'ทดสอบโดเมน', customerCode: 'tdc00' };
+    assert.equal(await rowsTotal('quotations', both), 2);
+    const one = { ...both, no: 'Q0002' };
+    assert.deepEqual([(await card('quotation_summary', one)).total, await rowsTotal('quotations', one)], [1, 1]);
+    assert.equal(
+      await rowsTotal('quotations', { ...APRIL, no: 'TDQ0001', customer: 'ไม่มีชื่อนี้' }),
+      0,
+      'not the first box only',
+    );
+    assert.equal(await rowsTotal('quotations', { ...APRIL, imei: '35' }), 0);
   });
 
   console.log('\nAudit keeps the old value — [old, new], not [null, new]');
@@ -1980,6 +1993,20 @@ try {
       assert.equal((await jobRow('TDJ0205')).s, 15);
       const bad = await fieldsOf(saveOutsource('TDJ0205', { send, status: await statusName(1) }, U.admin.id));
       assert.deepEqual([bad.status, bad.fields], [400, { status: OUTSOURCE_STATUS_ONLY }]);
+    });
+    await test('R1 jobs: out-source with the current status sent back (the page always does) → sent 14, back 15; a changed choice wins', async () => {
+      await pool.query(`INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+                          VALUES ${job('TDJ0291', 2)}, ${job('TDJ0292', 2)}`);
+      const current = async (no: string) => statusName((await jobRow(no)).s);
+      const send = { to: 'TD Vendor R1b', date: '2026-10-10' };
+      await saveOutsource('TDJ0291', { send, status: await current('TDJ0291') }, U.admin.id);
+      assert.equal((await jobRow('TDJ0291')).s, 14, 'sent');
+      const receive = { from: send.to, date: '2026-10-12' };
+      await saveOutsource('TDJ0291', { receive, status: await current('TDJ0291') }, U.admin.id);
+      assert.equal((await jobRow('TDJ0291')).s, 15, 'back');
+      // 15 picked while sending (an allowed choice, not the current status): the choice, not the implied 14
+      await saveOutsource('TDJ0292', { send, status: await statusName(15) }, U.admin.id);
+      assert.equal((await jobRow('TDJ0292')).s, 15, 'explicit choice');
     });
     await test('R1 jobs: the job-list search finds a phone typed as digits in "081-496-9925"', async () => {
       const found = async (q: string) => (await listJobs({ q })).some((j) => j.no === 'TDJ0206');
@@ -3396,6 +3423,28 @@ try {
         await statusOf(upsertUser({ ...self, email: `  ${U.admin.email.toUpperCase()} ` }, U.admin.id)),
         200,
       );
+    });
+
+    await test('R5 admin users: ส่งออก Excel takes the filter bar (role + status) — the file = the filtered list', async () => {
+      const { exportXlsx } = await import('@/server/export');
+      const ExcelJS = (await import('exceljs')).default;
+      const buffer = await new Response(
+        (await exportXlsx(await request('/api/export/users?role=TD%20Seller&status=Active', U.admin), 'users')).stream,
+      ).arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+      const ws = wb.worksheets[0]!;
+      const head = (ws.getRow(1).values as unknown[]).slice(1);
+      const ids = new Set<string>();
+      ws.eachRow((r, n) => {
+        const v = (r.values as unknown[]).slice(1);
+        if (n > 1 && v[head.indexOf('ID')] != null) {
+          assert.equal(v[head.indexOf('บทบาท')], 'TD Seller');
+          ids.add(String(v[head.indexOf('ID')]));
+        }
+      });
+      assert.ok(ids.has(String(U.seller.id)) && ids.has(String(U.seller2.id)), [...ids].join());
+      assert.ok(!ids.has(String(U.admin.id)));
     });
 
     await test('R5 admin users: a DELETED user never goes straight back to Active (users API → 409; records → กู้คืน = INACTIVE)', async () => {

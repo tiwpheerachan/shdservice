@@ -114,7 +114,7 @@ export function WarrantyField({ f: { s, patch, errors } }: P) {
   return (
     <Field label="Warranty" error={errors.warranty}>
       <Select value={s.warranty} onChange={(e) => patch({ warranty: e.target.value, warrantyAuto: false })}>
-        <option value="">- - Please Select - -</option>
+        <option value="">- - เลือก - -</option>
         {WARRANTY_OPTIONS.map((w) => (
           <option key={w}>{w}</option>
         ))}
@@ -322,7 +322,7 @@ export function ShipperField({ f: { s, set, errors } }: P) {
   return (
     <Field label="โดยบริษัทขนส่ง" error={errors.receptionShipper} lookup={shippingLookup}>
       <Select value={s.receptionShipper} onChange={(e) => set('receptionShipper', e.target.value)}>
-        <option value="">- - Please Select - -</option>
+        <option value="">- - เลือก - -</option>
         {SHIPPING_PROFILES.map((p) => (
           <option key={p.id} value={p.nameTh}>
             {p.nameTh}

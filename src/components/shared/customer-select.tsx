@@ -25,6 +25,7 @@ import { useFormErrors, apiFieldErrors, focusFirstInvalid } from '@/lib/use-form
 import { customerSchema } from '@/lib/validation/customer';
 import { useApi } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { useTourRestore } from '@/components/tour/tour';
 
 /**
  * Customer block used by job / quotation / sale-order forms.
@@ -60,6 +61,16 @@ export function CustomerSelect({
   const fe = useFormErrors();
   // a new customer typed in, not saved yet — kept when the session runs out, asked before leaving
   useUnsavedChanges(() => mode === 'new' && JSON.stringify(form) !== JSON.stringify(EMPTY_CUSTOMER));
+  // a บทสอน that switched to ลูกค้าใหม่ / typed a draft leaves this as it found it
+  useTourRestore(
+    () => ({ mode, form, conflicts }),
+    (v) => {
+      setMode(v.mode);
+      setForm(v.form);
+      setConflicts(v.conflicts);
+      fe.setErrors({});
+    },
+  );
 
   const pickByCode = async (code: string) => {
     try {
@@ -235,7 +246,8 @@ export function CustomerSelect({
             <Button variant="outline" size="sm" onClick={() => setMode('existing')}>
               ยกเลิก
             </Button>
-            <Button size="sm" onClick={saveNew} disabled={saving} loading={saving}>
+            {/* data-tour-block: a บทสอน lets the user try this form, never save it */}
+            <Button size="sm" onClick={saveNew} disabled={saving} loading={saving} data-tour-block>
               <Plus className="h-3.5 w-3.5" />
               บันทึกลูกค้าใหม่
             </Button>

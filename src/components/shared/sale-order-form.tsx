@@ -21,6 +21,7 @@ import { overpaidMessage, saleOrderSchema, SUBMIT_CREATOR_ONLY } from '@/lib/val
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { SaleOrderLines, type SaleOrderLine as Line } from '@/components/sale/sale-order-lines';
+import { useTourRestore } from '@/components/tour/tour';
 
 // approve status label (approve_name_th; 3 is shown as ส่งกลับแก้ไข) → badge tone (list + edit page)
 export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
@@ -171,6 +172,22 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [pendingSlip, setPendingSlip] = React.useState<File | null>(null);
     // the radio shows the order's real state: only a waiting (2) order is "sent"; a sent-back (3) one starts unsent
     const [submit, setSubmit] = React.useState(initial?.approveId === 2);
+    // a บทสอน that tried the form leaves it as it found it (a slip file cannot be picked during one — not kept)
+    useTourRestore(
+      () => ({ lines, profileId, customer, pickedSalesId, payment, payAmount, remark, slip, submit }),
+      (v) => {
+        setLines(v.lines);
+        setProfileId(v.profileId);
+        setCustomer(v.customer);
+        setSalesId(v.pickedSalesId);
+        setPayment(v.payment);
+        setPayAmount(v.payAmount);
+        setRemark(v.remark);
+        setSlip(v.slip);
+        setSubmit(v.submit);
+        fe.setErrors({});
+      },
+    );
     // only the creator (or System Admin) sends it for approval — anyone else's save keeps the status (server rule)
     const canSubmit = !initial || isAdmin || initial.createdById === userId;
     // read-only, as the server refuses the save: 4 อนุมัติแล้ว / 5 ปฏิเสธ are final, a cancelled order is

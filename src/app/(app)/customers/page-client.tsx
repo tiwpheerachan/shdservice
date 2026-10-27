@@ -38,6 +38,7 @@ import { customerSchema } from '@/lib/validation/customer';
 import { useServerTable } from '@/lib/use-server-table';
 import { NO_FILTER, type CustomerFilter } from './filters';
 import { ExportButton } from '@/components/shared/export-button';
+import { useTourRestore } from '@/components/tour/tour';
 
 function CustomersPageInner() {
   const { push } = useToast();
@@ -68,6 +69,8 @@ function CustomersPageInner() {
   const [saving, setSaving] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<CustomerConflict[] | null>(null);
   const fe = useFormErrors();
+  // บทสอน: what is tried in the เพิ่มลูกค้า dialog goes back before the tour closes it (closing never asks)
+  useTourRestore(() => form, setForm);
   // typed into the dialog, not saved yet: a session running out keeps the page (sign in again in a new tab)
   // instead of /login, and a link away asks first — as on every form
   useUnsavedChanges(

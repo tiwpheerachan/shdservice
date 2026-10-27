@@ -21,6 +21,7 @@ import { addDays, today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { receiveSchema } from '@/lib/validation/stock';
 import type { Product } from '@/data/types';
+import { useTourRestore } from '@/components/tour/tour';
 
 type Row = {
   sysCode: string;
@@ -88,6 +89,23 @@ export default function ReceivePage() {
   const [supplier, setSupplier] = React.useState('');
   const [remark, setRemark] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  // บทสอน: the header and the typed quantities go back to how they were
+  useTourRestore(
+    () => ({
+      po,
+      date,
+      supplier,
+      remark,
+      qty: Object.fromEntries(rows.filter((r) => r.qty > 0).map((r) => [r.sysCode, r.qty])),
+    }),
+    (v) => {
+      setPo(v.po);
+      setDate(v.date);
+      setSupplier(v.supplier);
+      setRemark(v.remark);
+      setRows((s) => s.map((r) => ({ ...r, qty: v.qty[r.sysCode] ?? 0 })));
+    },
+  );
 
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
   useClearOnChange(fe.clear, { lines: typedQty, date }); // typing a quantity / picking a date takes the error away

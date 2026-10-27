@@ -303,6 +303,40 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-pos
   --mobile-offset-bottom: calc(var(--actions-h) + 6.5rem) !important;
 }
 
+/* บทสอน (components/tour): a highlighted field's dropdown opens above the dimmed page and the card (z-71) */
+html[data-tour] [data-radix-popper-content-wrapper],
+html[data-tour] [data-slot='popover-content'] {
+  z-index: 72 !important;
+}
+/* a confirmation the page asks during a tour (มอบให้คนใหม่แทน?) is answered above it */
+html[data-tour] div:has(> [role='alertdialog']) {
+  z-index: 72 !important;
+}
+/* the first-visit offer: bottom-right (a phone: a sheet across the bottom), above the sticky save bar when the
+   page has one — the same clearance as the toasts (the bar rests higher, above the footer, scrolled to the end) */
+[data-tour-offer] {
+  bottom: 1rem;
+}
+html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
+  bottom: calc(var(--actions-h) + 5.5rem);
+}
+@media (width < 40rem) {
+  html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
+    bottom: calc(var(--actions-h) + 6.5rem);
+  }
+}
+/* the note after a tour is skipped (top centre): below the topbar, its ? button in view */
+[data-sonner-toaster][data-y-position='top'] {
+  --offset-top: calc(var(--topbar-h) + 0.5rem) !important;
+  --mobile-offset-top: calc(var(--topbar-h) + 0.5rem) !important;
+}
+/* a link inside a field the step lets you try leaves the page: not followed, and shown so (a step that only
+   points at links shows them as they are) */
+html[data-tour='try'] [data-tour-target] a {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 @media print {
   .no-print {
     display: none !important;

@@ -131,6 +131,11 @@ export type QuotationFilters = {
   type?: string;
   warranty?: string;
   brand?: string;
+  /** the list's text boxes — each its own condition (contains), ANDed with the rest */
+  no?: string;
+  customer?: string;
+  customerCode?: string;
+  imei?: string;
 };
 
 /** The page's query (?status=&brand=…) as filters — the list, its report KPI and the export all read it here. */
@@ -143,7 +148,14 @@ export const quotationFiltersFromQuery = (f: Record<string, string>, deleted: St
   type: f.type,
   warranty: f.warranty,
   brand: f.brand,
+  no: f.no,
+  customer: f.customer,
+  customerCode: f.customerCode,
+  imei: f.imei,
 });
+
+const contains = (col: Parameters<typeof ilike>[0], v?: string) =>
+  v?.trim() ? ilike(col, likeTerm(v.trim())) : undefined;
 
 /** quoteExpired (src/lib/quote-expiry.ts) in SQL: sent, and created before the validity window or its job says so */
 const sentExpired = () =>
@@ -190,6 +202,10 @@ export function quotationWhere(q: string, f: QuotationFilters) {
     // ข้อมูลเครื่องมาจากงานที่อ้างถึง (job) — กรองที่ server ให้ครบทุกหน้า ไม่ใช่เฉพาะหน้าที่โหลด
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    contains(quotationHd.quotationNo, f.no),
+    contains(customer.customerName, f.customer),
+    contains(quotationHd.customerCode, f.customerCode),
+    contains(job.productImeiNo, f.imei),
   );
 }
 

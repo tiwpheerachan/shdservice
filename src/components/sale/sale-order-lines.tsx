@@ -11,6 +11,7 @@ import { Input, NumberInput } from '@/components/ui/input';
 import { useProductSearch } from '@/data/db';
 import { baht } from '@/lib/utils';
 import type { FieldErrors } from '@/lib/validation';
+import { useTourRestore } from '@/components/tour/tour';
 
 /** a row of the sale order */
 export type SaleOrderLine = {
@@ -59,6 +60,14 @@ export function SaleOrderLines({
 }) {
   const [item, setItem] = React.useState<PickedItem | null>(null); // the part chosen, not added yet
   const [qty, setQty] = React.useState(1);
+  // a บทสอน that picked a product / typed a qty here leaves the add row as it found it
+  useTourRestore(
+    () => ({ item, qty }),
+    (v) => {
+      setItem(v.item);
+      setQty(v.qty);
+    },
+  );
   // new rows' ids follow the rows the order opened with (the edit page remounts the form for every order)
   const idRef = React.useRef(lines.length);
 

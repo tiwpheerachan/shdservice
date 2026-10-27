@@ -206,6 +206,22 @@ export function isRequiredFilled(key: JobRequiredKey, v: unknown): boolean {
 /* ---- identifier formats (checked on cleanCode(); services store the cleaned value) ---- */
 const SO_RE = /^(?!0+$)[A-Z0-9][A-Z0-9/._-]{3,49}$/;
 const SO_MSG = 'Sale Order No. ใช้ได้เฉพาะ A-Z 0-9 / . _ - (4–50 ตัว)';
+/**
+ * Sale Order No. of a marketplace has one shape (prod, jobs opened 2025 on: 97.6% / 99.1% / 98.3% already
+ * like this) — checked when the SO or the channel is changed, so an older job keeps the number it has
+ */
+export const SO_BY_CHANNEL: Record<string, { re: RegExp; msg: string; example: string }> = {
+  SHOPEE: {
+    re: /^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])[A-Z0-9]{8}$/,
+    msg: 'Shopee: Sale Order No. มี 14 ตัว — วันที่สั่งซื้อ 6 หลัก (ปปดดวว) ตามด้วยตัวอักษร / ตัวเลข 8 ตัว',
+    example: '251015ABCD1234',
+  },
+  LAZADA: { re: /^\d{15,16}$/, msg: 'Lazada: Sale Order No. เป็นตัวเลข 15–16 หลัก', example: '581234567890123' },
+  TIKTOK: { re: /^\d{18}$/, msg: 'TikTok: Sale Order No. เป็นตัวเลข 18 หลัก', example: '576123456789012345' },
+};
+/** the Sale Order No. rule for a channel: the marketplace's own, else the general one */
+export const soAccepts = (so: unknown, channel: unknown) =>
+  (SO_BY_CHANNEL[clean(channel)]?.re ?? SO_RE).test(cleanCode(so));
 /** a typed "S/N:" / "SN:" prefix is allowed here and dropped on save (cleanSerial) */
 const SERIAL_BODY = String.raw`(?:S\/?N\s*:\s*)?[A-Z0-9][A-Z0-9/._:-]{3,49}`;
 const NEW_SERIAL_RE = new RegExp(`^${SERIAL_BODY}$`);
@@ -214,7 +230,13 @@ const NEW_SERIAL_MSG = 'Serial No. ใช้ได้เฉพาะ A-Z 0-9 / .
 const SERIAL_MSG = `${NEW_SERIAL_MSG} — ไม่มีหรืออ่านไม่ได้ ให้ติ๊ก "ไม่มี S/N / S/N เสียหาย"`;
 /** Serial No. as stored: cleanCode() without a typed "S/N:" prefix */
 export const cleanSerial = (v: unknown) => cleanCode(v).replace(/^S\/?N\s*:\s*/, '');
+/** well-formed values (the rules below, on the cleaned value) — what a typed-on-Thai fix must give */
+export const serialAccepts = (v: unknown) => NEW_SERIAL_RE.test(cleanSerial(v));
+export const imeiAccepts = (v: unknown) => /^\d{15}$/.test(cleanCode(v));
+const DOC_NO_RE = /^[A-Z0-9][A-Z0-9/._-]{0,49}$/;
+export const docNoAccepts = (v: unknown) => DOC_NO_RE.test(cleanCode(v));
 const PAY_NO_RE = /^[A-Z0-9 -]{1,50}$/;
+export const payNoAccepts = (v: unknown) => PAY_NO_RE.test(cleanCode(v));
 const PAY_NO_MSG = 'ใช้ได้เฉพาะ A-Z 0-9 ช่องว่าง และ - (ไม่เกิน 50 ตัว)';
 
 /** "YYYY-MM-DD" n years later (string order = date order) */
@@ -274,6 +296,9 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
       // a value given that differs from the stored one — only those must follow the rules below
       const changed = (k: string) => clean(val[k]) !== '' && (!prev || clean(val[k]) !== clean(prev[k]));
       if (changed('channel') && !has(CHANNELS, v.channel)) add('channel', 'Channel ต้องเลือกจากรายการ');
+      const market = SO_BY_CHANNEL[clean(v.channel)];
+      const so = cleanCode(v.so);
+      if (market && so && (changed('so') || changed('channel')) && !market.re.test(so)) add('so', market.msg);
       if (changed('warranty') && !has(WARRANTY_OPTIONS, v.warranty)) add('warranty', 'Warranty ต้องเป็น IN หรือ OUT');
       if (changed('receptionType') && !has(RECEIVE_METHODS, v.receptionType))
         add('receptionType', 'รับสินค้าเข้าโดย ต้องเลือกจากรายการ');
@@ -443,11 +468,7 @@ export function swapRefundSchema(
       status: z.string().optional(),
       inspection: maxNote(200, 'ผลการตรวจสอบ '),
       newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG, prev.newSerial),
-      docNo: codeField(
-        /^[A-Z0-9][A-Z0-9/._-]{0,49}$/,
-        'เลขที่เอกสารใช้ได้เฉพาะ A-Z 0-9 / . _ - (ไม่เกิน 50 ตัว)',
-        prev.docNo,
-      ),
+      docNo: codeField(DOC_NO_RE, 'เลขที่เอกสารใช้ได้เฉพาะ A-Z 0-9 / . _ - (ไม่เกิน 50 ตัว)', prev.docNo),
       swapDate: date,
       refundDate: date,
       refundRef: codeField(PAY_NO_RE, `เลขที่บัญชี/อ้างอิง ${PAY_NO_MSG}`, prev.refundRef),

@@ -29,6 +29,7 @@ import {
 } from '@/lib/modules';
 import { PENDING_ROLE } from '@/lib/access';
 import { masterNameKey } from '@/lib/validation/admin';
+import { useTourRestore } from '@/components/tour/tour';
 
 // บทบาท (user_type) มาจากตาราง app_config — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
 // (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว app_config ชื่อ RIGHTS
@@ -164,6 +165,17 @@ export default function PermissionsPage() {
 
   const [adding, setAdding] = React.useState<string | null>(null); // the เพิ่มตำแหน่ง dialog's name
   const addName = adding?.trim() ?? '';
+  // a บทสอน puts back what was tried in เพิ่มตำแหน่ง — Enter there adds the role and picks it (addRole). Only the
+  // typed name, not whether the dialog is open ('' vs null): the tour opens and closes that itself
+  useTourRestore(
+    () => ({ adding: adding || null, newRoles, pickedRole, draftPick }),
+    (v) => {
+      setAdding(v.adding);
+      setNewRoles(v.newRoles);
+      setRole(v.pickedRole);
+      setDraft(v.draftPick);
+    },
+  );
   const addError =
     addName.length > 50
       ? 'ชื่อตำแหน่งยาวเกิน 50 ตัวอักษร'
@@ -270,7 +282,12 @@ export default function PermissionsPage() {
         }}
       >
         <Field label="ประเภทผู้ใช้งาน" required>
-          <SearchSelect value={draft.role} onChange={(v) => void pickRole(v)} options={strOptions(ASSIGNABLE_ROLES)} />
+          <SearchSelect
+            placeholder="- - เลือกบทบาท - -"
+            value={draft.role}
+            onChange={(v) => void pickRole(v)}
+            options={strOptions(ASSIGNABLE_ROLES)}
+          />
         </Field>
         <Field label="เมนูงาน">
           <SearchSelect

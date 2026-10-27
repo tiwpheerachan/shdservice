@@ -19,6 +19,8 @@ export type AccessValue = {
   role: string;
   isAdmin: boolean;
   grants: GrantMap;
+  /** the บทสอน already offered (drizzle/0039): page paths answered, never ask again */
+  tour?: { seen: string[]; off: boolean };
 };
 
 const Ctx = React.createContext<AccessValue>({

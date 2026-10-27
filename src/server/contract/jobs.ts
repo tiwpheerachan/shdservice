@@ -86,6 +86,48 @@ const SwapBody = z.looseObject({
   version,
 });
 
+const SeenJob = z.object({
+  no: s,
+  date: s.meta({ description: 'Opened on, YYYY-MM-DD.' }),
+  sameCustomer: z.boolean(),
+  bounce: z.boolean().meta({ description: 'Ticked งานเด้ง.' }),
+  model: s,
+});
+
+export const jobChecksGet = defineOperation({
+  method: 'get',
+  path: '/jobs/checks',
+  tags,
+  summary: 'Warnings while a job is typed in (never a refusal)',
+  description:
+    "The Serial No. on other jobs (newest 5), the Sale Order No. on other customers' jobs (needs `customer`), a Serial that looks like another brand family's or like none of the chosen brand's, a shop that mostly sells another brand. Needs view on any job screen.",
+  query: z.object({
+    serial: s.optional(),
+    so: s.optional(),
+    brand: s.optional().meta({ description: 'The chosen brand (ยี่ห้อ) name.' }),
+    shop: s.optional(),
+    customer: s.optional().meta({ description: 'The chosen customer code.' }),
+    job: s.optional().meta({ description: 'The job being edited — left out of the matches.' }),
+  }),
+  responses: {
+    200: jsonResponse(
+      'What to warn about.',
+      z.object({
+        serial: z.object({
+          jobs: z.array(SeenJob),
+          looksLike: s.nullable().meta({ description: 'The brand whose serials look like this one (another family).' }),
+          unusual: z.boolean().meta({ description: "None of the chosen brand family's jobs has a serial like it." }),
+        }),
+        so: z.object({ jobs: z.array(SeenJob) }),
+        shop: z.object({
+          brand: s.nullable().meta({ description: 'The brand this shop mostly sells (another family).' }),
+        }),
+      }),
+    ),
+    ...SIGNED_IN,
+  },
+});
+
 export const jobGet = defineOperation({
   method: 'get',
   path: '/jobs/{no}',

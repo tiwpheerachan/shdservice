@@ -15,7 +15,7 @@ const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ban
 async function openClose(page: Page, no: string) {
   await signIn(page, CLOSER_EMAIL);
   await page.goto(`/jobs/close?job=${no}`);
-  await expect(page.getByRole('heading', { name: 'ปิดงาน - ส่งคืนสินค้า' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ปิดงาน - ส่งคืนสินค้า', exact: true })).toBeVisible();
   await expect(page.getByLabel('หมายเลขงาน', { exact: true })).toHaveText(no);
 }
 

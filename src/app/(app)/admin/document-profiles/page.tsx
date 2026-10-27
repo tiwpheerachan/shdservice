@@ -15,6 +15,7 @@ import { useConfirm } from '@/components/ui/confirm';
 import { api, postJson, del, errMsg, isStale, uploadFile, useUploading } from '@/lib/api';
 import { useApi } from '@/data/db';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { useTourRestore } from '@/components/tour/tour';
 import { documentProfileSchema } from '@/lib/validation/admin';
 
 type Profile = {
@@ -91,6 +92,7 @@ export default function DocumentProfilesPage() {
 
   const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
   useClearOnChange(fe.clear, form);
+  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
@@ -167,8 +169,8 @@ export default function DocumentProfilesPage() {
       title: `ลบโปรไฟล์ ${r.code} — ${r.nameTh}?`,
       description: (
         <>
-          จะหายจากหน้านี้และจากช่อง "ออกเอกสารในนาม" ทุกฟอร์ม เอกสารที่เคยออกในนามนี้ยังพิมพ์ด้วยโลโก้/ที่อยู่เดิมได้
-          และ prefix เลขเอกสารของโปรไฟล์นี้จะถูกจองไว้ นำกลับมาใช้กับโปรไฟล์อื่นไม่ได้
+          จะหายจากหน้านี้และจากช่อง "ออกเอกสารในนาม" ทุกฟอร์ม
+          เอกสารที่เคยออกในนามนี้ยังพิมพ์ด้วยโลโก้/ที่อยู่ของโปรไฟล์นี้ได้ และรหัส {r.code} นำไปใช้กับโปรไฟล์ใหม่ได้
           <br />
           การกู้คืนต้องทำโดยผู้ดูแลระบบ — ถ้าแค่หยุดใช้ชั่วคราว ให้แก้ไขแล้วปิด "เปิดใช้งาน" แทน
         </>
@@ -271,7 +273,7 @@ export default function DocumentProfilesPage() {
         open={open}
         onClose={() => setOpen(false)}
         title={editing ? `แก้ไขโปรไฟล์ ${editing.code}` : 'เพิ่มโปรไฟล์ผู้ออกเอกสาร'}
-        description={editing ? undefined : 'บันทึกก่อน แล้วค่อยอัปโหลดโลโก้'}
+        description={editing ? undefined : 'โลโก้ที่เลือกไว้อัปโหลดหลังกดบันทึก'}
         size="xl"
         footer={
           <>
@@ -390,7 +392,7 @@ export default function DocumentProfilesPage() {
             group="group"
             hint={
               editing
-                ? 'PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD'
+                ? 'SVG (คมที่สุด) หรือ PNG/JPG พื้นขาว แนะนำสูงอย่างน้อย 300px — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD'
                 : pendingLogo
                   ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก`
                   : 'เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก — ถ้าไม่อัปโหลดจะใช้สัญลักษณ์ SHD'
@@ -407,7 +409,7 @@ export default function DocumentProfilesPage() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
                 className="hidden"
                 onChange={(e) => void onLogo(e.target.files?.[0])}
               />
@@ -417,6 +419,7 @@ export default function DocumentProfilesPage() {
                 type="button"
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
+                data-tour-block // uploads (editing) / picks a file: never during a บทสอน
               >
                 <Upload className="h-3.5 w-3.5" />
                 {editing ? 'อัปโหลดโลโก้' : pendingLogo ? 'เปลี่ยนไฟล์' : 'เลือกโลโก้'}

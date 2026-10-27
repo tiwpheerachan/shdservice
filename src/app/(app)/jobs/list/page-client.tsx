@@ -11,6 +11,7 @@ import { useJobsPage, useStaff, useJobStats } from '@/data/db';
 import { cn } from '@/lib/utils';
 import { exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { useTourRestore } from '@/components/tour/tour';
 import { ExportButton } from '@/components/shared/export-button';
 import { toParams, useJobListUrl } from './use-job-list-url';
 import { JobFilterBar } from './job-filter-bar';
@@ -62,6 +63,7 @@ export default function JobListPage() {
   // filters + table state, kept in the URL; tat / kpi = the dashboard card a deep link came from
   const { init, draft, setDraft, setD, filters, narrowed, table, pageArgs, server, tat, kpi, clearAll, onSearch } =
     useJobListUrl();
+  useTourRestore(() => draft, setDraft); // a บทสอน leaves the filter bar as it found it
   const {
     rows: JOBS,
     total,

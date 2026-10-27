@@ -72,7 +72,10 @@ export function ReportView<T extends Record<string, unknown>>({
   // the defaults the filters declare change (a page passes new ones) → the form starts over from
   // them: adjusted while rendering (React's "state from props" pattern), not in an effect pass
   const defaultsKey = filters.map((f) => `${keyOf(f)}=${f.value ?? ''}`).join('|');
-  const [values, setValues] = React.useState<ReportValues>(() => defaultsOf(filters));
+  // ล้างค่า goes back to these, the first render's defaults: pages pass the applied range as `value`, so a
+  // later defaultsOf(filters) is the last search, not the report's opening range
+  const [initial] = React.useState(() => defaultsOf(filters));
+  const [values, setValues] = React.useState<ReportValues>(initial);
   const [seenKey, setSeenKey] = React.useState(defaultsKey);
   if (seenKey !== defaultsKey) {
     setSeenKey(defaultsKey);
@@ -115,9 +118,8 @@ export function ReportView<T extends Record<string, unknown>>({
           invalidateLists();
         }}
         onReset={() => {
-          const d = defaultsOf(filters);
-          setValues(d);
-          onApply?.(clean(d));
+          setValues(initial);
+          onApply?.(clean(initial));
         }}
       >
         {filters.map((f) => {

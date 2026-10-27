@@ -40,6 +40,7 @@ import {
 import { postJson, errMsg, uploadFile } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { closePaymentEdited, closeSchema, jobBalance, notClosableMsg, partsWaitingMsg } from '@/lib/validation/job';
+import { useTourRestore } from '@/components/tour/tour';
 
 function CloseForm() {
   const { push } = useToast();
@@ -63,6 +64,7 @@ function CloseForm() {
   // (the slip is not: an upload is saved to the job right away)
   const [saved, setSaved] = React.useState<typeof d | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
+  useTourRestore(() => d, setD); // a บทสอน leaves the payment / return fields as it found them
   // สลิปชำระเงิน → bucket oneservice/jobs/{no}/slip/… (path เก็บใน job.job_payment_slip_file_name)
   const onPickSlip = async (f: File | undefined) => {
     if (!f || !job) return;

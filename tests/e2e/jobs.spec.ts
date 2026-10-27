@@ -18,7 +18,7 @@ test('the owner opens a job: a job number is issued and the job is in the list',
     {
       customerCode: 'CE2E01',
       jobType: 'E2E ซ่อม',
-      so: 'SO-E2E',
+      so: '260901E2ESO001',
       channel: 'SHOPEE',
       saleOrderDate: today,
       warrantyMonth: 12,

@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from '@/lib/session';
 import { AppShell } from '@/components/layout/app-shell';
 import { AccessProvider } from '@/lib/use-access';
 import { userFromCookies, grantsForUserType } from '@/server/auth';
+import { tourState } from '@/server/services/tour';
 
 // Always evaluate the access gate at request time (never statically cached).
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // a failed grants read must not look like "no access" (→ /pending): let it reach app/error.tsx
   // (System Admin's too: Job Take is the one right an admin holds only when ticked — checkRight)
-  const grants = await grantsForUserType(user.userType);
+  // the tutorials' "asked already": a nicety — a failed read asks again rather than failing the page
+  const [grants, tour] = await Promise.all([
+    grantsForUserType(user.userType),
+    tourState(user.userId).catch(() => ({ seen: [], off: false })),
+  ]);
 
   return (
     <AccessProvider
@@ -43,6 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         role: user.role,
         isAdmin: user.isAdmin,
         grants,
+        tour,
       }}
     >
       <AppShell>{children}</AppShell>

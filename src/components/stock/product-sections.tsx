@@ -10,6 +10,7 @@ import type { Product } from '@/data/types';
 import { int } from '@/lib/utils';
 import type { FieldErrors } from '@/lib/validation';
 import { STORE_LOCATION_NAME } from '@/lib/status-ids';
+import { useTourRestore } from '@/components/tour/tour';
 import { type ProductForm, modelRows } from './product-form';
 
 /** a row of GET /api/products/:code's stock card */
@@ -65,6 +66,11 @@ export function ProductFields({ p, seeCost, ...f }: FormProps & { p: Product; se
   const { form, set, errors, ro } = f;
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
+  // บทสอน: what is tried in the dialog's form (models and status included) goes back before it closes
+  useTourRestore(
+    () => form,
+    (v) => (Object.keys(v) as (keyof ProductForm)[]).forEach((k) => set(k, v[k])),
+  );
   return (
     <FieldGrid cols={2}>
       <Field label="รหัสอะไหล่ (ระบบ)">
@@ -255,7 +261,7 @@ export function ProductColorStatus({ form, set, ro, sysCode }: Omit<FormProps, '
             form.forModelColor,
           )}
           disabled={ro}
-          emptyLabel="- - Please Select - -"
+          emptyLabel="- - เลือก - -"
           searchPlaceholder="พิมพ์ชื่อสี…"
         />
       </Field>

@@ -67,6 +67,7 @@ import type { FieldErrors } from '@/lib/validation';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useTourRestore } from '@/components/tour/tour';
 
 /* ------------------------------------------------------------------ *
  * Shared form state. Every section reads/writes this through context, and
@@ -343,6 +344,8 @@ export function JobFormProvider({ initial, children }: { initial?: JobFormState;
   const [saved, setSaved] = React.useState<JobFormState>(initial ?? EMPTY_JOB_FORM);
   const dirty = React.useMemo(() => JSON.stringify(s) !== JSON.stringify(saved), [s, saved]);
   useUnsavedChanges(dirty);
+  // a บทสอน leaves the form as it found it (every job screen)
+  useTourRestore(() => s, setS);
   const { errors, setErrors, run, clear, report, fromApi } = useFormErrors();
   // the job as loaded ("never worse"): the required fields it had + its values (an unchanged legacy
   // value passes the format rules) + its open date; null = new job (all required, opened today)
@@ -713,23 +716,19 @@ export function ProductSection({
           <ChannelField f={f} />
           <ShopSuggestField f={f} />
           <SaleDateField f={f} />
-
           <WarrantyMonthField f={f} />
           <ImeiField f={f} />
           <SerialField f={f} />
           <ExpireField f={f} />
-
           <WarrantyField f={f} />
           <BrandField f={f} />
           <ModelField f={f} />
           <ModelDetailField f={f} />
-
           <ReceptionTypeField f={f} />
           <ReceptionDateField f={f} />
           <TrackingField f={f} />
           <ShipperField f={f} />
-          <div className="hidden lg:block" aria-hidden />
-
+          <div className="hidden sm:block" aria-hidden /> {/* the notes start their own row on a 2-column grid too */}
           {notes}
         </FieldGrid>
       </Section>
@@ -744,17 +743,14 @@ export function ProductSection({
           <ChannelField f={f} repair />
           <SaleDateField f={f} />
           <WarrantyMonthField f={f} />
-
           <ImeiField f={f} />
           <SerialField f={f} />
           <ExpireField f={f} />
           <WarrantyField f={f} />
-
           <BrandField f={f} />
           <ModelField f={f} />
           <ModelDetailField f={f} />
-          <div className="hidden lg:block" aria-hidden />
-
+          <div className="hidden sm:block" aria-hidden /> {/* the notes start their own row on a 2-column grid too */}
           {notes}
         </FieldGrid>
       </Section>
@@ -1032,6 +1028,32 @@ export const AttachmentSection = React.forwardRef<AttachmentsHandle, Attachments
   );
 });
 export type { AttachmentsHandle };
+
+/**
+ * The shared job sections on a workflow screen (บันทึกซ่อม / Out-Source): read-only, saying why, for a user
+ * without "Job Management" edit — commonSections leaves them out of the save, so typing there would be lost.
+ */
+export function JobEditLock({
+  locked,
+  className,
+  children,
+}: {
+  locked: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset disabled={locked} className={cn('min-w-0 space-y-2', className)}>
+      {locked && (
+        <p role="note" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Lock className="h-3 w-3" aria-hidden />
+          แก้ได้เฉพาะผู้มีสิทธิ์แก้ไขข้อมูลงาน
+        </p>
+      )}
+      {children}
+    </fieldset>
+  );
+}
 
 /** FormActions `denied` on a screen the role may open but not save */
 export const VIEW_ONLY = 'ไม่มีสิทธิ์แก้ไข — ดูข้อมูลได้อย่างเดียว';

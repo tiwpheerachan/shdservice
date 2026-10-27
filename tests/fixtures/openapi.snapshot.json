@@ -2475,6 +2475,224 @@
         }
       }
     },
+    "/jobs/checks": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Warnings while a job is typed in (never a refusal)",
+        "description": "The Serial No. on other jobs (newest 5), the Sale Order No. on other customers' jobs (needs `customer`), a Serial that looks like another brand family's or like none of the chosen brand's, a shop that mostly sells another brand. Needs view on any job screen.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "serial",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "so",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The chosen brand (ยี่ห้อ) name."
+            },
+            "required": false,
+            "description": "The chosen brand (ยี่ห้อ) name.",
+            "name": "brand",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "shop",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The chosen customer code."
+            },
+            "required": false,
+            "description": "The chosen customer code.",
+            "name": "customer",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The job being edited — left out of the matches."
+            },
+            "required": false,
+            "description": "The job being edited — left out of the matches.",
+            "name": "job",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What to warn about.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serial": {
+                      "type": "object",
+                      "properties": {
+                        "jobs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "no": {
+                                "type": "string"
+                              },
+                              "date": {
+                                "type": "string",
+                                "description": "Opened on, YYYY-MM-DD."
+                              },
+                              "sameCustomer": {
+                                "type": "boolean"
+                              },
+                              "bounce": {
+                                "type": "boolean",
+                                "description": "Ticked งานเด้ง."
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "no",
+                              "date",
+                              "sameCustomer",
+                              "bounce",
+                              "model"
+                            ]
+                          }
+                        },
+                        "looksLike": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The brand whose serials look like this one (another family)."
+                        },
+                        "unusual": {
+                          "type": "boolean",
+                          "description": "None of the chosen brand family's jobs has a serial like it."
+                        }
+                      },
+                      "required": [
+                        "jobs",
+                        "looksLike",
+                        "unusual"
+                      ]
+                    },
+                    "so": {
+                      "type": "object",
+                      "properties": {
+                        "jobs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "no": {
+                                "type": "string"
+                              },
+                              "date": {
+                                "type": "string",
+                                "description": "Opened on, YYYY-MM-DD."
+                              },
+                              "sameCustomer": {
+                                "type": "boolean"
+                              },
+                              "bounce": {
+                                "type": "boolean",
+                                "description": "Ticked งานเด้ง."
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "no",
+                              "date",
+                              "sameCustomer",
+                              "bounce",
+                              "model"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "jobs"
+                      ]
+                    },
+                    "shop": {
+                      "type": "object",
+                      "properties": {
+                        "brand": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The brand this shop mostly sells (another family)."
+                        }
+                      },
+                      "required": [
+                        "brand"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "serial",
+                    "so",
+                    "shop"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/address": {
       "get": {
         "tags": [
@@ -9849,6 +10067,46 @@
             "required": false,
             "name": "type",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "quotation number contains"
+            },
+            "required": false,
+            "description": "quotation number contains",
+            "name": "no",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "customer name contains"
+            },
+            "required": false,
+            "description": "customer name contains",
+            "name": "customer",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "customer code contains"
+            },
+            "required": false,
+            "description": "customer code contains",
+            "name": "customerCode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the referenced job's IMEI contains"
+            },
+            "required": false,
+            "description": "the referenced job's IMEI contains",
+            "name": "imei",
+            "in": "query"
           }
         ],
         "responses": {
@@ -10071,6 +10329,46 @@
             },
             "required": false,
             "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "quotation number contains"
+            },
+            "required": false,
+            "description": "quotation number contains",
+            "name": "no",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "customer name contains"
+            },
+            "required": false,
+            "description": "customer name contains",
+            "name": "customer",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "customer code contains"
+            },
+            "required": false,
+            "description": "customer code contains",
+            "name": "customerCode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the referenced job's IMEI contains"
+            },
+            "required": false,
+            "description": "the referenced job's IMEI contains",
+            "name": "imei",
             "in": "query"
           },
           {
@@ -13535,6 +13833,118 @@
         }
       }
     },
+    "/me/tour": {
+      "post": {
+        "tags": [
+          "Sign-in"
+        ],
+        "summary": "Remember a step-by-step tutorial (บทสอน) answer for the signed-in user",
+        "description": "`seen` = the page path whose \"ดูวิธีใช้หน้านี้ไหม?\" was answered; `off` = never ask again on any page. Any approved user; only their own row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seen": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "example": "/jobs/new"
+                  },
+                  "off": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Remembered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input: `invalid_json`, or a form rule failed — `error` = \"กรอกข้อมูลไม่ครบ N ช่อง\" and `details.fields` = { field: message }.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 1 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sso/callback": {
       "get": {
         "tags": [
@@ -14966,6 +15376,93 @@
   },
   "components": {
     "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "กรอกข้อมูลไม่ครบ 2 ช่อง",
+            "description": "Thai, for the user (the pages show it as is). Its wording is not a contract."
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "example": {
+                  "phone": "ต้องระบุเบอร์โทรศัพท์"
+                },
+                "description": "A 400 from a form rule (src/lib/validation): the message per field, keyed as sent."
+              },
+              "stale": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ],
+                "description": "409: the `version` sent is not the stored row_version — reload, then save again."
+              },
+              "retryAfter": {
+                "type": "integer",
+                "description": "429: seconds until the window turns over."
+              },
+              "conflicts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "phone",
+                        "email",
+                        "taxId"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "taxId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "value",
+                    "code",
+                    "name",
+                    "phone",
+                    "email",
+                    "taxId"
+                  ]
+                },
+                "description": "409 on a customer save: the existing customers holding that phone / email / tax id."
+              }
+            }
+          },
+          "ref": {
+            "type": "string",
+            "description": "Only on an unexpected 500 / 503: the reference to quote — the details are in the server log."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
       "JobDetail": {
         "type": "object",
         "properties": {
@@ -15633,93 +16130,6 @@
           "key",
           "summary",
           "changes"
-        ]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string",
-            "example": "กรอกข้อมูลไม่ครบ 2 ช่อง",
-            "description": "Thai, for the user (the pages show it as is). Its wording is not a contract."
-          },
-          "details": {
-            "type": "object",
-            "properties": {
-              "fields": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "example": {
-                  "phone": "ต้องระบุเบอร์โทรศัพท์"
-                },
-                "description": "A 400 from a form rule (src/lib/validation): the message per field, keyed as sent."
-              },
-              "stale": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ],
-                "description": "409: the `version` sent is not the stored row_version — reload, then save again."
-              },
-              "retryAfter": {
-                "type": "integer",
-                "description": "429: seconds until the window turns over."
-              },
-              "conflicts": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "field": {
-                      "type": "string",
-                      "enum": [
-                        "phone",
-                        "email",
-                        "taxId"
-                      ]
-                    },
-                    "value": {
-                      "type": "string"
-                    },
-                    "code": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "phone": {
-                      "type": "string"
-                    },
-                    "email": {
-                      "type": "string"
-                    },
-                    "taxId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "field",
-                    "value",
-                    "code",
-                    "name",
-                    "phone",
-                    "email",
-                    "taxId"
-                  ]
-                },
-                "description": "409 on a customer save: the existing customers holding that phone / email / tax id."
-              }
-            }
-          },
-          "ref": {
-            "type": "string",
-            "description": "Only on an unexpected 500 / 503: the reference to quote — the details are in the server log."
-          }
-        },
-        "required": [
-          "error"
         ]
       },
       "JobInput": {

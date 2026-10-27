@@ -18,6 +18,7 @@ import type { Job } from '@/data/types';
 import { useJobsPage, useJobTypes, useManufacturers, useModels } from '@/data/db';
 import { api, postJson, errMsg, qs, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { useTourRestore } from '@/components/tour/tour';
 import { apiFieldErrors } from '@/lib/use-form-errors';
 import { useServerTable } from '@/lib/use-server-table';
 import { NOT_ENGINEER } from '@/lib/validation/job';
@@ -97,6 +98,14 @@ export default function AssignPage() {
 
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [removed, setRemoved] = React.useState<Set<string>>(new Set());
+  // a บทสอน leaves the filter bar and the ticks as it found them
+  useTourRestore(
+    () => ({ draft, picked: [...picked] }),
+    (v) => {
+      setDraft(v.draft);
+      setPicked(new Set(v.picked));
+    },
+  );
 
   const pool = React.useMemo(() => JOBS.filter((j) => !removed.has(j.no)), [JOBS, removed]);
 
@@ -135,7 +144,7 @@ export default function AssignPage() {
     }
   };
 
-  // POST /api/jobs/assign → engineer_id + status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  // POST /api/jobs/assign → engineer_id; a "งานใหม่" job also → status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
   const confirm = async () => {
     const list = [...picked];
     if (!list.length) return;
@@ -155,7 +164,7 @@ export default function AssignPage() {
       push({
         kind: 'success',
         title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
-        desc: "เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ'",
+        desc: "งานที่เป็น 'งานใหม่' เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ' · งานอื่นคงสถานะเดิม",
       });
       refetch();
     } catch (e) {
@@ -329,7 +338,7 @@ export default function AssignPage() {
             เจ้าหน้าที่ช่าง: <span className="font-medium text-foreground">{CURRENT_TECH}</span>
           </span>
         </div>
-        {/* wraps on phones: three buttons + the long confirm label are wider than 390px */}
+        {/* wraps on phones: three buttons are wider than 390px */}
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={toggleAll} disabled={pool.length === 0}>
             {allSelected ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
@@ -343,12 +352,10 @@ export default function AssignPage() {
               {NOT_ENGINEER} — ดูรายการได้อย่างเดียว
             </span>
           ) : can('Job Assign', 'edit') ? (
-            <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm}>
+            // data-tour-block: a บทสอน lets the user tick jobs, never take them
+            <Button size="sm" disabled={picked.size === 0 || saving} onClick={confirm} data-tour-block>
               <UserCheck className="h-3.5 w-3.5" />
-              <span className="sm:hidden">ยืนยันรับงาน</span>
-              <span className="hidden sm:inline">
-                ยืนยันรับงานนี้ และเปลี่ยนสถานะงานเป็น &lsquo;อยู่ระหว่างดำเนินการ&rsquo;
-              </span>
+              ยืนยันรับงาน ({picked.size} งาน)
             </Button>
           ) : (
             <span role="note" className="text-xs font-medium text-warning">

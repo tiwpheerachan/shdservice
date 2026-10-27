@@ -91,16 +91,34 @@ export const cleanCode = (v: unknown): string =>
     .replace(/[ΑΒΕΗΙΚΜΝΟΡΤΧΥΖАВЕКМНОРСТХ]/g, (c) => LOOKALIKE[c] ?? c)
     .toUpperCase();
 
+/* the Thai Kedmanee keyboard over the US one, key by key (unshifted, then shifted): "หฟสำ" = "sale" typed with
+   the keyboard left on Thai. Thai digits ๐–๙ (shift + the number row) count as the digits they are. */
+const US_KEYS = "1234567890-=qwertyuiop[]asdfghjkl;'zxcvbnm,./" + '!@#$%^&*()_+QWERTYUIOP{}ASDFGHJKL:"ZXCVBNM<>?';
+const TH_KEYS = 'ๅ/-ภถุึคตจขชๆไำพะัีรนยบลฟหกดเ้่าสวงผปแอิืทมใฝ' + '+๑๒๓๔ู฿๕๖๗๘๙๐"ฎฑธํ๊ณฯญฐ,ฤฆฏโฌ็๋ษศซ.()ฉฮฺ์?ฒฬฦ';
+const THAI = /[\u0E00-\u0E7F]/;
+const ON_THAI = new Map<string, string>(
+  [...TH_KEYS].flatMap((t, i) => (THAI.test(t) ? [[t, US_KEYS[i]!] as const] : [])),
+);
+for (let d = 0; d <= 9; d++) ON_THAI.set(String.fromCharCode(0x0e50 + d), String(d));
+/** what `v` was meant to be when typed with the keyboard on Thai — null when it holds no Thai character */
+export const typedOnThai = (v: unknown): string | null => {
+  const s = String(v ?? '');
+  return THAI.test(s) ? [...s].map((c) => ON_THAI.get(c) ?? c).join('') : null;
+};
+
 /** a parcel number as stored: cleanCode() without spaces ("ED 0063 9063 5TH" → "ED006390635TH") */
 export const cleanTracking = (v: unknown) => cleanCode(v).replace(/\s/g, '');
 /** optional parcel number (job reception / return, sale-order delivery — varchar 50); an unchanged legacy value (`prev`) passes */
+const TRACKING_RE = /^[A-Z0-9][A-Z0-9-]{5,39}$/;
+/** a well-formed parcel number (the rule below, on the cleaned value) */
+export const trackingAccepts = (v: unknown) => TRACKING_RE.test(cleanTracking(v));
 export const trackingField = (prev?: string | null) =>
   z
     .string()
     .nullish()
     .refine((v) => {
       const c = cleanTracking(v);
-      return !c || /^[A-Z0-9][A-Z0-9-]{5,39}$/.test(c) || (prev != null && c === cleanTracking(prev));
+      return !c || TRACKING_RE.test(c) || (prev != null && c === cleanTracking(prev));
     }, 'เลขพัสดุใช้ได้เฉพาะ A-Z 0-9 และ - (6–40 ตัว ไม่มีภาษาไทยหรือช่องว่าง)');
 
 /** free text of at most `max` characters (after clean) — the column length, so nothing is cut silently */

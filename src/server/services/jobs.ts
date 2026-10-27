@@ -481,6 +481,10 @@ const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   amount: job.jobTotalCost,
   closedDate: job.jobClosedDate,
   repairedDate: job.jobRepairedDate,
+  // รายงานการปิดงานซ่อม: TAT = วันที่ปิดงาน − วันที่เปิดงาน
+  tat: sql`(${job.jobClosedDate} - ${job.jobCreateDate})`,
+  returnType: job.returnCustomerType,
+  paymentAmount: job.jobPaymentAmount,
 };
 
 export type JobFilters = {
@@ -2495,7 +2499,8 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     });
 
     const implied = await writeSendRow(tx, jobNo, i, open[0], last, { back, sendBy, receiveBy, byUserId });
-    const target = newStatus ?? implied;
+    // the page sends the current status back unchanged (as บันทึกซ่อม): only a changed choice beats the implied 14 / 15
+    const target = (newStatus === status ? undefined : newStatus) ?? implied;
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
     return versionNow(tx, jobNo);
   });

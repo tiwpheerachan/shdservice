@@ -122,7 +122,7 @@ function RemoveLine({ line, lock, remove }: { line: Line; lock?: string; remove:
 /** phone: one card per line (the 14-column table does not fit) — the same fields, desktop keeps the table */
 function PartCards({ lines, lock, act, upd, remove, dup }: RowProps) {
   return (
-    <ul className="divide-y divide-border md:hidden">
+    <ul aria-label="รายการอะไหล่" className="divide-y divide-border md:hidden">
       {lines.length === 0 && (
         <li className="px-3 py-8 text-center text-xs text-muted-foreground">
           ยังไม่มีรายการอะไหล่ — ค้นหาในช่องด้านบนเพื่อเพิ่ม

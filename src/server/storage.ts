@@ -41,7 +41,10 @@ const EXT: Record<string, string> = {
   'image/png': '.png',
   'image/webp': '.webp',
   'application/pdf': '.pdf',
+  'image/svg+xml': '.svg',
 };
+/** a logo may also be an SVG (logos only — never a photo / slip: sharp would rasterise it) */
+export const LOGO_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
 
 /** first bytes of each accepted type (OneLink lib/api/validate.ts) */
 const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
@@ -50,7 +53,24 @@ const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
   'image/webp': (b) => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP',
   'application/pdf': (b) => ascii(b, 0, 5) === '%PDF-',
+  // text: checked whole by svgProblem
+  'image/svg+xml': () => true,
 };
+
+/**
+ * An SVG is a document, not pixels: it can carry script, event handlers, links and other files. Shown through
+ * <img> none of that runs, but the file is also opened on its own (a signed storage URL) — so only a plain
+ * drawing is taken: no script / handlers / javascript: / embedded HTML / entities, nothing loaded from elsewhere
+ * (an embedded raster `data:image/png|jpeg|webp|gif` and `#id` references are fine). Refused, never "cleaned".
+ */
+export function svgProblem(text: string): string | null {
+  const t = text.replace(/^\uFEFF/, '');
+  if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*|<!DOCTYPE svg[^>[]*>\s*)*<svg[\s>]/i.test(t))
+    return 'ไฟล์ไม่ใช่ SVG จริง';
+  const bad =
+    /<script|<foreignObject|<iframe|<embed|<object|<!ENTITY|\son[a-z]+\s*=|javascript:|(?:href|src)\s*=\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^"'\s>]|url\(\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^)"'\s]|@import/i;
+  return bad.test(t) ? 'SVG นี้มีสคริปต์หรือลิงก์ไปไฟล์อื่น — ส่งออกเป็น SVG ธรรมดา หรือใช้ PNG แทน' : null;
+}
 
 /**
  * An uploaded file is there, not empty, within the size, one of `types` — and its
@@ -66,6 +86,7 @@ export async function fileProblem(file: File, types: ReadonlySet<string> = ALLOW
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   if (!SIGNATURES[file.type]?.(head))
     return `ไฟล์ไม่ใช่ ${EXT[file.type]?.slice(1).toUpperCase()} จริง — รองรับเฉพาะ ${label}`;
+  if (file.type === 'image/svg+xml') return svgProblem(await file.text());
   return null;
 }
 

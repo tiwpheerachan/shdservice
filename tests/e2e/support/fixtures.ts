@@ -9,6 +9,16 @@ export async function signIn(page: Page, email: string, loginUrl = '/login'): Pr
   await page.getByLabel('Email').fill(email);
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.waitForURL((url) => url.origin === APP_ORIGIN && !url.pathname.startsWith('/api/'));
+  // the บทสอน offer ("ดูวิธีใช้หน้านี้ไหม?") sits over a page's top-right buttons: off for this account (tour.spec
+  // turns it back on), and the page read again without it. A person still pending has no row to keep: nothing asks
+  const off = await page.evaluate(() =>
+    fetch('/api/me/tour', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ off: true }),
+    }).then((r) => r.ok),
+  );
+  if (off) await page.reload();
 }
 
 /** Another person at the same browser: the session cookie goes, then a fresh SSO sign-in. */

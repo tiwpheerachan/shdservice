@@ -25,6 +25,7 @@ import {
 import { QuotationLineTable } from '@/components/quotation/line-items';
 import { type QuotationLine as Line, lineTotals } from '@/components/quotation/line-totals';
 import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/totals';
+import { useTourRestore } from '@/components/tour/tour';
 
 /** Shape returned by GET /api/quotations/:no (subset the form uses). */
 export type QuotationLoaded = {
@@ -148,6 +149,42 @@ export const QuotationForm = React.forwardRef<
   const idRef = React.useRef((initial?.lines.length ?? 0) + 1);
   // the job's quoted parts the lines were filled from (sent with a new quotation's save)
   const [jobParts, setJobParts] = React.useState<string>();
+  // a บทสอน that tried the form (typed, picked a job, added rows) leaves it as it found it
+  useTourRestore(
+    () => ({
+      type,
+      profileId,
+      lines,
+      service,
+      discount,
+      discountUnit,
+      vatRate,
+      remark,
+      status,
+      customer,
+      contact,
+      jobRef,
+      job,
+      jobParts,
+    }),
+    (v) => {
+      setType(v.type);
+      setProfileId(v.profileId);
+      setLines(v.lines);
+      setService(v.service);
+      setDiscount(v.discount);
+      setDiscountUnit(v.discountUnit);
+      setVatRate(v.vatRate);
+      setRemark(v.remark);
+      setStatus(v.status);
+      setCustomer(v.customer);
+      setContact(v.contact);
+      setJobRef(v.jobRef);
+      setJob(v.job);
+      setJobParts(v.jobParts);
+      fe.setErrors({});
+    },
+  );
 
   // the form as it opened (a loaded quotation, or empty / filled from ?job=) — anything else is an
   // unsaved edit

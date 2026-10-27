@@ -57,25 +57,15 @@ export default function QuotationListPage() {
   // every status in quotation_status (the fixed list is only the fallback while it loads)
   const { data: STATUSES } = useQuotationStatuses();
   const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
-  const textQ = table.q || filters.no || filters.customer || filters.customerCode || filters.imei;
+  // each box its own condition (ANDed); the list, the export and the report KPI read them alike (quotationFiltersFromQuery)
+  const query = { ...filters, jobNo: cleanCode(filters.jobNo) };
   const {
     rows: PAGE,
     total: totalRows,
     loading,
     error: loadError,
     refetch: retryLoad,
-  } = useQuotationsPage({
-    ...pageArgs,
-    // one text box rides on q (the API has no own param for no / customer / code / IMEI); the job no is its own (exact)
-    q: textQ,
-    jobNo: cleanCode(filters.jobNo),
-    status: filters.status,
-    from: filters.from,
-    to: filters.to,
-    type: filters.type,
-    warranty: filters.warranty,
-    brand: filters.brand,
-  });
+  } = useQuotationsPage({ ...pageArgs, ...query });
   const QUOTATIONS = PAGE;
 
   const columns: Column<Quotation>[] = [
@@ -187,20 +177,7 @@ export default function QuotationListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <ExportButton
-              run={() =>
-                exportXlsx('quotations', {
-                  q: textQ,
-                  jobNo: cleanCode(filters.jobNo),
-                  status: filters.status,
-                  from: filters.from,
-                  to: filters.to,
-                  type: filters.type,
-                  warranty: filters.warranty,
-                  brand: filters.brand,
-                })
-              }
-            />
+            <ExportButton run={() => exportXlsx('quotations', { ...query, q: table.q })} />
             {canAdd && (
               <Link href="/quotation/new">
                 <Button size="sm">

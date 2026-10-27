@@ -22,6 +22,7 @@ import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { MASTER_DETAIL_MAX, masterSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
 import { useFilterDraft } from '@/lib/use-filter-draft';
+import { useTourRestore } from '@/components/tour/tour';
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
 export type MasterKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types' | 'symptoms';
@@ -90,6 +91,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
 
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
+  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
   const openNew = () => {
     setEditing(null);
     setForm({ name: '', status: 'Active', group: '', detail: '', days: config.daysLabel ? '7' : '' });

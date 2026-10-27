@@ -353,6 +353,10 @@ const quotationFilters = {
   to: ymd,
   jobNo: s.optional(),
   type: s.optional(),
+  no: s.optional().describe('quotation number contains'),
+  customer: s.optional().describe('customer name contains'),
+  customerCode: s.optional().describe('customer code contains'),
+  imei: s.optional().describe("the referenced job's IMEI contains"),
 };
 resource(
   'quotations',

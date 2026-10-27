@@ -77,7 +77,13 @@ export function ProfileSelect({
           : 'หัวกระดาษ โลโก้ ที่อยู่ และเลขภาษีที่จะพิมพ์บนเอกสาร'
       }
     >
-      <Select value={value || def?.id || ''} disabled={busy} onChange={(e) => void change(Number(e.target.value))}>
+      {/* on a saved document a change saves at once: a บทสอน never lets it be tried (data-tour-block) */}
+      <Select
+        value={value || def?.id || ''}
+        disabled={busy}
+        data-tour-block={doc ? '' : undefined}
+        onChange={(e) => void change(Number(e.target.value))}
+      >
         {profiles.map((p) => (
           <option key={p.id} value={p.id}>
             {p.code} — {p.nameTh}

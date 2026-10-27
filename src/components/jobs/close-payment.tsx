@@ -72,7 +72,7 @@ function CostBreakdown({
   const net = netOf(SUMMARY);
   const deposit = job?.depositCost ?? 0;
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-4">
+    <div role="group" aria-label="ยอดเงินของงาน" className="rounded-lg border border-border bg-muted/30 p-4">
       <ul className="space-y-2 text-sm">
         {SUMMARY.map((s) => (
           <li key={s.label} className="flex justify-between gap-3">

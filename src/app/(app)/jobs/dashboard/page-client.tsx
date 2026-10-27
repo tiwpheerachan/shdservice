@@ -15,6 +15,7 @@ import { useDashboard, useJobs, useJobStatuses, useJobTypes } from '@/data/db';
 import { int, cn } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { useAccess } from '@/lib/use-access';
+import { useTourRestore } from '@/components/tour/tour';
 
 /* one restrained accent per status group — carried as a small dot + thin bar, never a fill */
 const TONE: Record<string, string> = {
@@ -151,11 +152,24 @@ export default function DashboardPage() {
   const [to, setTo] = React.useState(() => today());
   // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
   const [type, setType] = React.useState('');
+  // a บทสอน leaves the filters as it found them
+  useTourRestore(
+    () => ({ from, to, type }),
+    (v) => {
+      setFrom(v.from);
+      setTo(v.to);
+      setType(v.type);
+    },
+  );
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
+  // a date being typed (year 0002 → 0020 → 0202 → 2026) is not a range yet: only an empty box or a whole date
+  // (year 2000 on) is asked for — a partial year was a 400 per keystroke
+  const whole = (d: string) => !d || (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= '2000-01-01');
   // a reversed pair finds nothing: say so (as FilterBar does) and keep showing the last range that made sense
-  const reversed = !!from && !!to && from > to;
+  const reversed = whole(from) && whole(to) && !!from && !!to && from > to;
   const [range, setRange] = React.useState({ from, to, type });
-  if (!reversed && (range.from !== from || range.to !== to || range.type !== type)) setRange({ from, to, type });
+  if (!reversed && whole(from) && whole(to) && (range.from !== from || range.to !== to || range.type !== type))
+    setRange({ from, to, type });
   // presets use the Thai calendar (lib/dates), like the server's date filters
   const preset = (key: '7d' | '30d' | '90d' | 'month' | 'all') => {
     const now = today();
@@ -369,7 +383,8 @@ export default function DashboardPage() {
                 </span>
                 <span className="num text-2xs tabular-nums text-muted-foreground">{g.percent.toFixed(2)}%</span>
               </div>
-              <p className="mt-2 text-2xs text-muted-foreground">{g.sub}</p>
+              {/* g.sub is the API's group key (Pending …): said in Thai, as what the card opens */}
+              <p className="mt-2 text-2xs text-muted-foreground group-hover:text-primary">ดูรายการงาน →</p>
             </Link>
           ))}
         </div>
@@ -386,11 +401,13 @@ export default function DashboardPage() {
         bodyClass="p-0"
       >
         <TableScroll label="งานค้างตามสถานะและจำนวนวัน">
-          <table className="w-full min-w-[680px] text-sm">
+          {/* a phone scrolls it sideways: the status column stays on the left (sticky) so every number keeps
+              its row's name. border-separate: a sticky cell keeps its own hairline (collapsed borders stay behind) */}
+          <table className="w-full min-w-[680px] border-separate border-spacing-0 text-sm [&_tbody_td]:border-b [&_tbody_td]:border-border/60 [&_tbody_tr:last-child_td]:border-b-0 [&_tfoot_td]:border-t [&_tfoot_td]:border-border [&_th]:border-b [&_th]:border-border">
             <thead>
-              <tr className="border-b border-border text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 py-2.5 pl-5 pr-3 text-left font-medium">#</th>
-                <th className="py-2.5 pr-4 text-left font-medium">สถานะงาน</th>
+              <tr className="text-2xs uppercase tracking-wide text-muted-foreground">
+                <th className="w-10 py-2.5 pl-5 text-left font-medium">#</th>
+                <th className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-left font-medium">สถานะงาน</th>
                 {dayCols.map((c) => (
                   <th key={c.k} className="px-4 py-2.5 text-right font-medium">
                     {c.label}
@@ -411,8 +428,8 @@ export default function DashboardPage() {
                 </tr>
               )}
               {tat.map((r, i) => (
-                <tr key={r.status} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
-                  <td className="py-2.5 pl-5 pr-3">
+                <tr key={r.status}>
+                  <td className="py-2.5 pl-5">
                     <span className="flex items-center gap-2.5">
                       <span
                         className={cn(
@@ -423,7 +440,7 @@ export default function DashboardPage() {
                       <span className="num text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                     </span>
                   </td>
-                  <td className="py-2.5 pr-4 font-medium">{r.status}</td>
+                  <td className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 font-medium">{r.status}</td>
                   {(['d13', 'd47', 'd814', 'd1530'] as const).map((k) => (
                     <td key={k} className="num px-4 py-2.5 text-right tabular-nums">
                       <TatNum n={r[k]} href={tatHref(k, type, { id: r.statusId, name: r.status })} />
@@ -444,8 +461,9 @@ export default function DashboardPage() {
             </tbody>
             {tat.length > 0 && (
               <tfoot>
-                <tr className="border-t border-border text-sm">
-                  <td colSpan={2} className="py-2.5 pl-5 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr className="text-sm">
+                  <td />
+                  <td className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-xs uppercase tracking-wide text-muted-foreground">
                     รวมทั้งสิ้น
                   </td>
                   {dayCols.map((c) => (
@@ -618,8 +636,8 @@ export default function DashboardPage() {
                 </tr>
               )}
               {(jobsError ? [] : JOBS.slice(0, 6)).map((j) => (
-                <tr key={j.no} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
-                  <td className="num py-2.5 pl-5 font-medium text-primary">{j.no}</td>
+                <tr key={j.no} className="border-b border-border/60 last:border-0">
+                  <td className="num py-2.5 pl-5 font-medium">{j.no}</td>
                   <td className="num py-2.5 text-xs text-muted-foreground">{j.openDate}</td>
                   <td className="max-w-[220px] truncate py-2.5 pr-3">{j.customer}</td>
                   <td className="hidden py-2.5 pr-3 md:table-cell">{j.brandModel}</td>

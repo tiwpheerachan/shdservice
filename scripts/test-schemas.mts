@@ -3,7 +3,7 @@
  * Pure: no DB, no network.
  */
 import assert from 'node:assert/strict';
-import { validate, summary, isRealDate } from '../src/lib/validation/index.ts';
+import { validate, summary, isRealDate, typedOnThai } from '../src/lib/validation/index.ts';
 import {
   jobSchema as jobSchemaOf,
   filledRequired,
@@ -22,6 +22,7 @@ import {
   noteMaxLength,
   NO_SERIAL,
   STATUS_CLOSED_TRACKED,
+  soAccepts,
   type JobCheck,
   type JobRequiredKey,
 } from '../src/lib/validation/job.ts';
@@ -39,7 +40,8 @@ import {
   shippingProfileSchema,
 } from '../src/lib/validation/admin.ts';
 import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '../src/lib/validation/stock.ts';
-import { fileProblem } from '../src/server/storage.ts';
+import { fileProblem, LOGO_TYPES } from '../src/server/storage.ts';
+import { readdirSync, readFileSync } from 'node:fs';
 import { clampInt, orderBy, ymd } from '../src/server/paging.ts';
 import { version } from '../src/server/contract/common.ts';
 import { sql } from 'drizzle-orm';
@@ -69,7 +71,7 @@ const jobSchema = (keep?: readonly JobRequiredKey[], check: JobCheck = {}) =>
 const fullJob = {
   customerCode: 'C00001',
   jobType: 'งานซ่อม',
-  so: 'SO-1',
+  so: '260901ABCD1234',
   channel: 'SHOPEE',
   saleOrderDate: '2026-09-01',
   warrantyMonth: '12',
@@ -521,6 +523,45 @@ for (const [name, file, accepted] of fileChecks) {
 const pdfAsImage = await fileProblem(new File([PDF], 'a.pdf', { type: 'application/pdf' }), new Set(['image/png']));
 test('images-only kinds refuse a real PDF', () => assert.ok(pdfAsImage));
 
+console.log('\nA logo may be an SVG — a plain drawing only (fileProblem with LOGO_TYPES)');
+const svgFile = (text: string) => new File([text], 'logo.svg', { type: 'image/svg+xml' });
+// real courier logos (tests/fixtures/logos — exported from Illustrator & co: xml prolog, comments, DOCTYPE)
+for (const f of readdirSync('tests/fixtures/logos')) {
+  const problem = await fileProblem(svgFile(readFileSync(`tests/fixtures/logos/${f}`, 'utf8')), LOGO_TYPES);
+  test(`logo ${f} → accepted`, () => assert.equal(problem, null));
+}
+const svgChecks: [string, string, boolean][] = [
+  [
+    'shapes, a #gradient, an embedded PNG',
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(#g)"/><image href="data:image/png;base64,iVBOR"/></svg>',
+    true,
+  ],
+  ['<script>', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', false],
+  ['an onload handler', '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>', false],
+  [
+    'a javascript: link',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)"><rect/></a></svg>',
+    false,
+  ],
+  [
+    'an image from another site',
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.test/x.png"/></svg>',
+    false,
+  ],
+  [
+    'embedded HTML (foreignObject)',
+    '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div/></foreignObject></svg>',
+    false,
+  ],
+  ['an entity (billion laughs)', '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "x">]><svg>&a;</svg>', false],
+  ['HTML declared as SVG', '<html><body>hi</body></html>', false],
+];
+for (const [name, text, accepted] of svgChecks) {
+  const problem = await fileProblem(svgFile(text), LOGO_TYPES);
+  test(`SVG logo: ${name} → ${accepted ? 'accepted' : 'refused'}`, () =>
+    assert.equal(problem === null, accepted, problem ?? ''));
+}
+
 console.log('\nQuery params cannot crash a list (src/server/paging.ts)');
 test('limit: junk / NaN → default, else clamped to 1..max', () => {
   assert.equal(clampInt(null, 300, 1000), 300);
@@ -793,10 +834,12 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     return { v, schema: jobSchema(filledRequired(v), { prev: v, openDate }) };
   };
   test('J: Sale Order No. — A-Z 0-9 / . _ -, 4–50, not all zeros; lower case / spaces are cleaned', () => {
+    // a channel without a marketplace shape (those: the "by marketplace" test below)
+    const dealer = { ...fullJob, channel: 'ตัวแทนจำหน่าย' };
     for (const good of ['SO2600760', 'so-2600760', ' 2600760/1 ', 'INV.123_A'])
-      assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, so: good }), {}, good);
+      assert.deepEqual(errorsOf(jobSchema(), { ...dealer, so: good }), {}, good);
     for (const bad of ['SO', '0000', 'ไม่มี SO', 'SO 123', 'S'.repeat(51), '#123'])
-      assert.ok(errorsOf(jobSchema(), { ...fullJob, so: bad }).so, bad);
+      assert.ok(errorsOf(jobSchema(), { ...dealer, so: bad }).so, bad);
   });
   test('J: Serial — 4–50 of A-Z 0-9 / . _ : -, a typed "S/N:" prefix is dropped; Thai notes refused', () => {
     for (const good of ['W2210A35FEU0026005', 'sn: ABC123', 'S/N:ABC123', 'BX8/03E-JC3100321'])
@@ -1037,6 +1080,43 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     assert.equal(masterNameKey(' Poco  F5\n'), masterNameKey('POCOF5'), 'duplicates ignore case and spaces');
   });
 }
+
+test('Sale Order No. by marketplace: Shopee 14 (a real YYMMDD + 8), Lazada 15–16 digits, TikTok 18 — only a changed SO / channel', () => {
+  const so = (channel: string, v: string) => errorsOf(jobSchema(), { ...fullJob, channel, so: v }).so;
+  assert.equal(so('SHOPEE', '251015ABCD1234'), undefined);
+  assert.equal(so('SHOPEE', '251015abcd1234'), undefined, 'checked upper-cased, as stored');
+  assert.match(so('SHOPEE', 'SO2600760') ?? '', /Shopee/);
+  assert.ok(so('SHOPEE', '251315ABCD1234'), 'month 13 is no date');
+  assert.ok(so('SHOPEE', '251015ABCD123'), '13 characters');
+  assert.equal(so('LAZADA', '581234567890123'), undefined);
+  assert.equal(so('LAZADA', '5812345678901234'), undefined);
+  assert.match(so('LAZADA', '58123456789012') ?? '', /Lazada/);
+  assert.equal(so('TIKTOK', '576123456789012345'), undefined);
+  assert.match(so('TIKTOK', '57612345678901234') ?? '', /TikTok/);
+  assert.equal(
+    so('ตัวแทนจำหน่าย', '123'),
+    'Sale Order No. ใช้ได้เฉพาะ A-Z 0-9 / . _ - (4–50 ตัว)',
+    'other channels: the general rule',
+  );
+  assert.equal(so('ตัวแทนจำหน่าย', 'INV-2026/001'), undefined);
+  // an older job keeps its number: unchanged SO and channel pass; changing either applies the rule
+  const prev = { ...fullJob, so: 'SO-OLD-1', channel: 'SHOPEE' };
+  const edit = (v: object) => errorsOf(jobSchema(undefined, { prev }), { ...prev, ...v }).so;
+  assert.equal(edit({}), undefined);
+  assert.ok(edit({ so: 'SO-OLD-2' }));
+  assert.ok(edit({ channel: 'LAZADA' }));
+  assert.equal(soAccepts('581234567890123', 'LAZADA'), true);
+  assert.equal(soAccepts('SO-1', 'LAZADA'), false);
+});
+
+test('typedOnThai: what was meant with the keyboard left on Thai (Kedmanee → US), Thai digits as digits', () => {
+  assert.equal(typedOnThai('หฟสำ'), 'sale');
+  assert.equal(typedOnThai('นพกำพ ืีทิำพ'), 'order number');
+  assert.equal(typedOnThai('ฟำ๑๒๓'), 'ae123');
+  assert.equal(typedOnThai('ๅ/-ภถ'), '1/-45', 'the number row: only the Thai keys change');
+  assert.equal(typedOnThai('AE123'), null, 'no Thai: nothing to suggest');
+  assert.equal(typedOnThai(''), null);
+});
 
 test('contract `version`: parsed to what assertVersion reads (a number, or none) — a stale / junk one still 409s', () => {
   const v = (x: unknown) => version.parse(x);

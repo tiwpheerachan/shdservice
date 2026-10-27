@@ -110,7 +110,7 @@ export function CloseReturnSection({
       <FieldGrid>
         <Field label="วิธีการส่งคืนสินค้า" required error={errors['return.type']}>
           <Select value={d.returnType} onChange={(e) => upd({ returnType: e.target.value })}>
-            <option value="">- - Please Select - -</option>
+            <option value="">- - เลือก - -</option>
             {RETURN_METHODS.map((m) => (
               <option key={m}>{m}</option>
             ))}
@@ -197,7 +197,7 @@ export function CloseReturnSection({
           }
         >
           <Select value={d.status} onChange={(e) => upd({ status: e.target.value })}>
-            <option value="">- - Please Select - -</option>
+            <option value="">- - เลือก - -</option>
             {CLOSE_STATUS_OPTIONS.map((st) => (
               <option key={st}>{st}</option>
             ))}

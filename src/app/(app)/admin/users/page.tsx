@@ -96,7 +96,9 @@ export default function UsersPage() {
         description="เพิ่มผู้ใช้จากไดเรกทอรี Lark และกำหนดสิทธิ์การเข้าถึงตามบทบาท"
         actions={
           <>
-            <ExportButton run={() => exportXlsx('users', { deleted: view === 'deleted' ? 'only' : 'exclude' })} />
+            <ExportButton
+              run={() => exportXlsx('users', { ...filter, deleted: view === 'deleted' ? 'only' : 'exclude' })}
+            />
             <Button size="sm" onClick={openAdd}>
               <Plus className="h-3.5 w-3.5" />
               เพิ่มผู้ใช้งาน

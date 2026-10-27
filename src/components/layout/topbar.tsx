@@ -11,6 +11,7 @@ import { OverdueBell } from './overdue-bell';
 import { cn } from '@/lib/utils';
 import { useMe } from '@/lib/use-me';
 import { startSignOut } from '@/lib/navigation';
+import { useTour } from '@/components/tour/tour';
 
 export function Topbar({
   onOpenMobile,
@@ -24,6 +25,7 @@ export function Topbar({
   collapsed?: boolean;
 }) {
   const pathname = usePathname();
+  const tour = useTour();
   const crumb = findBreadcrumb(pathname);
 
   // the tab title names the page (WCAG 2.4.2) — the (app) pages are client pages without metadata of
@@ -103,14 +105,27 @@ export function Topbar({
 
       <SessionTimer />
 
-      <Link
-        href="/admin/guide"
-        title="คู่มือการใช้งาน"
-        aria-label="คู่มือการใช้งาน"
-        className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
-      >
-        <CircleHelp className="h-4 w-4" />
-      </Link>
+      {/* a page with a บทสอน starts it; the others open the full guide */}
+      {tour.has ? (
+        <button
+          type="button"
+          onClick={tour.start}
+          title="สอนการใช้งานหน้านี้"
+          aria-label="สอนการใช้งานหน้านี้"
+          className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
+        >
+          <CircleHelp className="h-4 w-4" />
+        </button>
+      ) : (
+        <Link
+          href="/admin/guide"
+          title="คู่มือการใช้งาน"
+          aria-label="คู่มือการใช้งาน"
+          className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
+        >
+          <CircleHelp className="h-4 w-4" />
+        </Link>
+      )}
 
       <OverdueBell />
 
