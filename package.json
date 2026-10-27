@@ -49,7 +49,7 @@
     "exceljs": "4.4.0",
     "lru-cache": "11.5.3",
     "lucide-react": "0.469.0",
-    "next": "16.3.8",
+    "next": "16.4.3",
     "pg": "8.23.0",
     "radix-ui": "1.6.7",
     "react": "19.2.8",
@@ -60,7 +60,7 @@
     "swr": "2.5.1",
     "tailwind-merge": "3.7.0",
     "tw-animate-css": "1.4.0",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@hrefcl/apidoc": "5.1.0",
@@ -70,11 +70,11 @@
     "@types/pg": "8.23.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "dotenv": "17.4.2",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.8",
+    "eslint-config-next": "16.4.3",
     "eslint-config-prettier": "10.1.8",
     "postcss": "8.5.28",
     "prettier": "3.9.9",
