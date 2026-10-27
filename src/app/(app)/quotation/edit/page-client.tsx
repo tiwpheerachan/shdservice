@@ -17,6 +17,7 @@ import { useAccess } from '@/lib/use-access';
 import { quoteJobNote } from '@/lib/quote-job';
 import { quoteExpired } from '@/lib/quote-expiry';
 import { QUOTE_VALID_DAYS } from '@/lib/company';
+import { profileLock } from '@/lib/profile-lock';
 
 function EditQuotation() {
   const { push } = useToast();
@@ -120,6 +121,7 @@ function EditQuotation() {
             <PrintButton
               label="พิมพ์ใบเสนอราคา"
               kind="quotation"
+              locked={profileLock('quotation', { statusId: loaded?.statusId })}
               no={no ?? ''}
               profileId={loaded?.documentProfileId}
               href={`/print/quotation/${encodeURIComponent(no ?? '')}`}

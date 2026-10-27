@@ -311,8 +311,9 @@ function Runner({
     const bring = () => {
       if (!els.length) return;
       const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      // a wide table the card talks about the last column of: scrolled sideways to it
-      if (toEnd) els[0]!.scrollTo({ left: els[0]!.scrollWidth, behavior: smooth ? 'smooth' : 'auto' });
+      // a wide table the card talks about the last column of: its scroll box sideways to it (at once — the
+      // scrollIntoView below would cancel a smooth one); the lit part may be the header row inside it
+      if (toEnd) (els[0]!.closest<HTMLElement>('.table-scroll') ?? els[0]!).scrollTo({ left: els[0]!.scrollWidth });
       // inside a box that scrolls on its own (a dialog's body): the step's fields to its top, all of them that fit;
       // a table wider than a phone: sideways to the first one — the page itself is placed below
       const sc = scroller(els[0]!);

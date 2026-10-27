@@ -30,6 +30,7 @@ import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 function EditSaleOrder() {
   const { push } = useToast();
@@ -108,14 +109,17 @@ function EditSaleOrder() {
   const [paidLater, setPaidLater] = React.useState('');
   const attachSlip = async (f: File | undefined) => {
     if (!f || !no) return;
+    let ok = true;
     try {
       await upload('/api/upload', { kind: 'sale-order-slip', id: no, paymentAmount: paidLater }, f);
       push({ kind: 'success', title: 'แนบสลิปการชำระเงินแล้ว', desc: f.name });
       setPaidLater('');
     } catch (e) {
       push({ kind: 'error', title: 'แนบสลิปไม่สำเร็จ', desc: errMsg(e) });
+      ok = false; // the file input lets go of the name
     }
     void reload();
+    return ok;
   };
 
   // อนุมัติ → ตัดสต๊อก (WHO type 4) ทันที ตามพฤติกรรมระบบเดิม
@@ -320,7 +324,11 @@ function EditSaleOrder() {
                   className="num text-right"
                 />
               </Field>
-              <Field label="สลิปหลักฐานการโอน" className="flex-1">
+              <Field
+                label="สลิปการชำระเงิน"
+                className="flex-1"
+                hint="อัปโหลดแล้วบันทึกเข้าระบบทันที พร้อมจำนวนเงินที่กรอก"
+              >
                 <FileInput
                   placeholder="แนบสลิปการชำระเงิน (JPG, PNG, PDF)"
                   accept=".jpg,.jpeg,.png,.webp,.pdf"
@@ -352,6 +360,7 @@ function EditSaleOrder() {
               <PrintButton
                 label="พิมพ์ใบสั่งขาย"
                 kind="sale_order"
+                locked={profileLock('sale_order', { statusId: loaded?.approveId, cancelled: loaded?.cancelled })}
                 no={no ?? ''}
                 profileId={loaded?.documentProfileId}
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}

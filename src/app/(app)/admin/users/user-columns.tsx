@@ -55,6 +55,7 @@ export function userColumns({
       width: '52px',
       align: 'center',
       sortable: false,
+      hideBelow: 'sm', // phones: name + role + action
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {
@@ -120,12 +121,12 @@ export function userColumns({
       key: 'status',
       header: 'สถานะ',
       width: '100px',
+      hideBelow: 'sm', // a pending sign-up still shows: its action is "อนุมัติ"
       cell: (r) => <StatusBadge r={r} />,
     },
     {
       key: 'action',
       header: 'Action',
-      width: '180px',
       align: 'center',
       sortable: false,
       cell: (r) =>

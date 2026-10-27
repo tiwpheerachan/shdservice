@@ -11,6 +11,7 @@ import {
   SIGNED_IN,
   byNo,
   choice,
+  errorResponse,
   jsonResponse,
   notFound,
   version,
@@ -249,7 +250,8 @@ export const documentProfileSet = defineOperation({
   path: '/documents/profile',
   tags: ['Documents'],
   summary: 'Change "ออกเอกสารในนาม" of an existing job, quotation or sale order',
-  description: "Edit on the document's module. The number never changes; audited.",
+  description:
+    "Edit on the document's module. The number never changes; audited. Fixed once the document is approved / closed (src/lib/profile-lock.ts).",
   body: z.object({
     // in the order the route always checked them
     kind: z.enum(['job', 'quotation', 'sale_order'], { error: 'kind required' }),
@@ -274,6 +276,9 @@ export const documentProfileSet = defineOperation({
     ...SIGNED_IN,
     ...JSON_BODY,
     ...notFound('No such document or profile.'),
+    409: errorResponse(
+      'The document is fixed: a sale order approved / denied / cancelled, a quotation agreed / declined / cancelled / deleted, a closed job — `error` says which.',
+    ),
   },
 });
 

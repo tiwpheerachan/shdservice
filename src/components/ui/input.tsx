@@ -29,10 +29,11 @@ export function FileInput({
   onFile,
   disabled,
   ...props
-}: { placeholder?: string; onFile: (f: File | undefined) => void } & Omit<
-  React.InputHTMLAttributes<HTMLInputElement>,
-  'type' | 'onChange' | 'className'
->) {
+}: {
+  placeholder?: string;
+  /** `false` (or a promise of it) = the upload failed: the chosen file's name is not kept on screen */
+  onFile: (f: File | undefined) => void | boolean | Promise<void | boolean>;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange' | 'className'>) {
   const field = useFieldControl(props.id);
   const [name, setName] = React.useState('');
   // one upload at a time: a second file picked while one is still going up would race it
@@ -56,8 +57,8 @@ export function FileInput({
         onChange={(e) => {
           const f = e.target.files?.[0];
           setName(f?.name ?? '');
-          onFile(f);
           e.target.value = ''; // the same file can be chosen again (after a failed upload)
+          void Promise.resolve(onFile(f)).then((ok) => ok === false && setName(''));
         }}
       />
     </label>

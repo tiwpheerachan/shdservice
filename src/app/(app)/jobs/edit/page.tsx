@@ -31,6 +31,7 @@ import { PrintButton } from '@/components/shared/print-button';
 import { TrackLink } from '@/components/shared/track-link';
 import { patchJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { profileLock } from '@/lib/profile-lock';
 
 function EditJobForm() {
   const { push } = useToast();
@@ -129,6 +130,7 @@ function EditJobForm() {
               <PrintButton
                 label="พิมพ์ใบรับงาน"
                 kind="job"
+                locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                 no={job?.no ?? ''}
                 profileId={job?.documentProfileId}
                 href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
@@ -139,6 +141,7 @@ function EditJobForm() {
                 <PrintButton
                   label="พิมพ์ใบส่งคืน"
                   kind="job"
+                  locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                   no={job.no}
                   profileId={job.documentProfileId}
                   href={`/print/job/${encodeURIComponent(job.no)}/return`}

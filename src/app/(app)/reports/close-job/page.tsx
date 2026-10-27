@@ -14,16 +14,11 @@ import { kpisOr, useReportAccess, JOB_SCREENS } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
-// TAT = วันที่ปิดงาน − วันที่เปิดงาน
+// TAT = วันที่ปิดงาน − วันที่เปิดงาน, calendar days (date parts only) — the same count as the server's "เกิน 30 วัน"
 const tatDays = (r: Job) => {
   if (!r.closedDate || !r.openDate) return 0;
-  return Math.max(
-    0,
-    Math.round(
-      (new Date(r.closedDate.replace(' ', 'T')).getTime() - new Date(r.openDate.replace(' ', 'T')).getTime()) /
-        86400000,
-    ),
-  );
+  const day = (s: string) => Date.parse(`${s.slice(0, 10)}T00:00:00Z`);
+  return Math.max(0, Math.round((day(r.closedDate) - day(r.openDate)) / 86400000));
 };
 
 const columns: Column<Job>[] = [
@@ -56,7 +51,9 @@ const columns: Column<Job>[] = [
     value: (r) => tatDays(r),
     cell: (r) => {
       const d = tatDays(r);
-      return <span className={d > 10 ? 'text-danger font-semibold' : ''}>{d}</span>;
+      return (
+        <span className={d > 30 ? 'font-semibold text-danger' : d > 10 ? 'font-semibold text-warning' : ''}>{d}</span>
+      );
     },
   },
   {
@@ -124,7 +121,7 @@ export default function Page() {
       kpis={kpisOr(sumError, [
         { label: 'งานที่ปิดแล้ว', value: int(S?.total ?? 0), tone: 'success' },
         { label: 'ยอดรับชำระรวม', value: baht(total) },
-        { label: 'TAT เฉลี่ย (วัน)', value: avg },
+        { label: 'TAT เฉลี่ย (วัน)', value: avg, sub: 'สีส้ม = เกิน 10 วัน · สีแดง = เกิน 30 วัน' },
         { label: 'เกิน 30 วัน', value: int(over30), tone: 'danger' },
       ])}
       columns={columns}

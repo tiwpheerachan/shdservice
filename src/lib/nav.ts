@@ -46,7 +46,7 @@ export const NAV: NavGroup[] = [
       { title: 'รายการอะไหล่ทั้งหมด', href: '/stock/products' },
       { title: 'รับเข้าอะไหล่', href: '/stock/receive' },
       { title: 'ตัดจ่ายอะไหล่', href: '/stock/pick' },
-      { title: 'ประวัติการเคลื่อนไหว', href: '/stock/inventory' },
+      { title: 'ประวัติการเคลื่อนไหวเข้า-ออก', href: '/stock/inventory' },
     ],
   },
   {

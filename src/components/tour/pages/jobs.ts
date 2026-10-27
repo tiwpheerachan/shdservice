@@ -63,11 +63,12 @@ export const JOBS_TOURS: Record<string, Tour> = {
         look: true,
       },
       {
-        target: 'main [aria-label="งานค้างตามสถานะและจำนวนวัน"]',
+        // the header row, not the whole table: ~15 status rows are taller than a phone, the card would cover them
+        target: 'main [aria-label="งานค้างตามสถานะและจำนวนวัน"] thead',
         title: 'TAT — งานค้าง',
-        body: 'งานที่ยังไม่ปิดทั้งหมด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) แถวละสถานะ คอลัมน์คือจำนวนวันนับจากวันเปิดงาน · ช่อง "เกิน 30 วัน" ที่มีเกิน 20 งานเป็นตัวแดง ควรตามก่อน · กดตัวเลขเพื่อเปิดรายการงานชุดนั้น',
+        body: 'แถวด้านล่างคือแต่ละสถานะของงานที่ยังไม่ปิด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) · คอลัมน์คือจำนวนวันนับจากวันเปิดงาน · ช่อง "เกิน 30 วัน" ที่มีเกิน 20 งานเป็นตัวแดง ควรตามก่อน · กดตัวเลขเพื่อเปิดรายการงานชุดนั้น',
         look: true,
-        toEnd: true, // a phone: the table scrolled to "เกิน 30 วัน" (the status column stays on the left)
+        toEnd: true, // a phone: the table (the thead's .table-scroll) scrolled to "เกิน 30 วัน" — the status column stays on the left
       },
       {
         target: 'main section:has(> div > svg[role="img"])',
@@ -249,7 +250,9 @@ export const JOBS_TOURS: Record<string, Tour> = {
         body: ({ has }) =>
           'หมายเลขงาน วันที่ เปิดงานโดย และสถานะงาน แก้ไม่ได้ — สถานะเปลี่ยนเองตามขั้นตอน (รับงาน บันทึกงานซ่อม ปิดงาน)' +
           (has('field:ออกเอกสารในนาม')
-            ? ' · ออกเอกสารในนาม: บริษัทบนหัวเอกสารที่พิมพ์ เปลี่ยนแล้วบันทึกทันทีไม่ต้องกดบันทึก (ระหว่างบทสอนเปลี่ยนไม่ได้)'
+            ? !has('main select[data-tour-block]:not(:disabled)')
+              ? ' · ออกเอกสารในนาม: บริษัทบนหัวเอกสาร เปลี่ยนไม่ได้แล้ว (เหตุผลใต้ช่อง)'
+              : ' · ออกเอกสารในนาม: บริษัทบนหัวเอกสาร เลือกแล้วบันทึกทันที (ระหว่างบทสอนเปลี่ยนไม่ได้)'
             : ''),
         // ออกเอกสารในนาม saves on change (ProfileSelect with a doc): never tried here
         look: true,

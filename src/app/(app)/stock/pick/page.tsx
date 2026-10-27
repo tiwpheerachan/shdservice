@@ -368,7 +368,7 @@ export default function PickPage() {
     <>
       <PageHeader
         title="ตัดจ่ายอะไหล่"
-        description="Stock Module » จ่ายอะไหล่ — สร้างเอกสารจ่ายออกตามงานซ่อม / ใบสั่งขาย"
+        description="Stock Module » ตัดจ่ายอะไหล่ตามงานซ่อม / ใบสั่งขาย / อื่นๆ และรับคืนอะไหล่ที่จ่ายไปแล้วเข้าคลัง"
       />
 
       {/* document header */}

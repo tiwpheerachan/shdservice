@@ -4,7 +4,7 @@ import type { documentProfileSave } from '@/server/contract/admin';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { asc, eq, ne, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { documentProfile, job, quotationHd, saleOutHd } from '@/db/schema';
+import { documentProfile, job, jobStatus, quotationHd, saleOutHd } from '@/db/schema';
 import { HttpError } from '@/server/auth';
 import { assertValid } from '@/server/validate';
 import { documentProfileSchema } from '@/lib/validation/admin';
@@ -12,6 +12,9 @@ import { taxIdDigits } from '@/lib/validation/customer';
 import { clean, cleanCode } from '@/lib/validation';
 import { audit, diff } from '@/server/audit';
 import { nowThai } from '@/server/mappers/format';
+import { RS } from '@/server/record-status';
+import { JOB_GROUP } from '@/lib/status-ids';
+import { profileLock, type DocumentKind } from '@/lib/profile-lock';
 
 /**
  * "ออกเอกสารในนาม" — the company/brand whose letterhead (logo, name, address,
@@ -21,8 +24,8 @@ import { nowThai } from '@/server/mappers/format';
  *
  * Document NUMBERS are NOT brand-specific: J / Q / SO + year + one running
  * series for the whole company, exactly like the legacy app. The profile can be
- * changed on a document at any time (edit screen, or from the print button) and
- * the change is audited. The prefix_* columns are legacy of the first design and
+ * changed on a document (edit screen, or from the print button) until it is
+ * approved / closed (profileLock) and the change is audited. The prefix_* columns are legacy of the first design and
  * always hold J / Q / SO.
  */
 export type DocumentProfile = {
@@ -296,16 +299,19 @@ export async function setDocumentProfileLogo(id: number, logoPath: string, byUse
 }
 
 /* ------------------------------------------------------------------ *
- * Change "ออกเอกสารในนาม" of an existing document — allowed at any time; the
- * number never changes (numbers are not brand-specific). Audited under the
- * document's own module so it shows in the job's history.
+ * Change "ออกเอกสารในนาม" of an existing document — until it is approved / closed
+ * (profileLock: 409); the number never changes (numbers are not brand-specific).
+ * Audited under the document's own module so it shows in the job's history.
  * ------------------------------------------------------------------ */
-export type DocumentKind = 'job' | 'quotation' | 'sale_order';
+export type { DocumentKind };
+export { DOC_MODULE } from '@/lib/profile-lock';
 const DOC = {
   job: {
     table: job,
     key: job.jobNo,
     col: job.documentProfileId,
+    status: job.jobStatusId,
+    rs: job.recordStatus,
     module: 'Job Management',
     entity: 'job',
     label: 'งาน',
@@ -314,6 +320,8 @@ const DOC = {
     table: quotationHd,
     key: quotationHd.quotationNo,
     col: quotationHd.documentProfileId,
+    status: quotationHd.quotationStatusId,
+    rs: quotationHd.recordStatus,
     module: 'Quotation',
     entity: 'quotation_hd',
     label: 'ใบเสนอราคา',
@@ -322,16 +330,13 @@ const DOC = {
     table: saleOutHd,
     key: saleOutHd.saleOutHdNo,
     col: saleOutHd.documentProfileId,
+    status: saleOutHd.approveStatusId,
+    rs: saleOutHd.recordStatus,
     module: 'Sale Order',
     entity: 'sale_out_hd',
     label: 'ใบสั่งขาย',
   },
 } as const;
-export const DOC_MODULE: Record<DocumentKind, 'Job Management' | 'Quotation' | 'Sale Order'> = {
-  job: 'Job Management',
-  quotation: 'Quotation',
-  sale_order: 'Sale Order',
-};
 
 export async function setDocumentProfile(
   kind: DocumentKind,
@@ -343,8 +348,26 @@ export async function setDocumentProfile(
   return db.transaction(async (tx) => {
     await tx.execute(lockProfiles(true)); // the target is not deleted / deactivated until this commits
     const target = await issuingProfile(profileId); // must exist, be active and not deleted
-    const [row] = await tx.select({ cur: d.col }).from(d.table).where(eq(d.key, no)).for('update');
+    const [row] = await tx
+      .select({ cur: d.col, status: d.status, rs: d.rs })
+      .from(d.table)
+      .where(eq(d.key, no))
+      .for('update');
     if (!row) throw new HttpError(404, `ไม่พบ${d.label} ${no}`);
+    // approved / closed: what the customer got stays as printed — read under the row lock, so a decision racing this waits
+    const [g] =
+      kind === 'job' && row.status != null
+        ? await tx
+            .select({ group: jobStatus.jobStatusGroup })
+            .from(jobStatus)
+            .where(eq(jobStatus.jobStatusId, row.status))
+        : [];
+    const locked = profileLock(kind, {
+      statusId: row.status,
+      cancelled: row.rs === RS.DELETED,
+      closed: g?.group?.trim() === JOB_GROUP.FINISHED,
+    });
+    if (locked) throw new HttpError(409, locked);
     const cur = row.cur ?? SHD_PROFILE_ID;
     if (cur === target.id) return target;
     const from = await getDocumentProfile(cur);

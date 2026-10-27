@@ -9,7 +9,7 @@ const REPORTS = [
     href: '/reports/open-job',
     icon: FilePlus2,
     title: 'รายงานการเปิดงานซ่อม',
-    desc: 'สรุปจำนวนงานที่เปิดใหม่ แยกตามช่วงเวลา ประเภทงาน และช่องทางรับเข้า',
+    desc: 'สรุปจำนวนงานที่เปิดใหม่ แยกตามช่วงเวลา ประเภทงาน และช่องทางการขาย',
   },
   {
     href: '/reports/repair-job',
@@ -45,14 +45,17 @@ const REPORTS = [
     href: '/reports/product-onhand',
     icon: Boxes,
     title: 'รายงานอะไหล่คงเหลือ',
-    desc: 'ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ',
+    desc: 'ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ใกล้หมด (1–3 ชิ้น) หรือหมดสต๊อก',
   },
 ];
 
 export default function ReportsPage() {
   return (
     <>
-      <PageHeader title="รายงาน" description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไขและส่งออกเป็น Excel / PDF" />
+      <PageHeader
+        title="รายงาน"
+        description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไขและส่งออกเป็น Excel หรือพิมพ์"
+      />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {REPORTS.map((r) => (
           <Link

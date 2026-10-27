@@ -34,6 +34,7 @@ import { type Line, chargedTotal, partsBlockOf } from '@/components/jobs/repair-
 import { postJson, errMsg } from '@/lib/api';
 import { repairActionSchema } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 const NO_DETAIL: RepairDetail = {
   engineerSymptom: '',
@@ -234,6 +235,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
               <PrintButton
                 label="พิมพ์ใบรับงาน"
                 kind="job"
+                locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                 no={job?.no ?? ''}
                 profileId={job?.documentProfileId}
                 href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}

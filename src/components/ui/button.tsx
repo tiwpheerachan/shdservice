@@ -23,7 +23,9 @@ export const buttonVariants = cva(
       variant: {
         primary: 'bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/95 shadow-xs',
         secondary: 'bg-muted text-foreground hover:bg-accent border border-border',
-        outline: 'border border-input bg-card text-foreground hover:bg-accent hover:border-border',
+        // aria-pressed: a filter toggle that is on (รายการใบสั่งขาย "เฉพาะใบรออนุมัติ")
+        outline:
+          'border border-input bg-card text-foreground hover:bg-accent hover:border-border aria-pressed:border-primary aria-pressed:bg-primary-soft aria-pressed:text-primary',
         ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground',
         danger: 'bg-danger text-white dark:text-background hover:bg-danger/90 shadow-xs', // white fails on dark's lighter red
         success: 'bg-success text-white dark:text-background hover:bg-success/90 shadow-xs',

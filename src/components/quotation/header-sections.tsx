@@ -22,6 +22,7 @@ export function QuotationTypeSection({
   profileId,
   onProfile,
   docNo,
+  profileLocked,
 }: {
   type: QuoteType;
   onType: (t: QuoteType) => void;
@@ -29,6 +30,8 @@ export function QuotationTypeSection({
   onProfile: React.ComponentProps<typeof ProfileSelect>['onChange'];
   /** the quotation's number once it has one */
   docNo?: string;
+  /** why its ออกเอกสารในนาม is fixed (profileLock) */
+  profileLocked?: string;
 }) {
   return (
     <Section
@@ -41,6 +44,7 @@ export function QuotationTypeSection({
           value={profileId}
           onChange={onProfile}
           doc={docNo ? { kind: 'quotation', no: docNo } : undefined}
+          locked={profileLocked}
         />
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">

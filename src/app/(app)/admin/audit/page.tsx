@@ -56,11 +56,10 @@ export default function AuditPage() {
   const [detail, setDetail] = React.useState<AuditRow | null>(null);
 
   const columns: Column<AuditRow>[] = [
-    { key: 'at', header: 'เวลา', width: '150px', cell: (r) => <span className="num text-xs">{r.at}</span> },
+    { key: 'at', header: 'เวลา', cell: (r) => <span className="num text-xs">{r.at}</span> },
     {
       key: 'user',
       header: 'ผู้ใช้',
-      width: '180px',
       cell: (r) => <span className="line-clamp-1">{r.user || '—'}</span>,
     },
     {

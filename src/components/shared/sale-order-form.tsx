@@ -17,11 +17,17 @@ import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
-import { overpaidMessage, saleOrderSchema, SUBMIT_CREATOR_ONLY } from '@/lib/validation/sale-order';
+import {
+  overpaidMessage,
+  saleOrderSchema,
+  SUBMIT_CREATOR_ONLY,
+  WAITING_CREATOR_ONLY,
+} from '@/lib/validation/sale-order';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { SaleOrderLines, type SaleOrderLine as Line } from '@/components/sale/sale-order-lines';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 // approve status label (approve_name_th; 3 is shown as ส่งกลับแก้ไข) → badge tone (list + edit page)
 export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> = {
@@ -106,7 +112,7 @@ export type SaleOrderFormHandle = {
 export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
   function SaleOrderForm({ soNo, initial }, ref) {
     const { push } = useToast();
-    const { name: me, userId, isAdmin } = useAccess();
+    const { name: me, userId, isAdmin, can } = useAccess();
     const fe = useFormErrors();
     const { data: STAFF, ...staffLookup } = useStaff();
     // an existing SO fills the form when it mounts — the edit page remounts the form (key) for every
@@ -194,6 +200,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     // closed, and a waiting (2) order is edited only by its creator (System Admin may)
     const readOnly =
       [4, 5].includes(initial?.approveId ?? 0) || !!initial?.cancelled || (initial?.approveId === 2 && !canSubmit);
+    // the edit page's "แนบสลิปการชำระเงิน" (an approved order without a slip) — the same rule as there
+    const canAttachLater = initial?.approveId === 4 && !initial.cancelled && !initial.slip && can('Sale Order', 'edit');
 
     // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
     const onPickSlip = async (f: File | undefined) => {
@@ -211,6 +219,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
       } catch (e) {
         push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
+        return false; // the file input lets go of the name
       }
     };
     // the order's own date, or (a new order) when the screen opened — Thai time, browser only
@@ -304,6 +313,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 if (how !== 'user') setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
               }}
               doc={soNo || initial?.no ? { kind: 'sale_order', no: soNo || initial?.no || '' } : undefined}
+              // the fieldset disables it on a read-only order — the hint says why
+              locked={
+                profileLock('sale_order', { statusId: initial?.approveId, cancelled: initial?.cancelled }) ||
+                (readOnly ? WAITING_CREATOR_ONLY : '')
+              }
             />
             <Field label="วันที่สร้าง">
               <ReadOnly>
@@ -356,52 +370,87 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 </div>
               </Field>
             )}
-            <Field
-              label="จำนวนเงินที่ชำระ (บาท)"
-              error={fe.errors.paymentAmount || (overpaid ? overpaidMessage(net) : undefined)}
-              hint={`ยอดรวม ${baht(net)} — ใส่เฉพาะยอดที่ลูกค้าชำระแล้ว`}
-            >
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                max={10_000_000}
-                inputMode="decimal"
-                placeholder="ยังไม่ชำระ"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                onFocus={(e) => e.currentTarget.select()}
-                className="num text-right"
-              />
-            </Field>
-            <Field
-              label="สลิปหลักฐานการโอน"
-              hint={
-                slip.includes('/') || !slip
-                  ? undefined
-                  : pendingSlip
-                    ? `จะอัปโหลดหลังบันทึก: ${slip}`
-                    : `สลิปอยู่บนระบบเก่า: ${slip}` // a legacy row keeps a bare file name, the file is not here
-              }
-            >
-              <div className="flex items-center gap-2">
-                <FileInput
-                  placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
-                  accept=".jpg,.jpeg,.png,.webp,.pdf"
-                  onFile={onPickSlip}
-                />
-                {slip.includes('/') && (
-                  <a
-                    href={fileUrl(slip)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 text-xs text-primary hover:underline"
-                  >
-                    ดูสลิป
-                  </a>
-                )}
-              </div>
-            </Field>
+            {readOnly ? (
+              // read-only as text, like the method above — not a greyed-out box and file picker
+              <>
+                <Field label="จำนวนเงินที่ชำระ (บาท)">
+                  <ReadOnly>
+                    {payAmount !== '' && Number(payAmount) > 0 ? (
+                      <>
+                        ชำระแล้ว <span className="num">{baht(Number(payAmount))}</span> บาท
+                      </>
+                    ) : (
+                      'ยังไม่ชำระ'
+                    )}
+                  </ReadOnly>
+                </Field>
+                <Field label="สลิปการชำระเงิน">
+                  <ReadOnly>
+                    {slip.includes('/') ? (
+                      <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                        ดูสลิป
+                      </a>
+                    ) : slip ? (
+                      `สลิปอยู่บนระบบเก่า: ${slip}`
+                    ) : canAttachLater ? (
+                      'ยังไม่มีสลิป — แนบได้ที่ส่วน "แนบสลิปการชำระเงิน" ด้านล่าง'
+                    ) : (
+                      'ยังไม่มีสลิป'
+                    )}
+                  </ReadOnly>
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field
+                  label="จำนวนเงินที่ชำระ (บาท)"
+                  error={fe.errors.paymentAmount || (overpaid ? overpaidMessage(net) : undefined)}
+                  hint={`ยอดรวม ${baht(net)} — ใส่เฉพาะยอดที่ลูกค้าชำระแล้ว`}
+                >
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={10_000_000}
+                    inputMode="decimal"
+                    placeholder="ยังไม่ชำระ"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="num text-right"
+                  />
+                </Field>
+                <Field
+                  label="สลิปการชำระเงิน"
+                  hint={
+                    pendingSlip
+                      ? `จะอัปโหลดหลังบันทึก: ${slip}`
+                      : initial
+                        ? `อัปโหลดแล้วบันทึกเข้าระบบทันที${slip ? ' (แทนที่สลิปเดิม)' : ''}` +
+                          (slip && !slip.includes('/') ? ` · สลิปเดิมอยู่บนระบบเก่า: ${slip}` : '') // a legacy row: a bare file name, the file is not here
+                        : undefined
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <FileInput
+                      placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
+                      accept=".jpg,.jpeg,.png,.webp,.pdf"
+                      onFile={onPickSlip}
+                    />
+                    {slip.includes('/') && (
+                      <a
+                        href={fileUrl(slip)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 text-xs text-primary hover:underline"
+                      >
+                        ดูสลิป
+                      </a>
+                    )}
+                  </div>
+                </Field>
+              </>
+            )}
             <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
               <Textarea rows={2} maxLength={100} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>

@@ -336,13 +336,18 @@ try {
   });
   await expect([200], `/api/sale-orders/${soNo}`);
   await expect([404], '/api/sale-orders/SO0' + rand);
+  // ออกเอกสารในนาม: open while waiting, fixed once approved (src/lib/profile-lock.ts)
+  await expect([200], '/api/documents/profile', {
+    method: 'POST',
+    body: { kind: 'sale_order', no: soNo, profileId: 1 },
+  });
   await expect([200], `/api/sale-orders/${soNo}/approve`, {
     method: 'POST',
     body: { decision: 'approve' },
     as: MANAGER,
   });
   await expect([200], `/api/sale-orders/${soNo}/tracking`, { method: 'POST', body: { tracking: 'TH0123456789' } });
-  await expect([200], '/api/documents/profile', {
+  await expect([409], '/api/documents/profile', {
     method: 'POST',
     body: { kind: 'sale_order', no: soNo, profileId: 1 },
   });

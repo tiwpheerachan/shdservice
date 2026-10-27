@@ -68,6 +68,7 @@ import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 /* ------------------------------------------------------------------ *
  * Shared form state. Every section reads/writes this through context, and
@@ -545,6 +546,7 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
           value={s.documentProfileId}
           onChange={(id, how) => (how === 'user' ? set('documentProfileId', id) : adopt({ documentProfileId: id }))}
           doc={s.jobNo || jobNo ? { kind: 'job', no: s.jobNo || jobNo || '' } : undefined}
+          locked={profileLock('job', { closed: s.statusGroup === 'Finished' })}
         />
         <Field label="วันที่">
           <ReadOnly>

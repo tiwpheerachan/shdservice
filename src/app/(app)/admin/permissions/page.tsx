@@ -215,7 +215,7 @@ export default function PermissionsPage() {
     key: field,
     header,
     align: 'center',
-    width: '130px',
+    width: '64px', // four tick columns + the menu name fit a phone
     sortable: false,
     cell: (r) => (
       <Checkbox
@@ -234,6 +234,7 @@ export default function PermissionsPage() {
       width: '52px',
       align: 'center',
       sortable: false,
+      hideBelow: 'sm',
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {

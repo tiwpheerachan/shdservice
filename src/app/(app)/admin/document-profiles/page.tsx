@@ -191,7 +191,6 @@ export default function DocumentProfilesPage() {
     {
       key: 'code',
       header: 'รหัส',
-      width: '160px',
       cell: (r) => (
         <div className="flex items-center gap-2">
           <img
@@ -210,8 +209,8 @@ export default function DocumentProfilesPage() {
       header: 'บริษัท',
       cell: (r) => (
         <div className="min-w-0">
-          <p className="truncate font-medium">{r.nameTh}</p>
-          <p className="truncate text-2xs text-muted-foreground">
+          <p className="line-clamp-1 font-medium">{r.nameTh}</p>
+          <p className="line-clamp-1 text-2xs text-muted-foreground">
             {[r.addressLine1, r.addressLine2].filter(Boolean).join(' ') || '—'}
           </p>
         </div>
@@ -228,6 +227,7 @@ export default function DocumentProfilesPage() {
       key: 'isActive',
       header: 'สถานะ',
       width: '150px',
+      hideBelow: 'sm', // phones: code + company + action (Active / ค่าเริ่มต้น are in the edit dialog)
       cell: (r) => (
         <div className="flex gap-1">
           <Badge tone={r.isActive ? 'success' : 'neutral'} dot>

@@ -26,6 +26,7 @@ import { QuotationLineTable } from '@/components/quotation/line-items';
 import { type QuotationLine as Line, lineTotals } from '@/components/quotation/line-totals';
 import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/totals';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 /** Shape returned by GET /api/quotations/:no (subset the form uses). */
 export type QuotationLoaded = {
@@ -359,6 +360,7 @@ export const QuotationForm = React.forwardRef<
           if (how !== 'user') setSaved((x) => ({ ...x, profileId: id })); // a default / saved on the spot — not an edit
         }}
         docNo={initial?.no || quotationNo}
+        profileLocked={profileLock('quotation', { statusId: initial?.statusId })} // the saved status, not the one being edited
       />
 
       <QuotationCustomerSection

@@ -22,9 +22,10 @@ const CUSTOMER_FIELDS =
 const PRINT_AS = '[aria-label="เลือกบริษัทที่ออกเอกสาร"]';
 /** ออกเอกสารในนาม on a saved document (saves on change) that can still be changed (a closed order's is disabled) */
 const PROFILE_OPEN = 'main select[data-tour-block]:not(:disabled)';
-/** the print button's arrow (another company): picking one saves it on the document first — needs the edit right */
+/** the print button's arrow (another company): picking one saves it on the document first — needs the edit right,
+ *  and a document whose ออกเอกสารในนาม can still change (not approved / closed) */
 const printAs = (c: StepCtx, edit: boolean) =>
-  c.has(PRINT_AS) && edit ? ' · ลูกศรข้างปุ่ม: พิมพ์ในนามบริษัทอื่น (บันทึกลงใบนี้ด้วย)' : '';
+  c.has(PRINT_AS) && edit && c.has(PROFILE_OPEN) ? ' · ลูกศรข้างปุ่ม: พิมพ์ในนามบริษัทอื่น (บันทึกลงใบนี้ด้วย)' : '';
 
 const filterShutStep = (what: string): Step => ({
   target: FILTER_SHUT,
@@ -114,7 +115,11 @@ function quotationForm(edit: boolean): Tour {
       body: ({ has, can }) =>
         (has('field:ออกเอกสารในนาม')
           ? 'ออกเอกสารในนาม: บริษัทบนหัวใบ' +
-            (edit && can('Quotation', 'edit') ? ' เปลี่ยนแล้วบันทึกลงใบทันที (บทสอนเปลี่ยนไม่ได้)' : '') +
+            (!edit
+              ? ''
+              : has(PROFILE_OPEN) && can('Quotation', 'edit')
+                ? ' เปลี่ยนแล้วบันทึกลงใบทันที (บทสอนเปลี่ยนไม่ได้)'
+                : ' เปลี่ยนไม่ได้แล้ว (เหตุผลใต้ช่อง)') +
             ' · '
           : '') +
         'Type A / Type B: ช่างเสนออะไหล่ได้ 2 ชุด ประเภทบอกว่าใบนี้ใช้ชุดไหน' +
@@ -328,9 +333,11 @@ function saleOrderForm(edit: boolean): Tour {
           : 'เลขใบสั่งขายออกให้อัตโนมัติเมื่อบันทึก · วันที่สร้างและสร้างโดย ระบบใส่ให้') +
         (has('field:ออกเอกสารในนาม')
           ? ' · ออกเอกสารในนาม: บริษัทที่พิมพ์บนหัวใบ' +
-            (edit && has(PROFILE_OPEN) && can('Sale Order', 'edit')
-              ? ' เปลี่ยนแล้วบันทึกลงใบทันที (ระหว่างบทสอนเปลี่ยนไม่ได้)'
-              : '')
+            (!edit
+              ? ''
+              : has(PROFILE_OPEN) && can('Sale Order', 'edit')
+                ? ' เปลี่ยนแล้วบันทึกลงใบทันที (ระหว่างบทสอนเปลี่ยนไม่ได้)'
+                : ' เปลี่ยนไม่ได้แล้ว (เหตุผลใต้ช่อง)')
           : ''),
       // the edit page's ออกเอกสารในนาม saves on change
       look: edit,
@@ -360,11 +367,11 @@ function saleOrderForm(edit: boolean): Tour {
       body: 'ยังไม่ชำระ: เว้นยอดเงินว่างไว้ (วิธีชำระเลือกไว้ได้ เลือกแล้วล้างไม่ได้) · ชำระแล้ว: เลือกวิธี (โอนเงิน / เงินสด / บัตรเครดิต) และใส่ยอดที่ลูกค้าชำระแล้ว — ใส่ยอดต้องเลือกวิธีด้วย และยอดต้องไม่เกินยอดรวม',
     },
     {
-      target: 'field:สลิปหลักฐานการโอน',
+      target: 'field:สลิปการชำระเงิน',
       show: open,
-      title: 'สลิปหลักฐานการโอน',
+      title: 'สลิปการชำระเงิน',
       body: edit
-        ? 'เลือกไฟล์สลิป (JPG, PNG, PDF) แล้วระบบอัปโหลดเข้าใบนี้ทันที ไม่ต้องกดบันทึก · "ดูสลิป" เปิดสลิปที่แนบไว้ · ระหว่างบทสอนแนบไม่ได้'
+        ? 'เลือกไฟล์สลิป (JPG, PNG, PDF) แล้วระบบอัปโหลดเข้าใบนี้ทันที ไม่ต้องกดบันทึก แทนที่สลิปเดิม · "ดูสลิป" เปิดสลิปที่แนบไว้ · ระหว่างบทสอนแนบไม่ได้'
         : 'เลือกไฟล์สลิป (JPG, PNG, PDF) ไว้ ระบบอัปโหลดหลังบันทึกใบ · ระหว่างบทสอนแนบไม่ได้',
       look: true,
     },
@@ -383,7 +390,7 @@ function saleOrderForm(edit: boolean): Tour {
       target: 'body:การชำระเงินและเอกสาร',
       show: (c) => !open(c),
       title: 'การชำระเงินและเอกสาร',
-      body: 'ใบนี้แก้ไม่ได้ (เหตุผลอยู่แถบล่าง) แสดงอย่างเดียว: วิธีและยอดที่ชำระ สลิป และหมายเหตุ',
+      body: 'ใบนี้แก้ไม่ได้ (เหตุผลอยู่แถบล่าง) แสดงอย่างเดียว: วิธีและยอดที่ชำระ สลิป ("ดูสลิป" หรือ ยังไม่มีสลิป) และหมายเหตุ',
       look: true,
     },
     ...(edit
@@ -474,7 +481,7 @@ const SALE_ORDER_LIST: Tour = {
       target: HEADER_ACTIONS,
       title: 'ปุ่มด้านบน',
       body: ({ can }) =>
-        '"รออนุมัติ": เฉพาะใบที่รออนุมัติ (กลับเป็นทั้งหมดด้วย "ล้างค่า") · "แสดงใบที่ยกเลิก": ปกติซ่อนไว้ กดเพื่อแสดง / ซ่อน · "ส่งออก Excel": ดาวน์โหลดรายการตามตัวกรอง' +
+        '"เฉพาะใบรออนุมัติ" และ "แสดงใบที่ยกเลิก": กดเพื่อเปิด (ปุ่มเป็นสีหลัก) กดอีกครั้งเพื่อปิด · "ส่งออก Excel": ดาวน์โหลดรายการตามตัวกรอง' +
         (can('Sale Order', 'add') ? ' · "สร้างใบสั่งขาย": เปิดฟอร์มใบใหม่' : ''),
       look: true,
     },

@@ -41,6 +41,7 @@ import { postJson, errMsg, uploadFile } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { closePaymentEdited, closeSchema, jobBalance, notClosableMsg, partsWaitingMsg } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
+import { profileLock } from '@/lib/profile-lock';
 
 function CloseForm() {
   const { push } = useToast();
@@ -74,6 +75,7 @@ function CloseForm() {
       push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
     } catch (e) {
       push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
+      return false; // the file input lets go of the name
     }
   };
 
@@ -181,6 +183,7 @@ function CloseForm() {
             <PrintButton
               label="พิมพ์ใบส่งคืน"
               kind="job"
+              locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
               no={job?.no ?? ''}
               profileId={job?.documentProfileId}
               href={`/print/job/${encodeURIComponent(job?.no ?? '')}/return`}
@@ -190,6 +193,7 @@ function CloseForm() {
               label="พิมพ์ใบปะหน้าพัสดุ"
               title="ใบปะหน้าพัสดุ A5 สำหรับส่งคืนทางขนส่ง"
               kind="job"
+              locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
               no={job?.no ?? ''}
               profileId={job?.documentProfileId}
               href={`/print/job/${encodeURIComponent(job?.no ?? '')}/label`}

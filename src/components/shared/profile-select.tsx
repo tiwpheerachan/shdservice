@@ -5,20 +5,25 @@ import { Field } from '@/components/ui/field';
 import { Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useDocumentProfiles } from '@/data/db';
-import { postJson, errMsg } from '@/lib/api';
-import type { DocumentKind } from '@/server/services/document-profiles';
+import { postJson, errMsg, ApiError } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { DOC_MODULE, type DocumentKind } from '@/lib/profile-lock';
 
 /**
  * "ออกเอกสารในนาม" — which company/brand a job, quotation or sale order is
  * printed under (letterhead only; the document number is never affected).
  *  - new document: just form state, saved with the document
  *  - existing document (`doc` given): changing it saves immediately through
- *    POST /api/documents/profile (audited), so the print pages pick it up
+ *    POST /api/documents/profile (audited), so the print pages pick it up — and
+ *    the hint says so. Fixed (disabled, the reason as hint) without edit on the
+ *    document's module, or once it is approved / closed (`locked`, profileLock;
+ *    the server refuses the same with 409 — a 409 met here locks it too)
  */
 export function ProfileSelect({
   value,
   onChange,
   doc,
+  locked,
   className,
 }: {
   /** document_profile.id; 0 / undefined = default profile */
@@ -28,9 +33,14 @@ export function ProfileSelect({
   onChange: (id: number, how: 'user' | 'default' | 'saved') => void;
   /** the document this belongs to once it has a number — enables save-on-change */
   doc?: { kind: DocumentKind; no: string };
+  /** why the saved document's profile is fixed (profileLock in src/lib/profile-lock.ts); '' / undefined = it is not */
+  locked?: string;
   className?: string;
 }) {
   const { push } = useToast();
+  const { can } = useAccess();
+  // the server's 409 (approved / closed meanwhile) — for that document only (job-form keeps this mounted across jobs)
+  const [refused, setRefused] = React.useState({ no: '', why: '' });
   const { data: profiles, ...profilesLookup } = useDocumentProfiles();
   const [busy, setBusy] = React.useState(false);
   const def = profiles.find((p) => p.isDefault) ?? profiles[0];
@@ -60,11 +70,18 @@ export function ProfileSelect({
         desc: `${doc.no} → ${d.profile.code} — ${d.profile.nameTh}`,
       });
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setRefused({ no: doc.no, why: errMsg(e) });
       push({ kind: 'error', title: 'เปลี่ยนออกเอกสารในนามไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setBusy(false);
     }
   };
+
+  const fixed = !doc
+    ? ''
+    : locked ||
+      (refused.no === doc.no && refused.why) ||
+      (can(DOC_MODULE[doc.kind], 'edit') ? '' : 'ไม่มีสิทธิ์แก้ไขเอกสารนี้ — เปลี่ยนออกเอกสารในนามไม่ได้');
 
   return (
     <Field
@@ -72,15 +89,16 @@ export function ProfileSelect({
       className={className}
       lookup={profilesLookup}
       hint={
-        doc
-          ? 'เปลี่ยนได้ทุกเมื่อ มีผลกับเอกสารที่พิมพ์ (เลขที่เอกสารไม่เปลี่ยน)'
-          : 'หัวกระดาษ โลโก้ ที่อยู่ และเลขภาษีที่จะพิมพ์บนเอกสาร'
+        fixed ||
+        (doc
+          ? 'บันทึกทันทีเมื่อเลือก (ไม่ต้องกดบันทึก) · มีผลกับเอกสารที่พิมพ์ เลขที่เอกสารไม่เปลี่ยน'
+          : 'หัวกระดาษ โลโก้ ที่อยู่ และเลขภาษีที่จะพิมพ์บนเอกสาร')
       }
     >
       {/* on a saved document a change saves at once: a บทสอน never lets it be tried (data-tour-block) */}
       <Select
         value={value || def?.id || ''}
-        disabled={busy}
+        disabled={busy || !!fixed}
         data-tour-block={doc ? '' : undefined}
         onChange={(e) => void change(Number(e.target.value))}
       >

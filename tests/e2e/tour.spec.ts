@@ -196,6 +196,8 @@ test('dashboard TAT step: the table is scrolled to its last column (เกิน
       .getByRole('button', { name: /^(เริ่มเลย|ถัดไป)$/ })
       .click();
   const table = page.locator('main [aria-label="งานค้างตามสถานะและจำนวนวัน"]');
+  // the header row is lit, not the whole table (taller than a phone with ~15 statuses)
+  await expect(table.locator('thead')).toHaveAttribute('data-tour-target', '');
   await expect
     .poll(
       () =>

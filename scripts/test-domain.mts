@@ -52,6 +52,7 @@ const { addDays, today } = await import('@/lib/dates');
 const { GET: dataGET } = await import('@/app/api/data/[resource]/route');
 const { POST: soPOST } = await import('@/app/api/sale-orders/route');
 const { POST: soApprovePOST } = await import('@/app/api/sale-orders/[no]/approve/route');
+const { POST: docProfilePOST } = await import('@/app/api/documents/profile/route');
 const { POST: stockIssuePOST } = await import('@/app/api/stock/issue/route');
 const { POST: stockReceivePOST } = await import('@/app/api/stock/receive/route');
 const { POST: customerPOST } = await import('@/app/api/customers/route');
@@ -482,6 +483,32 @@ try {
     assert.equal((await qty(P.a.code)).remain, 8);
     assert.equal((await approve()).status, 409);
     assert.equal((await qty(P.a.code)).remain, 8);
+  });
+  await test('ออกเอกสารในนาม: an approved order → 409 (fixed), a draft → 200', async () => {
+    assert.ok(soNo, 'needs the order above');
+    const setProfile = async (no: string) =>
+      json(
+        await docProfilePOST(
+          await request('/api/documents/profile', U.admin, {
+            method: 'POST',
+            body: { kind: 'sale_order', no, profileId: 1 },
+          }),
+        ),
+      );
+    const approved = await setProfile(soNo);
+    assert.equal(approved.status, 409, JSON.stringify(approved.body));
+    assert.match(String(approved.body.error), /อนุมัติแล้ว/);
+    const draft = await json(
+      await soPOST(
+        await request('/api/sale-orders', U.admin, {
+          method: 'POST',
+          body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: false, lines: [{ code: P.a.code, qty: 1 }] },
+        }),
+      ),
+    );
+    assert.equal(draft.status, 201, JSON.stringify(draft.body));
+    const r = await setProfile((draft.body.order as { no: string }).no);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
   });
   await test('edit an approved order (POST /api/sale-orders with its no) → 409, lines untouched', async () => {
     assert.ok(soNo, 'needs the order above');

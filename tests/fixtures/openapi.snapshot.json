@@ -3920,7 +3920,7 @@
           "Documents"
         ],
         "summary": "Change \"ออกเอกสารในนาม\" of an existing job, quotation or sale order",
-        "description": "Edit on the document's module. The number never changes; audited.",
+        "description": "Edit on the document's module. The number never changes; audited. Fixed once the document is approved / closed (src/lib/profile-lock.ts).",
         "requestBody": {
           "required": true,
           "content": {
@@ -4029,6 +4029,16 @@
           },
           "404": {
             "description": "No such document or profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The document is fixed: a sale order approved / denied / cancelled, a quotation agreed / declined / cancelled / deleted, a closed job — `error` says which.",
             "content": {
               "application/json": {
                 "schema": {

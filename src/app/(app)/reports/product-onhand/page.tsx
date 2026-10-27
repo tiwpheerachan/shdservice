@@ -36,7 +36,7 @@ const columns: Column<Row>[] = [
     width: '100px',
     value: (r) => r.onhand,
     cell: (r) => (
-      <span className={cn('num font-semibold', r.onhand === 0 ? 'text-danger' : r.onhand <= 3 ? 'text-warning' : '')}>
+      <span className={cn('num font-semibold', r.onhand <= 0 ? 'text-danger' : r.onhand <= 3 ? 'text-warning' : '')}>
         {int(r.onhand)}
       </span>
     ),
@@ -70,7 +70,13 @@ export default function Page() {
     server,
   } = useServerTable<ReportValues>({ category: '', brand: '', stock: '', q: '' });
   const stockKey =
-    f.stock === 'มีสินค้า' ? 'in' : f.stock === 'ใกล้หมด (≤3)' ? 'low' : f.stock === 'หมดสต๊อก' ? 'out' : '';
+    f.stock === 'มีของ (เกิน 3 ชิ้น)'
+      ? 'in'
+      : f.stock === 'ใกล้หมด (1–3 ชิ้น)'
+        ? 'low'
+        : f.stock === 'หมดสต๊อก'
+          ? 'out'
+          : '';
   // ACTIVE products only; filters + KPIs on the server, table paged
   const filters = { category: f.category, brand: f.brand, stock: stockKey, status: 'Active' };
   // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
@@ -91,7 +97,7 @@ export default function Page() {
   return (
     <ReportView
       title="รายงานอะไหล่คงเหลือ"
-      description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ต่ำกว่าจุดสั่งซื้อ"
+      description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ใกล้หมด (1–3 ชิ้น) หรือหมดสต๊อก"
       filters={[
         {
           kind: 'select',
@@ -111,7 +117,7 @@ export default function Page() {
           kind: 'select',
           key: 'stock',
           label: 'สถานะสต๊อก',
-          options: ['ทั้งหมด', 'มีสินค้า', 'ใกล้หมด (≤3)', 'หมดสต๊อก'],
+          options: ['ทั้งหมด', 'มีของ (เกิน 3 ชิ้น)', 'ใกล้หมด (1–3 ชิ้น)', 'หมดสต๊อก'],
         },
         { kind: 'text', key: 'q', label: 'รหัส / ชื่ออะไหล่', placeholder: 'P02534' },
       ]}
@@ -141,7 +147,7 @@ export default function Page() {
           tone: 'success',
           sub: S?.noPrice ? `${int(S.noPrice)} รายการมีสต๊อกแต่ไม่มีราคา (ไม่รวมในมูลค่า)` : undefined,
         },
-        { label: 'ใกล้หมด (≤ 3)', value: int(low), tone: 'warning' },
+        { label: 'ใกล้หมด (1–3 ชิ้น)', value: int(low), tone: 'warning' },
         { label: 'หมดสต๊อก', value: int(out), tone: 'danger' },
       ])}
       columns={columns}

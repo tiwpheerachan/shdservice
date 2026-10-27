@@ -28,6 +28,7 @@ export function PrintButton({
   title,
   size = 'md',
   icon = true,
+  locked,
 }: {
   label: string;
   /** print page, e.g. /print/job/J2612165/return */
@@ -41,6 +42,8 @@ export function PrintButton({
   title?: string;
   size?: 'sm' | 'md';
   icon?: boolean;
+  /** why its ออกเอกสารในนาม can no longer change (profileLock): a plain print button, printed as it is */
+  locked?: string;
 }) {
   const { push } = useToast();
   const { data: profiles } = useDocumentProfiles();
@@ -74,8 +77,8 @@ export function PrintButton({
     }
   };
 
-  // one brand → nothing to choose
-  if (profiles.length <= 1) {
+  // one brand → nothing to choose; a document whose letterhead is fixed (approved / closed) → printed as it is
+  if (profiles.length <= 1 || locked) {
     return (
       <Button variant="outline" size={size} type="button" disabled={disabled} title={title} onClick={print}>
         {icon && <Printer className="h-3.5 w-3.5" />}

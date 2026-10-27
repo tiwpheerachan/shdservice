@@ -33,9 +33,11 @@ function SaleOrderList() {
     setDraft((f) => ({ ...f, cancelled }));
     setFilters((f) => ({ ...f, cancelled }));
   };
-  const showWaiting = () => {
-    setDraft((f) => ({ ...f, approve: WAITING }));
-    setFilters((f) => ({ ...f, approve: WAITING }));
+  // เฉพาะใบรออนุมัติ: on → approve = รออนุมัติ, pressed again → that filter is cleared
+  const showWaiting = (on: boolean) => {
+    const approve = on ? WAITING : '';
+    setDraft((f) => ({ ...f, approve }));
+    setFilters((f) => ({ ...f, approve }));
   };
   // deep link /sale/orders?pending=1 (landing / bell) → รออนุมัติ only; read on every URL change, adjusted while
   // rendering (a link to this page from this page does not remount it)
@@ -43,7 +45,7 @@ function SaleOrderList() {
   const [pendingSeen, setPendingSeen] = React.useState(false);
   if (pending !== pendingSeen) {
     setPendingSeen(pending);
-    if (pending) showWaiting();
+    if (pending) showWaiting(true);
   }
   const {
     rows: SALE_ORDERS,
@@ -136,8 +138,13 @@ function SaleOrderList() {
         description="เมนูขาย » ใบสั่งขาย (Sale Order)"
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={showWaiting} aria-pressed={filters.approve === WAITING}>
-              {WAITING}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => showWaiting(filters.approve !== WAITING)}
+              aria-pressed={filters.approve === WAITING}
+            >
+              เฉพาะใบรออนุมัติ
             </Button>
             <Button size="sm" variant="outline" onClick={toggleCancelled} aria-pressed={!!filters.cancelled}>
               แสดงใบที่ยกเลิก

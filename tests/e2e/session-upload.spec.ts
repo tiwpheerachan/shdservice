@@ -102,7 +102,7 @@ test('a slip upload shows its progress, survives a failed first attempt, and sen
     await route.fulfill({ json: { ok: true, path: `jobs/${no}/slip/e2e.jpg`, file: 'e2e.jpg' } });
   });
 
-  const slip = page.getByLabel('สลิปหลักฐานการชำระ');
+  const slip = page.getByLabel('สลิปการชำระเงิน');
   await slip.setInputFiles(photo);
   const failed = page.locator('[data-sonner-toast]').filter({ hasText: 'อัปโหลด photo.jpg ไม่สำเร็จ' });
   await expect(failed).toContainText('เชื่อมต่อไม่สำเร็จ');

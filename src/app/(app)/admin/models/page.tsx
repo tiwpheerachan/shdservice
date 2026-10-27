@@ -110,6 +110,7 @@ export default function ModelsPage() {
     {
       key: 'brand',
       header: 'Brand Name',
+      hideBelow: 'sm', // phones: code + name + action
       cell: (r) => <Badge tone="info">{r.brand}</Badge>,
     },
     {
@@ -117,6 +118,7 @@ export default function ModelsPage() {
       header: 'Market Price',
       align: 'right',
       width: '140px',
+      hideBelow: 'sm',
       value: (r) => r.price,
       cell: (r) => <span className="font-medium">{baht(r.price)}</span>,
     },
@@ -130,6 +132,7 @@ export default function ModelsPage() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
+      hideBelow: 'sm',
       cell: (r) => (
         <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
           {r.status}

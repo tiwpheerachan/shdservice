@@ -89,7 +89,7 @@ export default function Page() {
         { label: 'งานที่เปิดทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },
         { label: 'งานใหม่ (ยังไม่เริ่ม)', value: int(newJobs), tone: 'warning' },
         { label: 'เฉลี่ยต่อวัน', value: ((S?.total ?? 0) / days).toFixed(1) },
-        { label: 'ช่องทางหลัก', value: topChannel },
+        { label: 'ช่องทางการขายหลัก', value: topChannel },
       ])}
       columns={columns}
       rows={JOBS}

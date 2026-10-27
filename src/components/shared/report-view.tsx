@@ -1,17 +1,19 @@
 'use client';
 
 import * as React from 'react';
-import { Download, Printer, FileSpreadsheet } from 'lucide-react';
+import { Printer, FileSpreadsheet } from 'lucide-react';
+import { flushSync } from 'react-dom';
 import { PageHeader } from './page-header';
 import { FilterBar } from './filter-bar';
-import { DataTable, type Column, type ServerTable } from '@/components/ui/data-table';
+import { DataTable, type Column, type ServerTable, type ServerTableState } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Field, type Lookup } from '@/components/ui/field';
 import { Input, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions } from './search-select';
 import { ExportButton } from './export-button';
-import { cn } from '@/lib/utils';
+import { cn, int } from '@/lib/utils';
 import { invalidateLists } from '@/data/db';
+import { BUSINESS_TZ } from '@/lib/dates';
 
 export type ReportFilter =
   | { kind: 'text'; key?: string; label: string; placeholder?: string; value?: string }
@@ -30,6 +32,28 @@ function defaultsOf(filters: ReportFilter[]): ReportValues {
   const v: ReportValues = {};
   for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === 'select' ? (f.options[0] ?? '') : '');
   return v;
+}
+
+const thDate = (ymd: string) =>
+  new Date(`${ymd}T00:00:00`).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** the applied conditions in words for the printout: a date pair "(ตั้งแต่)" + "(ถึง)" reads as one range, a
+ *  select / text only when it narrows ("วันที่ปิดงาน 1 ต.ค. 2569 – 27 ต.ค. 2569 · วิธีการส่งคืน: ส่งทางขนส่ง") */
+function conditionsOf(filters: ReportFilter[], v: ReportValues): string {
+  const out: string[] = [];
+  const baseOf = (label: string) => label.replace(/\s*\((ตั้งแต่|ถึง)\)$/, '');
+  filters.forEach((f, i) => {
+    const x = v[keyOf(f)] ?? '';
+    if (!x || ALL.has(x)) return;
+    if (f.kind !== 'date') return void out.push(`${f.label}: ${x}`);
+    // the "(ตั้งแต่)" just before (already the last entry) and this "(ถึง)" read as one range
+    const p = filters[i - 1];
+    const px = p ? (v[keyOf(p)] ?? '') : '';
+    if (p?.kind === 'date' && px && baseOf(p.label) === baseOf(f.label))
+      out[out.length - 1] = `${baseOf(f.label)} ${thDate(px)} – ${thDate(x)}`;
+    else out.push(`${f.label} ${thDate(x)}`);
+  });
+  return out.join(' · ');
 }
 
 export function ReportView<T extends Record<string, unknown>>({
@@ -81,7 +105,29 @@ export function ReportView<T extends Record<string, unknown>>({
     setSeenKey(defaultsKey);
     setValues(defaultsOf(filters));
   }
+  // what the table shows (the last ค้นหา / ล้างค่า), not the draft in the fields — for the printout
+  const [applied, setApplied] = React.useState<ReportValues>(initial);
+  // the table's page as DataTable reports it, and the print time (set in beforeprint — Ctrl+P prints too)
+  const [paged, setPaged] = React.useState<ServerTableState | null>(null);
+  const [printedAt, setPrintedAt] = React.useState('');
+  React.useEffect(() => {
+    const stamp = () =>
+      flushSync(() =>
+        setPrintedAt(
+          new Date().toLocaleString('th-TH', { timeZone: BUSINESS_TZ, dateStyle: 'medium', timeStyle: 'short' }),
+        ),
+      );
+    window.addEventListener('beforeprint', stamp);
+    return () => window.removeEventListener('beforeprint', stamp);
+  }, []);
   const clean = (v: ReportValues) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, ALL.has(x) ? '' : x]));
+
+  const total = server?.total ?? 0;
+  const pageNote =
+    server && paged
+      ? `หน้า ${paged.page} จาก ${Math.max(1, Math.ceil(total / paged.pageSize))} รายการ ` +
+        `${int(total && (paged.page - 1) * paged.pageSize + 1)}–${int(Math.min(paged.page * paged.pageSize, total))} จาก ${int(total)}`
+      : '';
 
   const toneMap = {
     primary: 'text-primary',
@@ -97,15 +143,16 @@ export function ReportView<T extends Record<string, unknown>>({
         description={description}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.print()}
+              title="พิมพ์เฉพาะหน้าที่แสดงอยู่ — ต้องการทั้งรายงาน ใช้ ส่งออก Excel"
+            >
               <Printer className="h-3.5 w-3.5" />
-              พิมพ์รายงาน
+              พิมพ์ / บันทึกเป็น PDF
             </Button>
             {onExport && <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />}
-            <Button size="sm" onClick={() => window.print()} title="เปิดหน้าต่างพิมพ์ — เลือก 'บันทึกเป็น PDF'">
-              <Download className="h-3.5 w-3.5" />
-              PDF
-            </Button>
           </>
         }
       />
@@ -113,12 +160,14 @@ export function ReportView<T extends Record<string, unknown>>({
       <FilterBar
         title="เงื่อนไขการออกรายงาน"
         onSearch={() => {
+          setApplied(values);
           onApply?.(clean(values));
           // the same filters keep the same keys, so nothing would refetch: read them again (a revoked Report → its 403)
           invalidateLists();
         }}
         onReset={() => {
           setValues(initial);
+          setApplied(initial);
           onApply?.(clean(initial));
         }}
       >
@@ -152,6 +201,12 @@ export function ReportView<T extends Record<string, unknown>>({
         })}
       </FilterBar>
 
+      {/* print only, under the title the h1 already prints: what this printout covers */}
+      <div className="hidden text-xs print:block">
+        <p>{conditionsOf(filters, applied) || 'ทุกรายการ'}</p>
+        <p className="num">{[printedAt && `พิมพ์เมื่อ ${printedAt}`, pageNote].filter(Boolean).join(' · ')}</p>
+      </div>
+
       {kpis.length > 0 && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {kpis.map((k) => (
@@ -174,7 +229,16 @@ export function ReportView<T extends Record<string, unknown>>({
         error={error}
         onRetry={onRetry}
         rowKey={rowKey}
-        server={server}
+        server={
+          server && {
+            ...server,
+            onChange: (s) => {
+              setPaged(s);
+              server.onChange(s);
+            },
+          }
+        }
+        className="print:[&>div:last-child]:hidden" // the pager: the printout says the page in its header
         emptyText={emptyText}
       />
     </>

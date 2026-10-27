@@ -103,7 +103,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'openDate', header: 'วันที่เปิดงาน', width: 18 },
       { key: 'customer', header: 'ลูกค้า', width: 36 },
       { key: 'so', header: 'เลขคำสั่งซื้อ', width: 18 },
-      { key: 'channel', header: 'ช่องทาง', width: 14 },
+      { key: 'channel', header: 'ช่องทางการขาย', width: 14 },
       { key: 'brandModel', header: 'ยี่ห้อ/รุ่น', width: 28 },
       { key: 'imei', header: 'IMEI', width: 18 },
       { key: 'serial', header: 'Serial', width: 18 },

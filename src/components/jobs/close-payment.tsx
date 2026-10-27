@@ -27,7 +27,7 @@ export function ClosePaymentSection({
   bal: Balance;
   /** สลิปชำระเงิน already uploaded (its file path) */
   slip: string;
-  onPickSlip: (f: File | undefined) => void;
+  onPickSlip: Parameters<typeof FileInput>[0]['onFile'];
 }) {
   // money already given back (a swap/refund job stores it as a negative payment): shown as it is, no payment inputs
   // — the hidden fields stay as loaded, so a save sends no payment and the refund is kept
@@ -168,7 +168,12 @@ function PaymentFields({
   canUpload,
   slip,
   onPickSlip,
-}: Draft & { bal: Balance; canUpload: boolean; slip: string; onPickSlip: (f: File | undefined) => void }) {
+}: Draft & {
+  bal: Balance;
+  canUpload: boolean;
+  slip: string;
+  onPickSlip: Parameters<typeof FileInput>[0]['onFile'];
+}) {
   // the save puts the payment date in front of the note (one varchar(100))
   const payDetailMax = noteMaxLength((n) => paymentDetailOf(d.payDate, n), d.payDetail);
   return (
@@ -218,12 +223,22 @@ function PaymentFields({
           onChange={(e) => upd({ payNo: e.target.value })}
         />
       </Field>
-      <Field label="สลิปหลักฐานการชำระ" wide>
+      <Field
+        label="สลิปการชำระเงิน"
+        wide
+        hint={
+          lock
+            ? 'ล็อกพร้อมช่องเงิน (เหตุผลใต้ วิธีการชำระเงิน)'
+            : canUpload
+              ? `อัปโหลดแล้วบันทึกเข้าระบบทันที${slip ? ' (แทนที่สลิปเดิม)' : ''}`
+              : undefined
+        }
+      >
         <div className="flex items-center gap-2">
           <FileInput
             placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
             accept=".jpg,.jpeg,.png,.webp,.pdf"
-            disabled={!canUpload}
+            disabled={!canUpload || !!lock}
             onFile={onPickSlip}
           />
           {slip && (
