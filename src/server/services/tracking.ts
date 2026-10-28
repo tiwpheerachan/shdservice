@@ -6,11 +6,11 @@ import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
 import { today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
-import type { Customer } from '@/data/types';
 import { JOB_GROUP, QS } from '@/lib/status-ids';
 import { JS, effectiveDueText, type JobDetail } from './jobs';
 import type { QuotationDetail } from './quotations';
-import { getShippingProfile, trackUrlFor } from './shipping-profiles';
+import { getShippingProfile, listShippingProfiles, trackUrlFor, type ShippingProfile } from './shipping-profiles';
+import { shipperFor } from '@/lib/shipper';
 import {
   TRACK_STEPS,
   type PublicDoc,
@@ -152,80 +152,19 @@ export const inProgressForCustomer = (statusId: number | null, group: string | n
   return g !== JOB_GROUP.FINISHED && g !== JOB_GROUP.CANCEL;
 };
 
-/* masking — what /track and the documents opened from it show instead of the real value */
-/** a company / shop, not a person: never "คุณ บริ…" */
-const COMPANY =
-  /บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน|มหาชน|^ร้าน|มูลนิธิ|สมาคม|สหกรณ์|\b(?:co|ltd|inc|corp|plc)\b\.?|\b(?:company|limited|corporation)\b/i;
-const COMPANY_PREFIX = /^(?:บริษัท|บจก\.|หจก\.|ห้างหุ้นส่วน(?:จำกัด|สามัญ)?|ร้าน|มูลนิธิ|สมาคม|สหกรณ์)\s*/;
-// "นาย.อัครพล" (a dot typed after the title) → the title and the dot go
-const TITLE = /^(?:(?:คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)[.\s]*|(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))/i;
-/**
- * "C43600 คุณสมชาย ใจดี 081…" → "คุณ สมช…" (one title, never "คุณ คุณ…");
- * a company keeps its kind, no "คุณ": "บริษัท เอบีซี จำกัด" → "บริษัท เอบ…", "ABC Co., Ltd." → "ABC…"
- */
-export const maskName = (full: string) => {
-  let name = (full ?? '').trim().replace(/^[A-Z]\d+\s+/i, ''); // customer_detail = "C43600 ชื่อ เบอร์"
-  if (COMPANY.test(name)) {
-    const prefix = COMPANY_PREFIX.exec(name)?.[0] ?? '';
-    const word = name.slice(prefix.length).split(/\s+/)[0] ?? '';
-    return [prefix.trim(), word && `${word.slice(0, 3)}…`].filter(Boolean).join(' ') || 'ลูกค้า';
-  }
-  while (TITLE.test(name)) name = name.replace(TITLE, '');
-  const first = name.split(/\s+/)[0] ?? '';
-  return first ? `คุณ ${first.slice(0, 3)}…` : 'ลูกค้า';
-};
-/** serial / IMEI → "••••" + last 4; a note typed into the field ("SN เสียหาย", "รอ SN จากลูกค้า", "-") → "" */
-export const maskRef = (v: string) => {
-  const s = (v ?? '').replace(/[^A-Za-z0-9]/g, '');
-  return s.length > 4 && /\d/.test(s) ? `••••${s.slice(-4)}` : '';
-};
-export const maskPhone = (v: string) => {
-  const d = (v ?? '').replace(/\D/g, '');
-  return d.length >= 4 ? `•••-•••-${d.slice(-4)}` : '';
-};
-/** a phone / id number: 6+ digits, maybe split by "-" or spaces */
-const DIGIT_RUN = /\d(?:[\s-]?\d){5,}/g;
-/** a 5-digit number on its own (not part of "99/12345" or a longer number) */
-const POSTCODE = /(?<![\d/])\d{5}(?![\d/])/g;
-/**
- * No house number / street: from the ตำบล (แขวง / อำเภอ / เขต / จังหวัด) up to the first postcode, else
- * the postcode alone. Whatever follows the postcode ("… จ.เชียงราย 57000 โทร 095-4104532 …") is cut,
- * and a digit run before it (a phone typed in the middle) is scrubbed.
- */
-export const maskAddress = (v: string) => {
-  const s = (v ?? '').trim();
-  const i = s.search(/(?:^|\s)(?:ต\.|ตำบล|แขวง|อ\.|อำเภอ|เขต|จ\.|จังหวัด)/);
-  if (i < 0) return [...s.matchAll(POSTCODE)].at(-1)?.[0] ?? '';
-  const rest = s.slice(i);
-  const zip = [...rest.matchAll(POSTCODE)][0];
-  const head = (zip ? rest.slice(0, zip.index) : rest)
-    .replace(DIGIT_RUN, ' ')
-    .replace(/(?:โทร(?:ศัพท์)?|tel|มือถือ|เบอร์)\.?\s*:?\s*$/i, '');
-  return `${head} ${zip?.[0] ?? ''}`.replace(/\s+/g, ' ').trim();
-};
-const maskCustomer = <C extends { name: string; address: string; phone: string }>(c: C) => ({
-  name: maskName(c.name),
-  address: maskAddress(c.address),
-  phone: maskPhone(c.phone),
-  code: '',
-  taxId: '',
-  email: '',
-  line: '',
-});
+/** serial, else IMEI, in full; a note typed into the field ("SN เสียหาย", "รอ SN จากลูกค้า", "-") → "" */
+const deviceRefOf = (r: { serial: string | null; imei: string | null }) =>
+  [r.serial, r.imei].map((v) => (v ?? '').trim()).find((v) => v.length > 4 && /\d/.test(v)) ?? '';
 
 /**
- * A job as a document opened from /track (app/track/doc) shows it: no more than the tracking
- * page — masked name / phone / address / serial / IMEI, no staff names (technician / opener / closer), no contact details.
- * Prices stay (the customer decides on the quotation with them). Staff print views never call this.
+ * A document opened from /track (app/track/doc): the customer's own details in full — name, phone, address,
+ * serial, IMEI, order no. — so the copy can be used to confirm the job (2026-10-28); what the customer copy
+ * never had stays off: staff names (technician / opener / closer / quoted by) and staff notes. The status in
+ * the words /track uses. Staff print views never call this.
  */
-export function maskJobForCustomer(j: JobDetail): JobDetail {
+export function jobForCustomer(j: JobDetail): JobDetail {
   return {
     ...j,
-    customer: j.customer && { ...maskCustomer(j.customer), id: 0 },
-    customerDetail: maskName(j.customerDetail),
-    imei: maskRef(j.imei),
-    serial: maskRef(j.serial),
-    so: maskRef(j.so), // marketplace order no. — like the serial
     // the words /track uses, not the internal status ("อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว")
     status: statusLabel(j.statusId, stepOf(j.statusId, j.statusGroup?.trim() ?? '')),
     // free text typed by staff — internal notes / staff names ("คืนเงินนอกระบบ"); the return keeps its type + tracking no.
@@ -238,7 +177,6 @@ export function maskJobForCustomer(j: JobDetail): JobDetail {
     createByName: '', // staff names stay on the staff copy (ผู้รับงาน / ผู้ส่งคืน)
     repairedBy: '',
     closedBy: '',
-    sparePartReplace: '', // holds the new serial ("New S/N: …") — masked like `serial`
     outsource: [],
     logs: [],
     history: [],
@@ -246,16 +184,10 @@ export function maskJobForCustomer(j: JobDetail): JobDetail {
   };
 }
 
-export function maskQuotationForCustomer(q: QuotationDetail): QuotationDetail {
-  const c: Customer | null = q.customerDetail && { ...maskCustomer(q.customerDetail), status: q.customerDetail.status };
+export function quotationForCustomer(q: QuotationDetail): QuotationDetail {
   return {
     ...q,
-    customer: maskName(q.customer),
-    customerCode: '',
-    contactName: '',
-    imei: maskRef(q.imei),
-    customerDetail: c,
-    job: q.job && maskJobForCustomer(q.job),
+    job: q.job && jobForCustomer(q.job),
     createdBy: '', // เสนอราคาโดย — a staff name
     createdByPhone: '',
     createdByEmail: '',
@@ -289,6 +221,8 @@ function base(where: SQL | undefined) {
       shipper: job.returnCustomerType,
       trackingNo: job.returnCustomerTrackingNo,
       shipperId: job.returnShipperId,
+      receptionShipper: job.jobReceptionShipper,
+      receptionTrackingNo: job.jobReceptionTrackingNo,
       recordStatus: job.recordStatus,
       lastQuote,
     })
@@ -461,12 +395,24 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const step = stepOf(row.statusId ?? -1, row.group?.trim() ?? '');
   if (step && !seen.has(step)) seen.set(step, '');
 
-  // courier of the return leg (jobs closed before drizzle/0013 have none → plain tracking number)
+  // courier of the return leg: its profile (drizzle/0013); a job closed before that typed the name — the profile
+  // it is a name of (src/lib/shipper.ts), else just the tracking number
   const trackingNo = (row.trackingNo ?? '').trim();
+  const profiles = await listShippingProfiles(false);
+  const courierOf = (p: ShippingProfile | null, no: string) =>
+    p ? { name: p.nameTh, logoUrl: p.logoUrl, trackUrl: trackUrlFor(p, no) } : null;
   // a profile deleted since (soft delete) still names the courier of a parcel already shipped with it
-  const profile = row.shipperId ? await getShippingProfile(row.shipperId) : null;
-  const courier = profile
-    ? { name: profile.nameTh, logoUrl: profile.logoUrl, trackUrl: trackUrlFor(profile, trackingNo) }
+  const profile = row.shipperId ? await getShippingProfile(row.shipperId) : shipperFor(profiles, row.shipper ?? '');
+  const courier = courierOf(profile, trackingNo);
+  // the parcel the customer sent the device in with (job_reception_*: a profile name, or legacy free text)
+  const inboundNo = (row.receptionTrackingNo ?? '').trim();
+  const inboundShipper = (row.receptionShipper ?? '').trim();
+  const inbound = inboundNo
+    ? {
+        shipper: inboundShipper,
+        trackingNo: inboundNo,
+        courier: courierOf(shipperFor(profiles, inboundShipper), inboundNo),
+      }
     : null;
   // a past "expected" date while the job is still before ซ่อมเสร็จ: say so instead of a stale date
   const due = fmtDate(row.dueDate);
@@ -493,9 +439,9 @@ async function toPublic(row: Row): Promise<PublicJob> {
 
   return {
     no: row.no,
-    customerMasked: maskName(row.customerName ?? row.customerDetail ?? ''),
+    customer: (row.customerName ?? row.customerDetail ?? '').trim(),
     brandModel: [row.brand, row.model].filter(Boolean).join(' ').trim(),
-    deviceRef: maskRef(row.serial ?? '') || maskRef(row.imei ?? ''),
+    deviceRef: deviceRefOf(row),
     receivedDate: receivedOf(row),
     dueDate,
     step,
@@ -506,6 +452,7 @@ async function toPublic(row: Row): Promise<PublicJob> {
     trackingNo: (row.trackingNo ?? '').trim(),
     closedDate: fmtDate(row.closedDate),
     courier,
+    inbound,
     docs,
   };
 }
@@ -709,7 +656,7 @@ export async function listJobsForCustomers(
     const item: PublicJobSummary = {
       no: r.no,
       brandModel: [r.brand, r.model].filter(Boolean).join(' ').trim(),
-      deviceRef: maskRef(r.serial ?? '') || maskRef(r.imei ?? ''),
+      deviceRef: deviceRefOf(r),
       receivedDate: receivedOf(r),
       closedDate: isSentinelDate(r.closedDate) ? '' : fmtDate(r.closedDate),
       step,

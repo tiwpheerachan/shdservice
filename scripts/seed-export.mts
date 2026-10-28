@@ -60,13 +60,22 @@ CREATE TEMP TABLE s_config ON COMMIT DROP AS SELECT * FROM json_populate_records
 CREATE TEMP TABLE s_tour ON COMMIT DROP AS
   SELECT * FROM json_to_recordset(${lit(tour.json)}) AS x(email text, seen text[], off boolean, updated_at timestamptz);
 
--- โปรไฟล์: exactly the source's live rows (the migration's built-in SHD + 5 couriers are replaced)
+-- ผู้ออกเอกสาร: exactly the source's live rows (the migration's built-in SHD is replaced)
 DELETE FROM document_profile;
 INSERT INTO document_profile SELECT * FROM s_doc;
 SELECT setval(pg_get_serial_sequence('document_profile', 'id'), GREATEST((SELECT max(id) FROM document_profile), 1));
-DELETE FROM shipping_profile;
-INSERT INTO shipping_profile SELECT * FROM s_ship;
-SELECT setval(pg_get_serial_sequence('shipping_profile', 'id'), GREATEST((SELECT max(id) FROM shipping_profile), 1));
+-- บริษัทขนส่ง: the source's live profiles by code (names, logo, link, order); a courier the migration added that the
+-- source does not have stays (drizzle/0001), and so do its other names when the source has none (taken before 0001)
+UPDATE shipping_profile p SET name_th = s.name_th, name_en = s.name_en, logo_path = s.logo_path, track_url = s.track_url,
+       is_active = s.is_active, sort_order = s.sort_order, updated_at = s.updated_at,
+       aliases = CASE WHEN coalesce(s.aliases, '') <> '' THEN s.aliases ELSE p.aliases END
+  FROM s_ship s
+ WHERE p.code = s.code AND p.deleted_at IS NULL;
+INSERT INTO shipping_profile (code, name_th, name_en, logo_path, track_url, is_active, sort_order, aliases, created_at, updated_at)
+SELECT s.code, s.name_th, s.name_en, s.logo_path, s.track_url, s.is_active, s.sort_order, coalesce(s.aliases, ''),
+       s.created_at, s.updated_at
+  FROM s_ship s
+ WHERE NOT EXISTS (SELECT 1 FROM shipping_profile p WHERE p.code = s.code AND p.deleted_at IS NULL);
 
 -- ผู้ใช้: the legacy row (same e-mail) keeps its user_id and takes the new app's values
 UPDATE app_user u SET user_type = s.user_type, record_status = s.record_status, is_active = s.is_active,

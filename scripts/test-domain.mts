@@ -2440,28 +2440,28 @@ try {
       INSERT INTO quotation_hd (quotation_no, customer_code, reference_job_no, net_amount, quotation_status_id, create_date, create_by, is_active)
         VALUES ('TDQ0281', 'TDC281', 'TDJ0281', 500, 2, '2001-04-10', ${U.admin.id}, true);`);
 
-    await test('R2 track: a document opened from /track is masked like the page (name / phone / address / IMEI / tax id, no technician); prices stay', async () => {
+    await test("R2 track: a document opened from /track shows the customer's details in full (2026-10-28), no technician; prices stay", async () => {
       const staff = (await getJob('TDJ0281'))!;
       assert.equal(staff.engineer, 'TD td-admin', 'staff print unchanged');
-      assert.equal(staff.customer!.phone, '081-234-5678');
-      const j = tracking.maskJobForCustomer(staff);
+      const j = tracking.jobForCustomer(staff);
       assert.deepEqual(
+        [j.customer!.name, j.customer!.phone, j.customer!.address, j.customer!.taxId, j.imei, j.serial],
         [
-          j.customer!.name,
-          j.customer!.phone,
-          j.customer!.address,
-          j.customer!.taxId,
-          j.customer!.email,
-          j.customer!.line,
+          staff.customer!.name,
+          '081-234-5678',
+          staff.customer!.address,
+          staff.customer!.taxId,
+          staff.imei,
+          staff.serial,
         ],
-        ['คุณ สมช…', '•••-•••-5678', 'แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพมหานคร 10310', '', '', ''],
       );
-      assert.deepEqual([j.imei, j.serial, j.engineer, j.engineerId], ['••••5678', '', '', 0]);
-      assert.ok(!j.customerDetail.includes('081'), 'customer_detail carries the phone');
-      const q = tracking.maskQuotationForCustomer((await getQuotation('TDQ0281'))!);
+      assert.equal(j.customerDetail, staff.customerDetail);
+      assert.deepEqual([j.engineer, j.engineerId], ['', 0]);
+      const sq = (await getQuotation('TDQ0281'))!;
+      const q = tracking.quotationForCustomer(sq);
       assert.deepEqual(
-        [q.customer, q.customerDetail!.phone, q.customerDetail!.taxId, q.imei, q.job!.engineer],
-        ['คุณ สมช…', '•••-•••-5678', '', '••••5678', ''],
+        [q.customer, q.customerDetail!.phone, q.imei, q.job!.engineer],
+        [sq.customer, '081-234-5678', sq.imei, ''],
       );
       assert.equal(q.netAmount, 500, 'the customer decides with the price');
       // and the page lists that 2001 quotation as expired, never as current
@@ -2498,17 +2498,12 @@ try {
       assert.deepEqual(j.courier, { name: 'TD ขนส่ง', logoUrl: '', trackUrl: 'https://t.example/TH123' });
       assert.equal(j.stepLabel, 'ส่งคืนแล้ว (พัสดุ)');
     });
-    await test('R2 track: masking — one title ("คุณ คุณ…"), a Thai note in the S/N field is not a serial', async () => {
-      assert.equal(tracking.maskName('คุณสมชาย ใจดี'), 'คุณ สมช…');
-      assert.equal(tracking.maskName('คุณ สมชาย'), 'คุณ สมช…');
-      assert.equal(tracking.maskName('C43600 นายสมศักดิ์ ดีมาก 0812345678'), 'คุณ สมศ…');
-      assert.equal(tracking.maskName('Mr. John Covate'), 'คุณ Joh…');
-      assert.equal(tracking.maskName(''), 'ลูกค้า');
-      for (const v of ['SN เสียหาย', 'รอ SN จากลูกค้า', 'ไม่มีเลข SN', '-', 'no'])
-        assert.equal(tracking.maskRef(v), '', v);
-      assert.equal(tracking.maskRef('R58N123ABCD'), '••••ABCD');
-      // the job's serial is a note → the IMEI is shown instead
-      assert.equal((await tracking.publicJobByNo('TDJ0281'))!.deviceRef, '••••5678');
+    await test('R2 track: name and S/N in full (2026-10-28); a Thai note in the S/N field is not a serial', async () => {
+      const staff = (await getJob('TDJ0281'))!;
+      const pub = (await tracking.publicJobByNo('TDJ0281'))!;
+      // the job's serial is a note → the IMEI is shown instead, in full
+      assert.equal(pub.deviceRef, staff.imei);
+      assert.ok(pub.customer && !pub.customer.includes('…'), pub.customer);
     });
     await test('R2 track: a document link opens many times / from any browser for 10 min, only while its /track link is live', async () => {
       const { token } = await tracking.rotateToken('TDJ0282');
@@ -2773,26 +2768,20 @@ try {
         VALUES ('TDQ0392', 'TDC281', 'TDJ0392', 500, 2, now() - interval '30 days', ${U.admin.id}, true),
                ('TDQ0393', 'TDC281', 'TDJ0393', 500, 2, now(), ${U.admin.id}, true);`);
 
-    await test('R3 track docs: no staff names on the customer copy (ผู้รับงาน / เสนอราคาโดย); a company is never "คุณ บริ…"', async () => {
+    await test('R3 track docs: no staff names on the customer copy (ผู้รับงาน / เสนอราคาโดย)', async () => {
       const staff = (await getJob('TDJ0391'))!;
       assert.equal(staff.createByName, 'TD td-admin', 'staff print unchanged');
-      const j = tracking.maskJobForCustomer(staff);
+      const j = tracking.jobForCustomer(staff);
       assert.deepEqual([j.createByName, j.createBy, j.engineer, j.outsource], ['', 0, '', []]);
       const sq = (await getQuotation('TDQ0392'))!;
       assert.equal(sq.createdBy, 'TD td-admin', 'staff print unchanged');
-      assert.equal(tracking.maskQuotationForCustomer(sq).createdBy, '');
-      assert.equal(tracking.maskName('บริษัท เอบีซี จำกัด'), 'บริษัท เอบ…');
-      assert.equal(tracking.maskName('C43600 บริษัทเอบีซี จำกัด (มหาชน) 02-111-2222'), 'บริษัท เอบ…');
-      assert.equal(tracking.maskName('หจก. สมบูรณ์การช่าง'), 'หจก. สมบ…');
-      assert.equal(tracking.maskName('ABC Co., Ltd.'), 'ABC…');
-      assert.equal(tracking.maskName('คุณสมชาย ใจดี'), 'คุณ สมช…', 'a person keeps "คุณ"');
-      assert.equal(tracking.maskName('Corinne Smith'), 'คุณ Cor…', '"Co" inside a name is not a company');
+      assert.equal(tracking.quotationForCustomer(sq).createdBy, '');
     });
     await test('R3 track docs: receipt + return note use the /track received date (job_reception_date), not job_create_date', async () => {
       const j = (await getJob('TDJ0391'))!;
       assert.equal(j.createDate.slice(0, 10), '2026-09-07');
       assert.equal(tracking.receivedDateOf(j), '2026-09-08');
-      assert.equal(tracking.receivedDateOf(tracking.maskJobForCustomer(j)), '2026-09-08', 'customer copy too');
+      assert.equal(tracking.receivedDateOf(tracking.jobForCustomer(j)), '2026-09-08', 'customer copy too');
       assert.equal((await tracking.publicJobByNo('TDJ0391'))!.receivedDate, tracking.receivedDateOf(j), 'one truth');
       // legacy 1900 reception date → the day the job was opened, as on /track
       assert.equal(tracking.receivedDateOf({ receptionDate: '', createDate: '2026-09-07 11:50' }), '2026-09-07');
@@ -3376,38 +3365,47 @@ try {
   console.log('\nRound 5 — customer /track + print documents');
   {
     const tracking = await import('@/server/services/tracking');
+    const { listShippingProfiles } = await import('@/server/services/shipping-profiles');
     // TDJ0391 comes from the Round 3 /track block
 
-    await test('R5 track: masking — address cut at the postcode (no trailing phone), "นาย." title, companies', async () => {
-      assert.equal(
-        tracking.maskAddress(
-          '256 หมู่15 ต.รอบเวียง อ.เมือง จ.เชียงราย 57000 โทร 095-4104532 ( ร.17 พัน.3) ต.รอบเวียง 57000',
-        ),
-        'ต.รอบเวียง อ.เมือง จ.เชียงราย 57000',
-      );
-      assert.equal(
-        tracking.maskAddress('26/126 ต.ในเมือง อ.เมือง จ.พิษณุโลก 65000 เบอร์โทร 0814747040'),
-        'ต.ในเมือง อ.เมือง จ.พิษณุโลก 65000',
-      );
-      assert.equal(
-        tracking.maskAddress('12 ต.บ้านไร่ โทร 081-234-5678 จ.ราชบุรี'),
-        'ต.บ้านไร่ โทร จ.ราชบุรี',
-        'no postcode',
-      );
-      assert.equal(tracking.maskAddress('99/1 ซ.สุขใจ กรุงเทพ 10310 0812345678'), '10310', 'no ตำบล: postcode only');
-      assert.equal(
-        tracking.maskAddress('99/1 ซ.สุขใจ แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพมหานคร 10310'),
-        'แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพมหานคร 10310',
-        'a clean address is unchanged',
-      );
-      assert.equal(tracking.maskName('นาย.อัครพล ใจดี'), 'คุณ อัค…');
-      assert.equal(tracking.maskName('น.ส.สมหญิง'), 'คุณ สมห…');
-      assert.equal(tracking.maskName('บริษัท เอบีซี จำกัด'), 'บริษัท เอบ…');
-      assert.equal(tracking.maskName('ร้านสมใจโมบาย'), 'ร้าน สมใ…');
+    await test('R5 track: a courier name typed in the legacy system is its profile (aliases, drizzle/0001)', async () => {
+      const { shipperFor } = await import('@/lib/shipper');
+      const profiles = await listShippingProfiles(false);
+      const code = (typed: string) => shipperFor(profiles, typed)?.code ?? null;
+      for (const t of [
+        'THAIPOST',
+        'thaipost',
+        'ไปรษณีย์',
+        'ไปรษณ๊ย์',
+        'ไปรษณีย์ไทย',
+        'EMS',
+        't',
+        'บริษัท ไปรษณีย์ไทย จํากัด',
+      ])
+        assert.equal(code(t), 'THP', t);
+      for (const t of ['Flash', 'flash express', 'F', 'Fash']) assert.equal(code(t), 'FLASH', t);
+      for (const t of ['Kerry', 'kr', 'KEX']) assert.equal(code(t), 'KEX', t);
+      for (const t of ['J&T', '่j&t', 'jt']) assert.equal(code(t), 'JNT', t);
+      for (const t of ['speed-d', 'SPEED D', '7-11']) assert.equal(code(t), 'SPEEDD', t);
+      for (const t of ['มาส่งเอง', '0', '-', 'other', '']) assert.equal(code(t), null, t);
     });
-    await test('R5 track docs: customer copy drops job remark / engineer remark / return detail; SO masked; /track status words', async () => {
+    await test('R5 track: the parcel the customer sent in — its tracking no. + the courier the legacy name means', async () => {
+      await db.execute(
+        sql`UPDATE job SET job_reception_shipper = 'THAIPOST', job_reception_tracking_no = 'OB280167152TH' WHERE job_no = 'TDJ0391'`,
+      );
+      const thp = (await listShippingProfiles(false)).find((p) => p.code === 'THP')!;
+      const j = (await tracking.publicJobByNo('TDJ0391'))!;
+      assert.deepEqual(j.inbound, {
+        shipper: 'THAIPOST',
+        trackingNo: 'OB280167152TH',
+        courier: { name: thp.nameTh, logoUrl: thp.logoUrl, trackUrl: thp.trackUrl.replace('{no}', 'OB280167152TH') },
+      });
+      await db.execute(sql`UPDATE job SET job_reception_tracking_no = '' WHERE job_no = 'TDJ0391'`);
+      assert.equal((await tracking.publicJobByNo('TDJ0391'))!.inbound, null, 'no number, no parcel');
+    });
+    await test('R5 track docs: customer copy drops job remark / engineer remark / return detail; SO in full; /track status words', async () => {
       const staff = (await getJob('TDJ0391'))!;
-      const j = tracking.maskJobForCustomer({
+      const j = tracking.jobForCustomer({
         ...staff,
         statusId: 14,
         statusGroup: 'Pending',
@@ -3419,7 +3417,7 @@ try {
       });
       assert.deepEqual(
         [j.remark, j.engineerRemark, j.return.detail, j.return.type, j.return.tracking, j.so],
-        ['', '', '', 'ส่งพัสดุ', 'TH123', '••••1234'],
+        ['', '', '', 'ส่งพัสดุ', 'TH123', '240915ABCD1234'],
       );
       assert.equal(j.status, 'กำลังตรวจสอบ / ซ่อม', 'not the internal status name');
     });

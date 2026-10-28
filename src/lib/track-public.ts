@@ -5,7 +5,7 @@
  * column on `job` never reaches the public API unless it is added here on purpose.
  *
  * Never here: prices / costs, phone, address, email, internal notes, technician,
- * customer id, full serial / IMEI, any token.
+ * customer id, any token. The customer's name and the serial / IMEI are shown in full (2026-10-28).
  *
  * Documents (`docs`) are only a list of WHAT exists. The sheet itself (full name, address,
  * prices) is served one at a time by app/track/doc/[ticket] against a one-time ticket from
@@ -17,10 +17,10 @@ export type TrackStepKey = 'received' | 'diagnosing' | 'waiting' | 'repaired' | 
 export type PublicJob = {
   /** job number — printed on the customer's own receipt */
   no: string;
-  /** "คุณ สม…" — never the full name */
-  customerMasked: string;
+  /** the customer's name as on the job */
+  customer: string;
   brandModel: string;
-  /** •••• + last 4 of serial/IMEI, or "" */
+  /** serial, else IMEI, or "" */
   deviceRef: string;
   receivedDate: string;
   dueDate: string;
@@ -36,10 +36,15 @@ export type PublicJob = {
   trackingNo: string;
   closedDate: string;
   /** courier profile of the return leg — logo + link into the courier's own tracking page */
-  courier: { name: string; logoUrl: string; trackUrl: string } | null;
+  courier: PublicCourier | null;
+  /** the parcel the customer sent the device in with (เลขพัสดุจากลูกค้า), when there is a tracking number */
+  inbound: { shipper: string; trackingNo: string; courier: PublicCourier | null } | null;
   /** documents the customer can open, each shown under its step */
   docs: PublicDoc[];
 };
+
+/** a courier profile: logo + a link into the courier's own tracking page for this parcel ("" = none) */
+export type PublicCourier = { name: string; logoUrl: string; trackUrl: string };
 
 export type TrackDocKind = 'job' | 'quotation' | 'return';
 

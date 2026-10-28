@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { CircleCheck, CircleDot, Circle, Ban, Truck, ExternalLink, FileText, Loader2 } from 'lucide-react';
-import { TRACK_MSG, TRACK_STEPS, type PublicDoc, type PublicJob } from '@/lib/track-public';
+import { TRACK_MSG, TRACK_STEPS, type PublicCourier, type PublicDoc, type PublicJob } from '@/lib/track-public';
 import { cn } from '@/lib/utils';
 
 /**
@@ -108,7 +108,7 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
         </h1>
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:grid-cols-4">
           {[
-            ['ลูกค้า', j.customerMasked],
+            ['ลูกค้า', j.customer || '—'],
             ['เครื่อง', j.brandModel || '—'],
             ['S/N', j.deviceRef || '—'],
             ['วันที่รับเครื่อง', j.receivedDate || '—'],
@@ -181,44 +181,16 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
           </ol>
           {docNote && <div className="-mt-2 mb-3">{docNote}</div>}
 
-          {/* return shipment — courier logo + a link into the courier's own tracking page */}
-          {j.trackingNo && (
-            <div className="mt-1 rounded-lg border border-border bg-muted/40 p-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-white ring-1 ring-border">
-                  {j.courier?.logoUrl ? (
-                    <img
-                      src={j.courier.logoUrl}
-                      alt={j.courier.name}
-                      referrerPolicy="no-referrer"
-                      className="max-h-8 max-w-[56px] object-contain"
-                    />
-                  ) : (
-                    <Truck className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1 basis-40">
-                  <p className="text-xs text-muted-foreground">{j.courier?.name || j.shipper || 'การจัดส่งคืน'}</p>
-                  <p className="num text-sm font-semibold tracking-tight break-all">{j.trackingNo}</p>
-                </div>
-                {j.courier?.trackUrl && (
-                  <a
-                    href={j.courier.trackUrl}
-                    target="_blank"
-                    rel="noopener noreferrer nofollow"
-                    referrerPolicy="no-referrer"
-                    className="inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                  >
-                    ติดตามพัสดุ
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                )}
-              </div>
-              {!j.courier?.trackUrl && (
-                <p className="mt-2 text-xs text-muted-foreground">นำเลขพัสดุไปตรวจสอบที่เว็บไซต์ของบริษัทขนส่ง</p>
-              )}
-            </div>
+          {/* the parcels — courier logo + a link into the courier's own tracking page */}
+          {j.inbound && (
+            <Parcel
+              title="พัสดุที่ส่งมาที่ศูนย์"
+              shipper={j.inbound.shipper}
+              no={j.inbound.trackingNo}
+              c={j.inbound.courier}
+            />
           )}
+          {j.trackingNo && <Parcel title="พัสดุส่งคืน" shipper={j.shipper} no={j.trackingNo} c={j.courier} />}
 
           {(j.dueDate || j.closedDate) && (
             <dl className="mt-1 grid gap-2.5 border-t border-border pt-4 text-sm sm:grid-cols-3">
@@ -248,6 +220,48 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
       <p className="px-1 text-xs text-muted-foreground">
         สอบถามเพิ่มเติม ติดต่อศูนย์บริการตามเบอร์ด้านล่าง · เพื่อความปลอดภัย ต้องยืนยันใหม่ทุกครั้งที่เปิดหน้านี้
       </p>
+    </div>
+  );
+}
+
+/** one parcel: the courier (logo, name) and its number, with a link into the courier's tracking page when it has one */
+function Parcel({ title, shipper, no, c }: { title: string; shipper: string; no: string; c: PublicCourier | null }) {
+  return (
+    <div className="mt-1 mb-3 rounded-lg border border-border bg-muted/40 p-3">
+      <p className="mb-2 text-2xs font-medium text-muted-foreground">{title}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-white ring-1 ring-border">
+          {c?.logoUrl ? (
+            <img
+              src={c.logoUrl}
+              alt={c.name}
+              referrerPolicy="no-referrer"
+              className="max-h-8 max-w-[56px] object-contain"
+            />
+          ) : (
+            <Truck className="h-4 w-4 text-muted-foreground" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1 basis-40">
+          <p className="text-xs text-muted-foreground">{c?.name || shipper || 'บริษัทขนส่ง'}</p>
+          <p className="num text-sm font-semibold tracking-tight break-all">{no}</p>
+        </div>
+        {c?.trackUrl && (
+          <a
+            href={c.trackUrl}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            referrerPolicy="no-referrer"
+            className="inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            ติดตามพัสดุ
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+      </div>
+      {!c?.trackUrl && (
+        <p className="mt-2 text-xs text-muted-foreground">นำเลขพัสดุไปตรวจสอบที่เว็บไซต์ของบริษัทขนส่ง</p>
+      )}
     </div>
   );
 }

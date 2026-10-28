@@ -240,7 +240,7 @@ let phoneHashes: string[] = [];
 try {
   const PUBLIC_KEYS = [
     'no',
-    'customerMasked',
+    'customer',
     'brandModel',
     'deviceRef',
     'receivedDate',
@@ -253,6 +253,7 @@ try {
     'trackingNo',
     'closedDate',
     'courier',
+    'inbound',
     'docs',
   ].sort();
 
@@ -618,7 +619,7 @@ try {
     assert.ok(j);
     assert.deepEqual(Object.keys(j!).sort(), PUBLIC_KEYS);
   });
-  await test('no price / phone / address / email / note / full serial / token', async () => {
+  await test('no price / phone / address / email / note / token', async () => {
     const j = await publicJobByNo(JOB_A.job_no);
     const s = JSON.stringify(j).toLowerCase();
     for (const bad of [
@@ -636,7 +637,6 @@ try {
     ]) {
       assert.equal(s.includes(`"${bad}`), false, `field containing "${bad}"`);
     }
-    assert.ok(!j!.deviceRef || /^•{4}.{0,4}$/.test(j!.deviceRef), 'serial must be masked');
     assert.equal(s.includes(JOB_A.track_token.toLowerCase()), false);
   });
 

@@ -9,7 +9,7 @@ import { money } from '@/components/print/print-frame';
 import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
-import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
+import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { parseSwap, refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
 
 const dmy = (s: string) => {
@@ -28,12 +28,12 @@ const warrantyLabel = (w: string) => (w === 'IN' ? 'ในประกัน' : 
  * ใบส่งคืนสินค้า / RETURN & REPAIR NOTE — same form language as the quotation
  * (logomark header · boxed bilingual header · full-height table · totals with
  * the amount in words · two signature boxes) plus a repair-result block and the
- * return / payment details. Printed from the close-job screen. `forCustomer` = opened from /track (masked).
+ * return / payment details. Printed from the close-job screen. `forCustomer` = opened from /track: no staff names / notes.
  */
 export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getJob(no);
   if (!found) notFound();
-  const j = forCustomer ? maskJobForCustomer(found) : found;
+  const j = forCustomer ? jobForCustomer(found) : found;
   const co = await profileForDocument(j.documentProfileId); // ออกเอกสารในนาม
   const c = j.customer;
   // billed qty = issued less returned to stock (รับคืนจากการเบิก); a line returned in full is not printed
@@ -62,7 +62,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   // the deposit given back at close (closeJob): a negative payment "คืนมัดจำ <date>"
   const refunded = j.payment.amount < 0 && j.payment.detail.startsWith(REFUND_DETAIL);
   const lbl = 'text-neutral-700';
-  // the serial fitted at repair / swap: the "New S/N: …" line of spare_part_replace ('' on the customer copy: masked)
+  // the serial fitted at repair / swap: the "New S/N: …" line of spare_part_replace
   const newSerial = parseSwap(j.sparePartReplace)['New S/N'];
 
   return (
@@ -133,12 +133,9 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                 <span>
                   <span className={lbl}>Tel :</span>&nbsp;&nbsp;<span className="num">{or(c?.phone)}</span>
                 </span>
-                {/* never on the customer copy (masked away) — no empty label either */}
-                {!forCustomer && (
-                  <span>
-                    <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
-                  </span>
-                )}
+                <span>
+                  <span className={lbl}>เลขผู้เสียภาษี :</span>&nbsp;&nbsp;<span className="num">{or(c?.taxId)}</span>
+                </span>
               </div>
             </td>
             <td className="pad" rowSpan={2}>

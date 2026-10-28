@@ -204,4 +204,5 @@ export const shippingProfileSchema = z
     if (url.length > 300) issue(ctx, 'trackUrl', 'ลิงก์ติดตามยาวเกิน 300 ตัวอักษร');
     else if (url && !/^https:\/\//i.test(url)) issue(ctx, 'trackUrl', 'ลิงก์ติดตามต้องขึ้นต้นด้วย https://');
     else if (url && !/\{no\}/i.test(url)) issue(ctx, 'trackUrl', 'ลิงก์ติดตามต้องมี {no} ตรงตำแหน่งเลขพัสดุ');
+    if (clean(v.aliases).length > 500) issue(ctx, 'aliases', 'ชื่ออื่นยาวเกิน 500 ตัวอักษร');
   });

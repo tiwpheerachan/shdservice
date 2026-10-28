@@ -1023,4 +1023,6 @@ export const shippingProfile = pgTable('shipping_profile', {
   updatedAt: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { mode: 'string' }),
   deletedBy: integer('deleted_by'),
+  /** other names of the courier (legacy free text), comma separated — drizzle/0001, src/lib/shipper.ts */
+  aliases: varchar('aliases', { length: 500 }).notNull().default(''),
 });

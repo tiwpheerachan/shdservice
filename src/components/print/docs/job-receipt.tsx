@@ -3,15 +3,19 @@ import { getJob } from '@/server/services/jobs';
 import { PrintFrame, Box, KV, Signatures, money } from '@/components/print/print-frame';
 import { REPAIR_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
-import { maskJobForCustomer, receivedDateOf } from '@/server/services/tracking';
+import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
+import { listShippingProfiles } from '@/server/services/shipping-profiles';
+import { shipperFor } from '@/lib/shipper';
 
-/** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track (masked). */
+/** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track: no staff names / notes. */
 export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getJob(no);
   if (!found) notFound();
-  const j = forCustomer ? maskJobForCustomer(found) : found;
+  const j = forCustomer ? jobForCustomer(found) : found;
   const c = j.customer;
   const co = await profileForDocument(j.documentProfileId);
+  // a legacy courier name ("THAIPOST") printed as its profile (ไปรษณีย์ไทย), as /track shows it
+  const shipper = shipperFor(await listShippingProfiles(false), j.receptionShipper)?.nameTh || j.receptionShipper;
   return (
     <PrintFrame
       company={co}
@@ -58,7 +62,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
             { k: 'เลขคำสั่งซื้อ', v: j.so },
             { k: 'วันที่ซื้อ', v: j.saleOrderDate },
             { k: 'รับเข้าโดย', v: j.receptionType },
-            { k: 'เลขพัสดุ / ขนส่ง', v: [j.receptionTrackingNo, j.receptionShipper].filter(Boolean).join(' · ') },
+            { k: 'เลขพัสดุ / ขนส่ง', v: [j.receptionTrackingNo, shipper].filter(Boolean).join(' · ') },
           ]}
         />
         <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">

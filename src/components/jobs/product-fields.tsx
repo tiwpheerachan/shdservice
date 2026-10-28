@@ -13,6 +13,7 @@ import { CodeInput } from '@/components/shared/code-input';
 import { JobLinks, shopeeDateOff, thaiDate, Warn } from '@/components/jobs/job-checks';
 import type { JobChecks } from '@/server/services/job-checks';
 import { today } from '@/lib/dates';
+import { shipperFor } from '@/lib/shipper';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { clean, cleanCode } from '@/lib/validation';
 import {
@@ -444,13 +445,14 @@ export function TrackingField({ f: { s, set, errors } }: P) {
 
 export function ShipperField({ f: { s, set, errors } }: P) {
   const { data: SHIPPING_PROFILES, ...shippingLookup } = useShippingProfiles();
-  // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value ("F", "flash" …) stays selectable as-is
-  const legacyShipper =
-    s.receptionShipper && !SHIPPING_PROFILES.some((p) => p.nameTh === s.receptionShipper) ? s.receptionShipper : '';
+  // courier names from โปรไฟล์บริษัทขนส่ง; a legacy free-text value is that profile when it is one of its names
+  // ("THAIPOST" → ไปรษณีย์ไทย, src/lib/shipper.ts), else it stays selectable as-is ("(ค่าเดิม)")
+  const matched = shipperFor(SHIPPING_PROFILES, s.receptionShipper);
+  const legacyShipper = s.receptionShipper && !matched ? s.receptionShipper : '';
   // the API accepts a profile name or the job's own legacy value only (no free text)
   return (
     <Field label="โดยบริษัทขนส่ง" error={errors.receptionShipper} lookup={shippingLookup}>
-      <Select value={s.receptionShipper} onChange={(e) => set('receptionShipper', e.target.value)}>
+      <Select value={matched?.nameTh ?? s.receptionShipper} onChange={(e) => set('receptionShipper', e.target.value)}>
         <option value="">- - เลือก - -</option>
         {SHIPPING_PROFILES.map((p) => (
           <option key={p.id} value={p.nameTh}>

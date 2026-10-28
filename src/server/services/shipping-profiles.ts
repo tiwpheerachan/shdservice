@@ -27,6 +27,8 @@ export type ShippingProfile = {
   /** what an <img> can load, or "" */
   logoUrl: string;
   trackUrl: string;
+  /** other names (legacy free text "THAIPOST", "t" …), comma separated — src/lib/shipper.ts */
+  aliases: string;
   isActive: boolean;
   isDeleted: boolean;
   sortOrder: number;
@@ -41,6 +43,7 @@ const toProfile = (r: Row): ShippingProfile => ({
   logoPath: r.logoPath,
   logoUrl: r.logoPath ? `/api/files?path=${encodeURIComponent(r.logoPath)}` : '',
   trackUrl: r.trackUrl,
+  aliases: r.aliases,
   isActive: r.isActive,
   isDeleted: !!r.deletedAt,
   sortOrder: r.sortOrder,
@@ -70,6 +73,17 @@ export function trackUrlFor(profile: Pick<ShippingProfile, 'trackUrl'> | null, t
   return profile.trackUrl.replace(/\{no\}/gi, encodeURIComponent(no));
 }
 
+/** "THAIPOST,ไปรษณีย์ ,, EMS" → "THAIPOST, ไปรษณีย์, EMS" (trimmed, no blanks, no repeats) */
+const aliasList = (v: unknown) =>
+  [
+    ...new Set(
+      clean(v)
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean),
+    ),
+  ].join(', ');
+
 /** the parsed body of the save route (shippingProfileSave in src/server/contract/admin.ts) */
 export type ShippingProfileInput = z.output<typeof shippingProfileSave.body>;
 
@@ -84,6 +98,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
     nameTh,
     nameEn: clean(i.nameEn),
     trackUrl,
+    aliases: aliasList(i.aliases),
     isActive: i.isActive !== false,
     sortOrder: Number(i.sortOrder ?? 0) || 0,
     updatedAt: nowThai(),

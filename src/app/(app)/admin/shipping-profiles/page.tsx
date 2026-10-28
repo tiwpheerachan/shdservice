@@ -28,11 +28,12 @@ type Profile = {
   logoPath: string;
   logoUrl: string;
   trackUrl: string;
+  aliases: string;
   isActive: boolean;
   sortOrder: number;
 };
 type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: number };
-const EMPTY: FormValues = { code: '', nameTh: '', nameEn: '', trackUrl: '', isActive: true, sortOrder: 0 };
+const EMPTY: FormValues = { code: '', nameTh: '', nameEn: '', trackUrl: '', aliases: '', isActive: true, sortOrder: 0 };
 
 export default function ShippingProfilesPage() {
   const { push } = useToast();
@@ -173,6 +174,11 @@ export default function ShippingProfilesPage() {
           <span>
             <span className="font-medium">{r.code}</span>
             <span className="block text-xs text-muted-foreground">{r.nameTh}</span>
+            {r.aliases && (
+              <span className="block text-2xs text-muted-foreground" title="ชื่ออื่นที่ใช้เรียก">
+                หรือ {r.aliases}
+              </span>
+            )}
           </span>
         </div>
       ),
@@ -280,6 +286,20 @@ export default function ShippingProfilesPage() {
               value={form.trackUrl}
               onChange={(e) => set('trackUrl', e.target.value)}
               placeholder="https://…/track?no={no}"
+            />
+          </Field>
+
+          <Field
+            label="ชื่ออื่นที่ใช้เรียก"
+            wide
+            error={fe.errors.aliases}
+            hint="คั่นด้วย , — ชื่อที่พิมพ์ไว้ในงาน (เช่นจากระบบเดิม) ตรงกับชื่อไหนในนี้ ระบบถือว่าเป็นขนส่งนี้ ไม่สนตัวพิมพ์เล็ก-ใหญ่ เว้นวรรค และขีด"
+          >
+            <Input
+              maxLength={500}
+              value={form.aliases}
+              onChange={(e) => set('aliases', e.target.value)}
+              placeholder="เช่น THAIPOST, ไปรษณีย์, EMS"
             />
           </Field>
 

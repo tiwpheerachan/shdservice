@@ -18,8 +18,8 @@ export const dynamic = 'force-dynamic';
  * The ticket is the only input: it names one document of one job and works for 10 minutes while
  * the tracking session / link that asked for it is live — from any browser, so LINE's in-app
  * browser → Safari still opens it (services/tracking.ts docForLink). The document is checked again
- * here (a quotation cancelled / a job deleted since → refused) and shown masked: no more than the
- * tracking page shows (`forCustomer`).
+ * here (a quotation cancelled / a job deleted since → refused) and shown as the customer's copy: the
+ * customer's details in full, no staff names / notes (`forCustomer`).
  * The proxy (src/proxy.ts) gives this path the /track headers (no-store, noindex, no-referrer, CSP).
  */
 const FAIL_LIMIT = 5; // invalid tickets per IP per 10 minutes → blocked 15 minutes (as /api/track/data)

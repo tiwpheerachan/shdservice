@@ -12887,6 +12887,11 @@
                     "type": "string",
                     "nullable": true
                   },
+                  "aliases": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Other names of the courier, comma separated (≤ 500)."
+                  },
                   "isActive": {
                     "type": "boolean",
                     "nullable": true
@@ -12914,6 +12919,9 @@
                         "type": "string"
                       },
                       "trackUrl": {
+                        "type": "string"
+                      },
+                      "aliases": {
                         "type": "string"
                       },
                       "isActive": {
@@ -18006,6 +18014,9 @@
           "trackUrl": {
             "type": "string"
           },
+          "aliases": {
+            "type": "string"
+          },
           "isActive": {
             "type": "boolean"
           },
@@ -18024,6 +18035,7 @@
           "logoPath",
           "logoUrl",
           "trackUrl",
+          "aliases",
           "isActive",
           "isDeleted",
           "sortOrder"
@@ -18460,7 +18472,7 @@
           "no": {
             "type": "string"
           },
-          "customerMasked": {
+          "customer": {
             "type": "string"
           },
           "brandModel": {
@@ -18550,6 +18562,43 @@
               "trackUrl"
             ]
           },
+          "inbound": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "shipper": {
+                "type": "string"
+              },
+              "trackingNo": {
+                "type": "string"
+              },
+              "courier": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "logoUrl": {
+                    "type": "string"
+                  },
+                  "trackUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "logoUrl",
+                  "trackUrl"
+                ]
+              }
+            },
+            "required": [
+              "shipper",
+              "trackingNo",
+              "courier"
+            ]
+          },
           "docs": {
             "type": "array",
             "items": {
@@ -18595,7 +18644,7 @@
         },
         "required": [
           "no",
-          "customerMasked",
+          "customer",
           "brandModel",
           "deviceRef",
           "receivedDate",
@@ -18608,6 +18657,7 @@
           "trackingNo",
           "closedDate",
           "courier",
+          "inbound",
           "docs"
         ]
       },

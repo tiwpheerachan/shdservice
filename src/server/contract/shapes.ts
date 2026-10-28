@@ -499,6 +499,7 @@ export const ShippingProfile = z
     logoPath: s,
     logoUrl: s,
     trackUrl: s,
+    aliases: s,
     isActive: b,
     isDeleted: b,
     sortOrder: n,
@@ -520,11 +521,13 @@ export const LinkStatus = z
 
 const TrackStep = z.enum(['received', 'diagnosing', 'waiting', 'repaired', 'returned']);
 
+const Courier = z.object({ name: s, logoUrl: s, trackUrl: s });
+
 /** What an anonymous visitor may see of a job (src/lib/track-public.ts PublicJob — a whitelist). */
 export const PublicJob = z
   .object({
     no: s,
-    customerMasked: s,
+    customer: s,
     brandModel: s,
     deviceRef: s,
     receivedDate: s,
@@ -536,7 +539,8 @@ export const PublicJob = z
     shipper: s,
     trackingNo: s,
     closedDate: s,
-    courier: z.object({ name: s, logoUrl: s, trackUrl: s }).nullable(),
+    courier: Courier.nullable(),
+    inbound: z.object({ shipper: s, trackingNo: s, courier: Courier.nullable() }).nullable(),
     docs: z.array(
       z.object({ kind: z.enum(['job', 'quotation', 'return']), ref: s, label: s, date: s, step: TrackStep }),
     ),

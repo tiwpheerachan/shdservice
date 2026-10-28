@@ -350,6 +350,7 @@ export const shippingProfileSave = defineOperation({
     code: sn,
     nameTh: sn,
     trackUrl: sn,
+    aliases: sn.meta({ description: 'Other names of the courier, comma separated (≤ 500).' }),
     isActive: b.nullish(),
     expect: ShippingProfile.partial().nullish().meta({
       description:
