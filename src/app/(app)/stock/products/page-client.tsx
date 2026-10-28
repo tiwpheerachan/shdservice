@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Plus, PackageX, TriangleAlert, Boxes, PackageCheck, Eye, Pencil, Ban } from 'lucide-react';
+import { Plus, PackageX, TriangleAlert, Boxes, PackageCheck } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect } from '@/components/shared/search-select';
@@ -27,6 +27,7 @@ import { useServerTable } from '@/lib/use-server-table';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { ExportButton } from '@/components/shared/export-button';
+import { RowActions } from '@/components/shared/row-actions';
 import { NO_FILTER, type StockFilter } from './filters';
 
 function Kpi({
@@ -249,7 +250,7 @@ export default function ProductsPage() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
-      hideBelow: 'lg', // phones, and beside the sidebar at 1024–1279 (the 3-button Action column needs the room)
+      hideBelow: 'lg', // phones, and beside the sidebar at 1024–1279
       cell: (r) => (
         <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
           {r.status}
@@ -259,33 +260,15 @@ export default function ProductsPage() {
     {
       key: 'action',
       header: 'Action',
-      width: '220px',
+      width: '110px',
       align: 'center',
       sortable: false,
       cell: (r) => (
-        <div className="flex items-center justify-center gap-1">
-          <Button size="sm" variant="outline" onClick={() => setDetail({ product: r, mode: 'view' })}>
-            <Eye className="h-3.5 w-3.5" />
-            ดู
-          </Button>
-          {canEdit && (
-            <Button size="sm" variant="outline" onClick={() => setDetail({ product: r, mode: 'edit' })}>
-              <Pencil className="h-3.5 w-3.5" />
-              แก้ไข
-            </Button>
-          )}
-          {canDel && r.status === 'Active' && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-danger hover:bg-danger-soft"
-              onClick={() => cancelProduct(r)}
-            >
-              <Ban className="h-3.5 w-3.5" />
-              ยกเลิก
-            </Button>
-          )}
-        </div>
+        <RowActions
+          onView={() => setDetail({ product: r, mode: 'view' })}
+          onEdit={canEdit ? () => setDetail({ product: r, mode: 'edit' }) : undefined}
+          onCancel={canDel && r.status === 'Active' ? () => cancelProduct(r) : undefined}
+        />
       ),
     },
   ];
