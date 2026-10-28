@@ -36,7 +36,6 @@ import {
   jobStats,
   listJobTypeDetails,
   listShippers,
-  listShopNames,
   symptomStats,
   modelSymptoms,
 } from '@/server/services/jobs';
@@ -149,8 +148,6 @@ export async function readResource(
       return modelSymptoms(sp.get('model') ?? '');
     case 'shippers':
       return listShippers();
-    case 'shop_names':
-      return listShopNames();
     case 'document_profiles':
       return listDocumentProfiles(true);
     case 'shipping_profiles':

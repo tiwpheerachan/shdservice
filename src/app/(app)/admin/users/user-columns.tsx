@@ -82,6 +82,11 @@ export function userColumns({
           <div className="min-w-0">
             <p className="truncate font-medium">{r.name}</p>
             <p className="num truncate text-2xs text-muted-foreground">{r.username}</p>
+            {/* a phone: the role and status columns are hidden — shown here, so Action fits beside the name */}
+            <div className="mt-1 flex flex-wrap items-center gap-1 sm:hidden">
+              <RoleBadge role={r.role} />
+              {r.role !== PENDING_ROLE && <StatusBadge r={r} /> /* a pending sign-up: its role badge already says it */}
+            </div>
           </div>
         </div>
       ),
@@ -89,6 +94,7 @@ export function userColumns({
     {
       key: 'role',
       header: 'ประเภทผู้ใช้งาน / สิทธิ์',
+      hideBelow: 'sm',
       cell: (r) => <RoleBadge role={r.role} />,
     },
     // at 1280px (with the sidebar) every column does not fit and pushes Action off-screen:

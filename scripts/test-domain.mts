@@ -12,6 +12,14 @@
  */
 import assert from 'node:assert/strict';
 import { readFileSync as readFile } from 'node:fs';
+/** one migration as it was its own file — a `-- >>> <name>.sql` part of the squashed drizzle/0000_init.sql */
+const migrationPart = (name: string): string => {
+  const all = readFile('drizzle/0000_init.sql', 'utf8');
+  const start = all.indexOf(`-- >>> ${name}.sql\n`);
+  if (start < 0) throw new Error(`drizzle/0000_init.sql has no part ${name}`);
+  const end = all.indexOf('\n-- >>> ', start + 1);
+  return all.slice(start, end < 0 ? undefined : end);
+};
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, assertLocal } from '../tests/db-url.mts';
@@ -191,7 +199,7 @@ async function seed() {
       VALUES ('${JOB_PARTS}', 'TDP3', '', 1, false, true, 15, 1, now(), 9101, 0, 0);
   `);
   // the rest of 0030 (ส่งออก Excel for every role, the TD ones included — they were just inserted)
-  await pool.query(readFile('drizzle/0030_special_rights.sql', 'utf8'));
+  await pool.query(migrationPart('0030_special_rights'));
   // test:running-no deletes the Inventory-In series and restarts it from 0 — the WHI numbers then
   // collide with the movements earlier runs of this script left in inventory_hd (unique inventory_no).
   // Make sure this year's rows exist, then move them past the highest number already used.
@@ -509,6 +517,29 @@ try {
     assert.equal(draft.status, 201, JSON.stringify(draft.body));
     const r = await setProfile((draft.body.order as { no: string }).no);
     assert.equal(r.status, 200, JSON.stringify(r.body));
+    // waiting for approval: its creator's alone, as its save — an approver may not re-letterhead it (QA 2026-10-27)
+    const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
+    const waiting = await json(
+      await soPOST(
+        await request('/api/sale-orders', U.admin, {
+          method: 'POST',
+          body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.a.code, qty: 1 }] },
+        }),
+      ),
+    );
+    assert.equal(waiting.status, 201, JSON.stringify(waiting.body));
+    const wNo = (waiting.body.order as { no: string }).no;
+    const asManager = await json(
+      await docProfilePOST(
+        await request('/api/documents/profile', U.manager, {
+          method: 'POST',
+          body: { kind: 'sale_order', no: wNo, profileId: 1 },
+        }),
+      ),
+    );
+    assert.equal(asManager.status, 403, JSON.stringify(asManager.body));
+    assert.equal(asManager.body.error, WAITING_CREATOR_ONLY);
+    assert.equal((await setProfile(wNo)).status, 200, 'its creator still can');
   });
   await test('edit an approved order (POST /api/sale-orders with its no) → 409, lines untouched', async () => {
     assert.ok(soNo, 'needs the order above');
@@ -1557,7 +1588,7 @@ try {
             ...base,
             so: 'ไม่มี',
             serial: 'SN หาย',
-            imei: '123',
+            imei: 'IMEI 123', // digits only (not 15 digits is a warning on the form, never a refusal)
             receptionTrackingNo: 'มาส่งเอง',
             channel: 'Offline',
             warrantyMonth: 1225,
@@ -1610,6 +1641,44 @@ try {
         [j.so, j.serial, j.tracking, j.shop, j.remark],
         ['SO-2600123', 'AB12345', 'TH123456789TH', 'ร้าน A', 'บรรทัด 1\nบรรทัด 2'],
       );
+    });
+    await test('J: "รอ S/N จากลูกค้า" saves as the note prod uses and reloads as it (the form ticks it)', async () => {
+      const { WAIT_SERIAL } = await import('@/lib/validation/job');
+      const r = await fieldsOf(
+        updateJob(JOB_LEGACY, { ...(await asLoaded(JOB_LEGACY)), serial: WAIT_SERIAL }, U.admin.id),
+      );
+      assert.equal(r.status, 200, JSON.stringify(r.fields ?? r));
+      assert.equal((await row(JOB_LEGACY)).serial, 'รอ SN จากลูกค้า');
+      assert.equal((await getJob(JOB_LEGACY))!.serial, WAIT_SERIAL);
+    });
+    await test('J: suggestions — values typed before, spaces collapsed, most used first, contains any case, limit, deleted jobs left out', async () => {
+      const { jobSuggestions } = await import('@/server/services/jobs');
+      const { invalidate } = await import('@/server/cache');
+      const shops = [
+        ['TDJS01', 'TD Sugg Alpha', 'ACTIVE'],
+        ['TDJS02', ' TD Sugg   Alpha ', 'ACTIVE'],
+        ['TDJS03', 'TD Sugg Alpha', 'ACTIVE'],
+        ['TDJS04', 'td sugg beta', 'ACTIVE'],
+        ['TDJS05', 'td sugg beta', 'ACTIVE'],
+        ['TDJS06', 'TD Sugg Gamma', 'ACTIVE'],
+        ...['TDJS07', 'TDJS08', 'TDJS09', 'TDJS10'].map((no) => [no, 'TD Sugg Deleted', 'DELETED']),
+      ];
+      await pool.query(`DELETE FROM job WHERE job_no LIKE 'TDJS%'`);
+      for (const [no, shop, status] of shops)
+        await pool.query(
+          `INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date,
+                            product_sale_out_shop_name, product_equipment, record_status)
+             VALUES ($1, 2, 9001, $2, 'Model TD', now(), $3, 'TD Sugg ครบกล่อง', $4)`,
+          [no, `${CUSTOMER} ลูกค้า ทดสอบโดเมน`, shop, status],
+        );
+      invalidate('jobs:used:');
+      assert.deepEqual(await jobSuggestions('shop', 'td sugg'), ['TD Sugg Alpha', 'td sugg beta', 'TD Sugg Gamma']);
+      assert.deepEqual(await jobSuggestions('shop', ' SUGG   BETA'), ['td sugg beta'], 'contains, any case');
+      assert.deepEqual(await jobSuggestions('shop', 'td sugg', 2), ['TD Sugg Alpha', 'td sugg beta'], 'limit');
+      assert.deepEqual(await jobSuggestions('accessories', 'sugg ครบ'), ['TD Sugg ครบกล่อง'], 'another field');
+      assert.deepEqual(await jobSuggestions(undefined, 'td'), [], 'an unknown field answers none');
+      assert.ok((await jobSuggestions('shop')).length <= 10, 'no q: the 10 most used');
+      await pool.query(`DELETE FROM job WHERE job_no LIKE 'TDJS%'`);
     });
     await test('J: repair "New Serial" is added to the legacy part list, never written over it', async () => {
       await saveRepair(JOB_LEGACY, { status: 'ซ่อมเสร็จ', newSerial: 'new0001' }, U.admin.id);
@@ -2021,7 +2090,7 @@ try {
       const bad = await fieldsOf(saveOutsource('TDJ0205', { send, status: await statusName(1) }, U.admin.id));
       assert.deepEqual([bad.status, bad.fields], [400, { status: OUTSOURCE_STATUS_ONLY }]);
     });
-    await test('R1 jobs: out-source with the current status sent back (the page always does) → sent 14, back 15; a changed choice wins', async () => {
+    await test('R1 jobs: out-source with the current status sent back (the page always does) → sent 14, back 15; "รับคืนแล้ว" while still out is refused', async () => {
       await pool.query(`INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
                           VALUES ${job('TDJ0291', 2)}, ${job('TDJ0292', 2)}`);
       const current = async (no: string) => statusName((await jobRow(no)).s);
@@ -2031,9 +2100,15 @@ try {
       const receive = { from: send.to, date: '2026-10-12' };
       await saveOutsource('TDJ0291', { receive, status: await current('TDJ0291') }, U.admin.id);
       assert.equal((await jobRow('TDJ0291')).s, 15, 'back');
-      // 15 picked while sending (an allowed choice, not the current status): the choice, not the implied 14
-      await saveOutsource('TDJ0292', { send, status: await statusName(15) }, U.admin.id);
-      assert.equal((await jobRow('TDJ0292')).s, 15, 'explicit choice');
+      // 15 picked while sending: the device is not back — refused, nothing written (QA 2026-10-27)
+      const { RECEIVED_NEEDS_RECEIVE } = await import('@/lib/validation/job');
+      await assert.rejects(saveOutsource('TDJ0292', { send, status: await statusName(15) }, U.admin.id), (e: Error) =>
+        e.message.includes(RECEIVED_NEEDS_RECEIVE),
+      );
+      assert.equal((await jobRow('TDJ0292')).s, 2, 'unchanged');
+      // the same send with the job's own status kept goes through: the implied 14
+      await saveOutsource('TDJ0292', { send, status: await current('TDJ0292') }, U.admin.id);
+      assert.equal((await jobRow('TDJ0292')).s, 14, 'sent');
     });
     await test('R1 jobs: the job-list search finds a phone typed as digits in "081-496-9925"', async () => {
       const found = async (q: string) => (await listJobs({ q })).some((j) => j.no === 'TDJ0206');
@@ -2343,7 +2418,6 @@ try {
     const { getQuotation } = await import('@/server/services/quotations');
     const { saveShippingProfile, deleteShippingProfile, listShippingProfiles } =
       await import('@/server/services/shipping-profiles');
-    const { readFileSync } = await import('node:fs');
     await pool.query(`
       INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
         SELECT * FROM (VALUES (8, 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)', 8, 'Finished', true),
@@ -2447,7 +2521,7 @@ try {
       assert.equal(await tracking.docForLink('x'.repeat(43)), null);
     });
     await test('R2 migration 0028: status 16 พ้นกำหนดเสนอราคา; Customer Service cannot save Job Repair (view kept); re-runnable', async () => {
-      const file = readFileSync('drizzle/0028_round2_status_name_cs_repair.sql', 'utf8');
+      const file = migrationPart('0028_round2_status_name_cs_repair');
       await pool.query(`
         UPDATE job_status SET job_status_name = 'อยู่ระหว่างการซ่อม - พันกำหนดเสนอราคา' WHERE job_status_id = 16;
         INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
@@ -3391,7 +3465,6 @@ try {
     const { GET: pendingGET } = await import('@/app/api/alerts/sale-orders-pending/route');
     const { invalidateGrantCache, grantsForUserType } = await import('@/server/auth');
     const { canViewPath } = await import('@/lib/modules');
-    const { readFileSync } = await import('node:fs');
     const records = async (u: TestUser, body: Record<string, unknown>) =>
       json(await recordsPOST(await request('/api/admin/records', u, { method: 'POST', body })));
 
@@ -3572,7 +3645,7 @@ try {
     });
 
     await test('R5 migration 0029: Account / Audit may view sale orders (list + edit page), nothing more; a bigger grant is kept; re-runnable', async () => {
-      const file = readFileSync('drizzle/0029_round5_sale_order_view_account_audit.sql', 'utf8');
+      const file = migrationPart('0029_round5_sale_order_view_account_audit');
       await pool.query(`
         DELETE FROM app_config WHERE user_type = 'Account' AND module_name = 'Sale Order';
         INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
@@ -4886,7 +4959,7 @@ try {
     });
 
     await test('R6 migration 0030: seeds the rights as the rules were; re-run changes nothing; a removed right stays removed', async () => {
-      const file = readFile('drizzle/0030_special_rights.sql', 'utf8');
+      const file = migrationPart('0030_special_rights');
       await pool.query(`
         DELETE FROM app_config WHERE user_type IN ('Head Engineer', 'TD Cost Role');
         INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)

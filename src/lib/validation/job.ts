@@ -195,11 +195,14 @@ const LEGACY_PLACEHOLDERS = new Set(['0', '-', 'ยังไม่ระบุ']
  * answer, so it fills the required Serial (staff stop typing notes like "SN เสียหาย" into the field).
  */
 export const NO_SERIAL = '-';
+/** Serial No. ticked "รอ S/N จากลูกค้า": the note staff already typed for it (prod's most common spelling) —
+ *  an answer like NO_SERIAL; untick it and type the serial once the customer sends it */
+export const WAIT_SERIAL = 'รอ SN จากลูกค้า';
 
 /** is this required field filled? (the one rule the page, the API and the old-job notice share) */
 export function isRequiredFilled(key: JobRequiredKey, v: unknown): boolean {
   if (!isFilled(v)) return false;
-  if (key === 'serial' && String(v).trim() === NO_SERIAL) return true;
+  if (key === 'serial' && [NO_SERIAL, WAIT_SERIAL].includes(String(v).trim())) return true;
   return !(LEGACY_PLACEHOLDER_KEYS.has(key) && LEGACY_PLACEHOLDERS.has(String(v).trim()));
 }
 
@@ -225,7 +228,7 @@ export const soAccepts = (so: unknown, channel: unknown) =>
 /** a typed "S/N:" / "SN:" prefix is allowed here and dropped on save (cleanSerial) */
 const SERIAL_BODY = String.raw`(?:S\/?N\s*:\s*)?[A-Z0-9][A-Z0-9/._:-]{3,49}`;
 const NEW_SERIAL_RE = new RegExp(`^${SERIAL_BODY}$`);
-const SERIAL_RE = new RegExp(`^(?:-|${SERIAL_BODY})$`); // "-" = NO_SERIAL
+const SERIAL_RE = new RegExp(`^(?:-|${WAIT_SERIAL}|${SERIAL_BODY})$`); // "-" = NO_SERIAL
 const NEW_SERIAL_MSG = 'Serial No. ใช้ได้เฉพาะ A-Z 0-9 / . _ : - (4–50 ตัว)';
 const SERIAL_MSG = `${NEW_SERIAL_MSG} — ไม่มีหรืออ่านไม่ได้ ให้ติ๊ก "ไม่มี S/N / S/N เสียหาย"`;
 /** Serial No. as stored: cleanCode() without a typed "S/N:" prefix */
@@ -404,6 +407,9 @@ export const RECEIVE_BEFORE_SEND = 'วันที่รับต้องไ�
 export const RECEIVE_DATE_REQUIRED = 'ต้องระบุวันที่รับคืน';
 /** หน้า Out-Source เปลี่ยนสถานะได้แค่ ส่งซ่อม / รับคืนจาก Out-Source (สถานะเดิมของงานบันทึกซ้ำได้) */
 export const OUTSOURCE_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะ ส่งซ่อม Out-Source แล้ว / รับคืนจาก Out-Source แล้ว';
+/** "รับคืนจาก Out-Source แล้ว" while the device is still out (no receive block): the job would read back and closable */
+export const RECEIVED_NEEDS_RECEIVE =
+  'เลือก "รับคืนจาก Out-Source แล้ว" ได้เมื่อบันทึกรับเครื่องคืน (ใส่วันที่รับ) ในครั้งเดียวกัน';
 /** ปิดงานไม่ได้ระหว่างที่เครื่องยังอยู่ที่ Out-Source (setStatus → Finished; หน้า ปิดงาน เตือนก่อนกด) */
 export const OUTSOURCE_NOT_BACK =
   'งานนี้ส่งซ่อมภายนอกอยู่ — บันทึก "รับคืนจาก Out-Source แล้ว" (วันที่รับคืน) ที่หน้า บันทึกงานส่งซ่อมต่อ (Out-Source) ก่อนปิดงาน';

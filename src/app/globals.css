@@ -325,6 +325,15 @@ html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
     bottom: calc(var(--actions-h) + 6.5rem);
   }
 }
+/* a toast while the offer is up (a save on that page) goes above it, never over it */
+html:has([data-tour-offer]) [data-sonner-toaster][data-y-position='bottom'] {
+  --offset-bottom: 11rem !important;
+  --mobile-offset-bottom: 13rem !important;
+}
+html:has([data-tour-offer]):has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-position='bottom'] {
+  --offset-bottom: calc(var(--actions-h) + 15.5rem) !important;
+  --mobile-offset-bottom: calc(var(--actions-h) + 18.5rem) !important;
+}
 /* the note after a tour is skipped (top centre): below the topbar, its ? button in view */
 [data-sonner-toaster][data-y-position='top'] {
   --offset-top: calc(var(--topbar-h) + 0.5rem) !important;
@@ -337,7 +346,25 @@ html[data-tour='try'] [data-tour-target] a {
   cursor: not-allowed;
 }
 
+/* a report on paper: every column (the screen hides some by the table's width — paper is not a phone), the
+   whole width of the sheet (landscape: ReportView's @page), nothing cut by the screen's sideways scroll box */
 @media print {
+  .report-print :is(th, td).hidden {
+    display: table-cell !important;
+  }
+  .report-print .table-scroll {
+    overflow: visible !important;
+  }
+  .report-print table {
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 9pt;
+  }
+  .report-print :is(th, td) {
+    min-width: 0 !important;
+    width: auto !important;
+    padding: 4px 6px !important;
+  }
   .no-print {
     display: none !important;
   }

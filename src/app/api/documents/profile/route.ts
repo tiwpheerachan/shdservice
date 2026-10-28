@@ -15,6 +15,6 @@ export const POST = handle(async (req: NextRequest) => {
   // 400 "kind required" / "no required" / "profileId required" — before the permission check, which needs `kind`
   const { kind, no, profileId } = await parseBody(req, documentProfileSet);
   const me = await requireCan(req, DOC_MODULE[kind], 'edit');
-  const profile = await setDocumentProfile(kind, no, profileId, me.userId);
+  const profile = await setDocumentProfile(kind, no, profileId, me.userId, me.isAdmin);
   return NextResponse.json({ ok: true, profile: { id: profile.id, code: profile.code, nameTh: profile.nameTh } });
 });

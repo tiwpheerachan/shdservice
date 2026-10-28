@@ -1,5 +1,5 @@
 import 'server-only';
-import { cached, TTL_MASTER } from '@/server/cache';
+import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import {
   and,
   asc,
@@ -86,6 +86,7 @@ import {
   RECEIVE_BEFORE_SEND,
   OUTSOURCE_NOT_BACK,
   OUTSOURCE_STATUS_ONLY,
+  RECEIVED_NEEDS_RECEIVE,
   RECEIVE_DATE_REQUIRED,
   TRACKING_REQUIRED,
   partsNotIssuedMsg,
@@ -482,7 +483,8 @@ const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   closedDate: job.jobClosedDate,
   repairedDate: job.jobRepairedDate,
   // รายงานการปิดงานซ่อม: TAT = วันที่ปิดงาน − วันที่เปิดงาน
-  tat: sql`(${job.jobClosedDate} - ${job.jobCreateDate})`,
+  // calendar days, as the report's TAT cell and its "เกิน 30 วัน" count read it (not hours: 6.9 days would sort after 7)
+  tat: sql`(${job.jobClosedDate}::date - ${job.jobCreateDate}::date)`,
   returnType: job.returnCustomerType,
   paymentAmount: job.jobPaymentAmount,
 };
@@ -2438,6 +2440,8 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   const outsourceStatuses: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED, cur.status ?? -1];
   if (newStatus !== undefined && !outsourceStatuses.includes(newStatus))
     throw new HttpError(400, OUTSOURCE_STATUS_ONLY, { fields: { status: OUTSOURCE_STATUS_ONLY } });
+  if (newStatus === JS.OUTSOURCE_RECEIVED && newStatus !== cur.status && !i.receive)
+    throw new HttpError(400, RECEIVED_NEEDS_RECEIVE, { fields: { status: RECEIVED_NEEDS_RECEIVE } });
   if (i.receive && !i.receive.date)
     throw new HttpError(400, RECEIVE_DATE_REQUIRED, { fields: { 'receive.date': RECEIVE_DATE_REQUIRED } });
   // the people on the latest row (open, or already back and saved again) may stay even if they left
@@ -2504,6 +2508,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     if (target !== undefined) await setStatus(tx, jobNo, target, byUserId, status);
     return versionNow(tx, jobNo);
   });
+  if (i.send?.to) invalidate('jobs:vendors'); // a new vendor is offered at once, not 5 minutes later
   return savedJob(jobNo, v);
 }
 
@@ -2982,21 +2987,41 @@ async function loadShippers(limit: number): Promise<string[]> {
   return rows.map((r) => r.v?.trim() ?? '').filter(Boolean);
 }
 
-/** Shop Name (job.product_sale_out_shop_name) — free text in the legacy app (511 spellings);
- *  the most used ones (trimmed) are offered as suggestions, typing a new one still works. */
-export function listShopNames(limit = 60): Promise<string[]> {
-  return cached(`jobs:shop_names:${limit}`, 5 * TTL_MASTER, () => loadShopNames(limit));
+/** the free-text job fields offered back as you type (GET /api/jobs/suggestions) — Shop Name: 511 spellings */
+const SUGGESTED = {
+  shop: job.productSaleOutShopName,
+  accessories: job.productEquipment,
+  defects: job.productFault,
+} as const;
+export type SuggestedField = keyof typeof SUGGESTED;
+/** every value a field was saved with (spaces trimmed / collapsed, case kept), most used first — 5 min memo */
+function usedValues(field: SuggestedField): Promise<string[]> {
+  return cached(`jobs:used:${field}`, 5 * TTL_MASTER, async () => {
+    const v = sql<string>`regexp_replace(btrim(${SUGGESTED[field]}), '[[:space:]]+', ' ', 'g')`;
+    const rows = await db
+      .select({ v, n: count() })
+      .from(job)
+      .where(and(ne(job.recordStatus, RS.DELETED), sql`length(btrim(coalesce(${SUGGESTED[field]}, ''))) >= 2`))
+      .groupBy(v)
+      .orderBy(desc(count()), v);
+    // spellings of one name (dreameofficial / Dreame Official Store / DREAME…) offered once, as most of them write
+    // it — the list then steers towards one spelling instead of keeping every variant alive
+    const by = new Map<string, { v: string; n: number }>();
+    for (const r of rows) {
+      const k = r.v.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      const g = by.get(k);
+      if (g) g.n += Number(r.n);
+      else by.set(k, { v: r.v, n: Number(r.n) }); // rows come most used first: the first spelling seen leads
+    }
+    return [...by.values()].sort((a, b) => b.n - a.n).map((g) => g.v);
+  });
 }
-async function loadShopNames(limit: number): Promise<string[]> {
-  const v = sql<string>`trim(${job.productSaleOutShopName})`;
-  const rows = await db
-    .select({ v, n: count() })
-    .from(job)
-    .where(sql`length(trim(coalesce(${job.productSaleOutShopName},''))) >= 2`)
-    .groupBy(v)
-    .orderBy(desc(count()))
-    .limit(limit);
-  return rows.map((r) => r.v ?? '').filter(Boolean);
+/** the `limit` most used values containing `q` (any case); no `q` = the most used */
+export async function jobSuggestions(field: SuggestedField | undefined, q = '', limit = 10): Promise<string[]> {
+  if (!field) return [];
+  const t = clean(q).toLowerCase();
+  const all = await usedValues(field);
+  return (t ? all.filter((v) => v.toLowerCase().includes(t)) : all).slice(0, limit);
 }
 
 /* ------------------------------------------------------------------ *

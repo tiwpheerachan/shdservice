@@ -308,12 +308,15 @@ function Runner({
   // the step's fields into the upper part of the screen — on a step change and after a resize / rotation
   const toEnd = !!step.toEnd;
   React.useEffect(() => {
+    // the table a toEnd step scrolls sideways: put back as it was when the tour moves on / ends
+    const side = toEnd && els[0] ? (els[0].closest<HTMLElement>('.table-scroll') ?? els[0]) : null;
+    const sideWas = side?.scrollLeft ?? 0;
     const bring = () => {
       if (!els.length) return;
       const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       // a wide table the card talks about the last column of: its scroll box sideways to it (at once — the
       // scrollIntoView below would cancel a smooth one); the lit part may be the header row inside it
-      if (toEnd) (els[0]!.closest<HTMLElement>('.table-scroll') ?? els[0]!).scrollTo({ left: els[0]!.scrollWidth });
+      side?.scrollTo({ left: els[0]!.scrollWidth });
       // inside a box that scrolls on its own (a dialog's body): the step's fields to its top, all of them that fit;
       // a table wider than a phone: sideways to the first one — the page itself is placed below
       const sc = scroller(els[0]!);
@@ -344,6 +347,7 @@ function Runner({
     return () => {
       clearTimeout(t);
       window.removeEventListener('resize', onResize);
+      side?.scrollTo({ left: sideWas });
     };
   }, [els, toEnd]);
 
@@ -622,7 +626,7 @@ function Runner({
           )}
           {tryIt ? (
             <p className="mt-2 text-2xs text-primary">
-              ลองพิมพ์ / เลือกในช่องที่สว่างได้ — จบบทสอนแล้วฟอร์มกลับเป็นเหมือนเดิม
+              ลองกด พิมพ์ หรือเลือกในส่วนที่สว่างได้ — จบบทสอนแล้วฟอร์มกลับเป็นเหมือนเดิม
             </p>
           ) : (
             lookOnly && <p className="mt-2 text-2xs text-muted-foreground">ขั้นนี้ดูอย่างเดียว ลองใช้ได้หลังจบบทสอน</p>

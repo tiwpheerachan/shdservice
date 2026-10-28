@@ -83,7 +83,16 @@ export default function Page() {
       ]}
       onApply={setF}
       onExport={
-        access.canExport ? () => exportXlsx('jobs', { ...filters, q: table.q, file: 'report-open-job' }) : undefined
+        access.canExport
+          ? () =>
+              exportXlsx('jobs', {
+                ...filters,
+                q: table.q,
+                sort: pageArgs.sort,
+                dir: pageArgs.dir,
+                file: 'report-open-job',
+              })
+          : undefined
       }
       kpis={kpisOr(sumError, [
         { label: 'งานที่เปิดทั้งหมด', value: int(S?.total ?? 0), tone: 'primary' },

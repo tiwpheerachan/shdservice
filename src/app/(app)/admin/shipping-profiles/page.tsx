@@ -17,6 +17,7 @@ import { useApi } from '@/data/db';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { useTourRestore } from '@/components/tour/tour';
 import { shippingProfileSchema } from '@/lib/validation/admin';
+import { cn } from '@/lib/utils';
 
 /** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
 type Profile = {
@@ -156,17 +157,18 @@ export default function ShippingProfilesPage() {
       cell: (r) => (
         <div className="flex items-center gap-2">
           <span className="grid h-7 w-12 place-items-center overflow-hidden rounded bg-white ring-1 ring-border">
-            {r.logoUrl ? (
+            {r.logoUrl && (
               <img
                 src={r.logoUrl}
                 alt=""
                 loading="lazy"
                 decoding="async"
-                className="max-h-6 max-w-[44px] object-contain"
+                className="peer max-h-6 max-w-[44px] object-contain"
+                // its file is gone (an old row): the truck instead of an empty box
+                onError={(e) => e.currentTarget.setAttribute('hidden', '')}
               />
-            ) : (
-              <Truck className="h-3.5 w-3.5 text-muted-foreground" />
             )}
+            <Truck className={cn('h-3.5 w-3.5 text-muted-foreground', r.logoUrl && 'hidden peer-[[hidden]]:block')} />
           </span>
           <span>
             <span className="font-medium">{r.code}</span>
@@ -297,7 +299,7 @@ export default function ShippingProfilesPage() {
                 ? 'SVG (คมที่สุด) หรือ PNG/JPG พื้นขาวหรือโปร่งใส แนะนำสูงอย่างน้อย 120px'
                 : pendingLogo
                   ? `จะอัปโหลด ${pendingLogo.name} เมื่อกดบันทึก`
-                  : 'เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก'
+                  : 'SVG (คมที่สุด) หรือ PNG/JPG — เลือกไฟล์ได้เลย ระบบจะอัปโหลดให้เมื่อกดบันทึก'
             }
           >
             <div className="flex items-center gap-3">

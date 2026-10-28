@@ -47,7 +47,13 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
   const amount = page.getByLabel('จำนวนเงินที่ชำระ (บาท)');
   await expect(amount).toHaveValue(''); // nothing paid yet: an untouched box is no payment
   await page.getByLabel('วิธีการชำระเงิน').selectOption('เงินโอน');
-  await expect(amount).toHaveValue('600'); // choosing the method fills in total − deposit
+  await expect(amount).toHaveValue('600.00'); // choosing the method fills in total − deposit (shown as money)
+  // a click on the amount selects it: what is typed replaces it, never appended to it (QA 2026-10-27: 250 → 250250)
+  await amount.click();
+  await page.keyboard.type('600');
+  await expect(amount).toHaveValue('600');
+  await amount.blur();
+  await expect(amount).toHaveValue('600.00');
 
   await page.getByLabel('วิธีการส่งคืนสินค้า').selectOption(RETURN_TYPE);
   await page.getByLabel('โปรดระบุ สถานะงาน').selectOption(CLOSE_STATUS);
@@ -133,7 +139,7 @@ test('a closed job keeps its money for a role without Job Money After Close: inp
   const method = page.getByLabel('วิธีการชำระเงิน');
   await expect(method).toHaveValue('เงินสด');
   await expect(method).toBeDisabled();
-  await expect(page.getByLabel('จำนวนเงินที่ชำระ (บาท)')).toHaveValue('500');
+  await expect(page.getByLabel('จำนวนเงินที่ชำระ (บาท)')).toHaveValue('500.00'); // shown as money
   await expect(page.getByLabel('จำนวนเงินที่ชำระ (บาท)')).toBeDisabled();
   await expect(
     page.getByText('งานปิดแล้ว — ช่องเงินแก้ได้เฉพาะผู้มีสิทธิ์พิเศษ "แก้ช่องเงินหลังปิดงาน"'),

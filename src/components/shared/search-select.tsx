@@ -107,7 +107,7 @@ export function SearchSelect({
             }
           }}
           disabled={disabled}
-          className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
         >
           {selected ? (
             <span className="flex min-w-0 flex-1 items-baseline gap-2">

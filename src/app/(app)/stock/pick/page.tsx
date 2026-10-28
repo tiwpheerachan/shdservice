@@ -268,17 +268,29 @@ export default function PickPage() {
     ? lines.filter((l) => hit.has(l.code) || l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
     : lines;
   const columns: Column<Line>[] = [
-    { key: 'i', header: '#', width: '40px', align: 'center', sortable: false, cell: (_, i) => i + 1 },
-    { key: 'docNo', header: 'Document No.', cell: (l) => <span className="num">{l.docNo}</span> },
-    { key: 'code', header: 'Item Code', cell: (l) => <span className="num font-medium">{l.code}</span> },
+    // a phone: code, name, stock and the quantity box first — the rest from sm up
+    { key: 'i', header: '#', width: '40px', align: 'center', sortable: false, hideBelow: 'sm', cell: (_, i) => i + 1 },
+    { key: 'docNo', header: 'Document No.', hideBelow: 'sm', cell: (l) => <span className="num">{l.docNo}</span> },
+    {
+      key: 'code',
+      header: 'Item Code',
+      hideBelow: 'sm',
+      cell: (l) => <span className="num font-medium">{l.code}</span>,
+    },
     {
       key: 'name',
       header: 'Item Name',
-      cell: (l) => <span className="line-clamp-1 max-w-[320px]">{l.name}</span>,
+      cell: (l) => (
+        <span className="block max-w-[320px]">
+          <span className="num block font-medium sm:hidden">{l.code}</span>
+          <span className="line-clamp-1">{l.name}</span>
+        </span>
+      ),
     },
     {
       key: 'pickStatus',
       header: 'สถานะการเบิก',
+      hideBelow: 'sm',
       cell: (l) => (
         <Badge tone={l.pickStatus === 'รออะไหล่' ? 'danger' : isReturn ? 'info' : 'warning'} dot>
           {l.pickStatus}
@@ -295,7 +307,13 @@ export default function PickPage() {
         </span>
       ),
     },
-    { key: 'need', header: isReturn ? 'รับคืนได้' : 'ต้องการ', align: 'right', cell: (l) => int(l.need) },
+    {
+      key: 'need',
+      header: isReturn ? 'รับคืนได้' : 'ต้องการ',
+      align: 'right',
+      hideBelow: kind === 'other' ? 'sm' : undefined, // จ่ายออกอื่นๆ: the same as คงเหลือ
+      cell: (l) => int(l.need),
+    },
     {
       key: 'issue',
       header: isReturn ? 'จำนวนรับคืน' : 'จำนวนจ่ายออก',

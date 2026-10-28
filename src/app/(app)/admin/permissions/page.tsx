@@ -20,6 +20,7 @@ import { usePermissions, useRoles } from '@/data/db';
 import { del, errMsg, isStale, postJson } from '@/lib/api';
 import {
   ADMIN_USER_TYPE,
+  MODULE_LABELS,
   PAGE_MODULES,
   RIGHTS,
   RIGHT_HINTS,
@@ -240,7 +241,13 @@ export default function PermissionsPage() {
     {
       key: 'menu',
       header: 'เมนูงาน',
-      cell: (r) => <span className="font-medium">{r.menu}</span>,
+      // the menu as the sidebar names it; the app_config key under it (what the old system / the data say)
+      cell: (r) => (
+        <span>
+          <span className="block font-medium">{MODULE_LABELS[r.menu as keyof typeof MODULE_LABELS] ?? r.menu}</span>
+          <span className="block text-2xs text-muted-foreground">{r.menu}</span>
+        </span>
+      ),
     },
     check('add', 'เพิ่ม'),
     check('edit', 'แก้ไข'),
@@ -296,7 +303,11 @@ export default function PermissionsPage() {
             emptyLabel="ทั้งหมด"
             value={draft.menu}
             onChange={(v) => setDraft((d) => ({ ...d, menu: v }))}
-            options={strOptions(MENUS)}
+            options={MENUS.map((m) => ({
+              value: m,
+              label: MODULE_LABELS[m as keyof typeof MODULE_LABELS] ?? m,
+              sub: m,
+            }))}
           />
         </Field>
       </FilterBar>

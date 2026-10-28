@@ -16,6 +16,7 @@ import {
   uiStatus,
   fromUiStatus,
   statusStamp,
+  statusSummary,
   type StatusMode,
   type RecordStatus,
 } from '@/server/record-status';
@@ -66,6 +67,14 @@ function assertLoaded(now: Partial<Record<Loaded, unknown>>, expect?: MasterExpe
  * ------------------------------------------------------------------ */
 type SimpleKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types';
 
+/** what the audit page calls each master table */
+const KIND_NOUN: Record<SimpleKind, string> = {
+  categories: 'หมวดหมู่',
+  manufacturers: 'ยี่ห้อ',
+  colors: 'สี',
+  job_types: 'ประเภทงาน',
+  product_types: 'ประเภทสินค้า',
+};
 const SIMPLE = {
   categories: {
     table: category,
@@ -273,7 +282,7 @@ export async function saveSimple(
 export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
   await db.transaction(async (tx) => {
-    const [old] = await tx.select({ rs: d.active }).from(d.table).where(eq(d.id, id)).for('update');
+    const [old] = await tx.select({ rs: d.active, name: d.name }).from(d.table).where(eq(d.id, id)).for('update');
     if (!old) throw new HttpError(404, `ไม่พบรายการ ${kind} #${id}`);
     await tx
       .update(d.table)
@@ -284,7 +293,7 @@ export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordSt
       module: 'Admin',
       entity: kind,
       key: id,
-      summary: `${kind} #${id} → ${rs}`,
+      summary: statusSummary({ noun: KIND_NOUN[kind], key: id, name: old.name, old: old.rs, rs }),
       changes: { recordStatus: [old.rs ?? null, rs] },
     });
   });
@@ -390,7 +399,7 @@ export async function saveSymptom(
 export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
   await db.transaction(async (tx) => {
     const [old] = await tx
-      .select({ rs: symptom.recordStatus })
+      .select({ rs: symptom.recordStatus, name: symptom.symptomName })
       .from(symptom)
       .where(eq(symptom.symptomId, id))
       .for('update');
@@ -400,7 +409,7 @@ export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: n
       module: 'Admin',
       entity: 'symptom',
       key: id,
-      summary: `อาการเสีย #${id} → ${rs}`,
+      summary: statusSummary({ noun: 'อาการเสีย', key: id, name: old?.name, old: old?.rs, rs }),
       changes: { recordStatus: [old?.rs ?? null, rs] },
     });
   });
@@ -547,7 +556,7 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
       module: 'Admin',
       entity: 'model',
       key: code,
-      summary: `รุ่นสินค้า ${code} → ${rs}`,
+      summary: statusSummary({ noun: 'รุ่นสินค้า', key: code, old: old?.rs, rs }),
       changes: { recordStatus: [old?.rs ?? null, rs] },
     });
   });

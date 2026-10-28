@@ -100,10 +100,19 @@ const ON_THAI = new Map<string, string>(
   [...TH_KEYS].flatMap((t, i) => (THAI.test(t) ? [[t, US_KEYS[i]!] as const] : [])),
 );
 for (let d = 0; d <= 9; d++) ON_THAI.set(String.fromCharCode(0x0e50 + d), String(d));
-/** what `v` was meant to be when typed with the keyboard on Thai — null when it holds no Thai character */
-export const typedOnThai = (v: unknown): string | null => {
+/** on the Thai layout the number row's 2 and 3 keys type "/" and "-": an IMEI 35… comes out as "-ถ…" (QA 2026-10-27) */
+const MARK_KEYS = new Map([
+  ['/', '2'],
+  ['-', '3'],
+]);
+/**
+ * What `v` was meant to be when typed with the keyboard on Thai — null when it holds no Thai character. "/" and "-"
+ * are read as the 2 / 3 keys they are on that layout, unless `keepMarks` (a value typed partly in English, where
+ * they are the marks a serial may carry): offer the reading the field accepts.
+ */
+export const typedOnThai = (v: unknown, keepMarks = false): string | null => {
   const s = String(v ?? '');
-  return THAI.test(s) ? [...s].map((c) => ON_THAI.get(c) ?? c).join('') : null;
+  return THAI.test(s) ? [...s].map((c) => ON_THAI.get(c) ?? (keepMarks ? c : (MARK_KEYS.get(c) ?? c))).join('') : null;
 };
 
 /** a parcel number as stored: cleanCode() without spaces ("ED 0063 9063 5TH" → "ED006390635TH") */

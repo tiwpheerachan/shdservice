@@ -42,7 +42,7 @@ export const MODULE_LABELS: Record<Exclude<Module, Right>, string> = {
   'Job Repair': 'บันทึกงานซ่อม',
   'Job Closing': 'ปิดงาน-ส่งคืนสินค้า',
   Product: 'รายการอะไหล่',
-  'Product Onhand': 'ประวัติการเคลื่อนไหวอะไหล่',
+  'Product Onhand': 'ประวัติการเคลื่อนไหวเข้า-ออก',
   'Product Receive Stock': 'รับเข้าอะไหล่',
   'Product Pick Stock': 'ตัดจ่ายอะไหล่',
   Customer: 'ข้อมูลลูกค้า',

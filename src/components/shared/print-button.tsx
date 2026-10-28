@@ -8,7 +8,8 @@ import { useToast } from '@/components/ui/toast';
 import { useDocumentProfiles } from '@/data/db';
 import { postJson, errMsg } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { DocumentKind } from '@/server/services/document-profiles';
+import { DOC_MODULE, type DocumentKind } from '@/lib/profile-lock';
+import { useAccess } from '@/lib/use-access';
 
 /**
  * "พิมพ์…" button that also lets the user pick which company/brand the document
@@ -46,6 +47,7 @@ export function PrintButton({
   locked?: string;
 }) {
   const { push } = useToast();
+  const { can } = useAccess();
   const { data: profiles } = useDocumentProfiles();
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -78,7 +80,8 @@ export function PrintButton({
   };
 
   // one brand → nothing to choose; a document whose letterhead is fixed (approved / closed) → printed as it is
-  if (profiles.length <= 1 || locked) {
+  // and without edit on the document (the change would be refused) — printed as it is too
+  if (profiles.length <= 1 || locked || !can(DOC_MODULE[kind], 'edit')) {
     return (
       <Button variant="outline" size={size} type="button" disabled={disabled} title={title} onClick={print}>
         {icon && <Printer className="h-3.5 w-3.5" />}

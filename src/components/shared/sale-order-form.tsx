@@ -198,8 +198,13 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const canSubmit = !initial || isAdmin || initial.createdById === userId;
     // read-only, as the server refuses the save: 4 อนุมัติแล้ว / 5 ปฏิเสธ are final, a cancelled order is
     // closed, and a waiting (2) order is edited only by its creator (System Admin may)
+    // … and an account that may only look (no Sale Order edit): shown the same way, read-only text, not live inputs
+    const viewOnly = !!initial && !can('Sale Order', 'edit');
     const readOnly =
-      [4, 5].includes(initial?.approveId ?? 0) || !!initial?.cancelled || (initial?.approveId === 2 && !canSubmit);
+      [4, 5].includes(initial?.approveId ?? 0) ||
+      !!initial?.cancelled ||
+      (initial?.approveId === 2 && !canSubmit) ||
+      viewOnly;
     // the edit page's "แนบสลิปการชำระเงิน" (an approved order without a slip) — the same rule as there
     const canAttachLater = initial?.approveId === 4 && !initial.cancelled && !initial.slip && can('Sale Order', 'edit');
 
@@ -316,7 +321,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
               // the fieldset disables it on a read-only order — the hint says why
               locked={
                 profileLock('sale_order', { statusId: initial?.approveId, cancelled: initial?.cancelled }) ||
-                (readOnly ? WAITING_CREATOR_ONLY : '')
+                (readOnly && !viewOnly ? WAITING_CREATOR_ONLY : '')
               }
             />
             <Field label="วันที่สร้าง">

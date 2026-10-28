@@ -21,6 +21,8 @@ import {
   returnDetailOf,
   noteMaxLength,
   NO_SERIAL,
+  WAIT_SERIAL,
+  imeiAccepts,
   STATUS_CLOSED_TRACKED,
   soAccepts,
   type JobCheck,
@@ -555,6 +557,23 @@ const svgChecks: [string, string, boolean][] = [
   ],
   ['an entity (billion laughs)', '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "x">]><svg>&a;</svg>', false],
   ['HTML declared as SVG', '<html><body>hi</body></html>', false],
+  // QA 2026-10-27: an entity-encoded javascript: written into href by an animation element
+  [
+    'javascript: as &#106; set by <set>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="#x"><set attributeName="href" to="&#106;avascript:alert(1)"/><rect/></a></svg>',
+    false,
+  ],
+  [
+    'javascript: split by a &#9; tab',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="java&#9;script:x"><rect/></a></svg>',
+    false,
+  ],
+  [
+    'an <animate> on href',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="href" values="#a"/></a></svg>',
+    false,
+  ],
+  ['a hex-encoded on-handler name', '<svg xmlns="http://www.w3.org/2000/svg" &#x6f;nload="x"></svg>', false],
 ];
 for (const [name, text, accepted] of svgChecks) {
   const problem = await fileProblem(svgFile(text), LOGO_TYPES);
@@ -844,7 +863,7 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
   test('J: Serial — 4–50 of A-Z 0-9 / . _ : -, a typed "S/N:" prefix is dropped; Thai notes refused', () => {
     for (const good of ['W2210A35FEU0026005', 'sn: ABC123', 'S/N:ABC123', 'BX8/03E-JC3100321'])
       assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: good }), {}, good);
-    for (const bad of ['SN เสียหาย', 'รอ SN จากลูกค้า', 'AB', 'BX8 03E', 'X'.repeat(51)])
+    for (const bad of ['SN เสียหาย', 'รอSN จากลูกค้า', 'AB', 'BX8 03E', 'X'.repeat(51)])
       assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: bad }).serial, bad);
     assert.equal(cleanSerial(' s/n : abc123 '), 'ABC123');
     assert.equal(cleanSerial('SN12345'), 'SN12345', 'no colon = part of the serial');
@@ -857,20 +876,30 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     assert.equal(isRequiredFilled('so', '-'), false, '"-" is still the empty placeholder for SO / Channel');
     assert.equal(isRequiredFilled('channel', 'ยังไม่ระบุ'), false, '"ยังไม่ระบุ" = empty');
   });
+  test('J: "รอ S/N จากลูกค้า" stores the note prod already uses and fills the required Serial like "-"', () => {
+    assert.equal(WAIT_SERIAL, 'รอ SN จากลูกค้า');
+    assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: WAIT_SERIAL }), {});
+    assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: ` ${WAIT_SERIAL} ` }), {}, 'spaces around it');
+    assert.equal(isRequiredFilled('serial', WAIT_SERIAL), true);
+    assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: 'รอ SN' }).serial, 'only the exact note');
+  });
   test('J: legacy SO / serial / IMEI / tracking no saved unchanged pass; changed to junk → error under the field', () => {
     const junk = { so: '0', serial: 'SN เสียหาย', imei: '-', receptionTrackingNo: 'ไรเดอร์มาส่ง' };
     const { v, schema } = editOf(junk);
     assert.deepEqual(errorsOf(schema, v), {});
     assert.deepEqual(errorsOf(schema, { ...v, so: ' 0 ' }), {}, 'spaces around the stored value');
     assert.deepEqual(Object.keys(errorsOf(schema, { ...v, serial: 'SN หาย' })), ['serial']);
-    assert.deepEqual(Object.keys(errorsOf(schema, { ...v, imei: '12345' })), ['imei']);
+    assert.deepEqual(Object.keys(errorsOf(schema, { ...v, imei: 'IMEI 12345' })), ['imei']);
     assert.deepEqual(Object.keys(errorsOf(schema, { ...v, receptionTrackingNo: 'มาส่งเอง' })), ['receptionTrackingNo']);
     assert.deepEqual(Object.keys(errorsOf(schema, { ...v, so: 'ไม่มี' })), ['so']);
   });
   test('J: IMEI optional, 15 digits; reception tracking no 6–40 of A-Z 0-9 - (spaces dropped)', () => {
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, imei: '', receptionTrackingNo: '' }), {});
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, imei: '351234567890123' }), {});
-    assert.ok(errorsOf(jobSchema(), { ...fullJob, imei: '35123456789012' }).imei);
+    assert.ok(errorsOf(jobSchema(), { ...fullJob, imei: '35123456789012' }).imei, '14 digits');
+    assert.equal(imeiAccepts(' 351234567890123 '), true);
+    for (const bad of ['35-1234', 'ABC', '1'.repeat(51)])
+      assert.ok(errorsOf(jobSchema(), { ...fullJob, imei: bad }).imei, bad);
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, receptionTrackingNo: 'th 1234 5678 9' }), {});
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, receptionTrackingNo: 'ED006390635ΤΗ' }), {}, 'Greek ΤΗ folds');
     for (const bad of ['TH123', 'TH/123456', 'ไรเดอร์มาส่ง'])
@@ -1113,7 +1142,10 @@ test('typedOnThai: what was meant with the keyboard left on Thai (Kedmanee → U
   assert.equal(typedOnThai('หฟสำ'), 'sale');
   assert.equal(typedOnThai('นพกำพ ืีทิำพ'), 'order number');
   assert.equal(typedOnThai('ฟำ๑๒๓'), 'ae123');
-  assert.equal(typedOnThai('ๅ/-ภถ'), '1/-45', 'the number row: only the Thai keys change');
+  assert.equal(typedOnThai('ๅ/-ภถ'), '12345', 'the number row: its 2 / 3 keys type "/" "-" on Thai');
+  assert.equal(typedOnThai('-ถๅ/-ภถุึคตจๅ/-'), '351234567890123', 'an IMEI typed on Thai');
+  assert.equal(typedOnThai('หื-ฝ/ฟ', true), 'sn-//a', 'keepMarks: the marks as typed (partly English)');
+  assert.equal(typedOnThai('หื-ฝ/ฟ'), 'sn3/2a');
   assert.equal(typedOnThai('AE123'), null, 'no Thai: nothing to suggest');
   assert.equal(typedOnThai(''), null);
 });

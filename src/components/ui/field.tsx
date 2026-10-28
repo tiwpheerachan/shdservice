@@ -224,7 +224,7 @@ export function ReadOnly({ children }: { children: React.ReactNode }) {
       {...field}
       role="textbox"
       aria-readonly="true"
-      className="flex h-9 items-center rounded-md border border-border bg-muted/60 px-3 text-sm text-foreground"
+      className="flex min-h-9 items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-sm text-foreground" // a longer note wraps inside it
     >
       {children || <span className="text-muted-foreground">—</span>}
     </div>

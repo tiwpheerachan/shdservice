@@ -20,12 +20,15 @@ export function CodeInput({
   /** take the suggested value */
   onFix: (v: string) => void;
 }) {
-  const meant = typedOnThai(props.value);
-  const fix = meant == null ? '' : cleanCode(meant);
+  // all typed on Thai ("/" "-" = the 2 / 3 keys) first, else with the marks kept — the one the field takes
+  const fix =
+    [typedOnThai(props.value), typedOnThai(props.value, true)]
+      .map((m) => (m == null ? '' : cleanCode(m)))
+      .find((f) => f && accepts(f)) ?? '';
   return (
     <>
       <Input {...props} />
-      {fix && accepts(fix) && <TypedOnThai fix={fix} onFix={() => onFix(fix)} />}
+      {fix && <TypedOnThai fix={fix} onFix={() => onFix(fix)} />}
     </>
   );
 }

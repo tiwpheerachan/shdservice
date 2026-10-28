@@ -13,7 +13,8 @@ import { clean, cleanCode } from '@/lib/validation';
 import { audit, diff } from '@/server/audit';
 import { nowThai } from '@/server/mappers/format';
 import { RS } from '@/server/record-status';
-import { JOB_GROUP } from '@/lib/status-ids';
+import { AS, JOB_GROUP } from '@/lib/status-ids';
+import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { profileLock, type DocumentKind } from '@/lib/profile-lock';
 
 /**
@@ -343,6 +344,7 @@ export async function setDocumentProfile(
   no: string,
   profileId: number,
   byUserId: number,
+  byAdmin = false,
 ): Promise<DocumentProfile> {
   const d = DOC[kind];
   return db.transaction(async (tx) => {
@@ -368,6 +370,14 @@ export async function setDocumentProfile(
       closed: g?.group?.trim() === JOB_GROUP.FINISHED,
     });
     if (locked) throw new HttpError(409, locked);
+    // a sale order waiting for approval is its creator's alone, as its save (sale-orders.ts saveSaleOrder)
+    if (kind === 'sale_order' && row.status === AS.WAIT && !byAdmin) {
+      const [so] = await tx
+        .select({ by: saleOutHd.documentCreateBy })
+        .from(saleOutHd)
+        .where(eq(saleOutHd.saleOutHdNo, no));
+      if (so?.by !== byUserId) throw new HttpError(403, WAITING_CREATOR_ONLY);
+    }
     const cur = row.cur ?? SHD_PROFILE_ID;
     if (cur === target.id) return target;
     const from = await getDocumentProfile(cur);

@@ -31,6 +31,8 @@ export const SELLER_EMAIL = 'seller@e2e.test'; // ใบสั่งขาย �
 export const MANAGER_EMAIL = 'manager@e2e.test'; // ใบสั่งขาย + SO Approve
 /** the customer every money spec bills (support/seed.ts) */
 export const E2E_CUSTOMER = 'CE2E01';
+/** a shop name on an earlier job (support/seed.ts) — offered by the Shop Name suggestions (job-warnings.spec) */
+export const E2E_SHOP = 'E2E ร้านแนะนำ';
 
 export const SSO_CLIENT_ID = 'oneservice-e2e';
 export const SSO_CLIENT_SECRET = 'e2e-client-secret';

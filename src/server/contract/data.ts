@@ -159,7 +159,6 @@ resource('model_symptoms', 'Symptoms reported for a model', ANY, list(z.object({
   model: s.optional(),
 });
 resource('shippers', 'Couriers used before', ANY, strings);
-resource('shop_names', 'Shop names used before', ANY, strings);
 resource('document_profiles', 'Active document profiles (ออกเอกสารในนาม)', ANY, list(DocumentProfile));
 resource('shipping_profiles', 'Active courier profiles', ANY, list(ShippingProfile));
 resource('job_nos', 'Job numbers for pickers', ANY, strings, {

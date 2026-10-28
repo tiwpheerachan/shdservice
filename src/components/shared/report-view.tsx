@@ -101,9 +101,14 @@ export function ReportView<T extends Record<string, unknown>>({
   const [initial] = React.useState(() => defaultsOf(filters));
   const [values, setValues] = React.useState<ReportValues>(initial);
   const [seenKey, setSeenKey] = React.useState(defaultsKey);
+  // only the values a page declares (the applied date range) are taken over — a select / text box keeps what
+  // the user chose (QA 2026-10-27: a new range used to reset them while the table stayed filtered by them)
   if (seenKey !== defaultsKey) {
     setSeenKey(defaultsKey);
-    setValues(defaultsOf(filters));
+    setValues((v) => ({
+      ...v,
+      ...Object.fromEntries(filters.flatMap((f) => (f.value === undefined ? [] : [[keyOf(f), f.value]]))),
+    }));
   }
   // what the table shows (the last ค้นหา / ล้างค่า), not the draft in the fields — for the printout
   const [applied, setApplied] = React.useState<ReportValues>(initial);
@@ -125,7 +130,7 @@ export function ReportView<T extends Record<string, unknown>>({
   const total = server?.total ?? 0;
   const pageNote =
     server && paged
-      ? `หน้า ${paged.page} จาก ${Math.max(1, Math.ceil(total / paged.pageSize))} รายการ ` +
+      ? `หน้า ${paged.page}/${Math.max(1, Math.ceil(total / paged.pageSize))} · แถว ` +
         `${int(total && (paged.page - 1) * paged.pageSize + 1)}–${int(Math.min(paged.page * paged.pageSize, total))} จาก ${int(total)}`
       : '';
 
@@ -138,6 +143,8 @@ export function ReportView<T extends Record<string, unknown>>({
 
   return (
     <>
+      {/* a report prints landscape (A4): every column fits — a named @page left the layout at portrait width */}
+      <style>{'@page { size: A4 landscape; margin: 10mm; }'}</style>
       <PageHeader
         title={title}
         description={description}
@@ -238,7 +245,8 @@ export function ReportView<T extends Record<string, unknown>>({
             },
           }
         }
-        className="print:[&>div:last-child]:hidden" // the pager: the printout says the page in its header
+        // the pager: the printout says the page in its header; every column on paper (report-print in globals.css)
+        className="report-print print:[&>div:last-child]:hidden"
         emptyText={emptyText}
       />
     </>

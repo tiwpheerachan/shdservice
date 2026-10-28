@@ -16,6 +16,10 @@ import { useServerTable } from '@/lib/use-server-table';
 import { fieldLabel } from '@/lib/field-labels';
 import { ExportButton } from '@/components/shared/export-button';
 
+/** a sale order is cancelled, not deleted (its DELETE is the cancel: the summary says "ยกเลิกใบสั่งขาย") */
+const actionLabel = (r: { action: string; entity?: string | null }) =>
+  r.action === 'DELETE' && r.entity === 'sale_out_hd' ? 'ยกเลิก' : (ACTION[r.action]?.label ?? r.action);
+
 // action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
   CREATE: { label: 'เพิ่ม', tone: 'success' },
@@ -68,7 +72,7 @@ export default function AuditPage() {
       width: '120px',
       cell: (r) => (
         <Badge tone={ACTION[r.action]?.tone ?? 'neutral'} dot>
-          {ACTION[r.action]?.label ?? r.action}
+          {actionLabel(r)}
         </Badge>
       ),
     },
@@ -177,7 +181,7 @@ export default function AuditPage() {
       <Modal
         open={!!detail}
         onClose={() => setDetail(null)}
-        title={detail ? `${ACTION[detail.action]?.label ?? detail.action} · ${detail.key}` : ''}
+        title={detail ? `${actionLabel(detail)} · ${detail.key}` : ''}
         description={detail ? `${detail.at} · ${detail.user || '—'} · ${detail.summary}` : undefined}
         size="lg"
       >

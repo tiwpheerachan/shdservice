@@ -7,17 +7,37 @@ import type { JobFormState, useJobForm } from '@/components/shared/job-form';
 import { Field } from '@/components/ui/field';
 import { Input, Select, Textarea, Radio, Checkbox } from '@/components/ui/input';
 import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
-import { useManufacturers, useModels, useProductTypes, useShopNames, useShippingProfiles } from '@/data/db';
+import { useApi, useManufacturers, useModels, useProductTypes, useShippingProfiles } from '@/data/db';
+import { qs } from '@/data/keys';
+import { CodeInput } from '@/components/shared/code-input';
+import { JobLinks, shopeeDateOff, thaiDate, Warn } from '@/components/jobs/job-checks';
+import type { JobChecks } from '@/server/services/job-checks';
 import { today } from '@/lib/dates';
-import { isRequiredFor, NO_SERIAL, type JobRequiredKey } from '@/lib/validation/job';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { clean, cleanCode } from '@/lib/validation';
+import {
+  imeiAccepts,
+  isRequiredFor,
+  NO_SERIAL,
+  serialAccepts,
+  soAccepts,
+  WAIT_SERIAL,
+  type JobRequiredKey,
+} from '@/lib/validation/job';
 
 /**
  * The fields of ProductSection (job-form), one component each so its layouts read as a list.
  * They get the job form as `f` (useJobForm()) instead of reading the context themselves — job-form
  * imports this file, so importing its hook back would make a cycle.
  */
-type Form = Pick<ReturnType<typeof useJobForm>, 's' | 'set' | 'patch' | 'errors'>;
+type Form = Pick<ReturnType<typeof useJobForm>, 's' | 'set' | 'patch' | 'errors' | 'loaded'>;
 type P = { f: Form };
+/** `c`: what GET /api/jobs/checks warns about (useJobChecks — เปิดงานใหม่ / แก้ไขงาน only) */
+type Checked = P & { c?: JobChecks | null };
+
+/** changed from the job as loaded — only those get a warning (an edit does not nag about untouched values) */
+const edited = ({ s, loaded }: Form, k: keyof JobFormState) => s[k] !== loaded[k];
+const never = () => false;
 
 // walk-in (หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty
 const needed = (s: JobFormState, k: JobRequiredKey) => isRequiredFor(k, s.channel);
@@ -38,16 +58,30 @@ const recalcExpire = ({ s, patch }: Form, saleDate: string, months: string) => {
   patch(withExpire(s, `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`));
 };
 
-export function SoField({ f: { s, set, errors } }: P) {
+export function SoField({ f, c }: Checked) {
+  const { s, set, errors } = f;
+  // Shopee's number starts with its order date: far from the Sale Order Date → one of the two is wrong
+  const dateOff =
+    s.channel === 'SHOPEE' && (edited(f, 'so') || edited(f, 'saleOrderDate')) && soAccepts(s.so, s.channel)
+      ? shopeeDateOff(cleanCode(s.so), s.saleOrderDate)
+      : null;
   return (
     <Field label="Sale Order No." required={needed(s, 'so')} error={errors.so}>
-      <Input
+      <CodeInput
         placeholder="SO2600760"
         className="num"
         maxLength={50}
         value={s.so}
         onChange={(e) => set('so', e.target.value)}
+        accepts={edited(f, 'so') ? (v) => soAccepts(v, s.channel) : never}
+        onFix={(v) => set('so', v)}
       />
+      {!!c?.so.jobs.length && (
+        <Warn>
+          เลขคำสั่งซื้อนี้อยู่ในงานของลูกค้าคนอื่น: <JobLinks jobs={c.so.jobs} />
+        </Warn>
+      )}
+      {dateOff && <Warn>วันที่ในเลข Shopee คือ {thaiDate(dateOff)} ไม่ตรงกับ Sale Order Date</Warn>}
     </Field>
   );
 }
@@ -123,38 +157,84 @@ export function WarrantyField({ f: { s, patch, errors } }: P) {
   );
 }
 
-export function ImeiField({ f: { s, set, errors } }: P) {
+export function ImeiField({ f }: P) {
+  const { s, set, errors } = f;
+  const settled = useDebouncedValue(s.imei, 500);
+  const short = edited(f, 'imei') && settled === s.imei && /^\d+$/.test(cleanCode(s.imei)) && !imeiAccepts(s.imei);
   return (
     <Field label="Imei No." error={errors.imei}>
-      <Input
+      <CodeInput
         className="num"
         inputMode="numeric"
         maxLength={50}
         placeholder="35xxxxxxxxxxxxx"
         value={s.imei}
         onChange={(e) => set('imei', e.target.value)}
+        accepts={edited(f, 'imei') ? imeiAccepts : never}
+        onFix={(v) => set('imei', v)}
       />
+      {short && !errors.imei && (
+        <Warn tone="info">IMEI ต้องเป็นตัวเลข 15 หลัก (พิมพ์แล้ว {cleanCode(s.imei).length} หลัก) — ตรวจอีกครั้ง</Warn>
+      )}
     </Field>
   );
 }
 
-export function SerialField({ f: { s, set, errors } }: P) {
-  const noSerial = s.serial.trim() === NO_SERIAL;
+/** the two ticks under Serial No. (one at a time: both are the serial's value) — instead of a note typed into it */
+const SERIAL_TICKS = [
+  { value: NO_SERIAL, label: 'ไม่มี S/N / S/N เสียหาย' }, // the legacy "none" marker "-"
+  { value: WAIT_SERIAL, label: 'รอ S/N จากลูกค้า' },
+];
+
+export function SerialField({ f, c }: Checked) {
+  const { s, set, patch, errors } = f;
+  const tick = SERIAL_TICKS.find((t) => t.value === s.serial.trim());
+  const typed = React.useRef('');
+  const seen = (edited(f, 'serial') && c?.serial.jobs) || []; // a brand changed alone asks about the brand only
+  const sameCustomer = seen.some((j) => j.sameCustomer);
   return (
     <Field label="Serial No." required error={errors.serial}>
-      <Input
+      <CodeInput
         className="num"
         maxLength={50}
-        placeholder={noSerial ? 'ไม่มี S/N / S/N เสียหาย' : 'SN-XXXXXXXX'}
-        value={noSerial ? '' : s.serial}
-        disabled={noSerial}
+        placeholder={tick?.label ?? 'SN-XXXXXXXX'}
+        value={tick ? '' : s.serial}
+        disabled={!!tick}
         onChange={(e) => set('serial', e.target.value)}
+        accepts={edited(f, 'serial') ? serialAccepts : never}
+        onFix={(v) => set('serial', v)}
       />
-      {/* stored as the legacy "none" marker "-" (NO_SERIAL) — instead of typing a note into the serial */}
-      <label className="mt-1.5 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-        <Checkbox checked={noSerial} onChange={(e) => set('serial', e.target.checked ? NO_SERIAL : '')} />
-        ไม่มี S/N / S/N เสียหาย
-      </label>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+        {SERIAL_TICKS.map((t) => (
+          <label key={t.value} className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <Checkbox
+              checked={tick === t}
+              onChange={(e) => {
+                // what was typed is kept aside, and back when the tick goes (not thrown away)
+                if (e.target.checked && !tick) typed.current = s.serial;
+                set('serial', e.target.checked ? t.value : typed.current);
+              }}
+            />
+            {t.label}
+          </label>
+        ))}
+      </div>
+      {tick?.value === WAIT_SERIAL && s.jobNo && (
+        <Warn tone="info">ยังรอ S/N จากลูกค้า — ได้แล้วเอาติ๊กออกแล้วใส่ S/N</Warn>
+      )}
+      {seen.length > 0 && (
+        <Warn
+          action={
+            sameCustomer && !s.isBounce ? { label: 'ติ๊กงานเด้ง', onClick: () => patch({ isBounce: true }) } : undefined
+          }
+        >
+          S/N นี้เคยเข้าซ่อมแล้ว: <JobLinks jobs={seen} /> <span className="whitespace-nowrap">(เปิดแท็บใหม่)</span>
+          {sameCustomer ? ' — ลูกค้าคนเดิม' : s.customer ? ' — เป็นงานของลูกค้าคนอื่น ตรวจ S/N อีกครั้ง' : ''}
+          {sameCustomer && s.isBounce && ' · ติ๊กงานเด้งแล้ว ✓'}
+        </Warn>
+      )}
+      {c?.serial.looksLike && <Warn>S/N แบบนี้มักเป็นของ {c.serial.looksLike} — ตรวจยี่ห้อ / S/N อีกครั้ง</Warn>}
+      {c?.serial.unusual && <Warn tone="info">ยังไม่เคยเห็น S/N รูปแบบนี้ใน {s.brand} — ตรวจอีกครั้งถ้าไม่แน่ใจ</Warn>}
     </Field>
   );
 }
@@ -226,7 +306,7 @@ export function ProductTypeField({ f: { s, set, errors } }: P) {
   );
 }
 
-/** the two-column free-text notes (อุปกรณ์ / จุดตำหนิ / อาการเสีย (อื่นๆ) / หมายเหตุ) */
+/** the two-column free-text notes (อาการเสีย (อื่นๆ) / หมายเหตุ) */
 export function NoteField({
   f: { s, set, errors },
   k,
@@ -234,7 +314,7 @@ export function NoteField({
   maxLength,
   placeholder,
 }: P & {
-  k: 'equipment' | 'fault' | 'symptomOther' | 'remark';
+  k: 'symptomOther' | 'remark';
   label: string;
   maxLength: number;
   placeholder?: string;
@@ -252,24 +332,73 @@ export function NoteField({
   );
 }
 
-/** Shop Name of เปิดงาน: free text with the most used names as suggestions */
-export function ShopSuggestField({ f: { s, set, errors } }: P) {
-  const { data: SHOP_NAMES, ...shopNamesLookup } = useShopNames();
+/**
+ * Free text with the values typed before that contain what is typed, most used first (GET /api/jobs/suggestions)
+ * — the browser's own list (datalist): pick one or keep what you typed. Read once the field is first focused.
+ */
+function SuggestInput({
+  field,
+  value,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { field: 'shop' | 'accessories' | 'defects'; value: string }) {
+  const listId = React.useId();
+  const [wanted, setWanted] = React.useState(false);
+  const q = useDebouncedValue(clean(value), 250);
+  const { data } = useApi<{ values: string[] }>(wanted ? `/api/jobs/suggestions${qs({ field, q })}` : null, {
+    quiet: true,
+    keepPrevious: true,
+  });
   return (
-    <Field label="Shop Name" error={errors.shopName} lookup={shopNamesLookup}>
-      {/* free text in the legacy data (511 spellings) — the most used names as suggestions, new ones can be typed */}
+    <>
+      {/* title: a value longer than the one-line box reads in full on hover */}
       <Input
-        list="shop-name-options"
+        {...props}
+        list={listId}
+        value={value}
+        title={String(value ?? '') || undefined}
+        onFocus={() => setWanted(true)}
+      />
+      <datalist id={listId}>
+        {data?.values.map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+/** อุปกรณ์ (ที่นำส่ง) / จุดตำหนิ: free text, what was typed before as suggestions */
+export function SuggestNoteField({
+  f: { s, set, errors },
+  k,
+  label,
+  placeholder,
+}: P & { k: 'equipment' | 'fault'; label: string; placeholder: string }) {
+  return (
+    <Field label={label} className="lg:col-span-2" error={errors[k]}>
+      <SuggestInput
+        field={k === 'equipment' ? 'accessories' : 'defects'}
+        maxLength={100}
+        placeholder={placeholder}
+        value={s[k]}
+        onChange={(e) => set(k, e.target.value)}
+      />
+    </Field>
+  );
+}
+
+/** Shop Name of เปิดงาน: free text (511 spellings in the legacy data), the names typed before as suggestions */
+export function ShopSuggestField({ f: { s, set, errors }, c }: Checked) {
+  return (
+    <Field label="Shop Name" error={errors.shopName}>
+      <SuggestInput
+        field="shop"
         maxLength={100}
         placeholder="- - เลือกหรือพิมพ์ - -"
         value={s.shopName}
         onChange={(e) => set('shopName', e.target.value)}
       />
-      <datalist id="shop-name-options">
-        {SHOP_NAMES.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
+      {c?.shop.brand && <Warn>ร้านนี้ขาย {c.shop.brand} เป็นหลัก — ตรวจยี่ห้อ / ร้านอีกครั้ง</Warn>}
     </Field>
   );
 }

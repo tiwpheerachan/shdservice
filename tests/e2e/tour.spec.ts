@@ -92,7 +92,7 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   await page.goto('/jobs/new');
   await page.getByRole('button', { name: 'ไม่ใช่ตอนนี้' }).click();
   // a real entry made before the tour stays; what is tried during it goes
-  await page.getByRole('textbox', { name: 'จุดตำหนิ' }).fill('รอยจริงก่อนบทสอน');
+  await page.getByRole('combobox', { name: 'จุดตำหนิ' }).fill('รอยจริงก่อนบทสอน');
   let posts = 0;
   page.on('request', (r) => r.method() === 'POST' && /\/api\/(jobs|customers|upload)/.test(r.url()) && posts++);
 
@@ -126,8 +126,8 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   for (let k = 1; k < total - 1; k++) {
     const title = await card(page).locator('#tour-title').innerText();
     if (title.startsWith('ของที่มากับเครื่อง')) {
-      await page.getByRole('textbox', { name: 'อุปกรณ์ (ที่นำส่ง)' }).fill('ลองระหว่างบทสอน');
-      await page.getByRole('textbox', { name: 'จุดตำหนิ' }).fill('ลองแก้ระหว่างบทสอน');
+      await page.getByRole('combobox', { name: 'อุปกรณ์ (ที่นำส่ง)' }).fill('ลองระหว่างบทสอน');
+      await page.getByRole('combobox', { name: 'จุดตำหนิ' }).fill('ลองแก้ระหว่างบทสอน');
     }
     if (title === 'งานเด้ง') {
       // a lit checkbox (a <button role=checkbox>) ticks like any lit field
@@ -162,8 +162,8 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   expect(posts, 'nothing saved').toBe(0);
   await expect(page.locator('[data-sonner-toast]'), 'no toast after เสร็จสิ้น').toHaveCount(0);
   await expect.poll(() => page.evaluate(() => scrollY), { message: 'back at the top' }).toBe(0);
-  await expect(page.getByRole('textbox', { name: 'จุดตำหนิ' })).toHaveValue('รอยจริงก่อนบทสอน');
-  await expect(page.getByRole('textbox', { name: 'อุปกรณ์ (ที่นำส่ง)' })).toHaveValue('');
+  await expect(page.getByRole('combobox', { name: 'จุดตำหนิ' })).toHaveValue('รอยจริงก่อนบทสอน');
+  await expect(page.getByRole('combobox', { name: 'อุปกรณ์ (ที่นำส่ง)' })).toHaveValue('');
   await expect(page.getByRole('textbox', { name: /^Imei No\./ })).toHaveValue('');
   await expect(page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' })).toBeFocused();
   await expect(page.getByRole('radio', { name: /^ลูกค้าเดิม/ })).toBeChecked();

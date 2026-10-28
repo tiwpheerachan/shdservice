@@ -22,7 +22,7 @@ import {
 import { audit, listAudit, pageAudit } from '@/server/audit';
 import { db } from '@/db/client';
 import { clientIp } from '@/lib/client-ip';
-import { listJobs, filtersFromQuery, pageJobs } from '@/server/services/jobs';
+import { filtersFromQuery, pageJobs } from '@/server/services/jobs';
 import { listQuotations, quotationFiltersFromQuery, pageQuotations } from '@/server/services/quotations';
 import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
@@ -39,6 +39,10 @@ import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
  * at the same 20k, so a capped file is detectable — and it says so: a note row at
  * the end and "-partial" in the file name, never a silently short file.
  */
+/** whole days between two dates, by their date parts (as the close-job report's TAT) */
+const calendarDays = (from: string, to: string) =>
+  Math.round((Date.parse(to.slice(0, 10)) - Date.parse(from.slice(0, 10))) / 86_400_000);
+
 const MAX_ROWS = MAX_EXPORT_ROWS;
 
 type Col = { key: string; header: string; width?: number; num?: boolean; money?: boolean };
@@ -113,6 +117,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'status', header: 'สถานะงาน', width: 34 },
       { key: 'repairedDate', header: 'วันที่ซ่อมเสร็จ', width: 18 },
       { key: 'closedDate', header: 'วันที่ปิดงาน', width: 18 },
+      { key: 'tat', header: 'TAT (วัน)', width: 10 }, // closed jobs: calendar days open → closed
       { key: 'returnType', header: 'วิธีส่งคืน', width: 18 },
       { key: 'returnTracking', header: 'เลขพัสดุ', width: 18 },
       { key: 'partsCost', header: 'ค่าอะไหล่', width: 12, money: true },
@@ -278,8 +283,10 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
     case 'jobs':
       // ยอดชำระ = money taken (≥ 0); a refund (stored as a negative payment) is its own คืนเงิน column;
       // ค้างชำระ only on a closed job — an open one is not billed yet
-      return (await listJobs({ ...filtersFromQuery(f), q: p.q, limit: MAX_ROWS })).map((j) => ({
+      // in the order the table shows (its sort, as on screen)
+      return (await pageJobs({ ...p, page: 1, pageSize: MAX_ROWS }, filtersFromQuery(f))).rows.map((j) => ({
         ...j,
+        tat: j.closedDate && j.openDate ? calendarDays(j.openDate, j.closedDate) : '',
         paymentAmount: Math.max(0, j.paymentAmount ?? 0),
         refund: Math.max(0, -(j.paymentAmount ?? 0)),
         outstanding: j.statusGroup === 'Finished' ? j.outstanding : 0,

@@ -9,7 +9,7 @@ import { HttpError, invalidateUserCache } from '@/server/auth';
 import { audit } from '@/server/audit';
 import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
-import { RS, statusStamp, type RecordStatus } from '@/server/record-status';
+import { RS, statusStamp, statusSummary, type RecordStatus } from '@/server/record-status';
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from './masters';
 import { productsChanged } from './stock';
 import { AS } from './sale-orders';
@@ -85,6 +85,15 @@ export async function setRecordStatus(
     quotations: ['quotation_hd', 'Quotation'],
     sale_orders: ['sale_out_hd', 'Sale Order'],
   };
+  // what the audit page says (not the table name): a sale order is cancelled, the rest deleted / made Active …
+  const NOUN: Record<string, string> = {
+    users: 'ผู้ใช้งาน',
+    products: 'อะไหล่',
+    customers: 'ลูกค้า',
+    jobs: 'งาน',
+    quotations: 'ใบเสนอราคา',
+    sale_orders: 'ใบสั่งขาย',
+  };
   // the record_status before this change (read in the change's transaction) — the audit keeps [old, new], not [null, new]
   const OLD: Partial<Record<RecordTable, (tx: Tx) => Promise<{ rs: string }[]>>> = {
     users: (tx) =>
@@ -124,13 +133,15 @@ export async function setRecordStatus(
   };
   const log = async (w: Tx, old: string | null, why = '') => {
     const e = ENTITY[table];
-    if (!e) return;
+    if (!e || old === rs) return; // nothing changed (ACTIVE → ACTIVE): nothing to record
     await audit(w, byUserId, {
       action: rs === RS.DELETED ? 'DELETE' : 'STATUS',
       module: e[1],
       entity: e[0],
       key: id,
-      summary: (rs === RS.DELETED ? `ลบ (soft delete) ${e[0]} ${id}` : `${e[0]} ${id} → ${rs}`) + (why && ` · ${why}`),
+      summary:
+        statusSummary({ noun: NOUN[table] ?? e[0], key: id, old, rs, cancel: table === 'sale_orders' }) +
+        (why && ` · ${why}`),
       changes: { recordStatus: [old, rs] },
     });
   };

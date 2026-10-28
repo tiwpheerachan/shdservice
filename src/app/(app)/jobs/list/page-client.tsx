@@ -87,7 +87,11 @@ export default function JobListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <ExportButton run={() => exportXlsx('jobs', { q: table.q, ...toParams(filters) })} />
+            <ExportButton
+              run={() =>
+                exportXlsx('jobs', { q: table.q, sort: pageArgs.sort, dir: pageArgs.dir, ...toParams(filters) })
+              }
+            />
             {canAdd && (
               <Link href="/jobs/new">
                 <Button size="sm">

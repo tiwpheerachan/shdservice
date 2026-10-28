@@ -22,7 +22,17 @@ const tatDays = (r: Job) => {
 };
 
 const columns: Column<Job>[] = [
-  { key: 'no', header: 'เลขที่งาน', width: '130px', cell: (r) => <span className="num font-medium">{r.no}</span> },
+  {
+    key: 'no',
+    header: 'เลขที่งาน',
+    width: '130px',
+    cell: (r) => (
+      <span className="num">
+        <span className="block font-medium">{r.no}</span>
+        <span className="block text-2xs text-muted-foreground sm:hidden">{r.closedDate?.slice(0, 10)}</span>
+      </span>
+    ),
+  },
   {
     key: 'openDate',
     header: 'วันที่เปิดงาน',
@@ -34,11 +44,13 @@ const columns: Column<Job>[] = [
     key: 'closedDate',
     header: 'วันที่ปิดงาน',
     width: '140px',
+    hideBelow: 'sm', // a phone: under เลขที่งาน
     cell: (r) => <span className="num text-xs">{r.closedDate}</span>,
   },
   {
     key: 'customer',
     header: 'ลูกค้า',
+    hideBelow: 'sm', // a phone: เลขที่งาน · วันที่ปิดงาน · TAT · สถานะ — what this report is about
     minWidth: COL_MIN_WIDTH.customer,
     cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span>,
   },
@@ -68,6 +80,7 @@ const columns: Column<Job>[] = [
     header: 'ยอดรับชำระ',
     align: 'right',
     width: '120px',
+    hideBelow: 'sm',
     value: (r) => r.paymentAmount ?? 0,
     cell: (r) => baht(r.paymentAmount ?? 0),
   },
@@ -115,7 +128,14 @@ export default function Page() {
       onApply={setF}
       onExport={
         access.canExport
-          ? () => exportXlsx('jobs', { ...filters, q: table.q || f.no, file: 'report-close-job' })
+          ? () =>
+              exportXlsx('jobs', {
+                ...filters,
+                q: table.q || f.no,
+                sort: pageArgs.sort,
+                dir: pageArgs.dir,
+                file: 'report-close-job',
+              })
           : undefined
       }
       kpis={kpisOr(sumError, [

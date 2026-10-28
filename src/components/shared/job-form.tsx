@@ -25,13 +25,15 @@ import {
   ShopPlainField,
   ShopSuggestField,
   SoField,
+  SuggestNoteField,
   TrackingField,
   WarrantyField,
   WarrantyMonthField,
 } from '@/components/jobs/product-fields';
+import { useJobChecks } from '@/components/jobs/job-checks';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
-import { Input, Checkbox } from '@/components/ui/input';
+import { Input, Checkbox, moneyShown } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm';
 import { RECEIVE_METHODS } from '@/data/options';
@@ -679,6 +681,8 @@ export function ProductSection({
 }) {
   const f = useJobForm();
   const { incomplete } = f;
+  // the warnings that need the other jobs (S/N / SO seen before, a brand that does not fit): เปิดงาน / แก้ไขงาน
+  const c = useJobChecks(f.s, f.loaded, variant === 'open');
   // an old job saved before these fields were required: it can still be saved, but say what is missing
   const incompleteNotice = incomplete && incomplete.length > 0 && (
     <p
@@ -695,14 +699,8 @@ export function ProductSection({
   // every layout ends with the same notes + symptoms
   const notes = (
     <>
-      <NoteField
-        f={f}
-        k="equipment"
-        label="อุปกรณ์ (ที่นำส่ง)"
-        maxLength={100}
-        placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง"
-      />
-      <NoteField f={f} k="fault" label="จุดตำหนิ" maxLength={100} placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" />
+      <SuggestNoteField f={f} k="equipment" label="อุปกรณ์ (ที่นำส่ง)" placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" />
+      <SuggestNoteField f={f} k="fault" label="จุดตำหนิ" placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" />
       <MainSymptomField />
       <NoteField f={f} k="symptomOther" label="อาการเสีย (อื่นๆ)" maxLength={200} />
       <NoteField f={f} k="remark" label="หมายเหตุ" maxLength={2000} />
@@ -714,13 +712,13 @@ export function ProductSection({
       <Section title={title} icon={PackageSearch}>
         {incompleteNotice}
         <FieldGrid>
-          <SoField f={f} />
+          <SoField f={f} c={c} />
           <ChannelField f={f} />
-          <ShopSuggestField f={f} />
+          <ShopSuggestField f={f} c={c} />
           <SaleDateField f={f} />
           <WarrantyMonthField f={f} />
           <ImeiField f={f} />
-          <SerialField f={f} />
+          <SerialField f={f} c={c} />
           <ExpireField f={f} />
           <WarrantyField f={f} />
           <BrandField f={f} />
@@ -840,6 +838,9 @@ export function CostSummary({
 }) {
   const { s, set, errors } = useJobForm();
   const lock = useMoneyLock();
+  // the cost being typed, exactly as typed ("0.7"); the others as money ("123.00") — set on typing, never on focus
+  // (a focus that changes the text loses its select-all: typing then appended to the amount)
+  const [draft, setDraft] = React.useState<{ key: string; text: string } | null>(null);
   const parts = partsTotal ?? s.partsCost;
   const net = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
   const deposit = Number(s.depositCost) || 0;
@@ -865,13 +866,15 @@ export function CostSummary({
                   step="0.01"
                   min={0}
                   inputMode="decimal"
-                  value={s[f.key] === 0 ? '' : s[f.key]}
+                  value={draft?.key === f.key ? draft.text : s[f.key] === 0 ? '' : moneyShown(s[f.key])}
                   disabled={!!lock}
                   placeholder="0.00"
                   aria-invalid={!!error || undefined}
                   aria-describedby={error ? `cost-${f.key}-error` : undefined}
                   onFocus={(e) => e.currentTarget.select()}
+                  onBlur={() => setDraft(null)}
                   onChange={(e) => {
+                    setDraft({ key: f.key, text: e.target.value });
                     set(f.key, Number(e.target.value) || 0);
                     action?.clear(f.key);
                   }}

@@ -64,7 +64,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           inert={mobileOpen} // the open mobile drawer is modal: Tab stays inside it
           className={cn(
             'flex min-h-screen flex-col transition-[padding] duration-200 ease-out',
-            collapsed ? 'lg:pl-[72px]' : 'lg:pl-[268px]',
+            // the sidebar is not printed: neither is the room kept for it (a printed page used ~70% of the sheet)
+            collapsed ? 'lg:pl-[72px] print:lg:pl-0' : 'lg:pl-[268px] print:lg:pl-0',
           )}
         >
           <Topbar

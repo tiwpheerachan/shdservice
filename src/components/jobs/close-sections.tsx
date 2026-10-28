@@ -10,7 +10,8 @@ import { RETURN_METHODS, CLOSE_STATUS_OPTIONS } from '@/data/options';
 import { useShippingProfiles } from '@/data/db';
 import type { JobDetail } from '@/lib/use-job';
 import { SEND_STATUS } from '@/lib/outsource-status';
-import type { FieldErrors } from '@/lib/validation';
+import { trackingAccepts, type FieldErrors } from '@/lib/validation';
+import { CodeInput } from '@/components/shared/code-input';
 import {
   noteMaxLength,
   returnDetailOf,
@@ -165,11 +166,13 @@ export function CloseReturnSection({
           </datalist>
         </Field>
         <Field label="หมายเลขพัสดุ" required={d.status === STATUS_CLOSED_TRACKED} error={errors['return.tracking']}>
-          <Input
+          <CodeInput
             className="num"
             maxLength={50}
             value={d.tracking}
             onChange={(e) => upd({ tracking: e.target.value })}
+            accepts={trackingAccepts}
+            onFix={(v) => upd({ tracking: v })}
           />
         </Field>
         <Field

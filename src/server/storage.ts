@@ -64,12 +64,37 @@ const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
  * (an embedded raster `data:image/png|jpeg|webp|gif` and `#id` references are fine). Refused, never "cleaned".
  */
 export function svgProblem(text: string): string | null {
-  const t = text.replace(/^\uFEFF/, '');
-  if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*|<!DOCTYPE svg[^>[]*>\s*)*<svg[\s>]/i.test(t))
+  const raw = text.replace(/^\uFEFF/, '');
+  if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*|<!DOCTYPE svg[^>[]*>\s*)*<svg[\s>]/i.test(raw))
     return 'ไฟล์ไม่ใช่ SVG จริง';
+  // read as the browser will: character references decoded (&#106;avascript: is javascript:), and a URL's
+  // tabs / newlines dropped (java&#9;script:) — the checks below run on that, and on the raw text
+  const decoded = raw
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16) % 0x110000))
+    .replace(/&#(\d+);?/g, (_, d: string) => String.fromCodePoint(Number(d) % 0x110000))
+    .replace(
+      /&(colon|tab|newline|lpar|rpar|sol|num|amp|quot|apos);/gi,
+      (m, n: string) =>
+        ({
+          colon: ':',
+          tab: '\t',
+          newline: '\n',
+          lpar: '(',
+          rpar: ')',
+          sol: '/',
+          num: '#',
+          amp: '&',
+          quot: '"',
+          apos: "'",
+        })[n.toLowerCase()] ?? m,
+    );
+  const squeezed = decoded.replace(/[\s\u0000-\u001f]+/g, '').toLowerCase();
   const bad =
-    /<script|<foreignObject|<iframe|<embed|<object|<!ENTITY|\son[a-z]+\s*=|javascript:|(?:href|src)\s*=\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^"'\s>]|url\(\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^)"'\s]|@import/i;
-  return bad.test(t) ? 'SVG นี้มีสคริปต์หรือลิงก์ไปไฟล์อื่น — ส่งออกเป็น SVG ธรรมดา หรือใช้ PNG แทน' : null;
+    // animation elements can rewrite any attribute (an href into javascript:) after the file is checked
+    /<script|<foreignObject|<iframe|<embed|<object|<!ENTITY|<(?:set|animate|animateMotion|animateTransform|discard|handler|listener)[\s/>]|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^"'\s>]|url\(\s*["']?\s*(?!#|data:image\/(?:png|jpe?g|webp|gif);)[^)"'\s]|@import/i;
+  return bad.test(raw) || bad.test(decoded) || /(?:javascript|vbscript|livescript):|data:text\/html/.test(squeezed)
+    ? 'SVG นี้มีสคริปต์ ภาพเคลื่อนไหว หรือลิงก์ไปไฟล์อื่น — ส่งออกเป็น SVG ธรรมดา หรือใช้ PNG แทน'
+    : null;
 }
 
 /**

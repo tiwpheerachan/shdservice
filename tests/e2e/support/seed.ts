@@ -8,6 +8,7 @@ import {
   SELLER_EMAIL,
   STAFF_EMAIL,
   STOCK_EMAIL,
+  E2E_SHOP,
 } from './env';
 
 /** one row, unless a row with the first column's value exists; id = max + 1 (the other seeds insert
@@ -128,6 +129,13 @@ export default async function seed(): Promise<void> {
 
       ${ensure('customer', 'customer_id', { customer_code: "'CE2E01'", customer_name: "'ลูกค้า E2E'", phone_number: "'081-000-9001'" })}
       ${ensure('job_type', 'job_type_id', { job_type_name: "'E2E ซ่อม'", is_active: 'true' })}
+      -- a shop name typed on an earlier job, there before the server first reads the names (it keeps them 5 min)
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, product_serial,
+                       product_sale_out_shop_name, job_create_date, job_reception_date, job_closed_date, job_repaired_date)
+        SELECT 'E2ESHOP1', 9, c.customer_id, c.customer_code || ' ' || c.customer_name, 'E2E Model 1', 'SN-E2ESHOP1',
+               '${E2E_SHOP}', now(), current_date, '1900-01-01', now()
+          FROM customer c WHERE c.customer_code = 'CE2E01'
+        ON CONFLICT (job_no) DO NOTHING;
       ${ensure('manufacturer', 'manufacturer_id', { manufacturer_name: "'E2E Brand'", is_active: 'true' })}
       ${ensure('model', 'model_id', {
         model_code: "'E2E-M1'",

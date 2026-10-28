@@ -3,7 +3,7 @@
 import { Wallet } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { Field, FieldGrid } from '@/components/ui/field';
-import { FileInput, Input, Select, Textarea } from '@/components/ui/input';
+import { FileInput, Input, MoneyInput, Select, Textarea } from '@/components/ui/input';
 import { JOB_PAYMENT_METHODS } from '@/data/options';
 import { fileUrl } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
@@ -139,17 +139,11 @@ function RefundFields({ d, upd, errors, lock, bal }: Draft & { bal: Balance }) {
         error={errors['refund.amount']}
         hint={`ไม่เกิน ${baht(bal.refund)} บาท`}
       >
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
+        <MoneyInput
           max={bal.refund}
-          inputMode="decimal"
           value={d.refAmount}
           disabled={!!lock}
           onChange={(e) => upd({ refAmount: e.target.value })}
-          onFocus={(e) => e.currentTarget.select()}
-          className="num text-right"
         />
       </Field>
       <Field label="วันที่คืนเงิน" required error={errors['refund.date']}>
@@ -180,6 +174,7 @@ function PaymentFields({
     <FieldGrid cols={2}>
       <Field label="วิธีการชำระเงิน" required={bal.due > 0} error={errors['payment.type']} hint={lock}>
         <Select
+          name="payType" // the บทสอน reads whether it is locked
           value={d.payType}
           disabled={!!lock}
           onChange={(e) =>
@@ -198,18 +193,7 @@ function PaymentFields({
         </Select>
       </Field>
       <Field label="จำนวนเงินที่ชำระ (บาท)" error={errors['payment.amount']}>
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
-          inputMode="decimal"
-          placeholder="0.00"
-          value={d.payAmount}
-          disabled={!!lock}
-          onChange={(e) => upd({ payAmount: e.target.value })}
-          onFocus={(e) => e.currentTarget.select()}
-          className="num text-right"
-        />
+        <MoneyInput value={d.payAmount} disabled={!!lock} onChange={(e) => upd({ payAmount: e.target.value })} />
       </Field>
       <Field label="วันที่ชำระเงิน" error={errors['payment.date']}>
         <Input type="date" value={d.payDate} disabled={!!lock} onChange={(e) => upd({ payDate: e.target.value })} />

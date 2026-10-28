@@ -16,7 +16,7 @@ import { cleanSerial } from '@/lib/validation/job';
  */
 
 /** brands of one family share serials and shops (MOVA / TROUVER are Dreame's, Soundcore / eufy Anker's …) */
-// ponytail: read from the jobs (prod 2026-10), owner to confirm — a family column on manufacturer when it changes
+// read from the jobs (prod 2026-10), confirmed by the owner 2026-10-27 — a family column on manufacturer could come later
 const FAMILIES = [
   ['dreame', 'mova', 'trouver'],
   ['xiaomi', 'redmi', 'mijia'],

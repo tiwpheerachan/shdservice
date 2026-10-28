@@ -23,6 +23,48 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 );
 Input.displayName = 'Input';
 
+/** an amount as money looks: "800.00" ('' stays '') */
+export function moneyShown(value: string | number | undefined | null): string | number {
+  if (value == null || value === '') return '';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : value;
+}
+
+/** a money amount field (baht): the number keypad, right-aligned, shown with 2 decimals once left */
+export const MoneyInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, value, onFocus, onBlur, onChange, ...props }, ref) => {
+    // what is being typed, exactly as typed ("0.7", "12."): the box never reformats under the caret. Not set on
+    // focus — a focus that changes the text loses the select-all, and typing then appends ("250" → "250250")
+    const [draft, setDraft] = React.useState<string | null>(null);
+    return (
+      <Input
+        ref={ref}
+        type="number"
+        step="0.01"
+        min={0}
+        inputMode="decimal"
+        placeholder="0.00"
+        {...props}
+        value={draft ?? moneyShown(value as string | number | undefined)}
+        onFocus={(e) => {
+          e.currentTarget.select(); // a click on an amount replaces it
+          onFocus?.(e);
+        }}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onChange?.(e);
+        }}
+        onBlur={(e) => {
+          setDraft(null);
+          onBlur?.(e);
+        }}
+        className={cn('num text-right', className)}
+      />
+    );
+  },
+);
+MoneyInput.displayName = 'MoneyInput';
+
 /** a file field in the app's look (Thai text, the chosen file's name) — not the browser's "Choose File / No file chosen" */
 export function FileInput({
   placeholder = 'เลือกไฟล์',

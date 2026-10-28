@@ -34,7 +34,9 @@ import { RecordKey } from '@/lib/use-record';
 import { jobNoParam } from '@/data/keys';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { parseSwap, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
+import { parseSwap, serialAccepts, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
+import { CodeInput } from '@/components/shared/code-input';
+import { JobLinks, useJobChecks, Warn } from '@/components/jobs/job-checks';
 import { useTourRestore } from '@/components/tour/tour';
 
 function SwapRefundForm() {
@@ -102,6 +104,12 @@ function SwapRefundForm() {
   }
 
   const go = (v: string) => find(v);
+
+  // the new device's serial already on another job (one typed wrong, or a device given out twice) — a warning
+  // only, asked once the typing settles and only for a serial changed from the one saved
+  const asSerial = (serial: string) => ({ ...form, serial, so: '', shopName: '' });
+  const newSerialSeen =
+    useJobChecks(asSerial(d.newSerial), asSerial(saved?.d.newSerial ?? ''), mode === 'swap')?.serial.jobs ?? [];
 
   // POST /api/jobs/:no/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
   const save = async () => {
@@ -251,12 +259,20 @@ function SwapRefundForm() {
             {mode === 'swap' ? (
               <>
                 <Field label="New Serial No." required error={act.errors.newSerial}>
-                  <Input
+                  <CodeInput
                     className="num"
                     maxLength={50}
                     value={d.newSerial}
                     onChange={(e) => upd({ newSerial: e.target.value })}
+                    accepts={serialAccepts}
+                    onFix={(v) => upd({ newSerial: v })}
                   />
+                  {!!newSerialSeen.length && (
+                    <Warn>
+                      S/N นี้อยู่ในงานอื่นแล้ว: <JobLinks jobs={newSerialSeen} /> (เปิดแท็บใหม่) — ตรวจ S/N
+                      เครื่องใหม่อีกครั้ง
+                    </Warn>
+                  )}
                 </Field>
                 <Field label="รุ่นที่เปลี่ยนให้">
                   <Input value={d.newModel} onChange={(e) => upd({ newModel: e.target.value })} />

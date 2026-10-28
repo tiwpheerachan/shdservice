@@ -283,7 +283,7 @@ export default function DashboardPage() {
               type="date"
               value={from}
               max={to || undefined}
-              onChange={(e) => setFrom(e.target.value)}
+              onChange={(e) => !e.target.validity.badInput && setFrom(e.target.value)} // a half-typed date is not "all"
               className="num h-9 w-0 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่เริ่ม"
             />
@@ -292,7 +292,7 @@ export default function DashboardPage() {
               type="date"
               value={to}
               min={from || undefined}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={(e) => !e.target.validity.badInput && setTo(e.target.value)}
               className="num h-9 w-0 min-w-0 flex-1 sm:w-[150px] sm:flex-none"
               aria-label="วันที่สิ้นสุด"
             />

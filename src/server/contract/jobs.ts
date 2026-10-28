@@ -15,6 +15,7 @@ import {
   RATE_LIMITED,
   SIGNED_IN,
   byNo,
+  choice,
   errorResponse,
   flag,
   jsonResponse,
@@ -124,6 +125,20 @@ export const jobChecksGet = defineOperation({
         }),
       }),
     ),
+    ...SIGNED_IN,
+  },
+});
+
+export const jobSuggestionsGet = defineOperation({
+  method: 'get',
+  path: '/jobs/suggestions',
+  tags,
+  summary: 'Values typed before into a free-text job field, most used first',
+  description:
+    'Shop Name (`shop`), อุปกรณ์ (ที่นำส่ง) (`accessories`), จุดตำหนิ (`defects`): the 10 most used values (spaces trimmed and collapsed, case kept) that contain `q` in any case; no `q` = the 10 most used. Another `field` answers none. Needs view on any job screen.',
+  query: z.object({ field: choice(['shop', 'accessories', 'defects']), q: s.optional() }),
+  responses: {
+    200: jsonResponse('Most used first.', z.object({ values: z.array(s) })),
     ...SIGNED_IN,
   },
 });

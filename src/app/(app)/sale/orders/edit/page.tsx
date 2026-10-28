@@ -29,6 +29,8 @@ import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
+import { trackingAccepts } from '@/lib/validation';
+import { CodeInput } from '@/components/shared/code-input';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
 
@@ -273,7 +275,7 @@ function EditSaleOrder() {
           <Section title="เลขพัสดุ (Tracking)" icon={Truck}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <Field label="เลขพัสดุ" className="flex-1 sm:max-w-xs" error={te.errors.tracking}>
-                <Input
+                <CodeInput
                   maxLength={50}
                   value={tracking}
                   onChange={(e) => {
@@ -282,6 +284,11 @@ function EditSaleOrder() {
                   }}
                   disabled={!canEditTracking}
                   className="num"
+                  accepts={trackingAccepts}
+                  onFix={(v) => {
+                    setTracking(v);
+                    te.clear('tracking');
+                  }}
                 />
               </Field>
               {canEditTracking && (
@@ -360,7 +367,10 @@ function EditSaleOrder() {
               <PrintButton
                 label="พิมพ์ใบสั่งขาย"
                 kind="sale_order"
-                locked={profileLock('sale_order', { statusId: loaded?.approveId, cancelled: loaded?.cancelled })}
+                locked={
+                  profileLock('sale_order', { statusId: loaded?.approveId, cancelled: loaded?.cancelled }) ||
+                  (waitingLocked ? WAITING_CREATOR_ONLY : '')
+                }
                 no={no ?? ''}
                 profileId={loaded?.documentProfileId}
                 href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}

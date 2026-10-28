@@ -51,14 +51,19 @@ function Kpi({
     danger: 'bg-danger-soft text-danger',
   };
   const ring = { primary: 'ring-primary', success: 'ring-success', warning: 'ring-warning', danger: 'ring-danger' };
+  // no onClick: a figure to read, not a filter — a plain card, no button look
+  const Box = onClick ? 'button' : 'div';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={active ? 'กดอีกครั้งเพื่อยกเลิกการกรอง' : 'กดเพื่อกรองรายการ'}
+    <Box
+      {...(onClick && {
+        type: 'button' as const,
+        onClick,
+        'aria-pressed': active,
+        title: active ? 'กดอีกครั้งเพื่อยกเลิกการกรอง' : 'กดเพื่อกรองรายการ',
+      })}
       className={cn(
-        'surface flex w-full items-center gap-3 p-3.5 text-left transition-colors hover:bg-accent/40',
+        'surface flex w-full items-center gap-3 p-3.5 text-left',
+        onClick && 'transition-colors hover:bg-accent/40',
         active && cn('ring-2', ring[tone]),
       )}
     >
@@ -69,7 +74,7 @@ function Kpi({
         <p className="truncate text-2xs text-muted-foreground">{label}</p>
         <p className="num text-lg font-semibold leading-tight">{value}</p>
       </div>
-    </button>
+    </Box>
   );
 }
 
@@ -317,12 +322,11 @@ export default function ProductsPage() {
           label="จำนวนคงเหลือรวม (ชิ้น)"
           value={int(qty)}
           tone="success"
-          active={filters.stock === 'in'}
-          onClick={() => pickStock('in')}
+          // a sum of pieces, not a set of parts: nothing to filter by (the filter bar has มีของ / ใกล้หมด / หมด)
         />
         <Kpi
           icon={TriangleAlert}
-          label="ใกล้หมด (≤ 3 ชิ้น)"
+          label="ใกล้หมด (1–3 ชิ้น)"
           value={int(low)}
           tone="warning"
           active={filters.stock === 'low'}

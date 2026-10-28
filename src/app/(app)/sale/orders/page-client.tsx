@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
@@ -42,6 +42,7 @@ function SaleOrderList() {
   // deep link /sale/orders?pending=1 (landing / bell) → รออนุมัติ only; read on every URL change, adjusted while
   // rendering (a link to this page from this page does not remount it)
   const pending = useSearchParams().get('pending') === '1';
+  const router = useRouter();
   const [pendingSeen, setPendingSeen] = React.useState(false);
   if (pending !== pendingSeen) {
     setPendingSeen(pending);
@@ -141,7 +142,12 @@ function SaleOrderList() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => showWaiting(filters.approve !== WAITING)}
+              onClick={() => {
+                const on = filters.approve !== WAITING;
+                showWaiting(on);
+                // turned off: the link that turned it on goes too (a reload / Back would turn it on again)
+                if (!on && pending) router.replace('/sale/orders', { scroll: false });
+              }}
               aria-pressed={filters.approve === WAITING}
             >
               เฉพาะใบรออนุมัติ

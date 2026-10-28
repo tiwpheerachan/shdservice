@@ -163,7 +163,7 @@ export default function AssignPage() {
       setPicked(new Set());
       push({
         kind: 'success',
-        title: `ยืนยันรับงานแล้ว ${d.assigned} รายการ`,
+        title: `ยืนยันรับงานแล้ว ${d.assigned} งาน`,
         desc: "งานที่เป็น 'งานใหม่' เปลี่ยนสถานะเป็น 'อยู่ระหว่างดำเนินการ' · งานอื่นคงสถานะเดิม",
       });
       refetch();

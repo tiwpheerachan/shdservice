@@ -13,6 +13,24 @@ import { nowThai } from '@/server/mappers/format';
 export const RS = { ACTIVE: 'ACTIVE', INACTIVE: 'INACTIVE', DELETED: 'DELETED' } as const;
 export type RecordStatus = (typeof RS)[keyof typeof RS];
 
+/**
+ * What the audit page says about a status change, in words (never a table name): "ลบสี แดง (#27)",
+ * "กู้คืนลูกค้า C43759", "ยี่ห้อ Dreame (#3) → Inactive". `cancel` = a sale order's DELETED reads "ยกเลิก".
+ */
+export function statusSummary(o: {
+  noun: string;
+  key: string | number;
+  name?: string | null;
+  old: string | null | undefined;
+  rs: string;
+  cancel?: boolean;
+}): string {
+  const what = `${o.noun} ${o.name ? `${o.name} (#${o.key})` : o.key}`;
+  if (o.rs === RS.DELETED) return `${o.cancel ? 'ยกเลิก' : 'ลบ'}${what}`;
+  if (o.old === RS.DELETED) return `กู้คืน${what}`;
+  return `${what} → ${o.rs === RS.ACTIVE ? 'Active' : o.rs === RS.INACTIVE ? 'Inactive' : o.rs}`;
+}
+
 /** How a list should treat statuses. */
 export type StatusMode = 'active' | 'exclude' | 'only' | 'all';
 

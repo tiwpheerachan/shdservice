@@ -8,28 +8,36 @@ import { useApi } from '@/data/db';
 import { qs } from '@/data/keys';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
-import { NO_SERIAL } from '@/lib/validation/job';
+import { NO_SERIAL, WAIT_SERIAL } from '@/lib/validation/job';
 
 /**
  * What GET /api/jobs/checks warns about for this form (Serial on other jobs, SO on another customer's job,
- * a serial / shop that looks like another brand) — read once the typing settles; every field asks with the
- * same key, so one request serves them all. Warnings only: nothing here stops a save.
+ * a serial / shop that looks like another brand) — asked once the typing settles, and only about what was
+ * changed from `was` (the job as loaded: an edit does not warn about values nobody touched). One request
+ * serves every field. Warnings only: nothing here stops a save. `on` = false asks nothing.
  */
-export function useJobChecks(s: JobFormState): JobChecks | null {
-  const serial = s.serial.trim() === NO_SERIAL ? '' : s.serial.trim();
-  const params = useDebouncedValue(
-    {
-      serial,
-      so: s.so.trim(),
-      brand: s.brand,
-      shop: s.shopName.trim(),
-      customer: s.customer?.code ?? '',
-      job: s.jobNo,
-    },
-    500,
-  );
-  const want = params.serial.length >= 4 || params.so.length >= 4;
-  return useApi<JobChecks>(want ? `/api/jobs/checks${qs(params)}` : null, { quiet: true }).data ?? null;
+export function useJobChecks(s: JobFormState, was: JobFormState, on = true): JobChecks | null {
+  const changed = (k: 'serial' | 'so' | 'brand' | 'shopName') => s[k] !== was[k];
+  const serial = s.serial.trim();
+  const params = {
+    serial: (changed('serial') || changed('brand')) && serial !== NO_SERIAL && serial !== WAIT_SERIAL ? serial : '',
+    so: changed('so') || s.customer?.code !== was.customer?.code ? s.so.trim() : '',
+    brand: s.brand,
+    shop: changed('shopName') || changed('brand') ? s.shopName.trim() : '',
+    customer: s.customer?.code ?? '',
+    job: s.jobNo,
+  };
+  const want =
+    on && (params.serial.length >= 4 || params.so.length >= 4 || (!!params.brand && params.shop.length >= 2));
+  // the URL is what settles (a string: an object would be new on every render and never settle). While typing,
+  // the last answer stays on screen until the next one arrives — hidden on every key, the rows below jumped
+  // (QA 2026-10-27); nothing left to ask (a field emptied) clears it at once
+  const live = want ? `/api/jobs/checks${qs(params)}` : null;
+  const url = useDebouncedValue(live, 500);
+  const data = useApi<JobChecks>(url, { quiet: true }).data ?? null;
+  const [shown, setShown] = React.useState<JobChecks | null>(null);
+  if (live && live === url && data && data !== shown) setShown(data);
+  return live ? shown : null;
 }
 
 /** a warning line under a field, with an optional one-tap action */

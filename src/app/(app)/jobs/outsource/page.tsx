@@ -41,8 +41,6 @@ import { today as thaiToday } from '@/lib/dates';
 import { outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
 
-// ผู้รับซ่อมต่อ = ค่าที่เคยใช้ใน job_send_forward_dt.send_to_name (+ ค่าใหม่พิมพ์เพิ่มได้)
-const OTHER = 'อื่นๆ (ระบุ)';
 /** the statuses this page sets (saveOutsource refuses others; the job's own status is kept as an option) */
 const OUTSOURCE_IDS: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED];
 const OUTSOURCE_FALLBACK = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source')); // until job_statuses loads
@@ -71,7 +69,6 @@ function OutsourceForm() {
   const [d, setD] = React.useState({
     repairDetail: '',
     sendTo: '',
-    sendToOther: '',
     sendDate: '',
     sendBy: '', // app_user id (SearchSelect values are strings)
     sendDetail: '',
@@ -84,7 +81,6 @@ function OutsourceForm() {
   // editing a field clears its error (keys = the payload paths the rules report)
   const ERR_KEY: Partial<Record<keyof typeof d, string>> = {
     sendTo: 'send.to',
-    sendToOther: 'send.to',
     sendDate: 'send.date',
     sendBy: 'send.by',
     sendDetail: 'send.detail',
@@ -104,23 +100,13 @@ function OutsourceForm() {
   useTourRestore(() => d, setD); // a บทสอน leaves the send / receive fields as it found them
 
   // prefill from the job + its latest job_send_forward_dt row
-  // the vendor list can arrive after the job: a saved "ส่งไปยัง" that turns out to be a known
-  // vendor moves from "อื่นๆ" into the list (adjusted while rendering, once — then it matches)
-  if (VENDORS.length && d.sendTo === OTHER && d.sendToOther && VENDORS.includes(d.sendToOther)) {
-    const known = (x: typeof d) =>
-      x.sendTo === OTHER && VENDORS.includes(x.sendToOther) ? { ...x, sendTo: x.sendToOther, sendToOther: '' } : x;
-    setD(known);
-    setSaved((x) => x && known(x)); // the same value, only shown the other way — not an edit
-  }
-
   function prefill(job: JobDetail) {
     reset(fromJob(job));
     const last = job.outsource[job.outsource.length - 1];
     const today = thaiToday(); // Thai calendar, not UTC
     const next = {
       repairDetail: job.repairDetail,
-      sendTo: last?.sendTo && VENDORS.includes(last.sendTo) ? last.sendTo : last?.sendTo ? OTHER : '',
-      sendToOther: last?.sendTo && !VENDORS.includes(last.sendTo) ? last.sendTo : '',
+      sendTo: last?.sendTo ?? '',
       sendDate: last?.sendDate || today,
       sendBy: String(last?.sendById || meId),
       sendDetail: last?.sendDetail ?? '',
@@ -145,7 +131,7 @@ function OutsourceForm() {
   // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
-    const sendTo = d.sendTo === OTHER ? d.sendToOther.trim() : d.sendTo;
+    const sendTo = d.sendTo.trim();
     const receiving = !!open && (d.recvDate || d.recvDetail);
     const body = {
       symptomOther: form.symptomOther,
@@ -289,22 +275,19 @@ function OutsourceForm() {
               className="lg:col-span-2"
               lookup={vendorsLookup}
             >
-              <div className="space-y-2">
-                <SearchSelect
-                  value={d.sendTo}
-                  onChange={(v) => upd({ sendTo: v })}
-                  options={strOptions([...VENDORS, OTHER])}
-                  searchPlaceholder="พิมพ์ชื่อผู้รับซ่อมต่อ…"
-                />
-                {d.sendTo === OTHER && (
-                  <Input
-                    placeholder="ระบุชื่อผู้รับซ่อมต่อ"
-                    maxLength={50}
-                    value={d.sendToOther}
-                    onChange={(e) => upd({ sendToOther: e.target.value })}
-                  />
-                )}
-              </div>
+              {/* ผู้รับซ่อมต่อที่เคยส่ง (job_send_forward_dt.send_to_name, ใช้บ่อยก่อน) เป็นรายการแนะนำ — ร้านใหม่พิมพ์ได้เลย */}
+              <Input
+                list="outsource-vendor-options"
+                maxLength={50}
+                placeholder="- - เลือกหรือพิมพ์ชื่อผู้รับซ่อมต่อ - -"
+                value={d.sendTo}
+                onChange={(e) => upd({ sendTo: e.target.value })}
+              />
+              <datalist id="outsource-vendor-options">
+                {VENDORS.map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
             </Field>
             <Field label="วันที่ส่ง" required error={act.errors['send.date']}>
               <Input type="date" value={d.sendDate} onChange={(e) => upd({ sendDate: e.target.value })} />
@@ -358,9 +341,11 @@ function OutsourceForm() {
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
                 options={strOptions(
-                  job && !outsourceStatuses.includes(job.status)
+                  // รับคืนแล้ว: only with the receive date filled in (the save refuses it otherwise)
+                  (job && !outsourceStatuses.includes(job.status)
                     ? [job.status, ...outsourceStatuses]
-                    : outsourceStatuses,
+                    : outsourceStatuses
+                  ).filter((n) => d.recvDate || n === job?.status || n === d.status || !/รับคืนจาก Out-Source/.test(n)),
                 )}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />

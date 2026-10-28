@@ -2693,6 +2693,91 @@
         }
       }
     },
+    "/jobs/suggestions": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Values typed before into a free-text job field, most used first",
+        "description": "Shop Name (`shop`), อุปกรณ์ (ที่นำส่ง) (`accessories`), จุดตำหนิ (`defects`): the 10 most used values (spaces trimmed and collapsed, case kept) that contain `q` in any case; no `q` = the 10 most used. Another `field` answers none. Needs view on any job screen.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "shop",
+                "accessories",
+                "defects"
+              ]
+            },
+            "required": false,
+            "name": "field",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Most used first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "values"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/address": {
       "get": {
         "tags": [
@@ -11100,70 +11185,6 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/ShippingProfile"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/data/shop_names": {
-      "get": {
-        "tags": [
-          "Data"
-        ],
-        "summary": "Shop names used before",
-        "description": "Any approved user.",
-        "responses": {
-          "200": {
-            "description": "The list.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
                   }
                 }
               }

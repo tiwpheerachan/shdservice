@@ -152,6 +152,17 @@ function CloseForm() {
       }))
     )
       return;
+    // more taken than the bill: a slip of the keyboard (250 typed onto 250 = 250,250) is never saved silently
+    const over = paid ? Math.round((Number(d.payAmount || 0) - bal.due) * 100) / 100 : 0;
+    if (
+      over > 0 &&
+      !(await confirm({
+        title: `รับชำระเกินยอด ${baht(over)} บาท — ยืนยัน?`,
+        description: `ยอดที่ต้องชำระ ${baht(bal.due)} บาท · กรอกรับชำระ ${baht(Number(d.payAmount || 0))} บาท — ตรวจจำนวนเงินอีกครั้ง`,
+        confirmLabel: 'ยืนยันจำนวนนี้',
+      }))
+    )
+      return;
     setSaving(true);
     try {
       // the version the page loaded: someone else's save since → 409 (reload)

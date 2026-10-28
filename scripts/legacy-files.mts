@@ -18,6 +18,9 @@
  *   cd shdservice
  *   ../setupdata/upload_files.sh validate
  *   ../setupdata/upload_files.sh upload [images|attachments|slips|all] [--images DIR] [--files DIR] [--dry] [--force]
+ *   ../setupdata/upload_files.sh wipe [--dry]   empty the bucket for a full reload; the logos the profiles point to
+ *                                               (shipping_profile / document_profile.logo_path) are saved to
+ *                                               setupdata/backup/bucket first and put back at the same path
  * Source folders default to setupdata/ImagesProduct and setupdata/FileUpload.
  *
  * Env (from shdservice/.env): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)
@@ -32,7 +35,7 @@ import { createClient } from '@supabase/supabase-js';
 type Ref = { kind: 'images' | 'attachments' | 'slips'; key: string; file: string; table: string };
 
 const args = process.argv.slice(2);
-const cmd = args[0] === 'upload' ? 'upload' : 'validate';
+const cmd = args[0] === 'upload' || args[0] === 'wipe' ? args[0] : 'validate';
 const kindArg = args[1] && !args[1].startsWith('--') ? args[1] : 'all';
 const opt = (name: string, dflt: string) => {
   const i = args.indexOf(name);
@@ -163,14 +166,59 @@ console.log(
 );
 console.table((['images', 'attachments', 'slips'] as const).map(fmtKind));
 
+/* the logos the profiles point to (shippers/…, profiles/…) */
+const logos = (
+  await q<{ p: string }>(`select logo_path p from shipping_profile where logo_path <> '' and deleted_at is null
+                          union select logo_path from document_profile where logo_path <> '' and deleted_at is null`)
+).map((r) => r.p);
+
 /* orphans: objects in the bucket no row points to (uploaded through the app for rows that are gone after a reload, or test uploads) */
-const referencedPaths = new Set(rows.map((r) => r.path));
+const referencedPaths = new Set([...rows.map((r) => r.path), ...logos]);
 const orphans = [...inBucket].filter((p) => !referencedPaths.has(p) && !p.endsWith('/.emptyFolderPlaceholder'));
 console.log(
   `orphans in bucket (no DB row points to them): ${orphans.length}${orphans.length ? ' e.g. ' + orphans.slice(0, 3).join(', ') : ''}`,
 );
 
 if (cmd === 'validate') {
+  await db.end();
+  process.exit(0);
+}
+
+const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
+  auth: { persistSession: false },
+});
+
+if (cmd === 'wipe') {
+  const lost = logos.filter((p) => !inBucket.has(p));
+  if (lost.length)
+    throw new Error(`logos the profiles point to are not in the bucket — nothing deleted: ${lost.join(', ')}`);
+  const all = [...inBucket];
+  console.log(
+    `${DRY ? '[dry-run] would delete' : 'deleting'} ${all.length} object(s); keeping ${logos.length} logo(s)`,
+  );
+  if (DRY) {
+    await db.end();
+    process.exit(0);
+  }
+  const saved = path.join(SETUP, 'backup/bucket');
+  for (const p of logos) {
+    const { data, error } = await sb.storage.from(BUCKET).download(p);
+    if (error) throw new Error(`download ${p}: ${error.message} — nothing deleted`);
+    fs.mkdirSync(path.dirname(path.join(saved, p)), { recursive: true });
+    fs.writeFileSync(path.join(saved, p), Buffer.from(await data.arrayBuffer()));
+  }
+  for (let i = 0; i < all.length; i += 1000) {
+    const { error } = await sb.storage.from(BUCKET).remove(all.slice(i, i + 1000));
+    if (error) throw new Error(`remove: ${error.message}`);
+    console.log(`  ${Math.min(i + 1000, all.length)}/${all.length}`);
+  }
+  for (const p of logos) {
+    const body = fs.readFileSync(path.join(saved, p));
+    const type = p.endsWith('.svg') ? 'image/svg+xml' : ct(p);
+    const { error } = await sb.storage.from(BUCKET).upload(p, body, { contentType: type, upsert: true });
+    if (error) throw new Error(`put back ${p}: ${error.message} (the file is in ${saved})`);
+  }
+  console.log(`bucket ${BUCKET} empty but for ${logos.length} logo(s) (copies in ${saved})`);
   await db.end();
   process.exit(0);
 }
@@ -186,9 +234,6 @@ if (DRY || !todo.length) {
   process.exit(0);
 }
 
-const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
-  auth: { persistSession: false },
-});
 let ok = 0,
   done = 0;
 const failed: string[] = [];

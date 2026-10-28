@@ -255,6 +255,13 @@ try {
     const self = await call('/api/jobs/checks?serial=TDCHK0001SERIAL&job=TDJ0004');
     assert.deepEqual((self.body.serial as { jobs: unknown[] }).jobs, [], 'the job being edited is not "another job"');
   });
+  await test('GET /api/jobs/suggestions → 200: shop names typed before; an unknown field answers none', async () => {
+    const r = await call('/api/jobs/suggestions?field=shop&q=a');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.values));
+    const other = await call('/api/jobs/suggestions?field=nope&q=a');
+    assert.deepEqual([other.status, other.body.values], [200, []]);
+  });
   await test('POST /api/me/tour → 200: a page answered, then never ask again (kept per account)', async () => {
     assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
     assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
