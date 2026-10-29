@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Field, FieldGrid } from '@/components/ui/field';
-import { Input, Checkbox } from '@/components/ui/input';
+import { Input, Checkbox, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { api, postJson, del, errMsg, isStale, uploadFile, useUploading } from '@/lib/api';
@@ -37,6 +37,8 @@ type Profile = {
   isDefault: boolean;
   isActive: boolean;
   sortOrder: number;
+  /** document = ออกเอกสารในนาม · pick_slip = only the header of ใบเบิกสินค้า (never in the forms' chooser) */
+  purpose: 'document' | 'pick_slip';
 };
 
 type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: number };
@@ -56,6 +58,7 @@ const EMPTY: FormValues = {
   isDefault: false,
   isActive: true,
   sortOrder: 0,
+  purpose: 'document',
 };
 
 /**
@@ -234,6 +237,7 @@ export default function DocumentProfilesPage() {
             {r.isActive ? 'Active' : 'Inactive'}
           </Badge>
           {r.isDefault && <Badge tone="primary">ค่าเริ่มต้น</Badge>}
+          {r.purpose === 'pick_slip' && <Badge tone="info">หัวใบเบิกสินค้า</Badge>}
         </div>
       ),
     },
@@ -362,6 +366,27 @@ export default function DocumentProfilesPage() {
             />
           </Field>
 
+          <Field
+            label="ใช้สำหรับ"
+            hint={
+              form.purpose === 'pick_slip'
+                ? 'พิมพ์เป็นหัวใบเบิกสินค้าเท่านั้น ไม่อยู่ในช่อง "ออกเอกสารในนาม" ของฟอร์ม'
+                : 'เลือกได้ในช่อง "ออกเอกสารในนาม" ของงานซ่อม ใบเสนอราคา ใบสั่งขาย'
+            }
+            error={fe.errors.purpose}
+          >
+            <Select
+              value={form.purpose}
+              onChange={(e) => {
+                const purpose = e.target.value === 'pick_slip' ? 'pick_slip' : 'document';
+                setForm((f) => ({ ...f, purpose, isDefault: purpose === 'pick_slip' ? false : f.isDefault }));
+              }}
+            >
+              <option value="document">ออกเอกสาร (ออกเอกสารในนาม)</option>
+              <option value="pick_slip">หัวใบเบิกสินค้า</option>
+            </Select>
+          </Field>
+
           <Field label="ลำดับแสดง" error={fe.errors.sortOrder}>
             <Input
               type="number"
@@ -377,8 +402,12 @@ export default function DocumentProfilesPage() {
           <Field label="ตัวเลือก" wide group="group">
             <div className="flex flex-wrap gap-6 pt-1 text-sm">
               <label className="flex items-center gap-2">
-                <Checkbox checked={form.isDefault} onChange={(e) => set('isDefault', e.target.checked)} /> ค่าเริ่มต้น
-                (ใช้เมื่อไม่ได้เลือก)
+                <Checkbox
+                  checked={form.isDefault}
+                  disabled={form.purpose === 'pick_slip'}
+                  onChange={(e) => set('isDefault', e.target.checked)}
+                />{' '}
+                ค่าเริ่มต้น (ใช้เมื่อไม่ได้เลือก)
               </label>
               <label className="flex items-center gap-2">
                 <Checkbox checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} /> เปิดใช้งาน

@@ -28,8 +28,8 @@ export const tableKey = (table: string, deleted: DeletedMode = 'exclude', params
 export const pagedKey = (table: string, params: Params, deleted: DeletedMode = 'exclude') =>
   `/api/data/${table}${qs({ paged: 1, deleted, ...params })}`;
 
-/** the page sizes a server-paged table offers */
-export const PAGE_SIZES = [10, 25, 50, 100];
+/** the page sizes a server-paged table offers (legacy lists: 50 / 75 / 100) */
+export const PAGE_SIZES = [10, 25, 50, 75, 100];
 
 /** a server-paged table's state (DataTable's ServerTableState) */
 type TableState = { page: number; pageSize: number; q: string; sort: { key: string; dir: 'asc' | 'desc' } | null };

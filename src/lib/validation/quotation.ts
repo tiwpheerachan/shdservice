@@ -10,7 +10,7 @@ import { isFilled } from './job';
  *    has one must keep one ("never worse"); an unchanged legacy value passes; the API also checks
  *    that the job exists
  *  - lines: qty a whole 1–9999, unit price money, detail ≤ 100, type SparePart / Service / Delivery, unit ≤ 10,
- *    discount money ≤ qty × price, discount % 0–100; service money; discount 0–100 % (บาท: money); VAT 0 or 7 %;
+ *    discount (บาท) money ≤ qty × price, discount % 0–100 (lineAmount); service money; discount 0–100 % (บาท: money); VAT 0 or 7 %;
  *    contact ≤ 100; remark ≤ 1000 — nothing is cut off silently
  *  - a new quotation starts as รอเสนอราคา / เสนอราคาแล้ว (the customer answers a quotation that was sent)
  *  - no minimum number of lines (service-only / draft quotations exist)
@@ -37,14 +37,12 @@ export const quotationLine = z.looseObject({
       'ประเภทรายการต้องเป็น อะไหล่ / บริการ / ค่าขนส่ง',
     ),
   unit: maxText(10, 'หน่วย'),
-  // the form and the print carry no per-line discount (none in the legacy data either): a value sent here would
-  // be stored, then shown nowhere and zeroed by the next save from the form — the header discount is the one
-  discount: moneyField('ส่วนลดรายการ').refine((v) => !Number(v), 'ส่วนลดรายรายการยังไม่รองรับ — ใช้ส่วนลดท้ายใบ'),
+  // ส่วนลด (บาท) / ส่วนลด (%) of the line, as legacy — a % set wins and is turned into บาท (lineAmount)
+  discount: moneyField('ส่วนลดรายการ'),
   discountPercent: z
     .union([z.number(), z.string()])
     .nullish()
-    .refine((v) => v == null || v === '' || (Number(v) >= 0 && Number(v) <= 100), 'ส่วนลด % ต้องเป็นตัวเลข 0–100')
-    .refine((v) => !Number(v), 'ส่วนลดรายรายการยังไม่รองรับ — ใช้ส่วนลดท้ายใบ'),
+    .refine((v) => v == null || v === '' || (Number(v) >= 0 && Number(v) <= 100), 'ส่วนลด % ต้องเป็นตัวเลข 0–100'),
 });
 
 /** the fields' own rules (no stored quotation) — the API reads the body with these (src/server/contract) */
@@ -116,6 +114,17 @@ export function parseDiscount(type: string, formula: string): { type: string; va
  *  33.30 is 5.00, not the 4.99 a float product (499.4999…) rounds to */
 const percentOf = (amount: number, rate: number) =>
   Math.round((Math.round(amount * 100) * Math.round(rate * 100)) / 10_000) / 100;
+
+/**
+ * A line's ส่วนลด (บาท) and เป็นเงิน — the form, its preview and the server alike. ส่วนลด (%) set (0–100) wins:
+ * บาท = that % of qty × price (half a satang up); otherwise the บาท discount as given. เป็นเงิน = qty × price −
+ * ส่วนลด, never below 0. No discount → qty × price rounded to the satang, as every quotation before.
+ */
+export function lineAmount(l: { qty: number; unitPrice: number; discount?: number; discountPercent?: number }) {
+  const gross = l.qty * l.unitPrice;
+  const discount = l.discountPercent ? percentOf(gross, l.discountPercent) : (l.discount ?? 0);
+  return { discount, total: Math.max(0, Math.round((gross - discount) * 100) / 100) };
+}
 
 /**
  * Amount rules reverse-engineered from quotation_hd columns — the server stores these and the print

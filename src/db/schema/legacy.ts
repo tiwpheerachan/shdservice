@@ -1006,6 +1006,8 @@ export const documentProfile = pgTable('document_profile', {
   // soft delete (drizzle/0009): hidden from lists/dropdowns, still printable for old documents
   deletedAt: timestamp('deleted_at', { mode: 'string' }),
   deletedBy: integer('deleted_by'),
+  /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = the header of ใบเบิกสินค้า only (drizzle/0004) */
+  purpose: varchar('purpose', { length: 20 }).notNull().default('document'),
 });
 
 /** โปรไฟล์บริษัทขนส่ง (drizzle/0013) — logo + tracking URL shown on the public tracking page */

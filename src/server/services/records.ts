@@ -70,7 +70,8 @@ export async function setRecordStatus(
   byUserId: number,
   mayRestore = true,
   mayCancelOthers = true,
-  /** cancelling a sale order: the reason (document_cancel_remark) */
+  /** the reason for a DELETED: a sale order's document_cancel_remark; jobs / quotations: on the audit line
+   *  (ประวัติการแก้ไข) — required for these three by the API (route.ts) */
   remark?: string | null,
 ): Promise<void> {
   // a document is ACTIVE or DELETED — INACTIVE left a quotation listed as open with nothing to show it
@@ -143,6 +144,7 @@ export async function setRecordStatus(
         statusSummary({ noun: NOUN[table] ?? e[0], key: id, old, rs, cancel: table === 'sale_orders' }) +
         (why && ` · ${why}`),
       changes: { recordStatus: [old, rs] },
+      meta: why ? { remark: why } : null, // the summary is cut at 200 characters — the reason whole
     });
   };
   if (isSimpleKind(table)) return setSimpleStatus(table, Number(id), rs, byUserId);
@@ -233,7 +235,7 @@ export async function setRecordStatus(
           .update(quotationHd)
           .set(stamp)
           .where(eq(quotationHd.quotationNo, String(id)));
-        await log(tx, old);
+        await log(tx, old, rs === RS.DELETED ? clean(remark) : '');
       });
       return;
     case 'jobs': {
@@ -246,6 +248,9 @@ export async function setRecordStatus(
           .for('update');
         if (!cur) throw jobNotFound(String(id));
         refuseRestore(cur.rs);
+        // a second cancel (a stale list) must not add a second reason to the history
+        if (rs === RS.DELETED && cur.rs === RS.DELETED)
+          throw new HttpError(409, 'งานนี้ถูกยกเลิกไปแล้ว — โหลดหน้าใหม่');
         if (rs === RS.DELETED) {
           // parts still waiting for stock, or issued and not back: deleting would leave the booking held and the
           // stock out against a job no list shows
@@ -285,7 +290,7 @@ export async function setRecordStatus(
           .set({ ...statusStamp(rs, byUserId, false), ...(st !== null ? { jobStatusId: st } : {}) })
           .where(eq(job.jobNo, String(id)));
         if (st !== null && st !== cur.st) await logStatus(tx, String(id), st, byUserId);
-        await log(tx, cur.rs);
+        await log(tx, cur.rs, rs === RS.DELETED ? clean(remark) : '');
       });
       return;
     }
@@ -317,6 +322,9 @@ export async function setRecordStatus(
         // the edit page asks for it and shows it — the API must not cancel without one either
         if (rs === RS.DELETED && !reason)
           throw new HttpError(400, 'ระบุเหตุผลที่ยกเลิก', { fields: { remark: 'ระบุเหตุผลที่ยกเลิก' } });
+        // document_cancel_remark is varchar(100); the API takes 200 (a job's / quotation's reason)
+        if (reason.length > 100)
+          throw new HttpError(400, 'เหตุผลยาวเกิน 100 ตัวอักษร', { fields: { remark: 'เหตุผลยาวเกิน 100 ตัวอักษร' } });
         await tx
           .update(saleOutHd)
           .set(

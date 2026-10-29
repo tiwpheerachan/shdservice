@@ -360,6 +360,9 @@ export type JobSummary = {
   topChannel: string;
 };
 export const useJobSummary = (params: Params = {}) => useTable<JobSummary>('job_summary', undefined, 'exclude', params);
+/** a report's row-level table (src/app/(app)/reports/report-specs.ts): one page of `report`'s rows under its filters */
+export const useReportRows = (report: string, params: PageParams) =>
+  usePagedTable<Record<string, string | number>>('report_rows', { ...params, report });
 export type QuotationSummary = {
   total: number;
   agreed: number;

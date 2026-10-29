@@ -21,7 +21,7 @@ import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { followQuotation, getJob, jobStatuses } from './jobs';
 import { JOB_CLOSED_STATUSES } from './stock';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
-import { computeTotals, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
+import { computeTotals, lineAmount, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
 import type { z } from 'zod';
@@ -355,15 +355,9 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     .map((l, idx) => {
       const qty = num(l.qty) || 1;
       const price = num(l.unitPrice);
-      const disc = num(l.discount);
-      return {
-        ...l,
-        lineNumber: idx + 1,
-        qty,
-        unitPrice: price,
-        discount: disc,
-        total: Math.round((qty * price - disc) * 100) / 100,
-      };
+      const discountPercent = num(l.discountPercent);
+      const { discount, total } = lineAmount({ qty, unitPrice: price, discount: num(l.discount), discountPercent });
+      return { ...l, lineNumber: idx + 1, qty, unitPrice: price, discount, discountPercent, total };
     });
   const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
   const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
@@ -385,7 +379,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     unitPrice: l.unitPrice.toFixed(2),
     unitPriceDiscount: l.discount.toFixed(2),
     totalPrice: l.total.toFixed(2),
-    unitPriceDiscountPercent: num(l.discountPercent).toFixed(2),
+    unitPriceDiscountPercent: l.discountPercent.toFixed(2),
   }));
 
   const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
@@ -600,4 +594,40 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     return no!;
   });
   return (await getQuotation(no))!;
+}
+
+/** ใบเบิกสินค้า: at most this many quotations per print (one page each) */
+export const PICK_SLIP_MAX = 50;
+
+/**
+ * ใบเบิกสินค้า (pick slip, legacy "พิมพ์ใบเบิกสินค้า" on the ticked quotations): one per quotation, in the order
+ * asked — its spare-part lines only (service / delivery lines are not picked from stock), their qty and amount; the
+ * totals box prints the quotation's stored amounts. Any status prints except a deleted or ยกเลิกใบเสนอราคา one
+ * (owner 2026-10-29): those, unknown numbers and any past PICK_SLIP_MAX come back in `skipped` with the reason.
+ */
+export async function pickSlips(nos: string[]) {
+  const wanted = [...new Set(nos.map((n) => n.trim().toUpperCase()).filter(Boolean))];
+  const found = await Promise.all(wanted.slice(0, PICK_SLIP_MAX).map((n) => getQuotation(n)));
+  const slips: { q: QuotationDetail; lines: QuotationLine[]; qty: number; parts: number }[] = [];
+  const skipped: { no: string; why: string }[] = wanted
+    .slice(PICK_SLIP_MAX)
+    .map((no) => ({ no, why: `เกิน ${PICK_SLIP_MAX} ใบต่อครั้ง` }));
+  found.forEach((q, k) => {
+    const why = !q
+      ? 'ไม่พบใบเสนอราคา'
+      : !q.active
+        ? 'ถูกลบแล้ว'
+        : q.statusId === QS.CANCELLED
+          ? 'ยกเลิกใบเสนอราคา'
+          : '';
+    if (why || !q) return void skipped.push({ no: wanted[k]!, why });
+    const lines = q.lines.filter((l) => l.itemType === 'SparePart');
+    slips.push({
+      q,
+      lines,
+      qty: lines.reduce((s, l) => s + l.qty, 0),
+      parts: Math.round(lines.reduce((s, l) => s + l.total, 0) * 100) / 100,
+    });
+  });
+  return { slips, skipped };
 }

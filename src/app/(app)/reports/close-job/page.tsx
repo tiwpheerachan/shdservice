@@ -1,158 +1,28 @@
 'use client';
 
-import * as React from 'react';
-import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import { StatusBadge, Badge } from '@/components/ui/badge';
 import { RETURN_METHODS } from '@/data/options';
-import type { Job } from '@/data/types';
-import { useJobsPage, useJobSummary } from '@/data/db';
-import type { Column } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
-import { exportXlsx } from '@/lib/api';
-import { kpisOr, useReportAccess, JOB_SCREENS } from '../report-access';
-import { useServerTable } from '@/lib/use-server-table';
-import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
-
-// TAT = วันที่เปิดงาน → the return, else the close, else today — calendar days (date parts only): what the column
-// sorts by and the dashboard / Excel / the server's "เกิน 30 วัน" count (jobs.ts / reports.ts tatDays)
-const tatDays = (r: Job) => {
-  if (!r.openDate) return 0;
-  const day = (s: string) => Date.parse(`${s.slice(0, 10)}T00:00:00Z`);
-  return Math.max(0, Math.round((day(r.returnDate || r.closedDate || today()) - day(r.openDate)) / 86400000));
-};
-
-const columns: Column<Job>[] = [
-  {
-    key: 'no',
-    header: 'เลขที่งาน',
-    width: '130px',
-    cell: (r) => (
-      <span className="num">
-        <span className="block font-medium">{r.no}</span>
-        <span className="block text-2xs text-muted-foreground sm:hidden">{r.closedDate?.slice(0, 10)}</span>
-      </span>
-    ),
-  },
-  {
-    key: 'openDate',
-    header: 'วันที่เปิดงาน',
-    width: '140px',
-    hideBelow: 'lg', // วันที่ปิดงาน is this report's date
-    cell: (r) => <span className="num text-xs">{r.openDate}</span>,
-  },
-  {
-    key: 'closedDate',
-    header: 'วันที่ปิดงาน',
-    width: '140px',
-    hideBelow: 'sm', // a phone: under เลขที่งาน
-    cell: (r) => <span className="num text-xs">{r.closedDate}</span>,
-  },
-  {
-    key: 'customer',
-    header: 'ลูกค้า',
-    hideBelow: 'sm', // a phone: เลขที่งาน · วันที่ปิดงาน · TAT · สถานะ — what this report is about
-    minWidth: COL_MIN_WIDTH.customer,
-    cell: (r) => <span className="line-clamp-1 max-w-[200px]">{r.customer}</span>,
-  },
-  brandModelColumn(),
-  {
-    key: 'tat',
-    header: 'TAT (วัน)',
-    align: 'right',
-    width: '100px',
-    value: (r) => tatDays(r),
-    cell: (r) => {
-      const d = tatDays(r);
-      return (
-        <span className={d > 30 ? 'font-semibold text-danger' : d > 10 ? 'font-semibold text-warning' : ''}>{d}</span>
-      );
-    },
-  },
-  {
-    key: 'returnType',
-    header: 'วิธีส่งคืน',
-    hideBelow: 'lg',
-    cell: (r) =>
-      r.returnType ? <Badge tone="info">{r.returnType}</Badge> : <span className="text-muted-foreground">—</span>,
-  },
-  {
-    key: 'paymentAmount',
-    header: 'ยอดรับชำระ',
-    align: 'right',
-    width: '120px',
-    hideBelow: 'sm',
-    value: (r) => r.paymentAmount ?? 0,
-    cell: (r) => baht(r.paymentAmount ?? 0),
-  },
-  {
-    key: 'status',
-    header: 'สถานะงาน',
-    minWidth: COL_MIN_WIDTH.status,
-    cell: (r) => <StatusBadge status={r.status} group={r.statusGroup} wrap />,
-  },
-];
+import { JobReport } from '../job-report';
 
 export default function Page() {
-  const {
-    filters: f,
-    setFilters: setF,
-    table,
-    pageArgs,
-    server,
-  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), returnType: '', no: '' });
-  const filters = { closedFrom: f.from, closedTo: f.to, statusGroup: 'Finished', returnType: f.returnType };
-  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
-  const access = useReportAccess(JOB_SCREENS, 'Job Management');
-  const { data: sum, error: sumError } = useJobSummary({ ...filters, q: table.q || f.no });
-  const {
-    rows: JOBS,
-    total: totalRows,
-    loading,
-    error: loadError,
-    refetch: retryLoad,
-  } = useJobsPage({ ...pageArgs, q: table.q || f.no, ...filters });
-  const S = sum[0];
-  const total = S?.paid ?? 0;
-  const avg = String(S?.avgTat ?? 0);
-  const over30 = S?.over30 ?? 0;
   return (
-    <ReportView
+    <JobReport
+      report="close_job"
       title="รายงานการปิดงานซ่อม"
-      description="งานที่ปิดแล้ว วิธีการส่งคืน และระยะเวลาดำเนินงาน (TAT)"
-      filters={[
-        { kind: 'date', key: 'from', label: 'วันที่ปิดงาน (ตั้งแต่)', value: f.from },
-        { kind: 'date', key: 'to', label: 'วันที่ปิดงาน (ถึง)', value: f.to },
-        { kind: 'select', key: 'returnType', label: 'วิธีการส่งคืน', options: ['ทั้งหมด', ...RETURN_METHODS] },
-        { kind: 'text', key: 'no', label: 'เลขที่งาน', placeholder: 'J2612164' },
-      ]}
-      onApply={setF}
-      onExport={
-        access.canExport
-          ? () =>
-              exportXlsx('jobs', {
-                ...filters,
-                q: table.q || f.no,
-                sort: pageArgs.sort,
-                dir: pageArgs.dir,
-                file: 'report-close-job',
-              })
-          : undefined
-      }
-      kpis={kpisOr(sumError, [
+      description="งานที่ปิดแล้วตามช่วงวันที่ปิดงาน — การชำระเงิน วิธีส่งคืน และระยะเวลาดำเนินงาน (TAT)"
+      start={{ from: daysAgo(30), to: today() }}
+      dates={{ วันที่ปิดงานซ่อม: 'closed' }}
+      fixed={{ statusGroup: 'Finished' }}
+      statusGroup="Finished"
+      extra={[{ kind: 'select', key: 'returnType', label: 'วิธีการส่งคืน', options: ['ทั้งหมด', ...RETURN_METHODS] }]}
+      file="report-close-job"
+      kpis={(S) => [
         { label: 'งานที่ปิดแล้ว', value: int(S?.total ?? 0), tone: 'success' },
-        { label: 'ยอดรับชำระรวม', value: baht(total) },
-        { label: 'TAT เฉลี่ย (วัน)', value: avg, sub: 'สีส้ม = เกิน 10 วัน · สีแดง = เกิน 30 วัน' },
-        { label: 'เกิน 30 วัน', value: int(over30), tone: 'danger' },
-      ])}
-      columns={columns}
-      rows={JOBS}
-      loading={loading}
-      error={access.canTable ? loadError : null}
-      emptyText={access.emptyText}
-      onRetry={retryLoad}
-      rowKey={(r) => r.no}
-      server={{ ...server, total: totalRows }}
+        { label: 'ยอดรับชำระรวม', value: baht(S?.paid ?? 0) },
+        { label: 'TAT เฉลี่ย (วัน)', value: String(S?.avgTat ?? 0), sub: 'วันที่เปิดงาน → ส่งคืน / ปิดงาน' },
+        { label: 'เกิน 30 วัน', value: int(S?.over30 ?? 0), tone: 'danger' },
+      ]}
     />
   );
 }

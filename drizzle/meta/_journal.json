@@ -29,6 +29,13 @@
       "when": 1761782400000,
       "tag": "0003_merge_legacy_users_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1761868800000,
+      "tag": "0004_document_profile_purpose",
+      "breakpoints": true
     }
   ]
 }

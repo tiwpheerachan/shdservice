@@ -165,15 +165,17 @@ try {
     ]);
     for (const m of Object.values(r.fields)) assert.match(m, /[ก-๙]/, m);
   });
-  await test('B1 a per-line discount is refused (the form / print carry none — it would be zeroed unseen); 0 saves', async () => {
-    for (const extra of [{ discount: 30 }, { discountPercent: 10 }]) {
+  // a per-line discount is legacy's ส่วนลด (บาท / %) since 2026-10-29 — its math: scripts/test-qa-quotation.mts
+  await test('B1 a per-line discount (บาท or %) saves and lowers the net; 0 saves as before', async () => {
+    for (const [extra, net] of [
+      [{ discount: 30 }, 70],
+      [{ discountPercent: 10 }, 90],
+      [{ discount: 0, discountPercent: 0 }, 100],
+    ] as const) {
       const r = await post(base(j1, { lines: [line({ qty: 2, unitPrice: 50, ...extra })] }));
-      assert.equal(r.status, 400, `${JSON.stringify(extra)}: ${JSON.stringify(r.body)}`);
-      assert.match(JSON.stringify(r.fields), /ส่วนลดรายรายการยังไม่รองรับ/);
+      assert.equal(r.status, 201, `${JSON.stringify(extra)}: ${JSON.stringify(r.body)}`);
+      assert.equal((await getQuotation(r.body.quotation!.no))!.netAmount, net);
     }
-    const r = await post(base(j1, { lines: [line({ qty: 2, unitPrice: 50, discount: 0, discountPercent: 0 })] }));
-    assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.equal((await getQuotation(r.body.quotation!.no))!.netAmount, 100);
   });
   await test('B5 a บาท discount with 3 decimals → 400 discountValue', async () => {
     const r = await post(

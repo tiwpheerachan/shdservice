@@ -125,8 +125,8 @@ export const RECEIVE_METHODS: [string, ...string[]] = ['Walk-In', 'Carry-In', 'O
 /* วิธีการส่งคืนสินค้า (5) */
 export const RETURN_METHODS = ['ลูกค้ามารับเอง', 'ส่งไปรษณีย์', 'บริษัทขนส่งเอกชน', 'พนักงานจัดส่ง', 'ไม่ต้องส่งคืน'];
 
-/* วิธีชำระเงิน (3) */
-export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 'เงินสด', 'บัตรเครดิต']; // = sale_out_hd.payment_type
+/* วิธีชำระเงินของใบสั่งขาย (= sale_out_hd.payment_type) — COD = ยังไม่มีสลิป ยอดชำระไม่บังคับ (เหมือนระบบเดิม) */
+export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 'เงินสด', 'บัตรเครดิต', 'เก็บเงินปลายทาง (COD)'];
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
 export const JOB_PAYMENT_METHODS: [string, ...string[]] = ['เงินโอน', 'เงินสด', 'บัตรเครดิต'];
 

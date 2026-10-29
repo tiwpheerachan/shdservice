@@ -7,13 +7,13 @@ import { Input, NumberInput } from '@/components/ui/input';
 import { TableScroll } from '@/components/ui/data-table';
 import type { FieldErrors } from '@/lib/validation';
 import { baht } from '@/lib/utils';
-import type { QuotationLine } from './line-totals';
+import { lineOf, type QuotationLine } from './line-totals';
 
 /** non-stock line the quotation may carry (legacy SVD0001 = delivery charge, kept out of spare_part_amount);
  *  service_cost has no SVD0001 row — 60 is what legacy quotations (Q2500825, Q2600532) and jobs' ค่าขนส่ง charge */
 const DELIVERY_EXTRA: ExtraItem[] = [{ code: 'SVD0001', name: 'ค่าขนส่ง', price: 60 }];
 
-/** the quotation's line table: a part / ค่าขนส่ง per row, its detail, qty and unit price */
+/** the quotation's line table: a part / ค่าขนส่ง per row, its detail, qty, unit price and discount (% or บาท) */
 export function QuotationLineTable({
   lines,
   setLines,
@@ -33,7 +33,7 @@ export function QuotationLineTable({
 
   return (
     <TableScroll label="รายการในใบเสนอราคา" className="rounded-none">
-      <table className="w-full min-w-[720px] text-sm">
+      <table className="w-full min-w-[900px] text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
             <th className="w-10 px-3 py-2 text-left">#</th>
@@ -41,6 +41,8 @@ export function QuotationLineTable({
             <th className="px-3 py-2 text-left">รายละเอียด</th>
             <th className="w-20 px-3 py-2 text-right">จำนวน</th>
             <th className="w-28 px-3 py-2 text-right">ราคา/หน่วย</th>
+            <th className="w-20 px-3 py-2 text-right">ส่วนลด (%)</th>
+            <th className="w-28 px-3 py-2 text-right">ส่วนลด (บาท)</th>
             <th className="w-28 px-3 py-2 text-right">เป็นเงิน</th>
             <th className="w-16 px-3 py-2 text-center">Action</th>
           </tr>
@@ -48,7 +50,7 @@ export function QuotationLineTable({
         <tbody>
           {lines.length === 0 ? (
             <tr>
-              <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
+              <td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">
                 ยังไม่มีรายการ
               </td>
             </tr>
@@ -116,7 +118,41 @@ export function QuotationLineTable({
                     className="h-8"
                   />
                 </td>
-                <td className="num px-3 py-2 text-right font-medium">{baht(l.qty * l.price)}</td>
+                <td className="px-3 py-2">
+                  <NumberInput
+                    aria-label={`ส่วนลด (%) แถว ${i + 1}`}
+                    aria-invalid={!!errors[`lines.${i}.discountPercent`] || undefined}
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    placeholder="0"
+                    value={l.discountPercent}
+                    onChange={(n) => {
+                      upd(l.id, { discountPercent: n });
+                      clear(`lines.${i}.discountPercent`);
+                      clear(`lines.${i}.discount`);
+                    }}
+                    className="h-8"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  {/* a % set → its บาท shown here; typing บาท drops the % */}
+                  <NumberInput
+                    aria-label={`ส่วนลด (บาท) แถว ${i + 1}`}
+                    aria-invalid={!!errors[`lines.${i}.discount`] || undefined}
+                    min={0}
+                    step="0.01"
+                    placeholder="0"
+                    value={lineOf(l).discount}
+                    onChange={(n) => {
+                      upd(l.id, { discount: n, discountPercent: 0 });
+                      clear(`lines.${i}.discount`);
+                      clear(`lines.${i}.discountPercent`);
+                    }}
+                    className="h-8"
+                  />
+                </td>
+                <td className="num px-3 py-2 text-right font-medium">{baht(lineOf(l).total)}</td>
                 <td className="px-3 py-2 text-center">
                   <button
                     onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}

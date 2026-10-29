@@ -29,7 +29,7 @@ const or = (v: string | null | undefined, dash = '') => (v && v.trim() ? v : das
  */
 export async function QuotationDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getQuotation(no);
-  if (!found) notFound();
+  if (!found || !found.active) notFound(); // a deleted (ยกเลิก) quotation prints no more
   const q = forCustomer ? quotationForCustomer(found) : found;
   const co = await profileForDocument(q.documentProfileId); // ออกเอกสารในนาม
   const c = q.customerDetail;
@@ -37,6 +37,8 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);
   const hasDiscount = (q.discountAmount ?? 0) > 0;
+  // a line discount (legacy ส่วนลด % / บาท) gets its own column — none, the sheet is as before
+  const lineDiscount = q.lines.some((l) => l.discount > 0);
   // ติดต่อสอบถาม… = the issuing company (document profile); nothing set → the line is left out
   const contactLine = [co.phone && `Tel. : ${co.phone}`, co.email && `Email : ${co.email}`].filter(Boolean).join('  ');
   // the job's engineer — not the quotation's creator (a CS clerk printed as ช่าง); none assigned → —
@@ -221,6 +223,13 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                 <br />
                 Unit Price
               </th>
+              {lineDiscount && (
+                <th className="w-[92px]">
+                  ส่วนลด
+                  <br />
+                  Discount
+                </th>
+              )}
               <th className="w-[92px]">
                 จำนวนเงิน
                 <br />
@@ -238,6 +247,11 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                 </td>
                 <td className="num text-center">{l.qty}</td>
                 <td className="num text-right">{money(l.unitPrice)}</td>
+                {lineDiscount && (
+                  <td className="num text-right">
+                    {l.discount > 0 && (l.discountPercent > 0 ? `(${l.discountPercent}%) ` : '') + money(l.discount)}
+                  </td>
+                )}
                 <td className="num text-right">{money(l.total)}</td>
               </tr>
             ))}
@@ -247,6 +261,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
               <td />
               <td />
               <td />
+              {lineDiscount && <td />}
               <td />
             </tr>
           </tbody>

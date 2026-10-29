@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  IDEMPOTENCY,
   JSON_BODY,
   Ok,
   RATE_LIMITED,
@@ -11,7 +12,7 @@ import {
   redirect,
 } from './common';
 import { defineOperation, type Operation } from './registry';
-import { moneyField } from '@/lib/validation';
+import { clean, moneyField } from '@/lib/validation';
 
 /** Lookups, files, uploads, health, sign-in (SSO) and this document itself. */
 
@@ -39,6 +40,31 @@ export const address = defineOperation({
       z.object({ rows: z.array(z.object({ id: n, name: s, postal: s.optional() })) }),
     ),
     ...SIGNED_IN,
+  },
+});
+
+export const addressCreate = defineOperation({
+  method: 'post',
+  path: '/address',
+  tags: ['Customers'],
+  summary: 'Add a sub-district the list lacks (customer form "+ เพิ่มชื่อ")',
+  description:
+    'Customer edit. The name is cleaned (≤ 50, the column) and must not already be in that district (409); postal = 5 digits; an unknown district → 404. Audited; everyone gets it from GET /address. Takes an Idempotency-Key.',
+  headers: IDEMPOTENCY.headers,
+  invalid: IDEMPOTENCY.invalid,
+  body: z.object({
+    district: n.int().positive('เลือกเขต / อำเภอก่อน'),
+    name: s
+      .refine((v) => clean(v) !== '', 'ต้องระบุชื่อแขวง / ตำบล')
+      .refine((v) => clean(v).length <= 50, 'ชื่อแขวง / ตำบลยาวเกิน 50 ตัวอักษร'),
+    postal: s.refine((v) => /^\d{5}$/.test(clean(v)), 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก'),
+  }),
+  responses: {
+    201: jsonResponse('Added.', z.object({ ok: z.literal(true), row: z.object({ id: n, name: s, postal: s }) })),
+    ...SIGNED_IN,
+    ...JSON_BODY,
+    ...notFound('No district with that id.'),
+    ...IDEMPOTENCY.responses,
   },
 });
 

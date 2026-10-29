@@ -572,3 +572,48 @@ export async function listSubDistricts(districtId: number) {
     .where(eq(mtSubDistrict.districtId, districtId))
     .orderBy(asc(mtSubDistrict.nameTh));
 }
+
+/** "+ เพิ่มชื่อ" (customer form, as the legacy app had it): a แขวง / ตำบล the list lacks, for everyone from then on.
+ *  The body was checked by its operation (addressCreate); the same name in that district is refused. */
+export async function addSubDistrict(i: { district: number; name: string; postal: string }, byUserId: number) {
+  const name = clean(i.name);
+  const postal = clean(i.postal);
+  return db.transaction(async (tx) => {
+    // ponytail: one lock for the table — the legacy ids have no sequence (next = max + 1); adds are rare
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('mt_sub_district', 0))`);
+    const [d] = await tx
+      .select({ cityId: mtDistrict.cityId })
+      .from(mtDistrict)
+      .where(eq(mtDistrict.districtId, i.district));
+    if (!d) throw new HttpError(404, 'ไม่พบเขต / อำเภอนี้ กรุณาโหลดหน้าใหม่');
+    const [dup] = await tx
+      .select({ id: mtSubDistrict.subDistrictId })
+      .from(mtSubDistrict)
+      .where(and(eq(mtSubDistrict.districtId, i.district), sql`btrim(${mtSubDistrict.nameTh}) = ${name}`));
+    if (dup) {
+      const message = `มี "${name}" ในเขต / อำเภอนี้แล้ว`;
+      throw new HttpError(409, message, { fields: { name: message } });
+    }
+    const [row] = await tx
+      .insert(mtSubDistrict)
+      .values({
+        subDistrictId: sql`(SELECT coalesce(max(sub_district_id), 0) + 1 FROM mt_sub_district)`,
+        cityId: d.cityId,
+        districtId: i.district,
+        nameTh: name,
+        nameEn: '',
+        postalCode: postal,
+      })
+      .returning({ id: mtSubDistrict.subDistrictId, name: mtSubDistrict.nameTh, postal: mtSubDistrict.postalCode });
+    if (!row) throw new Error('mt_sub_district insert returned no row');
+    await audit(tx, byUserId, {
+      action: 'CREATE',
+      module: 'Customer',
+      entity: 'mt_sub_district',
+      key: row.id,
+      summary: `เพิ่มแขวง / ตำบล ${name} ${postal}`,
+      meta: { districtId: i.district },
+    });
+    return row;
+  });
+}

@@ -29,8 +29,16 @@ import {
   productFiltersFromQuery,
   jobsWithPendingParts,
   jobsWithReturnableParts,
+  canSeeCost,
 } from '@/server/services/stock';
-import { jobReportSummary, quotationReportSummary, saleOrderReportSummary } from '@/server/services/reports';
+import {
+  jobReportSummary,
+  quotationReportSummary,
+  saleOrderReportSummary,
+  reportPage,
+  REPORT_READ,
+} from '@/server/services/reports';
+import { isReportKey } from '@/app/(app)/reports/report-specs';
 import { listDocumentProfiles } from '@/server/services/document-profiles';
 import { listShippingProfiles } from '@/server/services/shipping-profiles';
 import {
@@ -75,6 +83,7 @@ const READ_ACCESS: Record<string, readonly Module[]> = {
   job_summary: ['Report'],
   quotation_summary: ['Report'],
   sale_order_summary: ['Report'],
+  report_rows: ['Report'],
 };
 
 /**
@@ -215,11 +224,17 @@ export async function readResource(
             limit,
           });
     case 'job_summary':
-      return [await jobReportSummary(filtersFromQuery(p.f), p.q)];
+      return [await jobReportSummary(filtersFromQuery(p.f), p.q, p.f)];
     case 'quotation_summary':
-      return [await quotationReportSummary(quotationFiltersFromQuery(p.f, deleted), p.q)];
+      return [await quotationReportSummary(quotationFiltersFromQuery(p.f, deleted), p.q, p.f)];
     case 'sale_order_summary':
-      return [await saleOrderReportSummary(saleOrderFiltersFromQuery(p.f, deleted), p.q)];
+      return [await saleOrderReportSummary(saleOrderFiltersFromQuery(p.f, deleted), p.q, p.f)];
+    case 'report_rows': {
+      // Report (above), and the list the report reads — as the report pages' tables always needed
+      const report = isReportKey(p.f.report) ? p.f.report : 'open_job';
+      if (REPORT_READ[report]) await requireView(req, REPORT_READ[report]);
+      return reportPage(report, p, await canSeeCost(user));
+    }
     case 'jobs':
       return paged ? pageJobs(p, filtersFromQuery(p.f)) : listJobs({ ...filtersFromQuery(p.f), q: p.q, limit });
     case 'quotations':

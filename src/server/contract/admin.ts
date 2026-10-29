@@ -179,8 +179,9 @@ export const recordStatus = defineOperation({
     ),
     status: choice(['ACTIVE', 'INACTIVE', 'DELETED']).meta({ description: 'Anything else: decided by `deleted`.' }),
     deleted: flag.meta({ description: 'Without `status`: `true` = DELETED, otherwise ACTIVE.' }),
-    remark: maxText(100, 'เหตุผล').meta({
-      description: 'Cancelling a sale order: the reason (document_cancel_remark). Other tables ignore it.',
+    remark: maxText(200, 'เหตุผล').meta({
+      description:
+        'DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark (≤ 100), a job / quotation on its history line. Other tables ignore it.',
     }),
   }),
   invalid: { body: 400 },
@@ -299,6 +300,10 @@ export const documentProfileSave = defineOperation({
     bankAccountNo: sn,
     isDefault: b.nullish(),
     isActive: b.nullish(),
+    purpose: choice(['document', 'pick_slip']).meta({
+      description:
+        '`document` = an issuer (ออกเอกสารในนาม), `pick_slip` = the header of ใบเบิกสินค้า only. Left out: as stored.',
+    }),
     expect: DocumentProfile.partial().nullish().meta({
       description:
         'The profile as the edit form loaded it (a row of GET /admin/document-profiles): a field saved since → 409 `details.stale`, nothing written.',

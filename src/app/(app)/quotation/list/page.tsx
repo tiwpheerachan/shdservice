@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Plus, Printer } from 'lucide-react';
+import { ClipboardList, Plus, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
@@ -11,14 +11,16 @@ import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
-import { Input, Select } from '@/components/ui/input';
+import { Checkbox, Input, Select, Textarea } from '@/components/ui/input';
+import { Modal } from '@/components/ui/modal';
+import { useToast } from '@/components/ui/toast';
 import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS } from '@/data/options';
 import type { Quotation } from '@/data/types';
 import { useQuotationsPage, useManufacturers, useQuotationStatuses } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { useServerTable } from '@/lib/use-server-table';
 import { useAccess } from '@/lib/use-access';
-import { exportXlsx } from '@/lib/api';
+import { errMsg, exportXlsx, postJson } from '@/lib/api';
 import { cleanCode } from '@/lib/validation';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 import { ExportButton } from '@/components/shared/export-button';
@@ -52,7 +54,8 @@ const NO_FILTER: Filters = {
 };
 
 export default function QuotationListPage() {
-  const { add: canAdd, edit: canEdit } = useAccess().forPath('/quotation/list');
+  const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath('/quotation/list');
+  const { push } = useToast();
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
   // every status in quotation_status (the fixed list is only the fallback while it loads)
   const { data: STATUSES } = useQuotationStatuses();
@@ -68,7 +71,69 @@ export default function QuotationListPage() {
   } = useQuotationsPage({ ...pageArgs, ...query });
   const QUOTATIONS = PAGE;
 
+  // ยกเลิกใบเสนอราคา (legacy ลบ) = soft delete through the records API: `del` on Quotation and a reason; the
+  // quotation leaves this list (deleted excluded), its edit page and print refuse it
+  const [cancelling, setCancelling] = React.useState<Quotation | null>(null);
+  const [reason, setReason] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const cancelQuotation = async () => {
+    if (!cancelling) return;
+    setBusy(true);
+    try {
+      await postJson('/api/admin/records', {
+        table: 'quotations',
+        id: cancelling.no,
+        status: 'DELETED',
+        remark: reason.trim(),
+      });
+      push({ kind: 'success', title: 'ยกเลิกใบเสนอราคาแล้ว', desc: cancelling.no });
+      setCancelling(null);
+      setReason('');
+      retryLoad();
+    } catch (e) {
+      push({ kind: 'error', title: 'ยกเลิกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ticked quotations → พิมพ์ใบเบิกสินค้า (one page each, /print/pick-slip; the print skips a deleted / ยกเลิก one)
+  const [picked, setPicked] = React.useState<Set<string>>(() => new Set());
+  const allPicked = QUOTATIONS.length > 0 && QUOTATIONS.every((r) => picked.has(r.no));
+  const pick = (nos: string[], on: boolean) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      for (const no of nos)
+        if (on) n.add(no);
+        else n.delete(no);
+      return n;
+    });
+
   const columns: Column<Quotation>[] = [
+    {
+      key: 'select',
+      header: (
+        <Checkbox
+          aria-label="เลือกทุกใบในหน้านี้"
+          checked={allPicked}
+          onChange={(e) =>
+            pick(
+              QUOTATIONS.map((r) => r.no),
+              e.target.checked,
+            )
+          }
+        />
+      ),
+      width: '40px',
+      sortable: false,
+      cell: (r) => (
+        <Checkbox
+          aria-label={`เลือก ${r.no}`}
+          checked={picked.has(r.no)}
+          onChange={(e) => pick([r.no], e.target.checked)}
+        />
+      ),
+    },
     {
       key: 'no',
       header: 'หมายเลขใบเสนอราคา',
@@ -159,6 +224,7 @@ export default function QuotationListPage() {
         <RowActions
           viewHref={`/quotation/edit?no=${encodeURIComponent(r.no)}`}
           editHref={canEdit ? `/quotation/edit?no=${encodeURIComponent(r.no)}` : undefined}
+          onCancel={canDel ? () => setCancelling(r) : undefined}
         />
       ),
     },
@@ -176,6 +242,15 @@ export default function QuotationListPage() {
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={picked.size === 0}
+              onClick={() => window.open(`/print/pick-slip?nos=${encodeURIComponent([...picked].join(','))}`, '_blank')}
+            >
+              <ClipboardList className="h-3.5 w-3.5" />
+              พิมพ์ใบเบิกสินค้า ({picked.size} ใบ)
             </Button>
             <ExportButton run={() => exportXlsx('quotations', { ...query, q: table.q })} />
             {canAdd && (
@@ -258,9 +333,34 @@ export default function QuotationListPage() {
         error={loadError}
         onRetry={retryLoad}
         rowKey={(r) => r.no}
-        footerNote={<span className="font-medium text-foreground">· มูลค่ารวม (หน้านี้) {baht(total)} ฿</span>}
+        footerNote={
+          <span className="font-medium text-foreground">
+            · มูลค่ารวม (หน้านี้) {baht(total)} ฿{picked.size > 0 && ` · เลือกไว้ ${picked.size} ใบ`}
+          </span>
+        }
         server={{ ...server, total: totalRows }}
       />
+      <Modal
+        open={!!cancelling}
+        onClose={() => setCancelling(null)}
+        title={`ยกเลิกใบเสนอราคา ${cancelling?.no ?? ''}`}
+        description="ใบนี้จะหายจากรายการ แก้ไขหรือพิมพ์ไม่ได้อีก — เหตุผลบันทึกไว้ในประวัติการแก้ไข"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCancelling(null)}>
+              ไม่ยกเลิก
+            </Button>
+            <Button variant="danger" size="sm" disabled={busy || !reason.trim()} onClick={cancelQuotation}>
+              ยกเลิกใบเสนอราคา
+            </Button>
+          </>
+        }
+      >
+        <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร`}>
+          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Modal>
     </>
   );
 }

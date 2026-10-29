@@ -18,6 +18,7 @@ import { JobFilterBar } from './job-filter-bar';
 import { jobColumns } from './job-columns';
 import { SourceChips } from './source-chips';
 import { useJobCallModal } from './job-call-modal';
+import { useJobCancelModal } from './job-row-menu';
 
 function StatChip({
   icon: Icon,
@@ -58,9 +59,9 @@ function StatChip({
 
 export default function JobListPage() {
   const access = useAccess();
-  const { add: canAdd, edit: canEdit } = access.forPath('/jobs/list');
+  const { add: canAdd, edit: canEdit, del: canDel } = access.forPath('/jobs/list');
   const { data: STAFF, ...staffLookup } = useStaff();
-  const { data: statRows, loading: statsLoading } = useJobStats();
+  const { data: statRows, loading: statsLoading, refetch: refetchStats } = useJobStats();
   // filters + table state, kept in the URL; tat / kpi = the dashboard card a deep link came from
   const { init, draft, setDraft, setD, filters, narrowed, table, pageArgs, server, tat, kpi, clearAll, onSearch } =
     useJobListUrl();
@@ -73,11 +74,20 @@ export default function JobListPage() {
     refetch: retryLoad,
   } = useJobsPage({ ...pageArgs, ...toParams(filters) });
   const { openCall, modal: callModal } = useJobCallModal();
+  const { openCancel, modal: cancelModal } = useJobCancelModal(() => {
+    retryLoad();
+    refetchStats();
+  });
 
   const stats = statRows[0] ?? { total: 0, fresh: 0, done: 0, progress: 0 };
   // ยกเลิกซ่อม (6): counted as Cancel like the dashboard (kpiGroup) — the rest of total, so the chips add up to it
   const declined = stats.total - stats.fresh - stats.progress - stats.done;
-  const columns = jobColumns({ jobLink: access.jobLink, canEdit, onCall: openCall });
+  const columns = jobColumns({
+    jobLink: access.jobLink,
+    canEdit,
+    onCall: openCall,
+    onCancel: canDel ? openCancel : undefined,
+  });
 
   return (
     <>
@@ -156,6 +166,7 @@ export default function JobListPage() {
       />
 
       {callModal}
+      {cancelModal}
     </>
   );
 }

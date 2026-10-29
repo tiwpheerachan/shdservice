@@ -151,6 +151,8 @@ try {
   await expect([200], '/api/address');
   await expect([200], '/api/address?level=district&city=1');
   await expect([200], '/api/address?level=subdistrict&district=1');
+  // "+ เพิ่มชื่อ" แขวง / ตำบล — its rules: scripts/test-qa-parity-d.mts
+  await expect([400], '/api/address', { method: 'POST', body: { district: 0, name: '', postal: '' } });
   await expect([200], '/api/alerts/overdue');
   await expect([200], '/api/alerts/sale-orders-pending');
   await expect([200], '/api/customers/lookup?q=TDC001');
@@ -529,7 +531,7 @@ try {
   const del = (table: string, id: string, as?: Who, status = 'DELETED', remark = 'TD เหตุผล') =>
     call('/api/admin/records', {
       method: 'POST',
-      body: { table, id, status, ...(table === 'sale_orders' ? { remark } : {}) },
+      body: { table, id, status, remark }, // jobs / quotations / sale orders: DELETED needs a reason
       ...(as === undefined ? {} : { as }),
     });
   await test('a job with a part waiting for stock / issued and not back → 409, the job stays', async () => {

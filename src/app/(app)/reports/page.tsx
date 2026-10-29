@@ -54,7 +54,7 @@ export default function ReportsPage() {
     <>
       <PageHeader
         title="รายงาน"
-        description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไขและส่งออกเป็น Excel หรือพิมพ์"
+        description="เลือกรายงานที่ต้องการออก พร้อมกำหนดเงื่อนไข แล้วส่งออกเป็น PDF, Excel หรือ Word"
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {REPORTS.map((r) => (

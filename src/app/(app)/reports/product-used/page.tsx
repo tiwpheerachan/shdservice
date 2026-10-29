@@ -1,19 +1,26 @@
 'use client';
 
-import * as React from 'react';
+import type * as React from 'react';
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
 import { Badge } from '@/components/ui/badge';
-import { useIssuedLinesPage, useIssuedStats, useCategories, type IssuedLine } from '@/data/db';
-import type { Column } from '@/components/ui/data-table';
+import {
+  useIssuedLinesPage,
+  useIssuedStats,
+  useCategories,
+  useReportRows,
+  type IssuedLine,
+  type PageParams,
+} from '@/data/db';
+import type { Column, ServerTable } from '@/components/ui/data-table';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
-import { exportXlsx } from '@/lib/api';
 import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
+import { reportExport, useReportColumns } from '../report-table';
+import type { ReportRow } from '../report-specs';
 
-type Row = IssuedLine;
-
-const columns: Column<Row>[] = [
+/** แบบเบิกจ่ายสุทธิ: inventory_dt lines of WHO documents minus รับคืนจากการเบิก (the earlier screen) */
+const netColumns: Column<IssuedLine>[] = [
   { key: 'doc', header: 'Document No.', width: '130px', cell: (r) => <span className="num font-medium">{r.doc}</span> },
   { key: 'date', header: 'วันที่', width: '140px', cell: (r) => <span className="num text-xs">{r.date}</span> },
   { key: 'type', header: 'ประเภทเอกสาร', hideBelow: 'lg', cell: (r) => <Badge tone="info">{r.type}</Badge> },
@@ -36,6 +43,60 @@ const columns: Column<Row>[] = [
   { key: 'by', header: 'ผู้ทำรายการ', hideBelow: 'xl' },
 ];
 
+const LOG = 'อ้างอิงงานซ่อม (เบิก / ขอคืน / จ่ายแล้ว)';
+const NET = 'เบิกจ่ายสุทธิ (เอกสารสต๊อก)';
+/** job_order_spare_part_status (legacy table, fixed) */
+const ORDER_STATUSES = ['เบิก', 'ขอคืน', 'จ่ายแล้ว', 'ยกเลิก', 'คืนแล้ว'];
+
+type Common = Omit<
+  React.ComponentProps<typeof ReportView<IssuedLine>>,
+  'columns' | 'rows' | 'rowKey' | 'loading' | 'error' | 'onRetry' | 'server' | 'onExport'
+> & {
+  pageArgs: PageParams;
+  server: Omit<ServerTable, 'total'>;
+  canTable: boolean;
+  canExport: boolean;
+  q: string;
+};
+
+/** แบบอ้างอิงงานซ่อม: the job part log — each mode its own component, so only the shown one is read */
+function LogReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Common & { f: ReportValues }) {
+  const filters = { from: f.from, to: f.to, code: f.code, name: f.name, jobNo: f.jobNo, status: f.status };
+  const { rows, total, loading, error, refetch } = useReportRows('product_used', { ...pageArgs, ...filters });
+  const columns = useReportColumns('product_used');
+  return (
+    <ReportView<ReportRow>
+      {...view}
+      onExport={canExport ? reportExport('report_product_used', { ...filters, q }, 'report-product-used') : undefined}
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => String(r.idx)}
+      loading={loading}
+      error={canTable ? error : null}
+      onRetry={refetch}
+      server={{ ...server, total }}
+    />
+  );
+}
+
+function NetReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Common & { f: ReportValues }) {
+  const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
+  const { rows, total, loading, error, refetch } = useIssuedLinesPage({ ...pageArgs, ...filters });
+  return (
+    <ReportView<IssuedLine>
+      {...view}
+      onExport={canExport ? reportExport('issued_lines', { ...filters, q }, 'report-product-used') : undefined}
+      columns={netColumns}
+      rows={rows}
+      rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
+      loading={loading}
+      error={canTable ? error : null}
+      onRetry={refetch}
+      server={{ ...server, total }}
+    />
+  );
+}
+
 export default function Page() {
   const {
     filters: f,
@@ -43,64 +104,56 @@ export default function Page() {
     table,
     pageArgs,
     server,
-  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today(), category: '', code: '' });
-  // inventory_dt lines of WHO documents (จ่ายออกตามงานซ่อม / ใบสั่งขาย / อื่นๆ) minus รับคืนจากการเบิก — paged + KPIs on the server
-  const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
-  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  } = useServerTable<ReportValues>({ from: daysAgo(30), to: today() });
+  // KPIs: the special right Report alone (the net issue over the range); table + exports: Report too
   const access = useReportAccess(null, 'Report');
-  const { data: sum, error: sumError } = useIssuedStats({ ...filters, q: table.q });
-  const {
-    rows,
-    total,
-    loading,
-    error: loadError,
-    refetch: retryLoad,
-  } = useIssuedLinesPage({ ...pageArgs, ...filters });
+  const { data: sum, error: sumError } = useIssuedStats({
+    from: f.from,
+    to: f.to,
+    category: f.category,
+    code: f.code,
+    q: table.q,
+  });
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   const S = sum[0];
-  const qty = S?.qty ?? 0;
-  const value = S?.value ?? 0;
-  const top = S?.top ?? '—';
-  return (
-    <ReportView
-      title="รายงานการเบิกจ่ายอะไหล่"
-      description="อะไหล่ที่ถูกเบิกใช้ในงานซ่อม ใบสั่งขาย และจ่ายออกอื่นๆ (หักที่รับคืนเข้าสต๊อก) พร้อมมูลค่ารวม"
-      filters={[
-        { kind: 'date', key: 'from', label: 'วันที่ (ตั้งแต่)', value: f.from },
-        { kind: 'date', key: 'to', label: 'วันที่ (ถึง)', value: f.to },
-        {
-          kind: 'select',
-          key: 'category',
-          label: 'หมวดหมู่',
-          options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)],
-          lookup: categoriesLookup,
-        },
-        { kind: 'text', key: 'code', label: 'รหัสอะไหล่', placeholder: 'P02534' },
-      ]}
-      onApply={setF}
-      onExport={
-        access.canExport
-          ? () => exportXlsx('issued_lines', { ...filters, q: table.q, file: 'report-product-used' })
-          : undefined
-      }
-      kpis={kpisOr(sumError, [
-        { label: 'รายการเคลื่อนไหว', value: int(S?.lines ?? 0), tone: 'primary' },
-        { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(qty)} ชิ้น` },
-        {
-          label: 'มูลค่าสุทธิ (ราคา ณ วันเบิก)',
-          value: baht(value),
-          sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
-        },
-        { label: 'อะไหล่ที่ใช้บ่อยสุด', value: top },
-      ])}
-      columns={columns}
-      rows={rows}
-      loading={loading}
-      error={access.canTable ? loadError : null}
-      emptyText={access.emptyText}
-      onRetry={retryLoad}
-      rowKey={(r, i) => `${r.doc}-${r.code}-${i}`}
-      server={{ ...server, total }}
-    />
-  );
+  const props: Common & { f: ReportValues } = {
+    f,
+    pageArgs,
+    server,
+    q: table.q,
+    canTable: access.canTable,
+    canExport: access.canExport,
+    emptyText: access.emptyText,
+    title: 'รายงานการเบิกจ่ายอะไหล่',
+    description:
+      'แบบอ้างอิงงานซ่อม: ทุกบรรทัดที่เบิก / ขอคืน / จ่าย / คืนของงานซ่อม (ตามรายงานเดิม) · แบบเบิกจ่ายสุทธิ: เอกสารจ่ายออกหักรับคืน พร้อมมูลค่า',
+    filters: [
+      { kind: 'select', key: 'mode', label: 'รูปแบบรายงาน', options: [LOG, NET] },
+      { kind: 'date', key: 'from', label: 'วันที่ (ตั้งแต่)', value: f.from },
+      { kind: 'date', key: 'to', label: 'วันที่ (ถึง)', value: f.to },
+      { kind: 'text', key: 'code', label: 'รหัสอะไหล่ (ระบบ / ผู้ผลิต)', placeholder: 'P02534' },
+      { kind: 'text', key: 'name', label: 'ชื่ออะไหล่ (แบบอ้างอิงงานซ่อม)' },
+      { kind: 'text', key: 'jobNo', label: 'เลขที่งานซ่อม (แบบอ้างอิงงานซ่อม)', placeholder: 'J2612164' },
+      { kind: 'select', key: 'status', label: 'สถานะ (แบบอ้างอิงงานซ่อม)', options: ['ทั้งหมด', ...ORDER_STATUSES] },
+      {
+        kind: 'select',
+        key: 'category',
+        label: 'หมวดหมู่ (แบบเบิกจ่ายสุทธิ)',
+        options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)],
+        lookup: categoriesLookup,
+      },
+    ],
+    onApply: setF,
+    kpis: kpisOr(sumError, [
+      { label: 'รายการเคลื่อนไหว (สุทธิ)', value: int(S?.lines ?? 0), tone: 'primary' },
+      { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(S?.qty ?? 0)} ชิ้น` },
+      {
+        label: 'มูลค่าสุทธิ (ราคา ณ วันเบิก)',
+        value: baht(S?.value ?? 0),
+        sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
+      },
+      { label: 'อะไหล่ที่ใช้บ่อยสุด', value: S?.top ?? '—' },
+    ]),
+  };
+  return f.mode === NET ? <NetReport {...props} /> : <LogReport {...props} />;
 }

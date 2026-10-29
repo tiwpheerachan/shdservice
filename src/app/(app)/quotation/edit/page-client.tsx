@@ -116,7 +116,13 @@ function EditQuotation() {
           onSave={save}
           saving={saving}
           cancelHref="/quotation/list"
-          denied={can('Quotation', 'edit') ? undefined : VIEW_ONLY}
+          denied={
+            loaded?.active === false
+              ? 'ใบเสนอราคานี้ถูกยกเลิก (ลบ) แล้ว — แก้ไขและพิมพ์ไม่ได้'
+              : can('Quotation', 'edit')
+                ? undefined
+                : VIEW_ONLY
+          }
           extra={
             <PrintButton
               label="พิมพ์ใบเสนอราคา"
@@ -125,7 +131,7 @@ function EditQuotation() {
               no={no ?? ''}
               profileId={loaded?.documentProfileId}
               href={`/print/quotation/${encodeURIComponent(no ?? '')}`}
-              disabled={!no}
+              disabled={!no || loaded?.active === false}
             />
           }
         />

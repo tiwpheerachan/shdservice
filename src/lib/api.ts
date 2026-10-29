@@ -152,9 +152,12 @@ export async function exportXlsx(
 ) {
   const res = await authedFetch(`/api/export/${resource}${qs(params)}`, {});
   if (!res.ok) throw await failure(res);
-  saveBlob(await res.blob(), filenameOf(res.headers.get('content-disposition')) ?? `${resource}.xlsx`);
   // a file cut at the 20,000-row cap: how many rows matched (the button warns)
-  return { truncatedOf: Number(res.headers.get('x-export-truncated')) || 0 };
+  const truncatedOf = Number(res.headers.get('x-export-truncated')) || 0;
+  // format=html: the report's print view — the page writes it into a new tab (printReport), nothing is saved
+  if (params.format === 'html') return { truncatedOf, html: await res.text() };
+  saveBlob(await res.blob(), filenameOf(res.headers.get('content-disposition')) ?? `${resource}.xlsx`);
+  return { truncatedOf };
 }
 
 /** filename from Content-Disposition (RFC 5987 filename*=UTF-8'' first, then filename="…") */

@@ -23,7 +23,7 @@ import {
   QuotationTypeSection,
 } from '@/components/quotation/header-sections';
 import { QuotationLineTable } from '@/components/quotation/line-items';
-import { type QuotationLine as Line, lineTotals } from '@/components/quotation/line-totals';
+import { type QuotationLine as Line, lineOf, lineTotals } from '@/components/quotation/line-totals';
 import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/totals';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
@@ -35,6 +35,8 @@ export type QuotationLoaded = {
   type: string;
   status: string;
   statusId?: number;
+  /** false = deleted (ยกเลิกใบเสนอราคา from the list) — no save, no print */
+  active?: boolean;
   customerCode?: string;
   contactName: string;
   jobRef: string;
@@ -43,7 +45,16 @@ export type QuotationLoaded = {
   discountType: string;
   discountFormula: string;
   vatRate: number;
-  lines: { id?: number; itemType: string; code: string; detail: string; qty: number; unitPrice: number }[];
+  lines: {
+    id?: number;
+    itemType: string;
+    code: string;
+    detail: string;
+    qty: number;
+    unitPrice: number;
+    discount?: number;
+    discountPercent?: number;
+  }[];
   customerDetail: Customer | null;
   job: JobDetail | null;
   approveDate?: string; // quotation_hd.customer_approve_date
@@ -130,6 +141,8 @@ export const QuotationForm = React.forwardRef<
       name: l.detail,
       qty: l.qty,
       price: l.unitPrice,
+      discount: l.discount ?? 0,
+      discountPercent: l.discountPercent ?? 0,
       itemType: (l.itemType as Line['itemType']) || 'SparePart',
     })),
   );
@@ -218,7 +231,15 @@ export const QuotationForm = React.forwardRef<
   // the job's parts flagged "เสนอ" in the repair screen, from set A or set B (= the quotation type)
   // always replaced — otherwise switching A → B with nothing quoted in B would keep A's lines on a B quotation
   const fillQuoted = (j: JobDetail, t: 'A' | 'B') => {
-    setLines(quotedParts(j.parts, t).map((p) => ({ ...p, id: ++idRef.current, itemType: 'SparePart' as const })));
+    setLines(
+      quotedParts(j.parts, t).map((p) => ({
+        ...p,
+        id: ++idRef.current,
+        discount: 0,
+        discountPercent: 0,
+        itemType: 'SparePart' as const,
+      })),
+    );
     setJobParts(quotedPartsKey(j.parts, t));
   };
   // a job → customer + device info (+ its quoted parts become lines)
@@ -287,7 +308,19 @@ export const QuotationForm = React.forwardRef<
   }, [jobNo, initial]);
 
   const add = () =>
-    setLines((s) => [...s, { id: ++idRef.current + 100, code: '', name: '', qty: 1, price: 0, itemType: 'SparePart' }]);
+    setLines((s) => [
+      ...s,
+      {
+        id: ++idRef.current + 100,
+        code: '',
+        name: '',
+        qty: 1,
+        price: 0,
+        discount: 0,
+        discountPercent: 0,
+        itemType: 'SparePart',
+      },
+    ]);
 
   const { parts: partsTotal, delivery: deliveryTotal } = lineTotals(lines);
   // the server's own rules (stored amounts = what the print shows)
@@ -324,8 +357,8 @@ export const QuotationForm = React.forwardRef<
       unitPrice: l.price,
       itemType: l.itemType,
       unit: 'หน่วย',
-      discount: 0,
-      discountPercent: 0,
+      discount: lineOf(l).discount, // a % sends the บาท it makes (the server recomputes it the same way)
+      discountPercent: l.discountPercent,
     })),
     serviceAmount: service,
     discountType: discount > 0 ? discountType : 'ไม่มีส่วนลด',

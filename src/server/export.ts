@@ -30,6 +30,9 @@ import { fieldLabel } from '@/lib/field-labels';
 import { logError } from '@/lib/log';
 import { rateLimit } from '@/server/rate-limit';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
+import { reportPage, REPORT_MODULE } from '@/server/services/reports';
+import { defaultDocumentProfile } from '@/server/services/document-profiles';
+import { REPORT_KEYS, REPORT_SPECS, isReportKey, type ReportCol } from '@/app/(app)/reports/report-specs';
 
 /**
  * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
@@ -45,7 +48,8 @@ const calendarDays = (from: string, to: string) =>
 
 const MAX_ROWS = MAX_EXPORT_ROWS;
 
-type Col = { key: string; header: string; width?: number; num?: boolean; money?: boolean };
+/** `cost` = ราคาทุน: only for a user with Product Cost */
+type Col = ReportCol;
 /** a row of any list: read by column key, so every list function's own type fits without a cast */
 type Row = object;
 
@@ -182,7 +186,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'onhand', header: 'คงเหลือ', width: 10, num: true },
       { key: 'received', header: 'รับเข้าสะสม', width: 12, num: true },
       { key: 'issued', header: 'จ่ายออกสะสม', width: 12, num: true },
-      { key: 'capitalPrice', header: 'ราคาทุน', width: 12, money: true },
+      { key: 'capitalPrice', header: 'ราคาทุน', width: 12, money: true, cost: true },
       { key: 'price', header: 'ราคาขาย', width: 12, money: true },
       { key: 'value', header: 'มูลค่าคงเหลือ', width: 14, money: true }, // pageProducts: max(0, คงเหลือ) × ราคาขาย
       { key: 'status', header: 'สถานะ', width: 10 },
@@ -239,6 +243,14 @@ SPECS.audit_log = {
 for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'product_types', 'symptoms']) {
   SPECS[k] = { title: k, module: null, cols: MASTER_COLS };
 }
+// the reports' row-level tables (report-specs.ts), with the module each report page always exported under
+for (const k of REPORT_KEYS) SPECS[`report_${k}`] = { ...REPORT_SPECS[k], module: REPORT_MODULE[k] };
+
+/** a report key of `report_<key>` */
+const reportOf = (resource: string) => {
+  const k = resource.slice('report_'.length);
+  return resource.startsWith('report_') && isReportKey(k) ? k : null;
+};
 
 async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser): Promise<Row[]> {
   const p = parsePageQuery(sp);
@@ -250,6 +262,8 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
     return rows.filter((r) => (!term || r.name.toLowerCase().includes(term)) && (!f.status || r.status === f.status));
   };
   if (isSimpleKind(resource)) return masterFilter(await listSimple(resource, mode));
+  const report = reportOf(resource);
+  if (report) return (await reportPage(report, { ...p, page: 1, pageSize: MAX_ROWS }, await canSeeCost(user))).rows;
   switch (resource) {
     case 'symptoms':
       return masterFilter(await listSymptoms(mode));
@@ -355,6 +369,8 @@ async function totalRows(sp: URLSearchParams, resource: string, user: CurrentUse
   const p = { ...parsePageQuery(sp), page: 1, pageSize: 1 };
   const mode = parseStatusMode(sp.get('deleted'));
   const f = p.f;
+  const report = reportOf(resource);
+  if (report) return (await reportPage(report, p)).total;
   switch (resource) {
     case 'jobs':
       return (await pageJobs(p, filtersFromQuery(f))).total;
@@ -410,8 +426,10 @@ export async function exportXlsx(
 ): Promise<{
   stream: ReadableStream<Uint8Array>;
   filename: string;
-  /** the rows the filters match, when the file stops at MAX_ROWS */
+  /** the rows the filters match, when the file stops at MAX_ROWS (doc / html: PRINT_MAX) */
   truncatedOf?: number;
+  /** ?format=doc|html: the Word file / print view instead of the workbook */
+  contentType: string;
 }> {
   const spec = SPECS[resource];
   if (!spec) throw new HttpError(404, `unknown export: ${resource}`);
@@ -429,6 +447,9 @@ export async function exportXlsx(
   const release = () => {
     if (slot === mine) slot = null;
   };
+  const format = query.format === 'doc' || query.format === 'html' ? query.format : 'xlsx';
+  const cap = format === 'xlsx' ? MAX_ROWS : PRINT_MAX;
+  const what = { xlsx: 'Excel', doc: 'Word', html: 'PDF' }[format];
   let rows: Row[];
   let cols: Col[];
   let total = 0;
@@ -436,10 +457,8 @@ export async function exportXlsx(
     rows = await loadRows(searchOf(query), resource, user);
     total = rows.length >= MAX_ROWS ? await totalRows(searchOf(query), resource, user) : rows.length;
     // ราคาทุน: only for a user who may see it — without it the column goes too, not a column of zeros
-    cols =
-      resource === 'products' && !(await canSeeCost(user))
-        ? spec.cols.filter((c) => c.key !== 'capitalPrice')
-        : spec.cols;
+    const cost = await canSeeCost(user);
+    cols = spec.cols.filter((c) => cost || !c.cost);
     // who took which data out, before a byte leaves: no record, no file
     const filters = Object.fromEntries(
       Object.entries(query).filter(([k, v]) => v !== undefined && v !== '' && k !== 'file'),
@@ -449,12 +468,36 @@ export async function exportXlsx(
       module: spec.module ?? 'Admin',
       entity: resource,
       key: resource,
-      summary: `ส่งออก Excel ${spec.title} ${Math.min(rows.length, MAX_ROWS).toLocaleString('en-US')} แถว`,
-      meta: { rows: Math.min(rows.length, MAX_ROWS), filters, ip: clientIp(req.headers) },
+      summary: `ส่งออก ${what} ${spec.title} ${Math.min(rows.length, cap).toLocaleString('en-US')} แถว`,
+      meta: { rows: Math.min(rows.length, cap), filters, ip: clientIp(req.headers) },
     });
   } catch (e) {
     release();
     throw e;
+  }
+  const stamp = today(); // Thai calendar date in the file name
+  // ?file= the report's own name (repair-job, close-job … — every job report exports `jobs`); a-z 0-9 - only
+  const file = typeof query.file === 'string' && /^[a-z0-9-]{1,40}$/.test(query.file) ? query.file : resource;
+
+  if (format !== 'xlsx') {
+    try {
+      const html = await reportHtml({
+        title: spec.title,
+        cond: typeof query.cond === 'string' ? query.cond.slice(0, 500) : '',
+        cols,
+        rows: rows.slice(0, PRINT_MAX),
+        total,
+        word: format === 'doc',
+      });
+      return {
+        stream: new Response(format === 'doc' ? `\ufeff${html}` : html).body!,
+        filename: `${file}-${stamp}${total > PRINT_MAX ? '-partial' : ''}.${format === 'doc' ? 'doc' : 'html'}`,
+        truncatedOf: total > PRINT_MAX ? total : undefined,
+        contentType: format === 'doc' ? 'application/msword; charset=utf-8' : 'text/html; charset=utf-8',
+      };
+    } finally {
+      release();
+    }
   }
 
   // ponytail: no backpressure into the writer — a slow client buffers the zipped file (a few MB at 20k rows)
@@ -509,12 +552,68 @@ export async function exportXlsx(
       out.destroy(e instanceof Error ? e : new Error(String(e)));
     })
     .finally(release);
-  const stamp = today(); // Thai calendar date in the file name
-  // ?file= the report's own name (repair-job, close-job … — every job report exports `jobs`); a-z 0-9 - only
-  const file = typeof query.file === 'string' && /^[a-z0-9-]{1,40}$/.test(query.file) ? query.file : resource;
   return {
     stream: Readable.toWeb(out) as ReadableStream<Uint8Array>,
     filename: `${file}-${stamp}${truncated ? '-partial' : ''}.xlsx`,
     truncatedOf: truncated ? total : undefined,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
+}
+
+/** the Word / print (PDF) export's row cap: a browser prints, and Word opens, a few thousand table rows well */
+export const PRINT_MAX = 3000;
+
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+const cellText = (c: Col, v: unknown) =>
+  c.money
+    ? Number(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : c.num
+      ? Number(v ?? 0).toLocaleString('en-US')
+      : String(v ?? '');
+
+/**
+ * The report as one HTML table — the Word export (.doc: Word opens HTML, UTF-8 BOM + meta so Thai shows) and the
+ * print view the page writes into a new tab and prints (save as PDF): landscape A4, the company header, the
+ * filters in words, every row up to PRINT_MAX (a cut one says so above the table).
+ */
+async function reportHtml(o: { title: string; cond: string; cols: Col[]; rows: Row[]; total: number; word: boolean }) {
+  const company = await defaultDocumentProfile().catch(() => null);
+  const printed = new Date().toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  const cut =
+    o.total > o.rows.length
+      ? `<p class="warn">⚠ แสดง ${o.rows.length.toLocaleString('en-US')} แถวแรกจาก ${o.total.toLocaleString('en-US')} แถว — กรองช่วงวันที่/เงื่อนไขให้แคบลง หรือใช้ส่งออก Excel เพื่อได้ข้อมูลครบ</p>`
+      : '';
+  const head = o.cols.map((c) => `<th>${esc(c.header)}</th>`).join('');
+  const body = o.rows
+    .map(
+      (r) =>
+        `<tr>${o.cols.map((c) => `<td${c.money || c.num ? ' class="r"' : ''}>${esc(cellText(c, (r as Record<string, unknown>)[c.key]))}</td>`).join('')}</tr>`,
+    )
+    .join('\n');
+  return `<!doctype html>
+<html lang="th"${o.word ? ' xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"' : ''}>
+<head><meta charset="utf-8"><title>${esc(o.title)}</title>
+<style>
+@page { size: A4 landscape; margin: 8mm; }
+${o.word ? '@page Section1 { size: 841.9pt 595.3pt; mso-page-orientation: landscape; margin: 0.4in; } div.Section1 { page: Section1; }' : ''}
+body { font-family: 'Noto Sans Thai', 'Sarabun', Tahoma, 'Leelawadee UI', Thonburi, sans-serif; font-size: 9pt; color: #000; margin: 0; }
+h1 { font-size: 13pt; margin: 0 0 2pt; } .co { font-size: 10pt; font-weight: bold; } .sub { margin: 0 0 4pt; color: #333; }
+.warn { color: #b45309; font-weight: bold; }
+table { border-collapse: collapse; width: 100%; } thead { display: table-header-group; }
+th, td { border: 0.5pt solid #999; padding: 2pt 3pt; vertical-align: top; text-align: left; }
+th { background: #e8eef9; font-weight: bold; } td.r { text-align: right; white-space: nowrap; } tr { page-break-inside: avoid; }
+</style></head>
+<body><div class="Section1">
+${company ? `<div class="co">${esc(company.nameTh || company.nameEn)}</div><div class="sub">${esc([company.address, company.phone && `โทร ${company.phone}`].filter(Boolean).join(' '))}</div>` : ''}
+<h1>${esc(o.title)}</h1>
+<p class="sub">${esc(o.cond || 'ทุกรายการ')} · ${o.total.toLocaleString('en-US')} แถว · พิมพ์เมื่อ ${esc(printed)}</p>
+${cut}
+<table><thead><tr>${head}</tr></thead><tbody>
+${body}
+</tbody></table>
+</div></body></html>`;
 }

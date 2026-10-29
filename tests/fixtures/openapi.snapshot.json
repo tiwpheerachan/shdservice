@@ -3239,6 +3239,187 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Add a sub-district the list lacks (customer form \"+ เพิ่มชื่อ\")",
+        "description": "Customer edit. The name is cleaned (≤ 50, the column) and must not already be in that district (409); postal = 5 digits; an unknown district → 404. Audited; everyone gets it from GET /address. Takes an Idempotency-Key.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none."
+            },
+            "required": false,
+            "description": "One key per logical submit (src/lib/api.ts postJson sends one), at most 100 characters. A repeat gets the stored answer with `Idempotent-Replayed: true` instead of a second document; a repeat while the first still runs → 409. Empty = none.",
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "district": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "postal": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "district",
+                  "name",
+                  "postal"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "row": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "postal": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "postal"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "row"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input: `invalid_json`, or a form rule failed — `error` = \"กรอกข้อมูลไม่ครบ N ช่อง\" and `details.fields` = { field: message }.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No district with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: `details.stale` = someone saved this record after you loaded it (row_version); otherwise a duplicate value, a state that no longer allows this, or a concurrent save — reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 1 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used for a different route.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/customers": {
@@ -7961,7 +8142,8 @@
                 "create",
                 "reception",
                 "repaired",
-                "closed"
+                "closed",
+                "forward"
               ]
             },
             "required": false,
@@ -10986,6 +11168,236 @@
         }
       }
     },
+    "/data/report_rows": {
+      "get": {
+        "tags": [
+          "Data"
+        ],
+        "summary": "A report table (the legacy reports' row-level columns)",
+        "description": "View on Report, plus the list the report reads: a job report any job screen, quotation Quotation, sale order Sale Order or Product Pick Stock. Capital Price only with Product Cost.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ],
+              "description": "`1` = answer one page `{ rows, total, page, pageSize }`."
+            },
+            "required": false,
+            "description": "`1` = answer one page `{ rows, total, page, pageSize }`.",
+            "name": "paged",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "From 1."
+            },
+            "required": false,
+            "description": "From 1.",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1–500, default 25."
+            },
+            "required": false,
+            "description": "1–500, default 25.",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A column key of the list."
+            },
+            "required": false,
+            "description": "A column key of the list.",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "required": false,
+            "name": "dir",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open_job",
+                "repair_job",
+                "close_job",
+                "quotation",
+                "quotation_detail",
+                "sale_order",
+                "sale_order_detail",
+                "product_used",
+                "product_onhand"
+              ],
+              "description": "Which report / mode; none = open_job."
+            },
+            "required": false,
+            "description": "Which report / mode; none = open_job.",
+            "name": "report",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Free-text search."
+            },
+            "required": false,
+            "description": "Free-text search.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list, or one page of it with `paged=1`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "rows",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/data/roles": {
       "get": {
         "tags": [
@@ -12065,6 +12477,15 @@
                 "movements",
                 "issued_lines",
                 "audit_log",
+                "report_open_job",
+                "report_repair_job",
+                "report_close_job",
+                "report_quotation",
+                "report_quotation_detail",
+                "report_sale_order",
+                "report_sale_order_detail",
+                "report_product_used",
+                "report_product_onhand",
                 "categories",
                 "manufacturers",
                 "colors",
@@ -12138,11 +12559,36 @@
             "description": "The file name (a-z 0-9 -, e.g. the report: `repair-job`); else the resource.",
             "name": "file",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "doc",
+                "html"
+              ],
+              "description": "`doc` = a Word file (an HTML table, UTF-8); `html` = the print view the page opens for PDF. Both at most 3,000 rows (a cut one says so)."
+            },
+            "required": false,
+            "description": "`doc` = a Word file (an HTML table, UTF-8); `html` = the print view the page opens for PDF. Both at most 3,000 rows (a cut one says so).",
+            "name": "format",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The filters in words, printed under the title (doc / html)."
+            },
+            "required": false,
+            "description": "The filters in words, printed under the title (doc / html).",
+            "name": "cond",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "The workbook (`Content-Disposition: attachment; filename=\"<file or resource>-<date>.xlsx\"`).",
+            "description": "The workbook (`Content-Disposition: attachment; filename=\"<file or resource>-<date>.xlsx\"`), or with `format` the .doc / the print view.",
             "headers": {
               "X-Export-Truncated": {
                 "schema": {
@@ -12156,6 +12602,17 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              },
+              "application/msword": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -12371,6 +12828,14 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "document",
+                      "pick_slip"
+                    ],
+                    "description": "`document` = an issuer (ออกเอกสารในนาม), `pick_slip` = the header of ใบเบิกสินค้า only. Left out: as stored."
+                  },
                   "expect": {
                     "type": "object",
                     "nullable": true,
@@ -12437,6 +12902,13 @@
                       },
                       "sortOrder": {
                         "type": "number"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "enum": [
+                          "document",
+                          "pick_slip"
+                        ]
                       }
                     },
                     "description": "The profile as the edit form loaded it (a row of GET /admin/document-profiles): a field saved since → 409 `details.stale`, nothing written."
@@ -13050,7 +13522,7 @@
                   "remark": {
                     "type": "string",
                     "nullable": true,
-                    "description": "Cancelling a sale order: the reason (document_cancel_remark). Other tables ignore it."
+                    "description": "DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark (≤ 100), a job / quotation on its history line. Other tables ignore it."
                   }
                 },
                 "required": [
@@ -18361,6 +18833,13 @@
           },
           "sortOrder": {
             "type": "number"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "document",
+              "pick_slip"
+            ]
           }
         },
         "required": [
@@ -18384,7 +18863,8 @@
           "isDefault",
           "isActive",
           "isDeleted",
-          "sortOrder"
+          "sortOrder",
+          "purpose"
         ]
       },
       "ShippingProfile": {

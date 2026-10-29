@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { can, handle, hasRight, parseBody, requireAdmin, requireCan } from '@/server/auth';
+import { can, handle, hasRight, HttpError, parseBody, requireAdmin, requireCan } from '@/server/auth';
+import { clean } from '@/lib/validation';
 import { recordStatus } from '@/server/contract/admin';
 import { setRecordStatus, RECORD_MODULES } from '@/server/services/records';
 import { RS, type RecordStatus } from '@/server/record-status';
@@ -35,6 +36,9 @@ export const POST = handle(async (req: NextRequest) => {
       : // cancelling a sale order is its creator's own step (edit) — who else may is decided on the locked row
         // (creator / SO Approve / System Admin); every other delete needs `del`
         await requireCan(req, permModule, rs === RS.DELETED && table !== 'sale_orders' ? 'del' : 'edit');
+  // ยกเลิกงาน / ใบเสนอราคา: why — on the audit line (ประวัติการแก้ไข); a sale order's is checked on its locked row
+  if (rs === RS.DELETED && (table === 'jobs' || table === 'quotations') && !clean(remark))
+    throw new HttpError(400, 'ระบุเหตุผลที่ยกเลิก', { fields: { remark: 'ระบุเหตุผลที่ยกเลิก' } });
   // out of DELETED (กู้คืน) is the reverse of a delete → `del` too (checked against the locked row);
   // a deleted customer (PDPA: erased on request) is System Admin's alone, as its list / lookup are
   await setRecordStatus(

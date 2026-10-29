@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isRealDate } from '@/lib/validation';
+import { REPORT_KEYS } from '@/app/(app)/reports/report-specs';
 import { deletedMode } from './admin';
 import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, page } from './common';
 import { defineOperation, type Operation } from './registry';
@@ -342,7 +343,24 @@ resource(
   'Job report totals',
   viewOn('Report'),
   one(z.object({ total: n, fresh: n, done: n, amount: n, paid: n, avgTat: n, over30: n, topChannel: s })),
-  jobFilters,
+  // the reports also date by วันที่ส่งต่อ (an out-source send) and read warranty=NONE (ยังไม่ได้ระบุ)
+  { ...jobFilters, dateBy: choice(['create', 'reception', 'repaired', 'closed', 'forward']) },
+);
+
+/** one row of a report table: its columns by key (src/app/(app)/reports/report-specs.ts) */
+const ReportRow = z.record(s, z.union([s, n]));
+resource(
+  'report_rows',
+  "A report table (the legacy reports' row-level columns)",
+  'View on Report, plus the list the report reads: a job report any job screen, quotation Quotation, sale order Sale Order or Product Pick Stock. Capital Price only with Product Cost.',
+  list(ReportRow),
+  {
+    report: choice(REPORT_KEYS as [string, ...string[]]).meta({ description: 'Which report / mode; none = open_job.' }),
+    q,
+    from: ymd,
+    to: ymd,
+  },
+  ReportRow,
 );
 
 const quotationFilters = {
@@ -421,6 +439,7 @@ export const exportXlsx = defineOperation({
         'movements',
         'issued_lines',
         'audit_log',
+        ...REPORT_KEYS.map((k) => `report_${k}`),
         'categories',
         'manufacturers',
         'colors',
@@ -440,11 +459,17 @@ export const exportXlsx = defineOperation({
     file: s
       .optional()
       .meta({ description: 'The file name (a-z 0-9 -, e.g. the report: `repair-job`); else the resource.' }),
+    format: choice(['xlsx', 'doc', 'html'], 'xlsx').meta({
+      description:
+        '`doc` = a Word file (an HTML table, UTF-8); `html` = the print view the page opens for PDF. Both at most 3,000 rows (a cut one says so).',
+    }),
+    cond: s.optional().meta({ description: 'The filters in words, printed under the title (doc / html).' }),
   }),
   invalid: { params: 404 },
   responses: {
     200: {
-      description: 'The workbook (`Content-Disposition: attachment; filename="<file or resource>-<date>.xlsx"`).',
+      description:
+        'The workbook (`Content-Disposition: attachment; filename="<file or resource>-<date>.xlsx"`), or with `format` the .doc / the print view.',
       headers: {
         'X-Export-Truncated': {
           schema: { type: 'string' },
@@ -455,6 +480,8 @@ export const exportXlsx = defineOperation({
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
           schema: { type: 'string', format: 'binary' },
         },
+        'application/msword': { schema: { type: 'string', format: 'binary' } },
+        'text/html': { schema: { type: 'string' } },
       },
     },
     ...BAD_DATE,

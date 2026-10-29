@@ -9,8 +9,11 @@ import { Button } from '@/components/ui/button';
 import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/options';
 import type { Customer } from '@/data/types';
 import { TTL_MASTER, useApi, useProvinces } from '@/data/db';
-import { qs } from '@/lib/api';
+import { errMsg, postJson, qs } from '@/lib/api';
 import type { FieldErrors } from '@/lib/validation';
+import { useAccess } from '@/lib/use-access';
+import { useFormErrors } from '@/lib/use-form-errors';
+import { useToast } from '@/components/ui/toast';
 import { isIndividual } from '@/lib/validation/customer';
 
 /**
@@ -99,6 +102,8 @@ export function useAddressLists(cityId: number, districtId: number) {
     PROVINCES: PROVINCES.filter((p) => p.id > 0),
     districts,
     subDistricts,
+    /** re-read the sub-districts (after "+ เพิ่มชื่อ" added one) */
+    reloadSubDistricts: sdLoad.mutate,
     /** for each list's <Field lookup> — a failed load says so instead of an empty dropdown */
     lookups: {
       provinces,
@@ -193,7 +198,12 @@ export function CustomerFields({
     setForm((f) => ({ ...f, [k]: v }));
     clearError?.(k);
   };
-  const { PROVINCES, districts, subDistricts, lookups } = useAddressLists(form.cityId, form.districtId);
+  const { PROVINCES, districts, subDistricts, reloadSubDistricts, lookups } = useAddressLists(
+    form.cityId,
+    form.districtId,
+  );
+  const canAddSubDistrict = useAccess().can('Customer', 'edit') && form.districtId > 0;
+  const [addingSubDistrict, setAddingSubDistrict] = React.useState(false);
   // a hint only, never an error — the master's code is wrong for some ตำบล (Mueang Chiang Mai: all 50000)
   const postalHint = subDistricts.find((s) => s.id === form.subDistrictId)?.postal?.trim();
   // no maxLength on the text boxes (it cut a paste silently): the rules say it in Thai; a count once near the limit
@@ -290,7 +300,31 @@ export function CustomerFields({
           disabled={form.districtId <= 0}
           searchPlaceholder="พิมพ์ชื่อแขวง / ตำบล หรือรหัสไปรษณีย์…"
         />
+        {canAddSubDistrict && !addingSubDistrict && (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="mt-1 h-auto px-0"
+            onClick={() => setAddingSubDistrict(true)}
+          >
+            + เพิ่มชื่อ (ไม่มีในรายการ)
+          </Button>
+        )}
       </Field>
+      {canAddSubDistrict && addingSubDistrict && (
+        <AddSubDistrict
+          districtId={form.districtId}
+          postal={subDistricts[0]?.postal?.trim() ?? ''}
+          onDone={async (row) => {
+            setAddingSubDistrict(false);
+            if (!row) return;
+            await reloadSubDistricts();
+            setForm((f) => ({ ...f, subDistrictId: row.id, postalCode: row.postal }));
+            clearError?.('postalCode');
+          }}
+        />
+      )}
       <Field
         label="รหัสไปรษณีย์"
         error={errors.postalCode}
@@ -347,5 +381,70 @@ export function CustomerFields({
       )}
       {extra}
     </FieldGrid>
+  );
+}
+
+/** "+ เพิ่มชื่อ" แขวง / ตำบล (as the legacy form had it): saved to the address list for everyone (Customer edit) */
+function AddSubDistrict({
+  districtId,
+  postal: postal0,
+  onDone,
+}: {
+  districtId: number;
+  postal: string;
+  onDone: (row: (Opt & { postal: string }) | null) => void | Promise<void>;
+}) {
+  const [name, setName] = React.useState('');
+  const [postal, setPostal] = React.useState(postal0);
+  const [busy, setBusy] = React.useState(false);
+  const fe = useFormErrors();
+  const { push } = useToast();
+  const save = async () => {
+    setBusy(true);
+    try {
+      const d = await postJson<{ row: Opt & { postal: string } }>('/api/address', {
+        district: districtId,
+        name,
+        postal,
+      });
+      push({ kind: 'success', title: 'เพิ่มแขวง / ตำบลแล้ว', desc: d.row.name });
+      await onDone(d.row);
+    } catch (e) {
+      if (!fe.fromApi(e)) push({ kind: 'error', title: 'เพิ่มไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="grid gap-3 rounded-md border border-border bg-muted/40 p-3 col-span-full sm:grid-cols-[1fr_8rem_auto]">
+      <Field label="ชื่อแขวง / ตำบลใหม่" required error={fe.errors.name}>
+        <Input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            fe.clear('name');
+          }}
+        />
+      </Field>
+      <Field label="รหัสไปรษณีย์" required error={fe.errors.postal}>
+        <Input
+          inputMode="numeric"
+          className="num"
+          value={postal}
+          onChange={(e) => {
+            setPostal(e.target.value);
+            fe.clear('postal');
+          }}
+        />
+      </Field>
+      <div className="flex items-end gap-2">
+        <Button type="button" size="sm" loading={busy} onClick={() => void save()}>
+          บันทึกชื่อ
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void onDone(null)}>
+          ยกเลิก
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -6215,6 +6215,94 @@ try {
       assert.equal(row!.r, '😀'.repeat(100));
     });
   }
+  console.log('\nJob list parity with legacy — ยกเลิกงาน (reason required) + Code 128 on ใบรับงาน');
+  {
+    const { POST: recordsPOST } = await import('@/app/api/admin/records/route');
+    const { invalidateGrantCache } = await import('@/server/auth');
+    const { code128, code128Values } = await import('@/lib/code128');
+    const records = async (u: TestUser, body: Record<string, unknown>) =>
+      json(await recordsPOST(await request('/api/admin/records', u, { method: 'POST', body })));
+    const jobRow = async () =>
+      (
+        await db.execute<{ rs: string; st: number }>(
+          sql`SELECT record_status AS rs, job_status_id AS st FROM job WHERE job_no = 'TDJCAN'`,
+        )
+      ).rows[0];
+
+    await test('ยกเลิกงาน: needs Job Management del, a reason (≤ 200); sets status 0 + job_log; the reason is in its history', async () => {
+      await pool.query(`DELETE FROM job_log WHERE job_no = 'TDJCAN'; DELETE FROM audit_log WHERE entity_key = 'TDJCAN';
+        DELETE FROM job WHERE job_no = 'TDJCAN';
+        INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJCAN', 2, 'ACTIVE')`);
+      const cancel = (u: TestUser, remark?: string) =>
+        records(u, { table: 'jobs', id: 'TDJCAN', status: 'DELETED', remark });
+      // TD Job Clerk: Job Management view + edit, no del → 403 (before the reason is looked at)
+      assert.equal((await cancel(U.clerk, 'TD เหตุผล')).status, 403);
+      for (const remark of [undefined, '', '   ']) {
+        const r = await cancel(U.admin, remark);
+        assert.deepEqual([r.status, r.body.error], [400, 'ระบุเหตุผลที่ยกเลิก'], JSON.stringify(remark));
+        assert.deepEqual(r.body.details, { fields: { remark: 'ระบุเหตุผลที่ยกเลิก' } });
+      }
+      assert.equal((await cancel(U.admin, 'ก'.repeat(201))).status, 400, '201 characters');
+      assert.deepEqual(await jobRow(), { rs: 'ACTIVE', st: 2 }, 'nothing changed');
+
+      // del alone (not System Admin) is enough — the owner's rule
+      await pool.query(
+        `UPDATE app_config SET can_delete = true WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Management'`,
+      );
+      invalidateGrantCache();
+      try {
+        const reason = 'ลูกค้าขอยกเลิก ' + 'ข'.repeat(185); // 200 characters: the summary cuts it, meta keeps it whole
+        assert.equal(reason.length, 200);
+        const ok = await cancel(U.clerk, ` ${reason} `);
+        assert.deepEqual([ok.status, ok.body], [200, { ok: true, status: 'DELETED' }]);
+        assert.deepEqual(await jobRow(), { rs: 'DELETED', st: 0 });
+        const log = (
+          await db.execute<{ st: number; by: number }>(
+            sql`SELECT job_status_id AS st, job_action_by AS by FROM job_log WHERE job_no = 'TDJCAN' ORDER BY job_log_id DESC LIMIT 1`,
+          )
+        ).rows[0];
+        assert.deepEqual(log, { st: 0, by: U.clerk.id });
+        const h = (await getJob('TDJCAN'))!.history[0]!;
+        assert.equal(h.action, 'DELETE');
+        assert.ok(h.summary.startsWith('ลบงาน TDJCAN · ลูกค้าขอยกเลิก'), h.summary);
+        const [meta] = (
+          await db.execute<{ m: { remark: string } }>(
+            sql`SELECT meta AS m FROM audit_log WHERE entity_key = 'TDJCAN' AND action = 'DELETE'`,
+          )
+        ).rows;
+        assert.equal(meta!.m.remark, reason);
+        // a second cancel (a stale list) is refused — the first reason stays the only one
+        const again = await cancel(U.clerk, 'อีกครั้ง');
+        assert.equal(again.status, 409, JSON.stringify(again.body));
+      } finally {
+        await pool.query(
+          `UPDATE app_config SET can_delete = false WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Management'`,
+        );
+        invalidateGrantCache();
+      }
+    });
+
+    await test('deleting a quotation needs a reason too (400 without), which lands on its audit line', async () => {
+      await pool.query(`DELETE FROM audit_log WHERE entity_key = 'TDQCAN'; DELETE FROM quotation_hd WHERE quotation_no = 'TDQCAN';
+        INSERT INTO quotation_hd (quotation_no, record_status) VALUES ('TDQCAN', 'ACTIVE')`);
+      const r = await records(U.admin, { table: 'quotations', id: 'TDQCAN', status: 'DELETED' });
+      assert.deepEqual([r.status, r.body.error], [400, 'ระบุเหตุผลที่ยกเลิก']);
+      const ok = await records(U.admin, { table: 'quotations', id: 'TDQCAN', status: 'DELETED', remark: 'TD ซ้ำ' });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      const [a] = (await db.execute<{ s: string }>(sql`SELECT summary AS s FROM audit_log WHERE entity_key = 'TDQCAN'`))
+        .rows;
+      assert.equal(a!.s, 'ลบใบเสนอราคา TDQCAN · TD ซ้ำ');
+    });
+
+    await test('Code 128 B: start B, values, mod-103 check and stop as the spec computes them', async () => {
+      // J2614824: 104 + 1·42 + 2·18 + 3·22 + 4·17 + 5·20 + 6·24 + 7·18 + 8·20 = 846 → 846 mod 103 = 22
+      assert.deepEqual(code128Values('J2614824'), [104, 42, 18, 22, 17, 20, 24, 18, 20, 22, 106]);
+      // "A": start B 11010010000 · A (33) 10100011000 · check (104 + 33) mod 103 = 34 → 10001011000 · stop 1100011101011
+      assert.equal(code128('A'), '11010010000' + '10100011000' + '10001011000' + '1100011101011');
+      assert.equal(code128('J2614824').length, 10 * 11 + 13, 'start + 8 + check: 11 modules each, the stop 13');
+      assert.throws(() => code128('งาน'), /cannot encode/);
+    });
+  }
 } finally {
   // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next
   // suite's first app insert (test:api POST /api/masters/symptoms) collides on the primary key

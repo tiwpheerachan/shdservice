@@ -801,6 +801,8 @@ const COST_FIELDS = [
   { key: 'deliveryCost', label: 'ค่าขนส่ง' },
   { key: 'boxCost', label: 'ค่ากล่องพัสดุ' },
 ] as const;
+/** ค่าบริการการซ่อม: the legacy system's choices, offered as suggestions — any amount can still be typed */
+const SERVICE_COST_PRESETS = [0, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
 
 /** One label : value : บาท row, stacked so the running total reads top-to-bottom. */
 function CostRow({
@@ -876,6 +878,7 @@ export function CostSummary({
                   step="0.01"
                   min={0}
                   inputMode="decimal"
+                  list={f.key === 'serviceCost' ? 'service-cost-presets' : undefined}
                   value={draft?.key === f.key ? draft.text : s[f.key] === 0 ? '' : moneyShown(s[f.key])}
                   disabled={!!lock}
                   placeholder="0.00"
@@ -891,6 +894,13 @@ export function CostSummary({
                   className="num h-9 w-full rounded-md border border-input bg-card px-3 text-right text-base outline-hidden md:text-sm transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-muted/60"
                 />
               </CostRow>
+              {f.key === 'serviceCost' && (
+                <datalist id="service-cost-presets">
+                  {SERVICE_COST_PRESETS.map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+                </datalist>
+              )}
               {error && (
                 <p id={`cost-${f.key}-error`} role="alert" className="mt-1 text-right text-2xs text-danger">
                   {error}

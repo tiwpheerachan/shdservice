@@ -9,14 +9,18 @@ import type { Job } from '@/data/types';
 import { baht } from '@/lib/utils';
 import type { useAccess } from '@/lib/use-access';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
+import { JobRowMenu } from './job-row-menu';
 
 export function jobColumns({
   jobLink,
   canEdit,
   onCall,
+  onCancel,
 }: {
   jobLink: ReturnType<typeof useAccess>['jobLink'];
   canEdit: boolean;
+  /** ยกเลิกงาน (Job Management del only) — the row menu's last item */
+  onCancel?: (job: Job) => void;
   /** the phone button in the customer cell (in the Action cell on phones): customer info / call log */
   onCall: (job: Job) => void;
 }): Column<Job>[] {
@@ -107,7 +111,7 @@ export function jobColumns({
     {
       key: 'action',
       header: 'Action',
-      width: '110px',
+      width: '130px',
       align: 'center',
       sortable: false,
       cell: (r) => (
@@ -126,6 +130,7 @@ export function jobColumns({
             viewHref={jobLink(r.no).href}
             editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
           />
+          <JobRowMenu job={r} onCancel={onCancel} />
         </span>
       ),
     },

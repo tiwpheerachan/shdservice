@@ -53,7 +53,11 @@ export type DocumentProfile = {
   isActive: boolean;
   isDeleted: boolean;
   sortOrder: number;
+  /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = only the header of ใบเบิกสินค้า (drizzle/0004) */
+  purpose: ProfilePurpose;
 };
+export const PROFILE_PURPOSES = ['document', 'pick_slip'] as const;
+export type ProfilePurpose = (typeof PROFILE_PURPOSES)[number];
 
 export const SHD_PROFILE_ID = 1;
 const BUILTIN_LOGO = '/logo-shd-mark.png';
@@ -89,9 +93,12 @@ function toProfile(r: Row): DocumentProfile {
     isActive: r.isActive,
     isDeleted: !!r.deletedAt,
     sortOrder: r.sortOrder,
+    purpose: r.purpose === 'pick_slip' ? 'pick_slip' : 'document',
   };
 }
 
+/** true = the issuer list (the ออกเอกสารในนาม choosers, login / track letterhead): active 'document' profiles;
+ *  false = every live profile, pick slip ones too (the admin page) */
 export function listDocumentProfiles(activeOnly = true): Promise<DocumentProfile[]> {
   return cached(`docprofiles:${activeOnly}`, TTL_MASTER, () => loadDocumentProfiles(activeOnly));
 }
@@ -99,9 +106,31 @@ async function loadDocumentProfiles(activeOnly: boolean): Promise<DocumentProfil
   const rows = await db
     .select()
     .from(documentProfile)
-    .where(and(isNull(documentProfile.deletedAt), activeOnly ? eq(documentProfile.isActive, true) : undefined))
+    .where(
+      and(
+        isNull(documentProfile.deletedAt),
+        activeOnly ? and(eq(documentProfile.isActive, true), eq(documentProfile.purpose, 'document')) : undefined,
+      ),
+    )
     .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id));
   return rows.map(toProfile);
+}
+
+/** ใบเบิกสินค้า's header: the active pick slip profile (IPA), null = none (the slip falls back to the quotation's) */
+export async function pickSlipProfile(): Promise<DocumentProfile | null> {
+  const [r] = await db
+    .select()
+    .from(documentProfile)
+    .where(
+      and(
+        eq(documentProfile.purpose, 'pick_slip'),
+        eq(documentProfile.isActive, true),
+        isNull(documentProfile.deletedAt),
+      ),
+    )
+    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id))
+    .limit(1);
+  return r ? toProfile(r) : null;
 }
 
 export async function getDocumentProfile(id: number | null | undefined): Promise<DocumentProfile | null> {
@@ -140,7 +169,9 @@ export async function defaultDocumentProfile(): Promise<DocumentProfile> {
 export async function issuingProfile(requested: number | null | undefined): Promise<DocumentProfile> {
   if (!requested || requested <= 0) return defaultDocumentProfile();
   const p = await getDocumentProfile(requested);
-  if (!p || !p.isActive || p.isDeleted) throw new HttpError(400, 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน');
+  // a pick slip profile (IPA) issues nothing
+  if (!p || !p.isActive || p.isDeleted || p.purpose !== 'document')
+    throw new HttpError(400, 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน');
   return p;
 }
 
@@ -219,6 +250,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     ...SYSTEM_PREFIXES,
     isDefault: !!i.isDefault,
     isActive: i.isActive !== false,
+    ...(i.purpose ? { purpose: i.purpose } : {}), // left out = as stored ('document' for a new one)
     sortOrder: Number(i.sortOrder ?? 0) || 0,
     updatedAt: nowThai(),
   };
@@ -252,6 +284,11 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
         throw new HttpError(400, 'ต้องมีโปรไฟล์เริ่มต้น 1 รายการ — ตั้งรายการอื่นเป็นเริ่มต้นก่อน');
       if (before.isDefault && values.isActive === false) throw new HttpError(400, 'ปิดใช้งานโปรไฟล์เริ่มต้นไม่ได้');
     }
+    // the default issues every document raised without a choice — a pick slip header never does
+    if (values.isDefault && (values.purpose ?? before?.purpose) === 'pick_slip')
+      throw new HttpError(400, 'โปรไฟล์หัวใบเบิกสินค้าตั้งเป็นค่าเริ่มต้นไม่ได้', {
+        fields: { purpose: 'โปรไฟล์ค่าเริ่มต้นต้องเป็น "ออกเอกสาร"' },
+      });
     if (values.isDefault)
       await tx
         .update(documentProfile)

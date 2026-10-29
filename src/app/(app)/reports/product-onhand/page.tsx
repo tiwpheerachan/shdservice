@@ -1,104 +1,51 @@
 'use client';
 
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import { Badge } from '@/components/ui/badge';
-import type { Product } from '@/data/types';
-import { useProductsPage, useProductStats, useCategories, useManufacturers } from '@/data/db';
-import type { Column } from '@/components/ui/data-table';
-import { baht, int, cn } from '@/lib/utils';
-import { exportXlsx } from '@/lib/api';
+import { useProductStats, useCategories, useManufacturers, useColors, useModels, useReportRows } from '@/data/db';
+import { baht, int } from '@/lib/utils';
 import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
-import * as React from 'react';
+import { reportExport, useReportColumns } from '../report-table';
+import { modelsOfBrand, ONHAND_ALL_COLORS } from '../report-specs';
 
-type Row = Product & { value: number };
-
-const columns: Column<Row>[] = [
-  {
-    key: 'sysCode',
-    header: 'รหัส (ระบบ)',
-    width: '110px',
-    cell: (r) => <span className="num font-medium">{r.sysCode}</span>,
-  },
-  {
-    key: 'mfgCode',
-    header: 'รหัส (ผู้ผลิต)',
-    hideBelow: 'xl',
-    cell: (r) => <span className="num text-xs text-muted-foreground">{r.mfgCode}</span>,
-  },
-  { key: 'name', header: 'ชื่ออะไหล่', cell: (r) => <span className="line-clamp-2 max-w-[360px]">{r.name}</span> },
-  { key: 'category', header: 'หมวดหมู่', hideBelow: 'lg' },
-  { key: 'brand', header: 'ยี่ห้อ', hideBelow: 'md', cell: (r) => <Badge tone="info">{r.brand}</Badge> },
-  {
-    key: 'onhand',
-    header: 'คงเหลือ',
-    align: 'right',
-    width: '100px',
-    value: (r) => r.onhand,
-    cell: (r) => (
-      <span className={cn('num font-semibold', r.onhand <= 0 ? 'text-danger' : r.onhand <= 3 ? 'text-warning' : '')}>
-        {int(r.onhand)}
-      </span>
-    ),
-  },
-  {
-    key: 'price',
-    header: 'ราคา/หน่วย',
-    align: 'right',
-    width: '110px',
-    value: (r) => r.price,
-    cell: (r) => baht(r.price),
-  },
-  {
-    key: 'value',
-    header: 'มูลค่าคงเหลือ',
-    align: 'right',
-    width: '130px',
-    value: (r) => r.value,
-    cell: (r) => <span className="font-medium">{baht(r.value)}</span>,
-  },
-];
+const STOCK: Record<string, string> = { 'มีของ (เกิน 3 ชิ้น)': 'in', 'ใกล้หมด (1–3 ชิ้น)': 'low', หมดสต๊อก: 'out' };
+// not "ทั้งหมด": ReportView reads that as left out (→ ใช้งาน)
+const STATUS: Record<string, string> = { ใช้งาน: 'Active', ไม่ใช้งาน: 'Inactive', ทุกสถานะ: '' };
 
 export default function Page() {
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
-  const {
-    filters: f,
-    setFilters: setF,
-    table,
-    pageArgs,
-    server,
-  } = useServerTable<ReportValues>({ category: '', brand: '', stock: '', q: '' });
-  const stockKey =
-    f.stock === 'มีของ (เกิน 3 ชิ้น)'
-      ? 'in'
-      : f.stock === 'ใกล้หมด (1–3 ชิ้น)'
-        ? 'low'
-        : f.stock === 'หมดสต๊อก'
-          ? 'out'
-          : '';
-  // ACTIVE products only; filters + KPIs on the server, table paged
-  const filters = { category: f.category, brand: f.brand, stock: stockKey, status: 'Active' };
-  // KPIs: the special right Report alone; table + Excel: the module's view too (useReportAccess)
+  const { data: COLORS, ...colorsLookup } = useColors('exclude');
+  const { data: MODELS, ...modelsLookup } = useModels('exclude');
+  const { filters: f, setFilters: setF, table, pageArgs, server } = useServerTable<ReportValues>({});
+  const modelLabel = (m: { code: string; name: string }) => `${m.name} · ${m.code}`;
+  // filters + KPIs on the server, table paged; ACTIVE parts unless สถานะ says otherwise
+  const filters = {
+    sysCode: f.sysCode,
+    mfgCode: f.mfgCode,
+    name: f.name,
+    status: STATUS[f.status ?? ''] ?? 'Active',
+    category: f.category,
+    brand: f.brand,
+    model: MODELS.find((m) => modelLabel(m) === f.model)?.code ?? '',
+    stock: STOCK[f.stock ?? ''] ?? '',
+  };
+  const report = { ...filters, color: f.color, allColors: f.color ? (ONHAND_ALL_COLORS[f.allColors ?? ''] ?? '') : '' };
+  // KPIs: the special right Report alone; table: Report too, exports: Product (useReportAccess)
   const access = useReportAccess(null, 'Product');
-  const { data: sum, error: sumError } = useProductStats({ ...filters, q: table.q || f.q });
-  const {
-    rows,
-    total,
-    loading,
-    error: loadError,
-    refetch: retryLoad,
-  } = useProductsPage({ ...pageArgs, q: table.q || f.q, ...filters });
+  const { data: sum, error: sumError } = useProductStats({ ...filters, q: table.q });
+  const { rows, total, loading, error, refetch } = useReportRows('product_onhand', { ...pageArgs, ...report });
+  const columns = useReportColumns('product_onhand');
   const S = sum[0];
-  const totalValue = S?.value ?? 0;
-  const totalQty = S?.qty ?? 0;
-  const low = S?.low ?? 0;
-  const out = S?.out ?? 0;
   return (
     <ReportView
       title="รายงานอะไหล่คงเหลือ"
-      description="ยอดคงเหลือปัจจุบัน มูลค่าสต๊อก และรายการที่ใกล้หมด (1–3 ชิ้น) หรือหมดสต๊อก"
+      description="ยอดคงเหลือปัจจุบัน (รับเข้า / ใช้ไป / จอง / คงเหลือ) ราคา และที่เก็บ — คอลัมน์และเงื่อนไขตามรายงานเดิม"
       filters={[
+        { kind: 'text', key: 'sysCode', label: 'รหัส (ระบบ)', placeholder: 'P02534' },
+        { kind: 'text', key: 'mfgCode', label: 'รหัส (ผู้ผลิต)' },
+        { kind: 'text', key: 'name', label: 'ชื่ออะไหล่' },
+        { kind: 'select', key: 'status', label: 'สถานะ', options: Object.keys(STATUS) },
         {
           kind: 'select',
           key: 'category',
@@ -115,48 +62,56 @@ export default function Page() {
         },
         {
           kind: 'select',
-          key: 'stock',
-          label: 'สถานะสต๊อก',
-          options: ['ทั้งหมด', 'มีของ (เกิน 3 ชิ้น)', 'ใกล้หมด (1–3 ชิ้น)', 'หมดสต๊อก'],
+          key: 'model',
+          label: 'รุ่น',
+          options: (d) => ['ทั้งหมด', ...modelsOfBrand(MODELS, d.brand).map(modelLabel)],
+          lookup: modelsLookup,
         },
-        { kind: 'text', key: 'q', label: 'รหัส / ชื่ออะไหล่', placeholder: 'P02534' },
+        {
+          kind: 'select',
+          key: 'color',
+          label: 'สี',
+          options: ['ทั้งหมด', ...COLORS.map((c) => c.name)],
+          lookup: colorsLookup,
+        },
+        {
+          kind: 'select',
+          key: 'allColors',
+          label: 'อะไหล่ที่ใช้ได้กับทุกสี (เมื่อเลือกสี)',
+          options: Object.keys(ONHAND_ALL_COLORS), // ไม่รวม first: the legacy checkbox starts unticked
+        },
+        { kind: 'select', key: 'stock', label: 'สถานะสต๊อก', options: ['ทั้งหมด', ...Object.keys(STOCK)] },
       ]}
       onApply={setF}
       onExport={
         access.canExport
-          ? () =>
-              exportXlsx('products', {
-                ...filters,
-                q: table.q || f.q,
-                deleted: 'active',
-                file: 'report-product-onhand',
-              })
+          ? reportExport('report_product_onhand', { ...report, q: table.q }, 'report-product-onhand')
           : undefined
       }
       kpis={kpisOr(sumError, [
         // productStats sums max(0, คงเหลือ) — a negative line in the table is not subtracted here
         {
           label: 'จำนวนคงเหลือรวม',
-          value: `${int(totalQty)} ชิ้น`,
+          value: `${int(S?.qty ?? 0)} ชิ้น`,
           tone: 'primary',
-          sub: 'ไม่นับรายการที่คงเหลือติดลบ',
+          sub: 'ไม่นับรายการที่คงเหลือติดลบ · ไม่กรองตามสี',
         },
         {
           label: 'มูลค่าสต๊อกรวม',
-          value: baht(totalValue),
+          value: baht(S?.value ?? 0),
           tone: 'success',
           sub: S?.noPrice ? `${int(S.noPrice)} รายการมีสต๊อกแต่ไม่มีราคา (ไม่รวมในมูลค่า)` : undefined,
         },
-        { label: 'ใกล้หมด (1–3 ชิ้น)', value: int(low), tone: 'warning' },
-        { label: 'หมดสต๊อก', value: int(out), tone: 'danger' },
+        { label: 'ใกล้หมด (1–3 ชิ้น)', value: int(S?.low ?? 0), tone: 'warning' },
+        { label: 'หมดสต๊อก', value: int(S?.out ?? 0), tone: 'danger' },
       ])}
       columns={columns}
       rows={rows}
       loading={loading}
-      error={access.canTable ? loadError : null}
+      error={access.canTable ? error : null}
       emptyText={access.emptyText}
-      onRetry={retryLoad}
-      rowKey={(r) => r.sysCode}
+      onRetry={refetch}
+      rowKey={(r) => String(r.code || r.idx)}
       server={{ ...server, total }}
     />
   );

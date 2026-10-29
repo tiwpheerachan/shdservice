@@ -6,6 +6,7 @@ import { profileForDocument } from '@/server/services/document-profiles';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { listShippingProfiles } from '@/server/services/shipping-profiles';
 import { shipperFor } from '@/lib/shipper';
+import { code128 } from '@/lib/code128';
 
 /** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track: no staff names / notes. */
 export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
@@ -16,6 +17,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
   const co = await profileForDocument(j.documentProfileId);
   // a legacy courier name ("THAIPOST") printed as its profile (ไปรษณีย์ไทย), as /track shows it
   const shipper = shipperFor(await listShippingProfiles(false), j.receptionShipper)?.nameTh || j.receptionShipper;
+  const bars = code128(j.no);
   return (
     <PrintFrame
       company={co}
@@ -29,6 +31,23 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
         { label: 'สถานะ', value: j.status },
       ]}
     >
+      {/* the job number as Code 128 (as the legacy sheet): scanned at the counter to call the job up */}
+      <div className="-mt-2 flex flex-col items-end">
+        <svg
+          viewBox={`-10 0 ${bars.length + 20} 1`}
+          preserveAspectRatio="none"
+          shapeRendering="crispEdges"
+          className="h-[12mm] w-[52mm]"
+          role="img"
+          aria-label={`บาร์โค้ด ${j.no}`}
+        >
+          {[...bars.matchAll(/1+/g)].map((m) => (
+            <rect key={m.index} x={m.index} width={m[0].length} height={1} fill="#000" />
+          ))}
+        </svg>
+        <p className="num text-[11px] tracking-[0.2em]">{j.no}</p>
+      </div>
+
       <Box title="ข้อมูลลูกค้า">
         <KV
           items={[

@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Textarea, NumberInput, Select } from '@/components/ui/input';
 import { SearchSelect, strOptions, withCurrent } from '@/components/shared/search-select';
@@ -67,6 +68,9 @@ export function QuotationStatusFields({
   );
 }
 
+/** ค่าบริการ suggestions, as legacy offers them — any other amount may still be typed */
+const SERVICE_PRESETS = [0, 98, 100, 200, 300, 350, 400, 450, 500, 550, 1000];
+
 /** the money card: parts / service / delivery, discount, VAT and the net (computeTotals = the server's rules) */
 export function QuotationSummary({
   partsTotal,
@@ -102,6 +106,7 @@ export function QuotationSummary({
   /** a loaded quotation shows its 0 amounts as 0 */
   showZero: boolean;
 }) {
+  const presetsId = React.useId();
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-4">
       <dl className="space-y-2 text-sm">
@@ -112,6 +117,7 @@ export function QuotationSummary({
           <dd>
             <NumberInput
               aria-label="ค่าบริการ"
+              list={presetsId}
               aria-invalid={!!errors.serviceAmount || undefined}
               step="0.01"
               showZero={showZero}
@@ -122,6 +128,11 @@ export function QuotationSummary({
               }}
               className="h-8 w-32"
             />
+            <datalist id={presetsId}>
+              {SERVICE_PRESETS.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
           </dd>
         </div>
         {deliveryTotal > 0 && <Row label="ค่าขนส่ง" value={baht(deliveryTotal)} />}

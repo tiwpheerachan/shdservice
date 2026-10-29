@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Printer, FileSpreadsheet } from 'lucide-react';
+import { Printer, FileSpreadsheet, FileText, FileDown } from 'lucide-react';
 import { flushSync } from 'react-dom';
 import { PageHeader } from './page-header';
 import { FilterBar } from './filter-bar';
@@ -18,8 +18,16 @@ import { BUSINESS_TZ } from '@/lib/dates';
 export type ReportFilter =
   | { kind: 'text'; key?: string; label: string; placeholder?: string; value?: string }
   | { kind: 'date'; key?: string; label: string; value?: string }
-  /** `lookup`: the hook the options come from — a failed load says so under the dropdown */
-  | { kind: 'select'; key?: string; label: string; options: string[]; value?: string; lookup?: Lookup | Lookup[] };
+  /** `lookup`: the hook the options come from — a failed load says so under the dropdown. `options` as a function
+   *  of the draft values = a dependent list (รุ่น of the chosen ยี่ห้อ): a value the new list lacks goes back to its first */
+  | {
+      kind: 'select';
+      key?: string;
+      label: string;
+      options: string[] | ((draft: ReportValues) => string[]);
+      value?: string;
+      lookup?: Lookup | Lookup[];
+    };
 
 /** values keyed by filter `key` (or label); "ทั้งหมด" (and the old "Select All" / "ALL" labels) → "" */
 export type ReportValues = Record<string, string>;
@@ -27,10 +35,13 @@ const ALL = new Set(['ทั้งหมด', '- - Select All - -', '- - Select 
 
 const keyOf = (f: ReportFilter) => f.key ?? f.label;
 
+const optionsOf = (f: Extract<ReportFilter, { kind: 'select' }>, draft: ReportValues) =>
+  typeof f.options === 'function' ? f.options(draft) : f.options;
+
 /** each filter's starting value: its `value`, else a select's first option, else "" */
 function defaultsOf(filters: ReportFilter[]): ReportValues {
   const v: ReportValues = {};
-  for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === 'select' ? (f.options[0] ?? '') : '');
+  for (const f of filters) v[keyOf(f)] = f.value ?? (f.kind === 'select' ? (optionsOf(f, {})[0] ?? '') : '');
   return v;
 }
 
@@ -88,8 +99,9 @@ export function ReportView<T extends Record<string, unknown>>({
   onApply?: (values: ReportValues) => void;
   /** server-side paging for the report table (rows = current page) */
   server?: ServerTable;
-  /** download the whole report (same filters) as .xlsx */
-  onExport?: () => Promise<unknown>;
+  /** the whole report (same filters) as .xlsx, Word (.doc) or the print view saved as PDF; `cond` = the applied
+   *  filters in words, for the document's header */
+  onExport?: (format: 'xlsx' | 'doc' | 'pdf', cond: string) => Promise<unknown>;
   /** what the empty table says (e.g. the menu right the table needs) */
   emptyText?: string;
 }) {
@@ -154,12 +166,26 @@ export function ReportView<T extends Record<string, unknown>>({
               variant="outline"
               size="sm"
               onClick={() => window.print()}
-              title="พิมพ์เฉพาะหน้าที่แสดงอยู่ — ต้องการทั้งรายงาน ใช้ ส่งออก Excel"
+              title="พิมพ์เฉพาะหน้าที่แสดงอยู่ — ต้องการทั้งรายงาน ใช้ PDF / Excel / Word"
             >
               <Printer className="h-3.5 w-3.5" />
-              พิมพ์ / บันทึกเป็น PDF
+              พิมพ์หน้านี้
             </Button>
-            {onExport && <ExportButton run={onExport} label="Excel" icon={FileSpreadsheet} />}
+            {onExport && (
+              <>
+                <ExportButton run={() => onExport('pdf', conditionsOf(filters, applied))} label="PDF" icon={FileDown} />
+                <ExportButton
+                  run={() => onExport('xlsx', conditionsOf(filters, applied))}
+                  label="Excel"
+                  icon={FileSpreadsheet}
+                />
+                <ExportButton
+                  run={() => onExport('doc', conditionsOf(filters, applied))}
+                  label="Word"
+                  icon={FileText}
+                />
+              </>
+            )}
           </>
         }
       />
@@ -181,7 +207,18 @@ export function ReportView<T extends Record<string, unknown>>({
         {filters.map((f) => {
           const k = keyOf(f);
           const v = values[k] ?? '';
-          const set = (x: string) => setValues((s) => ({ ...s, [k]: x }));
+          const set = (x: string) =>
+            setValues((s) => {
+              const next = { ...s, [k]: x };
+              // a dependent list (รุ่น under ยี่ห้อ) drops a choice that no longer fits
+              for (const g of filters) {
+                if (g.kind !== 'select' || typeof g.options !== 'function') continue;
+                const opts = g.options(next);
+                const gk = keyOf(g);
+                if (next[gk] && !opts.includes(next[gk])) next[gk] = opts[0] ?? '';
+              }
+              return next;
+            });
           return (
             <Field key={f.label} label={f.label} lookup={f.kind === 'select' ? f.lookup : undefined}>
               {f.kind === 'text' && (
@@ -191,7 +228,7 @@ export function ReportView<T extends Record<string, unknown>>({
               {f.kind === 'select' &&
                 (() => {
                   // options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique
-                  const opts = Array.from(new Set(f.options));
+                  const opts = Array.from(new Set(optionsOf(f, values)));
                   // same rule as the rest of the app: long lists are searchable, 2–5 fixed choices stay a plain select
                   return opts.length > 5 ? (
                     <SearchSelect value={v} onChange={set} options={strOptions(opts)} />

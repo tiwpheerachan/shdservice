@@ -488,6 +488,7 @@ export const DocumentProfile = z
     isActive: b,
     isDeleted: b,
     sortOrder: n,
+    purpose: z.enum(['document', 'pick_slip']),
   })
   .meta({ id: 'DocumentProfile' });
 

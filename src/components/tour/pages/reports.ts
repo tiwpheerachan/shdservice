@@ -56,11 +56,11 @@ function reportTour(r: Report): Tour {
     },
     {
       target: ACTIONS,
-      title: 'พิมพ์ และส่งออก Excel',
+      title: 'พิมพ์ และส่งออก PDF / Excel / Word',
       body: ({ has }) =>
-        'พิมพ์ / บันทึกเป็น PDF: ตัวเลขสรุปกับแถวในหน้านี้ พร้อมเงื่อนไข · ' +
+        'PDF / Word: ทั้งรายงาน (≤ 3,000 แถว) · พิมพ์หน้านี้: หน้าที่เห็น · ' +
         (has('button:Excel')
-          ? `Excel: ทุกแถวตามการค้นหาล่าสุด (สูงสุด ${MAX_EXPORT_ROWS.toLocaleString('en-US')} แถว) · ${r.file} · บันทึกในประวัติการใช้งาน`
+          ? `Excel: ทุกแถว (≤ ${MAX_EXPORT_ROWS.toLocaleString('en-US')} แถว) · ${r.file} · บันทึกในประวัติการใช้งาน`
           : `ปุ่ม Excel แสดงเมื่อบทบาทมี${exportNeeds}`),
       look: true,
     },
@@ -275,7 +275,7 @@ export const REPORTS_TOURS: Record<string, Tour> = {
     steps: [
       {
         title: 'รายงานทั้งหมดอยู่ที่นี่',
-        body: 'เลือกรายงานที่ต้องการ แล้วกำหนดเงื่อนไข ดูตัวเลขสรุป และส่งออกเป็น Excel หรือพิมพ์ / บันทึกเป็น PDF ได้ในหน้ารายงานนั้น',
+        body: 'เลือกรายงานที่ต้องการ แล้วกำหนดเงื่อนไข ดูตัวเลขสรุป และส่งออกเป็น Excel, PDF หรือ Word ได้ในหน้ารายงานนั้น',
       },
       {
         target: 'main div.grid:has(> a)',

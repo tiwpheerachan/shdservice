@@ -3,7 +3,8 @@
  * one SQL file (../setupdata/seed.sql, outside the repo: it holds people's e-mails and phones) that the load
  * applies after the migration (setupdata/load_supabase.sh, npm run db:dev:load):
  *
- *   โปรไฟล์ผู้ออกเอกสาร / บริษัทขนส่ง   the live rows, same ids (logos stay in the bucket under the stored path)
+ *   โปรไฟล์ผู้ออกเอกสาร / บริษัทขนส่ง   the live rows, same ids (logos stay in the bucket under the stored path); a
+ *                                      profile only a migration adds (0004 หัวใบเบิกสินค้า) stays
  *   ผู้ใช้ระบบ                          every user who has signed in to the new app (last_login set), matched by
  *                                      e-mail: a legacy row keeps its user_id (its old jobs stay theirs) and takes the
  *                                      new app's role / status / name / SSO profile; a person new to the app is added
@@ -60,8 +61,11 @@ CREATE TEMP TABLE s_config ON COMMIT DROP AS SELECT * FROM json_populate_records
 CREATE TEMP TABLE s_tour ON COMMIT DROP AS
   SELECT * FROM json_to_recordset(${lit(tour.json)}) AS x(email text, seen text[], off boolean, updated_at timestamptz);
 
--- ผู้ออกเอกสาร: exactly the source's live rows (the migration's built-in SHD is replaced)
-DELETE FROM document_profile;
+-- ผู้ออกเอกสาร: the source's live rows (the migration's built-in SHD is replaced, same id or code); a profile only the
+-- migration adds stays (drizzle/0004's หัวใบเบิกสินค้า IPA, when the source was taken before 0004), and a source
+-- without document_profile.purpose (before 0004) is an issuer: 'document'
+UPDATE s_doc SET purpose = 'document' WHERE purpose IS NULL;
+DELETE FROM document_profile p WHERE p.id IN (SELECT id FROM s_doc) OR p.code IN (SELECT code FROM s_doc);
 INSERT INTO document_profile SELECT * FROM s_doc;
 SELECT setval(pg_get_serial_sequence('document_profile', 'id'), GREATEST((SELECT max(id) FROM document_profile), 1));
 -- บริษัทขนส่ง: the source's live profiles by code (names, logo, link, order); a courier the migration added that the
