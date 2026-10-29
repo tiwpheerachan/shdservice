@@ -124,6 +124,21 @@ export async function checkStep(page: Page) {
 }
 
 /**
+ * เริ่มเลย / ถัดไป until the step whose title passes `is`. Each click waits for the counter to move: a step that
+ * opens a dialog takes a while, and a slow runner read the old title and clicked past the step (CI, phone).
+ */
+export async function stepTo(page: Page, is: (title: string) => boolean) {
+  const num = card(page).locator('.num').locator('visible=true').first();
+  while (!is(await card(page).locator('#tour-title').innerText())) {
+    const at = await num.innerText();
+    await card(page)
+      .getByRole('button', { name: /^(เริ่มเลย|ถัดไป)$/ })
+      .click();
+    await expect(num).not.toHaveText(at);
+  }
+}
+
+/**
  * Every step of the tour on the page that is open, started from `start` (the ? button or the first-visit
  * offer), each one checked; ends on the last step. Returns the number of steps.
  */

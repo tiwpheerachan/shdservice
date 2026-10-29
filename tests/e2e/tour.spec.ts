@@ -3,7 +3,7 @@ import { TOURS } from '../../src/components/tour/tours';
 import { OWNER_EMAIL } from './support/env';
 import { rows, userId } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
-import { card, demoUrl, tourOn, walkTour } from './support/tour';
+import { card, demoUrl, stepTo, tourOn, walkTour } from './support/tour';
 
 /**
  * บทสอน — what a new user sees must be right on every page and screen size: the steps in reading order, only
@@ -191,10 +191,7 @@ test('dashboard TAT step: the table is scrolled to its last column (Over 30 Days
   await page.goto('/jobs/dashboard');
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
-  while ((await card(page).locator('#tour-title').innerText()) !== 'TAT')
-    await card(page)
-      .getByRole('button', { name: /^(เริ่มเลย|ถัดไป)$/ })
-      .click();
+  await stepTo(page, (t) => t === 'TAT');
   const table = page.locator('main [aria-label="จำนวนงานตามสถานะและ TAT"]');
   // the header row is lit, not the whole table (taller than a phone with 24 statuses)
   await expect(table.locator('thead')).toHaveAttribute('data-tour-target', '');
@@ -293,11 +290,7 @@ test('Enter in a lit box of a dialog step runs nothing: the dialog and the card 
   await signIn(page, OWNER_EMAIL);
   await page.goto('/admin/permissions');
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
-  // to the dialog's first step (the tour opens เพิ่มตำแหน่ง itself)
-  while (!(await card(page).locator('#tour-title').innerText()).startsWith('เพิ่มตำแหน่ง *'))
-    await card(page)
-      .getByRole('button', { name: /^(เริ่มเลย|ถัดไป)$/ })
-      .click();
+  await stepTo(page, (t) => t.startsWith('เพิ่มตำแหน่ง *')); // the dialog's first step (the tour opens it)
   const name = page.getByRole('dialog').getByLabel('ชื่อตำแหน่ง');
   await name.fill('ตำแหน่งทดสอบบทสอน');
   await name.press('Enter');
