@@ -11,7 +11,7 @@
  *    that state (journal has rows but app_user.lark_id is missing) and reset the
  *    journal so every migration — all written to be idempotent — runs again.
  *
- *  - `--reset` forces that behaviour.
+ *  - `--reset` forces that behaviour. Neither ever runs against production (PROD_REF in the URL).
  *  - `--deploy` (db:migrate:deploy, and db:migrate while Render's dashboard still calls it): Render's pre-deploy
  *    only — from a laptop it is refused and names the two commands that are (ADR 0009).
  *  - `--prod`: run by scripts/db-prod-migrate.mts (db:prod:migrate) after it asked; never with --reset.
@@ -21,7 +21,10 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { dbSsl } from '../src/db/ssl';
+import { PROD_REF } from './db-prod-migrate.mjs'; // the .mts (tsx and tsc resolve it)
 
+const PROD_RESET =
+  'REFUSED: the migration journal of PRODUCTION is never reset from here (a reload is setupdata/load_supabase.sh).';
 const MIGRATIONS_FOLDER = './drizzle';
 const JOURNAL_SCHEMA = 'drizzle';
 const JOURNAL_TABLE = '__drizzle_migrations';
@@ -57,9 +60,16 @@ async function main() {
   const db = drizzle(pool);
 
   const force = process.argv.includes('--reset');
+  const prod = url.includes(PROD_REF);
+  // the journal of production is never cleared from here, whatever is exported (ALLOW_PROD_DB, RENDER) — a reload
+  // is setupdata/load_supabase.sh's; the automatic re-run below is refused the same way
+  if (prod && force) {
+    console.error(PROD_RESET);
+    process.exit(1);
+  }
   // production is migrated by Render (pre-deploy, RENDER is set there) — from a laptop, .env's
   // DATABASE_URL is production, so a stray `npm run db:migrate` must not run against it
-  if (url.includes('bnntpshuoyzkzckepjse') && !process.env.RENDER && process.env.ALLOW_PROD_DB !== '1') {
+  if (prod && !process.env.RENDER && process.env.ALLOW_PROD_DB !== '1') {
     console.error(
       'REFUSED: this is the PRODUCTION database — Render migrates it on deploy. For the local dev DB: npm run db:dev:load. Set ALLOW_PROD_DB=1 only if you really mean it.',
     );
@@ -84,11 +94,15 @@ async function main() {
     if (!force && hasEntries && !appColumnsPresent && process.env.RENDER) {
       // a deploy must never guess the journal is stale — a renamed column would re-run everything
       console.error(
-        'app_user.lark_id missing but the journal says applied — check why, then run db:migrate:reset by hand',
+        'app_user.lark_id missing but the journal says applied — check why (a legacy reload is setupdata/load_supabase.sh)',
       );
       process.exit(1);
     }
     if (force || (hasEntries && !appColumnsPresent)) {
+      if (prod) {
+        console.error(`${PROD_RESET} (app_user.lark_id missing but the journal says applied — check why)`);
+        process.exit(1);
+      }
       console.log(
         force
           ? '--reset: clearing the migration journal, all migrations will re-run'

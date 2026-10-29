@@ -51,9 +51,9 @@ export const files = defineOperation({
   path: '/files',
   tags: ['Files'],
   security: SESSION_OR_NONE,
-  summary: 'Open a stored file by its storage path (a short-lived signed URL)',
+  summary: 'Open a stored file by its storage path (a signed URL)',
   description:
-    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A video URL is valid 15 minutes (it plays from it), others 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.',
+    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A job attachment (and the `.jpg` thumbnail of a video) opens only while its attachment row is there — removed → 404; `download=1` saves it under its attached name. A picture (jpg / png / webp / svg, never a slip) gets one URL a day shared by everyone, cacheable; a video URL is valid 15 minutes (it plays from it), a slip / PDF 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.',
   query: z.object({
     path: z
       .string({ error: PATH_REQUIRED })
@@ -74,7 +74,10 @@ export const files = defineOperation({
     307: redirect('To the signed URL (cacheable while it is valid).'),
     400: errorResponse('No / bad path.'),
     ...SIGNED_IN,
-    ...notFound('Not a folder the app writes, or no such file (or still on the old system).'),
+    503: errorResponse(
+      'The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).',
+    ),
+    ...notFound('Not a folder the app writes, no such file (or still on the old system), or a removed attachment.'),
     ...RATE_LIMITED,
   },
 });

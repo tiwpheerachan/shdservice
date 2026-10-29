@@ -65,6 +65,7 @@ import {
 import { QUOTE_MOVES_BY_ID, QUOTE_STEP } from '@/lib/quote-job';
 import { customerForDocument, getCustomerById } from './customers';
 import { staffOrKeep } from './users';
+import { listSimple, listSymptoms } from './masters';
 import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
 import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
 import { RS, statusStamp } from '@/server/record-status';
@@ -97,6 +98,7 @@ import {
   STATUS_DELETE_ONLY,
   REPAIR_STATUS_ONLY,
   SWAP_STATUS_ONLY,
+  CLOSE_STATUS_ONLY,
   EDIT_STATUS_ONLY,
   partCharge,
   NOT_ENGINEER,
@@ -481,7 +483,8 @@ const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   so: job.jobReferenceNo,
   brandModel: job.productModelName,
   jobType: jobType.jobTypeName,
-  owner: eng.firstName,
+  // unassigned last in both directions: `is null` sorts first (asc, desc() only reaches the name)
+  owner: sql`${eng.firstName} is null, ${eng.firstName}`,
   status: jobStatus.displayOrder,
   imei: job.productImeiNo,
   amount: job.jobTotalCost,
@@ -940,16 +943,51 @@ export type JobDetail = {
 /** audit fields holding an app_user id — the job history shows the person's name */
 const USER_KEYS = new Set(['engineerId', 'sendBy', 'receiveBy', 'jobReturnBy', 'jobRepairedBy', 'jobClosedBy']);
 const ASSIGNED_TO = /มอบหมายงานให้ช่าง #(\d+)/;
+/** audit fields holding a master row's id → its name: the cached master lists; model / shipper / customer by id */
+const ID_NAMES: Record<string, (ids: number[]) => Promise<{ id: string | number; name: string | null }[]>> = {
+  jobTypeId: () => listSimple('job_types', 'all'),
+  productTypeId: () => listSimple('product_types', 'all'),
+  productBrandId: () => listSimple('manufacturers', 'all'),
+  productSymptomId: () => listSymptoms('all'),
+  engineerSymptomId: () => listSymptoms('all'),
+  productModelId: (ids) =>
+    db.select({ id: model.modelId, name: model.modelCode }).from(model).where(inArray(model.modelId, ids)),
+  returnShipperId: (ids) =>
+    db
+      .select({ id: shippingProfile.id, name: shippingProfile.nameTh })
+      .from(shippingProfile)
+      .where(inArray(shippingProfile.id, ids)),
+  customerId: (ids) =>
+    db
+      .select({
+        id: customer.customerId,
+        name: sql<string>`concat_ws(' ', ${customer.customerCode}, ${customer.customerName})`,
+      })
+      .from(customer)
+      .where(inArray(customer.customerId, ids)),
+};
 
-/** ประวัติการแก้ไข: user ids → names, status ids → status names (also in older "มอบหมายงานให้ช่าง #116" lines) */
+/** ประวัติการแก้ไข: user / master ids → names, status ids → status names (also in older "มอบหมายงานให้ช่าง #116"
+ *  lines); an id not found stays as it is */
 async function readableHistory(rows: AuditRow[]): Promise<AuditRow[]> {
   const ids = new Set<number>();
+  const masterIds = new Map<string, Set<number>>();
   for (const r of rows) {
     for (const [k, pair] of Object.entries(r.changes ?? {}))
-      if (USER_KEYS.has(k)) for (const v of pair) if (Number(v) > 0) ids.add(Number(v));
+      for (const v of pair.map(Number).filter((n) => n > 0))
+        if (USER_KEYS.has(k)) ids.add(v);
+        else if (Object.hasOwn(ID_NAMES, k)) masterIds.set(k, (masterIds.get(k) ?? new Set<number>()).add(v));
     const m = ASSIGNED_TO.exec(r.summary);
     if (m) ids.add(Number(m[1]));
   }
+  const names = new Map(
+    await Promise.all(
+      [...masterIds].map(async ([k, set]) => {
+        const found = await ID_NAMES[k]!([...set]);
+        return [k, new Map(found.map((x) => [Number(x.id), x.name]))] as const;
+      }),
+    ),
+  );
   const users = ids.size
     ? await db
         .select({ id: appUser.userId, f: appUser.firstName, l: appUser.lastName })
@@ -963,7 +1001,8 @@ async function readableHistory(rows: AuditRow[]): Promise<AuditRow[]> {
     return (u && fullName(u.f, u.l)) || `#${v}`;
   };
   const status = (v: unknown) => (v == null ? null : (statuses.find((x) => x.id === Number(v))?.name ?? v));
-  const readable = (k: string, v: unknown) => (USER_KEYS.has(k) ? person(v) : k === 'jobStatusId' ? status(v) : v);
+  const readable = (k: string, v: unknown) =>
+    USER_KEYS.has(k) ? person(v) : k === 'jobStatusId' ? status(v) : names.get(k)?.get(Number(v)) || v;
   return rows.map((r) => ({
     ...r,
     summary: r.summary.replace(ASSIGNED_TO, (_, id: string) => `มอบหมายงานให้ช่าง ${person(id)}`),
@@ -1435,12 +1474,15 @@ function keepMoney<T extends Partial<JobRow>>(row: JobRow, values: T): T {
 
 const JOB_COLS = getTableColumns(job);
 /** how a code-like column is cleaned on the way in — any other text column: clean() / cleanText() */
+/** เลขที่เอกสาร Swap / Refund — "0" / "00" (legacy) = none */
+const docNoOf = (v: unknown) => (/^0{1,2}$/.test(cleanCode(v)) ? '' : cleanCode(v));
+
 const CODE_CLEAN: Partial<Record<keyof JobRow, (v: unknown) => string>> = {
   jobReferenceNo: cleanCode,
   productImeiNo: cleanCode,
   productSerial: cleanSerial,
   jobPaymentNo: cleanCode,
-  swapRefundDocumentNo: cleanCode,
+  swapRefundDocumentNo: (v) => docNoOf(v),
   jobReceptionTrackingNo: cleanTracking,
   returnCustomerTrackingNo: cleanTracking,
 };
@@ -1511,6 +1553,8 @@ const SWAP_STATUS_IDS = {
   swap: [JS.RETURNED_TO_STOCK, JS.SWAP_ISSUED],
   refund: [JS.RETURNED_TO_STOCK, JS.REFUND_PAID],
 };
+/** ปิดงาน-ส่งคืนสินค้า's statuses (CLOSE_STATUS_OPTIONS, by id) */
+const CLOSE_STATUS_IDS: number[] = [JS.CLOSED_WAIT_TRACKING, JS.CLOSED_TRACKED, JS.CLOSED_WAIT_PICKUP, JS.COMPLETE];
 
 /**
  * A status picked on a workflow page (บันทึกซ่อม / Swap-Refund / แก้ไขงาน): never a closed one or ยกเลิกข้อมูล
@@ -1765,7 +1809,6 @@ async function prepJobEdit(jobNo: string, i: JobInput) {
   assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
   const lk = await lookups(i, was.shipper, jobNo);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  await assertPageStatus(newStatus, was.status, [], EDIT_STATUS_ONLY); // the edit page shows the status only
   const engineerId = i.engineerId !== undefined ? int(i.engineerId, 0) : undefined;
   return { i, was, lk, c: costFields(i), newStatus, engineerId };
 }
@@ -1782,6 +1825,8 @@ async function applyJobEdit(
   byUserId: number,
 ): Promise<JobRow> {
   const { i, was, lk, c, newStatus, engineerId } = edit;
+  // the edit page shows the status only — "unchanged" = the row as locked, not as read before the lock
+  await assertPageStatus(newStatus, existing.jobStatusId, [], EDIT_STATUS_ONLY);
   // under the job lock (job → customer / user): a delete running now finishes first, or waits for this save
   const cust = i.customerCode ? await customerForDocument(tx, str(i.customerCode), existing.customerId) : null;
   // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
@@ -1945,14 +1990,16 @@ export type RepairInput = z.output<typeof jobRepair.body>;
  * job.spare_part_replace (varchar 300) holds the legacy part list ("มอเตอร์ดูดฝุ่น H11 MAX,H12" — 9,377
  * jobs): a new serial (บันทึกซ่อม / Swap) is one "New S/N: …" line ADDED to it (an earlier such line is
  * replaced), never written over it. No room left → 400 under newSerial instead of cutting either part.
+ * `serial` '' = the line removed (none there → the list as it is).
  */
 function withNewSerial(replace: string | null, serial: string): string {
+  if (!serial && !parseSwap(replace ?? '')['New S/N']) return replace ?? '';
   const kept = (replace ?? '')
     .split('\n')
     .filter((l) => !l.startsWith('New S/N:'))
     .join('\n')
     .trim();
-  const v = [kept, `New S/N: ${serial}`].filter(Boolean).join('\n');
+  const v = [kept, serial && `New S/N: ${serial}`].filter(Boolean).join('\n');
   if (v.length > 300) {
     const msg = 'ช่องรายการอะไหล่ที่เปลี่ยนของงานนี้เต็ม (300 ตัวอักษร) — บันทึก Serial ใหม่ในหมายเหตุแทน';
     throw new HttpError(400, msg, { fields: { newSerial: msg } });
@@ -1963,12 +2010,32 @@ function withNewSerial(replace: string | null, serial: string): string {
 /**
  * job.swap_refund_detail with its "New S/N" line set (first, as the Swap page writes it) — ปิดงาน's Serial
  * เครื่องใหม่. A legacy free text ("เปลี่ยนสินค้า") is kept as its รายละเอียด, as a Swap page save keeps it.
+ * `serial` '' = the line removed (none there → the detail as it is).
  */
 function swapDetailWithSerial(detail: string, serial: string): string {
+  if (!serial && !parseSwap(detail)['New S/N']) return detail;
   const rest = Object.keys(parseSwap(detail)).length
     ? detail.split('\n').filter((l) => l.trim() && !l.startsWith('New S/N:'))
     : [`รายละเอียด: ${clean(detail)}`];
-  return [`New S/N: ${serial}`, ...rest].join('\n');
+  return [serial && `New S/N: ${serial}`, ...rest].filter(Boolean).join('\n');
+}
+
+/** the swap_refund_detail keys, in the order the Swap / Refund page writes them */
+const SWAP_KEYS = [
+  'New S/N',
+  'รุ่นที่เปลี่ยนให้',
+  'วันที่เปลี่ยนเครื่อง',
+  'ยอดเงินคืน',
+  'วิธีการคืนเงิน',
+  'เลขที่บัญชี/อ้างอิง',
+  'วันที่คืนเงิน',
+  'รายละเอียด',
+];
+/** what the Swap / Refund page reads out of a stored detail (a legacy free text = its รายละเอียด) */
+function swapShown(detail: string): string {
+  const sw = parseSwap(detail);
+  const o: Record<string, string> = Object.keys(sw).length || !detail.trim() ? sw : { รายละเอียด: clean(detail) };
+  return SWAP_KEYS.map((k) => o[k] ?? '').join('\n');
 }
 
 /** บันทึกงานซ่อม's job columns: what the page sent (a cost left out keeps the stored one) + the parts total */
@@ -2232,7 +2299,7 @@ async function syncPartLines(
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
   assertValid(repairActionSchema, i);
   const [cur] = await db
-    .select({ status: job.jobStatusId, eng: job.engineerId, es: job.engineerSymptomId })
+    .select({ eng: job.engineerId, es: job.engineerSymptomId })
     .from(job)
     .where(eq(job.jobNo, jobNo));
   if (!cur) throw jobNotFound(jobNo);
@@ -2245,8 +2312,6 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  // the repair page's own list — a close is ปิดงาน's (STATUS_CLOSE_ONLY)
-  await assertPageStatus(newStatus, cur.status, REPAIR_STATUS_IDS, REPAIR_STATUS_ONLY);
   // nobody on the job yet: who saves the repair takes it when their role has Job Take (another role does not)
   const meTakes = !(cur.eng && cur.eng > 0) && (await userHasRight(byUserId, 'Job Take'));
   const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
@@ -2258,6 +2323,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
     if (edit) j = await applyJobEdit(tx, jobNo, j, edit, byUserId);
     const status = j.jobStatusId;
+    // the repair page's own list — a close is ปิดงาน's (STATUS_CLOSE_ONLY); "unchanged" = the row as locked
+    await assertPageStatus(newStatus, status, REPAIR_STATUS_IDS, REPAIR_STATUS_ONLY);
     const locked = await moneyLocked(status, byUserId);
     const parts = i.parts
       ? await syncPartLines(tx, jobNo, i.parts, locked, byUserId)
@@ -2353,6 +2420,7 @@ function outsourceChanges(
       ...(last
         ? {
             sendTo: last.sendToName,
+            sendDetail: last.sendDetail,
             sendDate: fmtDate(last.sendDate),
             sendBy: last.sendBy,
             ...(back
@@ -2368,7 +2436,9 @@ function outsourceChanges(
     },
     {
       ...fields,
-      ...(i.send ? { sendTo: str(i.send.to), sendDate: str(i.send.date), sendBy } : {}),
+      ...(i.send
+        ? { sendTo: str(i.send.to), sendDetail: cleanText(i.send.detail), sendDate: str(i.send.date), sendBy }
+        : {}),
       ...(i.receive
         ? {
             receiveFrom: str(i.receive.from),
@@ -2457,10 +2527,7 @@ async function writeSendRow(
 /** บันทึกงานส่งซ่อมต่อ: send to / receive back from an outside repairer + the job fields and status, in one transaction */
 export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: number): Promise<JobDetail> {
   assertValid(outsourceActionSchema, i);
-  const [cur] = await db
-    .select({ status: job.jobStatusId, es: job.engineerSymptomId })
-    .from(job)
-    .where(eq(job.jobNo, jobNo));
+  const [cur] = await db.select({ es: job.engineerSymptomId }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw jobNotFound(jobNo);
   const [es] = i.engineerSymptom
     ? await db
@@ -2471,12 +2538,6 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
         .limit(1)
     : [];
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  // only the out-source statuses here — the job's own status re-saves unchanged ("never worse")
-  const outsourceStatuses: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED, cur.status ?? -1];
-  if (newStatus !== undefined && !outsourceStatuses.includes(newStatus))
-    throw new HttpError(400, OUTSOURCE_STATUS_ONLY, { fields: { status: OUTSOURCE_STATUS_ONLY } });
-  if (newStatus === JS.OUTSOURCE_RECEIVED && newStatus !== cur.status && !i.receive)
-    throw new HttpError(400, RECEIVED_NEEDS_RECEIVE, { fields: { status: RECEIVED_NEEDS_RECEIVE } });
   if (i.receive && !i.receive.date)
     throw new HttpError(400, RECEIVE_DATE_REQUIRED, { fields: { 'receive.date': RECEIVE_DATE_REQUIRED } });
   // the people on the latest row (open, or already back and saved again) may stay even if they left
@@ -2497,6 +2558,12 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
     if (edit) before = await applyJobEdit(tx, jobNo, before, edit, byUserId);
     const status = before.jobStatusId;
+    // only the out-source statuses here — the job's own status (as locked) re-saves unchanged ("never worse")
+    const outsourceStatuses: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED, status ?? -1];
+    if (newStatus !== undefined && !outsourceStatuses.includes(newStatus))
+      throw new HttpError(400, OUTSOURCE_STATUS_ONLY, { fields: { status: OUTSOURCE_STATUS_ONLY } });
+    if (newStatus === JS.OUTSOURCE_RECEIVED && newStatus !== status && !i.receive)
+      throw new HttpError(400, RECEIVED_NEEDS_RECEIVE, { fields: { status: RECEIVED_NEEDS_RECEIVE } });
     const open = await tx
       .select()
       .from(jobSendForwardDt)
@@ -2524,18 +2591,21 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           .orderBy(desc(jobSendForwardDt.id))
           .limit(1);
     const back = last?.sendStatus === SEND_STATUS.RECEIVED;
-    await audit(tx, byUserId, {
-      action: 'UPDATE',
-      module: 'Job Repair',
-      entity: 'job',
-      key: jobNo,
-      summary: i.receive
-        ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
-        : i.send
-          ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
-          : 'บันทึกงานส่งซ่อมต่อ',
-      changes: outsourceChanges(i, before, fields, last, { back, sendBy, receiveBy }),
-    });
+    // saved again as stored (a repeated receive): no empty history row — the status change has its own
+    const changes = outsourceChanges(i, before, fields, last, { back, sendBy, receiveBy });
+    if (changes)
+      await audit(tx, byUserId, {
+        action: 'UPDATE',
+        module: 'Job Repair',
+        entity: 'job',
+        key: jobNo,
+        summary: i.receive
+          ? `รับคืนจาก Out-Source (${str(i.receive.from)})`
+          : i.send
+            ? `ส่งซ่อมต่อ → ${str(i.send.to)}`
+            : 'บันทึกงานส่งซ่อมต่อ',
+        changes,
+      });
 
     const implied = await writeSendRow(tx, jobNo, i, open[0], last, { back, sendBy, receiveBy, byUserId });
     // the page sends the current status back unchanged (as บันทึกซ่อม): only a changed choice beats the implied 14 / 15
@@ -2559,7 +2629,6 @@ export type SwapRefundInput = z.output<typeof jobSwapRefund.body>;
 export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId: number): Promise<JobDetail> {
   const [cur] = await db
     .select({
-      status: job.jobStatusId,
       total: job.jobTotalCost,
       detail: job.swapRefundDetail,
       docNo: job.swapRefundDocumentNo,
@@ -2577,9 +2646,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i,
   );
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  // only the mode's list (SWAP_STATUS_OPTIONS; refund fields = Refund, as swapRefundSchema) or the job's own status
   const refund = i.refundAmount !== undefined || i.refundMethod !== undefined;
-  await assertPageStatus(newStatus, cur.status, SWAP_STATUS_IDS[refund ? 'refund' : 'swap'], SWAP_STATUS_ONLY);
   const newSerial = cleanSerial(i.newSerial);
   const refundRef = cleanCode(i.refundRef);
   const lines = [
@@ -2598,11 +2665,23 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     assertVersion(i.version, before.rowVersion); // absent = last write wins
     // the page's shared job sections (`job`) in THIS transaction: a refused action saves none of them
     if (edit) before = await applyJobEdit(tx, jobNo, before, edit, byUserId);
+    // only the mode's list (SWAP_STATUS_OPTIONS; refund fields = Refund, as swapRefundSchema) or the job's own status
+    await assertPageStatus(
+      newStatus,
+      before.jobStatusId,
+      SWAP_STATUS_IDS[refund ? 'refund' : 'swap'],
+      SWAP_STATUS_ONLY,
+    );
+    const stored = before.swapRefundDetail ?? '';
+    // New S/N sent empty removes the line the page showed (its own, in the swap detail) — one only บันทึกซ่อม
+    // wrote stays; left out (Refund) = unchanged
+    const serialLine = newSerial || (i.newSerial !== undefined && !!parseSwap(stored)['New S/N']);
     const swapValues = {
       ...(i.inspection !== undefined ? { engineerRepairDetail: cleanText(i.inspection) } : {}),
-      swapRefundDetail: lines.join('\n'),
-      swapRefundDocumentNo: /^0{1,2}$/.test(cleanCode(i.docNo)) ? '' : cleanCode(i.docNo), // "0" / "00" = none
-      ...(newSerial ? { sparePartReplace: withNewSerial(before.sparePartReplace, newSerial) } : {}),
+      // what the page showed sent back unchanged keeps the stored text (a legacy "เปลี่ยน" is not reformatted)
+      swapRefundDetail: swapShown(stored) === swapShown(lines.join('\n')) ? stored : lines.join('\n'),
+      swapRefundDocumentNo: docNoOf(i.docNo),
+      ...(serialLine ? { sparePartReplace: withNewSerial(before.sparePartReplace, newSerial) } : {}),
       ...(num(i.refundAmount) > 0
         ? {
             jobPaymentType: clean(i.refundMethod).slice(0, 50), // a list value — safety net
@@ -2686,13 +2765,18 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     const shut = notClosableMsg(status, await statusGroup(status ?? -1), await statusName(status ?? -1));
     // still out at the vendor: 400 with what to do (setStatus' check)
     if (shut) throw new HttpError(status === JS.OUTSOURCE_SENT ? 400 : 409, shut, { fields: { status: shut } });
+    // only the page's list (a closing status) or the job's own one re-saved — never ยกเลิกข้อมูล / an open status
+    if (newStatus !== status && !CLOSE_STATUS_IDS.includes(newStatus))
+      throw new HttpError(400, CLOSE_STATUS_ONLY, { fields: { status: CLOSE_STATUS_ONLY } });
     const pay: Partial<NonNullable<CloseInput['payment']>> = i.payment ?? {};
     const ret = i.return ?? {};
     // a refund stored as a negative payment (Swap/Refund, คืนมัดจำ) is never wiped by a payment of nothing
     const payNothing = num(before.jobPaymentAmount) < 0 && !(num(pay.amount) > 0);
-    // Serial เครื่องใหม่ (a swap job): stored as the Swap page stores it — only a changed one is written
+    // Serial เครื่องใหม่ (a swap job): stored as the Swap page stores it — only a changed one is written,
+    // sent empty = removed; left out (not a swap job) = unchanged
     const newSerial = cleanSerial(i.newSerial);
-    const serialNew = !!newSerial && newSerial !== parseSwap(before.sparePartReplace ?? '')['New S/N'];
+    const serialNew =
+      i.newSerial !== undefined && newSerial !== (parseSwap(before.sparePartReplace ?? '')['New S/N'] ?? '');
     const fields = {
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
       ...(serialNew ? { sparePartReplace: withNewSerial(before.sparePartReplace, newSerial) } : {}),
@@ -2767,6 +2851,15 @@ export async function attachableJob(jobNo: string): Promise<string> {
   return row.no;
 }
 
+/** `s` cut to `max` characters as a varchar counts them (code points: an emoji is never split in two) */
+const cutChars = (s: string, max: number) => Array.from(s).slice(0, max).join('');
+/** document_attach.original_file_name (varchar 50): a longer name keeps its extension ("รายงาน….pdf") */
+export function attachmentName(name: string, max = 50): string {
+  if (Array.from(name).length <= max) return name;
+  const ext = /\.[^.]{1,10}$/u.exec(name)?.[0] ?? '';
+  return cutChars(name, max - Array.from(ext).length) + ext;
+}
+
 export async function addAttachment(
   jobNo: string,
   originalName: string,
@@ -2774,6 +2867,9 @@ export async function addAttachment(
   remark = '',
   byUserId = 0,
 ) {
+  const name = attachmentName(originalName);
+  const note = cutChars(remark, 100);
+  // what was stored (name / remark cut to the columns) — the answer shows exactly that
   return db.transaction(async (tx) => {
     // the job checked again under a share lock (the route's check ran before the upload): a delete running
     // now finishes first, or waits for this row — the caller removes the stored file when this refuses
@@ -2785,9 +2881,9 @@ export async function addAttachment(
       .values({
         referenceTopic: 'Jobs',
         referenceItemCode: jobNo,
-        originalFileName: originalName.slice(0, 50),
+        originalFileName: name,
         systemFileName: systemName.slice(0, 50),
-        remark: remark.slice(0, 100),
+        remark: note,
         isActive: true,
       })
       .returning({ id: documentAttach.documentAttachId });
@@ -2797,10 +2893,10 @@ export async function addAttachment(
       module: 'Job Management',
       entity: 'job',
       key: jobNo,
-      summary: `แนบไฟล์ ${originalName}`,
+      summary: `แนบไฟล์ ${name}`,
       changes: { file: [null, systemName] },
     });
-    return row.id;
+    return { id: row.id, name, remark: note };
   });
 }
 

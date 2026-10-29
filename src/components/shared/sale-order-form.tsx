@@ -438,7 +438,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 >
                   <div className="flex items-center gap-2">
                     <FileInput
-                      placeholder="เลือกไฟล์สลิป (JPG, PNG, PDF)"
+                      placeholder="เลือกไฟล์สลิป (JPG, PNG, WEBP, PDF)"
                       accept=".jpg,.jpeg,.png,.webp,.pdf"
                       onFile={onPickSlip}
                     />

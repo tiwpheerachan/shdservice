@@ -26,6 +26,8 @@ export const POST = handle(async (req: NextRequest) => {
   if (Number(req.headers.get('content-length') ?? 0) > MAX_THUMB_BYTES)
     throw new HttpError(413, 'ภาพตัวอย่างใหญ่เกิน 1MB');
   const { jobNo, file, name, remark, thumb } = await parseForm(req, attachmentVideoConfirm);
+  // a chunked body has no content-length: what was parsed is checked too (name / remark are cut to their columns)
+  if (thumb && thumb.size > MAX_THUMB_BYTES) throw new HttpError(413, 'ภาพตัวอย่างใหญ่เกิน 1MB');
   const no = await attachableJob(jobNo); // 404 / 409 — nothing removed: an unchecked job is not this caller's
   // a confirmed video is never confirmed (nor removed below) again
   const [done] = await db
@@ -42,8 +44,8 @@ export const POST = handle(async (req: NextRequest) => {
     await checkStoredVideo(path);
     // re-encoded like every photo (sharp decodes it: a real JPEG, nothing else rides along)
     if (thumb) await uploadFile(thumbPath, await optimizeImage(thumb));
-    const id = await addAttachment(no, name, file, remark, user.userId);
-    return NextResponse.json({ ok: true, row: { id, name, file, remark } });
+    const row = await addAttachment(no, name, file, remark, user.userId);
+    return NextResponse.json({ ok: true, row: { ...row, file } });
   } catch (e) {
     // never attached: what was uploaded for it goes (the job deleted meanwhile, a wrong / oversize file)
     await Promise.all([removeFile(path), thumb && removeFile(thumbPath)]);

@@ -2,6 +2,8 @@ import 'server-only';
 import sharp from 'sharp';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { AwsClient } from 'aws4fetch';
+import { LRUCache } from 'lru-cache';
+import { NextResponse } from 'next/server';
 import { isoDateTime } from '@/lib/dates';
 import { HttpError } from '@/server/http-error';
 import { logError } from '@/lib/log';
@@ -294,13 +296,19 @@ export async function uploadFile(path: string, file: File | Blob, contentType?: 
 
 /**
  * A presigned R2 URL the browser PUTs one video to, valid 2 h — a video is too big to pass through this server.
- * Signed with Content-Type `type` (no other type) and `If-None-Match: *` (a conditional write: R2 answers 412 when
- * the key exists), so like Supabase's upload URL it can never overwrite — not even the video it put there.
+ * Signed with Content-Type `type`, Content-Length `size` (R2 refuses any other size — the caller checked it is
+ * ≤ MAX_VIDEO_BYTES) and `If-None-Match: *` (a conditional write: R2 answers 412 when the key exists), so like
+ * Supabase's upload URL it can never overwrite — not even the video it put there.
+ * ponytail: a URL issued but never confirmed leaves its object in R2 (≤ 200 MB each, 30 issues a minute per user) —
+ * a sweep of unconfirmed v… objects (or an R2 lifecycle rule) when that ever costs something.
  */
-export async function signedUploadUrl(path: string, type: string): Promise<string> {
+export async function signedUploadUrl(path: string, type: string, size: number): Promise<string> {
   const { client, url } = r2(path);
   url.searchParams.set('X-Amz-Expires', String(2 * 60 * 60));
-  return r2Presign(client, url, { method: 'PUT', headers: { 'content-type': type, 'if-none-match': '*' } });
+  return r2Presign(client, url, {
+    method: 'PUT',
+    headers: { 'content-type': type, 'content-length': String(size), 'if-none-match': '*' },
+  });
 }
 
 /**
@@ -346,21 +354,77 @@ async function firstBytes(res: Response, n: number): Promise<Uint8Array> {
   return out.subarray(0, got);
 }
 
-export async function signedUrl(path: string, seconds = 120, download = false): Promise<string | null> {
+/**
+ * A signed GET URL; `download` = sent as a download (a string: the name to save it as). null = the store has no
+ * such file; any other failure of the store → 503 (logged) — an outage is not a missing file.
+ */
+export async function signedUrl(
+  path: string,
+  seconds = 120,
+  download: boolean | string = false,
+): Promise<string | null> {
   if (onR2(path)) {
     const { client, url } = r2(path);
     url.searchParams.set('X-Amz-Expires', String(seconds));
-    if (download) url.searchParams.set('response-content-disposition', 'attachment');
+    if (download) {
+      const name =
+        download === true
+          ? ''
+          : `; filename*=UTF-8''${encodeURIComponent(download).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16)}`)}`;
+      url.searchParams.set('response-content-disposition', `attachment${name}`);
+    }
     return r2Presign(client, url, { method: 'GET' });
   }
-  const { data, error } = await storage()
-    .from(BUCKET)
-    .createSignedUrl(path, seconds, download ? { download: true } : undefined);
+  const { data, error } = await storage().from(BUCKET).createSignedUrl(path, seconds);
   if (error) {
+    // Supabase answers a missing object with 400 + statusCode "404" (newer versions: a 404)
+    const e = error as { status?: number; statusCode?: string };
+    if (e.status === 404 || e.statusCode === '404') return null;
     logError(error, 'storage signedUrl failed');
-    return null;
+    throw new HttpError(503, 'ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง');
   }
-  return data.signedUrl;
+  // supabase-js puts its `download` option into the URL unencoded (a name with & or # would break it)
+  return download
+    ? `${data.signedUrl}&download=${download === true ? '' : encodeURIComponent(download)}`
+    : data.signedUrl;
+}
+
+const URL_TTL_S = 120;
+// a video plays from the signed URL itself, fetching ranges while it plays and seeks — valid long enough to watch
+const VIDEO_TTL_S = 15 * 60;
+const VIDEO = /\.(?:mp4|mov|webm)$/i;
+/**
+ * A picture (photo, product image, logo, a video's thumbnail — never a slip: a customer's payment details) gets ONE
+ * signed URL a day, shared by everyone who may see it: the browser keeps the redirect and the image, Supabase's CDN
+ * serves the same URL again — reopening a job does not download its pictures again. The price: a copied link opens
+ * for up to a day, and a browser keeps what it saw after its rights are taken away.
+ */
+const PICTURE_TTL_S = 24 * 60 * 60;
+const PICTURE = /\.(?:jpe?g|png|webp|svg)$/i;
+const SLIP = /\/slip\//;
+// ponytail: per process (one Render instance) — a restart signs anew, the old URLs stay valid until they expire
+const pictures = new LRUCache<string, { url: string; exp: number }>({ max: 5000, ttl: (PICTURE_TTL_S - 3600) * 1000 });
+
+/**
+ * The answer of GET /api/files and GET /api/attachments/{id} (the caller checked who may see it): a redirect to the
+ * file's signed URL that the browser may keep while it is valid — a picture a day (the same URL for both routes), a
+ * video 15 minutes, a slip / PDF 2. 404 when the store has no such file (not kept: the next request tries again).
+ */
+export async function fileRedirect(path: string, o: { download?: boolean | string; isPublic?: boolean } = {}) {
+  const picture = PICTURE.test(path) && !SLIP.test(path);
+  const ttl = picture ? PICTURE_TTL_S : VIDEO.test(path) ? VIDEO_TTL_S : URL_TTL_S;
+  const key = `${path}\n${o.download || ''}`; // no download: one entry, whatever said so
+  let signed = picture ? pictures.get(key) : undefined;
+  if (!signed) {
+    const url = await signedUrl(path, ttl, o.download);
+    if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)');
+    signed = { url, exp: Date.now() + ttl * 1000 };
+    if (picture) pictures.set(key, signed);
+  }
+  const maxAge = Math.floor((signed.exp - Date.now()) / 1000) - 60;
+  return NextResponse.redirect(signed.url, {
+    headers: { 'Cache-Control': `${o.isPublic ? 'public' : 'private'}, max-age=${maxAge}` },
+  });
 }
 
 export async function removeFile(path: string): Promise<void> {

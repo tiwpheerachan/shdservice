@@ -1,6 +1,14 @@
 import 'server-only';
 import type { NextRequest } from 'next/server';
-import { requireAdmin, requireUser, requireView, JOB_MODULES, SALE_ORDER_READERS, HttpError } from '@/server/auth';
+import {
+  requireAdmin,
+  requireUser,
+  requireView,
+  JOB_MODULES,
+  PRODUCT_MODULES,
+  SALE_ORDER_READERS,
+  HttpError,
+} from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { pageAudit, listAudit, auditModules } from '@/server/audit';
 import { clampInt, parsePageQuery, searchOf, type Page } from '@/server/paging';
@@ -162,7 +170,10 @@ export async function readResource(
       // lite: ACTIVE (pickers), INACTIVE too only when asked (stock receive) — never DELETED
       if (sp.get('fields') === 'lite')
         return listProductsLite(p.q, sp.get('deleted') === 'exclude' ? 'exclude' : 'active');
-      return paged ? pageProducts(p, productFiltersFromQuery(p.f, deleted)) : listProducts({ deleted, q: p.q });
+      if (paged) return pageProducts(p, productFiltersFromQuery(p.f, deleted));
+      // the full rows (prices, stock): no screen reads them unpaged — the product / stock screens' right, ≤ limit
+      await requireView(req, PRODUCT_MODULES);
+      return (await listProducts({ deleted, q: p.q })).slice(0, limit); // ponytail: cut after the query; a SQL limit if it ever gets a caller
     }
     case 'product_stats':
       return [await productStats(p.q, productFiltersFromQuery(p.f, deleted))];

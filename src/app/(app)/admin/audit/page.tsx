@@ -16,10 +16,18 @@ import { useServerTable } from '@/lib/use-server-table';
 import { fieldLabel } from '@/lib/field-labels';
 import { moduleLabel } from '@/lib/modules';
 import { ExportButton } from '@/components/shared/export-button';
+import { AS } from '@/lib/status-ids';
 
+/** a sale order denied / sent back before 2026-10-29 was logged APPROVE (the log is read-only) — its change says so */
+const actionOf = (r: Pick<AuditRow, 'action' | 'entity' | 'changes'>) =>
+  r.action === 'APPROVE' &&
+  r.entity === 'sale_out_hd' &&
+  [AS.REJECT, AS.DENIED].some((s) => s === r.changes?.approveStatusId?.[1])
+    ? 'STATUS'
+    : r.action;
 /** a sale order is cancelled, not deleted (its DELETE is the cancel: the summary says "ยกเลิกใบสั่งขาย") */
-const actionLabel = (r: { action: string; entity?: string | null }) =>
-  r.action === 'DELETE' && r.entity === 'sale_out_hd' ? 'ยกเลิก' : (ACTION[r.action]?.label ?? r.action);
+const actionLabel = (r: Pick<AuditRow, 'action' | 'entity' | 'changes'>) =>
+  r.action === 'DELETE' && r.entity === 'sale_out_hd' ? 'ยกเลิก' : (ACTION[actionOf(r)]?.label ?? r.action);
 
 // action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
@@ -73,7 +81,7 @@ export default function AuditPage() {
       header: 'การกระทำ',
       width: '120px',
       cell: (r) => (
-        <Badge tone={ACTION[r.action]?.tone ?? 'neutral'} dot>
+        <Badge tone={ACTION[actionOf(r)]?.tone ?? 'neutral'} dot>
           {actionLabel(r)}
         </Badge>
       ),

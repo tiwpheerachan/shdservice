@@ -14,11 +14,12 @@ import { kpisOr, useReportAccess, JOB_SCREENS } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
-// TAT = วันที่ปิดงาน − วันที่เปิดงาน, calendar days (date parts only) — the same count as the server's "เกิน 30 วัน"
+// TAT = วันที่เปิดงาน → the return, else the close, else today — calendar days (date parts only): what the column
+// sorts by and the dashboard / Excel / the server's "เกิน 30 วัน" count (jobs.ts / reports.ts tatDays)
 const tatDays = (r: Job) => {
-  if (!r.closedDate || !r.openDate) return 0;
+  if (!r.openDate) return 0;
   const day = (s: string) => Date.parse(`${s.slice(0, 10)}T00:00:00Z`);
-  return Math.max(0, Math.round((day(r.closedDate) - day(r.openDate)) / 86400000));
+  return Math.max(0, Math.round((day(r.returnDate || r.closedDate || today()) - day(r.openDate)) / 86400000));
 };
 
 const columns: Column<Job>[] = [

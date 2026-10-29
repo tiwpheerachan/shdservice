@@ -5982,6 +5982,239 @@ try {
       assert.ok(listed.includes('J9900961') && listed.includes('J9900962'), 'the engineer filter still matches');
     });
   }
+  console.log(
+    '\nQA round — close statuses, New S/N cleared, unchanged saves, history names, owner sort, attachment names',
+  );
+  {
+    const { saveSwapRefund, addAttachment, attachmentName } = await import('@/server/services/jobs');
+    const { CLOSE_STATUS_ONLY, SWAP_STATUS_ONLY, EDIT_STATUS_ONLY } = await import('@/lib/validation/job');
+    const { audit } = await import('@/server/audit');
+    const { invalidate } = await import('@/server/cache');
+    const job = (no: string, status: number) =>
+      `('${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', 9110)`;
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_id)
+        VALUES ${job('TDJQ01', 5)}, ${job('TDJQ02', 5)}, ${job('TDJQ03', 2)}, ${job('TDJQ04', 18)}, ${job('TDJQ05', 5)},
+               ${job('TDJQ06', 5)}, ${job('TDJQ07', 2)}, ${job('TDJQ08', 2)};
+      -- swapped on the Swap page: the New S/N in both places
+      UPDATE job SET swap_refund_detail = E'New S/N: CLS0001\\nวันที่เปลี่ยนเครื่อง: 2026-10-20', spare_part_replace = 'New S/N: CLS0001'
+       WHERE job_no = 'TDJQ04';
+      -- legacy: the old system's free-text swap detail, doc no "0"; a New S/N from บันทึกซ่อม
+      UPDATE job SET swap_refund_detail = 'เปลี่ยน', swap_refund_document_no = '0', spare_part_replace = 'New S/N: REP0001'
+       WHERE job_no IN ('TDJQ05', 'TDJQ06');
+      UPDATE job SET spare_part_replace = 'แบตเตอรี่' WHERE job_no = 'TDJQ03';`);
+    const [s0, s2, s5, s17, s18, s20] = await Promise.all([0, 2, 5, 17, 18, 20].map(statusName));
+    const ret = { type: 'ลูกค้ามารับเอง', date: '2026-10-29' };
+    const stored = async (no: string) =>
+      (
+        await db.execute<{ s: number; sw: string; spr: string; doc: string }>(sql`
+          SELECT job_status_id AS s, swap_refund_detail AS sw, spare_part_replace AS spr, swap_refund_document_no AS doc
+            FROM job WHERE job_no = ${no}`)
+      ).rows[0];
+    const trail = async (no: string) =>
+      (
+        await db.execute<{ j: unknown; a: number; l: number }>(sql`
+          SELECT to_jsonb(job) AS j,
+                 (SELECT count(*)::int FROM audit_log WHERE entity = 'job' AND entity_key = ${no}) AS a,
+                 (SELECT count(*)::int FROM job_log WHERE job_no = ${no}) AS l
+            FROM job WHERE job_no = ${no}`)
+      ).rows[0];
+
+    await test('QA 1: ปิดงาน takes only its own statuses (or the current one) — ยกเลิกข้อมูล / 18 / an open one → 400, nothing written', async () => {
+      for (const st of [s0, s18, s2])
+        assert.deepEqual(
+          await fieldsOf(closeJob('TDJQ01', { status: st, return: ret }, U.admin.id)).then((r) => [r.status, r.fields]),
+          [400, { status: CLOSE_STATUS_ONLY }],
+          st,
+        );
+      assert.deepEqual([(await stored('TDJQ01')).s, await logRows('TDJQ01')], [5, []]);
+      const ok = await fieldsOf(closeJob('TDJQ01', { status: s20, return: ret }, U.admin.id));
+      assert.equal(ok.status, 200, JSON.stringify(ok));
+      // closed: the job's own status saved again (the parcel no. added later) still passes
+      const again = await fieldsOf(closeJob('TDJQ01', { status: s20, return: ret }, U.admin.id));
+      assert.equal(again.status, 200, JSON.stringify(again));
+    });
+
+    await test('QA 2: Swap / edit "own status unchanged" is the row as locked — moved meanwhile, re-sending the old one → 400, nothing moves', async () => {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(`UPDATE job SET job_status_id = 17 WHERE job_no = 'TDJQ02'`);
+        const saving = fieldsOf(saveSwapRefund('TDJQ02', { status: s5 }, U.admin.id));
+        await new Promise((r) => setTimeout(r, 300)); // the save read 5 and waits for the row lock
+        await c.query('COMMIT');
+        const r = await saving;
+        assert.deepEqual([r.status, r.fields], [400, { status: SWAP_STATUS_ONLY }]);
+      } finally {
+        c.release();
+      }
+      assert.deepEqual([(await stored('TDJQ02')).s, await logRows('TDJQ02')], [17, []]);
+      // แก้ไขข้อมูลงาน the same way: its status (display only) read as 17, moved to 5 meanwhile → 400, stays 5
+      const j = (await getJob('TDJQ02'))!;
+      const edit = { customerCode: CUSTOMER, jobType: j.jobType, dueDate: j.dueDate, warrantyMonth: j.warrantyMonth };
+      const d = await pool.connect();
+      try {
+        await d.query('BEGIN');
+        await d.query(`UPDATE job SET job_status_id = 5 WHERE job_no = 'TDJQ02'`);
+        const saving = fieldsOf(updateJob('TDJQ02', { ...edit, status: s17 }, U.admin.id));
+        await new Promise((r) => setTimeout(r, 300));
+        await d.query('COMMIT');
+        const r = await saving;
+        assert.deepEqual([r.status, r.fields], [400, { status: EDIT_STATUS_ONLY }]);
+      } finally {
+        d.release();
+      }
+      assert.deepEqual([(await stored('TDJQ02')).s, await logRows('TDJQ02')], [5, []]);
+    });
+
+    await test('QA 3a: Swap — a New S/N cleared leaves both swap_refund_detail and spare_part_replace (the part list stays)', async () => {
+      const swap = { status: s17, swapDate: '2026-10-28' };
+      await saveSwapRefund('TDJQ03', { ...swap, newSerial: 'CLR0001' }, U.admin.id);
+      assert.deepEqual(
+        [(await stored('TDJQ03')).sw, (await stored('TDJQ03')).spr],
+        ['New S/N: CLR0001\nวันที่เปลี่ยนเครื่อง: 2026-10-28', 'แบตเตอรี่\nNew S/N: CLR0001'],
+      );
+      await saveSwapRefund('TDJQ03', { ...swap, newSerial: '' }, U.admin.id);
+      const k = await stored('TDJQ03');
+      assert.deepEqual([k.sw, k.spr], ['วันที่เปลี่ยนเครื่อง: 2026-10-28', 'แบตเตอรี่']);
+    });
+
+    await test('QA 3b: ปิดงาน — Serial เครื่องใหม่ cleared on a swap job leaves both places; not sent (legacy) = untouched', async () => {
+      const r = await fieldsOf(closeJob('TDJQ04', { status: s20, return: ret, newSerial: '' }, U.admin.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      const k = await stored('TDJQ04');
+      assert.deepEqual([k.s, k.sw, k.spr], [20, 'วันที่เปลี่ยนเครื่อง: 2026-10-20', '']);
+      const legacy = await fieldsOf(closeJob('TDJQ05', { status: s20, return: ret }, U.admin.id));
+      assert.equal(legacy.status, 200, JSON.stringify(legacy));
+      const m = await stored('TDJQ05');
+      assert.deepEqual([m.sw, m.spr, m.doc], ['เปลี่ยน', 'New S/N: REP0001', '0']);
+    });
+
+    await test('QA 4a: a legacy Swap job saved unchanged (what the page sends) writes nothing — row, version, history', async () => {
+      const before = await trail('TDJQ06');
+      const j = (await getJob('TDJQ06'))!;
+      // the Swap page as loaded: detail = the free text, New S/N / date empty (no "today" for a stored detail)
+      const body = {
+        inspection: j.repairDetail,
+        newSerial: '',
+        newModel: '',
+        swapDate: '',
+        docNo: j.swap.docNo,
+        detail: j.swap.detail,
+        status: j.status,
+        version: j.version,
+      };
+      const r = await fieldsOf(saveSwapRefund('TDJQ06', body, U.admin.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      assert.deepEqual(await trail('TDJQ06'), before);
+    });
+
+    await test('QA 4b: Out-Source saved again as stored (send, a repeated receive) adds no history row', async () => {
+      const [s14, s15] = [await statusName(14), await statusName(15)];
+      const send = { to: 'TD Vendor QA', date: '2026-10-20', by: U.admin.id };
+      const receive = { from: send.to, date: '2026-10-22', by: U.admin.id };
+      await saveOutsource('TDJQ07', { send, status: s14 }, U.admin.id);
+      let before = await trail('TDJQ07');
+      await saveOutsource('TDJQ07', { send, status: s14 }, U.admin.id);
+      assert.deepEqual(await trail('TDJQ07'), before, 'the open send saved again');
+      await saveOutsource('TDJQ07', { send, receive, status: s15 }, U.admin.id);
+      before = await trail('TDJQ07');
+      await saveOutsource('TDJQ07', { send, receive, status: s15 }, U.admin.id);
+      await saveOutsource('TDJQ07', { receive, status: s15 }, U.admin.id);
+      assert.deepEqual(await trail('TDJQ07'), before, 'the receive saved again');
+      // a real change still writes its row
+      await saveOutsource('TDJQ07', { send, receive: { ...receive, detail: 'TD QA note' }, status: s15 }, U.admin.id);
+      assert.equal((await trail('TDJQ07')).a, before.a + 1);
+    });
+
+    await test('QA 5: ประวัติการแก้ไข shows names for the id columns (job type, product type, brand, model, symptoms, shipper, customer); unknown id stays', async () => {
+      await pool.query(`
+        INSERT INTO product_type (product_type_name) SELECT 'TD ประเภทสินค้า' WHERE NOT EXISTS (SELECT 1 FROM product_type WHERE product_type_name = 'TD ประเภทสินค้า');
+        INSERT INTO shipping_profile (code, name_th) SELECT 'TDQA', 'TD ขนส่ง QA' WHERE NOT EXISTS (SELECT 1 FROM shipping_profile WHERE code = 'TDQA');`);
+      invalidate('master:');
+      const one = async (q: string) => (await pool.query<{ id: number; n: string }>(q)).rows[0]!;
+      const jt = await one(
+        `SELECT job_type_id AS id, job_type_name AS n FROM job_type WHERE job_type_name = 'TD งานซ่อม'`,
+      );
+      const pt = await one(
+        `SELECT product_type_id AS id, product_type_name AS n FROM product_type WHERE product_type_name = 'TD ประเภทสินค้า'`,
+      );
+      const br = await one(
+        `SELECT manufacturer_id AS id, manufacturer_name AS n FROM manufacturer ORDER BY manufacturer_id LIMIT 1`,
+      );
+      const md = await one(`SELECT model_id AS id, model_code AS n FROM model ORDER BY model_id LIMIT 1`);
+      const sy = await one(`SELECT symptom_id AS id, symptom_name AS n FROM symptom ORDER BY symptom_id LIMIT 1`);
+      const sh = await one(`SELECT id, name_th AS n FROM shipping_profile WHERE code = 'TDQA'`);
+      const cu = await one(
+        `SELECT customer_id AS id, concat_ws(' ', customer_code, customer_name) AS n FROM customer WHERE customer_id = 9001`,
+      );
+      await audit(db, U.admin.id, {
+        action: 'UPDATE',
+        module: 'Job Management',
+        entity: 'job',
+        key: 'TDJQ08',
+        summary: 'TD QA ids',
+        changes: {
+          jobTypeId: [999999, jt.id],
+          productTypeId: [null, pt.id],
+          productBrandId: [br.id, null],
+          productModelId: [md.id, 999999],
+          productSymptomId: [sy.id, sy.id],
+          engineerSymptomId: [null, sy.id],
+          returnShipperId: [null, sh.id],
+          customerId: [cu.id, cu.id],
+        },
+      });
+      const h = (await getJob('TDJQ08'))!.history.find((x) => x.summary === 'TD QA ids')!;
+      assert.deepEqual(h.changes, {
+        jobTypeId: [999999, jt.n],
+        productTypeId: [null, pt.n],
+        productBrandId: [br.n, null],
+        productModelId: [md.n, 999999],
+        productSymptomId: [sy.n, sy.n],
+        engineerSymptomId: [null, sy.n],
+        returnShipperId: [null, sh.n],
+        customerId: [cu.n, cu.n],
+      });
+    });
+
+    await test('QA 6: job list sorted by ผู้รับผิดชอบ puts the unassigned last, ascending and descending', async () => {
+      await pool.query(`UPDATE job SET engineer_id = NULL WHERE job_no = 'TDJQ08'`);
+      for (const dir of ['asc', 'desc'] as const) {
+        const p = await pageJobs(
+          { page: 1, pageSize: 500, q: '', f: {}, sort: { key: 'owner', dir } },
+          filtersFromQuery({ customerCode: CUSTOMER }),
+        );
+        const owners = p.rows.map((r) => r.owner);
+        const firstNone = owners.indexOf('');
+        assert.ok(firstNone > 0, `${dir}: someone assigned comes first`);
+        assert.ok(
+          owners.slice(firstNone).every((o) => o === ''),
+          `${dir}: nobody assigned after the unassigned`,
+        );
+      }
+    });
+
+    await test('QA 7: an attachment name is cut to 50 characters keeping its extension, never splitting an emoji; remark ≤ 100', async () => {
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      const long = `${'รายงาน'.repeat(4)}${'😀'.repeat(30)}.pdf`; // 58 characters, 88 UTF-16 units
+      const name = attachmentName(long);
+      assert.equal(Array.from(name).length, 50);
+      assert.ok(name.endsWith('😀.pdf') && !lone.test(name) && !name.includes('�'), name);
+      assert.equal(attachmentName('short.png'), 'short.png');
+      assert.equal(Array.from(attachmentName('x'.repeat(60))).length, 50, 'no extension: just cut');
+      const remark = '😀'.repeat(120);
+      const { id, ...answer } = await addAttachment('TDJQ08', long, 'qa-system.pdf', remark, U.admin.id);
+      assert.deepEqual(answer, { name, remark: '😀'.repeat(100) }, 'the answer = what was stored');
+      const [row] = (
+        await db.execute<{ n: string; r: string }>(
+          sql`SELECT original_file_name AS n, remark AS r FROM document_attach WHERE document_attach_id = ${id}`,
+        )
+      ).rows;
+      assert.equal(row!.n, name);
+      assert.equal(row!.r, '😀'.repeat(100));
+    });
+  }
 } finally {
   // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next
   // suite's first app insert (test:api POST /api/masters/symptoms) collides on the primary key

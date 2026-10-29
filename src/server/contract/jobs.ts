@@ -392,8 +392,8 @@ const attachJobNo = z
 const attachRemark = z
   .unknown()
   .optional()
-  .transform((v) => String(v ?? '').slice(0, 200))
-  .meta({ type: 'string', description: 'Read up to 200 characters (the rest is dropped).' });
+  .transform((v) => String(v ?? '').slice(0, 100))
+  .meta({ type: 'string', description: 'Read up to 100 characters (the column; the rest is dropped).' });
 const AttachmentRow = z.object({
   ok: z.literal(true),
   row: z.object({ id: n, name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),
@@ -441,17 +441,22 @@ export const attachmentVideoUrl = defineOperation({
   tags,
   summary: 'Get a one-time URL to upload a video attachment straight to storage',
   description:
-    "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type` and `If-None-Match: *` are signed — send both; an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
+    "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type`, `Content-Length` (= `size`) and `If-None-Match: *` are signed — any other type or size is refused, an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
   body: z.object({
     jobNo: attachJobNo,
     type: z
       .enum(['video/mp4', 'video/quicktime', 'video/webm'], { error: VIDEO_TYPE })
       .meta({ description: 'the type of the file to be PUT (a converted clip: video/mp4) — sets its extension' }),
+    size: z
+      .number({ error: 'ไม่ทราบขนาดไฟล์วิดีโอ' })
+      .int('ไม่ทราบขนาดไฟล์วิดีโอ')
+      .positive('ไม่ทราบขนาดไฟล์วิดีโอ')
+      .meta({ description: 'bytes of the file to be PUT — signed into the URL (Content-Length); over 200 MB → 413' }),
   }),
   invalid: { body: 400 },
   responses: {
     200: jsonResponse(
-      'Where to PUT the file (`Content-Type` = `type`, `If-None-Match: *`).',
+      'Where to PUT the file (`Content-Type` = `type`, `Content-Length` = `size`, `If-None-Match: *`).',
       z.object({
         file: s.meta({ description: 'the stored file name — sent back to confirm' }),
         url: s.meta({ description: 'R2 presigned upload URL' }),
@@ -460,7 +465,8 @@ export const attachmentVideoUrl = defineOperation({
     ...SIGNED_IN,
     503: errorResponse(VIDEO_STORE_DOWN),
     ...JSON_BODY,
-    400: errorResponse('Not JSON (`invalid_json`), or a type other than MP4 / MOV / WebM.'),
+    400: errorResponse('Not JSON (`invalid_json`), a type other than MP4 / MOV / WebM, or no `size`.'),
+    413: errorResponse('Body over 1 MB, or `size` over 200 MB (`วิดีโอใหญ่เกิน 200MB`).'),
     ...notFound('No such job.'),
     409: errorResponse('The job is deleted (cancelled).'),
     ...RATE_LIMITED,
@@ -510,6 +516,8 @@ export const attachmentVideoConfirm = defineOperation({
   },
 });
 
+const STORE_DOWN =
+  'The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).';
 const attachmentId = z.object({ id: s.regex(/^\d{1,9}$/, 'not found').meta({ description: 'document_attach id' }) });
 
 export const attachmentGet = defineOperation({
@@ -517,12 +525,17 @@ export const attachmentGet = defineOperation({
   path: '/attachments/{id}',
   tags,
   summary: 'Open an attachment',
+  description:
+    'Any job module. The same answer as GET /files for its path: a picture a day (cacheable), a video 15 minutes, a PDF 2.',
   params: attachmentId,
   invalid: { params: 404 },
   responses: {
-    307: redirect('To a short-lived signed URL of the file.'),
+    307: redirect('To a signed URL of the file (cacheable while it is valid).'),
     ...SIGNED_IN,
-    ...notFound('No such attachment (or it was removed), or the file is still on the old system.'),
+    503: errorResponse(STORE_DOWN),
+    ...notFound(
+      'No such attachment (or it was removed), a legacy row without a file name, or the file is still on the old system.',
+    ),
   },
 });
 

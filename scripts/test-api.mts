@@ -176,7 +176,10 @@ try {
   await expect([400], '/api/upload', { method: 'POST', form: form({ kind: 'product-image', id: 'TDP1' }) });
   await expect([400], '/api/attachments', { method: 'POST', form: form({ jobNo: 'TDJ0004' }) });
   // video attachments: the storage side (signed upload, the checks of what arrived) is scripts/test-qa-video.mts
-  await expect([404], '/api/attachments/video', { method: 'POST', body: { jobNo: 'NOPE' + rand, type: 'video/mp4' } });
+  await expect([404], '/api/attachments/video', {
+    method: 'POST',
+    body: { jobNo: 'NOPE' + rand, type: 'video/mp4', size: 1024 },
+  });
   await expect([404], '/api/attachments/video/confirm', {
     method: 'POST',
     form: form({ jobNo: 'NOPE' + rand, file: 'v20261028120000abcdef0123456789abcd.mp4' }),
@@ -691,7 +694,7 @@ try {
   await refuses(400, { error: 'ไม่พบไฟล์' }, '/api/attachments', { method: 'POST', form: form({ jobNo: 'TDJ0004' }) });
   await refuses(400, { error: 'รองรับเฉพาะวิดีโอ MP4, MOV, WebM' }, '/api/attachments/video', {
     method: 'POST',
-    body: { jobNo: 'TDJ0004', type: 'video/x-msvideo' },
+    body: { jobNo: 'TDJ0004', type: 'video/x-msvideo', size: 1024 },
   });
   await refuses(400, { error: 'ไม่พบไฟล์วิดีโอที่อัปโหลด' }, '/api/attachments/video/confirm', {
     method: 'POST',

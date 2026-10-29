@@ -5,7 +5,7 @@ import { documentAttach } from '@/db/schema';
 import { handle, requireCan, HttpError, requireView, JOB_MODULES, parseParams } from '@/server/auth';
 import { attachmentDelete, attachmentGet } from '@/server/contract/jobs';
 import { removeAttachment } from '@/server/services/jobs';
-import { signedUrl, filePath, resolvePath } from '@/server/storage';
+import { fileRedirect, filePath, resolvePath } from '@/server/storage';
 import { RS } from '@/server/record-status';
 
 export const runtime = 'nodejs';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** Redirect to a short-lived signed URL for the stored file. */
+/** Redirect to the file's signed URL — the same answer as GET /api/files (storage.ts fileRedirect). */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, JOB_MODULES);
   const { id } = await parseParams(ctx, attachmentGet);
@@ -21,13 +21,9 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
     .select()
     .from(documentAttach)
     .where(eq(documentAttach.documentAttachId, Number(id)));
-  if (!row || row.recordStatus === RS.DELETED) throw new HttpError(404, 'not found');
-  const url = await signedUrl(
-    resolvePath(row.systemFileName ?? '', (f) => filePath.attachment(row.referenceItemCode ?? '', f)),
-    120, // a leaked link (history, a forwarded URL) stops working soon
-  );
-  if (!url) throw new HttpError(404, 'ไฟล์นี้อยู่บนระบบเก่า ยังไม่ได้ย้ายมา');
-  return NextResponse.redirect(url);
+  // a legacy row without a file name has nothing to open (it would sign the job's folder)
+  if (!row || row.recordStatus === RS.DELETED || !row.systemFileName?.trim()) throw new HttpError(404, 'not found');
+  return fileRedirect(resolvePath(row.systemFileName, (f) => filePath.attachment(row.referenceItemCode ?? '', f)));
 });
 
 /** Soft delete (record_status DELETED + audit): the stored file stays — evidence, and restorable in SQL. */

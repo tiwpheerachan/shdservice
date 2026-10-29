@@ -111,6 +111,7 @@ export const JOB_COLUMN_LABEL: Record<string, string> = {
   swapRefundDetail: 'รายละเอียด Swap / Refund',
   swapRefundDocumentNo: 'เลขที่เอกสาร Swap / Refund',
   sendTo: 'ส่งไปยัง',
+  sendDetail: 'หมายเหตุการส่ง',
   sendDate: 'วันที่ส่ง',
   sendBy: 'ส่งโดย',
   receiveFrom: 'รับจาก',
@@ -440,6 +441,8 @@ export const SWAP_STATUS_OPTIONS = {
   refund: ['อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว', 'อยู่ระหว่างดำเนินการ - เบิกจ่ายเงินแล้ว'],
 };
 export const SWAP_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า Swap / Refund (ตามแบบที่เลือก)';
+/** ปิดงาน-ส่งคืนสินค้า: CLOSE_STATUS_OPTIONS only (closeJob, by id); the job's own status re-saved unchanged passes */
+export const CLOSE_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า ปิดงาน-ส่งคืนสินค้า';
 /** แก้ไขข้อมูลงาน shows the status only — it moves through the workflow pages (updateJob) */
 export const EDIT_STATUS_ONLY =
   'หน้าแก้ไขข้อมูลงานเปลี่ยนสถานะไม่ได้ — ใช้หน้า บันทึกงานซ่อม / Out-Source / Swap-Refund / ปิดงาน';

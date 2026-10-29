@@ -20,6 +20,7 @@ import {
   type TrackStepKey,
 } from '@/lib/track-public';
 import { logError } from '@/lib/log';
+import { REFUND_DETAIL, refundDateOf } from '@/lib/validation/job';
 import { newToken, sha256, TOKEN_SHAPE } from '@/server/track-guard';
 
 /**
@@ -170,7 +171,12 @@ export function jobForCustomer(j: JobDetail): JobDetail {
     // free text typed by staff — internal notes / staff names ("คืนเงินนอกระบบ"); the return keeps its type + tracking no.
     remark: '',
     engineerRemark: '',
-    return: { ...j.return, detail: '' },
+    return: { ...j.return, detail: '' }, // the return note names the courier from its profile instead
+    // "ชำระ <date> · <staff note>"; a refund keeps the "คืนมัดจำ <date>" closeJob wrote (the return note's คืนเงินมัดจำ)
+    payment: {
+      ...j.payment,
+      detail: refundDateOf(j.payment.detail) ? `${REFUND_DETAIL} ${refundDateOf(j.payment.detail)}` : '',
+    },
     engineerId: 0,
     engineer: '',
     createBy: 0,
@@ -188,6 +194,7 @@ export function quotationForCustomer(q: QuotationDetail): QuotationDetail {
   return {
     ...q,
     job: q.job && jobForCustomer(q.job),
+    remark: '', // หมายเหตุ — typed by staff, internal
     createdBy: '', // เสนอราคาโดย — a staff name
     createdByPhone: '',
     createdByEmail: '',

@@ -39,6 +39,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   // removing a saved file needs Job Management delete (the API refuses others); a queued one is just dropped
   const access = useAccess();
   const canDelete = access.can('Job Management', 'del');
+  // attaching needs Job Management edit (POST /api/attachments refuses others): a view-only user sees just the list
+  const canAttach = access.can('Job Management', 'edit');
   // existing files of a loaded job: `files` came with the job the page loaded (no second GET /api/jobs/:no),
   // on screen from the first render (so in the server HTML); taken again only when another job is shown, so
   // a save (same job) keeps what was uploaded here meanwhile
@@ -60,7 +62,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   // each picked video converted once: a failed upload (or the queue of a new job) sends the same result again
   const prepared = React.useRef(new WeakMap<File, PreparedVideo>());
   const [playing, setPlaying] = React.useState<{ name: string; src: string; download?: string } | null>(null);
-  const [unplayable, setUnplayable] = React.useState(false);
+  // why the player stopped: the file is not in storage, or this browser cannot play it
+  const [playError, setPlayError] = React.useState<'' | 'missing' | 'unplayable'>('');
   // files queued for a job not saved yet are an unsaved edit (they upload with the job), and so is a file
   // picked but not "แนบไฟล์"-ed yet, and a video on its way
   useUnsavedChanges(rows.some((r) => r.pending) || !!file || !!progress);
@@ -198,42 +201,46 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <label className="flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
-          <Upload className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">
-            {name ||
-              (access.videos
-                ? 'เลือกไฟล์แนบ (PDF, JPG, PNG — ไม่เกิน 10MB · วิดีโอ MP4, MOV, WebM — ไม่เกิน 3 นาที)'
-                : 'เลือกไฟล์แนบ (PDF, JPG, PNG — ไม่เกิน 10MB)')}
-          </span>
-          <input
-            type="file"
-            className="hidden"
-            accept={`.pdf,.jpg,.jpeg,.png,.webp${access.videos ? ',.mp4,.m4v,.mov,.webm,video/mp4,video/quicktime,video/webm' : ''}`}
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              e.target.value = ''; // the same file can be chosen again
-              // no video storage (R2) configured: the API would answer 503 with the same words
-              if (f && !access.videos && isVideo(f)) push({ kind: 'error', title: 'แนบวิดีโอไม่ได้', desc: VIDEO_OFF });
-              else setFile(f);
-            }}
+      {canAttach && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
+            <Upload className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              {name ||
+                (access.videos
+                  ? 'เลือกไฟล์แนบ (PDF, JPG, PNG, WEBP — ไม่เกิน 10MB · วิดีโอ MP4, MOV, WebM — ไม่เกิน 3 นาที)'
+                  : 'เลือกไฟล์แนบ (PDF, JPG, PNG, WEBP — ไม่เกิน 10MB)')}
+            </span>
+            <input
+              type="file"
+              className="hidden"
+              accept={`.pdf,.jpg,.jpeg,.png,.webp${access.videos ? ',.mp4,.m4v,.mov,.webm,video/mp4,video/quicktime,video/webm' : ''}`}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                e.target.value = ''; // the same file can be chosen again
+                // no video storage (R2) configured: the API would answer 503 with the same words
+                if (f && !access.videos && isVideo(f))
+                  push({ kind: 'error', title: 'แนบวิดีโอไม่ได้', desc: VIDEO_OFF });
+                else setFile(f);
+              }}
+            />
+          </label>
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="คำอธิบายเพิ่มเติม"
+            aria-label="คำอธิบายไฟล์แนบ"
+            maxLength={100} // document_attach.remark
+            className="sm:w-64"
           />
-        </label>
-        <Input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="คำอธิบายเพิ่มเติม"
-          aria-label="คำอธิบายไฟล์แนบ"
-          className="sm:w-64"
-        />
-        <Button variant="outline" size="md" onClick={add} disabled={!file || busy}>
-          <Paperclip className="h-3.5 w-3.5" />
-          แนบไฟล์
-        </Button>
-      </div>
+          <Button variant="outline" size="md" onClick={add} disabled={!file || busy}>
+            <Paperclip className="h-3.5 w-3.5" />
+            แนบไฟล์
+          </Button>
+        </div>
+      )}
 
-      {!access.videos && <p className="text-xs text-muted-foreground">วิดีโอ: {VIDEO_OFF}</p>}
+      {canAttach && !access.videos && <p className="text-xs text-muted-foreground">วิดีโอ: {VIDEO_OFF}</p>}
 
       {progress && (
         <div
@@ -245,7 +252,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
             {progress.label} {progress.pct}%
           </span>
           <progress value={progress.pct} max={100} className="h-1.5 min-w-0 flex-1 accent-primary" />
-          <Button variant="ghost" size="sm" onClick={() => abort.current?.abort()}>
+          <Button variant="ghost" size="sm" onClick={() => abort.current?.abort()} aria-label="ยกเลิกการแนบวิดีโอ">
             ยกเลิก
           </Button>
         </div>
@@ -255,10 +262,11 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
-              <th className="w-10 px-3 py-2 text-left">#</th>
+              {/* a phone: # hidden, the description under the file name — nothing off-screen */}
+              <th className="hidden w-10 px-3 py-2 text-left sm:table-cell">#</th>
               <th className="px-3 py-2 text-left">เอกสารแนบ</th>
-              <th className="px-3 py-2 text-left">คำอธิบายเพิ่มเติม</th>
-              <th className="w-20 px-3 py-2 text-center">Action</th>
+              <th className="hidden px-3 py-2 text-left sm:table-cell">คำอธิบายเพิ่มเติม</th>
+              <th className="w-16 px-3 py-2 text-center sm:w-20">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -271,14 +279,14 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
             ) : (
               rows.map((r, i) => (
                 <tr key={r.id} className="border-b border-border/70 last:border-0">
-                  <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
-                  <td className="px-3 py-2">
+                  <td className="num hidden px-3 py-2 text-muted-foreground sm:table-cell">{i + 1}</td>
+                  <td className="px-3 py-2 wrap-anywhere">
                     {r.id > 0 && isVideoFile(r.file) ? (
                       <button
                         type="button"
                         onClick={() => {
                           const path = `jobs/${jobNo}/attachments/${r.file}`;
-                          setUnplayable(false);
+                          setPlayError('');
                           setPlaying({
                             name: r.name,
                             src: fileUrl(path),
@@ -306,7 +314,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                         type="button"
                         onClick={() => {
                           const v = prepared.current.get(r.pending!);
-                          setUnplayable(false);
+                          setPlayError('');
                           setPlaying({ name: r.name, src: URL.createObjectURL(v?.file ?? r.pending!) });
                         }}
                         className="inline-flex items-center gap-1.5 text-left hover:underline"
@@ -315,7 +323,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                         {r.name}
                         <span className="text-2xs text-muted-foreground">(รอบันทึก)</span>
                       </button>
-                    ) : r.id > 0 ? (
+                    ) : r.id > 0 && r.file?.trim() ? (
                       <a
                         href={`/api/attachments/${r.id}`}
                         target="_blank"
@@ -329,11 +337,15 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                       <span className="inline-flex items-center gap-1.5">
                         <FileText className="h-3.5 w-3.5 text-primary" />
                         {r.name}
-                        <span className="text-2xs text-muted-foreground">(รอบันทึก)</span>
+                        {/* a legacy row without a stored file: nothing to open */}
+                        <span className="text-2xs text-muted-foreground">
+                          {r.pending ? '(รอบันทึก)' : '(ไม่มีไฟล์)'}
+                        </span>
                       </span>
                     )}
+                    {r.note && <p className="mt-0.5 text-xs text-muted-foreground sm:hidden">{r.note}</p>}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.note || '—'}</td>
+                  <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{r.note || '—'}</td>
                   <td className="px-3 py-2 text-center">
                     {(r.id < 0 || canDelete) && (
                       <button
@@ -361,16 +373,19 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
         title={playing?.name ?? ''}
         size="lg"
         footer={
-          playing?.download && (
+          playing?.download &&
+          playError !== 'missing' && (
             <Button asChild variant="outline" size="sm">
               <a href={playing.download}>ดาวน์โหลด</a>
             </Button>
           )
         }
       >
-        {unplayable ? (
+        {playError ? (
           <p className="text-sm text-muted-foreground">
-            เบราว์เซอร์นี้เล่นวิดีโอนี้ไม่ได้{playing?.download && ' — กด ดาวน์โหลด แล้วเปิดในเครื่อง'}
+            {playError === 'missing'
+              ? 'ไม่พบไฟล์วิดีโอ — อาจยังอยู่บนระบบเก่า หรือถูกลบไปแล้ว'
+              : `เบราว์เซอร์นี้เล่นวิดีโอนี้ไม่ได้${playing?.download ? ' — กด ดาวน์โหลด แล้วเปิดในเครื่อง' : ''}`}
           </p>
         ) : (
           playing && (
@@ -380,7 +395,11 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
               controls
               preload="metadata"
               playsInline
-              onError={() => setUnplayable(true)}
+              onError={async () => {
+                // a status probe of our own /api/files URL (not followed to storage): 404 = the file is not there
+                const res = await fetch(playing.src, { redirect: 'manual' }).catch(() => null);
+                setPlayError(res?.status === 404 ? 'missing' : 'unplayable');
+              }}
               className="max-h-[70vh] w-full rounded-md bg-black"
             />
           )

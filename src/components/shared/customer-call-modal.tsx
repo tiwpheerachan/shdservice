@@ -142,9 +142,10 @@ export function CustomerCallModal({
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-linear-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-xs">
               {initials(customer.name) || <User className="h-5 w-5" />}
             </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-semibold">{customer.name}</p>
-              <p className="num mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            {/* basis: on a phone the buttons wrap below instead of squeezing the name to "QA…" */}
+            <div className="min-w-0 flex-1 basis-40">
+              <p className="wrap-break-word text-base font-semibold">{customer.name}</p>
+              <p className="num mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <Hash className="h-3 w-3" />
                 {customer.code}
                 <Badge tone={customer.status === 'Active' ? 'success' : 'neutral'} dot className="ml-1">

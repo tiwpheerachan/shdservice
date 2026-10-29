@@ -1,5 +1,7 @@
-import { NextResponse, type NextRequest } from 'next/server';
-import { LRUCache } from 'lru-cache';
+import type { NextRequest } from 'next/server';
+import { and, eq, inArray, ne } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { documentAttach } from '@/db/schema';
 import {
   canViewAny,
   handle,
@@ -12,14 +14,16 @@ import {
 } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { files } from '@/server/contract/misc';
-import { signedUrl } from '@/server/storage';
+import { fileRedirect, filePath } from '@/server/storage';
+import { RS } from '@/server/record-status';
 import { rateLimit } from '@/server/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/files?path=products/P00230/x.jpg → 302 to a short-lived signed URL.
+ * GET /api/files?path=products/P00230/x.jpg → 307 to a signed URL (storage.ts fileRedirect: a picture a day, a video
+ * 15 minutes, anything else 2).
  *
  * Only the folders the app actually writes (storage.ts `filePath`) can be signed —
  * never an arbitrary object in the bucket:
@@ -37,21 +41,7 @@ const STAFF_PATHS: [RegExp, readonly Module[]][] = [
   [/^products\/[^/]+\/[^/]+$/, PRODUCT_MODULES],
 ];
 const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
-const URL_TTL_S = 120;
-// a video plays from the signed URL itself, fetching ranges while it plays and seeks — valid long enough to watch
-const VIDEO_TTL_S = 15 * 60;
-const VIDEO = /\.(?:mp4|mov|webm)$/i;
-/**
- * A picture (photo, product image, logo, a video's thumbnail — never a slip: a customer's payment details) gets ONE
- * signed URL a day, shared by everyone who may see it: the browser keeps the redirect and the image, Supabase's CDN
- * serves the same URL again — reopening a job does not download its pictures again. The price: a copied link opens
- * for up to a day, and a browser keeps what it saw after its rights are taken away.
- */
-const PICTURE_TTL_S = 24 * 60 * 60;
-const PICTURE = /\.(?:jpe?g|png|webp|svg)$/i;
-const SLIP = /\/slip\//;
-// ponytail: per process (one Render instance) — a restart signs anew, the old URLs stay valid until they expire
-const pictures = new LRUCache<string, { url: string; exp: number }>({ max: 5000, ttl: (PICTURE_TTL_S - 3600) * 1000 });
+const ATTACHMENT = /^jobs\/([^/]+)\/attachments\/([^/]+)$/;
 
 export const GET = handle(async (req: NextRequest) => {
   // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"
@@ -67,23 +57,32 @@ export const GET = handle(async (req: NextRequest) => {
     if (!modules) throw new HttpError(404, 'ไม่พบไฟล์');
     if (!(await canViewAny(user, modules))) throw new HttpError(403, 'ไม่มีสิทธิ์ดูข้อมูลส่วนนี้');
   }
-  const picture = PICTURE.test(path) && !SLIP.test(path);
-  const ttl = picture ? PICTURE_TTL_S : VIDEO.test(path) ? VIDEO_TTL_S : URL_TTL_S;
+  // a job attachment opens only while its row is there (not once removed — a soft delete keeps the file), on every
+  // request, before any cached URL; a video's thumbnail ({file}.jpg) belongs to the video's row; a legacy row may
+  // hold the full path (storage.ts resolvePath). A download is saved under the attachment's own name.
+  let name: string | null = null;
+  const att = ATTACHMENT.exec(path);
+  if (att) {
+    const [, no = '', f = ''] = att;
+    const file = f.replace(/(\.(?:mp4|mov|webm))\.jpg$/i, '$1');
+    const [row] = await db
+      .select({ name: documentAttach.originalFileName })
+      .from(documentAttach)
+      .where(
+        and(
+          eq(documentAttach.referenceTopic, 'Jobs'),
+          eq(documentAttach.referenceItemCode, no),
+          inArray(documentAttach.systemFileName, [file, filePath.attachment(no, file)]),
+          ne(documentAttach.recordStatus, RS.DELETED),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new HttpError(404, 'ไม่พบไฟล์');
+    name = row.name;
+  }
   // Which store signs it (storage.ts onR2): a video POST /api/attachments/video named — v{14 digits}{20 hex}.mp4|
   // mov|webm under jobs/{no}/attachments/ — and its thumbnail ({file}.jpg) are in Cloudflare R2 (a presigned GET;
   // download=1 adds response-content-disposition=attachment). Every other path is in Supabase — images, PDFs,
   // slips, logos, and the legacy .mp4 attachments (their names have no leading `v`), which keep opening from there.
-  const key = `${path}\n${download ?? ''}`;
-  let signed = picture ? pictures.get(key) : undefined;
-  if (!signed) {
-    const url = await signedUrl(path, ttl, download === '1');
-    if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)'); // not kept: the next request tries again
-    signed = { url, exp: Date.now() + ttl * 1000 };
-    if (picture) pictures.set(key, signed);
-  }
-  // the browser may reuse the redirect only while the signed URL is still valid
-  const maxAge = Math.floor((signed.exp - Date.now()) / 1000) - 60;
-  return NextResponse.redirect(signed.url, {
-    headers: { 'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${maxAge}` },
-  });
+  return fileRedirect(path, { download: download === '1' && (name || true), isPublic });
 });

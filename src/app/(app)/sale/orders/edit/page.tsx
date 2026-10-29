@@ -337,7 +337,7 @@ function EditSaleOrder() {
                 hint="อัปโหลดแล้วบันทึกเข้าระบบทันที พร้อมจำนวนเงินที่กรอก"
               >
                 <FileInput
-                  placeholder="แนบสลิปการชำระเงิน (JPG, PNG, PDF)"
+                  placeholder="แนบสลิปการชำระเงิน (JPG, PNG, WEBP, PDF)"
                   accept=".jpg,.jpeg,.png,.webp,.pdf"
                   onFile={attachSlip}
                 />
@@ -364,18 +364,21 @@ function EditSaleOrder() {
           }
           extra={
             <>
-              <PrintButton
-                label="พิมพ์ใบสั่งขาย"
-                kind="sale_order"
-                locked={
-                  profileLock('sale_order', { statusId: loaded?.approveId, cancelled: loaded?.cancelled }) ||
-                  (waitingLocked ? WAITING_CREATOR_ONLY : '')
-                }
-                no={no ?? ''}
-                profileId={loaded?.documentProfileId}
-                href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
-                disabled={!no || loaded?.cancelled}
-              />
+              {/* a denied order is not printed (the print page refuses it too) */}
+              {approveId !== 5 && (
+                <PrintButton
+                  label="พิมพ์ใบสั่งขาย"
+                  kind="sale_order"
+                  locked={
+                    profileLock('sale_order', { statusId: loaded?.approveId, cancelled: loaded?.cancelled }) ||
+                    (waitingLocked ? WAITING_CREATOR_ONLY : '')
+                  }
+                  no={no ?? ''}
+                  profileId={loaded?.documentProfileId}
+                  href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
+                  disabled={!no || loaded?.cancelled}
+                />
+              )}
               {canCancel && (
                 <Button variant="outline" size="md" type="button" onClick={() => setAsking('cancel')} disabled={saving}>
                   ยกเลิกใบสั่งขาย

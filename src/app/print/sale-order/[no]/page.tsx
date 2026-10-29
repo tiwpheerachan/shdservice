@@ -5,6 +5,7 @@ import { getSaleOrder } from '@/server/services/sale-orders';
 import { ShippingLabel } from '@/components/print/shipping-label';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { SO_CANCELLED } from '@/lib/validation/sale-order';
+import { AS } from '@/lib/status-ids';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +22,11 @@ export default async function Page({ params }: { params: Promise<{ no: string }>
   if (!user || !(await canViewAny(user, ['Sale Order', 'Product Pick Stock']))) notFound();
   const o = await getSaleOrder(no.toUpperCase());
   if (!o) notFound();
-  // a cancelled order is not a document any more — refused here, not only by hiding the button
-  if (o.cancelled)
+  // a cancelled or denied order is not a document any more — refused here, not only by hiding the button
+  if (o.cancelled || o.approveId === AS.DENIED)
     return (
       <p role="alert" className="mx-auto max-w-md rounded-md bg-white p-6 text-center text-lg font-medium">
-        {SO_CANCELLED} — พิมพ์ไม่ได้
+        {o.cancelled ? SO_CANCELLED : 'ใบสั่งขายนี้ถูกปฏิเสธแล้ว'} — พิมพ์ไม่ได้
       </p>
     );
   const c = o.customerDetail;

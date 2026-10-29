@@ -668,7 +668,7 @@ export async function approveSaleOrder(
       })
       .where(eq(saleOutHd.saleOutHdNo, no));
     await audit(tx, byUserId, {
-      action: 'APPROVE',
+      action: decision === 'approve' ? 'APPROVE' : 'STATUS', // ปฏิเสธ / ส่งกลับแก้ไข approve nothing
       module: 'Sale Order',
       entity: 'sale_out_hd',
       key: no,

@@ -8,6 +8,7 @@ import { AutoPrint } from '@/components/print/auto-print';
 import { money } from '@/components/print/print-frame';
 import { RETURN_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
+import { getShippingProfile } from '@/server/services/shipping-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { parseSwap, refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
@@ -56,6 +57,9 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         .where(eq(job.jobNo, j.no))
         .limit(1);
   const contact = forCustomer ? { phone: co.phone, email: co.email } : closer;
+  // ขนส่ง: the staff copy's return detail ("<courier> · <note>"); the customer's has no note (jobForCustomer) —
+  // its courier from the shipping profile chosen at close (a deleted one still names it)
+  const courier = forCustomer ? ((await getShippingProfile(j.return.shipperId))?.nameTh ?? '') : j.return.detail;
   const contactLine = [contact?.phone && `Tel. : ${contact.phone}`, contact?.email && `Email : ${contact.email}`]
     .filter(Boolean)
     .join('  ');
@@ -322,7 +326,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
                   </tr>
                   <tr>
                     <td className="k">ขนส่ง / เลขพัสดุ :</td>
-                    <td className="num">{[j.return.detail, j.return.tracking].filter(Boolean).join('  ·  ') || '—'}</td>
+                    <td className="num">{[courier, j.return.tracking].filter(Boolean).join('  ·  ') || '—'}</td>
                   </tr>
                   <tr>
                     <td className="k">ชำระเงิน :</td>

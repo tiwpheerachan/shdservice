@@ -107,7 +107,7 @@
                   },
                   "remark": {
                     "type": "string",
-                    "description": "Read up to 200 characters (the rest is dropped)."
+                    "description": "Read up to 100 characters (the column; the rest is dropped)."
                   }
                 },
                 "required": [
@@ -273,6 +273,7 @@
           "Jobs"
         ],
         "summary": "Open an attachment",
+        "description": "Any job module. The same answer as GET /files for its path: a picture a day (cacheable), a video 15 minutes, a PDF 2.",
         "parameters": [
           {
             "schema": {
@@ -288,7 +289,7 @@
         ],
         "responses": {
           "307": {
-            "description": "To a short-lived signed URL of the file.",
+            "description": "To a signed URL of the file (cacheable while it is valid).",
             "headers": {
               "Location": {
                 "schema": {
@@ -319,7 +320,7 @@
             }
           },
           "404": {
-            "description": "No such attachment (or it was removed), or the file is still on the old system.",
+            "description": "No such attachment (or it was removed), a legacy row without a file name, or the file is still on the old system.",
             "content": {
               "application/json": {
                 "schema": {
@@ -329,7 +330,7 @@
             }
           },
           "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "description": "The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).",
             "content": {
               "application/json": {
                 "schema": {
@@ -430,7 +431,7 @@
           "Jobs"
         ],
         "summary": "Get a one-time URL to upload a video attachment straight to storage",
-        "description": "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type` and `If-None-Match: *` are signed — send both; an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
+        "description": "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type`, `Content-Length` (= `size`) and `If-None-Match: *` are signed — any other type or size is refused, an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
         "requestBody": {
           "required": true,
           "content": {
@@ -450,10 +451,17 @@
                       "video/webm"
                     ],
                     "description": "the type of the file to be PUT (a converted clip: video/mp4) — sets its extension"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
+                    "description": "bytes of the file to be PUT — signed into the URL (Content-Length); over 200 MB → 413"
                   }
                 },
                 "required": [
-                  "type"
+                  "type",
+                  "size"
                 ]
               }
             }
@@ -461,7 +469,7 @@
         },
         "responses": {
           "200": {
-            "description": "Where to PUT the file (`Content-Type` = `type`, `If-None-Match: *`).",
+            "description": "Where to PUT the file (`Content-Type` = `type`, `Content-Length` = `size`, `If-None-Match: *`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -485,7 +493,7 @@
             }
           },
           "400": {
-            "description": "Not JSON (`invalid_json`), or a type other than MP4 / MOV / WebM.",
+            "description": "Not JSON (`invalid_json`), a type other than MP4 / MOV / WebM, or no `size`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -535,7 +543,7 @@
             }
           },
           "413": {
-            "description": "Body over 1 MB.",
+            "description": "Body over 1 MB, or `size` over 200 MB (`วิดีโอใหญ่เกิน 200MB`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -606,7 +614,7 @@
                   },
                   "remark": {
                     "type": "string",
-                    "description": "Read up to 200 characters (the rest is dropped)."
+                    "description": "Read up to 100 characters (the column; the rest is dropped)."
                   },
                   "thumb": {
                     "type": "string",
@@ -5837,8 +5845,8 @@
         "tags": [
           "Files"
         ],
-        "summary": "Open a stored file by its storage path (a short-lived signed URL)",
-        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A video URL is valid 15 minutes (it plays from it), others 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.",
+        "summary": "Open a stored file by its storage path (a signed URL)",
+        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A job attachment (and the `.jpg` thumbnail of a video) opens only while its attachment row is there — removed → 404; `download=1` saves it under its attached name. A picture (jpg / png / webp / svg, never a slip) gets one URL a day shared by everyone, cacheable; a video URL is valid 15 minutes (it plays from it), a slip / PDF 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.",
         "security": [
           {},
           {
@@ -5915,7 +5923,7 @@
             }
           },
           "404": {
-            "description": "Not a folder the app writes, or no such file (or still on the old system).",
+            "description": "Not a folder the app writes, no such file (or still on the old system), or a removed attachment.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5935,7 +5943,7 @@
             }
           },
           "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "description": "The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).",
             "content": {
               "application/json": {
                 "schema": {

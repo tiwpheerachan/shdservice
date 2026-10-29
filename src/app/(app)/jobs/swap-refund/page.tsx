@@ -89,7 +89,8 @@ function SwapRefundForm() {
       inspection: job.repairDetail,
       newSerial: (sw['New S/N'] ?? '').trim(),
       newModel: sw['รุ่นที่เปลี่ยนให้'] ?? '',
-      swapDate: sw['วันที่เปลี่ยนเครื่อง'] || today,
+      // today only for a first swap — a stored (legacy) detail without a date saved unchanged writes nothing
+      swapDate: sw['วันที่เปลี่ยนเครื่อง'] || (job.swap.detail.trim() ? '' : today),
       docNo: job.swap.docNo,
       refundAmount: sw['ยอดเงินคืน'] ?? '',
       refundMethod: sw['วิธีการคืนเงิน'] || 'โอนเงินเข้าบัญชี',

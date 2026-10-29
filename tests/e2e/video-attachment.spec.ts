@@ -15,14 +15,18 @@ test('a video is converted, uploaded straight to R2 (cancel, then again), and pl
 }) => {
   const no = await newJob({ status: 2 });
   const file = `v20261028120000${'ab'.repeat(10)}.mp4`;
-  const upload = `https://${SERVER_ENV.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${SERVER_ENV.R2_BUCKET}/jobs/${no}/attachments/${file}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-SignedHeaders=content-type%3Bhost%3Bif-none-match&X-Amz-Signature=e2e`;
+  const upload = `https://${SERVER_ENV.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${SERVER_ENV.R2_BUCKET}/jobs/${no}/attachments/${file}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bif-none-match&X-Amz-Signature=e2e`;
   const cors = {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'PUT',
     'access-control-allow-headers': '*',
   };
 
-  await page.route('**/api/attachments/video', (route) => route.fulfill({ json: { file, url: upload } }));
+  const asked: { size: number }[] = [];
+  await page.route('**/api/attachments/video', (route) => {
+    asked.push(route.request().postDataJSON());
+    return route.fulfill({ json: { file, url: upload } });
+  });
   const puts: { type: string; ifNoneMatch?: string; bytes: Buffer }[] = [];
   const waiting: (() => void)[] = [];
   const release = () => waiting.forEach((r) => r());
@@ -78,7 +82,7 @@ test('a video is converted, uploaded straight to R2 (cancel, then again), and pl
   // converted, then on its way — ยกเลิก stops it: nothing confirmed, the file stays picked
   await attach.click();
   await expect(going).toBeVisible();
-  await going.getByRole('button', { name: 'ยกเลิก' }).click();
+  await going.getByRole('button', { name: 'ยกเลิกการแนบวิดีโอ' }).click();
   await expect(page.getByText('ยกเลิกการแนบวิดีโอแล้ว')).toBeVisible();
   await expect(going).toHaveCount(0);
   expect(confirms).toHaveLength(0);
@@ -98,6 +102,7 @@ test('a video is converted, uploaded straight to R2 (cancel, then again), and pl
   expect(puts[1]!.ifNoneMatch).toBe('*'); // signed into the URL: never over an existing object
   expect(puts[1]!.bytes.subarray(4, 8).toString('latin1')).toBe('ftyp');
   expect(puts[1]!.bytes.equals(puts[0]!.bytes)).toBe(true);
+  expect(asked[1]!.size).toBe(puts[1]!.bytes.length); // the size signed into the URL is the one PUT
   const form = confirms[0]!.postDataBuffer()!.toString('latin1');
   expect(form).toContain(file);
   expect(form).toMatch(/name="thumb"; filename="thumb\.jpg"\r\nContent-Type: image\/jpeg/);

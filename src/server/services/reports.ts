@@ -15,6 +15,9 @@ import { saleOrderWhere, withSaleOrderJoins, type SaleOrderFilters } from './sal
  * though the table only shows a page.
  */
 const eng = alias(appUser, 'eng');
+/** a closed job's TAT as the dashboard / Excel / the report's TAT column count it (jobs.ts tatDays): opening → the
+ *  return, else the close — calendar days */
+const tatDays = sql`((case when ${job.jobReturnDate} > '1901-01-01' then ${job.jobReturnDate} else ${job.jobClosedDate} end)::date - ${job.jobCreateDate}::date)`;
 
 async function jobBase(tx: Tx, f: JobFilters, q = '') {
   return tx
@@ -24,10 +27,11 @@ async function jobBase(tx: Tx, f: JobFilters, q = '') {
       // ลูกค้าไม่ซ่อม (JS.REPAIR_CANCELLED) is not a successful repair — kpiGroup counts it as Cancel
       done: sql<string>`count(*) filter (where ${kpiGroup} in ('Repaired','Finished'))`,
       amount: sql<string>`coalesce(sum(${job.jobTotalCost}),0)`,
-      paid: sql<string>`coalesce(sum(${job.jobPaymentAmount}) filter (where ${job.jobPaymentAmount} > 0),0)`,
-      tatSum: sql<string>`coalesce(sum(greatest(0, (${job.jobClosedDate}::date - ${job.jobCreateDate}::date))) filter (where ${job.jobClosedDate} > '1901-01-01'),0)`,
+      // net, as the table's ยอดรับชำระ column adds up: a refund (คืนมัดจำ, a negative payment) counts too
+      paid: sql<string>`coalesce(sum(${job.jobPaymentAmount}),0)`,
+      tatSum: sql<string>`coalesce(sum(greatest(0, ${tatDays})) filter (where ${job.jobClosedDate} > '1901-01-01'),0)`,
       tatN: sql<string>`count(*) filter (where ${job.jobClosedDate} > '1901-01-01')`,
-      over30: sql<string>`count(*) filter (where ${job.jobClosedDate} > '1901-01-01' and (${job.jobClosedDate}::date - ${job.jobCreateDate}::date) > 30)`,
+      over30: sql<string>`count(*) filter (where ${job.jobClosedDate} > '1901-01-01' and ${tatDays} > 30)`,
       minDate: sql<string>`min(${job.jobCreateDate})`,
       maxDate: sql<string>`max(${job.jobCreateDate})`,
     })

@@ -38,6 +38,12 @@ export const isVideo = (f: File) => !!typeOf(f) || f.type.startsWith('video/');
 /** a stored attachment that is a video (its system file name) */
 export const isVideoFile = (name = '') => /\.(?:mp4|mov|webm)$/i.test(name);
 
+/** m:ss of a length, whole seconds rounded up (180.3 s is 3:01 — over 3 minutes, never "3:00") */
+export const mmss = (seconds: number) => {
+  const s = Math.ceil(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
 export type PreparedVideo = { file: File; thumb: Blob | null; converted: boolean };
 
 /** Checks the length, then converts (`onProgress` 0–100); `signal` cancels. Throws a Thai message when refused. */
@@ -46,16 +52,23 @@ export async function prepareVideo(
   onProgress: (pct: number) => void,
   signal: AbortSignal,
 ): Promise<PreparedVideo> {
+  // a file the browser cannot read (an iCloud / OneDrive file not downloaded yet, moved or changed since it was picked)
+  await src
+    .slice(0, 16)
+    .arrayBuffer()
+    .catch(() => {
+      throw new Error(
+        'อ่านไฟล์วิดีโอนี้ไม่ได้ — ถ้าไฟล์อยู่บน iCloud หรือคลาวด์ ให้ดาวน์โหลดลงเครื่องก่อน แล้วเลือกใหม่',
+      );
+    });
   const mb = await import('mediabunny');
   const input = new mb.Input({ source: new mb.BlobSource(src), formats: mb.ALL_FORMATS });
   try {
     const track = await input.getPrimaryVideoTrack().catch(() => null);
     if (!track) throw new Error('เปิดไฟล์วิดีโอนี้ไม่ได้ — รองรับ MP4, MOV, WebM');
     const seconds = await input.computeDuration();
-    if (seconds > VIDEO_MAX_SECONDS) {
-      const mmss = `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
-      throw new Error(`วิดีโอยาว ${mmss} นาที — แนบได้ไม่เกิน 3 นาที ตัดให้สั้นลงก่อนแนบ`);
-    }
+    if (seconds > VIDEO_MAX_SECONDS)
+      throw new Error(`วิดีโอยาว ${mmss(seconds)} นาที — แนบได้ไม่เกิน 3 นาที ตัดให้สั้นลงก่อนแนบ`);
     const thumb = await thumbnail(mb, track, seconds).catch(() => null);
     signal.throwIfAborted();
 
@@ -146,13 +159,18 @@ export async function uploadVideo(
   const { file, url } = await postJson<{ file: string; url: string }>('/api/attachments/video', {
     jobNo,
     type: v.file.type,
+    size: v.file.size, // signed into the URL: R2 takes these bytes only
   });
   const res = await xhrSend((sent, total) => onProgress(total ? Math.floor((sent / total) * 100) : 0))(url, {
     method: 'PUT',
     body: v.file,
-    // both signed into the URL (src/server/storage.ts signedUploadUrl): this type only, never over an existing object
+    // signed into the URL (src/server/storage.ts signedUploadUrl): this type only, never over an existing object
     headers: { 'Content-Type': v.file.type, 'If-None-Match': '*' },
     signal,
+  }).catch((e: unknown) => {
+    // storage not reached while this device is online (R2 down, blocked by a network) is not "check your internet"
+    if (signal.aborted || !(e instanceof TypeError) || navigator.onLine === false) throw e;
+    throw new Error('อัปโหลดวิดีโอไปที่เก็บไม่สำเร็จ — ลองใหม่อีกครั้ง หากยังไม่ได้ แจ้งผู้ดูแลระบบ');
   });
   if (!res.ok) throw new ApiError(res.status, `อัปโหลดวิดีโอไม่สำเร็จ (ที่เก็บไฟล์ตอบ ${res.status})`);
   const body = new FormData();
