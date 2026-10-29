@@ -177,6 +177,7 @@ async function call(
   return {
     status: res.status,
     location: res.headers.get('location') ?? '',
+    cache: res.headers.get('cache-control') ?? '',
     body: (await res.json().catch(() => ({}))) as Record<string, unknown>,
   };
 }
@@ -369,7 +370,7 @@ await test('a file name the server did not issue (another folder, another type) 
 });
 
 console.log('\nPlaying it: /api/files');
-await test('an R2 video: a presigned GET for 15 minutes (download=1 → attachment), its thumbnail 2 minutes', async () => {
+await test('an R2 video: a presigned GET for 15 minutes (download=1 → attachment), its thumbnail a day', async () => {
   const file = [...r2.keys()].find((p) => r2.has(`${p}.jpg`))!; // the attached one
   const play = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(file)}`);
   const down = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(file)}&download=1`);
@@ -380,8 +381,13 @@ await test('an R2 video: a presigned GET for 15 minutes (download=1 → attachme
   assert.equal(`${t!.origin}${t!.pathname}`, `${R2_OBJECTS}${file}.jpg`);
   assert.deepEqual(
     [p, d, t].map((u) => u!.searchParams.get('X-Amz-Expires')),
-    ['900', '900', '120'],
+    ['900', '900', '86400'],
   );
+  // the thumbnail is a picture: the same URL again (the browser keeps it), the video a fresh one each time
+  const again = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(file + '.jpg')}`);
+  assert.equal(again.location, thumb.location);
+  assert.match(thumb.cache, /^private, max-age=8\d{4}$/);
+  assert.equal(play.cache, 'private, max-age=840');
   assert.equal(d!.searchParams.get('response-content-disposition'), 'attachment');
   assert.equal(p!.searchParams.has('response-content-disposition'), false);
   // the presigned URL opens it (a ranged read, as a <video> does)
@@ -402,6 +408,25 @@ await test('a legacy .mp4 (and an older name without the v) still opens from Sup
     assert.match(r.location, /[?&]download=(&|$)/);
     assert.deepEqual(signs, [{ path: path(legacy), expiresIn: 900 }]);
   }
+});
+
+await test('a picture is signed once a day and kept by the browser; a slip / PDF signs anew, 2 minutes', async () => {
+  const open = async (p: string) => {
+    stored.set(p, { bytes: MP4, type: 'image/jpeg' });
+    signs.length = 0;
+    const a = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(p)}`);
+    const b = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(p)}`);
+    assert.deepEqual([a.status, b.status], [307, 307]);
+    assert.equal(a.location, b.location);
+    return { signs: signs.map((x) => x.expiresIn), cache: b.cache };
+  };
+  const photo = await open(path('20261029100000abcdef0123456789abcd.webp'));
+  assert.deepEqual(photo.signs, [86400]); // signed once, the second answered from the cache
+  assert.match(photo.cache, /^private, max-age=8\d{4}$/);
+  const logo = await open('profiles/1/20261029100000abcdef0123456789abcd.png');
+  assert.deepEqual([logo.signs, logo.cache.startsWith('public, max-age=8')], [[86400], true]);
+  for (const p of ['jobs/QV0001/slip/20261029100000abcdef0123456789abcd.jpg', path('a.pdf')])
+    assert.deepEqual(await open(p), { signs: [120, 120], cache: 'private, max-age=60' });
 });
 
 await pool.end();

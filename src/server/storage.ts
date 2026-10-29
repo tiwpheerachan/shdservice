@@ -284,7 +284,8 @@ export async function uploadFile(path: string, file: File | Blob, contentType?: 
     return;
   }
   const s = await bucket();
-  const { error } = await s.from(BUCKET).upload(path, buf, { contentType: type, upsert: true });
+  // names are never reused (systemFileName): what a browser keeps for a day is still the file (api/files PICTURE)
+  const { error } = await s.from(BUCKET).upload(path, buf, { contentType: type, upsert: true, cacheControl: '86400' });
   if (error)
     throw new Error(
       `อัปโหลดไฟล์ไม่สำเร็จ (Supabase Storage: ${error.message}) — ตรวจสอบ SUPABASE_SECRET_KEY / bucket "${BUCKET}"`,

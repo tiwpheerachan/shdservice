@@ -194,7 +194,7 @@ export function SerialField({ f, c }: Checked) {
   const seen = (edited(f, 'serial') && c?.serial.jobs) || []; // a brand changed alone asks about the brand only
   const sameCustomer = seen.some((j) => j.sameCustomer);
   return (
-    <Field label="Serial No." required error={errors.serial}>
+    <Field label="Serial No." error={errors.serial}>
       <CodeInput
         className="num"
         maxLength={50}

@@ -10,7 +10,8 @@ import { JOB_GROUP, JS } from '@/lib/status-ids';
  * Job form rules (เปิดงาน / แก้ไขงาน / บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) —
  * the payload is the API's JobInput (keys from toJobInput in components/shared/job-form.tsx).
  *
- *  - new job: every field marked * on the form is required
+ *  - new job: every field marked * on the form is required — Serial No. is never one (owner 2026-10-29: typed, or a
+ *    tick, when known; checked only when typed)
  *  - existing job ("never worse"): a required field that already has a value must keep one; a field
  *    that was empty before may stay empty, so old jobs (e.g. swap jobs without a serial) can still
  *    move through the workflow — the form shows them as "ข้อมูลไม่ครบ"
@@ -27,7 +28,6 @@ export const JOB_REQUIRED = {
   saleOrderDate: 'ต้องระบุ Sale Order Date',
   warrantyMonth: 'ต้องระบุจำนวนเดือนรับประกัน',
   expireDate: 'ต้องระบุ Expire Date',
-  serial: 'ต้องระบุ Serial No.',
   brand: 'ต้องเลือกยี่ห้อ',
   modelCode: 'ต้องเลือกรุ่น',
   symptoms: 'ต้องเลือกอาการเสียหลักอย่างน้อย 1 อาการ',
@@ -45,7 +45,6 @@ export const JOB_FIELD_LABEL: Record<JobRequiredKey, string> = {
   saleOrderDate: 'Sale Order Date',
   warrantyMonth: 'รับประกัน (เดือน)',
   expireDate: 'Expire Date',
-  serial: 'Serial No.',
   brand: 'ยี่ห้อ',
   modelCode: 'รุ่น',
   symptoms: 'อาการเสียหลัก',
@@ -62,7 +61,7 @@ export const JOB_COLUMN_LABEL: Record<string, string> = {
   jobTypeDetail: 'งานย่อย',
   jobStatusId: 'สถานะงาน',
   productImeiNo: 'IMEI',
-  productSerial: JOB_FIELD_LABEL.serial,
+  productSerial: 'Serial No.',
   productTypeId: 'ประเภทสินค้า',
   productBrandId: JOB_FIELD_LABEL.brand,
   productModelId: JOB_FIELD_LABEL.modelCode,
@@ -186,13 +185,13 @@ export function isFilled(v: unknown): boolean {
 }
 
 /** text fields where the legacy data wrote "0" / "-" / "ยังไม่ระบุ" for "none" — those count as empty */
-const LEGACY_PLACEHOLDER_KEYS = new Set<JobRequiredKey>(['so', 'channel', 'serial']);
+const LEGACY_PLACEHOLDER_KEYS = new Set<JobRequiredKey>(['so', 'channel']);
 const LEGACY_PLACEHOLDERS = new Set(['0', '-', 'ยังไม่ระบุ']);
 
 /**
  * Serial No. ticked "ไม่มี S/N / S/N เสียหาย": stored as the legacy "none" marker "-" (search, the
- * print-outs and reports already show it as "no serial"), but — unlike a typed "0" / "-" — it is an
- * answer, so it fills the required Serial (staff stop typing notes like "SN เสียหาย" into the field).
+ * print-outs and reports already show it as "no serial") — an answer, so staff stop typing notes like
+ * "SN เสียหาย" into the field. Serial No. itself is optional (empty is fine).
  */
 export const NO_SERIAL = '-';
 /** Serial No. ticked "รอ S/N จากลูกค้า": the note staff already typed for it (prod's most common spelling) —
@@ -202,7 +201,6 @@ export const WAIT_SERIAL = 'รอ SN จากลูกค้า';
 /** is this required field filled? (the one rule the page, the API and the old-job notice share) */
 export function isRequiredFilled(key: JobRequiredKey, v: unknown): boolean {
   if (!isFilled(v)) return false;
-  if (key === 'serial' && [NO_SERIAL, WAIT_SERIAL].includes(String(v).trim())) return true;
   return !(LEGACY_PLACEHOLDER_KEYS.has(key) && LEGACY_PLACEHOLDERS.has(String(v).trim()));
 }
 

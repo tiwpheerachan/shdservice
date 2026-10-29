@@ -87,14 +87,14 @@ const fullJob = {
 
 console.log('\nJob — new job (every required field)');
 test('a complete job passes', () => assert.deepEqual(errorsOf(jobSchema(), fullJob), {}));
-test('an empty job reports all 12 required fields at once, in form order', () => {
+test('an empty job reports all 11 required fields at once, in form order (Serial No. is not one)', () => {
   const e = errorsOf(jobSchema(), {});
   assert.deepEqual(Object.keys(e), JOB_REQUIRED_KEYS);
   assert.equal(e.so, 'ต้องระบุ Sale Order No.');
 });
 test('blank strings, spaces and empty symptom lists count as empty', () => {
   const e = errorsOf(jobSchema(), { ...fullJob, so: '   ', serial: '', symptoms: [''] });
-  assert.deepEqual(Object.keys(e).sort(), ['serial', 'so', 'symptoms']);
+  assert.deepEqual(Object.keys(e).sort(), ['so', 'symptoms']); // an empty Serial No. is fine (owner 2026-10-29)
 });
 test('warranty months 0 is a value (not empty); negative / text is rejected', () => {
   assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, warrantyMonth: 0 }), {});
@@ -140,11 +140,10 @@ test('…but a field that had a value cannot be cleared', () => {
   const before = filledRequired(legacy);
   assert.deepEqual(Object.keys(errorsOf(jobSchema(before), { ...legacy, brand: '' })), ['brand']);
 });
-test("the 'ข้อมูลไม่ครบ' notice lists what is still missing", () =>
-  assert.deepEqual(missingRequired(legacy), ['so', 'serial']));
+test("the 'ข้อมูลไม่ครบ' notice lists what is still missing", () => assert.deepEqual(missingRequired(legacy), ['so']));
 test('legacy placeholders "0" / "-" in text fields count as empty (warranty months 0 does not)', () => {
-  assert.deepEqual(missingRequired({ ...fullJob, serial: '0', so: '-' }), ['so', 'serial']);
-  assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: '0' }).serial);
+  assert.deepEqual(missingRequired({ ...fullJob, serial: '0', so: '-' }), ['so']);
+  assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: '0' }).serial, 'a typed "0" is no serial (the format)');
   assert.deepEqual(missingRequired({ ...fullJob, warrantyMonth: 0 }), []);
 });
 
@@ -876,19 +875,18 @@ console.log('\nField formats (agent J): jobs, workflow screens, call log, master
     assert.equal(cleanSerial(' s/n : abc123 '), 'ABC123');
     assert.equal(cleanSerial('SN12345'), 'SN12345', 'no colon = part of the serial');
   });
-  test('J: "ไม่มี S/N / S/N เสียหาย" stores "-" and fills the required Serial; a typed "0" does not', () => {
+  test('J: Serial No. is never required; "ไม่มี S/N / S/N เสียหาย" stores "-"; a typed "0" is refused', () => {
     assert.equal(NO_SERIAL, '-');
+    assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: '' }), {});
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: NO_SERIAL }), {});
-    assert.equal(isRequiredFilled('serial', NO_SERIAL), true);
-    assert.equal(isRequiredFilled('serial', '0'), false);
+    assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: '0' }).serial);
     assert.equal(isRequiredFilled('so', '-'), false, '"-" is still the empty placeholder for SO / Channel');
     assert.equal(isRequiredFilled('channel', 'ยังไม่ระบุ'), false, '"ยังไม่ระบุ" = empty');
   });
-  test('J: "รอ S/N จากลูกค้า" stores the note prod already uses and fills the required Serial like "-"', () => {
+  test('J: "รอ S/N จากลูกค้า" stores the note prod already uses, accepted like "-"', () => {
     assert.equal(WAIT_SERIAL, 'รอ SN จากลูกค้า');
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: WAIT_SERIAL }), {});
     assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, serial: ` ${WAIT_SERIAL} ` }), {}, 'spaces around it');
-    assert.equal(isRequiredFilled('serial', WAIT_SERIAL), true);
     assert.ok(errorsOf(jobSchema(), { ...fullJob, serial: 'รอ SN' }).serial, 'only the exact note');
   });
   test('J: legacy SO / serial / IMEI / tracking no saved unchanged pass; changed to junk → error under the field', () => {
