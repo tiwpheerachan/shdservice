@@ -209,7 +209,7 @@ export const JOBS_TOURS: Record<string, Tour> = {
 
   '/jobs/edit': {
     title: 'แก้ไขข้อมูลงาน',
-    demo: ['/jobs/edit?job={job:2}', '/jobs/edit?job={job:8}'],
+    demo: ['/jobs/edit?id={job:2}', '/jobs/edit?id={job:8}'],
     steps: [
       {
         title: 'แก้ไขข้อมูลงาน',

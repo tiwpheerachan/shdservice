@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { E2E_CUSTOMER, OWNER_EMAIL, STAFF_EMAIL } from './support/env';
-import { newJob, newPart, newPartLine, one, rows } from './support/db';
+import { jobUuid, newJob, newPart, newPartLine, one, rows } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -19,19 +19,19 @@ async function offline(page: Page) {
   return asked;
 }
 
-/** a quotation of the e2e customer, as a legacy row (Q97 + 5 digits: a series the app never issues) */
+/** a quotation of the e2e customer, as a legacy row (Q97 + 5 digits: a series the app never issues) — its uuid (the link) */
 async function newQuotation(remark: string): Promise<string> {
   const { no } = await one<{ no: string }>(
     `SELECT 'Q97' || lpad((coalesce(max(substring(quotation_no FROM 4)::int), 0) + 1)::text, 5, '0') AS no
        FROM quotation_hd WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
   );
-  await rows(
+  const { id } = await one<{ id: string }>(
     `INSERT INTO quotation_hd (quotation_no, customer_code, create_date, create_by, remark, quotation_status_id,
                                is_active, record_status)
-     VALUES ($1, $2, now(), -1, $3, 1, true, 'ACTIVE')`,
+     VALUES ($1, $2, now(), -1, $3, 1, true, 'ACTIVE') RETURNING id::text AS id`,
     [no, E2E_CUSTOMER, remark],
   );
-  return no;
+  return id;
 }
 
 test('the job list, a job and a quotation open with the read API cut off', async ({ page }) => {
@@ -48,14 +48,14 @@ test('the job list, a job and a quotation open with the read API cut off', async
   // the list and its counts came with the page; only the lookups (staff) were asked for
   expect(asked.filter((p) => /\/api\/data\/(jobs|job_stats)$/.test(p))).toEqual([]);
 
-  await page.goto(`/jobs/repair?job=${no}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   await expect(page.getByRole('heading', { name: 'บันทึกงานซ่อม' })).toBeVisible();
   await expect(page.getByLabel('หมายเลขงานซ่อม')).toHaveText(no);
   await expect(page.getByLabel('ประเภทงานซ่อม')).toContainText('E2E ซ่อม');
   // the form is filled from the job that came with the page (onRecord), as after a read
   await expect(page.getByLabel('รหัสลูกค้า')).toHaveValue(E2E_CUSTOMER);
 
-  await page.goto(`/quotation/edit?no=${qno}`);
+  await page.goto(`/quotation/edit?id=${qno}`);
   await expect(page.getByRole('heading', { name: 'แก้ไขใบเสนอราคา' })).toBeVisible();
   await expect(page.getByLabel('หมายเหตุ')).toHaveValue(remark);
 
@@ -141,7 +141,7 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
 
   // the server-rendered form already holds the job's values (built at first render, not by an effect) —
   // its part line, its file and the hint made from the staff lookup too
-  const html = await (await page.request.get(`/jobs/repair?job=${no}`)).text();
+  const html = await (await page.request.get(`/jobs/repair?id=${await jobUuid(no)}`)).text();
   expect(html).toContain(`value="${name}"`);
   expect(html).toContain(`value="SN-${no}"`);
   expect(html).toContain(`>${part.code}</td>`); // rendered, not only in the page's data payload
@@ -155,7 +155,7 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
     return route.abort();
   });
   const errors = hydrationErrors(page);
-  await page.goto(`/jobs/repair?job=${no}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   await expect(page.getByRole('textbox', { name: /^ชื่อลูกค้า/ })).toHaveValue(name);
   await expect(page.getByRole('textbox', { name: /^Serial No\./ })).toHaveValue(`SN-${no}`);
   // the part line: a table row from md up, a card (list item) on a phone — only one of them is shown
@@ -174,7 +174,7 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
   await page.getByRole('combobox', { name: /อาการเสียที่ตรวจพบ/ }).focus();
   await expect.poll(() => asked.filter(symptomLists).length).toBeGreaterThan(0);
 
-  await page.goto(`/quotation/edit?no=${qno}`);
+  await page.goto(`/quotation/edit?id=${qno}`);
   await expect(page.getByRole('heading', { name: 'แก้ไขใบเสนอราคา' })).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(errors, 'hydration mismatches').toEqual([]);

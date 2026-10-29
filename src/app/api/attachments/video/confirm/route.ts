@@ -31,7 +31,7 @@ export const POST = handle(async (req: NextRequest) => {
   const no = await attachableJob(jobNo); // 404 / 409 — nothing removed: an unchecked job is not this caller's
   // a confirmed video is never confirmed (nor removed below) again
   const [done] = await db
-    .select({ id: documentAttach.documentAttachId })
+    .select({ id: documentAttach.id })
     .from(documentAttach)
     .where(and(eq(documentAttach.referenceItemCode, no), eq(documentAttach.systemFileName, file)))
     .limit(1);

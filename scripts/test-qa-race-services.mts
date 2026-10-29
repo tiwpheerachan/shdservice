@@ -190,6 +190,17 @@ async function race(b: pg.Client, req: () => Promise<unknown>, del: () => Promis
 }
 const del = (table: 'customers' | 'jobs' | 'products', id: string) => () =>
   setRecordStatus(table, id, 'DELETED', ADMIN.id);
+/** a customer's uuid — what /api/admin/records (setRecordStatus) takes for one (ADR 0008) */
+const custId = async (code: string) =>
+  (await Q<{ id: string }>(`SELECT id::text AS id FROM customer WHERE customer_code = $1`, [code]))[0]!.id;
+/** a job's / user's uuid — what the API and records take (ADR 0008) */
+const uuidOf = async (table: 'job' | 'app_user', key: string | number) =>
+  (
+    await Q<{ id: string }>(
+      `SELECT id::text AS id FROM ${table} WHERE ${table === 'job' ? 'job_no' : 'user_id'} = $1`,
+      [key],
+    )
+  )[0]!.id;
 const QLINE = { itemType: 'SparePart' as const, code: '', detail: 'QRS', qty: 1, unit: 'หน่วย', unitPrice: 100 };
 const jobInput = (customerCode: string, extra: Record<string, unknown> = {}) => ({
   customerCode,
@@ -238,7 +249,11 @@ try {
     const serial = `QRS-G13-${Date.now()}`;
     const b = await blocker();
     await runningLock(b, 'Job'); // another job being opened: holds this one after its checks
-    const r = await race(b, () => createJob(jobInput('QRSC02', { serial }), ADMIN.id), del('customers', 'QRSC02'));
+    const r = await race(
+      b,
+      () => createJob(jobInput('QRSC02', { serial }), ADMIN.id),
+      del('customers', await custId('QRSC02')),
+    );
     const jobs = await Q(`SELECT job_no FROM job WHERE product_serial = $1`, [serial]);
     assert.ok(
       r.req === 200 ? !r.delFirst : r.req === 409,
@@ -258,7 +273,7 @@ try {
       (e: unknown) => (e instanceof HttpError ? e.status : Promise.reject(e)),
     );
     await lockWaits(1);
-    await del('customers', 'QRSC03')();
+    await del('customers', await custId('QRSC03'))();
     await b.query('COMMIT');
     await b.end();
     assert.equal(await p, 409);
@@ -267,6 +282,10 @@ try {
   });
   await test('POST quotation / sale order ‖ delete its customer: saved before the delete, or refused (409)', async () => {
     const bad: string[] = [];
+    // the salesperson by uuid (ADR 0008)
+    const [{ id: salesId }] = await Q<{ id: string }>(`SELECT id::text AS id FROM app_user WHERE user_id = $1`, [
+      ADMIN.id,
+    ]);
     for (const [code, save, type] of [
       [
         'QRSC04',
@@ -278,7 +297,7 @@ try {
         'QRSC05',
         () =>
           saveSaleOrder(
-            { customerCode: 'QRSC05', salesId: ADMIN.id, submit: false, lines: [{ code: PART, qty: 1 }] },
+            { customerCode: 'QRSC05', salesId, submit: false, lines: [{ code: PART, qty: 1 }] },
             { userId: ADMIN.id, isAdmin: true },
           ),
         'SaleOrder',
@@ -286,7 +305,7 @@ try {
     ] as const) {
       const b = await blocker();
       await runningLock(b, type);
-      const r = await race(b, save, del('customers', code));
+      const r = await race(b, save, del('customers', await custId(code)));
       if (r.req === 200 ? r.delFirst : r.req !== 409) bad.push(`${type}: ${r.req}, delete first ${r.delFirst}`);
     }
     assert.deepEqual(bad, []);
@@ -295,7 +314,8 @@ try {
     const b = await blocker();
     await b.query(`SELECT 1 FROM job WHERE job_no = $1 FOR UPDATE`, [J(3)]);
     let fields: unknown;
-    const p = assignJobs([J(3)], ENG, ADMIN.id).then(
+    const eng = await uuidOf('app_user', ENG);
+    const p = assignJobs([J(3)], eng, ADMIN.id).then(
       () => 200,
       (e: unknown) =>
         e instanceof HttpError ? ((fields = (e.details as { fields?: unknown })?.fields), e.status) : Promise.reject(e),
@@ -320,7 +340,7 @@ try {
     const r = await race(
       b,
       () => saveQuotation({ jobNo: QJOB, customerCode: CUST, contactName: 'QRS', lines: [QLINE] }, ADMIN.id),
-      del('jobs', QJOB),
+      del('jobs', await uuidOf('job', QJOB)),
     );
     const qs = await Q(`SELECT 1 FROM quotation_hd WHERE reference_job_no = $1`, [QJOB]);
     assert.ok(r.req === 200 ? !r.delFirst : r.req === 409, `quotation ${r.req}, delete first ${r.delFirst}`);
@@ -373,14 +393,13 @@ try {
 
   console.log('\nG4 · an attachment deleted twice at once');
   await test('5 × DELETE /api/attachments/{id} at once → one 200 and one DELETE audit row, the rest 404 "ไฟล์นี้ถูกลบไปแล้ว"', async () => {
-    const [a] = await Q<{ id: number }>(
-      `SELECT document_attach_id id FROM document_attach WHERE reference_item_code = $1`,
-      [J(5)],
-    );
-    const id = String(a!.id);
-    const [{ last }] = await Q<{ last: number }>(`SELECT coalesce(max(id), 0) AS last FROM audit_log`);
+    const [a] = await Q<{ id: string }>(`SELECT id::text id FROM document_attach WHERE reference_item_code = $1`, [
+      J(5),
+    ]);
+    const id = a!.id;
+    const [{ last }] = await Q<{ last: number }>(`SELECT coalesce(max(pk), 0) AS last FROM audit_log`);
     const b = await blocker();
-    await b.query(`SELECT 1 FROM document_attach WHERE document_attach_id = $1 FOR UPDATE`, [a!.id]);
+    await b.query(`SELECT 1 FROM document_attach WHERE id = $1 FOR UPDATE`, [a!.id]);
     const rs = Array.from({ length: 5 }, () =>
       route(attachIdRoute.DELETE as never, `/api/attachments/${id}`, { method: 'DELETE', params: { id } }),
     );
@@ -390,7 +409,7 @@ try {
     const answers = await Promise.all(rs);
     const statuses = answers.map((r) => r.status).sort();
     const audits = await Q(
-      `SELECT 1 FROM audit_log WHERE id > $1 AND entity_key = $2 AND action = 'DELETE' AND summary LIKE 'ลบไฟล์แนบ%'`,
+      `SELECT 1 FROM audit_log WHERE pk > $1 AND entity_key = $2 AND action = 'DELETE' AND summary LIKE 'ลบไฟล์แนบ%'`,
       [last, J(5)],
     );
     assert.deepEqual([statuses, audits.length], [[200, 404, 404, 404, 404], 1]);
@@ -411,7 +430,7 @@ try {
     form.set('jobNo', J(6));
     const p = route(attachRoute.POST as never, '/api/attachments', { method: 'POST', form });
     await started;
-    await del('jobs', J(6))();
+    await del('jobs', await uuidOf('job', J(6)))();
     open();
     const r = await p;
     uploadGate = Promise.resolve();

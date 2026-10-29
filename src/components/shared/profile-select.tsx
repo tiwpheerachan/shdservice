@@ -26,11 +26,11 @@ export function ProfileSelect({
   locked,
   className,
 }: {
-  /** document_profile.id; 0 / undefined = default profile */
-  value?: number;
+  /** the document profile's uuid; '' / undefined = default profile */
+  value?: string;
   /** `how`: "user" = picked here (an edit to save) · "default" = pre-picked for a new document ·
    *  "saved" = already saved on the spot — neither of the last two is an unsaved edit */
-  onChange: (id: number, how: 'user' | 'default' | 'saved') => void;
+  onChange: (id: string, how: 'user' | 'default' | 'saved') => void;
   /** the document this belongs to once it has a number — enables save-on-change */
   doc?: { kind: DocumentKind; no: string };
   /** why the saved document's profile is fixed (profileLock in src/lib/profile-lock.ts); '' / undefined = it is not */
@@ -54,7 +54,7 @@ export function ProfileSelect({
   // a single profile = nothing to choose; keep the form unchanged (a failed load still says so, with a retry)
   if (profiles.length <= 1 && !profilesLookup.error) return null;
 
-  const change = async (id: number) => {
+  const change = async (id: string) => {
     if (!doc) return onChange(id, 'user');
     setBusy(true);
     try {
@@ -100,7 +100,7 @@ export function ProfileSelect({
         value={value || def?.id || ''}
         disabled={busy || !!fixed}
         data-tour-block={doc ? '' : undefined}
-        onChange={(e) => void change(Number(e.target.value))}
+        onChange={(e) => void change(e.target.value)}
       >
         {profiles.map((p) => (
           <option key={p.id} value={p.id}>

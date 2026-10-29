@@ -317,7 +317,7 @@ export default function PermissionsPage() {
         columns={columns}
         rows={viewRows}
         loading={loading}
-        rowKey={(r) => r.id}
+        rowKey={(r) => keyOf(r.role, r.menu)}
         pageSize={25}
         dense
         toolbar={

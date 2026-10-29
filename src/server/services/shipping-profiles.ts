@@ -19,7 +19,8 @@ import { nowThai } from '@/server/mappers/format';
  * number goes, and is editable because carriers change their URLs.
  */
 export type ShippingProfile = {
-  id: number;
+  /** the row's uuid (ADR 0008) — job.return_shipper_id stores its `pk` */
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -55,14 +56,19 @@ export function listShippingProfiles(activeOnly = true): Promise<ShippingProfile
       .select()
       .from(shippingProfile)
       .where(and(isNull(shippingProfile.deletedAt), activeOnly ? eq(shippingProfile.isActive, true) : undefined))
-      .orderBy(asc(shippingProfile.sortOrder), asc(shippingProfile.id));
+      .orderBy(asc(shippingProfile.sortOrder), asc(shippingProfile.pk));
     return rows.map(toProfile);
   });
 }
 
-export async function getShippingProfile(id: number | null | undefined): Promise<ShippingProfile | null> {
-  if (!id || id <= 0) return null;
-  const [r] = await db.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
+/** by uuid (the API), or by pk (a job's stored return_shipper_id) */
+export async function getShippingProfile(id: string | number | null | undefined): Promise<ShippingProfile | null> {
+  if (!id || (typeof id === 'number' && id <= 0)) return null;
+  const [r] = await db
+    .select()
+    .from(shippingProfile)
+    .where(typeof id === 'number' ? eq(shippingProfile.pk, id) : eq(shippingProfile.id, id))
+    .limit(1);
   return r ? toProfile(r) : null;
 }
 
@@ -128,7 +134,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
         throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้รายการนี้ — โหลดหน้าใหม่แล้วแก้อีกครั้ง', { stale: true });
     }
     const [row] = before
-      ? await tx.update(shippingProfile).set(values).where(eq(shippingProfile.id, before.id)).returning()
+      ? await tx.update(shippingProfile).set(values).where(eq(shippingProfile.pk, before.pk)).returning()
       : await tx.insert(shippingProfile).values(values).returning();
     if (!row) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await audit(tx, byUserId, {
@@ -146,14 +152,14 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
 }
 
 /** soft delete — jobs already shipped keep pointing at the row so old links still work */
-export async function deleteShippingProfile(id: number, byUserId: number): Promise<void> {
+export async function deleteShippingProfile(id: string, byUserId: number): Promise<void> {
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx
       .update(shippingProfile)
       .set({ deletedAt: nowThai(), deletedBy: byUserId, updatedAt: nowThai() })
-      .where(eq(shippingProfile.id, id));
+      .where(eq(shippingProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Admin',
@@ -167,11 +173,11 @@ export async function deleteShippingProfile(id: number, byUserId: number): Promi
 }
 
 /** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
-export async function setShippingProfileLogo(id: number, logoPath: string, byUserId: number): Promise<string> {
+export async function setShippingProfileLogo(id: string, logoPath: string, byUserId: number): Promise<string> {
   const old = await db.transaction(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
-    await tx.update(shippingProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(shippingProfile.id, id));
+    await tx.update(shippingProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(shippingProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Admin',

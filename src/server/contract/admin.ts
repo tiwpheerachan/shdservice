@@ -1,7 +1,19 @@
 import { z } from 'zod';
 import { documentProfileSchema, shippingProfileSchema, userFields } from '@/lib/validation/admin';
 import { maxText } from '@/lib/validation';
-import { CONFLICT, JSON_BODY, Ok, SIGNED_IN, choice, errorResponse, flag, jsonResponse, notFound } from './common';
+import {
+  CONFLICT,
+  JSON_BODY,
+  Ok,
+  SIGNED_IN,
+  byUuid,
+  choice,
+  errorResponse,
+  flag,
+  jsonResponse,
+  notFound,
+  uuid,
+} from './common';
 import { defineOperation } from './registry';
 import { PAGE_MODULES, RIGHTS } from '@/lib/modules';
 import { DocumentProfile, MasterRow, Model, Permission, ShippingProfile, Symptom, SystemUser } from './shapes';
@@ -15,14 +27,16 @@ const tags = ['Admin'];
 const ADMIN = 'System Admin only.';
 const sn = s.nullish();
 
-/** ?id= of a DELETE: a positive number, else 400 "id required" */
-const byId = z.object({
-  id: z.coerce
-    .number({ error: 'id required' })
-    .int('id required')
-    .positive('id required')
-    .meta({ description: 'profile id' }),
-});
+/** ?id= of a profile DELETE: its uuid — anything else (an old int id) → 404 ไม่พบโปรไฟล์, as an unknown one */
+const profileById = byUuid('โปรไฟล์', 'profile id');
+
+/** a row's uuid on a save: set = edit that row (no such row → 404); left out / null / "" = a new one */
+const optId = (what: string) =>
+  z
+    .literal('')
+    .transform(() => undefined)
+    .or(uuid(`ไม่พบ${what}`))
+    .nullish();
 
 /** what the route's `str()` reads: a string, trimmed; anything else as "" */
 const str = z
@@ -58,7 +72,7 @@ export const userSave = defineOperation({
   summary: 'Create or update a system user and give them a role',
   description: `${ADMIN} Rules: \`userSchema(prev)\` in src/lib/validation/admin.ts, run by the route against the stored user. Blank code / branch / phone / avatar / title are filled from the Lark directory by email. An edit that leaves name / role / status out keeps them as stored (the row's quick actions send only what they change).`,
   body: userFields.extend({
-    id: sn.meta({ description: 'Set = edit that user.' }),
+    id: optId('ผู้ใช้').meta({ description: "The user's uuid: set = edit that user; left out or empty = a new one." }),
     expect: z.object({ name: sn, email: sn, role: sn, status: sn }).nullish().meta({
       description:
         'The values the form loaded (as GET /admin/users shows them): one that no longer matches the stored user → 409 `details.stale`, nothing written.',
@@ -156,9 +170,9 @@ export const recordStatus = defineOperation({
   body: z.object({
     // in the order the route always checked them: 400 "id required", then "table not allowed: …"
     id: z
-      .union([s, n], { error: 'id required' })
-      .refine((v) => v !== '', 'id required')
-      .meta({ description: 'The record key (users: the app_user id).' }),
+      .string({ error: 'id required' })
+      .refine((v) => v.trim() !== '', 'id required')
+      .meta({ description: "The row's uuid (models: the model code). No such row → 404." }),
     table: z.enum(
       [
         'users',
@@ -216,7 +230,9 @@ export const masterSave = defineOperation({
     }),
   }),
   body: z.object({
-    id: text,
+    id: optId('รายการนี้ — โหลดหน้าใหม่').meta({
+      description: "The row's uuid (simple lists and symptoms): set = edit it; left out or empty = a new one.",
+    }),
     code: text.meta({ description: 'models' }),
     name: text,
     detail: text,
@@ -292,7 +308,7 @@ export const documentProfileSave = defineOperation({
   summary: 'Create (no `id`) or update a document profile',
   description: `${ADMIN} Rules: \`documentProfileSchema\` (src/lib/validation/admin.ts).`,
   body: documentProfileSchema.extend({
-    id: n.nullish().meta({ description: 'Set = edit that profile.' }),
+    id: uuid().nullish().meta({ description: 'Set = edit that profile.' }),
     code: sn,
     nameTh: sn,
     phone: sn,
@@ -324,12 +340,12 @@ export const documentProfileDelete = defineOperation({
   tags,
   summary: 'Soft-delete a document profile',
   description: `${ADMIN} The default profile, or one still used by an open document, is refused.`,
-  query: byId,
-  invalid: { query: 400 },
+  query: profileById,
+  invalid: { query: 404 },
   responses: {
     200: jsonResponse('Deleted.', Ok),
     ...SIGNED_IN,
-    400: errorResponse('`id` missing or not a positive number.'),
+    400: errorResponse('SHD (the built-in profile) or the default profile.'),
     ...notFound('No such profile.'),
     ...CONFLICT,
   },
@@ -351,7 +367,7 @@ export const shippingProfileSave = defineOperation({
   summary: 'Create (no `id`) or update a courier profile',
   description: `${ADMIN} Rules: \`shippingProfileSchema\` (src/lib/validation/admin.ts) — the tracking link is https with {no} where the parcel number goes.`,
   body: shippingProfileSchema.extend({
-    id: n.nullish().meta({ description: 'Set = edit that profile.' }),
+    id: uuid().nullish().meta({ description: 'Set = edit that profile.' }),
     code: sn,
     nameTh: sn,
     trackUrl: sn,
@@ -377,12 +393,11 @@ export const shippingProfileDelete = defineOperation({
   tags,
   summary: 'Soft-delete a courier profile',
   description: ADMIN,
-  query: byId,
-  invalid: { query: 400 },
+  query: profileById,
+  invalid: { query: 404 },
   responses: {
     200: jsonResponse('Deleted.', Ok),
     ...SIGNED_IN,
-    400: errorResponse('`id` missing or not a positive number.'),
-    ...notFound('No such profile.'),
+    ...notFound('No such profile (or `id` no uuid).'),
   },
 });

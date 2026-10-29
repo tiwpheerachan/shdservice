@@ -16,6 +16,9 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 Object.assign(process.env, { SESSION_SECRET: 'unit-test-session-secret-0123456789abcdef', DB_POOL_MAX: '25' });
 
 const { db, pool } = await import('@/db/client');
+/** a job's uuid — its API path (ADR 0008) */
+const jobIdOf = async (no: string) =>
+  (await pool.query<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no])).rows[0]!.id;
 const { HttpError } = await import('@/server/auth');
 const { signSession, SESSION_COOKIE } = await import('@/lib/session');
 const { nextRunningNo } = await import('@/db/running-no');
@@ -34,7 +37,7 @@ const {
 } = await import('@/server/services/jobs');
 const { receiveSchema } = await import('@/lib/validation/stock');
 const { addDays, today } = await import('@/lib/dates');
-const { GET: trackLinkGET } = await import('@/app/api/jobs/[no]/track-link/route');
+const { GET: trackLinkGET } = await import('@/app/api/jobs/[id]/track-link/route');
 const { POST: stockIssuePOST } = await import('@/app/api/stock/issue/route');
 
 // ---- fixtures ----
@@ -133,9 +136,13 @@ const jobRow = (no: string) =>
            job_closed_by AS "closedBy", to_char(job_repaired_date, 'YYYY-MM-DD') AS repaired, job_repaired_by AS rb,
            track_token_hash AS hash
       FROM job WHERE job_no = ${no}`);
+/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
+const ADMIN_UUID = (
+  await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.admin.id])
+).rows[0]!.id;
 const line = (no: string) =>
-  one<{ id: number; st: number; req: number; got: number; back: number; price: string; total: string }>(sql`
-    SELECT job_order_log_id AS id, order_status_id AS st, request_qty AS req, grant_qty AS got, return_qty AS back,
+  one<{ id: string; st: number; req: number; got: number; back: number; price: string; total: string }>(sql`
+    SELECT id::text AS id, order_status_id AS st, request_qty AS req, grant_qty AS got, return_qty AS back,
            spare_part_unit_price AS price, spare_part_total_price AS total
       FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`);
 const booking = async (code: string) =>
@@ -155,7 +162,7 @@ async function err(p: Promise<unknown>) {
   }
 }
 /** a repair-page part line (แบบ A เบิก + เสนอ) as the page sends it */
-const partLine = (code: string, qty: number, logId?: number, unitPrice = 100) => ({
+const partLine = (code: string, qty: number, logId?: string, unitPrice = 100) => ({
   logId,
   code,
   unitPrice,
@@ -273,7 +280,7 @@ try {
   await test('out-source send with a stale version → 409 stale; the first save stands', async () => {
     const v = (await jobRow(J(5))).v;
     const status = await statusName(14);
-    const send = (to: string) => ({ status, send: { to, date: today(), by: U.admin.id }, version: v });
+    const send = (to: string) => ({ status, send: { to, date: today(), by: ADMIN_UUID }, version: v });
     await saveOutsource(J(5), send('QJ Vendor A'), U.admin.id);
     const r = await err(saveOutsource(J(5), send('QJ Vendor B'), U.admin.id));
     assert.deepEqual([r.status, r.details], [409, { stale: true }]);
@@ -305,9 +312,12 @@ try {
 
   console.log('\n6 · assign refuses closed / deleted / unknown jobs');
   await test('a closed job → 409, a deleted one → 409, an unknown job no → 404; nobody assigned', async () => {
-    assert.equal((await err(assignJobs([J(8)], U.engineer.id, U.admin.id))).status, 409);
-    assert.equal((await err(assignJobs([J(9)], U.engineer.id, U.admin.id))).status, 409);
-    assert.equal((await err(assignJobs(['QJJ9999'], U.engineer.id, U.admin.id))).status, 404);
+    const eng = (
+      await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.engineer.id])
+    ).rows[0]!.id;
+    assert.equal((await err(assignJobs([J(8)], eng, U.admin.id))).status, 409);
+    assert.equal((await err(assignJobs([J(9)], eng, U.admin.id))).status, 409);
+    assert.equal((await err(assignJobs(['QJJ9999'], eng, U.admin.id))).status, 404);
     const { n } = await one<{ n: number }>(
       sql`SELECT count(*)::int AS n FROM job WHERE job_no IN (${J(8)}, ${J(9)}) AND engineer_id = ${U.engineer.id}`,
     );
@@ -349,7 +359,7 @@ try {
     const j = await jobRow(J(11));
     assert.deepEqual([j.s, j.closed, j.closedBy], [5, '1900-01-01 00:00', 0]);
     const { c } = await one<{ c: Record<string, unknown> }>(
-      sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${J(11)} AND action = 'STATUS' ORDER BY id DESC LIMIT 1`,
+      sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${J(11)} AND action = 'STATUS' ORDER BY pk DESC LIMIT 1`,
     );
     assert.deepEqual(c.jobClosedBy, [U.admin.id, 0]);
     assert.ok(Array.isArray(c.jobClosedDate));
@@ -415,8 +425,9 @@ try {
         )
       ).n;
     const n0 = await audits();
-    const r = await trackLinkGET(await request(`/api/jobs/${J(12)}/track-link`, U.admin), {
-      params: Promise.resolve({ no: J(12) }),
+    const id = await jobIdOf(J(12));
+    const r = await trackLinkGET(await request(`/api/jobs/${id}/track-link`, U.admin), {
+      params: Promise.resolve({ id }),
     });
     assert.equal(r.status, 200);
     assert.equal(((await r.json()) as { url: string }).url, '');

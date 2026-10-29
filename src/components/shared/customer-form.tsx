@@ -21,7 +21,7 @@ import { isIndividual } from '@/lib/validation/customer';
  * (inline "ลูกค้าใหม่" on job / quotation / sale order). One source of truth for
  * the fields, the cascading address lists and the payload shape (/api/customers).
  */
-export type Opt = { id: number; name: string; postal?: string };
+export type Opt = { id: string; name: string; postal?: string };
 
 export type CustomerFormValues = {
   code: string;
@@ -31,9 +31,10 @@ export type CustomerFormValues = {
   taxId: string;
   address1: string;
   address2: string;
-  cityId: number;
-  districtId: number;
-  subDistrictId: number;
+  /** uuids of the picked จังหวัด / อำเภอ / ตำบล — '' = not picked */
+  cityId: string;
+  districtId: string;
+  subDistrictId: string;
   postalCode: string;
   phone: string;
   email: string;
@@ -52,9 +53,9 @@ export const EMPTY_CUSTOMER: CustomerFormValues = {
   taxId: '',
   address1: '',
   address2: '',
-  cityId: -1,
-  districtId: -1,
-  subDistrictId: -1,
+  cityId: '',
+  districtId: '',
+  subDistrictId: '',
   postalCode: '',
   phone: '',
   email: '',
@@ -71,9 +72,9 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
   taxId: c.taxId,
   address1: c.address1 || c.address,
   address2: c.address2 ?? '',
-  cityId: c.cityId ?? -1,
-  districtId: c.districtId ?? -1,
-  subDistrictId: c.subDistrictId ?? -1,
+  cityId: c.cityId ?? '',
+  districtId: c.districtId ?? '',
+  subDistrictId: c.subDistrictId ?? '',
   postalCode: c.postalCode ?? '',
   phone: c.phone,
   email: c.email,
@@ -84,22 +85,21 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
 });
 
 /** cascading address lists (mt_city → mt_district → mt_sub_district) */
-export function useAddressLists(cityId: number, districtId: number) {
+export function useAddressLists(cityId: string, districtId: string) {
   const { data: PROVINCES, ...provinces } = useProvinces();
   // master data: read once, shared by every customer form (5 min cache like the other masters)
   const { data: d, ...dLoad } = useApi<{ rows: Opt[] }>(
-    cityId > 0 ? `/api/address${qs({ level: 'district', city: cityId })}` : null,
+    cityId ? `/api/address${qs({ level: 'district', city: cityId })}` : null,
     { ttl: TTL_MASTER },
   );
   const { data: sd, ...sdLoad } = useApi<{ rows: Opt[] }>(
-    districtId > 0 ? `/api/address${qs({ level: 'subdistrict', district: districtId })}` : null,
+    districtId ? `/api/address${qs({ level: 'subdistrict', district: districtId })}` : null,
     { ttl: TTL_MASTER },
   );
-  const districts = React.useMemo(() => (cityId > 0 ? (d?.rows ?? []) : []), [cityId, d]);
-  const subDistricts = React.useMemo(() => (districtId > 0 ? (sd?.rows ?? []) : []), [districtId, sd]);
-  // mt_city -1 is the legacy blank "not set" row — the placeholder row stands for it
+  const districts = React.useMemo(() => (cityId ? (d?.rows ?? []) : []), [cityId, d]);
+  const subDistricts = React.useMemo(() => (districtId ? (sd?.rows ?? []) : []), [districtId, sd]);
   return {
-    PROVINCES: PROVINCES.filter((p) => p.id > 0),
+    PROVINCES,
     districts,
     subDistricts,
     /** re-read the sub-districts (after "+ เพิ่มชื่อ" added one) */
@@ -202,7 +202,7 @@ export function CustomerFields({
     form.cityId,
     form.districtId,
   );
-  const canAddSubDistrict = useAccess().can('Customer', 'edit') && form.districtId > 0;
+  const canAddSubDistrict = useAccess().can('Customer', 'edit') && !!form.districtId;
   const [addingSubDistrict, setAddingSubDistrict] = React.useState(false);
   // a hint only, never an error — the master's code is wrong for some ตำบล (Mueang Chiang Mai: all 50000)
   const postalHint = subDistricts.find((s) => s.id === form.subDistrictId)?.postal?.trim();
@@ -250,7 +250,7 @@ export function CustomerFields({
         wide
         error={errors.address1}
         hint={
-          editing && (editing.cityId ?? -1) <= 0 && form.address1
+          editing && !editing.cityId && form.address1
             ? 'ที่อยู่เดิมจากระบบเก่ายังไม่แยกจังหวัด/อำเภอ — ถ้าจะเลือกจังหวัดด้านล่าง กรุณาตัดส่วนตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ออกจากช่องนี้ก่อน ไม่เช่นนั้นที่อยู่จะซ้ำ'
             : count(form.address1, 100)
         }
@@ -268,11 +268,9 @@ export function CustomerFields({
       </Field>
       <Field label="จังหวัด" lookup={lookups.provinces}>
         <SearchSelect
-          value={form.cityId > 0 ? String(form.cityId) : ''}
-          onChange={(v) =>
-            setForm((f) => ({ ...f, cityId: Number(v) || -1, districtId: -1, subDistrictId: -1, postalCode: '' }))
-          }
-          options={PROVINCES.map((p) => ({ value: String(p.id), label: p.name }))}
+          value={form.cityId}
+          onChange={(v) => setForm((f) => ({ ...f, cityId: v, districtId: '', subDistrictId: '', postalCode: '' }))}
+          options={PROVINCES.map((p) => ({ value: p.id, label: p.name }))}
           placeholder="- - เลือกจังหวัด - -"
           emptyLabel="- - เลือกจังหวัด - -"
           searchPlaceholder="พิมพ์ชื่อจังหวัด…"
@@ -280,24 +278,23 @@ export function CustomerFields({
       </Field>
       <Field label="เขต / อำเภอ" lookup={lookups.districts}>
         <SearchSelect
-          value={form.districtId > 0 ? String(form.districtId) : ''}
-          onChange={(v) => setForm((f) => ({ ...f, districtId: Number(v) || -1, subDistrictId: -1, postalCode: '' }))}
-          options={districts.map((d) => ({ value: String(d.id), label: d.name }))}
-          disabled={form.cityId <= 0}
+          value={form.districtId}
+          onChange={(v) => setForm((f) => ({ ...f, districtId: v, subDistrictId: '', postalCode: '' }))}
+          options={districts.map((d) => ({ value: d.id, label: d.name }))}
+          disabled={!form.cityId}
           searchPlaceholder="พิมพ์ชื่อเขต / อำเภอ…"
         />
       </Field>
       <Field label="แขวง / ตำบล" lookup={lookups.subDistricts}>
         <SearchSelect
-          value={form.subDistrictId > 0 ? String(form.subDistrictId) : ''}
+          value={form.subDistrictId}
           onChange={(v) => {
-            const id = Number(v) || -1;
-            const hit = subDistricts.find((s) => s.id === id);
-            setForm((f) => ({ ...f, subDistrictId: id, postalCode: hit?.postal || f.postalCode }));
+            const hit = subDistricts.find((s) => s.id === v);
+            setForm((f) => ({ ...f, subDistrictId: v, postalCode: hit?.postal || f.postalCode }));
             clearError?.('postalCode');
           }}
-          options={subDistricts.map((s) => ({ value: String(s.id), label: s.name, sub: s.postal || undefined }))}
-          disabled={form.districtId <= 0}
+          options={subDistricts.map((s) => ({ value: s.id, label: s.name, sub: s.postal || undefined }))}
+          disabled={!form.districtId}
           searchPlaceholder="พิมพ์ชื่อแขวง / ตำบล หรือรหัสไปรษณีย์…"
         />
         {canAddSubDistrict && !addingSubDistrict && (
@@ -390,7 +387,7 @@ function AddSubDistrict({
   postal: postal0,
   onDone,
 }: {
-  districtId: number;
+  districtId: string;
   postal: string;
   onDone: (row: (Opt & { postal: string }) | null) => void | Promise<void>;
 }) {

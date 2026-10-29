@@ -135,7 +135,7 @@ export default function AuditPage() {
           <Input type="date" value={draft.to} onChange={(e) => setD('to', e.target.value)} />
         </Field>
         <Field label="ผู้ใช้">
-          <Input placeholder="ชื่อ หรือ user id" value={draft.user} onChange={(e) => setD('user', e.target.value)} />
+          <Input placeholder="ชื่อผู้ใช้" value={draft.user} onChange={(e) => setD('user', e.target.value)} />
         </Field>
         <Field label="โมดูล" lookup={modulesLookup}>
           <SearchSelect

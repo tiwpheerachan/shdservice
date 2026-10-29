@@ -130,18 +130,18 @@ export function CloseReturnSection({
         >
           {/* โปรไฟล์บริษัทขนส่ง (ข้อมูลระบบ) — เลือก "อื่น ๆ" เพื่อพิมพ์ชื่อเองแบบระบบเดิม */}
           <Select
-            value={d.shipperId ? String(d.shipperId) : d.courier ? 'other' : ''}
+            value={d.shipperId || (d.courier ? 'other' : '')}
             onChange={(e) => {
               const v = e.target.value;
-              if (v === 'other') return upd({ shipperId: 0, courier: '' });
-              const p = SHIPPING.find((x) => String(x.id) === v);
-              upd({ shipperId: p ? p.id : 0, courier: p ? p.nameTh : '' });
+              if (v === 'other') return upd({ shipperId: '', courier: '' });
+              const p = SHIPPING.find((x) => x.id === v);
+              upd({ shipperId: p ? p.id : '', courier: p ? p.nameTh : '' });
             }}
           >
             <option value="">- - เลือก - -</option>
             {/* a profile deleted since (hidden from the list): the job keeps it */}
-            {d.shipperId > 0 && !SHIPPING.some((p) => p.id === d.shipperId) && (
-              <option value={d.shipperId}>{d.courier || `#${d.shipperId}`} (ค่าเดิม)</option>
+            {d.shipperId && !SHIPPING.some((p) => p.id === d.shipperId) && (
+              <option value={d.shipperId}>{d.courier || 'โปรไฟล์ที่ถูกลบ'} (ค่าเดิม)</option>
             )}
             {SHIPPING.map((p) => (
               <option key={p.id} value={p.id}>

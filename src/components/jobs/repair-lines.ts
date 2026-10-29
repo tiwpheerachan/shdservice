@@ -12,7 +12,7 @@ const QUOTE_ONLY = 'เสนอ (ยังไม่เบิก)';
 /** a spare-part line of บันทึกงานซ่อม (job_order_spare_part_log) */
 export type Line = {
   id: number;
-  logId?: number; // existing job_order_spare_part_log row
+  logId?: string; // existing job_order_spare_part_log row (its id)
   code: string;
   name: string;
   price: number;

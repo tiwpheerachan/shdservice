@@ -149,19 +149,40 @@ try {
 
   console.log('\nLookups, alerts, files, docs');
   await expect([200], '/api/address');
-  await expect([200], '/api/address?level=district&city=1');
-  await expect([200], '/api/address?level=subdistrict&district=1');
+  // a province / district by its uuid (ADR 0008)
+  const place = (
+    await pool.query<{ c: string; d: string }>(
+      `SELECT c.id::text AS c, d.id::text AS d FROM mt_district d JOIN mt_city c USING (city_id) ORDER BY d.district_id LIMIT 1`,
+    )
+  ).rows[0];
+  await test('GET /api/address by uuid → the districts / sub-districts; an old int id → no rows', async () => {
+    const rows = async (q: string) => ((await call(`/api/address?${q}`)).body.rows as unknown[]).length;
+    if (place) assert.ok((await rows(`level=district&city=${place.c}`)) > 0, 'districts of the province');
+    assert.equal(await rows('level=district&city=1'), 0);
+  });
+  await expect([200], `/api/address?level=subdistrict&district=${place?.d ?? ''}`);
   // "+ เพิ่มชื่อ" แขวง / ตำบล — its rules: scripts/test-qa-parity-d.mts
   await expect([400], '/api/address', { method: 'POST', body: { district: 0, name: '', postal: '' } });
   await expect([200], '/api/alerts/overdue');
   await expect([200], '/api/alerts/sale-orders-pending');
   await expect([200], '/api/customers/lookup?q=TDC001');
   await expect([200], '/api/customers/lookup?q=ทดสอบ');
-  await expect([200], '/api/products/TDP1');
+  // a part by its uuid (ADR 0008); its code — an old link — or an unknown uuid is 404, no redirect
+  const uuidOf = async (sqlText: string) => (await pool.query<{ id: string }>(sqlText)).rows[0]!.id;
+  const tdp1 = await uuidOf(`SELECT id::text AS id FROM product WHERE product_code = 'TDP1'`);
+  await expect([200], `/api/products/${tdp1}`);
+  await expect([404], '/api/products/TDP1');
+  await expect([404], '/api/products/00000000-0000-7000-8000-000000000000');
   await expect([404], '/api/products/NOPE-' + rand);
+  // staff filters take a user's uuid (a name still works where the page types one)
+  const tdAdmin = await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9101`);
+  await expect([200], `/api/data/audit_log?paged=1&user=${tdAdmin}`);
+  await expect([200], `/api/data/products?paged=1&creator=${tdAdmin}`);
+  await expect([200], `/api/data/report_rows?report=sale_order&createdBy=${tdAdmin}`);
   await expect([200], '/api/export/customers');
+  // an attachment / a job by its uuid (ADR 0008): an old int id / job number → 404, no redirect
   await expect([404], '/api/attachments/999999999');
-  await expect([404], '/api/attachments/999999999', { method: 'DELETE' });
+  await expect([404], '/api/attachments/00000000-0000-7000-8000-000000000000', { method: 'DELETE' });
   await expect([400], '/api/files');
   await expect([404, 503], '/api/files?path=products/TDP1/x.jpg');
   await expect([200], '/api/openapi.json');
@@ -230,41 +251,49 @@ try {
   });
 
   console.log('\nJobs');
-  await expect([200], '/api/jobs/TDJ0004');
-  await expect([404], '/api/jobs/NOPE' + rand);
+  const tdj4 = await uuidOf(`SELECT id::text AS id FROM job WHERE job_no = 'TDJ0004'`);
+  const J4 = `/api/jobs/${tdj4}`;
+  await expect([200], J4);
+  await expect([404], '/api/jobs/TDJ0004'); // its number: an old link
+  await expect([404], '/api/jobs/00000000-0000-7000-8000-000000000000');
   await expect([404], '/api/jobs/J%25zz'); // a literal % (Next hands the segment over decoded once): no URIError
-  await expect([200], '/api/jobs/TDJ0004/calls');
-  await expect([200], '/api/jobs/TDJ0004/calls', { method: 'POST', body: { detail: 'โทรแจ้งลูกค้าแล้ว (test-api)' } });
-  await expect([400], '/api/jobs/TDJ0004/calls', { method: 'POST', body: { detail: '' } });
+  await expect([404], '/api/jobs/TDJ0004/calls');
+  await expect([200], `${J4}/calls`);
+  await expect([200], `${J4}/calls`, { method: 'POST', body: { detail: 'โทรแจ้งลูกค้าแล้ว (test-api)' } });
+  await expect([400], `${J4}/calls`, { method: 'POST', body: { detail: '' } });
   await expect([200], '/api/jobs/assign', {
     method: 'POST',
-    body: { jobNos: ['TDJ0004'], engineerId: 9110, takeOver: true },
+    body: {
+      jobNos: ['TDJ0004'],
+      engineerId: await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9110`),
+      takeOver: true,
+    },
   });
   await expect([400], '/api/jobs', { method: 'POST', body: {} });
-  await expect([200, 400, 409], '/api/jobs/TDJ0004', { method: 'PATCH', body: { version: -1 } });
-  await expect([415], '/api/jobs/TDJ0004/close', { method: 'POST', headers: { 'content-type': 'text/plain' } });
-  await expect([400], '/api/jobs/TDJ0004/close', { method: 'POST', body: {} });
-  await expect([400], '/api/jobs/TDJ0004/outsource', { method: 'POST', body: {} });
-  await expect([400], '/api/jobs/TDJ0004/repair', { method: 'POST', body: {} });
-  await expect([400], '/api/jobs/TDJ0004/swap-refund', { method: 'POST', body: {} });
+  await expect([200, 400, 409], J4, { method: 'PATCH', body: { version: -1 } });
+  await expect([415], `${J4}/close`, { method: 'POST', headers: { 'content-type': 'text/plain' } });
+  await expect([400], `${J4}/close`, { method: 'POST', body: {} });
+  await expect([400], `${J4}/outsource`, { method: 'POST', body: {} });
+  await expect([400], `${J4}/repair`, { method: 'POST', body: {} });
+  await expect([400], `${J4}/swap-refund`, { method: 'POST', body: {} });
   await test("POST /api/jobs/TDJ0004/swap-refund → 400: a status off the Swap list (19 = Refund's); no New Serial asked", async () => {
     const { n } = (
       await pool.query<{ n: string }>('SELECT job_status_name AS n FROM job_status WHERE job_status_id = 19')
     ).rows[0]!;
-    const r = await call('/api/jobs/TDJ0004/swap-refund', { method: 'POST', body: { status: n } });
+    const r = await call(`${J4}/swap-refund`, { method: 'POST', body: { status: n } });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.deepEqual(Object.keys((r.body.details as { fields: object }).fields), ['status']);
   });
   await test('POST /api/jobs/TDJ0004/close → 400: Serial เครื่องใหม่ checked when typed (newSerial)', async () => {
     const body = { status: 'x', newSerial: 'SN ใหม่', return: { type: 'ลูกค้ามารับเอง', date: '2026-10-28' } };
-    const r = await call('/api/jobs/TDJ0004/close', { method: 'POST', body });
+    const r = await call(`${J4}/close`, { method: 'POST', body });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.ok((r.body.details as { fields: Record<string, string> }).fields.newSerial);
   });
-  await expect([200], '/api/jobs/TDJ0004/track-link');
+  await expect([200], `${J4}/track-link`);
   let linkToken = '';
   await test('POST /api/jobs/TDJ0004/track-link → 200 (a new link)', async () => {
-    const r = await call('/api/jobs/TDJ0004/track-link', { method: 'POST' });
+    const r = await call(`${J4}/track-link`, { method: 'POST' });
     assert.equal(r.status, 200);
     linkToken = String(r.body.url).split('/track/')[1] ?? '';
     assert.ok(linkToken);
@@ -300,14 +329,14 @@ try {
   });
 
   console.log('\nCustomers, quotations, sale orders');
-  let customerCode = '';
+  let customerId = '';
   await test('POST /api/customers → 201 (create)', async () => {
     const r = await call('/api/customers', {
       method: 'POST',
       body: { name: `ลูกค้า API ${rand}`, phone: `08${String(Date.now()).slice(-8)}`, type: 'Normal' },
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    customerCode = String((r.body.row as { code: string }).code);
+    customerId = String((r.body.row as { id: string }).id);
   });
   // deleted customers (PDPA) are System Admin's alone: anyone else asking for them gets the live list, no 400
   await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCDEL';
@@ -332,7 +361,7 @@ try {
     method: 'POST',
     body: { code: 'TDC001', name: 'ลูกค้า ทดสอบโดเมน', phone: '02-000-0000', version: -1 },
   });
-  let quotationNo = '';
+  let quotationId = '';
   await test('POST /api/quotations → 201 (create)', async () => {
     const r = await call('/api/quotations', {
       method: 'POST',
@@ -354,35 +383,41 @@ try {
       },
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    quotationNo = String((r.body.quotation as { no?: string } | undefined)?.no ?? '');
+    quotationId = String((r.body.quotation as { id?: string } | undefined)?.id ?? '');
   });
-  if (quotationNo) await expect([200], `/api/quotations/${quotationNo}`);
+  // a quotation / sale order by its uuid (ADR 0008); its number — an old link — or an unknown uuid is 404
+  if (quotationId) await expect([200], `/api/quotations/${quotationId}`);
   await expect([404], '/api/quotations/NOPE' + rand);
+  await expect([404], '/api/quotations/00000000-0000-7000-8000-000000000000');
+  const salesId = await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9107`);
+  const shdId = await uuidOf(`SELECT id::text AS id FROM document_profile WHERE code = 'SHD'`);
   let soNo = '';
+  let soId = '';
   await test('POST /api/sale-orders → 201 (create, sent for approval)', async () => {
     const r = await call('/api/sale-orders', {
       method: 'POST',
-      body: { customerCode: 'TDC001', salesId: 9107, lines: [{ code: 'TDP1', qty: 1, price: 100 }], submit: true },
+      body: { customerCode: 'TDC001', salesId, lines: [{ code: 'TDP1', qty: 1, price: 100 }], submit: true },
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    soNo = String((r.body.order as { no: string }).no);
+    ({ no: soNo, id: soId } = r.body.order as { no: string; id: string });
   });
-  await expect([200], `/api/sale-orders/${soNo}`);
+  await expect([200], `/api/sale-orders/${soId}`);
+  await expect([404], `/api/sale-orders/${soNo}`);
   await expect([404], '/api/sale-orders/SO0' + rand);
   // ออกเอกสารในนาม: open while waiting, fixed once approved (src/lib/profile-lock.ts)
   await expect([200], '/api/documents/profile', {
     method: 'POST',
-    body: { kind: 'sale_order', no: soNo, profileId: 1 },
+    body: { kind: 'sale_order', no: soNo, profileId: shdId },
   });
-  await expect([200], `/api/sale-orders/${soNo}/approve`, {
+  await expect([200], `/api/sale-orders/${soId}/approve`, {
     method: 'POST',
     body: { decision: 'approve' },
     as: MANAGER,
   });
-  await expect([200], `/api/sale-orders/${soNo}/tracking`, { method: 'POST', body: { tracking: 'TH0123456789' } });
+  await expect([200], `/api/sale-orders/${soId}/tracking`, { method: 'POST', body: { tracking: 'TH0123456789' } });
   await expect([409], '/api/documents/profile', {
     method: 'POST',
-    body: { kind: 'sale_order', no: soNo, profileId: 1 },
+    body: { kind: 'sale_order', no: soNo, profileId: shdId },
   });
   await expect([400], '/api/documents/profile', { method: 'POST', body: { kind: 'nope' } });
 
@@ -423,10 +458,10 @@ try {
     body: { items: [{ role: 'TD Api', menu: 'Customer', view: true }] },
   });
   await expect([200], '/api/admin/permissions?role=TD%20Api', { method: 'DELETE' }); // nobody holds it
-  if (customerCode)
+  if (customerId)
     await expect([200], '/api/admin/records', {
       method: 'POST',
-      body: { table: 'customers', id: customerCode, status: 'INACTIVE' },
+      body: { table: 'customers', id: customerId, status: 'INACTIVE' },
     });
   await expect([200], '/api/masters/colors', { method: 'POST', body: { name: `TD สี ${rand}` } });
   await expect([200], '/api/masters/symptoms', { method: 'POST', body: { name: `TD อาการ ${rand}`, group: 'TD' } });
@@ -436,14 +471,14 @@ try {
   });
   for (const kind of ['document-profiles', 'shipping-profiles']) {
     await expect([200], `/api/admin/${kind}`);
-    let id = 0;
+    let id = '';
     await test(`POST /api/admin/${kind} → 200 (create)`, async () => {
       const r = await call(`/api/admin/${kind}`, {
         method: 'POST',
         body: { code: `TD${rand}`, nameTh: `โปรไฟล์ทดสอบ ${rand}` },
       });
       assert.equal(r.status, 200, JSON.stringify(r.body));
-      id = (r.body.row as { id: number }).id;
+      id = (r.body.row as { id: string }).id;
     });
     await expect([200], `/api/admin/${kind}?id=${id}`, { method: 'DELETE' });
   }
@@ -501,18 +536,23 @@ try {
       assert.deepEqual(r.body, body);
     });
   const idRequired = { error: 'id required' };
-  await refuses(400, idRequired, '/api/admin/document-profiles', { method: 'DELETE' });
-  await refuses(400, idRequired, '/api/admin/document-profiles?id=abc', { method: 'DELETE' });
-  await refuses(400, idRequired, '/api/admin/shipping-profiles?id=0', { method: 'DELETE' });
-  await refuses(400, idRequired, '/api/admin/shipping-profiles?id=1.2', { method: 'DELETE' });
-  await refuses(404, { error: 'not found' }, '/api/attachments/id');
-  await refuses(404, { error: 'not found' }, '/api/attachments/id', { method: 'DELETE' });
+  // a profile by its uuid: none, an old int id or junk is no profile
+  const noProfile = { error: 'ไม่พบโปรไฟล์' };
+  await refuses(404, noProfile, '/api/admin/document-profiles', { method: 'DELETE' });
+  await refuses(404, noProfile, '/api/admin/document-profiles?id=abc', { method: 'DELETE' });
+  await refuses(404, noProfile, '/api/admin/shipping-profiles?id=1', { method: 'DELETE' });
+  await refuses(404, noProfile, '/api/admin/shipping-profiles?id=00000000-0000-7000-8000-000000000000', {
+    method: 'DELETE',
+  });
+  await refuses(404, { error: 'ไม่พบไฟล์แนบ' }, '/api/attachments/id');
+  await refuses(404, { error: 'ไม่พบไฟล์แนบ' }, '/api/attachments/id', { method: 'DELETE' });
+  await refuses(404, { error: 'ไม่พบงาน' }, '/api/jobs/J2612164'); // a job's number is no path (ADR 0008)
   // what the DB cannot take (DAST 2026-10-20): the caller's mistake → 400, not an "unhandled" 500
   const badInput = { error: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่' };
   await refuses(400, badInput, '/api/data/jobs?q=a%00b');
   await refuses(400, badInput, '/api/customers/lookup?q=a%00b');
-  // a literal % in a number is just a character (Next decodes the segment once): not found, not 400 / 500
-  await refuses(404, { error: 'ไม่พบใบสั่งขาย SO%n%s' }, '/api/sale-orders/SO%25n%25s');
+  // a literal % in a path is just a character (Next decodes the segment once): not found, not 400 / 500
+  await refuses(404, { error: 'ไม่พบใบสั่งขาย' }, '/api/sale-orders/SO%25n%25s');
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', { method: 'POST', body: { items: 'all' } });
   await refuses(400, { error: 'no items' }, '/api/admin/permissions', {
     method: 'POST',
@@ -522,18 +562,31 @@ try {
   // the body is checked before the permission, as always: a stranger gets the same 400
   await refuses(400, { error: 'table not allowed: nope' }, '/api/admin/records', {
     method: 'POST',
-    body: { table: 'nope', id: 1 },
+    body: { table: 'nope', id: 'x' }, // a row id is text (a uuid / model code) — a number is no id
     as: null,
   });
   await refuses(404, { error: 'unknown master: nope' }, '/api/masters/nope', { method: 'POST', body: { name: 'x' } });
 
   console.log('\nDeleting through /api/admin/records — what a delete would leave behind is refused');
-  const del = (table: string, id: string, as?: Who, status = 'DELETED', remark = 'TD เหตุผล') =>
-    call('/api/admin/records', {
+  // a part / job / quotation / sale order goes by its uuid (ADR 0008) — looked up here by its code / number
+  const DOC: Record<string, [string, string]> = {
+    products: ['product', 'product_code'],
+    jobs: ['job', 'job_no'],
+    quotations: ['quotation_hd', 'quotation_no'],
+    sale_orders: ['sale_out_hd', 'sale_out_hd_no'],
+    customers: ['customer', 'customer_code'],
+  };
+  const del = async (table: string, key: string, as?: Who, status = 'DELETED', remark = 'TD เหตุผล') => {
+    const d = DOC[table];
+    const id = d
+      ? (await pool.query<{ id: string }>(`SELECT id::text AS id FROM ${d[0]} WHERE ${d[1]} = $1`, [key])).rows[0]!.id
+      : key;
+    return call('/api/admin/records', {
       method: 'POST',
       body: { table, id, status, remark }, // jobs / quotations / sale orders: DELETED needs a reason
       ...(as === undefined ? {} : { as }),
     });
+  };
   await test('a job with a part waiting for stock / issued and not back → 409, the job stays', async () => {
     await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRDEL';
       DELETE FROM job_log WHERE job_no = 'TDJRDEL';
@@ -610,7 +663,9 @@ try {
     );
     assert.deepEqual(kept[0], { r: 'TD เหตุผล', b: 9107 });
     // the detail carries the reason; the list / export read ยกเลิก, not the last approval step
-    const got = await call('/api/sale-orders/TDSORDEL2');
+    const got = await call(
+      `/api/sale-orders/${await uuidOf(`SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2'`)}`,
+    );
     const order = got.body.order as { cancelRemark: string; approve: string };
     assert.deepEqual([order.cancelRemark, order.approve], ['TD เหตุผล', 'ยกเลิก']);
   });
@@ -632,7 +687,12 @@ try {
     const codes = async (url: string, as?: Who) =>
       ((await call(url, as === undefined ? {} : { as })).body.rows as { code: string }[]).map((r) => r.code);
     assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD'), [], 'admin, a picker');
-    assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all'), ['TDCLKD'], 'admin, ?edit=');
+    assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all'), ['TDCLKD'], 'admin, by code');
+    // the customers page's ?edit=<uuid> link: that customer by its uuid
+    const [{ id }] = (await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = 'TDCLKD'`))
+      .rows;
+    assert.deepEqual(await codes(`/api/customers/lookup?q=${id}&deleted=all`), ['TDCLKD'], 'admin, ?edit=<uuid>');
+    assert.deepEqual(await codes(`/api/customers/lookup?q=${id}`), [], 'admin, a picker by uuid');
     const clerk = { email: 'td-clerk@example.invalid' };
     assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all', clerk), [], 'non-admin asking');
   });
@@ -710,7 +770,7 @@ try {
   await refuses(
     400,
     { error: 'กรอกข้อมูลไม่ครบ 1 ช่อง', details: { fields: { detail: 'ต้องระบุรายละเอียด' } } },
-    '/api/jobs/TDJ0004/calls',
+    `${J4}/calls`,
     { method: 'POST', body: { detail: ' ' } },
   );
   // a choice outside its values is read as left out, an unknown name is a filter — never a 400

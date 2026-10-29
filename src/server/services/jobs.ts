@@ -65,8 +65,8 @@ import {
 import { QUOTE_MOVES_BY_ID, QUOTE_STEP } from '@/lib/quote-job';
 import { customerForDocument, getCustomerById } from './customers';
 import { staffOrKeep } from './users';
-import { listSimple, listSymptoms } from './masters';
-import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { issuingProfile, profileIdOf } from './document-profiles';
+import { pkOf } from '@/server/ids';
 import { adjustQty, listPartRequests, lockStock, PART, productsByCode } from './stock';
 import { RS, statusStamp } from '@/server/record-status';
 import { filePath, resolvePath } from '@/server/storage';
@@ -206,6 +206,14 @@ const statusEntry = (jobNo: string, name: string, from: number | null, to: numbe
 
 export const jobNotFound = (jobNo: string) => new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
 
+/** the job_no of the job whose uuid is `id` (a path's `{id}`, already a uuid) — no such job → 404 `ไม่พบงาน` */
+export const jobNoOf = (id: string) => pkOf(job, job.jobNo, id, 'งาน');
+
+/** jobNoOf for a page's path segment (print views): anything but a uuid of a job → null */
+export async function jobNoOrNull(id: string): Promise<string | null> {
+  return isUuid(id) ? jobNoOf(id.toLowerCase()).catch(() => null) : null;
+}
+
 type JobRow = typeof job.$inferSelect;
 
 /**
@@ -310,7 +318,7 @@ async function setStatus(
     // INTO Finished: an already-closed legacy job (7 → 8, adding the tracking no.) is not blocked.
     const closing = fromGroup !== FINISHED_GROUP;
     const [out] = closing
-      ? await tx.select({ id: jobSendForwardDt.id }).from(jobSendForwardDt).where(outsourceOpen(jobNo)).limit(1)
+      ? await tx.select({ id: jobSendForwardDt.pk }).from(jobSendForwardDt).where(outsourceOpen(jobNo)).limit(1)
       : [];
     if (out) throw new HttpError(400, OUTSOURCE_NOT_BACK, { fields: { status: OUTSOURCE_NOT_BACK } });
     // closed → closed (7 → 8 when the parcel no. comes later) keeps the original close date / closer
@@ -366,10 +374,10 @@ export async function followQuotation(
 const customerText = sql<string>`coalesce(nullif(btrim(concat_ws(' ', btrim(${customer.customerCode}), btrim(${customer.customerName}), btrim(${customer.phoneNumber}))), ''), ${job.customerDetail})`;
 
 const listSelect = {
+  id: job.id,
   no: job.jobNo,
   openDate: job.jobCreateDate,
   customer: customerText,
-  customerId: job.customerId,
   so: job.jobReferenceNo,
   brand: manufacturer.manufacturerName,
   modelName: job.productModelName,
@@ -378,7 +386,6 @@ const listSelect = {
   jobTypeDetail: job.jobTypeDetail,
   engFirst: eng.firstName,
   engLast: eng.lastName,
-  engineerId: job.engineerId,
   isBounce: job.isJobBounce,
   status: jobStatus.jobStatusName,
   statusId: job.jobStatusId,
@@ -418,6 +425,7 @@ export type JobListRow = Job & { deposit: number; outstanding: number };
 
 function toJob(r: ListRow): JobListRow {
   return {
+    id: r.id ?? '',
     no: r.no ?? '',
     openDate: fmtDateTime(r.openDate),
     customer: r.customer?.trim() ?? '',
@@ -431,8 +439,6 @@ function toJob(r: ListRow): JobListRow {
     // extra DB-backed fields (optional on the UI type)
     statusId: r.statusId ?? 0,
     statusGroup: r.statusGroup ?? '',
-    customerId: r.customerId ?? 0,
-    engineerId: r.engineerId ?? 0,
     isBounce: !!r.isBounce,
     serial: r.serial ?? '',
     channel: r.channel ?? '',
@@ -516,7 +522,7 @@ export type JobFilters = {
   open?: boolean; // not Finished/Cancel
   overdue?: boolean; // still open and past its real due date — overdueWhere (the notification bell)
   type?: string; // job type name
-  engineer?: string; // engineer full name or id
+  engineer?: string; // engineer full name or app_user.id (uuid)
   channel?: string;
   from?: string; // job_create_date >=
   to?: string;
@@ -538,7 +544,7 @@ export type JobFilters = {
   brand?: string; // ยี่ห้อ — manufacturer name
   model?: string; // รุ่น — product_model_name
   typeDetail?: string; // งานย่อย
-  createdBy?: string; // เปิดงานโดย — app_user id
+  createdBy?: string; // เปิดงานโดย — app_user.id (uuid)
   customer?: string; // ชื่อ-สกุลลูกค้า (matched inside customer_detail = "code name phone")
   phone?: string; // เบอร์โทร — digits, matched inside customer_detail
   tracking?: string; // เลขพัสดุจากลูกค้า (job_reception_tracking_no)
@@ -610,6 +616,10 @@ const customerPhoneHas = (digits: string) =>
 const customerNow = (cond: SQL | undefined) =>
   sql`${job.customerId} = ANY(ARRAY(select ${customer.customerId} from ${customer} where ${cond}))`;
 
+const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+/** app_user.user_id of the user whose uuid is `id` (a filter's value: no such user → matches nothing) */
+const userIdOf = (id: string) => sql`(select ${appUser.userId} from ${appUser} where ${appUser.id} = ${id.trim()})`;
+
 export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   // a phone typed as digits ("0814969925") also finds "081-4969925" — same match as f.phone below
@@ -650,8 +660,8 @@ export function jobWhere(q: string, f: JobFilters) {
     f.overdue ? overdueWhere : undefined,
     f.type ? eq(jobType.jobTypeName, f.type) : undefined,
     f.engineer
-      ? /^\d+$/.test(f.engineer)
-        ? eq(job.engineerId, Number(f.engineer))
+      ? isUuid(f.engineer)
+        ? eq(job.engineerId, userIdOf(f.engineer))
         : // the same name fullName() builds: each part trimmed, empty parts dropped
           sql`concat_ws(' ', nullif(trim(${eng.firstName}),''), nullif(trim(${eng.lastName}),'')) = ${f.engineer.trim()}`
       : undefined,
@@ -683,7 +693,7 @@ export function jobWhere(q: string, f: JobFilters) {
       : undefined,
     f.model ? eq(job.productModelName, f.model) : undefined,
     f.typeDetail ? eq(job.jobTypeDetail, f.typeDetail) : undefined,
-    f.createdBy && /^\d+$/.test(f.createdBy) ? eq(job.jobCreateBy, Number(f.createdBy)) : undefined,
+    f.createdBy && isUuid(f.createdBy) ? eq(job.jobCreateBy, userIdOf(f.createdBy)) : undefined,
     f.customer
       ? or(
           ilike(job.customerDetail, likeTerm(f.customer.trim())),
@@ -827,20 +837,20 @@ async function loadJobStats() {
  * Detail
  * ------------------------------------------------------------------ */
 export type JobDetail = {
+  /** job.id (uuid) — every link and API path of the job (ADR 0008); `no` is what people read */
+  id: string;
   no: string;
   /** ออกเอกสารในนาม — document_profile.id (NULL in legacy rows = SHD) */
-  documentProfileId: number;
+  documentProfileId: string;
   statusId: number;
   status: string;
   statusGroup: string;
   createDate: string;
-  createBy: number;
   createByName: string;
-  jobTypeId: number;
   jobType: string;
   jobTypeDetail: string;
   customer: {
-    id: number;
+    id: string;
     code: string;
     name: string;
     taxId: string;
@@ -857,13 +867,10 @@ export type JobDetail = {
   warrantyMonth: number;
   expireDate: string;
   warranty: string;
-  productTypeId: number;
   productType: string;
   imei: string;
   serial: string;
-  brandId: number;
   brand: string;
-  modelId: number;
   modelCode: string;
   modelName: string;
   modelDetail: string;
@@ -874,7 +881,6 @@ export type JobDetail = {
   receptionType: string;
   equipment: string;
   fault: string;
-  symptomIds: number[];
   symptoms: string[];
   symptomOther: string;
   remark: string;
@@ -896,9 +902,9 @@ export type JobDetail = {
   dueDate: string;
   /** true = no user picked it: opened + the job type's SLA (a legacy "+1 day" date is ignored) */
   dueDateAuto: boolean;
-  engineerId: number;
+  /** app_user.id of the assignee; null = nobody */
+  engineerId: string | null;
   engineer: string;
-  engineerSymptomId: number;
   engineerSymptom: string;
   repairDetail: string;
   engineerRemark: string;
@@ -911,28 +917,29 @@ export type JobDetail = {
   sparePartReplace: string;
   /** `slip` = the storage path (a legacy bare file name → jobs/{no}/slip/{file}) */
   payment: { type: string; no: string; amount: number; detail: string; slip: string };
-  return: { date: string; type: string; tracking: string; detail: string; shipperId: number };
+  /** shipperId = shipping_profile.id (null = none) */
+  return: { date: string; type: string; tracking: string; detail: string; shipperId: string | null };
   swap: { detail: string; docNo: string };
   quotationNo: string;
   isBounce: boolean;
   gspnNo: string;
   outsource: {
-    id: number;
+    id: string;
     sendTo: string;
     sendDetail: string;
     sendDate: string;
     sendBy: string;
-    /** app_user id of ส่งโดย / รับโดย (0 = none) — the page's dropdowns use these */
-    sendById: number;
+    /** app_user.id of ส่งโดย / รับโดย (null = none) — the page's dropdowns use these */
+    sendById: string | null;
     receiveDate: string;
     receiveBy: string;
-    receiveById: number;
+    receiveById: string | null;
     receiveDetail: string;
     status: string;
   }[];
   /** + `total` = the line's stored spare_part_total_price (what the job is charged for it) */
   parts: (Awaited<ReturnType<typeof listPartRequests>>[number] & { total: number })[];
-  attachments: { id: number; name: string; file: string; remark: string }[];
+  attachments: { id: string; name: string; file: string; remark: string }[];
   logs: { statusId: number; status: string; date: string; by: string }[];
   /** audit_log entries for this job (newest first) — ประวัติการแก้ไข */
   history: AuditRow[];
@@ -943,20 +950,35 @@ export type JobDetail = {
 /** audit fields holding an app_user id — the job history shows the person's name */
 const USER_KEYS = new Set(['engineerId', 'sendBy', 'receiveBy', 'jobReturnBy', 'jobRepairedBy', 'jobClosedBy']);
 const ASSIGNED_TO = /มอบหมายงานให้ช่าง #(\d+)/;
+const symptomNames = (ids: number[]) =>
+  db.select({ id: symptom.symptomId, name: symptom.symptomName }).from(symptom).where(inArray(symptom.symptomId, ids));
 /** audit fields holding a master row's id → its name: the cached master lists; model / shipper / customer by id */
 const ID_NAMES: Record<string, (ids: number[]) => Promise<{ id: string | number; name: string | null }[]>> = {
-  jobTypeId: () => listSimple('job_types', 'all'),
-  productTypeId: () => listSimple('product_types', 'all'),
-  productBrandId: () => listSimple('manufacturers', 'all'),
-  productSymptomId: () => listSymptoms('all'),
-  engineerSymptomId: () => listSymptoms('all'),
+  // by the integer keys the audit rows hold (the master lists answer uuids — ADR 0008)
+  jobTypeId: (ids) =>
+    db
+      .select({ id: jobType.jobTypeId, name: jobType.jobTypeName })
+      .from(jobType)
+      .where(inArray(jobType.jobTypeId, ids)),
+  productTypeId: (ids) =>
+    db
+      .select({ id: productType.productTypeId, name: productType.productTypeName })
+      .from(productType)
+      .where(inArray(productType.productTypeId, ids)),
+  productBrandId: (ids) =>
+    db
+      .select({ id: manufacturer.manufacturerId, name: manufacturer.manufacturerName })
+      .from(manufacturer)
+      .where(inArray(manufacturer.manufacturerId, ids)),
+  productSymptomId: (ids) => symptomNames(ids),
+  engineerSymptomId: (ids) => symptomNames(ids),
   productModelId: (ids) =>
     db.select({ id: model.modelId, name: model.modelCode }).from(model).where(inArray(model.modelId, ids)),
   returnShipperId: (ids) =>
     db
-      .select({ id: shippingProfile.id, name: shippingProfile.nameTh })
+      .select({ id: shippingProfile.pk, name: shippingProfile.nameTh })
       .from(shippingProfile)
-      .where(inArray(shippingProfile.id, ids)),
+      .where(inArray(shippingProfile.pk, ids)),
   customerId: (ids) =>
     db
       .select({
@@ -1030,10 +1052,12 @@ async function jobDetailRow(jobNo: string) {
       productType: productType.productTypeName,
       symptomName: symptom.symptomName,
       engSymptom: engSym.symptomName,
+      engId: eng.id,
       engFirst: eng.firstName,
       engLast: eng.lastName,
       openerFirst: opener.firstName,
       openerLast: opener.lastName,
+      shipperId: shippingProfile.id,
       repairerFirst: repairer.firstName,
       repairerLast: repairer.lastName,
       closerFirst: closer.firstName,
@@ -1052,9 +1076,10 @@ async function jobDetailRow(jobNo: string) {
     .leftJoin(opener, eq(opener.userId, job.jobCreateBy))
     .leftJoin(repairer, eq(repairer.userId, job.jobRepairedBy))
     .leftJoin(closer, eq(closer.userId, job.jobClosedBy))
+    .leftJoin(shippingProfile, eq(shippingProfile.pk, job.returnShipperId))
     .where(eq(job.jobNo, jobNo))
     .limit(1);
-  return r;
+  return r && { ...r, profileId: await profileIdOf(r.j.documentProfileId) };
 }
 
 /** what hangs off a job (getJob): customer, symptoms, out-source trips, part lines, attachments, status log, history */
@@ -1072,8 +1097,10 @@ function jobDetailRelated(jobNo: string, j: JobRow) {
       return db
         .select({
           f: jobSendForwardDt,
+          sid: sendBy.id,
           sf: sendBy.firstName,
           sl: sendBy.lastName,
+          rid: recvBy.id,
           rf: recvBy.firstName,
           rl: recvBy.lastName,
         })
@@ -1081,11 +1108,11 @@ function jobDetailRelated(jobNo: string, j: JobRow) {
         .leftJoin(sendBy, eq(sendBy.userId, jobSendForwardDt.sendBy))
         .leftJoin(recvBy, eq(recvBy.userId, jobSendForwardDt.receiveBy))
         .where(eq(jobSendForwardDt.jobNo, jobNo))
-        .orderBy(asc(jobSendForwardDt.id));
+        .orderBy(asc(jobSendForwardDt.pk));
     })(),
     listPartRequests(jobNo),
     db
-      .select({ id: jobOrderSparePartLog.jobOrderLogId, total: jobOrderSparePartLog.sparePartTotalPrice })
+      .select({ id: jobOrderSparePartLog.id, total: jobOrderSparePartLog.sparePartTotalPrice })
       .from(jobOrderSparePartLog)
       .where(eq(jobOrderSparePartLog.jobNo, jobNo)),
     db
@@ -1125,28 +1152,22 @@ function toJobDetail(
   const bal = jobBalance(num(j.jobTotalCost), num(j.depositCost), num(j.jobPaymentAmount));
   const [cust, syms, fwd, parts, partTotals, atts, logs, history] = related;
 
-  const symptomIds = syms.length
-    ? syms.map((s) => s.id)
-    : j.productSymptomId && j.productSymptomId > 0
-      ? [j.productSymptomId]
-      : [];
   const symptoms = syms.length ? syms.map((s) => s.name ?? '').filter(Boolean) : r.symptomName ? [r.symptomName] : [];
 
   return {
+    id: j.id,
     no: j.jobNo,
-    documentProfileId: j.documentProfileId ?? SHD_PROFILE_ID,
+    documentProfileId: r.profileId,
     statusId: j.jobStatusId ?? 0,
     status: r.status?.trim() ?? '',
     statusGroup: r.statusGroup ?? '',
     createDate: fmtDateTime(j.jobCreateDate),
-    createBy: j.jobCreateBy ?? 0,
     createByName: fullName(r.openerFirst, r.openerLast),
-    jobTypeId: j.jobTypeId ?? 0,
     jobType: r.jobType ?? '',
     jobTypeDetail: j.jobTypeDetail ?? '',
     customer: cust
       ? {
-          id: cust.id ?? 0,
+          id: cust.id ?? '',
           code: cust.code,
           name: cust.name,
           taxId: cust.taxId,
@@ -1164,13 +1185,10 @@ function toJobDetail(
     warrantyMonth: j.productWarrantyMonth ?? 0,
     expireDate: fmtDate(j.productExpireDate),
     warranty: j.productWarranty ?? '',
-    productTypeId: j.productTypeId ?? 0,
     productType: r.productType ?? '',
     imei: j.productImeiNo ?? '',
     serial: j.productSerial ?? '',
-    brandId: j.productBrandId ?? 0,
     brand: r.brand ?? '',
-    modelId: j.productModelId ?? 0,
     modelCode: r.modelCode ?? '',
     modelName: j.productModelName ?? '',
     modelDetail: j.productModelDetail ?? '',
@@ -1181,7 +1199,6 @@ function toJobDetail(
     receptionType: j.jobReceptionType ?? '',
     equipment: j.productEquipment ?? '',
     fault: j.productFault ?? '',
-    symptomIds,
     symptoms,
     symptomOther: j.productSymptomOther ?? '',
     remark: j.jobRemark ?? '',
@@ -1198,9 +1215,8 @@ function toJobDetail(
     outstanding: bal.outstanding,
     dueDate: fmtDate(r.due),
     dueDateAuto: !j.dueDateSetByUser,
-    engineerId: j.engineerId ?? 0,
+    engineerId: r.engId,
     engineer: fullName(r.engFirst, r.engLast),
-    engineerSymptomId: j.engineerSymptomId ?? 0,
     engineerSymptom: r.engSymptom ?? '',
     repairDetail: j.engineerRepairDetail ?? '',
     engineerRemark: j.engineerRemark ?? '',
@@ -1222,7 +1238,7 @@ function toJobDetail(
       type: j.returnCustomerType ?? '',
       tracking: j.returnCustomerTrackingNo ?? '',
       detail: j.returnCustomerDetail ?? '',
-      shipperId: j.returnShipperId ?? 0,
+      shipperId: r.shipperId,
     },
     swap: { detail: j.swapRefundDetail ?? '', docNo: j.swapRefundDocumentNo ?? '' },
     quotationNo: j.quotationNoApproved ?? '',
@@ -1234,16 +1250,16 @@ function toJobDetail(
       sendDetail: x.f.sendDetail ?? '',
       sendDate: fmtDate(x.f.sendDate),
       sendBy: fullName(x.sf, x.sl),
-      sendById: Math.max(0, x.f.sendBy ?? 0),
+      sendById: x.sid,
       receiveDate: fmtDate(x.f.receiveDate),
       receiveBy: fullName(x.rf, x.rl),
-      receiveById: Math.max(0, x.f.receiveBy ?? 0),
+      receiveById: x.rid,
       receiveDetail: x.f.receiveDetail ?? '',
       status: x.f.sendStatus ?? '',
     })),
     parts: parts.map((p) => ({ ...p, total: num(partTotals.find((t) => t.id === p.logId)?.total) })),
     attachments: atts.map((a) => ({
-      id: a.documentAttachId,
+      id: a.id,
       name: a.originalFileName ?? '',
       file: a.systemFileName ?? '',
       remark: a.remark ?? '',
@@ -1273,24 +1289,26 @@ export async function getJob(jobNo: string): Promise<JobDetail | null> {
 export type JobInput = z.output<typeof jobCreate.body>;
 
 /**
- * มอบหมายงานนี้ให้ (job.engineer_id): an active user whose role has Job Take (สิทธิ์พิเศษ) — checked only
- * when the assignee changes, so the job's current one re-saved passes ("never worse"). Else 400 under engineerId.
+ * มอบหมายงานนี้ให้ (job.engineer_id): the user whose uuid is `id` → their user_id. An active user whose role has
+ * Job Take (สิทธิ์พิเศษ) — checked only when the assignee changes (`current` = the job's one now), so the job's
+ * current one re-saved passes ("never worse"). Else 400 under engineerId.
  * FOR SHARE in the assigning transaction: a user save (users.ts, FOR UPDATE) running now finishes first.
  */
-async function assertAssignee(tx: Tx, id: number) {
-  if (!(id > 0)) return;
+async function assertAssignee(tx: Tx, id: string, current?: number | null): Promise<number> {
   const [u] = await tx
-    .select({ type: appUser.userType, rs: appUser.recordStatus })
+    .select({ userId: appUser.userId, type: appUser.userType, rs: appUser.recordStatus })
     .from(appUser)
-    .where(eq(appUser.userId, id))
+    .where(eq(appUser.id, id))
     .limit(1)
     .for('share');
+  if (u && u.userId === current) return u.userId;
   if (u && u.rs !== RS.ACTIVE)
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
       fields: { engineerId: 'บัญชีช่างคนนี้ถูกปิดใช้งานแล้ว — เลือกช่างคนอื่น' },
     });
   if (!u || !(await hasRight({ isAdmin: false, userType: u.type?.trim() || null }, 'Job Take')))
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { engineerId: NOT_ENGINEER } });
+  return u.userId;
 }
 
 /** the history line of an assignment: who gave the job to whom (a take-over names the one before too) */
@@ -1394,7 +1412,7 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
       : [],
     newShipper
       ? db
-          .select({ id: shippingProfile.id })
+          .select({ id: shippingProfile.pk })
           .from(shippingProfile)
           .where(and(nameIs(shippingProfile.nameTh, shipper), sql`${shippingProfile.deletedAt} is null`))
           .limit(1)
@@ -1689,7 +1707,6 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
   assertValid(jobSchema(), i); // a new job: every required field (400 with every failing field under its box)
   const c = costFields(i);
   const now = nowThai();
-  const engineerId = int(i.engineerId, 0);
 
   const jobNo = await db.transaction(async (tx) => {
     // the customer and the assignee checked under their row locks (a delete running now finishes first, or
@@ -1698,15 +1715,15 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
     if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้าก่อนเปิดงาน');
     const lk = await lookups(i);
     if (!lk.jobTypeId) throw new HttpError(400, 'ต้องเลือกประเภทงานหลัก');
-    await assertAssignee(tx, engineerId);
+    const engineerId = i.engineerId ? await assertAssignee(tx, i.engineerId) : 0;
     const profile = await issuingProfile(i.documentProfileId);
     const no = await nextRunningNo(tx, 'Job');
     await tx.insert(job).values({
       jobNo: no,
-      documentProfileId: profile.id,
-      companyId: profile.id,
+      documentProfileId: profile.pk,
+      companyId: profile.pk,
       branchId: BRANCH_ID,
-      customerId: cust.id,
+      customerId: cust.key,
       customerDetail: customerDetailOf(cust),
       customerDueDate: dateOrSentinel(i.dueDate),
       dueDateSetByUser: true, // required on a new job — the user picked it
@@ -1809,8 +1826,7 @@ async function prepJobEdit(jobNo: string, i: JobInput) {
   assertValid(jobSchema(was.keep, was.check), i); // never worse than it is now
   const lk = await lookups(i, was.shipper, jobNo);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  const engineerId = i.engineerId !== undefined ? int(i.engineerId, 0) : undefined;
-  return { i, was, lk, c: costFields(i), newStatus, engineerId };
+  return { i, was, lk, c: costFields(i), newStatus };
 }
 
 /**
@@ -1824,23 +1840,26 @@ async function applyJobEdit(
   edit: Awaited<ReturnType<typeof prepJobEdit>>,
   byUserId: number,
 ): Promise<JobRow> {
-  const { i, was, lk, c, newStatus, engineerId } = edit;
+  const { i, was, lk, c, newStatus } = edit;
   // the edit page shows the status only — "unchanged" = the row as locked, not as read before the lock
   await assertPageStatus(newStatus, existing.jobStatusId, [], EDIT_STATUS_ONLY);
   // under the job lock (job → customer / user): a delete running now finishes first, or waits for this save
   const cust = i.customerCode ? await customerForDocument(tx, str(i.customerCode), existing.customerId) : null;
   // a new engineer on a job that already has one: only when the user confirmed it (takeOver)
   const prevEng = existing.engineerId ?? 0;
+  // มอบหมายงานนี้ให้ cleared (the form sends ''): the job has nobody on it again
+  const engineerId =
+    i.engineerId === undefined ? undefined : i.engineerId ? await assertAssignee(tx, i.engineerId, prevEng) : 0;
   const assigning = engineerId !== undefined && engineerId > 0 && engineerId !== prevEng;
-  // มอบหมายงานนี้ให้ cleared (the form sends 0): the job has nobody on it again
   const unassigning = engineerId !== undefined && engineerId <= 0 && prevEng > 0;
   if (assigning && prevEng > 0 && !i.takeOver) throw await takeOverError([{ no: jobNo, eng: prevEng }]);
-  if (assigning) await assertAssignee(tx, engineerId);
   // blank stays blank: a legacy job with no channel / reception type is not given the default by a re-save
   const orBlank = (v: unknown, dflt: string, stored: string | null) => clean(v) || (clean(stored) ? dflt : '');
   const values = {
     // the customer text is rebuilt only when the customer changes (its phone may have changed since)
-    ...(cust && cust.id !== existing.customerId ? { customerId: cust.id, customerDetail: customerDetailOf(cust) } : {}),
+    ...(cust && cust.key !== existing.customerId
+      ? { customerId: cust.key, customerDetail: customerDetailOf(cust) }
+      : {}),
     // the due date is written (and becomes "picked by a user") only when it was changed: saving
     // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
     ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
@@ -1925,14 +1944,15 @@ async function applyJobEdit(
 /* ------------------------------------------------------------------ *
  * Assign (จนท.รับมอบหมายงาน)
  * ------------------------------------------------------------------ */
+/** `engineer` = app_user.id (uuid) of who takes the jobs */
 export async function assignJobs(
   jobNos: string[],
-  engineerId: number,
+  engineer: string,
   byUserId: number,
   takeOver = false,
 ): Promise<number> {
   if (!jobNos.length) throw new HttpError(400, 'ยังไม่ได้เลือกงาน');
-  if (!engineerId) throw new HttpError(400, 'ต้องเลือกช่าง');
+  if (!engineer) throw new HttpError(400, 'ต้องเลือกช่าง');
   let n = 0;
   await db.transaction(async (tx) => {
     const rows = await tx
@@ -1941,7 +1961,7 @@ export async function assignJobs(
       .where(inArray(job.jobNo, jobNos))
       .orderBy(job.jobNo)
       .for('update');
-    await assertAssignee(tx, engineerId); // the chosen engineer takes the jobs: their role has Job Take
+    const engineerId = await assertAssignee(tx, engineer); // the chosen engineer takes the jobs: their role has Job Take
     const missing = jobNos.filter((no) => !rows.some((r) => r.no === no));
     if (missing.length) throw new HttpError(404, `ไม่พบหมายเลขงาน ${missing.join(', ')}`);
     // a closed or deleted job takes nobody new (its record of who repaired it stays)
@@ -2139,7 +2159,7 @@ async function syncPartLines(
   // a stored line kept as loaded passes (legacy rows may hold a tick with qty 0)
   const fields: FieldErrors = {};
   parts.forEach((p, i) => {
-    const e = p.logId ? existing.find((x) => x.jobOrderLogId === p.logId) : undefined;
+    const e = p.logId ? existing.find((x) => x.id === p.logId) : undefined;
     const stored = {
       a: [e?.isSpecial, e?.isQuotation, e?.requestQty],
       b: [e?.isSpecialB, e?.isQuotationB, e?.requestQtyB],
@@ -2157,7 +2177,7 @@ async function syncPartLines(
     }
   });
   if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
-  const keep = new Set(parts.map((p) => p.logId).filter((x): x is number => !!x));
+  const keep = new Set(parts.map((p) => p.logId).filter((x): x is string => !!x));
   const codes = parts.map((p) => str(p.code)).filter(Boolean);
   // nothing issued yet: the line is the page's (cancel / re-book / rewrite)
   const isPending = (e: PartRow) => e.orderStatusId === PART.REQUESTED && (e.grantQty ?? 0) === 0;
@@ -2171,7 +2191,7 @@ async function syncPartLines(
 
   // rows removed in the UI: cancel while still pending; one stock has issued from is refused, never ignored
   for (const e of existing) {
-    if (keep.has(e.jobOrderLogId) || e.orderStatusId === PART.CANCELLED) continue;
+    if (keep.has(e.id) || e.orderStatusId === PART.CANCELLED) continue;
     if (!isPending(e)) throw issuedLine(e);
     if (locked) throw partsLocked();
     await tx
@@ -2184,7 +2204,7 @@ async function syncPartLines(
   }
 
   for (const [i, p] of parts.entries()) {
-    const e = p.logId ? existing.find((x) => x.jobOrderLogId === p.logId) : undefined;
+    const e = p.logId ? existing.find((x) => x.id === p.logId) : undefined;
     if (p.logId && !e) continue;
     const prod = map.get(e ? (e.sparePartCode ?? '') : str(p.code));
     // ราคา/หน่วย is not a field on the page: a new line takes the part's ราคาขาย (what the picker showed), a
@@ -2473,7 +2493,7 @@ async function writeSendRow(
         receiveDetail: cleanText(i.receive.detail),
         sendStatus: SEND_STATUS.RECEIVED,
       })
-      .where(eq(jobSendForwardDt.id, open.id));
+      .where(eq(jobSendForwardDt.pk, open.pk));
     // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
     // the job is closed with job_repaired_date 1900 and drops out of the repair reports
     await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
@@ -2505,7 +2525,7 @@ async function writeSendRow(
               }
             : {}),
         })
-        .where(eq(jobSendForwardDt.id, row.id));
+        .where(eq(jobSendForwardDt.pk, row.pk));
     } else {
       await tx.insert(jobSendForwardDt).values({
         jobNo,
@@ -2545,7 +2565,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     .select({ sendBy: jobSendForwardDt.sendBy, receiveBy: jobSendForwardDt.receiveBy })
     .from(jobSendForwardDt)
     .where(eq(jobSendForwardDt.jobNo, jobNo))
-    .orderBy(desc(jobSendForwardDt.id))
+    .orderBy(desc(jobSendForwardDt.pk))
     .limit(1);
   const sendBy = await staffOrKeep(i.send?.by, lastRow?.sendBy, 'send.by', byUserId);
   const receiveBy = await staffOrKeep(i.receive?.by, lastRow?.receiveBy, 'receive.by', byUserId);
@@ -2568,7 +2588,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
       .select()
       .from(jobSendForwardDt)
       .where(outsourceOpen(jobNo))
-      .orderBy(desc(jobSendForwardDt.id))
+      .orderBy(desc(jobSendForwardDt.pk))
       .limit(1);
     // the send date is usually stored already (the page sends the receive block alone)
     const sentOn = fmtDate(open[0]?.sendDate);
@@ -2588,7 +2608,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
           .select()
           .from(jobSendForwardDt)
           .where(eq(jobSendForwardDt.jobNo, jobNo))
-          .orderBy(desc(jobSendForwardDt.id))
+          .orderBy(desc(jobSendForwardDt.pk))
           .limit(1);
     const back = last?.sendStatus === SEND_STATUS.RECEIVED;
     // saved again as stored (a repeated receive): no empty history row — the status change has its own
@@ -2775,6 +2795,10 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     // Serial เครื่องใหม่ (a swap job): stored as the Swap page stores it — only a changed one is written,
     // sent empty = removed; left out (not a swap job) = unchanged
     const newSerial = cleanSerial(i.newSerial);
+    // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
+    const shipperPk = ret.shipperId
+      ? await pkOf(shippingProfile, shippingProfile.pk, ret.shipperId, 'โปรไฟล์บริษัทขนส่ง', tx)
+      : null;
     const serialNew =
       i.newSerial !== undefined && newSerial !== (parseSwap(before.sparePartReplace ?? '')['New S/N'] ?? '');
     const fields = {
@@ -2803,8 +2827,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
             returnCustomerType: clean(ret.type).slice(0, 50), // a list value — safety net
             returnCustomerTrackingNo: cleanTracking(ret.tracking),
             returnCustomerDetail: returnDetailOf(ret.courier, ret.detail),
-            // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
-            returnShipperId: Number(ret.shipperId) > 0 ? Number(ret.shipperId) : null,
+            returnShipperId: shipperPk,
           }
         : {}),
     };
@@ -2886,7 +2909,7 @@ export async function addAttachment(
         remark: note,
         isActive: true,
       })
-      .returning({ id: documentAttach.documentAttachId });
+      .returning({ id: documentAttach.id });
     if (!row) throw new Error('document_attach insert returned no row');
     await audit(tx, byUserId, {
       action: 'UPLOAD',
@@ -2900,25 +2923,21 @@ export async function addAttachment(
   });
 }
 
-export async function removeAttachment(id: number, byUserId = 0) {
+/** `id` = document_attach.id (uuid) */
+export async function removeAttachment(id: string, byUserId = 0) {
   await db.transaction(async (tx) => {
     // the check is the write: a second delete at the same moment changes nothing → 404, no second audit row
     const [row] = await tx
       .update(documentAttach)
       .set(statusStamp(RS.DELETED, byUserId))
-      .where(
-        and(
-          eq(documentAttach.documentAttachId, id),
-          sql`${documentAttach.recordStatus} is distinct from ${RS.DELETED}`,
-        ),
-      )
+      .where(and(eq(documentAttach.id, id), sql`${documentAttach.recordStatus} is distinct from ${RS.DELETED}`))
       .returning({ jobNo: documentAttach.referenceItemCode, name: documentAttach.originalFileName });
     if (!row) throw new HttpError(404, 'ไฟล์นี้ถูกลบไปแล้ว');
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Job Management',
       entity: 'job',
-      key: row.jobNo ?? String(id),
+      key: row.jobNo ?? id,
       summary: `ลบไฟล์แนบ ${row.name ?? id}`,
     });
   });
@@ -3201,13 +3220,13 @@ export function symptomStats() {
         .where(and(ne(job.recordStatus, RS.DELETED), ne(jobSymptom.symptomId, job.productSymptomId))),
     ).as('u');
     const rows = await db
-      .select({ id: symptom.symptomId, name: symptom.symptomName, grp: symptom.symptomGroupName, n: count(used.sid) })
+      .select({ id: symptom.id, name: symptom.symptomName, grp: symptom.symptomGroupName, n: count(used.sid) })
       .from(symptom)
       .leftJoin(used, eq(used.sid, symptom.symptomId))
       .where(eq(symptom.recordStatus, RS.ACTIVE))
-      .groupBy(symptom.symptomId, symptom.symptomName, symptom.symptomGroupName)
+      .groupBy(symptom.id, symptom.symptomName, symptom.symptomGroupName)
       .orderBy(desc(count(used.sid)), asc(symptom.symptomName));
-    return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? '').trim(), group: x.grp ?? '', count: Number(x.n) }));
+    return rows.map((x) => ({ id: x.id, name: (x.name ?? '').trim(), group: x.grp ?? '', count: Number(x.n) }));
   });
 }
 
@@ -3229,14 +3248,14 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
       .where(and(ofModel, ne(jobSymptom.symptomId, job.productSymptomId))),
   ).as('u');
   const rows = await db
-    .select({ id: symptom.symptomId, name: symptom.symptomName, n: count() })
+    .select({ id: symptom.id, name: symptom.symptomName, n: count() })
     .from(used)
     .innerJoin(symptom, eq(symptom.symptomId, used.sid))
     .where(eq(symptom.recordStatus, RS.ACTIVE))
-    .groupBy(symptom.symptomId, symptom.symptomName)
+    .groupBy(symptom.id, symptom.symptomName)
     .orderBy(desc(count()))
     .limit(limit);
-  return rows.map((x) => ({ id: Number(x.id), name: (x.name ?? '').trim(), count: Number(x.n) }));
+  return rows.map((x) => ({ id: x.id, name: (x.name ?? '').trim(), count: Number(x.n) }));
 }
 
 /* ------------------------------------------------------------------ *
@@ -3245,7 +3264,7 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
 export async function listCallLogs(jobNo: string) {
   const rows = await db
     .select({
-      id: jobCallLog.jobCallLogId,
+      id: jobCallLog.id,
       detail: jobCallLog.callLogDescription,
       date: jobCallLog.callLogDate,
       f: appUser.firstName,

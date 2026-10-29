@@ -62,10 +62,7 @@ function SaleOrderList() {
       header: 'เลขใบสั่งขาย',
       width: '120px',
       cell: (r) => (
-        <Link
-          href={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`}
-          className="num font-medium text-primary hover:underline"
-        >
+        <Link href={`/sale/orders/edit?id=${r.id}`} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -125,8 +122,8 @@ function SaleOrderList() {
       hideBelow: 'sm', // the order number is the same link
       cell: (r) => (
         <RowActions
-          viewHref={`/sale/orders/edit?no=${encodeURIComponent(r.no)}`}
-          editHref={canEdit ? `/sale/orders/edit?no=${encodeURIComponent(r.no)}` : undefined}
+          viewHref={`/sale/orders/edit?id=${r.id}`}
+          editHref={canEdit ? `/sale/orders/edit?id=${r.id}` : undefined}
         />
       ),
     },

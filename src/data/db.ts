@@ -200,21 +200,22 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
 
 export const useUsers = (deleted: DeletedMode = 'exclude') =>
   useTable<User>('users', undefined, deleted, {}, TTL_MASTER); // server order: pending → active (name) → inactive
-export const usePermissions = () => useTable<Permission>('permissions', { column: 'id' }, 'exclude', {}, TTL_MASTER);
-// Master lookups feed dropdowns → ACTIVE rows only (INACTIVE stay visible on the admin pages).
+export const usePermissions = () => useTable<Permission>('permissions', undefined, 'exclude', {}, TTL_MASTER);
+// Master lookups feed dropdowns → ACTIVE rows only (INACTIVE stay visible on the admin pages). In the server's order
+// (the legacy key): a uuid id is no display order.
 export const useCategories = (mode: DeletedMode = 'active') =>
-  useTable<MasterRow>('categories', { column: 'id' }, mode, {}, TTL_MASTER);
+  useTable<MasterRow>('categories', undefined, mode, {}, TTL_MASTER);
 export const useManufacturers = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('manufacturers', { column: 'name' }, mode, {}, TTL_MASTER);
 export const useColors = (mode: DeletedMode = 'active') =>
-  useTable<MasterRow>('colors', { column: 'id' }, mode, {}, TTL_MASTER);
+  useTable<MasterRow>('colors', undefined, mode, {}, TTL_MASTER);
 export const useJobTypes = (mode: DeletedMode = 'active') =>
-  useTable<MasterRow>('job_types', { column: 'id' }, mode, {}, TTL_MASTER);
+  useTable<MasterRow>('job_types', undefined, mode, {}, TTL_MASTER);
 export const useProductTypes = (mode: DeletedMode = 'active') =>
-  useTable<MasterRow>('product_types', { column: 'id' }, mode, {}, TTL_MASTER);
+  useTable<MasterRow>('product_types', undefined, mode, {}, TTL_MASTER);
 /** `enabled: false` → nothing loaded (yet): the symptom pickers load their lists once opened / focused */
 export const useSymptoms = (mode: DeletedMode = 'active', enabled = true) =>
-  useTable<Symptom>('symptoms', { column: 'id' }, mode, {}, TTL_MASTER, enabled);
+  useTable<Symptom>('symptoms', undefined, mode, {}, TTL_MASTER, enabled);
 /** the whole list is 1,171 rows (~140 KB): `brand` → only that brand's models; `enabled: false` → nothing loaded (yet) */
 export const useModels = (mode: DeletedMode = 'active', { brand = '', enabled = true } = {}) =>
   useTable<Model>('models', { column: 'code' }, mode, brand ? { brand } : {}, TTL_MASTER, enabled);
@@ -222,9 +223,8 @@ export const useModelsPage = (params: PageParams, mode: DeletedMode = 'exclude')
   usePagedTable<Model>('models', params, mode);
 /** Audit trail (System Admin) — see src/server/audit.ts */
 export type AuditRow = {
-  id: number;
+  id: string;
   at: string;
-  userId: number;
   user: string;
   action: string;
   module: string;
@@ -274,13 +274,13 @@ export function useDashboard(range: DashRange = {}) {
 }
 
 /* ---- lookups ---- */
-export type Staff = { id: number; name: string; userType: string; takesJobs: boolean; sells: boolean };
+export type Staff = { id: string; name: string; userType: string; takesJobs: boolean; sells: boolean };
 /** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
   useTable<Staff>('staff', undefined, 'exclude', usedAs ? { usedAs } : {}, TTL_MASTER);
 export const useRoles = () => useTable<string>('roles', undefined, 'exclude', {}, TTL_MASTER);
 export const useProvinces = () =>
-  useTable<{ id: number; name: string }>('provinces', undefined, 'exclude', {}, TTL_MASTER);
+  useTable<{ id: string; name: string }>('provinces', undefined, 'exclude', {}, TTL_MASTER);
 export const useJobStatuses = () =>
   useTable<{ id: number; name: string; group: string; order: number; active: boolean }>(
     'job_statuses',
@@ -296,7 +296,7 @@ export const useVendors = () => useTable<string>('vendors', undefined, 'exclude'
 /** งานย่อย / บริษัทขนส่ง — ค่าที่ใช้อยู่ใน DB สำหรับ datalist (พิมพ์ค่าใหม่ได้) */
 export const useJobTypeDetails = () => useTable<string>('job_type_details', undefined, 'exclude', {}, TTL_MASTER);
 export type DocumentProfileLite = {
-  id: number;
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -309,7 +309,7 @@ export const useDocumentProfiles = () =>
 export const useShippers = () => useTable<string>('shippers', undefined, 'exclude', {}, TTL_MASTER);
 /** โปรไฟล์บริษัทขนส่ง (active) — dropdown ตอนปิดงาน + โลโก้/ลิงก์ติดตามในหน้าลูกค้า */
 export type ShippingProfileLite = {
-  id: number;
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -320,11 +320,11 @@ export type ShippingProfileLite = {
 export const useShippingProfiles = () =>
   useTable<ShippingProfileLite>('shipping_profiles', undefined, 'exclude', {}, TTL_MASTER);
 /** อาการเสีย เรียงตามความถี่ที่ใช้จริง + อาการที่พบบ่อยของรุ่น (SymptomPicker) */
-export type SymptomStat = { id: number; name: string; group: string; count: number };
+export type SymptomStat = { id: string; name: string; group: string; count: number };
 export const useSymptomStats = (enabled = true) =>
   useTable<SymptomStat>('symptom_stats', undefined, 'exclude', {}, TTL_MASTER, enabled);
 export const useModelSymptoms = (model: string, enabled = true) =>
-  useTable<{ id: number; name: string; count: number }>(
+  useTable<{ id: string; name: string; count: number }>(
     'model_symptoms',
     undefined,
     'exclude',

@@ -1,0 +1,27 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { handle, parseBody, parseParams, requireCan, requireView, JOB_MODULES } from '@/server/auth';
+import { jobGet, jobUpdate } from '@/server/contract/jobs';
+import { getJob, jobNoOf, jobNotFound, updateJob } from '@/server/services/jobs';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+type Ctx = { params: Promise<{ id: string }> };
+
+/** Job detail for every job screen. */
+export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
+  await requireView(req, [...JOB_MODULES, 'Quotation']);
+  const no = await jobNoOf((await parseParams(ctx, jobGet)).id);
+  const job = await getJob(no);
+  if (!job) throw jobNotFound(no);
+  return NextResponse.json({ job });
+});
+
+/** แก้ไขข้อมูลงาน */
+export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
+  const user = await requireCan(req, 'Job Management', 'edit');
+  const no = await jobNoOf((await parseParams(ctx, jobUpdate)).id);
+  const body = await parseBody(req, jobUpdate);
+  const job = await updateJob(no, body, user.userId);
+  return NextResponse.json({ ok: true, job });
+});

@@ -25,6 +25,13 @@ export async function one<T = Record<string, unknown>>(text: string, params: unk
 
 export const userId = async (email: string) =>
   (await one<{ id: number }>('SELECT user_id AS id FROM app_user WHERE email_address = $1', [email])).id;
+/** the user's external id (uuid) — what the API takes and answers (ADR 0008); userId above is the DB key */
+export const userUuid = async (email: string) =>
+  (await one<{ id: string }>('SELECT id::text AS id FROM app_user WHERE email_address = $1', [email])).id;
+
+/** the job's external id (uuid) — its link (/jobs/edit?id=, /api/jobs/<uuid>, ADR 0008); the number is what's shown */
+export const jobUuid = async (no: string) =>
+  (await one<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no])).id;
 
 /** J97 + 5 digits: J + 7 digits like a real job no. (the pick page's rule), a series the app never issues (J + yy).
  *  Past every number already used ANYWHERE: test:track TRUNCATEs job (not the stock documents / part logs that

@@ -10,9 +10,9 @@ import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { Badge } from '@/components/ui/badge';
-import { postJson, errMsg } from '@/lib/api';
+import { api, postJson, errMsg } from '@/lib/api';
 import { useRecord } from '@/lib/use-record';
-import { quotationKey } from '@/data/keys';
+import { quotationKey, recordNo } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { quoteJobNote } from '@/lib/quote-job';
 import { quoteExpired } from '@/lib/quote-expiry';
@@ -24,12 +24,12 @@ function EditQuotation() {
   const confirm = useConfirm();
   const { can } = useAccess();
   const sp = useSearchParams();
-  const initialNo = sp.get('no') ?? '';
+  const initialId = sp.get('id') ?? ''; // the quotation's uuid (ADR 0008)
   const form = React.useRef<QuotationFormHandle>(null);
   // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
   // once, when it mounts, so a new record always starts from a clean form
   const [version, setVersion] = React.useState(0);
-  // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
+  // the quotation from ?id= opens quietly; the lookup bar's number toasts found / not found
   const {
     data: loaded,
     setData: setLoaded,
@@ -40,14 +40,29 @@ function EditQuotation() {
   } = useRecord<QuotationLoaded>({
     url: quotationKey,
     pick: (d: { quotation: QuotationLoaded }) => d.quotation,
-    initial: initialNo,
+    initial: initialId,
     onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => {
       push({ kind: 'success', title: 'เรียกข้อมูลใบเสนอราคาสำเร็จ', desc: d.no });
-      window.history.replaceState(null, '', `?no=${encodeURIComponent(d.no)}`); // a refresh keeps this one
+      window.history.replaceState(null, '', `?id=${d.id}`); // a refresh keeps this one
     },
-    onMissing: (n) => push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: n }),
+    onMissing: (_, message) => push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: message }),
   });
+  // the lookup bar takes the number (Q…): found through the list, then opened by its uuid
+  const lookUp = async (v: string) => {
+    const typed = recordNo(v);
+    if (!typed) return;
+    try {
+      const rows = await api<{ id: string; no: string }[]>(
+        `/api/data/quotations?no=${encodeURIComponent(typed)}&deleted=all&limit=50`,
+      );
+      const hit = rows.find((r) => r.no === typed);
+      if (hit) load(hit.id);
+      else push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: typed });
+    } catch (e) {
+      push({ kind: 'error', title: 'ค้นหาใบเสนอราคาไม่สำเร็จ', desc: errMsg(e) });
+    }
+  };
   const no = loaded?.no ?? '';
   const [saving, setSaving] = React.useState(false);
   // sent and past its validity — the list shows it as พ้นกำหนดเสนอราคา (same rule: src/lib/quote-expiry.ts)
@@ -106,8 +121,8 @@ function EditQuotation() {
         id="quotation-no"
         label="ระบุ หมายเลขใบเสนอราคา"
         placeholder="Q2600462"
-        initial={initialNo}
-        onFind={(v) => load(v)}
+        initial={loaded?.no ?? ''}
+        onFind={(v) => void lookUp(v)}
       />
       <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบเสนอราคา" searchId="quotation-no">
         <QuotationForm key={version} ref={form} mode="edit" quotationNo={no || undefined} initial={loaded} />
@@ -130,7 +145,7 @@ function EditQuotation() {
               locked={profileLock('quotation', { statusId: loaded?.statusId })}
               no={no ?? ''}
               profileId={loaded?.documentProfileId}
-              href={`/print/quotation/${encodeURIComponent(no ?? '')}`}
+              href={`/print/quotation/${loaded?.id ?? ''}`}
               disabled={!no || loaded?.active === false}
             />
           }

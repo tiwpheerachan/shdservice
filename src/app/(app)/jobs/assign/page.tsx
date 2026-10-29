@@ -121,8 +121,9 @@ export default function AssignPage() {
 
   const toggleAll = () => setPicked(allSelected ? new Set() : new Set(pool.map((j) => j.no)));
 
-  // type a job no → verify on the server that it is still waiting, then tick it
-  const go = async (v: string) => {
+  // type a job no (or pick it: `no` = its number) → verify on the server that it is still waiting, then tick it
+  const go = async (picked: string, no?: string) => {
+    const v = (no ?? picked).trim().toUpperCase();
     if (!v) return;
     const local = pool.find((j) => j.no === v);
     if (local) {

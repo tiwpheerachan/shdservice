@@ -239,7 +239,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
           </thead>
           <tbody>
             {q.lines.map((l, i) => (
-              <tr key={l.id ?? i}>
+              <tr key={i}>
                 <td className="num text-center">{i + 1}</td>
                 <td>
                   {l.code && <span className="num">{l.code} </span>}

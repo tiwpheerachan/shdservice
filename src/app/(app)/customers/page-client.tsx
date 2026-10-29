@@ -93,25 +93,25 @@ function CustomersPageInner() {
   };
 
   // deep links — handled once each, without an effect:
-  //   ?edit=C43601 (from the job / quotation / SO forms) → that customer's form (swr answer's callback)
+  //   ?edit=<customer uuid> (from the job / quotation / SO forms) → that customer's form (swr answer's callback)
   //   ?new=1&phone=…&name=… → a new customer's form with those filled in (adjusted while rendering)
   const sp = useSearchParams();
-  const editCode = sp.get('edit')?.trim() ?? '';
+  const editId = sp.get('edit')?.trim().toLowerCase() ?? '';
   const editLinkOpened = React.useRef(false);
-  useApi<{ rows: Customer[] }>(editCode ? `/api/customers/lookup${qs({ q: editCode, deleted: 'all' })}` : null, {
+  useApi<{ rows: Customer[] }>(editId ? `/api/customers/lookup${qs({ q: editId, deleted: 'all' })}` : null, {
     fresh: true,
     onSuccess: (d) => {
       if (editLinkOpened.current) return;
       editLinkOpened.current = true;
-      // the exact code only — a deleted customer (non-admin) is not found, never another one in its place
-      const hit = d.rows.find((c) => c.code === editCode.toUpperCase());
+      // that customer only — a deleted one (non-admin) is not found, never another one in its place
+      const hit = d.rows.find((c) => c.id === editId);
       if (!hit) {
-        push({ kind: 'error', title: 'ไม่พบลูกค้า', desc: `${editCode} — อาจถูกลบแล้ว` });
+        push({ kind: 'error', title: 'ไม่พบลูกค้า', desc: 'ลิงก์ไม่ถูกต้อง หรือลูกค้าอาจถูกลบแล้ว' });
         return;
       }
       // only an admin gets a deleted one here (deleted=all): it opens to look at, not as an edit that can never save
-      void api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: editCode })}`)
-        .then((live) => live.rows.some((c) => c.code === hit.code))
+      void api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: editId })}`)
+        .then((live) => live.rows.some((c) => c.id === hit.id))
         .catch(() => true)
         .then((alive) => {
           openForm(hit, !canEdit || !alive);
@@ -125,7 +125,7 @@ function CustomersPageInner() {
     },
   });
   const [newLinkHandled, setNewLinkHandled] = React.useState(false);
-  if (!editCode && sp.get('new') && canAdd && !newLinkHandled) {
+  if (!editId && sp.get('new') && canAdd && !newLinkHandled) {
     setNewLinkHandled(true);
     openForm(null);
     setForm((f) => ({ ...f, phone: sp.get('phone') ?? '', name: sp.get('name') ?? '' }));
@@ -193,7 +193,7 @@ function CustomersPageInner() {
     });
     if (!ok) return;
     try {
-      await postJson('/api/admin/records', { table: 'customers', id: r.code, status: 'DELETED' });
+      await postJson('/api/admin/records', { table: 'customers', id: r.id, status: 'DELETED' });
       push({ kind: 'success', title: 'ลบลูกค้าแล้ว', desc: `${r.code} · ${r.name}` });
       refetch();
     } catch (e) {
@@ -209,7 +209,7 @@ function CustomersPageInner() {
     });
     if (!ok) return;
     try {
-      await postJson('/api/admin/records', { table: 'customers', id: r.code, status: 'ACTIVE' });
+      await postJson('/api/admin/records', { table: 'customers', id: r.id, status: 'ACTIVE' });
       push({ kind: 'success', title: 'กู้คืนลูกค้าแล้ว', desc: `${r.code} · ${r.name}` });
       refetch();
     } catch (e) {
@@ -365,8 +365,7 @@ function CustomersPageInner() {
           <SearchSelect
             value={draft.province}
             onChange={(v) => setD('province', v)}
-            // mt_city -1 is the legacy blank "not set" row (an empty extra row in the list)
-            options={PROVINCES.filter((p) => p.id > 0).map((p) => ({ value: String(p.id), label: p.name }))}
+            options={PROVINCES.map((p) => ({ value: p.id, label: p.name }))}
             placeholder="ทุกจังหวัด"
             emptyLabel="ทุกจังหวัด"
             searchPlaceholder="พิมพ์ชื่อจังหวัด…"

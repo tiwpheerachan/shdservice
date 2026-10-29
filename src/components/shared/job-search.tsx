@@ -39,8 +39,9 @@ export function JobSearch({
   id?: string;
   /** currently loaded job no — shown in the trigger */
   value?: string;
-  /** called with the chosen job no (upper-cased) */
-  onPick: (jobNo: string) => void | Promise<unknown>;
+  /** called with the chosen job's id + its no (a listed row), or the full job no typed (one outside the list; `no`
+   *  left out) — useJob's find takes either */
+  onPick: (job: string, no?: string) => void | Promise<unknown>;
   scope?: JobSearchScope;
   className?: string;
 }) {
@@ -74,7 +75,8 @@ export function JobSearch({
       // screen's scope, on Enter — the page then loads it directly and reports what it finds)
       onSuccess: (d) => {
         const term = q.trim().toUpperCase();
-        if (JOB_NO.test(term) && d.rows.some((r) => r.no === term)) pick(term);
+        const hit = JOB_NO.test(term) && d.rows.find((r) => r.no === term);
+        if (hit) pick(hit.id, hit.no);
       },
     },
   );
@@ -84,10 +86,10 @@ export function JobSearch({
   );
   const loading = typed.length >= SEARCH_MIN_CHARS && (typed !== settled || found.validating);
 
-  const pick = (no: string) => {
+  const pick = (job: string, no?: string) => {
     setOpen(false);
     setQ('');
-    void onPick(no.trim().toUpperCase());
+    void onPick(job.trim(), no);
   };
 
   const term = q.trim();
@@ -146,7 +148,7 @@ export function JobSearch({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && exactOutside) {
                   e.preventDefault();
-                  pick(term);
+                  pick(term.toUpperCase());
                 }
               }}
               placeholder="พิมพ์เลขงาน ชื่อลูกค้า เบอร์โทร Serial / IMEI หรือรุ่น…"
@@ -181,7 +183,7 @@ export function JobSearch({
             {exactOutside && rows.length === 0 && (
               <CommandPrimitive.Item
                 value={`__exact__${term}`}
-                onSelect={() => pick(term)}
+                onSelect={() => pick(term.toUpperCase())}
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm outline-hidden select-none data-[selected=true]:bg-accent"
               >
                 <span className="num font-medium">{term.toUpperCase()}</span>
@@ -192,9 +194,9 @@ export function JobSearch({
             )}
             {rows.map((j) => (
               <CommandPrimitive.Item
-                key={j.no}
+                key={j.id}
                 value={j.no}
-                onSelect={() => pick(j.no)}
+                onSelect={() => pick(j.id, j.no)}
                 className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
               >
                 <span className="num w-[76px] shrink-0 font-medium">{j.no}</span>

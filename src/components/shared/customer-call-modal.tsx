@@ -12,7 +12,7 @@ import type { Customer } from '@/data/types';
 import { baht, cn } from '@/lib/utils';
 import { postJson, errMsg } from '@/lib/api';
 
-type CallLog = { id: number; detail: string; date: string; by: string };
+type CallLog = { id: string; detail: string; date: string; by: string };
 
 // job_status_group Finished/Repaired = done
 const DONE_GROUPS = new Set(['Finished', 'Repaired']);
@@ -53,13 +53,15 @@ export function CustomerCallModal({
   open,
   onClose,
   customer,
-  jobNo,
+  job,
 }: {
   open: boolean;
   onClose: () => void;
   customer: Customer | null;
-  jobNo?: string;
+  /** the job whose call log this is (its id for the API, its number to show) */
+  job?: { id: string; no: string };
 }) {
+  const jobNo = job?.no;
   const { push } = useToast();
   // job history of this customer (server-filtered by customer code)
   const { data: JOBS } = useJobs(
@@ -81,7 +83,7 @@ export function CustomerCallModal({
   }
 
   // this job's call log (job_call_log), read fresh every time the dialog opens
-  const calls = useApi<{ rows: CallLog[] }>(open && jobNo ? `/api/jobs/${encodeURIComponent(jobNo)}/calls` : null, {
+  const calls = useApi<{ rows: CallLog[] }>(open && job ? `/api/jobs/${job.id}/calls` : null, {
     fresh: true,
   });
   const log = React.useMemo(() => (open && jobNo ? (calls.data?.rows ?? []) : []), [open, jobNo, calls.data]);
@@ -95,10 +97,10 @@ export function CustomerCallModal({
 
   const addLog = async () => {
     const v = text.trim();
-    if (!v || !jobNo || saving) return;
+    if (!v || !job || saving) return;
     setSaving(true);
     try {
-      const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${encodeURIComponent(jobNo)}/calls`, { detail: v });
+      const d = await postJson<{ rows: CallLog[] }>(`/api/jobs/${job.id}/calls`, { detail: v });
       void calls.mutate(d, { revalidate: false }); // the server answers with the updated log
       setText('');
       push({ kind: 'success', title: 'เพิ่มบันทึกการโทรแล้ว', desc: jobNo });
@@ -228,7 +230,7 @@ export function CustomerCallModal({
                           </tr>
                         ) : (
                           history.map((j) => (
-                            <tr key={j.no} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
+                            <tr key={j.id} className="border-b border-border/70 last:border-0 hover:bg-accent/50">
                               <td className="num px-3 py-2 font-medium text-primary">{j.no}</td>
                               <td className="num px-3 py-2 text-xs text-muted-foreground">{j.openDate.slice(0, 10)}</td>
                               <td className="px-3 py-2">{j.brandModel}</td>

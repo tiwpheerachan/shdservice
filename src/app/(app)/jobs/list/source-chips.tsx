@@ -29,8 +29,7 @@ export function SourceChips({
           <span className="inline-flex items-center gap-2 rounded-full border border-danger/30 bg-danger-soft py-1 pl-3 pr-1 text-danger">
             <span>
               จากการแจ้งเตือน: <span className="font-medium">งานเกินกำหนดส่ง</span>
-              {filters.engineer &&
-                ` · ช่าง ${STAFF.find((s) => String(s.id) === filters.engineer)?.name ?? `#${filters.engineer}`}`}
+              {filters.engineer && ` · ช่าง ${STAFF.find((s) => s.id === filters.engineer)?.name ?? ''}`}
               <span className="num tabular-nums"> ({loading ? '…' : total.toLocaleString('en-US')} งาน)</span>
             </span>
             <button

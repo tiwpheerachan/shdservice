@@ -27,8 +27,9 @@ export const filePath = {
   jobSlip: (jobNo: string, file: string) => `jobs/${jobNo}/slip/${file}`,
   saleOrderSlip: (soNo: string, file: string) => `sale-orders/${soNo}/slip/${file}`,
   productImage: (code: string, file: string) => `products/${code}/${file}`,
-  profileLogo: (id: number, file: string) => `profiles/${id}/${file}`,
-  shipperLogo: (id: number, file: string) => `shippers/${id}/${file}`,
+  // the profile's uuid (ADR 0008); logos stored before it keep their profiles/{int}/ path
+  profileLogo: (id: string, file: string) => `profiles/${id}/${file}`,
+  shipperLogo: (id: string, file: string) => `shippers/${id}/${file}`,
 };
 
 /** Accept either a stored full path or a bare file name (legacy / short columns). */

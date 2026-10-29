@@ -1,5 +1,5 @@
 import { OWNER_EMAIL } from './support/env';
-import { newJob, rows } from './support/db';
+import { jobUuid, newJob, rows } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -22,7 +22,7 @@ test('call log from the job list (a phone too); a double click on เพิ่�
 
   // the answer held back a moment, as on a slow line: the second click lands while the first is on its way
   let posts = 0;
-  await page.route(`**/api/jobs/${no}/calls`, async (route) => {
+  await page.route(`**/api/jobs/${await jobUuid(no)}/calls`, async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     posts++;
     const res = await route.fetch();

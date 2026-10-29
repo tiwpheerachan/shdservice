@@ -133,7 +133,7 @@ async function test(name: string, fn: () => Promise<void>) {
 await seed();
 // audit_log is append-only and the job numbers repeat every run: read only what this run wrote
 const AUDIT_FROM = Number(
-  (await db.execute<{ m: string | null }>(sql`SELECT max(id) AS m FROM audit_log`)).rows[0]?.m ?? 0,
+  (await db.execute<{ m: string | null }>(sql`SELECT max(pk) AS m FROM audit_log`)).rows[0]?.m ?? 0,
 );
 try {
   console.log('\nBug 1 / 5 — line fields and the บาท discount are checked, never taken as anything');
@@ -235,7 +235,7 @@ try {
     assert.equal(await pointer(j2), ok[0]);
     // the job's status change names the quotation it followed — the one the job points at
     const moved = await db.execute<{ d: string }>(
-      sql`SELECT summary AS d FROM audit_log WHERE id > ${AUDIT_FROM} AND entity = 'job' AND entity_key = ${j2} AND summary LIKE '%ตามใบเสนอราคา%ตกลง%'`,
+      sql`SELECT summary AS d FROM audit_log WHERE pk > ${AUDIT_FROM} AND entity = 'job' AND entity_key = ${j2} AND summary LIKE '%ตามใบเสนอราคา%ตกลง%'`,
     );
     assert.deepEqual(
       moved.rows.map((r) => r.d.includes(ok[0]!)),
@@ -253,7 +253,7 @@ try {
     await saveQuotation(base(j2, { no: ot.no, version: ot.version, status: AGREED }), ADMIN.id);
     assert.equal(await pointer(j2), other.no);
     const audits = await db.execute<{ c: unknown }>(
-      sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${j2} AND changes ? 'quotationNoApproved' AND id > ${AUDIT_FROM} ORDER BY id`,
+      sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${j2} AND changes ? 'quotationNoApproved' AND pk > ${AUDIT_FROM} ORDER BY pk`,
     );
     assert.deepEqual(
       audits.rows.map((r) => (r.c as Record<string, unknown>).quotationNoApproved),

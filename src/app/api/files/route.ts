@@ -40,7 +40,9 @@ const STAFF_PATHS: [RegExp, readonly Module[]][] = [
   [/^sale-orders\/[^/]+\/slip\/[^/]+$/, SALE_ORDER_READERS],
   [/^products\/[^/]+\/[^/]+$/, PRODUCT_MODULES],
 ];
-const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
+// {id}: the int of a logo stored before ADR 0008, or the profile's uuid
+const PUBLIC_PATH =
+  /^(?:shippers|profiles)\/(?:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[^/]+$/;
 const ATTACHMENT = /^jobs\/([^/]+)\/attachments\/([^/]+)$/;
 
 export const GET = handle(async (req: NextRequest) => {

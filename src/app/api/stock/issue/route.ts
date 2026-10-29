@@ -39,7 +39,7 @@ async function issue(req: NextRequest, userId: number) {
         jobNo: b.ref,
         remark: b.remark,
         payTo: b.payTo,
-        lines: b.lines.map((l) => ({ logId: Number(l.logId), qty: Number(l.qty) })),
+        lines: b.lines.map((l) => ({ logId: l.logId ?? '', qty: Number(l.qty) })),
       },
       userId,
     );
@@ -51,7 +51,7 @@ async function issue(req: NextRequest, userId: number) {
         soNo: b.ref,
         remark: b.remark,
         payTo: b.payTo,
-        lines: b.lines.map((l) => ({ dtId: Number(l.dtId), qty: Number(l.qty) })),
+        lines: b.lines.map((l) => ({ dtId: l.dtId ?? '', qty: Number(l.qty) })),
       },
       userId,
     );
@@ -63,7 +63,7 @@ async function issue(req: NextRequest, userId: number) {
         jobNo: b.ref,
         remark: b.remark,
         from: b.payTo,
-        lines: b.lines.map((l) => ({ logId: Number(l.logId), qty: Number(l.qty) })),
+        lines: b.lines.map((l) => ({ logId: l.logId ?? '', qty: Number(l.qty) })),
       },
       userId,
     );

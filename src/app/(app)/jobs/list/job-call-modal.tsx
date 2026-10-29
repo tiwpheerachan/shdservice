@@ -15,7 +15,7 @@ const CustomerCallModal = dynamic(
 export function useJobCallModal() {
   const [callFor, setCallFor] = React.useState<{
     customer: Customer | null;
-    jobNo: string;
+    job: { id: string; no: string };
   } | null>(null);
   // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
   const [modalUsed, setModalUsed] = React.useState(false);
@@ -31,7 +31,7 @@ export function useJobCallModal() {
     } catch {
       customer = null;
     }
-    setCallFor({ customer, jobNo: job.no });
+    setCallFor({ customer, job: { id: job.id, no: job.no } });
   };
 
   const modal = modalUsed && (
@@ -39,7 +39,7 @@ export function useJobCallModal() {
       open={!!callFor}
       onClose={() => setCallFor(null)}
       customer={callFor?.customer ?? null}
-      jobNo={callFor?.jobNo}
+      job={callFor?.job}
     />
   );
   return { openCall, modal };

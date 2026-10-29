@@ -13,7 +13,8 @@ import {
 } from '@/lib/modules';
 
 export type AccessValue = {
-  userId: number;
+  /** the signed-in user's uuid (app_user.id, ADR 0008) — '' outside the provider */
+  userId: string;
   name: string;
   email: string;
   role: string;
@@ -26,7 +27,7 @@ export type AccessValue = {
 };
 
 const Ctx = React.createContext<AccessValue>({
-  userId: 0,
+  userId: '',
   name: '',
   email: '',
   role: '',
@@ -56,12 +57,12 @@ export function useAccess() {
       canLink: (l: { href: string; need?: Action }) =>
         canViewPath(v.isAdmin, v.grants, l.href) &&
         (!l.need || checkGrant(v.isAdmin, v.grants, moduleForPath(l.href), l.need)),
-      /** where a job number opens: บันทึกงานซ่อม, or — for a role that cannot open that page — the
+      /** where a job (its uuid) opens: บันทึกงานซ่อม, or — for a role that cannot open that page — the
        *  read-only receipt in a new tab (the print view only needs view on a job screen) */
-      jobLink: (no: string) =>
+      jobLink: (id: string) =>
         canViewPath(v.isAdmin, v.grants, '/jobs/repair')
-          ? { href: `/jobs/repair?job=${encodeURIComponent(no)}` }
-          : { href: `/print/job/${encodeURIComponent(no)}?auto=0`, target: '_blank' },
+          ? { href: `/jobs/repair?id=${encodeURIComponent(id)}` }
+          : { href: `/print/job/${encodeURIComponent(id)}?auto=0`, target: '_blank' },
       /** grants for the page the user is on, by pathname */
       forPath: (pathname: string) => {
         const m = moduleForPath(pathname);

@@ -17,14 +17,14 @@ import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { customerForDocument, getCustomerByCode } from './customers';
-import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { issuingProfile, profileIdOf } from './document-profiles';
 import { followQuotation, getJob, jobStatuses } from './jobs';
 import { JOB_CLOSED_STATUSES } from './stock';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
 import { computeTotals, lineAmount, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { quotationSave } from '@/server/contract/sales';
 
 /** quotation_status ids (from the dump) */
@@ -49,6 +49,7 @@ async function statusIdByName(name: string) {
 }
 
 const listSelect = {
+  id: quotationHd.id,
   no: quotationHd.quotationNo,
   date: quotationHd.createDate,
   type: quotationHd.quotationType,
@@ -76,6 +77,7 @@ type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]['_']['da
 
 function toQuotation(r: ListRow): Quotation {
   return {
+    id: r.id ?? '',
     no: r.no ?? '',
     date: fmtDateTime(r.date),
     type: TYPE_LABEL[r.type?.trim() ?? 'Normal'] ?? 'Type A (Normal)',
@@ -232,7 +234,6 @@ export async function listQuotations(f: QuotationFilters & { q?: string; limit?:
 }
 
 export type QuotationLine = {
-  id?: number;
   lineNumber: number;
   itemType: 'SparePart' | 'Service' | 'Delivery';
   code: string;
@@ -261,8 +262,8 @@ export type QuotationDetail = Quotation & {
   rounding: number;
   netAmount: number;
   approveRemark: string;
-  /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
-  documentProfileId: number;
+  /** ออกเอกสารในนาม — the document profile's uuid (legacy rows = SHD's) */
+  documentProfileId: string;
   /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
   createdByPhone: string;
   createdByEmail: string;
@@ -275,6 +276,17 @@ export type QuotationDetail = Quotation & {
  *  version could only match again if row_version grew by exactly that id. */
 const versionOf = (rowVersion: number, lines: { quotationDtId: number }[]) =>
   rowVersion + Math.max(0, ...lines.map((l) => l.quotationDtId));
+
+/** the number of the quotation whose uuid is `id` (a link: page, API path, print) — null: none, or not a uuid */
+export async function quotationNoOf(id: string): Promise<string | null> {
+  if (!z.uuid().safeParse(id).success) return null;
+  const [r] = await db
+    .select({ no: quotationHd.quotationNo })
+    .from(quotationHd)
+    .where(eq(quotationHd.id, id.toLowerCase()))
+    .limit(1);
+  return r?.no ?? null;
+}
 
 export async function getQuotation(no: string): Promise<QuotationDetail | null> {
   // the list row, the whole header and the creator's contact in one read; the lines alongside
@@ -295,9 +307,10 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   ]);
   if (!r) return null;
   const { hd } = r;
-  const [cust, jb] = await Promise.all([
+  const [cust, jb, profileId] = await Promise.all([
     hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
     hd.referenceJobNo ? getJob(hd.referenceJobNo) : null,
+    profileIdOf(hd.documentProfileId),
   ]);
   return {
     ...toQuotation(r),
@@ -306,7 +319,6 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     customerDetail: cust,
     job: jb,
     lines: dts.map((d) => ({
-      id: d.quotationDtId,
       lineNumber: d.lineNumber ?? 0,
       itemType: (d.itemType as QuotationLine['itemType']) ?? 'SparePart',
       code: d.itemCode ?? '',
@@ -329,7 +341,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     rounding: num(hd.roundingAmount),
     netAmount: num(hd.netAmount),
     approveRemark: hd.customerApproveRemark ?? '',
-    documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
+    documentProfileId: profileId,
     createdByPhone: r.creatorPhone ?? '',
     createdByEmail: r.creatorEmail ?? '',
     version: versionOf(hd.rowVersion, dts),
@@ -519,7 +531,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       no = await nextRunningNo(tx, 'Quotation');
       await tx.insert(quotationHd).values({
         ...values,
-        documentProfileId: profile.id,
+        documentProfileId: profile.pk,
         quotationNo: no,
         createDate: nowThai(),
         createBy: byUserId,
@@ -600,14 +612,16 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
 export const PICK_SLIP_MAX = 50;
 
 /**
- * ใบเบิกสินค้า (pick slip, legacy "พิมพ์ใบเบิกสินค้า" on the ticked quotations): one per quotation, in the order
- * asked — its spare-part lines only (service / delivery lines are not picked from stock), their qty and amount; the
- * totals box prints the quotation's stored amounts. Any status prints except a deleted or ยกเลิกใบเสนอราคา one
- * (owner 2026-10-29): those, unknown numbers and any past PICK_SLIP_MAX come back in `skipped` with the reason.
+ * ใบเบิกสินค้า (pick slip, legacy "พิมพ์ใบเบิกสินค้า" on the ticked quotations): one per quotation (`ids`: their
+ * uuids), in the order asked — its spare-part lines only (service / delivery lines are not picked from stock), their
+ * qty and amount; the totals box prints the quotation's stored amounts. Any status prints except a deleted or
+ * ยกเลิกใบเสนอราคา one (owner 2026-10-29): those, unknown ids and any past PICK_SLIP_MAX come back in `skipped` with
+ * the reason (`no`: the number, or the id asked when none is known).
  */
-export async function pickSlips(nos: string[]) {
-  const wanted = [...new Set(nos.map((n) => n.trim().toUpperCase()).filter(Boolean))];
-  const found = await Promise.all(wanted.slice(0, PICK_SLIP_MAX).map((n) => getQuotation(n)));
+export async function pickSlips(ids: string[]) {
+  const wanted = [...new Set(ids.map((n) => n.trim().toLowerCase()).filter(Boolean))];
+  const nos = await Promise.all(wanted.slice(0, PICK_SLIP_MAX).map(quotationNoOf));
+  const found = await Promise.all(nos.map((n) => (n ? getQuotation(n) : null)));
   const slips: { q: QuotationDetail; lines: QuotationLine[]; qty: number; parts: number }[] = [];
   const skipped: { no: string; why: string }[] = wanted
     .slice(PICK_SLIP_MAX)
@@ -620,7 +634,7 @@ export async function pickSlips(nos: string[]) {
         : q.statusId === QS.CANCELLED
           ? 'ยกเลิกใบเสนอราคา'
           : '';
-    if (why || !q) return void skipped.push({ no: wanted[k]!, why });
+    if (why || !q) return void skipped.push({ no: nos[k] ?? wanted[k]!, why });
     const lines = q.lines.filter((l) => l.itemType === 'SparePart');
     slips.push({
       q,

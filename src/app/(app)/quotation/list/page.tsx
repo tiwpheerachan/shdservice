@@ -82,7 +82,7 @@ export default function QuotationListPage() {
     try {
       await postJson('/api/admin/records', {
         table: 'quotations',
-        id: cancelling.no,
+        id: cancelling.id,
         status: 'DELETED',
         remark: reason.trim(),
       });
@@ -97,15 +97,15 @@ export default function QuotationListPage() {
     }
   };
 
-  // ticked quotations → พิมพ์ใบเบิกสินค้า (one page each, /print/pick-slip; the print skips a deleted / ยกเลิก one)
+  // ticked quotations (their uuids) → พิมพ์ใบเบิกสินค้า (one page each, /print/pick-slip; the print skips a deleted / ยกเลิก one)
   const [picked, setPicked] = React.useState<Set<string>>(() => new Set());
-  const allPicked = QUOTATIONS.length > 0 && QUOTATIONS.every((r) => picked.has(r.no));
-  const pick = (nos: string[], on: boolean) =>
+  const allPicked = QUOTATIONS.length > 0 && QUOTATIONS.every((r) => picked.has(r.id));
+  const pick = (ids: string[], on: boolean) =>
     setPicked((s) => {
       const n = new Set(s);
-      for (const no of nos)
-        if (on) n.add(no);
-        else n.delete(no);
+      for (const id of ids)
+        if (on) n.add(id);
+        else n.delete(id);
       return n;
     });
 
@@ -118,7 +118,7 @@ export default function QuotationListPage() {
           checked={allPicked}
           onChange={(e) =>
             pick(
-              QUOTATIONS.map((r) => r.no),
+              QUOTATIONS.map((r) => r.id),
               e.target.checked,
             )
           }
@@ -129,8 +129,8 @@ export default function QuotationListPage() {
       cell: (r) => (
         <Checkbox
           aria-label={`เลือก ${r.no}`}
-          checked={picked.has(r.no)}
-          onChange={(e) => pick([r.no], e.target.checked)}
+          checked={picked.has(r.id)}
+          onChange={(e) => pick([r.id], e.target.checked)}
         />
       ),
     },
@@ -140,10 +140,7 @@ export default function QuotationListPage() {
       headerWrap: true,
       width: '150px',
       cell: (r) => (
-        <Link
-          href={`/quotation/edit?no=${encodeURIComponent(r.no)}`}
-          className="num font-medium text-primary hover:underline"
-        >
+        <Link href={`/quotation/edit?id=${r.id}`} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -222,8 +219,8 @@ export default function QuotationListPage() {
       sortable: false,
       cell: (r) => (
         <RowActions
-          viewHref={`/quotation/edit?no=${encodeURIComponent(r.no)}`}
-          editHref={canEdit ? `/quotation/edit?no=${encodeURIComponent(r.no)}` : undefined}
+          viewHref={`/quotation/edit?id=${r.id}`}
+          editHref={canEdit ? `/quotation/edit?id=${r.id}` : undefined}
           onCancel={canDel ? () => setCancelling(r) : undefined}
         />
       ),
@@ -247,7 +244,7 @@ export default function QuotationListPage() {
               variant="outline"
               size="sm"
               disabled={picked.size === 0}
-              onClick={() => window.open(`/print/pick-slip?nos=${encodeURIComponent([...picked].join(','))}`, '_blank')}
+              onClick={() => window.open(`/print/pick-slip?ids=${[...picked].join(',')}`, '_blank')}
             >
               <ClipboardList className="h-3.5 w-3.5" />
               พิมพ์ใบเบิกสินค้า ({picked.size} ใบ)

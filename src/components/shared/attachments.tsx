@@ -13,10 +13,11 @@ import { MAY_NOT_PLAY, isVideo, isVideoFile, prepareVideo, uploadVideo, type Pre
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useAccess } from '@/lib/use-access';
 
-type Row = { id: number; name: string; note: string; file?: string; pending?: File };
+/** `id` = document_attach.id (uuid); a queued file (`pending`, not uploaded yet) has a client-only `tmp-…` key */
+type Row = { id: string; name: string; note: string; file?: string; pending?: File };
 /** src/server/storage.ts R2_MISSING */
 const VIDEO_OFF = 'ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ';
-type SavedFile = { id: number; name: string; file: string; remark: string };
+type SavedFile = { id: string; name: string; file: string; remark: string };
 /** files = the loaded job's attachments (JobDetail.attachments) */
 export type AttachmentsProps = { jobNo?: string; files?: SavedFile[] };
 
@@ -70,7 +71,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
 
   // shrunk photo, progress, "ลองอีกครั้ง" on a failure (the file is kept) — lib/api upload
   const upload = (target: string, f: File, remark: string) =>
-    send<{ row: { id: number; name: string; file: string; remark: string } }>(
+    send<{ row: { id: string; name: string; file: string; remark: string } }>(
       '/api/attachments',
       { jobNo: target, remark },
       f,
@@ -149,7 +150,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
           setBusy(false);
         }
       }
-      setRows((r) => [...r, { id: -++idRef.current, name: file.name, note, pending: file }]);
+      setRows((r) => [...r, { id: `tmp-${++idRef.current}`, name: file.name, note, pending: file }]);
       setFile(null);
       setNote('');
       return;
@@ -170,7 +171,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   };
 
   const remove = async (r: Row) => {
-    if (r.id < 0) {
+    if (r.pending) {
       setRows((s) => s.filter((x) => x.id !== r.id)); // not uploaded yet — just drop it from the queue
       return;
     }
@@ -281,7 +282,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                 <tr key={r.id} className="border-b border-border/70 last:border-0">
                   <td className="num hidden px-3 py-2 text-muted-foreground sm:table-cell">{i + 1}</td>
                   <td className="px-3 py-2 wrap-anywhere">
-                    {r.id > 0 && isVideoFile(r.file) ? (
+                    {!r.pending && isVideoFile(r.file) ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -323,7 +324,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                         {r.name}
                         <span className="text-2xs text-muted-foreground">(รอบันทึก)</span>
                       </button>
-                    ) : r.id > 0 && r.file?.trim() ? (
+                    ) : !r.pending && r.file?.trim() ? (
                       <a
                         href={`/api/attachments/${r.id}`}
                         target="_blank"
@@ -347,7 +348,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                   </td>
                   <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{r.note || '—'}</td>
                   <td className="px-3 py-2 text-center">
-                    {(r.id < 0 || canDelete) && (
+                    {(r.pending || canDelete) && (
                       <button
                         onClick={() => remove(r)}
                         className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"

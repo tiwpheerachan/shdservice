@@ -97,6 +97,8 @@ export const toParams = (f: Filters) => ({
 export type TatSource = { bucket: string; status: string; type: string };
 
 /** a list URL's query → filters, table state and the dashboard card a deep link came from */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function fromQuery(p: Pick<URLSearchParams, 'get'>) {
   const g = (k: string) => p.get(k)?.trim() ?? '';
   const f: Filters = { ...NO_FILTER };
@@ -105,8 +107,9 @@ export function fromQuery(p: Pick<URLSearchParams, 'get'>) {
     if (v) Object.assign(f, { [k]: typeof NO_FILTER[k] === 'boolean' ? v === '1' : v });
   }
   if (g('src') === 'overdue') f.overdue = true;
-  // ids and choices: anything else is no filter
-  for (const k of ['statusId', 'engineer', 'createdBy'] as const) if (!/^\d+$/.test(f[k])) f[k] = '';
+  // ids and choices: anything else is no filter (a status is its code; a person their uuid — ADR 0008)
+  if (!/^\d+$/.test(f.statusId)) f.statusId = '';
+  for (const k of ['engineer', 'createdBy'] as const) if (!UUID.test(f[k])) f[k] = '';
   if (!['create', 'reception', 'closed'].includes(f.dateBy)) f.dateBy = 'create';
   if (!['', 'yes', 'no'].includes(f.cost)) f.cost = '';
   if (!['', 'd13', 'd47', 'd814', 'd1530', 'over30'].includes(f.tat)) f.tat = '';

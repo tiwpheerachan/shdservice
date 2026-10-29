@@ -9,6 +9,7 @@ import {
   timestamp,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { uuidId } from './id';
 
 /**
  * Public tracking security tables (drizzle/0014, 0017, 0019 — hand-written migrations, RLS on,
@@ -27,6 +28,7 @@ const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' 
 export const trackTicket = pgTable(
   'track_ticket',
   {
+    id: uuidId(),
     tokenHash: bytea('token_hash').primaryKey(),
     jobNo: varchar('job_no', { length: 20 }).notNull(),
     issuedIp: inet('issued_ip').notNull(),
@@ -41,6 +43,7 @@ export const trackTicket = pgTable(
 export const trackRate = pgTable(
   'track_rate',
   {
+    id: uuidId(),
     bucket: varchar('bucket', { length: 40 }).notNull(),
     key: varchar('key', { length: 128 }).notNull(),
     windowStart: at('window_start').notNull(),
@@ -50,6 +53,7 @@ export const trackRate = pgTable(
 );
 
 export const trackBlock = pgTable('track_block', {
+  id: uuidId(),
   key: varchar('key', { length: 160 }).primaryKey(),
   blockedUntil: at('blocked_until').notNull(),
 });
@@ -58,7 +62,8 @@ export const trackBlock = pgTable('track_block', {
 export const trackEvent = pgTable(
   'track_event',
   {
-    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    id: uuidId(),
+    pk: bigserial('pk', { mode: 'number' }).primaryKey(),
     at: at('at').notNull().defaultNow(),
     event: varchar('event', { length: 40 }).notNull(),
     result: varchar('result', { length: 20 }).notNull().default(''),
@@ -74,6 +79,7 @@ export const trackEvent = pgTable(
 export const trackOtp = pgTable(
   'track_otp',
   {
+    id: uuidId(),
     requestHash: bytea('request_hash').primaryKey(),
     phoneHash: varchar('phone_hash', { length: 64 }).notNull(),
     customerIds: integer('customer_ids').array().notNull(),
@@ -94,6 +100,7 @@ export const trackOtp = pgTable(
 export const trackSession = pgTable(
   'track_session',
   {
+    id: uuidId(),
     tokenHash: bytea('token_hash').primaryKey(),
     customerIds: integer('customer_ids').array().notNull(),
     phoneHash: varchar('phone_hash', { length: 64 }).notNull(),
@@ -110,6 +117,7 @@ export const trackSession = pgTable(
 export const trackDocTicket = pgTable(
   'track_doc_ticket',
   {
+    id: uuidId(),
     tokenHash: bytea('token_hash').primaryKey(),
     jobNo: varchar('job_no', { length: 50 }).notNull(),
     kind: varchar('kind', { length: 16 }).notNull(),

@@ -89,7 +89,7 @@ export type JobFormState = {
   jobType: string;
   jobTypeDetail: string;
   isBounce: boolean; // งานเด้ง (job.is_job_bounce)
-  documentProfileId: number; // ออกเอกสารในนาม (0 = default)
+  documentProfileId: string; // ออกเอกสารในนาม — document_profile.id ('' = default)
   so: string;
   channel: string;
   shopName: string;
@@ -125,7 +125,8 @@ export type JobFormState = {
   totalCost: number;
   estimateCost: string;
   depositCost: string;
-  engineerId: number;
+  /** มอบหมายงานนี้ให้ — app_user.id ('' = nobody) */
+  engineerId: string;
   engineerName: string;
   /** the user confirmed giving the job (it had an engineer) to someone else — sent as takeOver */
   takeOver: boolean;
@@ -146,7 +147,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   jobType: '',
   jobTypeDetail: '',
   isBounce: false,
-  documentProfileId: 0,
+  documentProfileId: '',
   so: '',
   channel: '',
   shopName: '',
@@ -179,7 +180,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   totalCost: 0,
   estimateCost: '',
   depositCost: '',
-  engineerId: 0,
+  engineerId: '',
   engineerName: '',
   takeOver: false,
   dueDate: '',
@@ -187,7 +188,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   version: 0,
 };
 
-/** Prefill the form from a job loaded through /api/jobs/:no */
+/** Prefill the form from a job loaded through /api/jobs/:id */
 export function fromJob(j: JobDetail): JobFormState {
   return {
     ...EMPTY_JOB_FORM,
@@ -244,7 +245,7 @@ export function fromJob(j: JobDetail): JobFormState {
     totalCost: j.totalCost,
     estimateCost: j.estimateCost ? String(j.estimateCost) : '',
     depositCost: j.depositCost ? String(j.depositCost) : '',
-    engineerId: j.engineerId,
+    engineerId: j.engineerId ?? '',
     engineerName: j.engineer,
     dueDate: j.dueDate,
     dueDateAuto: j.dueDateAuto,
@@ -252,7 +253,7 @@ export function fromJob(j: JobDetail): JobFormState {
   };
 }
 
-/** Body for POST /api/jobs and PATCH /api/jobs/:no */
+/** Body for POST /api/jobs and PATCH /api/jobs/:id */
 export function toJobInput(s: JobFormState) {
   return {
     customerCode: s.customer?.code ?? '',
@@ -289,7 +290,7 @@ export function toJobInput(s: JobFormState) {
     boxCost: s.boxCost,
     estimateCost: s.estimateCost,
     depositCost: s.depositCost,
-    engineerId: s.engineerId, // 0 = มอบหมายงานนี้ให้ cleared: the job has nobody on it (updateJob)
+    engineerId: s.engineerId, // '' = มอบหมายงานนี้ให้ cleared: the job has nobody on it (updateJob)
     engineerName: s.engineerName || undefined,
     takeOver: s.takeOver || undefined,
     dueDate: s.dueDate,
@@ -615,7 +616,7 @@ export function useSymptomLists(modelCode: string) {
   const symptoms = useSymptoms('active', wanted);
   const stats = useSymptomStats(wanted);
   const { data: suggested } = useModelSymptoms(modelCode, wanted);
-  const options = stats.data.length ? stats.data : symptoms.data.map((sy) => ({ id: Number(sy.id), name: sy.name }));
+  const options = stats.data.length ? stats.data : symptoms.data.map((sy) => ({ id: sy.id, name: sy.name }));
   return {
     // empty only when both failed
     lookup: {
@@ -959,16 +960,16 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   // "มอบหมายงานนี้ให้" = job.engineer_id → an active user whose role has Job Take (the API refuses anyone else)
   const staffOptions = React.useMemo(() => {
     const opts = STAFF.filter((st) => st.takesJobs).map((st) => ({
-      value: String(st.id),
+      value: st.id,
       label: st.name,
       sub: st.userType || undefined,
     }));
     // the job's own assignee who is not on that list (left / another role) → still shown, may stay
     const own = loaded.engineerId;
-    if (own > 0 && !opts.some((o) => o.value === String(own)))
+    if (own && !opts.some((o) => o.value === own))
       opts.unshift({
-        value: String(own),
-        label: loaded.engineerName || `#${own}`,
+        value: own,
+        label: loaded.engineerName || 'ผู้รับงานเดิม',
         sub: 'ผู้รับงานเดิม (ไม่อยู่ในรายชื่อช่างปัจจุบัน)',
       });
     return opts;
@@ -979,12 +980,12 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   // a job that already has someone on it goes to another person only when the user says so (the API asks too)
   const assign = async (next: Pick<JobFormState, 'engineerId' | 'engineerName'>) => {
     const had = loaded.engineerId;
-    const taking = !!loaded.jobNo && had > 0 && !!next.engineerId && next.engineerId !== had;
+    const taking = !!loaded.jobNo && !!had && !!next.engineerId && next.engineerId !== had;
     const ok =
       !taking ||
       s.takeOver ||
       (await confirm({
-        title: `งานนี้มีผู้รับงานแล้ว (${loaded.engineerName || `#${had}`}) — มอบให้คนใหม่แทน?`,
+        title: `งานนี้มีผู้รับงานแล้ว (${loaded.engineerName || 'ผู้รับงานเดิม'}) — มอบให้คนใหม่แทน?`,
         confirmLabel: 'มอบให้คนใหม่',
       }));
     if (ok) patch({ ...next, takeOver: taking });
@@ -1023,11 +1024,10 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
         {showTech && (
           <Field label="มอบหมายงานนี้ให้" hint={techHint} error={errors.engineerId} lookup={staffLookup}>
             <SearchSelect
-              value={s.engineerId ? String(s.engineerId) : ''}
+              value={s.engineerId}
               onChange={(v) => {
-                const id = Number(v) || 0;
                 void assign({
-                  engineerId: id,
+                  engineerId: v,
                   engineerName: staffOptions.find((o) => o.value === v)?.label ?? '',
                 });
               }}

@@ -84,9 +84,16 @@ async function call(method: 'GET' | 'POST', url: string, u: (typeof U)[keyof typ
           } as never);
   return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> };
 }
+/** the district's uuid — what /api/address takes (ADR 0008) */
+const districtId = (
+  await pool.query<{ id: string }>(`SELECT id::text FROM mt_district WHERE district_id = $1`, [DISTRICT])
+).rows[0]!.id;
+/** the salesperson's uuid — what a sale order takes (ADR 0008) */
+const adminId = (await pool.query<{ id: string }>(`SELECT id::text FROM app_user WHERE user_id = $1`, [U.admin.id]))
+  .rows[0]!.id;
 const subDistricts = async () =>
-  (await call('GET', `/api/address?level=subdistrict&district=${DISTRICT}`, U.admin)).body.rows as {
-    id: number;
+  (await call('GET', `/api/address?level=subdistrict&district=${districtId}`, U.admin)).body.rows as {
+    id: string;
     name: string;
     postal: string;
   }[];
@@ -111,7 +118,7 @@ await test('a sale-order choice only — the job close keeps its 3; fits sale_ou
   assert.ok(COD.length <= 50);
 });
 await test('the form rules take COD with no amount (nothing collected yet) and with one ≤ the total', async () => {
-  const base = { customerCode: 'QPDC001', salesId: U.admin.id, lines: [{ code: 'QPDP1', qty: 1, price: 100 }] };
+  const base = { customerCode: 'QPDC001', salesId: adminId, lines: [{ code: 'QPDP1', qty: 1, price: 100 }] };
   assert.equal(saleOrderSchema().safeParse({ ...base, paymentType: COD }).success, true);
   assert.equal(saleOrderSchema().safeParse({ ...base, paymentType: COD, paymentAmount: 100 }).success, true);
   assert.equal(saleOrderSchema().safeParse({ ...base, paymentType: COD, paymentAmount: 101 }).success, false);
@@ -120,7 +127,7 @@ await test('saved as payment_type "เก็บเงินปลายทาง
   const o = await saveSaleOrder(
     {
       customerCode: 'QPDC001',
-      salesId: U.admin.id,
+      salesId: adminId,
       submit: false,
       paymentType: COD,
       lines: [{ code: 'QPDP1', qty: 1 }],
@@ -138,43 +145,54 @@ await test('saved as payment_type "เก็บเงินปลายทาง
 console.log('\nลูกค้า: + เพิ่มชื่อ แขวง / ตำบล (POST /api/address)');
 await test('Customer edit adds one (cleaned) — 201, in the list for everyone, audited', async () => {
   const r = await call('POST', '/api/address', U.cs, {
-    district: DISTRICT,
+    district: districtId,
     name: '  ตำบลใหม่   QPD ',
     postal: '99811',
   });
   assert.equal(r.status, 201, JSON.stringify(r.body));
-  const row = r.body.row as { id: number; name: string; postal: string };
+  const row = r.body.row as { id: string; name: string; postal: string };
   assert.deepEqual({ name: row.name, postal: row.postal }, { name: 'ตำบลใหม่ QPD', postal: '99811' });
   assert.ok((await subDistricts()).some((s) => s.id === row.id && s.name === 'ตำบลใหม่ QPD'));
-  // the latest line: audit_log is append-only, and a re-run may get the same id again
+  // the audit key = the new row's uuid
   const { rows } = await pool.query(
-    `SELECT action, module FROM audit_log WHERE entity = 'mt_sub_district' AND entity_key = $1 ORDER BY id DESC LIMIT 1`,
-    [String(row.id)],
+    `SELECT action, module FROM audit_log WHERE entity = 'mt_sub_district' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
+    [row.id],
   );
   assert.deepEqual(rows, [{ action: 'CREATE', module: 'Customer' }]);
 });
 await test('the same name in that district again → 409 (nothing added)', async () => {
   const before = (await subDistricts()).length;
-  const r = await call('POST', '/api/address', U.cs, { district: DISTRICT, name: 'ตำบลเดิม QPD', postal: '99810' });
+  const r = await call('POST', '/api/address', U.cs, { district: districtId, name: 'ตำบลเดิม QPD', postal: '99810' });
   assert.equal(r.status, 409);
   assert.equal((await subDistricts()).length, before);
 });
 await test('Customer view only → 403', async () => {
-  const r = await call('POST', '/api/address', U.viewer, { district: DISTRICT, name: 'ตำบลอื่น QPD', postal: '99812' });
+  const r = await call('POST', '/api/address', U.viewer, {
+    district: districtId,
+    name: 'ตำบลอื่น QPD',
+    postal: '99812',
+  });
   assert.equal(r.status, 403);
 });
 await test('a name over the column (50), no name, a bad postal code → 400 under the fields', async () => {
-  const r = await call('POST', '/api/address', U.cs, { district: DISTRICT, name: 'ก'.repeat(51), postal: '9981' });
+  const r = await call('POST', '/api/address', U.cs, { district: districtId, name: 'ก'.repeat(51), postal: '9981' });
   assert.equal(r.status, 400);
   assert.deepEqual(Object.keys((r.body.details as { fields: object }).fields).sort(), ['name', 'postal']);
   assert.equal(
-    (await call('POST', '/api/address', U.cs, { district: DISTRICT, name: ' ', postal: '99810' })).status,
+    (await call('POST', '/api/address', U.cs, { district: districtId, name: ' ', postal: '99810' })).status,
     400,
   );
 });
 await test('a district that is not there → 404', async () => {
-  const r = await call('POST', '/api/address', U.cs, { district: 9989, name: 'ตำบลอื่น QPD', postal: '99812' });
+  const r = await call('POST', '/api/address', U.cs, {
+    district: '00000000-0000-7000-8000-000000000000',
+    name: 'ตำบลอื่น QPD',
+    postal: '99812',
+  });
   assert.equal(r.status, 404);
+  // not a uuid at all (an old int id) → 400 under the field
+  const old = await call('POST', '/api/address', U.cs, { district: 9989, name: 'ตำบลอื่น QPD', postal: '99812' });
+  assert.equal(old.status, 400);
 });
 
 console.log('\n75 rows a page (legacy 50 / 75 / 100)');

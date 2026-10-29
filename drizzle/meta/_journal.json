@@ -36,6 +36,13 @@
       "when": 1761868800000,
       "tag": "0004_document_profile_purpose",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1761955200000,
+      "tag": "0005_uuid7_ids",
+      "breakpoints": true
     }
   ]
 }

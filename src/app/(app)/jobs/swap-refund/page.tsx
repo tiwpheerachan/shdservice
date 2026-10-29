@@ -32,7 +32,7 @@ import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
-import { jobNoParam } from '@/data/keys';
+import { jobIdParam } from '@/data/keys';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
 import { parseSwap, serialAccepts, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
@@ -45,7 +45,7 @@ function SwapRefundForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, set } = useJobForm();
-  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
   const lock = useMoneyLock(); // a closed job: the refund stays as recorded (Job Money After Close may change it)
   const [tab, setTab] = React.useState('product');
@@ -113,7 +113,7 @@ function SwapRefundForm() {
   const newSerialSeen =
     useJobChecks(asSerial(d.newSerial), asSerial(saved?.d.newSerial ?? ''), mode === 'swap')?.serial.jobs ?? [];
 
-  // POST /api/jobs/:no/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
+  // POST /api/jobs/:id/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body =
@@ -144,7 +144,7 @@ function SwapRefundForm() {
     setSaving(true);
     try {
       // the version the page loaded: someone else's save since → 409 (reload), not overwritten
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/swap-refund`, {
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${job.id}/swap-refund`, {
         ...body,
         job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
         version: form.version,
@@ -382,7 +382,7 @@ function SwapRefundForm() {
 export default function SwapRefundPage() {
   return (
     <JobScreen>
-      <RecordKey of={jobNoParam}>
+      <RecordKey of={jobIdParam}>
         <SwapRefundForm />
       </RecordKey>
     </JobScreen>

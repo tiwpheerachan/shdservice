@@ -87,7 +87,8 @@ async function loadStats(): Promise<Stats> {
   return { bySig, fam, byShop };
 }
 
-export type SeenJob = { no: string; date: string; sameCustomer: boolean; bounce: boolean; model: string };
+/** `id` = job.id (the link), `no` = what is shown */
+export type SeenJob = { id: string; no: string; date: string; sameCustomer: boolean; bounce: boolean; model: string };
 export type JobChecks = {
   serial: { jobs: SeenJob[]; looksLike: string | null; unusual: boolean };
   so: { jobs: SeenJob[] };
@@ -122,6 +123,7 @@ export async function jobChecks(q: {
   ) => {
     const rows = await db
       .select({
+        id: job.id,
         no: job.jobNo,
         date: job.jobCreateDate,
         cust: job.customerId,
@@ -141,6 +143,7 @@ export async function jobChecks(q: {
       .orderBy(desc(job.jobCreateDate))
       .limit(5);
     return rows.map((r) => ({
+      id: r.id,
       no: r.no,
       date: (r.date ?? '').slice(0, 10),
       sameCustomer: custId != null && r.cust === custId,

@@ -140,7 +140,7 @@ const wholeLike = (field: string) =>
 /** field types — everything optional here; what is required is decided per mode below */
 const jobInputShape = z.object({
   customerCode: text,
-  documentProfileId: z.number().optional(),
+  documentProfileId: z.uuid({ error: 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน' }).optional(), // document_profile.id
   jobType: text,
   jobTypeDetail: maxText(50, 'งานย่อย '),
   isBounce: z.boolean().optional(),
@@ -174,7 +174,8 @@ const jobInputShape = z.object({
   toolCost: moneyField('ค่าเครื่องมือพิเศษ'),
   deliveryCost: moneyField('ค่าขนส่ง'),
   boxCost: moneyField('ค่ากล่องพัสดุ'),
-  engineerId: z.union([z.number(), z.string()]).optional(),
+  /** มอบหมายงานนี้ให้: the user's id (app_user.id); '' = nobody */
+  engineerId: z.union([z.literal(''), z.uuid({ error: 'ไม่พบผู้ใช้คนนี้' })]).optional(),
   engineerName: text,
   dueDate: date,
 });
@@ -328,8 +329,8 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
 
 const req = (msg: string) => z.string({ error: msg }).trim().min(1, msg);
 
-/** ส่งโดย / รับโดย: an app_user id (left out → the server uses the person saving) */
-const staffId = (msg: string) => z.number({ error: msg }).int(msg).positive(msg).optional();
+/** ส่งโดย / รับโดย: an app_user id (uuid; left out → the server uses the person saving) */
+const staffId = (msg: string) => z.uuid({ error: msg }).optional();
 
 /** an A / B quote of a part line: qty 0 = that option is not used */
 const partOption = z
@@ -356,7 +357,7 @@ export const NOT_ENGINEER = `มอบหมายงานได้เฉพา
 export const REPEATED_LINE = 'มีรายการซ้ำกัน — แต่ละรายการระบุได้ครั้งเดียว';
 export const noRepeatedLine = (lines: Record<string, unknown>[]) => {
   const ids = lines.map((l) => l.logId).filter(Boolean);
-  return new Set(ids.map(Number)).size === ids.length;
+  return new Set(ids.map((x) => String(x).toLowerCase())).size === ids.length;
 };
 
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair (money 0–1,000,000, part qty whole 0–1000, text ≤ its column) */

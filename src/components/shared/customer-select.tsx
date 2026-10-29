@@ -167,9 +167,9 @@ export function CustomerSelect({
         {!readOnly && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             <span>ข้อมูลลูกค้าเป็นข้อมูลกลาง แก้ไขได้ที่หน้า ข้อมูลลูกค้า</span>
-            {canEdit && (
+            {canEdit && c.id && (
               <a
-                href={`/customers?edit=${encodeURIComponent(c.code)}`}
+                href={`/customers?edit=${c.id}`}
                 target="_blank"
                 rel="noopener"
                 className="inline-flex items-center gap-1 font-medium text-primary hover:underline"

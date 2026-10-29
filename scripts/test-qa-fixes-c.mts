@@ -45,8 +45,8 @@ await pool.query(`
       .map((u) => `(${u.id}, 'QFC', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
       .join(', ')};
   DELETE FROM job WHERE job_no LIKE 'QFCJ%';
-  DELETE FROM shipping_profile WHERE id = 9961 OR code = 'QFC';
-  INSERT INTO shipping_profile (id, code, name_th) VALUES (9961, 'QFC', 'ขนส่ง QFC');
+  DELETE FROM shipping_profile WHERE pk = 9961 OR code = 'QFC';
+  INSERT INTO shipping_profile (pk, code, name_th) VALUES (9961, 'QFC', 'ขนส่ง QFC');
   -- A: opened 09-01, closed 09-20, returned 10-10 → TAT 39 (the close alone says 19); paid 500
   -- B: opened 10-01, closed 10-05, not returned → TAT 4; the deposit given back: -200
   INSERT INTO job (job_no, job_status_id, record_status, job_create_date, job_closed_date, job_return_date,
@@ -104,7 +104,7 @@ console.log('\nAudit log: a denied sale order is no อนุมัติ');
 await test('ปฏิเสธ → audit action STATUS (เปลี่ยนสถานะ), not APPROVE', async () => {
   await approveSaleOrder(SO, 'deny', 'QFC ไม่ผ่าน', { userId: U.admin.id, isAdmin: true, userType: 'System Admin' });
   const { rows } = await pool.query(
-    `SELECT action, summary FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = $1 ORDER BY id DESC LIMIT 1`,
+    `SELECT action, summary FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
     [SO],
   );
   assert.deepEqual(rows[0], { action: 'STATUS', summary: 'ปฏิเสธใบสั่งขาย · QFC ไม่ผ่าน' });

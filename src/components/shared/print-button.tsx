@@ -36,9 +36,9 @@ export function PrintButton({
   href: string;
   kind: DocumentKind;
   no: string;
-  /** the document's current document_profile_id (0 / undefined = SHD) */
-  profileId?: number;
-  onProfileChange?: (id: number) => void;
+  /** the document's current profile (uuid; '' / undefined = the default) */
+  profileId?: string;
+  onProfileChange?: (id: string) => void;
   disabled?: boolean;
   title?: string;
   size?: 'sm' | 'md';
@@ -51,11 +51,11 @@ export function PrintButton({
   const { data: profiles } = useDocumentProfiles();
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const currentId = profileId || profiles.find((p) => p.isDefault)?.id || profiles[0]?.id || 0;
+  const currentId = profileId || profiles.find((p) => p.isDefault)?.id || profiles[0]?.id || '';
 
   const print = () => window.open(href, '_blank');
 
-  const pick = async (id: number) => {
+  const pick = async (id: string) => {
     setOpen(false);
     if (id === currentId) return print();
     setBusy(true);

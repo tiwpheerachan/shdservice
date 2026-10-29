@@ -160,7 +160,7 @@ export default function JobListPage() {
         loading={loading}
         error={loadError}
         onRetry={retryLoad}
-        rowKey={(r) => r.no}
+        rowKey={(r) => r.id}
         pageSize={init.pageSize}
         server={{ ...server, total }}
       />

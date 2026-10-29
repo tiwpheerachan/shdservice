@@ -34,12 +34,12 @@ type Line = {
   onhand: number;
   need: number;
   issue: number;
-  logId?: number; // job_order_spare_part_log id (จ่ายออกตามงานซ่อม)
-  dtId?: number; // sale_out_dt id (จ่ายออกตามใบสั่งขาย)
+  logId?: string; // job_order_spare_part_log id, a uuid (จ่ายออกตามงานซ่อม)
+  dtId?: string; // sale_out_dt id, a uuid (จ่ายออกตามใบสั่งขาย)
 };
 
 type PartLine = {
-  logId: number;
+  logId: string;
   jobNo: string;
   code: string;
   name: string;
@@ -48,7 +48,7 @@ type PartLine = {
   status: string;
 };
 type SoLine = {
-  dtId: number;
+  dtId: string;
   code: string;
   name: string;
   onhand: number;
@@ -57,7 +57,7 @@ type SoLine = {
   pickNo: string;
 };
 type ReturnLine = {
-  logId: number;
+  logId: string;
   jobNo: string;
   code: string;
   name: string;
@@ -246,7 +246,7 @@ export default function PickPage() {
   };
 
   // a quantity over the limit stays as typed and is flagged (never cut down quietly) — the server refuses it too
-  const setIssue = (key: number | string, v: number) =>
+  const setIssue = (key: string, v: number) =>
     setLines((s) => s.map((l) => ((l.logId ?? l.dtId ?? l.code) === key ? { ...l, issue: Math.max(0, v) } : l)));
   const maxOf = (l: Line) => (isReturn ? l.need : Math.min(l.need, l.onhand));
   const overMsg = (l: Line) =>

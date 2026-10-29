@@ -40,7 +40,7 @@ async function provision(opts: {
   avatar: string;
   title: string;
 }): Promise<
-  | { role: string; status: string; recordStatus: string | null; userId: number; sessionVersion: number }
+  | { role: string; status: string; recordStatus: string | null; userId: number; id: string; sessionVersion: number }
   | 'user_conflict'
   | 'db_unavailable'
 > {
@@ -51,6 +51,7 @@ async function provision(opts: {
       status: r.isActive ? 'Active' : 'Inactive',
       recordStatus: r.recordStatus,
       userId: r.userId,
+      id: r.id,
       sessionVersion: r.sessionVersion,
     };
   } catch (e) {
@@ -160,7 +161,7 @@ export const GET = checked(async (request: NextRequest) => {
     title: prof?.title ?? '',
   });
   if (typeof provisioned === 'string') return fail(request, provisioned);
-  const { role, status, recordStatus, userId, sessionVersion } = provisioned;
+  const { role, status, recordStatus, userId, id, sessionVersion } = provisioned;
 
   // audit: LOGIN, or LOGIN_FAILED for a refused (Inactive / deleted) account (best-effort — never blocks sign-in)
   try {
@@ -168,7 +169,7 @@ export const GET = checked(async (request: NextRequest) => {
       ...signInAuditLine(email, role, recordStatus),
       module: 'Auth',
       entity: 'app_user',
-      key: userId || email,
+      key: id,
       meta: { ip: clientIp(request.headers), ua: request.headers.get('user-agent')?.slice(0, 200) ?? null },
     });
   } catch (e) {
@@ -195,7 +196,7 @@ export const GET = checked(async (request: NextRequest) => {
   // shared PC never opens the previous person's page. No os_seen at all (a browser that never signed in
   // here, e.g. a link opened on a new PC) keeps it: nobody used this browser before.
   const seen = request.cookies.get(SEEN_COOKIE)?.value;
-  const next = seen === undefined || seen === String(userId) ? nextFromState : DEFAULT_AFTER_LOGIN;
+  const next = seen === undefined || seen === id ? nextFromState : DEFAULT_AFTER_LOGIN;
   const res = NextResponse.redirect(new URL(next, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.

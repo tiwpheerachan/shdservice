@@ -53,8 +53,8 @@ type Col = ReportCol;
 /** a row of any list: read by column key, so every list function's own type fits without a cast */
 type Row = object;
 
+// no ID column (ADR 0008): the row's uuid tells a reader nothing — the pages no longer show it either
 const MASTER_COLS: Col[] = [
-  { key: 'id', header: 'ID', width: 8 },
   { key: 'name', header: 'ชื่อ', width: 40 },
   { key: 'detail', header: 'รายละเอียด', width: 40 },
   { key: 'status', header: 'สถานะ', width: 10 },
@@ -65,7 +65,6 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
     title: 'ผู้ใช้ระบบ',
     module: null,
     cols: [
-      { key: 'id', header: 'ID', width: 8 },
       { key: 'name', header: 'ชื่อ-สกุล', width: 30 },
       { key: 'username', header: 'Username', width: 18 },
       { key: 'email', header: 'อีเมล', width: 34 },

@@ -22,10 +22,10 @@ export default function NewSaleOrderPage() {
     if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
     setSaving(true);
     try {
-      const d = await postJson<{ order: { no: string } }>('/api/sale-orders', p);
-      await form.current?.uploadPendingSlip(d.order.no);
+      const d = await postJson<{ order: { id: string; no: string } }>('/api/sale-orders', p);
+      await form.current?.uploadPendingSlip(d.order.id);
       push({ kind: 'success', title: 'สร้างใบสั่งขายแล้ว', desc: d.order.no });
-      router.push(`/sale/orders/edit?no=${encodeURIComponent(d.order.no)}`);
+      router.push(`/sale/orders/edit?id=${d.order.id}`);
     } catch (e) {
       if (!form.current?.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {

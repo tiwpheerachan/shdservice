@@ -858,22 +858,17 @@ COMMENT ON COLUMN quotation_hd.net_amount IS 'จำนวนเงินทั�
 SELECT setval(pg_get_serial_sequence('product_none_serial', 'item_id'), COALESCE((SELECT max(item_id) FROM product_none_serial), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('product_serial', 'item_id'), COALESCE((SELECT max(item_id) FROM product_serial), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('customer', 'customer_id'), COALESCE((SELECT max(customer_id) FROM customer), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('app_back_up_db_log', 'id'), COALESCE((SELECT max(id) FROM app_back_up_db_log), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('app_config', 'config_id'), COALESCE((SELECT max(config_id) FROM app_config), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('category', 'category_id'), COALESCE((SELECT max(category_id) FROM category), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('color', 'id'), COALESCE((SELECT max(id) FROM color), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('condition', 'condition_id'), COALESCE((SELECT max(condition_id) FROM condition), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('document_attach', 'document_attach_id'), COALESCE((SELECT max(document_attach_id) FROM document_attach), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('inventory_dt', 'inventory_dt_id'), COALESCE((SELECT max(inventory_dt_id) FROM inventory_dt), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('inventory_hd', 'inventory_hd_id'), COALESCE((SELECT max(inventory_hd_id) FROM inventory_hd), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_call_log', 'job_call_log_id'), COALESCE((SELECT max(job_call_log_id) FROM job_call_log), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('job_close_temp', 'id'), COALESCE((SELECT max(id) FROM job_close_temp), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('job_create_temp', 'id'), COALESCE((SELECT max(id) FROM job_create_temp), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_log', 'job_log_id'), COALESCE((SELECT max(job_log_id) FROM job_log), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_order_spare_part_log', 'job_order_log_id'), COALESCE((SELECT max(job_order_log_id) FROM job_order_spare_part_log), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_return_dt', 'job_return_dt_id'), COALESCE((SELECT max(job_return_dt_id) FROM job_return_dt), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_return_hd', 'job_return_id'), COALESCE((SELECT max(job_return_id) FROM job_return_hd), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('job_send_forward_dt', 'id'), COALESCE((SELECT max(id) FROM job_send_forward_dt), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('job_type', 'job_type_id'), COALESCE((SELECT max(job_type_id) FROM job_type), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('manufacturer', 'manufacturer_id'), COALESCE((SELECT max(manufacturer_id) FROM manufacturer), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('model', 'model_id'), COALESCE((SELECT max(model_id) FROM model), 0) + 1, false);
@@ -892,6 +887,18 @@ SELECT setval(pg_get_serial_sequence('sale_out_dt', 'sale_out_dt_id'), COALESCE(
 SELECT setval(pg_get_serial_sequence('sale_out_hd', 'sale_out_hd_id'), COALESCE((SELECT max(sale_out_hd_id) FROM sale_out_hd), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('store_location', 'store_location_id'), COALESCE((SELECT max(store_location_id) FROM store_location), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('symptom', 'symptom_id'), COALESCE((SELECT max(symptom_id) FROM symptom), 0) + 1, false);
+-- the five whose column was `id`: drizzle/0005 renames it `pk` — a re-run (--reset) reads whichever is there
+DO $$
+DECLARE
+  t text;
+  c text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['app_back_up_db_log', 'color', 'job_close_temp', 'job_create_temp', 'job_send_forward_dt'] LOOP
+    c := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = t AND column_name = 'pk') THEN 'pk' ELSE 'id' END;
+    EXECUTE format('SELECT setval(pg_get_serial_sequence(%L, %L), COALESCE((SELECT max(%I) FROM %I), 0) + 1, false)', t, c, c, t);
+  END LOOP;
+END $$;
 SELECT setval(pg_get_serial_sequence('app_user', 'user_id'), COALESCE((SELECT max(user_id) FROM app_user), 0) + 1, false);
 
 -- RLS on: the app talks to Postgres directly (drizzle); PostgREST/anon must not read these tables
@@ -1434,12 +1441,22 @@ BEGIN
 END $$;
 
 -- seed SHD as id 1 / default with what the legacy forms print
-INSERT INTO document_profile (id, code, name_th, name_en, address_line1, address_line2, phone, bank_name, bank_account_type, prefix_job, prefix_quotation, prefix_sale_order, is_default, sort_order)
+-- (drizzle/0005 renames document_profile.id `pk` — a re-run (--reset) reads whichever is there)
+DO $$
+DECLARE
+  c text := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = 'public' AND table_name = 'document_profile' AND column_name = 'pk')
+                 THEN 'pk' ELSE 'id' END;
+BEGIN
+  EXECUTE format($q$
+INSERT INTO document_profile (%1$I, code, name_th, name_en, address_line1, address_line2, phone, bank_name, bank_account_type, prefix_job, prefix_quotation, prefix_sale_order, is_default, sort_order)
 SELECT 1, 'SHD', 'บริษัท เอสเอชดี เทคโนโลยี จำกัด', 'SHD Technology Co., Ltd.',
        'อาคารไอซีเอส ชั้น 7 เลขที่ 112 ถนนเจริญนคร แขวงคลองต้นไทร', 'เขตคลองสาน กรุงเทพมหานคร 10600',
        '02-100-4578', 'ธ.ไทยพาณิชย์ จำกัด (มหาชน)', 'บัญชีออมทรัพย์', 'J', 'Q', 'SO', true, 0
-WHERE NOT EXISTS (SELECT 1 FROM document_profile WHERE id = 1);
-SELECT setval(pg_get_serial_sequence('document_profile', 'id'), GREATEST((SELECT max(id) FROM document_profile), 1));
+WHERE NOT EXISTS (SELECT 1 FROM document_profile WHERE %1$I = 1)$q$, c);
+  EXECUTE format('SELECT setval(pg_get_serial_sequence(%L, %L), GREATEST((SELECT max(%I) FROM document_profile), 1))',
+                 'document_profile', c, c);
+END $$;
 
 -- which profile each document was issued under (NULL = SHD)
 ALTER TABLE quotation_hd ADD COLUMN IF NOT EXISTS document_profile_id integer;

@@ -23,7 +23,7 @@ import { UserDialog, useUserDialog } from './user-dialog';
 export default function UsersPage() {
   // your own row: no revoke / delete / role or status change (the API refuses them with a 409)
   const { userId: myId } = useAccess();
-  const isMe = (r: { id: string }) => r.id === String(myId);
+  const isMe = (r: { id: string }) => r.id === myId;
   const [view, setView] = React.useState<'active' | 'deleted'>('active');
   const { data: USERS, loading, refetch } = useUsers(view === 'deleted' ? 'only' : 'exclude');
   // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet

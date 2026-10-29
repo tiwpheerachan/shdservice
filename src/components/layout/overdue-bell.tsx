@@ -56,7 +56,7 @@ export function OverdueBell() {
     .filter(Boolean)
     .join(' · ');
   const mine = data?.scope === 'mine';
-  const listHref = (engineerId?: number | null) =>
+  const listHref = (engineerId?: string | null) =>
     `/jobs/list?src=overdue${engineerId ? `&engineer=${engineerId}` : ''}`;
 
   return (
@@ -114,7 +114,7 @@ export function OverdueBell() {
                   {so.data.items.map((o) => (
                     <li key={o.no}>
                       <Link
-                        href={`/sale/orders/edit?no=${encodeURIComponent(o.no)}`}
+                        href={`/sale/orders/edit?id=${o.id}`}
                         onClick={() => setOpen(false)}
                         className="block px-4 py-2.5 transition-colors hover:bg-accent/50"
                       >
@@ -204,7 +204,7 @@ export function OverdueBell() {
                   {data.items.map((j) => (
                     <li key={j.no}>
                       <Link
-                        {...jobLink(j.no)}
+                        {...jobLink(j.id)}
                         onClick={() => setOpen(false)}
                         className="block px-4 py-2.5 transition-colors hover:bg-accent/50"
                       >

@@ -46,9 +46,10 @@ export const pageArgsOf = (t: TableState) => ({
 
 /** a record number as the "ระบุหมายเลข…" screens look it up */
 export const recordNo = (v: string) => v.trim().toUpperCase();
-export const jobKey = (no: string) => `/api/jobs/${encodeURIComponent(no)}`;
+/** a job's own URL: its uuid (ADR 0008), one spelling whatever case the caller holds it in */
+export const jobKey = (id: string) => `/api/jobs/${encodeURIComponent(id.toLowerCase())}`;
 export const quotationKey = (no: string) => `/api/quotations/${encodeURIComponent(no)}`;
-/** the job a job screen opens with: ?job= is what every link writes; ?no= / ?jobNo= open the same */
-export const jobNoParam = (sp: Pick<URLSearchParams, 'get'>) => sp.get('job') || sp.get('no') || sp.get('jobNo') || '';
+/** the job a job screen opens with: ?id=<the job's uuid> (ADR 0008) — an old ?job=<number> link opens none */
+export const jobIdParam = (sp: Pick<URLSearchParams, 'get'>) => sp.get('id') || '';
 /** not a URL: the id prefetch() stamps on each answer set, so <Prefetched> seeds one set only once */
 export const PREFETCH_ID = 'prefetch:id';

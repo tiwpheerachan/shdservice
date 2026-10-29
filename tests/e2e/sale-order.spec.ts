@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { E2E_CUSTOMER, MANAGER_EMAIL, SELLER_EMAIL } from './support/env';
-import { movementsOf, newPart, one, stockOf, userId } from './support/db';
+import { movementsOf, newPart, one, stockOf, userId, userUuid } from './support/db';
 import { call, expect, signIn, switchUser, test } from './support/fixtures';
 
 /**
@@ -21,11 +21,15 @@ const orderState = (no: string) =>
     [no],
   );
 
+/** the order's uuid — its link (ADR 0008); the number is what's shown and what the rows reference */
+const soId = async (no: string) =>
+  (await one<{ id: string }>('SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).id;
+
 /** an order sent for approval through the API, as the signed-in user (the UI path is the first test's) */
 async function createOrder(page: Page, code: string, qty: number, salesEmail: string): Promise<string> {
   const r = await call(page, 'POST', '/api/sale-orders', {
     customerCode: E2E_CUSTOMER,
-    salesId: await userId(salesEmail),
+    salesId: await userUuid(salesEmail),
     lines: [{ code, qty, price: PRICE, name: '', type: 'SparePart' }],
     paymentType: '',
     paymentAmount: '',
@@ -38,13 +42,14 @@ async function createOrder(page: Page, code: string, qty: number, salesEmail: st
 }
 
 async function approve(page: Page, no: string, decision: 'approve' | 'deny' | 'reject', remark = '') {
-  const { body } = await call(page, 'GET', `/api/sale-orders/${no}`);
+  const id = await soId(no);
+  const { body } = await call(page, 'GET', `/api/sale-orders/${id}`);
   const version = (body.order as { version: number }).version;
-  return call(page, 'POST', `/api/sale-orders/${no}/approve`, { decision, remark, version });
+  return call(page, 'POST', `/api/sale-orders/${id}/approve`, { decision, remark, version });
 }
 
 async function openOrder(page: Page, no: string) {
-  await page.goto(`/sale/orders/edit?no=${no}`);
+  await page.goto(`/sale/orders/edit?id=${await soId(no)}`);
   await expect(page.getByRole('heading', { name: 'แก้ไขใบสั่งขาย' })).toBeVisible();
   await expect(page.getByText(no, { exact: true })).toBeVisible();
 }
@@ -71,8 +76,10 @@ test('a seller sends an order for approval; the manager approves it and the stoc
   await expect(page.getByRole('row', { name: new RegExp(part.code) })).toContainText('คงเหลือ 10');
   await page.getByRole('radio', { name: 'ส่งขออนุมัติ' }).check();
   await page.getByRole('button', { name: 'บันทึกใบสั่งขาย' }).click();
-  await page.waitForURL(/\/sale\/orders\/edit\?no=SO\d+$/);
-  const no = new URL(page.url()).searchParams.get('no')!;
+  await page.waitForURL(/\/sale\/orders\/edit\?id=[0-9a-f-]{36}$/);
+  const { no } = await one<{ no: string }>('SELECT sale_out_hd_no AS no FROM sale_out_hd WHERE id = $1', [
+    new URL(page.url()).searchParams.get('id'),
+  ]);
   await expect(page.getByText('รออนุมัติ', { exact: true })).toBeVisible();
   expect(await orderState(no)).toMatchObject({
     approve: 2,
@@ -109,19 +116,20 @@ test('two approvals of the same order at once (double click): one wins, the stoc
 
   await switchUser(page, MANAGER_EMAIL);
   await openOrder(page, no);
-  const { body } = await call(page, 'GET', `/api/sale-orders/${no}`);
+  const id = await soId(no);
+  const { body } = await call(page, 'GET', `/api/sale-orders/${id}`);
   const version = (body.order as { version: number }).version;
   const statuses = await page.evaluate(
-    async ({ no, version }) => {
+    async ({ id, version }) => {
       const post = () =>
-        fetch(`/api/sale-orders/${no}/approve`, {
+        fetch(`/api/sale-orders/${id}/approve`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ decision: 'approve', remark: '', version }),
         }).then((r) => r.status);
       return Promise.all([post(), post()]);
     },
-    { no, version },
+    { id, version },
   );
   expect(statuses.sort()).toEqual([200, 409]);
   expect(await movementsOf(no)).toEqual([{ no: expect.stringMatching(/^WHO\d+$/), type: 4, code: part.code, qty: 2 }]);

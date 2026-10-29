@@ -177,9 +177,8 @@ export function jobForCustomer(j: JobDetail): JobDetail {
       ...j.payment,
       detail: refundDateOf(j.payment.detail) ? `${REFUND_DETAIL} ${refundDateOf(j.payment.detail)}` : '',
     },
-    engineerId: 0,
+    engineerId: null,
     engineer: '',
-    createBy: 0,
     createByName: '', // staff names stay on the staff copy (ผู้รับงาน / ผู้ส่งคืน)
     repairedBy: '',
     closedBy: '',

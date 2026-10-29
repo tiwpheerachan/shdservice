@@ -85,7 +85,7 @@ export function JobLinks({ jobs }: { jobs: SeenJob[] }) {
         <React.Fragment key={j.no}>
           {i > 0 && ', '}
           <a
-            href={`/jobs/edit?no=${encodeURIComponent(j.no)}`}
+            href={`/jobs/edit?id=${j.id}`}
             target="_blank"
             rel="noopener"
             className="num font-semibold underline underline-offset-2"

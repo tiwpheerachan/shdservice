@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { CLOSER_EMAIL, OWNER_EMAIL } from './support/env';
-import { newJob, newPart, newPartLine, one, rows, userId } from './support/db';
+import { jobUuid, newJob, newPart, newPartLine, one, rows, userId } from './support/db';
 import { call, expect, signIn, test } from './support/fixtures';
 
 /**
@@ -14,7 +14,7 @@ const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ban
 
 async function openClose(page: Page, no: string) {
   await signIn(page, CLOSER_EMAIL);
-  await page.goto(`/jobs/close?job=${no}`);
+  await page.goto(`/jobs/close?id=${await jobUuid(no)}`);
   await expect(page.getByRole('heading', { name: 'ปิดงาน - ส่งคืนสินค้า', exact: true })).toBeVisible();
   await expect(page.getByLabel('หมายเลขงาน', { exact: true })).toHaveText(no);
 }
@@ -73,7 +73,7 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
   expect(await logsOf(no)).toEqual([{ status: 24, by: closer }]);
 
   // the return note (พิมพ์ใบส่งคืน opens this page; auto=0: no print dialog)
-  await page.goto(`/print/job/${no}/return?auto=0`);
+  await page.goto(`/print/job/${await jobUuid(no)}/return?auto=0`);
   await expect(page.getByRole('heading', { name: 'ใบส่งคืนสินค้า / RETURN & REPAIR NOTE' })).toBeVisible();
   for (const line of [
     new RegExp(`^1 ${part.code} ${part.name} 1 300\\.00 300\\.00$`),
@@ -108,7 +108,7 @@ test('a job whose requested part is not issued yet is not closed: field error, n
   expect(closes, 'the page sends nothing').toEqual([]);
 
   // the server refuses the same close on its own (a stale page, another client)
-  const r = await call(page, 'POST', `/api/jobs/${no}/close`, {
+  const r = await call(page, 'POST', `/api/jobs/${await jobUuid(no)}/close`, {
     status: CLOSE_STATUS,
     return: { type: RETURN_TYPE, date: today() },
   });
@@ -146,7 +146,7 @@ test('a closed job keeps its money for a role without Job Money After Close: inp
   ).toBeVisible();
 
   // a client that sends a new amount anyway
-  const r = await call(page, 'POST', `/api/jobs/${no}/close`, {
+  const r = await call(page, 'POST', `/api/jobs/${await jobUuid(no)}/close`, {
     status: CLOSE_STATUS,
     payment: { type: 'เงินสด', amount: 300, date: today() },
     return: { type: RETURN_TYPE, date: today() },
@@ -184,7 +184,7 @@ test('a swapped job: Serial เครื่องใหม่ prefilled, optiona
     await one(`SELECT spare_part_replace AS parts, swap_refund_detail AS swap FROM job WHERE job_no = $1`, [no]),
   ).toEqual({ parts: 'New S/N: NEW00001', swap: 'New S/N: NEW00001' });
 
-  await page.goto(`/print/job/${no}/return?auto=0`);
+  await page.goto(`/print/job/${await jobUuid(no)}/return?auto=0`);
   await expect(page.getByRole('row', { name: /New S\/N : NEW00001/ }).first()).toBeVisible();
 });
 
@@ -192,7 +192,7 @@ test('ประวัติการแก้ไข on the Out-Source, Swap / Re
   const no = await newJob({ status: 5 });
   await signIn(page, OWNER_EMAIL);
   for (const path of ['/jobs/outsource', '/jobs/swap-refund', '/jobs/close']) {
-    await page.goto(`${path}?job=${no}`);
+    await page.goto(`${path}?id=${await jobUuid(no)}`);
     await expect(page.getByRole('heading', { name: 'ประวัติการแก้ไข' }), path).toBeVisible();
   }
 });

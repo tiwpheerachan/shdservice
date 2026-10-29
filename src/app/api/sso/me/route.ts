@@ -40,8 +40,8 @@ export const GET = checked(async (request: NextRequest) => {
     disabled: !user.isActive && !!user.userType,
   });
   // os_seen = who last used this browser: sign-in drops a `next` page that belonged to someone else
-  // (src/app/api/sso/callback). Never a secret — only an id, httpOnly.
-  res.cookies.set(SEEN_COOKIE, String(user.userId), {
+  // (src/app/api/sso/callback). Never a secret — only the user's uuid, httpOnly.
+  res.cookies.set(SEEN_COOKIE, user.id, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

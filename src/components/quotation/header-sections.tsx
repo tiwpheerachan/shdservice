@@ -26,7 +26,7 @@ export function QuotationTypeSection({
 }: {
   type: QuoteType;
   onType: (t: QuoteType) => void;
-  profileId: number;
+  profileId: string;
   onProfile: React.ComponentProps<typeof ProfileSelect>['onChange'];
   /** the quotation's number once it has one */
   docNo?: string;
@@ -154,10 +154,7 @@ export function QuotationInfoSection({
               onBlur={() => jobRef && jobRef.toUpperCase() !== job?.no && onLoadJob()}
             />
             {linkJob && job?.no && (
-              <Link
-                href={`/jobs/edit?job=${encodeURIComponent(job.no)}`}
-                className="shrink-0 text-xs text-primary hover:underline"
-              >
+              <Link href={`/jobs/edit?id=${job.id}`} className="shrink-0 text-xs text-primary hover:underline">
                 เปิดงาน
               </Link>
             )}

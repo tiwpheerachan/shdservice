@@ -17,12 +17,9 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireView(req, JOB_MODULES);
   const { id } = await parseParams(ctx, attachmentGet);
-  const [row] = await db
-    .select()
-    .from(documentAttach)
-    .where(eq(documentAttach.documentAttachId, Number(id)));
+  const [row] = await db.select().from(documentAttach).where(eq(documentAttach.id, id));
   // a legacy row without a file name has nothing to open (it would sign the job's folder)
-  if (!row || row.recordStatus === RS.DELETED || !row.systemFileName?.trim()) throw new HttpError(404, 'not found');
+  if (!row || row.recordStatus === RS.DELETED || !row.systemFileName?.trim()) throw new HttpError(404, 'ไม่พบไฟล์แนบ');
   return fileRedirect(resolvePath(row.systemFileName, (f) => filePath.attachment(row.referenceItemCode ?? '', f)));
 });
 
@@ -30,6 +27,6 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireCan(req, 'Job Management', 'del');
   const { id } = await parseParams(ctx, attachmentDelete);
-  await removeAttachment(Number(id), me.userId); // 404 when it is gone or already deleted
+  await removeAttachment(id, me.userId); // 404 when it is gone or already deleted
   return NextResponse.json({ ok: true });
 });

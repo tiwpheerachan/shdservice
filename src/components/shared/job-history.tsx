@@ -37,7 +37,7 @@ const fmt = (v: unknown) =>
  */
 export function JobHistorySection({ job }: { job: JobDetail | null }) {
   const [open, setOpen] = React.useState(false);
-  const [expanded, setExpanded] = React.useState<number | null>(null);
+  const [expanded, setExpanded] = React.useState<string | null>(null);
   const rows = job?.history ?? [];
   const logs = job?.logs ?? [];
   if (!job) return null;

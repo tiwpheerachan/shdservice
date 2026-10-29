@@ -32,6 +32,7 @@ import { quoteExpired } from '@/lib/quote-expiry';
 import { fmtDate, fmtDateTime, num } from '@/server/mappers/format';
 import { likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { RS } from '@/server/record-status';
+import { isUuid } from '@/server/audit';
 import { JOB_MODULES, SALE_ORDER_READERS } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { REPORT_SPECS, type ReportKey, type ReportRow } from '@/app/(app)/reports/report-specs';
@@ -398,7 +399,12 @@ async function quotationLineRows(p: PageQuery, limit: number, offset: number): P
 
 /** สร้างโดย = who keyed the order in (document_create_by) — saleOrderWhere's `sales` is the seller */
 const saleExtra = (f: Raw) =>
-  /^\d+$/.test(f.createdBy ?? '') ? eq(saleOutHd.documentCreateBy, Number(f.createdBy)) : undefined;
+  isUuid(f.createdBy ?? '') // the user's uuid (ADR 0008); anything else = no filter, as before
+    ? inArray(
+        saleOutHd.documentCreateBy,
+        db.select({ id: appUser.userId }).from(appUser).where(eq(appUser.id, f.createdBy!.trim().toLowerCase())),
+      )
+    : undefined;
 const saleReportWhere = (p: PageQuery) =>
   and(saleOrderWhere(p.q, saleOrderFiltersFromQuery(p.f, 'exclude')), saleExtra(p.f));
 const soHead = {

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { E2E_CUSTOMER, OWNER_EMAIL } from './env';
-import { newJob, newPart, one, rows, userId } from './db';
+import { jobUuid, newJob, newPart, one, rows, userId, userUuid } from './db';
 import { call, expect } from './fixtures';
 
 /** the บทสอน card */
@@ -11,27 +11,27 @@ export async function tourOn(email = OWNER_EMAIL) {
   await rows('DELETE FROM app_user_tour WHERE user_id = $1', [await userId(email)]);
 }
 
-/** a legacy quotation of the e2e customer (Q97 + 5 digits: a series the app never issues) */
+/** a legacy quotation of the e2e customer (Q97 + 5 digits: a series the app never issues) — its uuid (the link) */
 async function newQuotation(): Promise<string> {
   const { no } = await one<{ no: string }>(
     `SELECT 'Q97' || lpad((coalesce(max(substring(quotation_no FROM 4)::int), 0) + 1)::text, 5, '0') AS no
        FROM quotation_hd WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
   );
-  await rows(
+  const [q] = await rows<{ id: string }>(
     `INSERT INTO quotation_hd (quotation_no, customer_code, create_date, create_by, remark, quotation_status_id,
                                is_active, record_status)
-     VALUES ($1, $2, now(), -1, 'E2E บทสอน', 1, true, 'ACTIVE')`,
+     VALUES ($1, $2, now(), -1, 'E2E บทสอน', 1, true, 'ACTIVE') RETURNING id::text AS id`,
     [no, E2E_CUSTOMER],
   );
-  return no;
+  return q!.id;
 }
 
-/** a draft sale order (not sent for approval) through the API, as the signed-in user */
+/** a draft sale order (not sent for approval) through the API, as the signed-in user — its uuid (the link) */
 async function newSaleOrder(page: Page): Promise<string> {
   const part = await newPart({ remain: 5, price: 150 });
   const r = await call(page, 'POST', '/api/sale-orders', {
     customerCode: E2E_CUSTOMER,
-    salesId: await userId(OWNER_EMAIL),
+    salesId: await userUuid(OWNER_EMAIL),
     lines: [{ code: part.code, qty: 1, price: 150, name: '', type: 'SparePart' }],
     paymentType: '',
     paymentAmount: '',
@@ -40,17 +40,17 @@ async function newSaleOrder(page: Page): Promise<string> {
     submit: false,
   });
   expect(r.status, JSON.stringify(r.body)).toBe(201);
-  return (r.body.order as { no: string }).no;
+  return (r.body.order as { id: string }).id;
 }
 
 /**
  * A tour's `demo` URL with its placeholders made real: {job} / {job:<status id>} = a new job in that status
- * (default 2), {quotation}, {saleOrder} (a draft), {customer} = the e2e customer, {part} = a new spare part
+ * (default 2) — its uuid (the link), {quotation}, {saleOrder} (a draft), {customer} = the e2e customer, {part} = a new spare part
  */
 export async function demoUrl(page: Page, url: string): Promise<string> {
   let out = url;
   for (const m of [...url.matchAll(/\{job(?::(\d+))?\}/g)])
-    out = out.replace(m[0], await newJob({ status: Number(m[1] ?? 2) }));
+    out = out.replace(m[0], await jobUuid(await newJob({ status: Number(m[1] ?? 2) })));
   if (out.includes('{quotation}')) out = out.replace('{quotation}', await newQuotation());
   if (out.includes('{saleOrder}')) out = out.replace('{saleOrder}', await newSaleOrder(page));
   if (out.includes('{part}')) out = out.replace('{part}', (await newPart({ remain: 5, price: 100 })).code);

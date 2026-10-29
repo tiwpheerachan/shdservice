@@ -1,5 +1,5 @@
 import { E2E_SHOP, OWNER_EMAIL } from './support/env';
-import { newJob, one } from './support/db';
+import { jobUuid, newJob, one } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -16,7 +16,7 @@ const saveEdit = async (page: import('@playwright/test').Page) => {
 test('a Serial typed with the keyboard left on Thai: one tap writes what was meant', async ({ page }) => {
   const no = await newJob({ status: 2 });
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
   // "sn145" on the Kedmanee layout (its / and - stay as typed: they are characters a serial may have)
   await serialBox(page).fill('หืๅภถ');
   await expect(page.getByRole('status').filter({ hasText: 'แป้นพิมพ์เป็นภาษาไทยหรือเปล่า' })).toContainText('SN145');
@@ -31,7 +31,7 @@ test('a Serial already on another job: the warning links that job, ติ๊ก�
   const earlier = await newJob({ status: 9 }); // its serial: SN-<no> (newJob)
   const no = await newJob({ status: 2 });
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
   // the loaded serial is nobody's warning: an edit only warns about what was changed
   await expect(page.getByText('S/N นี้เคยเข้าซ่อมแล้ว')).toHaveCount(0);
 
@@ -39,7 +39,7 @@ test('a Serial already on another job: the warning links that job, ติ๊ก�
   const warning = page.getByRole('status').filter({ hasText: 'S/N นี้เคยเข้าซ่อมแล้ว' });
   await expect(warning).toContainText('ลูกค้าคนเดิม');
   const link = warning.getByRole('link', { name: earlier });
-  await expect(link).toHaveAttribute('href', `/jobs/edit?no=${earlier}`);
+  await expect(link).toHaveAttribute('href', `/jobs/edit?id=${await jobUuid(earlier)}`);
   await expect(link).toHaveAttribute('target', '_blank');
 
   await warning.getByRole('button', { name: 'ติ๊กงานเด้ง' }).click();
@@ -58,7 +58,7 @@ test('a Serial already on another job: the warning links that job, ติ๊ก�
 test('"รอ S/N จากลูกค้า" saves as the note and loads ticked, with what to do next', async ({ page }) => {
   const no = await newJob({ status: 2 });
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
   const waiting = page.getByRole('checkbox', { name: 'รอ S/N จากลูกค้า' });
   const none = page.getByRole('checkbox', { name: 'ไม่มี S/N / S/N เสียหาย' });
   await none.check();
@@ -86,7 +86,7 @@ test('Shop Name offers the names typed before that contain what is typed; the on
   const shop = E2E_SHOP;
   const no = await newJob({ status: 2 });
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
 
   const input = page.getByRole('combobox', { name: 'Shop Name' }); // an input with a list = a combobox;
   await input.fill('ร้านแนะนำ');

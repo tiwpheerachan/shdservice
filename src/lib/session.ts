@@ -26,10 +26,11 @@ export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 // never on the callback redirect — see the single-Set-Cookie note there).
 export const SEEN_COOKIE = 'os_seen';
 export const SEEN_TTL_S = 30 * 24 * 60 * 60;
-/** os_seen after ออกจากระบบ: "this browser signed out" (a user id otherwise) */
+/** os_seen after ออกจากระบบ: "this browser signed out" (a user's uuid otherwise) */
 export const SIGNED_OUT_SEEN = '0';
-/** os_seen holds a real user id (not missing, not SIGNED_OUT_SEEN) */
-export const seenUserId = (v: string | undefined) => (v && /^[1-9]\d*$/.test(v) ? v : null);
+/** os_seen holds a user's uuid (app_user.id, ADR 0008 — not missing, not SIGNED_OUT_SEEN; a pre-uuid number reads as none) */
+export const seenUserId = (v: string | undefined) =>
+  v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v) ? v : null;
 
 export type SessionUser = {
   email: string;

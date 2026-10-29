@@ -48,7 +48,7 @@ export type Tour = {
   steps: Step[];
   /** pressed before the steps are picked (a tab most of the steps are on): left that way after the tour */
   prepare?: string;
-  /** for the e2e walk: extra page states to check besides the bare path, e.g. `/jobs/repair?job={job}` ({job} = a
+  /** for the e2e walk: extra page states to check besides the bare path, e.g. `/jobs/repair?id={job}` ({job} = a
    *  fixture job, {quotation} / {saleOrder} / {customer} likewise) */
   demo?: string[];
 };

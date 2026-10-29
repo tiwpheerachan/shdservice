@@ -63,7 +63,8 @@ export function ProductDetailModal({
   const code = product?.sysCode ?? '';
 
   // full detail + stock card from the DB (product / product_none_serial / inventory_*)
-  const detailKey = open && mode !== 'add' && code ? `/api/products/${encodeURIComponent(code)}` : null;
+  // by the part's uuid (ADR 0008) — the code stays what the dialog shows and saves by
+  const detailKey = open && mode !== 'add' && product?.id ? `/api/products/${product.id}` : null;
   const loaded = useApi<{ product: Detail; card: Card[] }>(detailKey, {
     fresh: true,
     onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลอะไหล่ไม่สำเร็จ', desc: msg }),

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { E2E_CUSTOMER, OWNER_EMAIL, SELLER_EMAIL } from './support/env';
-import { newJob, newPart, one, userId } from './support/db';
+import { jobUuid, newJob, newPart, one, userUuid } from './support/db';
 import { call, dismissToasts, expect, signIn, test } from './support/fixtures';
 
 /**
@@ -42,7 +42,8 @@ test('Back after a save shows the saved job, and the repair page saves again aft
 
   // Forward replays the repair page's payload (the job before the save): the job is read again, not taken
   // from the payload — and saves on the current version
-  const reread = page.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith(`/api/jobs/${no}`));
+  const id = await jobUuid(no);
+  const reread = page.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith(`/api/jobs/${id}`));
   await page.goForward();
   await reread;
   await expect(page.getByLabel('สถานะงานซ่อม (ปัจจุบัน)')).toContainText(STATUS);
@@ -61,18 +62,18 @@ test('a link to another record on the same screen shows that record', async ({ p
   const [a, b] = [await newJob({ status: 2 }), await newJob({ status: 2 })];
   await signIn(page, OWNER_EMAIL);
   // repair: the page is keyed on the server
-  await page.goto(`/jobs/repair?job=${a}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(a)}`);
   await expect(page.getByLabel('หมายเลขงานซ่อม')).toHaveText(a);
-  await push(page, `/jobs/repair?job=${b}`);
+  await push(page, `/jobs/repair?id=${await jobUuid(b)}`);
   await expect(page.getByLabel('หมายเลขงานซ่อม')).toHaveText(b);
   await expect(page.getByRole('textbox', { name: /^Serial No\./ })).toHaveValue(`SN-${b}`);
 
-  // sale order: a client page, keyed by ?no= (<RecordKey>)
+  // sale order: a client page, keyed by ?id= (<RecordKey>)
   const part = await newPart({ remain: 10, price: 100 });
   const order = async () => {
     const r = await call(page, 'POST', '/api/sale-orders', {
       customerCode: E2E_CUSTOMER,
-      salesId: await userId(SELLER_EMAIL),
+      salesId: await userUuid(SELLER_EMAIL),
       lines: [{ code: part.code, qty: 1, price: 100, name: '', type: 'SparePart' }],
       paymentType: '',
       paymentAmount: '',
@@ -81,14 +82,14 @@ test('a link to another record on the same screen shows that record', async ({ p
       submit: true,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
-    return (r.body.order as { no: string }).no;
+    return r.body.order as { no: string; id: string };
   };
   const [soA, soB] = [await order(), await order()];
-  await page.goto(`/sale/orders/edit?no=${soA}`);
-  await expect(page.getByText(soA, { exact: true })).toBeVisible();
-  await push(page, `/sale/orders/edit?no=${soB}`);
-  await expect(page.getByText(soB, { exact: true })).toBeVisible();
-  await expect(page.getByText(soA, { exact: true })).toHaveCount(0);
+  await page.goto(`/sale/orders/edit?id=${soA.id}`);
+  await expect(page.getByText(soA.no, { exact: true })).toBeVisible();
+  await push(page, `/sale/orders/edit?id=${soB.id}`);
+  await expect(page.getByText(soB.no, { exact: true })).toBeVisible();
+  await expect(page.getByText(soA.no, { exact: true })).toHaveCount(0);
 });
 
 test('a number with a literal % is just not found — the API and the print view, not a 500', async ({ page }) => {

@@ -252,7 +252,8 @@ export const JOB_WARRANTY: Record<string, string> = { ยังไม่ได�
  *  + reports.ts jobReportWhere) — pure, so open-job's server render builds the same first keys */
 export function jobReportQuery(
   f: Record<string, string | undefined>,
-  ids: { staff?: (name: string) => number | undefined; status?: (name: string) => number | undefined } = {},
+  // staff: the user's uuid (ADR 0008); status: the job status code
+  ids: { staff?: (name: string) => string | undefined; status?: (name: string) => number | undefined } = {},
   fixed: Record<string, string> = {},
 ) {
   const status = f.status ?? '';

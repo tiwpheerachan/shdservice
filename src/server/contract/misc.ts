@@ -10,6 +10,7 @@ import {
   jsonResponse,
   notFound,
   redirect,
+  uuid,
 } from './common';
 import { defineOperation, type Operation } from './registry';
 import { clean, moneyField } from '@/lib/validation';
@@ -20,6 +21,8 @@ const s = z.string();
 const n = z.number();
 const b = z.boolean();
 const PUBLIC = [] as const;
+/** a uuid, read as left out when it is none (the lists answer no rows, as for a missing one) */
+const anyUuid = uuid().optional().catch(undefined).meta({ type: 'string', format: 'uuid' });
 
 export const address = defineOperation({
   method: 'get',
@@ -31,13 +34,13 @@ export const address = defineOperation({
     level: choice(['province', 'district', 'subdistrict']).meta({
       description: 'Default (and anything else): `province`.',
     }),
-    city: s.optional().meta({ description: 'province id (level=district)' }),
-    district: s.optional().meta({ description: 'district id (level=subdistrict)' }),
+    city: anyUuid.meta({ description: "the province's uuid (level=district); left out or no uuid = no rows" }),
+    district: anyUuid.meta({ description: "the district's uuid (level=subdistrict); left out or no uuid = no rows" }),
   }),
   responses: {
     200: jsonResponse(
       '`postal` only on sub-districts.',
-      z.object({ rows: z.array(z.object({ id: n, name: s, postal: s.optional() })) }),
+      z.object({ rows: z.array(z.object({ id: z.uuid(), name: s, postal: s.optional() })) }),
     ),
     ...SIGNED_IN,
   },
@@ -53,14 +56,14 @@ export const addressCreate = defineOperation({
   headers: IDEMPOTENCY.headers,
   invalid: IDEMPOTENCY.invalid,
   body: z.object({
-    district: n.int().positive('เลือกเขต / อำเภอก่อน'),
+    district: uuid('เลือกเขต / อำเภอก่อน').meta({ description: "the district's uuid (GET /address)" }),
     name: s
       .refine((v) => clean(v) !== '', 'ต้องระบุชื่อแขวง / ตำบล')
       .refine((v) => clean(v).length <= 50, 'ชื่อแขวง / ตำบลยาวเกิน 50 ตัวอักษร'),
     postal: s.refine((v) => /^\d{5}$/.test(clean(v)), 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก'),
   }),
   responses: {
-    201: jsonResponse('Added.', z.object({ ok: z.literal(true), row: z.object({ id: n, name: s, postal: s }) })),
+    201: jsonResponse('Added.', z.object({ ok: z.literal(true), row: z.object({ id: z.uuid(), name: s, postal: s }) })),
     ...SIGNED_IN,
     ...JSON_BODY,
     ...notFound('No district with that id.'),
@@ -126,13 +129,16 @@ export const upload = defineOperation({
     id: z
       .unknown()
       .optional()
-      .transform((v) =>
-        String(v ?? '')
-          .trim()
-          .toUpperCase(),
-      )
+      .transform((v) => {
+        const id = String(v ?? '').trim();
+        // a uuid (ADR 0008) is read lower-cased, a code / number upper-cased
+        return z.uuid().safeParse(id).success ? id.toLowerCase() : id.toUpperCase();
+      })
       .pipe(z.string().min(1, 'id required'))
-      .meta({ type: 'string', description: 'product code / sale order no / job no / profile id' }),
+      .meta({
+        type: 'string',
+        description: "product code / job no / the sale order's id / the profile's id (uuids; anything else → 404)",
+      }),
     paymentAmount: moneyField('จำนวนเงินที่ชำระ', 10_000_000).meta({
       type: 'string',
       description:

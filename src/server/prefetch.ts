@@ -2,8 +2,8 @@ import 'server-only';
 import { headers } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { GET as dataGet } from '@/app/api/data/[resource]/route';
-import { GET as jobGet } from '@/app/api/jobs/[no]/route';
-import { GET as quotationGet } from '@/app/api/quotations/[no]/route';
+import { GET as jobGet } from '@/app/api/jobs/[id]/route';
+import { GET as quotationGet } from '@/app/api/quotations/[id]/route';
 import { PREFETCH_ID } from '@/data/keys';
 
 /**
@@ -24,8 +24,8 @@ import { PREFETCH_ID } from '@/data/keys';
  */
 const ROUTES: [RegExp, (req: NextRequest, segment: string) => Promise<Response>][] = [
   [/^\/api\/data\/([^/]+)$/, (req, resource) => dataGet(req, { params: Promise.resolve({ resource }) })],
-  [/^\/api\/jobs\/([^/]+)$/, (req, no) => jobGet(req, { params: Promise.resolve({ no }) })],
-  [/^\/api\/quotations\/([^/]+)$/, (req, no) => quotationGet(req, { params: Promise.resolve({ no }) })],
+  [/^\/api\/jobs\/([^/]+)$/, (req, id) => jobGet(req, { params: Promise.resolve({ id }) })],
+  [/^\/api\/quotations\/([^/]+)$/, (req, id) => quotationGet(req, { params: Promise.resolve({ id }) })],
 ];
 
 export async function prefetch(urls: string[], { timeoutMs = 1500 } = {}): Promise<Record<string, unknown>> {

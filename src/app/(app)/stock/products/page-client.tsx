@@ -163,7 +163,7 @@ export default function ProductsPage() {
     });
     if (!ok) return;
     try {
-      await postJson('/api/admin/records', { table: 'products', id: r.sysCode, status: 'DELETED' });
+      await postJson('/api/admin/records', { table: 'products', id: r.id, status: 'DELETED' });
       push({ kind: 'success', title: 'ยกเลิกรายการอะไหล่แล้ว', desc: r.sysCode });
       reload();
     } catch (e) {

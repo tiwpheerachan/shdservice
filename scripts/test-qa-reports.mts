@@ -154,6 +154,9 @@ const page = (f: Record<string, string>, pageSize = 50) => ({ page: 1, pageSize,
 const run = async (report: ReportKey, f: Record<string, string>, cost = false) =>
   (await reportPage(report, page(f), cost)).rows;
 const col = (rows: Record<string, unknown>[], key = 'no') => rows.map((r) => r[key]);
+/** a fixture user's app_user.id — what the report pages' staff filters send (ADR 0008) */
+const uuidOf = async (userId: number) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
 
 async function cookieOf(u: { email: string }) {
   const now = Date.now();
@@ -241,8 +244,9 @@ await test('งานซ่อมซ้ำ, ค่าใช้จ่าย ม�
   assert.deepEqual(col(await run('open_job', { ...J, customerCode: 'QRPC99' })), ['QRPJ0002']);
 });
 await test('พนง.เปิดงาน / ช่าง, ยี่ห้อ / รุ่น, ประเภทงาน + งานย่อย, สถานะ / กลุ่มสถานะ', async () => {
-  assert.deepEqual(col(await run('open_job', { ...J, createdBy: '9942' })), ['QRPJ0002']);
-  assert.deepEqual(col(await run('open_job', { ...J, engineer: '9942' })), ['QRPJ0001']);
+  // staff filters carry the user's uuid (ADR 0008 — report-specs.ts jobReportQuery)
+  assert.deepEqual(col(await run('open_job', { ...J, createdBy: await uuidOf(9942) })), ['QRPJ0002']);
+  assert.deepEqual(col(await run('open_job', { ...J, engineer: await uuidOf(9942) })), ['QRPJ0001']);
   assert.deepEqual(col(await run('open_job', { ...J, brand: 'QRP Brand', model: 'QRP Model' })), ['QRPJ0001']);
   assert.deepEqual(col(await run('open_job', { ...J, type: 'QRP งานซ่อม', typeDetail: 'ย่อย QRP' })), ['QRPJ0001']);
   assert.deepEqual(col(await run('open_job', { ...J, statusGroup: 'Finished' })), ['QRPJ0001']);
@@ -340,8 +344,9 @@ await test('Grouping: amounts, address, creator, status as the list labels it', 
   assert.equal(rows[0]!.status, 'ส่งกลับแก้ไข');
 });
 await test('สร้างโดย (document_create_by) in the table and the KPIs; รายการสินค้า', async () => {
-  assert.deepEqual(col(await run('sale_order', { ...S, createdBy: '9941' })), ['QRPSO001']);
-  const raw = { ...S, createdBy: '9941' };
+  assert.deepEqual(col(await run('sale_order', { ...S, createdBy: await uuidOf(9941) })), ['QRPSO001']);
+  assert.deepEqual(col(await run('sale_order', { ...S, createdBy: '9941' })).length, 2, 'the old number: no filter');
+  const raw = { ...S, createdBy: await uuidOf(9941) };
   assert.equal((await saleOrderReportSummary(saleOrderFiltersFromQuery(raw, 'exclude'), '', raw)).total, 1);
   assert.deepEqual(col(await run('sale_order', { ...S, code: 'QRPP2' })), ['QRPSO001']);
 });

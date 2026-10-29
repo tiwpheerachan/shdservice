@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { int } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
 
-export type SymptomOption = { id: number; name: string; count?: number };
+export type SymptomOption = { id: string; name: string; count?: number };
 
 /**
  * อาการเสีย — searchable multi-select (cmdk inside a Popover).

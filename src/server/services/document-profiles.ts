@@ -2,7 +2,7 @@ import 'server-only';
 import type { z } from 'zod';
 import type { documentProfileSave } from '@/server/contract/admin';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
-import { asc, eq, ne, and, isNull, sql } from 'drizzle-orm';
+import { asc, eq, ne, and, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documentProfile, job, jobStatus, quotationHd, saleOutHd } from '@/db/schema';
 import { HttpError } from '@/server/auth';
@@ -20,8 +20,8 @@ import { profileLock, type DocumentKind } from '@/lib/profile-lock';
 /**
  * "ออกเอกสารในนาม" — the company/brand whose letterhead (logo, name, address,
  * tax id, bank account) a job, quotation or sale order is printed with
- * (drizzle/0007, revised 0010). SHD is id 1 and the default; documents with a
- * NULL profile id are SHD.
+ * (drizzle/0007, revised 0010). SHD (code 'SHD', shdProfileId) is the built-in
+ * fallback; documents with a NULL profile id are SHD.
  *
  * Document NUMBERS are NOT brand-specific: J / Q / SO + year + one running
  * series for the whole company, exactly like the legacy app. The profile can be
@@ -30,7 +30,8 @@ import { profileLock, type DocumentKind } from '@/lib/profile-lock';
  * always hold J / Q / SO.
  */
 export type DocumentProfile = {
-  id: number;
+  /** the row's uuid (ADR 0008) — document rows store its `pk` (issuingProfile, profileIdOf) */
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -59,7 +60,10 @@ export type DocumentProfile = {
 export const PROFILE_PURPOSES = ['document', 'pick_slip'] as const;
 export type ProfilePurpose = (typeof PROFILE_PURPOSES)[number];
 
-export const SHD_PROFILE_ID = 1;
+/** the built-in profile: legacy documents (no profile) print under it; it cannot be deleted or lose this code */
+export const SHD_CODE = 'SHD';
+/** the profile a new document is issued under: `pk` is what job / quotation_hd / sale_out_hd store — never sent */
+export type IssuingProfile = DocumentProfile & { pk: number };
 const BUILTIN_LOGO = '/logo-shd-mark.png';
 
 /** One profile change at a time (save / delete): "exactly one default" is checked and written by one of them
@@ -112,7 +116,7 @@ async function loadDocumentProfiles(activeOnly: boolean): Promise<DocumentProfil
         activeOnly ? and(eq(documentProfile.isActive, true), eq(documentProfile.purpose, 'document')) : undefined,
       ),
     )
-    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id));
+    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.pk));
   return rows.map(toProfile);
 }
 
@@ -128,88 +132,131 @@ export async function pickSlipProfile(): Promise<DocumentProfile | null> {
         isNull(documentProfile.deletedAt),
       ),
     )
-    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id))
+    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.pk))
     .limit(1);
   return r ? toProfile(r) : null;
 }
 
-export async function getDocumentProfile(id: number | null | undefined): Promise<DocumentProfile | null> {
-  const [r] = await db
-    .select()
-    .from(documentProfile)
-    .where(eq(documentProfile.id, id && id > 0 ? id : SHD_PROFILE_ID))
-    .limit(1);
+/** every profile's uuid by pk — deleted ones too (their documents still print) — and SHD's row */
+const profileKeys = () =>
+  cached('docprofiles:keys', TTL_MASTER, async () => {
+    const rows = await db
+      .select({
+        pk: documentProfile.pk,
+        id: documentProfile.id,
+        code: documentProfile.code,
+        gone: documentProfile.deletedAt,
+      })
+      .from(documentProfile)
+      .orderBy(asc(documentProfile.pk));
+    const shd = rows.find((r) => r.code === SHD_CODE && !r.gone);
+    return { byPk: new Map(rows.map((r) => [r.pk, r.id])), shd };
+  });
+const noShd = () => new HttpError(500, 'ไม่พบโปรไฟล์ผู้ออกเอกสาร SHD (document_profile ยังไม่ได้ migrate)');
+
+/** SHD's uuid — what a document without a profile (legacy rows) is issued under */
+export async function shdProfileId(): Promise<string> {
+  const { shd } = await profileKeys();
+  if (!shd) throw noShd();
+  return shd.id;
+}
+
+/** the uuid of the profile a document row stores (`document_profile_id`, a pk); NULL (legacy) = SHD's */
+export async function profileIdOf(pk: number | null | undefined): Promise<string> {
+  if (pk == null) return shdProfileId();
+  // a profile added since the map was read (another instance, a test's insert) is read itself
+  return (await profileKeys()).byPk.get(pk) ?? (await rowWhere(eq(documentProfile.pk, pk)))?.id ?? shdProfileId();
+}
+
+const rowWhere = async (where: SQL) => (await db.select().from(documentProfile).where(where).limit(1))[0];
+const shdRow = () => rowWhere(and(eq(documentProfile.code, SHD_CODE), isNull(documentProfile.deletedAt))!);
+
+/** the profile with uuid `id`; none given = SHD */
+export async function getDocumentProfile(id: string | null | undefined): Promise<DocumentProfile | null> {
+  const r = id ? await rowWhere(eq(documentProfile.id, id)) : await shdRow();
   return r ? toProfile(r) : null;
 }
 
-/** Profile a document should print with: its own, else the default (SHD). */
-export async function profileForDocument(id: number | null | undefined): Promise<DocumentProfile> {
-  const p = (await getDocumentProfile(id)) ?? (await getDocumentProfile(SHD_PROFILE_ID));
-  if (!p) throw new HttpError(500, 'ไม่พบโปรไฟล์ผู้ออกเอกสาร (document_profile ยังไม่ได้ migrate)');
+/** Profile a document should print with: its own (uuid), else the default (SHD). */
+export async function profileForDocument(id: string | null | undefined): Promise<DocumentProfile> {
+  const p = (await getDocumentProfile(id)) ?? (await getDocumentProfile(null));
+  if (!p) throw noShd();
   return p;
 }
 
+const defaultRow = async () =>
+  (
+    await db
+      .select()
+      .from(documentProfile)
+      .where(
+        and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)),
+      )
+      .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.pk))
+      .limit(1)
+  )[0] ?? (await shdRow());
+
 export async function defaultDocumentProfile(): Promise<DocumentProfile> {
-  const [r] = await db
-    .select()
-    .from(documentProfile)
-    .where(
-      and(eq(documentProfile.isDefault, true), eq(documentProfile.isActive, true), isNull(documentProfile.deletedAt)),
-    )
-    .orderBy(asc(documentProfile.sortOrder), asc(documentProfile.id))
-    .limit(1);
-  return r ? toProfile(r) : profileForDocument(SHD_PROFILE_ID);
+  const r = await defaultRow();
+  if (!r) throw noShd();
+  return toProfile(r);
 }
 
 /**
- * Resolve the profile to issue a NEW document under: the requested id if it is
- * active, else the default. Throws when an explicit id is unknown / inactive so
+ * Resolve the profile to issue a NEW document under: the requested one if it is
+ * active, else the default. Throws when an explicit one is unknown / inactive so
  * a stale dropdown never silently falls back to another brand's number series.
+ * `requested`: a uuid (from the API), or a pk (the job's own profile, read from its row).
  */
-export async function issuingProfile(requested: number | null | undefined): Promise<DocumentProfile> {
-  if (!requested || requested <= 0) return defaultDocumentProfile();
-  const p = await getDocumentProfile(requested);
+export async function issuingProfile(requested: string | number | null | undefined): Promise<IssuingProfile> {
+  const r = !requested
+    ? await defaultRow()
+    : await rowWhere(
+        typeof requested === 'number' ? eq(documentProfile.pk, requested) : eq(documentProfile.id, requested),
+      );
+  if (!r) throw requested ? new HttpError(400, 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน') : noShd();
   // a pick slip profile (IPA) issues nothing
-  if (!p || !p.isActive || p.isDeleted || p.purpose !== 'document')
+  if (requested && (!r.isActive || r.deletedAt || r.purpose !== 'document'))
     throw new HttpError(400, 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน');
-  return p;
+  return { ...toProfile(r), pk: r.pk };
 }
 
 /**
  * Soft delete: the row stays so documents issued under it keep printing and its
- * prefixes stay reserved. SHD (id 1, the built-in fallback) and the current
+ * prefixes stay reserved. SHD (the built-in fallback) and the current
  * default cannot be deleted — pick another default first.
  */
-export async function deleteDocumentProfile(id: number, byUserId: number): Promise<void> {
-  if (id === SHD_PROFILE_ID) throw new HttpError(400, 'โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)');
+export async function deleteDocumentProfile(id: string, byUserId: number): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.execute(lockProfiles());
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+    if (before.code === SHD_CODE)
+      throw new HttpError(400, 'โปรไฟล์ SHD เป็นโปรไฟล์หลักของระบบ ลบไม่ได้ (ปิดใช้งานได้)');
     if (before.isDefault)
       throw new HttpError(400, 'โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ');
     // any document ever issued under this profile? (stops at the first hit)
     const hadDocuments =
-      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, id)).limit(1)).length >
-        0 ||
+      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, before.pk)).limit(1))
+        .length > 0 ||
       (
         await tx
           .select({ id: quotationHd.documentProfileId })
           .from(quotationHd)
-          .where(eq(quotationHd.documentProfileId, id))
+          .where(eq(quotationHd.documentProfileId, before.pk))
           .limit(1)
       ).length > 0 ||
       (
         await tx
           .select({ id: saleOutHd.documentProfileId })
           .from(saleOutHd)
-          .where(eq(saleOutHd.documentProfileId, id))
+          .where(eq(saleOutHd.documentProfileId, before.pk))
           .limit(1)
       ).length > 0;
     await tx
       .update(documentProfile)
       .set({ deletedAt: nowThai(), deletedBy: byUserId, isDefault: false, updatedAt: nowThai() })
-      .where(eq(documentProfile.id, id));
+      .where(eq(documentProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Admin',
@@ -275,6 +322,11 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     if (i.id) {
       [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, i.id)).for('update');
       if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
+      // documents without a profile (legacy) print under SHD — found by this code
+      if (before.code === SHD_CODE && code !== SHD_CODE)
+        throw new HttpError(400, 'เปลี่ยนรหัสโปรไฟล์ SHD ไม่ได้', {
+          fields: { code: 'เปลี่ยนรหัสโปรไฟล์ SHD ไม่ได้' },
+        });
       // the form as it loaded the profile: a field another admin saved since → 409 stale, nothing written
       const loaded: Record<string, unknown> = i.expect ?? {};
       const now: Record<string, unknown> = toProfile(before);
@@ -297,7 +349,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
 
     let row: Row | undefined;
     if (before) {
-      [row] = await tx.update(documentProfile).set(values).where(eq(documentProfile.id, before.id)).returning();
+      [row] = await tx.update(documentProfile).set(values).where(eq(documentProfile.pk, before.pk)).returning();
     } else {
       [row] = await tx.insert(documentProfile).values(values).returning();
     }
@@ -317,11 +369,11 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
 }
 
 /** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
-export async function setDocumentProfileLogo(id: number, logoPath: string, byUserId: number): Promise<string> {
+export async function setDocumentProfileLogo(id: string, logoPath: string, byUserId: number): Promise<string> {
   const old = await db.transaction(async (tx) => {
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
-    await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.id, id));
+    await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: 'Admin',
@@ -379,10 +431,11 @@ const DOC = {
 export async function setDocumentProfile(
   kind: DocumentKind,
   no: string,
-  profileId: number,
+  /** the profile's uuid */
+  profileId: string,
   byUserId: number,
   byAdmin = false,
-): Promise<DocumentProfile> {
+): Promise<IssuingProfile> {
   const d = DOC[kind];
   return db.transaction(async (tx) => {
     await tx.execute(lockProfiles(true)); // the target is not deleted / deactivated until this commits
@@ -415,10 +468,10 @@ export async function setDocumentProfile(
         .where(eq(saleOutHd.saleOutHdNo, no));
       if (so?.by !== byUserId) throw new HttpError(403, WAITING_CREATOR_ONLY);
     }
-    const cur = row.cur ?? SHD_PROFILE_ID;
+    const cur = await profileIdOf(row.cur); // NULL (legacy) = SHD
     if (cur === target.id) return target;
     const from = await getDocumentProfile(cur);
-    await tx.update(d.table).set({ documentProfileId: target.id }).where(eq(d.key, no));
+    await tx.update(d.table).set({ documentProfileId: target.pk }).where(eq(d.key, no));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: d.module,

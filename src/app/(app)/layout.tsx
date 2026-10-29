@@ -43,7 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AccessProvider
       value={{
-        userId: user.userId,
+        userId: user.id,
         name: user.name,
         email: user.email,
         role: user.role,

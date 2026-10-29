@@ -128,6 +128,20 @@ export const page = <T extends z.ZodType>(row: T) =>
 /** Path parameter `{no}`: a document number, as typed (the route upper-cases / decodes it). */
 export const byNo = (description: string) => z.object({ no: z.string().meta({ description }) });
 
+/**
+ * A row's id (ADR 0008): its uuid, read lower-cased. Anything else → `message` — under the field in the
+ * default 400 (`details.fields`), or with `invalid: { part: status }` that status and this message.
+ * Resolve it to the row with src/server/ids.ts.
+ */
+export const uuid = (message = 'รหัสอ้างอิงไม่ถูกต้อง') => z.uuid({ error: message }).transform((v) => v.toLowerCase());
+
+/**
+ * Path parameter `{id}`: a row's uuid. Declare with `invalid: { params: 404 }`: a value that is no uuid (an
+ * old link holding a number) answers 404 `ไม่พบ<what>`, the same as a uuid with no row (src/server/ids.ts).
+ */
+export const byUuid = (what: string, description: string) =>
+  z.object({ id: uuid(`ไม่พบ${what}`).meta({ description }) });
+
 export const UiStatus = z.enum(['Active', 'Inactive', 'Cancel']);
 
 /*

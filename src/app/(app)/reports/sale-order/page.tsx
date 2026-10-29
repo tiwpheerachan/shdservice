@@ -25,7 +25,7 @@ export default function Page() {
   const createdBy = STAFF.find((s) => s.name === f.createdBy)?.id;
   const filters = {
     no: f.no,
-    createdBy: createdBy ? String(createdBy) : '',
+    createdBy: createdBy ?? '',
     from: f.from,
     to: f.to,
     customer: f.customer,

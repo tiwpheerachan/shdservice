@@ -21,8 +21,8 @@ const { signSession, SESSION_COOKIE } = await import('@/lib/session');
 const { closeJob, getJob, saveRepair, saveOutsource, saveSwapRefund, pageJobs, listJobs, filtersFromQuery } =
   await import('@/server/services/jobs');
 const { addDays, today } = await import('@/lib/dates');
-const { POST: repairPOST } = await import('@/app/api/jobs/[no]/repair/route');
-const { POST: trackLinkPOST } = await import('@/app/api/jobs/[no]/track-link/route');
+const { POST: repairPOST } = await import('@/app/api/jobs/[id]/repair/route');
+const { POST: trackLinkPOST } = await import('@/app/api/jobs/[id]/track-link/route');
 
 // ---- fixtures ----
 const U = {
@@ -103,9 +103,13 @@ const jobRow = (no: string) =>
 const audits = async (no: string) =>
   (await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'job' AND entity_key = ${no}`))
     .n;
+/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
+const ADMIN_UUID = (
+  await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.admin.id])
+).rows[0]!.id;
 const line = (no: string) =>
-  one<{ id: number; st: number; req: number; got: number }>(sql`
-    SELECT job_order_log_id AS id, order_status_id AS st, request_qty AS req, grant_qty AS got
+  one<{ id: string; st: number; req: number; got: number }>(sql`
+    SELECT id::text AS id, order_status_id AS st, request_qty AS req, grant_qty AS got
       FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`);
 /** the error of a rejected call ({ status: 200 } when it resolved); anything but an HttpError is re-thrown */
 async function err(p: Promise<unknown>) {
@@ -118,7 +122,7 @@ async function err(p: Promise<unknown>) {
   }
 }
 /** a repair-page part line (แบบ A เบิก + เสนอ) as the page sends it */
-const partLine = (qty: number, logId?: number) => ({
+const partLine = (qty: number, logId?: string) => ({
   logId,
   code: PART,
   unitPrice: 100,
@@ -222,14 +226,14 @@ try {
   });
   await test('Out-Source receive dated before the send (400) → the job sections not saved either', async () => {
     const no = J(5);
-    const receive = { date: addDays(today(), -1), by: U.admin.id };
+    const receive = { date: addDays(today(), -1), by: ADMIN_UUID };
     const status = await statusName(15);
     await nothingSaved(no, () => saveOutsource(no, { status, receive, job: common(`QAT ${no}`) }, U.admin.id), 400);
   });
   await test('Out-Source valid: sent with the job sections', async () => {
     const no = J(6);
     const status = await statusName(14);
-    const send = { to: 'QAT Vendor', date: today(), by: U.admin.id };
+    const send = { to: 'QAT Vendor', date: today(), by: ADMIN_UUID };
     let first = true;
     await bothSaved(no, (version) => {
       // the second (stale) try sends again to another vendor — a new trip, not "the same row saved again"
@@ -261,10 +265,10 @@ try {
   });
   await test('the job sections need Job Management edit: Job Repair only → 403 with `job`, 200 without', async () => {
     const no = J(17);
-    const { status, version } = (await getJob(no))!;
+    const { status, version, id } = (await getJob(no))!;
     const post = async (body: object) =>
-      repairPOST(await request(`/api/jobs/${no}/repair`, U.repairer, { method: 'POST', body }), {
-        params: Promise.resolve({ no }),
+      repairPOST(await request(`/api/jobs/${id}/repair`, U.repairer, { method: 'POST', body }), {
+        params: Promise.resolve({ id }),
       });
     const n = await audits(no);
     assert.equal((await post({ status, job: common(`QAT ${no}`), version })).status, 403);
@@ -318,16 +322,17 @@ try {
   });
   await test('the first tracking link is not logged as replacing one; the next one is', async () => {
     const no = J(18);
+    const { id } = (await getJob(no))!;
     const issue = async () =>
       (
-        await trackLinkPOST(await request(`/api/jobs/${no}/track-link`, U.admin, { method: 'POST' }), {
-          params: Promise.resolve({ no }),
+        await trackLinkPOST(await request(`/api/jobs/${id}/track-link`, U.admin, { method: 'POST' }), {
+          params: Promise.resolve({ id }),
         })
       ).status;
     const last = async () =>
       (
         await one<{ s: string }>(
-          sql`SELECT summary AS s FROM audit_log WHERE entity = 'job' AND entity_key = ${no} ORDER BY id DESC LIMIT 1`,
+          sql`SELECT summary AS s FROM audit_log WHERE entity = 'job' AND entity_key = ${no} ORDER BY pk DESC LIMIT 1`,
         )
       ).s;
     assert.equal(await issue(), 200);

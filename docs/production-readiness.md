@@ -386,14 +386,24 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 
 ทำหลังโหลดข้อมูลจริงรอบสุดท้ายและระบบเก่าหยุดรับงาน — ก่อนนั้นทุกการโหลด dump สร้างตารางใหม่หมด
 
-- [ ] **ID-1 สำรวจ** · M — ทุกตาราง: PK เดิม, คอลัมน์ที่อ้างถึง (FK จริง 31 + join ด้วยข้อความ เช่น `job_no`, `sale_out_hd_no`,
+**Phase 1 (2026-10-29, ข้อตัดสินใจ 8 ข้อใน [ADR 0008 § Phase 1 decisions](../adr/0008-bigint-pk-uuid7-id.md#phase-1-decisions-เจ้าของระบบ-2026-10-29)):**
+API ส่ง/รับแต่ `id` uuid ของแถว (รหัสสถานะ JS/QS/AS/PART ยังเป็นเลข) · ลิงก์งาน/ใบเสนอราคา/ใบสั่งขาย/ลูกค้า/สินค้าใช้ uuid,
+ไม่ redirect จากเลขเก่า · id ที่หน้าเว็บไม่ใช้ตัดทิ้ง · โปรไฟล์ SHD หาด้วย code · โลโก้เก่าคง path, ใหม่ใช้ uuid · audit แถวใหม่ key = uuid
+
+- [x] **ID-0 ชั้นกลาง** · S — `uuid()` / `byUuid()` (`contract/common.ts`), `src/server/ids.ts` (`rowByUuid` / `pkOf` / `pksOf`, 404
+  `ไม่พบ<what>`, เทสต์ใน `test-qa-ids.mts` §4), shapes / data / types เป็น uuid, `staffOrKeep` / `listStaff` / `userPrev` / `toUser` รับ-ส่ง
+  uuid, `CurrentUser.id`, `useAccess().userId` + cookie `os_seen` = uuid · 2026-10-29 ทำแล้ว รอ main session ตรวจ (tsc ที่เหลือ = งานของแต่ละกลุ่มใน ID-3)
+
+- [x] **ID-1 สำรวจ** · M — (2026-10-29: inventory โดย agent อ่านอย่างเดียว) — ทุกตาราง: PK เดิม, คอลัมน์ที่อ้างถึง (FK จริง 31 + join ด้วยข้อความ เช่น `job_no`, `sale_out_hd_no`,
   `customer_code`), จุดที่ id ออกนอกฐาน (contract ~50 จุด, URL ของหน้า, export, audit_log.record_id) → ตาราง mapping
 - [ ] **ID-2 migration สร้างตารางใหม่** · L — `uuid_generate_v7()` (จาก OneLink 0027), ทุกตาราง `pk` + `id` หน้าสุด, FK `<table>_pk` /
   `<บทบาท>_<table>_pk`, backfill uuid ตามวันที่สร้างแถว, ทั้งไฟล์ใน transaction เดียว · ซ้อมกับสำเนา prod ใน dev ก่อน
-- [ ] **ID-3 แอป** · L — drizzle schema, service/route รับ-ส่ง `id` (uuid) แทน int, หน้าเว็บ/URL, export, `seed-export.mts`;
-  แบ่ง agent ตามกลุ่ม API (ผู้ใช้/สิทธิ์ · งาน/ไฟล์แนบ · ขาย/เสนอราคา · คลัง · ข้อมูลหลัก/โปรไฟล์)
+- [ ] **ID-3 แอป** · L — (เฟส 1 เสร็จ 2026-10-29: id ภายนอกทุกจุดเป็น uuid, ลิงก์เอกสารใช้ uuid, รหัสสถานะคงเป็นตัวเลข — เหลือส่วน pk/FK ของเฟส 2) drizzle schema, service/route รับ-ส่ง `id` (uuid) แทน int, หน้าเว็บ/URL, export, `seed-export.mts`;
+  แบ่ง agent 4 กลุ่ม: (1) ผู้ใช้/สิทธิ์/พนักงาน + ข้อมูลหลัก + ลูกค้า/ที่อยู่ · (2) งาน (ไฟล์แนบ, โทร, ส่งซ่อมนอก, อะไหล่, มอบหมาย,
+  แจ้งเตือนเกินกำหนด, URL/หน้า/พิมพ์งาน) · (3) ใบเสนอราคา + ใบสั่งขาย + โปรไฟล์เอกสาร/ขนส่ง + อัปโหลดโลโก้ + หน้าพิมพ์ ·
+  (4) คลัง/สินค้า + รายงาน/export + หน้า audit + records route
 - [ ] **ID-4 เทสต์บังคับกติกา** · S — ทุกตารางมี `pk` + `id`; ไม่มีคำตอบ API ไหนมี `pk` / `*_pk` (แบบ OL `public-ids.test.ts`)
-- [ ] **ID-5 ตรวจครบ** · M — `test:db`, e2e ทุก project, OpenAPI snapshot, QA เบราว์เซอร์ · เลิกใช้ `load_supabase.sh` / `db:dev:load`
+- [ ] **ID-5 ตรวจครบ** · M — (เฟส 1 ผ่าน 2026-10-29: test:db 22 ชุด, e2e 261, QA เบราว์เซอร์, migration 0005 บนสำเนา prod 7 วินาที — ทำซ้ำหลังเฟส 2) `test:db`, e2e ทุก project, OpenAPI snapshot, QA เบราว์เซอร์ · เลิกใช้ `load_supabase.sh` / `db:dev:load`
 
 ## วิดีโอแนบงาน (2026-10-28 — คลิปอาการเสียจากลูกค้า)
 

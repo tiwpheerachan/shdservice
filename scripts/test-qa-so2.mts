@@ -25,7 +25,7 @@ const { nextRunningNo } = await import('@/db/running-no');
 const { BUCKET } = await import('@/server/storage');
 const { listStaff } = await import('@/server/services/users');
 const { POST: soPOST } = await import('@/app/api/sale-orders/route');
-const { POST: approvePOST } = await import('@/app/api/sale-orders/[no]/approve/route');
+const { POST: approvePOST } = await import('@/app/api/sale-orders/[id]/approve/route');
 const { POST: recordsPOST } = await import('@/app/api/admin/records/route');
 const { POST: uploadPOST } = await import('@/app/api/upload/route');
 const { GET: dataGET } = await import('@/app/api/data/[resource]/route');
@@ -118,14 +118,20 @@ const post = async (path: string, u: TestUser, body: unknown) =>
 type Order = { no: string; version: number; slip: string; paymentAmount: number; cancelled: boolean };
 type Res = { status: number; body: Record<string, unknown> & { error?: string; order?: Order } };
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
-const params = (no: string) => ({ params: Promise.resolve({ no }) });
+/** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
+const soIdOf = async (no: string) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).rows[0]?.id ??
+  '00000000-0000-7000-8000-000000000000';
+const userUuid = async (userId: number) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
+const params = async (no: string) => ({ params: Promise.resolve({ id: await soIdOf(no) }) });
 
 const save = async (u: TestUser, body: Record<string, unknown>) =>
   json(await soPOST(await post('/api/sale-orders', u, body)));
 const create = async (u: TestUser, extra: Record<string, unknown> = {}) => {
   const r = await save(u, {
     customerCode: CUSTOMER,
-    salesId: u.id,
+    salesId: await userUuid(u.id),
     submit: true,
     lines: [{ code: PART, qty: 1 }],
     ...extra,
@@ -134,10 +140,14 @@ const create = async (u: TestUser, extra: Record<string, unknown> = {}) => {
   return r.body.order!;
 };
 const decide = async (u: TestUser, no: string, decision: string) =>
-  json(await approvePOST(await post(`/api/sale-orders/${no}/approve`, u, { decision, remark: 'Q2' }), params(no)));
+  json(
+    await approvePOST(await post(`/api/sale-orders/${no}/approve`, u, { decision, remark: 'Q2' }), await params(no)),
+  );
 const cancel = async (u: TestUser, no: string, remark?: string) =>
   json(
-    await recordsPOST(await post('/api/admin/records', u, { table: 'sale_orders', id: no, status: 'DELETED', remark })),
+    await recordsPOST(
+      await post('/api/admin/records', u, { table: 'sale_orders', id: await soIdOf(no), status: 'DELETED', remark }),
+    ),
   );
 const png = await (
   await import('sharp')
@@ -148,7 +158,7 @@ const png = await (
 const upload = async (u: TestUser, no: string, paymentAmount?: string) => {
   const fd = new FormData();
   fd.set('kind', 'sale-order-slip');
-  fd.set('id', no);
+  fd.set('id', await soIdOf(no));
   if (paymentAmount !== undefined) fd.set('paymentAmount', paymentAmount);
   fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
   return json(
@@ -171,7 +181,7 @@ const hd = async (no: string) =>
 const lastAudit = async (no: string) =>
   (
     await db.execute<{ summary: string; changes: Record<string, unknown> | null }>(
-      sql`SELECT summary, changes FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} ORDER BY id DESC LIMIT 1`,
+      sql`SELECT summary, changes FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} ORDER BY pk DESC LIMIT 1`,
     )
   ).rows[0];
 const listNos = async (u: TestUser, deleted?: string) => {
@@ -258,17 +268,29 @@ try {
   console.log('\nQA sale orders 2 — salesperson (พนักงานขาย)');
   await test('the staff list marks who sells: Sale Order add or System Admin', async () => {
     const staff = new Map((await listStaff()).map((s) => [s.id, s.sells]));
-    assert.deepEqual(
-      [U.admin, U.seller, U.approver, U.clerk].map((u) => staff.get(u.id)),
-      [true, true, false, false],
-    );
+    // the staff list carries each user's uuid (ADR 0008)
+    const uuidOf = async (u: { id: number }) =>
+      (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [u.id])).rows[0]!.id;
+    const got = [];
+    for (const u of [U.admin, U.seller, U.approver, U.clerk]) got.push(staff.get(await uuidOf(u)));
+    assert.deepEqual(got, [true, true, false, false]);
   });
   await test('a salesperson whose role cannot add sale orders is refused (400 salesId); one kept on an edit passes', async () => {
-    const r = await save(U.seller, { customerCode: CUSTOMER, salesId: U.clerk.id, lines: [{ code: PART, qty: 1 }] });
+    const r = await save(U.seller, {
+      customerCode: CUSTOMER,
+      salesId: await userUuid(U.clerk.id),
+      lines: [{ code: PART, qty: 1 }],
+    });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.ok((r.body.details as { fields?: Record<string, string> })?.fields?.salesId);
     assert.equal(
-      (await save(U.seller, { customerCode: CUSTOMER, salesId: U.admin.id, lines: [{ code: PART, qty: 1 }] })).status,
+      (
+        await save(U.seller, {
+          customerCode: CUSTOMER,
+          salesId: await userUuid(U.admin.id),
+          lines: [{ code: PART, qty: 1 }],
+        })
+      ).status,
       201,
     );
     // an order already naming the clerk (legacy) keeps them on an edit
@@ -277,7 +299,7 @@ try {
     const kept = await save(U.seller, {
       no: o.no,
       customerCode: CUSTOMER,
-      salesId: U.clerk.id,
+      salesId: await userUuid(U.clerk.id),
       submit: false,
       remark: 'Q2 keep',
       lines: [{ code: PART, qty: 1 }],

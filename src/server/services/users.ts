@@ -18,6 +18,7 @@ import type { User, Permission } from '@/data/types';
 import { nowThai, fmtDateTime } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
 import { masterNameKey } from '@/lib/validation/admin';
+import { uuid } from '@/server/contract/common';
 import {
   RS,
   statusFilter,
@@ -61,6 +62,8 @@ export async function provisionSsoUser(
   retried = false,
 ): Promise<{
   userId: number;
+  /** app_user.id — the uuid that leaves the server (os_seen, audit key) */
+  id: string;
   userType: string | null;
   isActive: boolean;
   recordStatus: string | null;
@@ -102,6 +105,7 @@ export async function provisionSsoUser(
     .where(sql`lower(trim(${appUser.emailAddress})) = ${email}`)
     .returning({
       userId: appUser.userId,
+      id: appUser.id,
       userType: appUser.userType,
       recordStatus: appUser.recordStatus,
       sessionVersion: appUser.sessionVersion,
@@ -109,6 +113,7 @@ export async function provisionSsoUser(
   if (existing)
     return {
       userId: existing.userId,
+      id: existing.id,
       userType: existing.userType,
       isActive: existing.recordStatus === RS.ACTIVE,
       recordStatus: existing.recordStatus,
@@ -130,9 +135,9 @@ export async function provisionSsoUser(
         emailAddress: email,
         ...profile,
       })
-      .returning({ userId: appUser.userId, sessionVersion: appUser.sessionVersion });
+      .returning({ userId: appUser.userId, id: appUser.id, sessionVersion: appUser.sessionVersion });
   const local = (email.split('@')[0] ?? email).slice(0, 50);
-  let row: { userId: number; sessionVersion: number | null } | undefined;
+  let row: { userId: number; id: string; sessionVersion: number | null } | undefined;
   try {
     [row] = await insert(local).catch((e) => {
       // legacy unique (username, password): somchai@a and somchai@b share the local part
@@ -149,6 +154,7 @@ export async function provisionSsoUser(
   userChanged(email);
   return {
     userId: row.userId,
+    id: row.id,
     userType: owner ? ADMIN_USER_TYPE : null,
     isActive: true,
     recordStatus: RS.ACTIVE,
@@ -194,7 +200,7 @@ type AppUserRow = typeof appUser.$inferSelect;
 
 export function toUser(r: AppUserRow): User {
   return {
-    id: String(r.userId),
+    id: r.id,
     code: r.larkId ?? '',
     name: fullName(r.firstName, r.lastName) || r.username || '',
     username: r.username ?? '',
@@ -235,26 +241,32 @@ export async function listSystemUsers(deleted: DeletedMode = 'exclude'): Promise
 }
 
 /**
- * A person picked from the staff list (ส่งโดย / รับโดย, พนักงานขาย, ช่าง): an active app_user, or the
- * person already on the row (who may have left since — keeping them is never an error). Anything
- * else is a 400 under `field`. Left out (undefined) → `fallback`.
+ * A person picked from the staff list (ส่งโดย / รับโดย, พนักงานขาย, ช่าง) by their uuid: an active app_user, or the
+ * person already on the row (`current`, the stored user_id — who may have left since — keeping them is never an
+ * error). Anything else is a 400 under `field`. Left out (undefined) → `fallback`. Answers the user_id to store.
  */
 export async function staffOrKeep(
-  id: number | undefined,
+  id: string | undefined,
   current: number | null | undefined,
   field: string,
   fallback: number,
   message = 'ไม่พบพนักงานคนนี้ในรายชื่อปัจจุบัน',
 ): Promise<number> {
   if (id === undefined) return fallback;
-  if (id === current) return id;
   const [u] = await db
-    .select({ id: appUser.userId })
+    .select({ userId: appUser.userId })
     .from(appUser)
-    .where(and(eq(appUser.userId, id), eq(appUser.recordStatus, RS.ACTIVE)))
+    .where(
+      and(
+        eq(appUser.id, id),
+        current == null
+          ? eq(appUser.recordStatus, RS.ACTIVE)
+          : or(eq(appUser.recordStatus, RS.ACTIVE), eq(appUser.userId, current)),
+      ),
+    )
     .limit(1);
   if (!u) throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { [field]: message } });
-  return id;
+  return u.userId;
 }
 
 /**
@@ -262,7 +274,7 @@ export async function staffOrKeep(
  * adds the people who have left but are still on jobs (engineer) / sale orders (sales), labelled
  * "(ไม่ใช้งานแล้ว)", so old periods can still be filtered by them.
  */
-type StaffRow = { id: number; name: string; userType: string; takesJobs: boolean; sells: boolean };
+type StaffRow = { id: string; name: string; userType: string; takesJobs: boolean; sells: boolean };
 /** `takesJobs`: the role has Job Take — offered in มอบหมายงานนี้ให้; `sells`: the role adds sale orders (or is System
  *  Admin) — offered as พนักงานขาย (the cache is dropped when permissions are saved) */
 export function listStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
@@ -277,7 +289,7 @@ async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
         : undefined;
   const rows = await db
     .select({
-      id: appUser.userId,
+      id: appUser.id,
       first: appUser.firstName,
       last: appUser.lastName,
       username: appUser.username,
@@ -297,7 +309,7 @@ async function loadStaff(usedAs?: 'engineer' | 'sales'): Promise<StaffRow[]> {
   ]);
   return rows.map((r) => ({
     id: r.id,
-    name: (fullName(r.first, r.last) || r.username || `#${r.id}`) + (r.status === RS.ACTIVE ? '' : ' (ไม่ใช้งานแล้ว)'),
+    name: (fullName(r.first, r.last) || r.username || '-') + (r.status === RS.ACTIVE ? '' : ' (ไม่ใช้งานแล้ว)'),
     userType: r.userType?.trim() ?? '',
     takesJobs: takers.has(r.userType?.trim() ?? ''),
     sells: r.userType?.trim() === ADMIN_USER_TYPE || sellers.has(r.userType?.trim()),
@@ -321,14 +333,14 @@ export type UpsertUserInput = {
   expect?: { name?: string | null; email?: string | null; role?: string | null; status?: string | null } | null;
 };
 
-/** the stored username / phone of the user being edited — userSchema lets unchanged legacy values pass —
- *  and the name / role an edit that leaves them out keeps */
+/** the stored username / phone of the user being edited (`id` = its uuid) — userSchema lets unchanged legacy values
+ *  pass — and the name / role an edit that leaves them out keeps; no such user (or no uuid) → null */
 export async function userPrev(
   id: unknown,
 ): Promise<{ username: string | null; phone: string | null; name: string; role: string } | null> {
-  const n = Number(id);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  const [row] = await db.select().from(appUser).where(eq(appUser.userId, n)).limit(1);
+  const sent = uuid().safeParse(id);
+  if (!sent.success) return null;
+  const [row] = await db.select().from(appUser).where(eq(appUser.id, sent.data)).limit(1);
   if (!row) return null;
   const u = toUser(row);
   return { username: row.username, phone: row.phoneNo, name: u.name, role: u.role };
@@ -345,10 +357,10 @@ function assertLoaded(row: AppUserRow, expect: UpsertUserInput['expect']) {
 }
 
 /** An admin cannot lock themselves out: their own account is never disabled, deleted, given another role,
- *  or another email / username (sign-in finds the account by email). */
+ *  or another email / username (sign-in finds the account by email). Both ids of one kind: user_id, or the uuid. */
 export function refuseSelf(
-  userId: number,
-  actorId: number,
+  userId: number | string,
+  actorId: number | string,
   msg = 'เปลี่ยนบทบาท ถอนสิทธิ์ หรือลบบัญชีของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นทำแทน',
 ) {
   if (userId === actorId) throw new HttpError(409, msg);
@@ -359,9 +371,9 @@ export const DELETED_USER_MSG = 'ผู้ใช้นี้ถูกลบ — 
 
 /** Admin create/update from the "ผู้ใช้ระบบ" page. Role = legacy user_type. */
 export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{ user: User; created: boolean }> {
-  const targetId = input.id ? Number(input.id) : NaN;
-  const [before] = Number.isFinite(targetId) ? await db.select().from(appUser).where(eq(appUser.userId, targetId)) : [];
-  if (Number.isFinite(targetId) && !before) throw new HttpError(404, 'user not found');
+  // input.id = the user's uuid (the contract checked it)
+  const [before] = input.id ? await db.select().from(appUser).where(eq(appUser.id, input.id)) : [];
+  if (input.id && !before) throw new HttpError(404, 'user not found');
 
   const email = clean(input.email).toLowerCase();
   const role = clean(input.role);
@@ -415,11 +427,11 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
     if (email) {
       const other = await findAppUserByEmail(email, tx);
       if (other && other.userId !== before?.userId)
-        clash.email = `อีเมลนี้เป็นของผู้ใช้ ${fullName(other.firstName, other.lastName) || other.username || `#${other.userId}`} แล้ว — แก้ไขจากรายการแทน`;
+        clash.email = `อีเมลนี้เป็นของผู้ใช้ ${fullName(other.firstName, other.lastName) || other.username || 'คนอื่น'} แล้ว — แก้ไขจากรายการแทน`;
     }
     if (newUsername) {
       const [other] = await tx
-        .select({ id: appUser.userId, first: appUser.firstName, last: appUser.lastName })
+        .select({ first: appUser.firstName, last: appUser.lastName })
         .from(appUser)
         .where(
           and(
@@ -428,13 +440,15 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
           ),
         )
         .limit(1);
-      if (other) clash.username = `Username นี้เป็นของ ${fullName(other.first, other.last) || `#${other.id}`} แล้ว`;
+      if (other)
+        clash.username = `Username นี้เป็นของ${fullName(other.first, other.last) ? ` ${fullName(other.first, other.last)}` : 'ผู้ใช้อื่น'} แล้ว`;
     }
     const [firstClash] = Object.values(clash);
     if (firstClash) throw new HttpError(409, firstClash, { fields: clash });
   }
 
   if (before) {
+    const targetId = before.userId;
     const userValues = {
       firstName: keepName ? undefined : first,
       lastName: keepName ? undefined : last,
@@ -476,7 +490,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
           ),
           module: 'Admin',
           entity: 'app_user',
-          key: targetId,
+          key: before.id,
           changes,
         });
       return row;
@@ -509,7 +523,7 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       action: 'CREATE',
       module: 'Admin',
       entity: 'app_user',
-      key: row.userId,
+      key: row.id,
       summary: `เพิ่มผู้ใช้ ${fullName(first, last)} · ${email || '-'} · สิทธิ์ ${userType ?? PENDING_ROLE}`,
     });
     return row;
@@ -542,29 +556,35 @@ export function userAuditLine(
  * ลบ / กู้คืน. A restored user comes back INACTIVE: restoring must never re-open an account whose access
  * was revoked before it was deleted — the admin gives access back with คืนสิทธิ์ (upsertUser, audited).
  */
-export async function setUserDeleted(userId: number, deleted: boolean, actorId = 0) {
-  if (deleted) refuseSelf(userId, actorId);
+export async function setUserDeleted(id: string, deleted: boolean, actorId = 0) {
   await db.transaction(async (tx) => {
     const [old] = await tx
-      .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName })
+      .select({
+        userId: appUser.userId,
+        rs: appUser.recordStatus,
+        first: appUser.firstName,
+        last: appUser.lastName,
+        username: appUser.username,
+      })
       .from(appUser)
-      .where(eq(appUser.userId, userId))
+      .where(eq(appUser.id, id))
       .for('update');
     if (!old) throw new HttpError(404, 'user not found');
+    if (deleted) refuseSelf(old.userId, actorId);
     // only a deleted user is restored — "restore" on a live account would have switched it off
     if (!deleted && old.rs !== RS.DELETED)
       throw new HttpError(409, 'ผู้ใช้นี้ไม่ได้อยู่ในรายการที่ลบ — เปิดใช้งานด้วยปุ่ม คืนสิทธิ์');
-    const who = fullName(old.first, old.last) || `#${userId}`;
+    const who = fullName(old.first, old.last) || clean(old.username);
     const rs = deleted ? RS.DELETED : RS.INACTIVE;
     await tx
       .update(appUser)
       .set({ ...statusStamp(rs, actorId), deleted })
-      .where(eq(appUser.userId, userId));
+      .where(eq(appUser.userId, old.userId));
     await audit(tx, actorId, {
       action: deleted ? 'DELETE' : 'STATUS',
       module: 'Admin',
       entity: 'app_user',
-      key: userId,
+      key: id,
       summary: deleted ? `ลบผู้ใช้ ${who}` : `กู้คืนผู้ใช้ ${who} (ยังปิดการใช้งาน)`,
       changes: { recordStatus: [old.rs, rs] },
     });
@@ -596,7 +616,6 @@ async function loadModules(): Promise<string[]> {
 export async function listPermissions(): Promise<Permission[]> {
   const rows = await db.select().from(appConfig).orderBy(asc(appConfig.userType), asc(appConfig.moduleName));
   return rows.map((r) => ({
-    id: String(r.configId),
     role: r.userType?.trim() ?? '',
     menu: r.moduleName?.trim() ?? '',
     add: !!r.canInsert,

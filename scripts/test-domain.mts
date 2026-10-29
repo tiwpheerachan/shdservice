@@ -59,7 +59,7 @@ const { OUTSOURCE_NOT_BACK } = await import('@/lib/validation/job');
 const { addDays, today } = await import('@/lib/dates');
 const { GET: dataGET } = await import('@/app/api/data/[resource]/route');
 const { POST: soPOST } = await import('@/app/api/sale-orders/route');
-const { POST: soApprovePOST } = await import('@/app/api/sale-orders/[no]/approve/route');
+const { POST: soApprovePOST } = await import('@/app/api/sale-orders/[id]/approve/route');
 const { POST: docProfilePOST } = await import('@/app/api/documents/profile/route');
 const { POST: stockIssuePOST } = await import('@/app/api/stock/issue/route');
 const { POST: stockReceivePOST } = await import('@/app/api/stock/receive/route');
@@ -80,8 +80,24 @@ const U = {
   engineer: { id: 9110, email: 'td-engineer@example.invalid', type: 'Engineer', status: 'ACTIVE' }, // takes jobs (R4)
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
+/** a fixture user's app_user.id — the uuid the API, the pages and os_seen carry (ADR 0008) */
+const uuidOf = async (u: TestUser) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [u.id])).rows[0]!.id;
+/** SHD's document profile uuid (ออกเอกสารในนาม) */
+const shdId = async () =>
+  (await pool.query<{ id: string }>("SELECT id::text FROM document_profile WHERE code = 'SHD'")).rows[0]!.id;
+/** uuidOf by user_id (a salesperson passed around as its fixture user_id) */
+const userUuid = async (userId: number) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
 const SV = 3; // every fixture user's session_version — a cookie must carry exactly this
 const P = { a: { id: 9201, code: 'TDP1' }, b: { id: 9202, code: 'TDP2' }, c: { id: 9203, code: 'TDP3' } };
+/** a part's / document's uuid by its code / number — GET /api/products/{id} and /api/admin/records take it (ADR 0008) */
+const uuidBy = async (table: 'product' | 'job' | 'quotation_hd' | 'sale_out_hd', key: string) => {
+  const col = { product: 'product_code', job: 'job_no', quotation_hd: 'quotation_no', sale_out_hd: 'sale_out_hd_no' }[
+    table
+  ];
+  return (await pool.query<{ id: string }>(`SELECT id::text FROM ${table} WHERE ${col} = $1`, [key])).rows[0]!.id;
+};
 const CUSTOMER = 'TDC001';
 const JOB_CLOSE = 'TDJ0001'; // closeJob race
 const JOB_PARTS = 'TDJ0002'; // issueForJob over stock
@@ -418,8 +434,8 @@ try {
   await test('issueForJob of a 15-piece request with 10 on hand → 409; stock, booking and the request unchanged', async () => {
     const before = await qty(P.c.code);
     const [log] = (
-      await db.execute<{ id: number }>(
-        sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${JOB_PARTS}`,
+      await db.execute<{ id: string }>(
+        sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${JOB_PARTS}`,
       )
     ).rows;
     assert.equal(
@@ -429,7 +445,7 @@ try {
     assert.deepEqual(await qty(P.c.code), before);
     const [after] = (
       await db.execute<{ g: number; s: number }>(
-        sql`SELECT grant_qty AS g, order_status_id AS s FROM job_order_spare_part_log WHERE job_order_log_id = ${log.id}`,
+        sql`SELECT grant_qty AS g, order_status_id AS s FROM job_order_spare_part_log WHERE id = ${log.id}::uuid`,
       )
     ).rows;
     assert.deepEqual({ ...after }, { g: 0, s: 1 });
@@ -437,8 +453,8 @@ try {
   await test('issueForJob of more than was requested → 400 (before stock is touched)', async () => {
     const before = await qty(P.c.code);
     const [log] = (
-      await db.execute<{ id: number }>(
-        sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${JOB_PARTS}`,
+      await db.execute<{ id: string }>(
+        sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${JOB_PARTS}`,
       )
     ).rows;
     assert.equal(
@@ -450,14 +466,19 @@ try {
 
   console.log('\nSale order — approve / pick / edit');
   let soNo = '';
-  let soDtId = 0;
+  let soDtId = ''; // its first line's sale_out_dt.id (uuid) — what the pick page sends
   await test('create (submit → waiting) via POST /api/sale-orders', async () => {
     await setStock(P.a.code, 10);
     const r = await json(
       await soPOST(
         await request('/api/sale-orders', U.admin, {
           method: 'POST',
-          body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.a.code, qty: 2 }] },
+          body: {
+            customerCode: CUSTOMER,
+            salesId: await uuidOf(U.admin),
+            submit: true,
+            lines: [{ code: P.a.code, qty: 2 }],
+          },
         }),
       ),
     );
@@ -465,7 +486,11 @@ try {
     const order = r.body.order as { no: string; approveId: number; lines: { id: number }[] };
     assert.equal(order.approveId, 2);
     soNo = order.no;
-    soDtId = order.lines[0].id;
+    soDtId = (
+      await db.execute<{ id: string }>(
+        sql`SELECT id::text AS id FROM sale_out_dt WHERE sale_out_hd_no = ${soNo} ORDER BY list_no LIMIT 1`,
+      )
+    ).rows[0]!.id;
   });
   await test('pick on a NOT approved order (POST /api/stock/issue type=sale) → 409, stock unchanged', async () => {
     assert.ok(soNo, 'needs the order above');
@@ -484,7 +509,7 @@ try {
     const approve = async () =>
       soApprovePOST(
         await request(`/api/sale-orders/${soNo}/approve`, U.admin, { method: 'POST', body: { decision: 'approve' } }),
-        { params: Promise.resolve({ no: soNo }) },
+        { params: Promise.resolve({ id: await uuidBy('sale_out_hd', soNo) }) },
       );
     const first = await approve();
     assert.equal(first.status, 200, JSON.stringify(await first.json()));
@@ -499,7 +524,7 @@ try {
         await docProfilePOST(
           await request('/api/documents/profile', U.admin, {
             method: 'POST',
-            body: { kind: 'sale_order', no, profileId: 1 },
+            body: { kind: 'sale_order', no, profileId: await shdId() },
           }),
         ),
       );
@@ -510,7 +535,12 @@ try {
       await soPOST(
         await request('/api/sale-orders', U.admin, {
           method: 'POST',
-          body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: false, lines: [{ code: P.a.code, qty: 1 }] },
+          body: {
+            customerCode: CUSTOMER,
+            salesId: await uuidOf(U.admin),
+            submit: false,
+            lines: [{ code: P.a.code, qty: 1 }],
+          },
         }),
       ),
     );
@@ -523,7 +553,12 @@ try {
       await soPOST(
         await request('/api/sale-orders', U.admin, {
           method: 'POST',
-          body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.a.code, qty: 1 }] },
+          body: {
+            customerCode: CUSTOMER,
+            salesId: await uuidOf(U.admin),
+            submit: true,
+            lines: [{ code: P.a.code, qty: 1 }],
+          },
         }),
       ),
     );
@@ -533,7 +568,7 @@ try {
       await docProfilePOST(
         await request('/api/documents/profile', U.manager, {
           method: 'POST',
-          body: { kind: 'sale_order', no: wNo, profileId: 1 },
+          body: { kind: 'sale_order', no: wNo, profileId: await shdId() },
         }),
       ),
     );
@@ -546,7 +581,7 @@ try {
     const r = await soPOST(
       await request('/api/sale-orders', U.admin, {
         method: 'POST',
-        body: { no: soNo, customerCode: CUSTOMER, salesId: U.admin.id, lines: [{ code: P.a.code, qty: 9 }] },
+        body: { no: soNo, customerCode: CUSTOMER, salesId: await uuidOf(U.admin), lines: [{ code: P.a.code, qty: 9 }] },
       }),
     );
     assert.equal(r.status, 409);
@@ -684,7 +719,13 @@ try {
       await request('/api/sale-orders', u, {
         method: 'POST',
         headers: key ? { 'idempotency-key': key } : {},
-        body: { customerCode: CUSTOMER, salesId: u.id, submit: false, remark, lines: [{ code: P.b.code, qty: 1 }] },
+        body: {
+          customerCode: CUSTOMER,
+          salesId: await uuidOf(u),
+          submit: false,
+          remark,
+          lines: [{ code: P.b.code, qty: 1 }],
+        },
       }),
     );
   await test('same key twice (same user, same route) → one sale order, the second answer is the first one replayed', async () => {
@@ -722,7 +763,7 @@ try {
         headers: { 'idempotency-key': key },
         body: {
           customerCode: 'TD-NOPE',
-          salesId: U.admin.id,
+          salesId: await uuidOf(U.admin),
           remark: 'TD-idem-3',
           lines: [{ code: P.b.code, qty: 1 }],
         },
@@ -800,7 +841,7 @@ try {
               no: order.no,
               version: v,
               customerCode: CUSTOMER,
-              salesId: U.admin.id,
+              salesId: await uuidOf(U.admin),
               submit: false,
               remark: 'TD-ver',
               lines: [{ code: P.b.code, qty }],
@@ -963,7 +1004,7 @@ try {
     const before = (
       await db.execute<{ e: number | null }>(sql`SELECT engineer_id AS e FROM job WHERE job_no = ${JOB_EDIT}`)
     ).rows[0].e;
-    for (const id of [999999, U.inactive.id]) {
+    for (const id of ['00000000-0000-7000-8000-000000000000', await uuidOf(U.inactive)]) {
       const r = await fieldsOf(assignJobs([JOB_EDIT], id, U.admin.id));
       assert.equal(r.status, 400, String(id));
       assert.deepEqual(Object.keys(r.fields ?? {}), ['engineerId']);
@@ -980,7 +1021,7 @@ try {
           method: 'POST',
           body: {
             customerCode: CUSTOMER,
-            salesId: 999999,
+            salesId: '00000000-0000-7000-8000-000000000000',
             remark: 'TD-bad-sales',
             lines: [{ code: P.b.code, qty: 1 }],
           },
@@ -1005,7 +1046,7 @@ try {
           body: {
             no,
             customerCode: CUSTOMER,
-            salesId: U.inactive.id,
+            salesId: await uuidOf(U.inactive),
             submit: false,
             remark: 'TD-keep',
             lines: [{ code: P.b.code, qty: 2 }],
@@ -1409,20 +1450,26 @@ try {
   const lastChanges = async (entity: string, key: string) =>
     (
       await db.execute<{ c: Record<string, [unknown, unknown]> }>(
-        sql`SELECT changes AS c FROM audit_log WHERE entity = ${entity} AND entity_key = ${key} ORDER BY id DESC LIMIT 1`,
+        sql`SELECT changes AS c FROM audit_log WHERE entity = ${entity} AND entity_key = ${key} ORDER BY pk DESC LIMIT 1`,
       )
     ).rows[0]?.c;
   await test('record status (customer), master (color), user delete, sale-order tracking no.', async () => {
-    await setRecordStatus('customers', CUSTOMER, 'INACTIVE', U.admin.id);
-    assert.deepEqual((await lastChanges('customer', CUSTOMER))?.recordStatus, ['ACTIVE', 'INACTIVE']);
-    await setRecordStatus('customers', CUSTOMER, 'ACTIVE', U.admin.id);
-    assert.deepEqual((await lastChanges('customer', CUSTOMER))?.recordStatus, ['INACTIVE', 'ACTIVE']);
-    const color = (await pool.query<{ id: number }>(`INSERT INTO color (color_name) VALUES ('TD color') RETURNING id`))
-      .rows[0].id;
+    // customers / masters / users go by their uuid, which the audit line keeps as its key (ADR 0008)
+    const cust = (
+      await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = $1`, [CUSTOMER])
+    ).rows[0]!.id;
+    await setRecordStatus('customers', cust, 'INACTIVE', U.admin.id);
+    assert.deepEqual((await lastChanges('customer', cust))?.recordStatus, ['ACTIVE', 'INACTIVE']);
+    await setRecordStatus('customers', cust, 'ACTIVE', U.admin.id);
+    assert.deepEqual((await lastChanges('customer', cust))?.recordStatus, ['INACTIVE', 'ACTIVE']);
+    const color = (
+      await pool.query<{ id: string }>(`INSERT INTO color (color_name) VALUES ('TD color') RETURNING id::text`)
+    ).rows[0]!.id;
     await setSimpleStatus('colors', color, 'INACTIVE', U.admin.id);
-    assert.deepEqual((await lastChanges('colors', String(color)))?.recordStatus, ['ACTIVE', 'INACTIVE']);
-    await setUserDeleted(U.inactive.id, true, U.admin.id);
-    assert.deepEqual((await lastChanges('app_user', String(U.inactive.id)))?.recordStatus, ['INACTIVE', 'DELETED']);
+    assert.deepEqual((await lastChanges('colors', color))?.recordStatus, ['ACTIVE', 'INACTIVE']);
+    const inactive = await uuidOf(U.inactive);
+    await setUserDeleted(inactive, true, U.admin.id);
+    assert.deepEqual((await lastChanges('app_user', inactive))?.recordStatus, ['INACTIVE', 'DELETED']);
     await setTracking('TDS0001', 'TRK-NEW', U.admin.id);
     assert.deepEqual((await lastChanges('sale_out_hd', 'TDS0001'))?.deliveryTrackingNo, ['TRK-OLD', 'TRK-NEW']);
   });
@@ -1534,7 +1581,7 @@ try {
             method: 'POST',
             body: {
               customerCode: CUSTOMER,
-              salesId: U.admin.id,
+              salesId: await uuidOf(U.admin),
               remark: 'TD-1e9',
               paymentAmount: 1e9,
               lines: [{ code: P.b.code, qty: 1 }],
@@ -1853,7 +1900,7 @@ try {
         await soPOST(
           await request('/api/sale-orders', U.admin, {
             method: 'POST',
-            body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code, qty: 1 }] },
+            body: { customerCode: CUSTOMER, salesId: await uuidOf(U.admin), submit: true, lines: [{ code, qty: 1 }] },
           }),
         ),
       );
@@ -1867,7 +1914,7 @@ try {
             method: 'POST',
             body: { decision, remark: 'TD reason' }, // deny / send back need a reason
           }),
-          { params: Promise.resolve({ no }) },
+          { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
         )
       ).status;
     await test('R1: a denied sale order cannot be approved / sent back / re-saved (409, no stock out); approve ∥ deny → one wins', async () => {
@@ -1881,7 +1928,13 @@ try {
       const edit = await soPOST(
         await request('/api/sale-orders', U.admin, {
           method: 'POST',
-          body: { no, customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.b.code, qty: 1 }] },
+          body: {
+            no,
+            customerCode: CUSTOMER,
+            salesId: await uuidOf(U.admin),
+            submit: true,
+            lines: [{ code: P.b.code, qty: 1 }],
+          },
         }),
       );
       assert.equal(edit.status, 409, 're-saving would put it back to "waiting"');
@@ -1926,8 +1979,18 @@ try {
           sql`SELECT customer_address AS a, postal_code AS p FROM customer WHERE customer_code = ${code}`,
         )
       ).rows[0];
+    /** the uuids of mt_city / mt_district / mt_sub_district rows by their legacy ids — what the form sends (ADR 0008) */
+    const places = async (city: number, district: number, subDistrict: number) => {
+      const one = async (t: string, k: string, v: number) =>
+        (await pool.query<{ id: string }>(`SELECT id::text FROM ${t} WHERE ${k} = $1`, [v])).rows[0]!.id;
+      return {
+        cityId: await one('mt_city', 'city_id', city),
+        districtId: await one('mt_district', 'district_id', district),
+        subDistrictId: await one('mt_sub_district', 'sub_district_id', subDistrict),
+      };
+    };
     await test('R1: a real postal code that differs from the ตำบล master (50200 vs 50000) saves; a non-5-digit one → 400', async () => {
-      const where = { name: 'TD R1 เชียงใหม่', address1: '1', cityId: 9950, districtId: 9951, subDistrictId: 99511 };
+      const where = { name: 'TD R1 เชียงใหม่', address1: '1', ...(await places(9950, 9951, 99511)) };
       const ok = await newCustomer({ ...where, postalCode: '50200' });
       assert.equal(ok.status, 201, JSON.stringify(ok.body));
       const c = await storedAddress((ok.body.row as { code: string }).code);
@@ -1941,9 +2004,7 @@ try {
       const r = await newCustomer({
         name: 'TD R1 กรุงเทพ',
         address1: '99/1',
-        cityId: 10,
-        districtId: 9901,
-        subDistrictId: 99011,
+        ...(await places(10, 9901, 99011)),
         postalCode: '10310',
       });
       assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -1962,15 +2023,15 @@ try {
       const row = async () =>
         (await db.execute(sql`SELECT user_type, record_status FROM app_user WHERE user_id = ${U.admin.id}`)).rows[0];
       const before = await row();
-      const self = { id: String(U.admin.id), name: 'TD td-admin', role: 'System Admin' };
+      const self = { id: await uuidOf(U.admin), name: 'TD td-admin', role: 'System Admin' };
       assert.equal(await statusOf(upsertUser({ ...self, status: 'Inactive' }, U.admin.id)), 409, 'ถอนสิทธิ์ตัวเอง');
       assert.equal(await statusOf(upsertUser({ ...self, role: 'TD Job Clerk' }, U.admin.id)), 409, 'role change');
-      assert.equal(await statusOf(setUserDeleted(U.admin.id, true, U.admin.id)), 409, 'delete (service)');
+      assert.equal(await statusOf(setUserDeleted(self.id, true, U.admin.id)), 409, 'delete (service)');
       for (const status of ['DELETED', 'INACTIVE']) {
         const r = await recordsPOST(
           await request('/api/admin/records', U.admin, {
             method: 'POST',
-            body: { table: 'users', id: U.admin.id, status },
+            body: { table: 'users', id: self.id, status },
           }),
         );
         assert.equal(r.status, 409, `records ${status}`);
@@ -2010,8 +2071,8 @@ try {
         INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
           VALUES ('${jobNo}', '${P.a.code}', '', 1, false, true, 1, 1, now(), 9101, 0, 0);`);
       const [log] = (
-        await db.execute<{ id: number }>(
-          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${jobNo}`,
+        await db.execute<{ id: string }>(
+          sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${jobNo}`,
         )
       ).rows;
       const before = await qty(P.a.code);
@@ -2120,8 +2181,8 @@ try {
     await test('R1 jobs: stock issues every part of a job in รออะไหล่ (3) → เบิกจ่ายอะไหล่ครบแล้ว (10) + job_log', async () => {
       await setStock(P.a.code, 10);
       const [log] = (
-        await db.execute<{ id: number }>(
-          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0204'`,
+        await db.execute<{ id: string }>(
+          sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0204'`,
         )
       ).rows;
       const r = await issueForJob({ jobNo: 'TDJ0204', lines: [{ logId: log.id, qty: 1 }] }, U.admin.id);
@@ -2198,8 +2259,8 @@ try {
       assert.deepEqual(await listPartRequests('TDJ0208', true), []);
       assert.ok(!(await jobsWithPendingParts()).includes('TDJ0208'));
       const [log] = (
-        await db.execute<{ id: number }>(
-          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0208'`,
+        await db.execute<{ id: string }>(
+          sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0208'`,
         )
       ).rows;
       assert.equal(
@@ -2215,7 +2276,7 @@ try {
     const { GET: pickLinesGET } = await import('@/app/api/stock/pick-lines/route');
     await test('R2 stock: ราคาทุน — a role without Product edit gets no cost in the product API JSON or the export; an admin does', async () => {
       const { invalidateGrantCache } = await import('@/server/auth');
-      const { GET: productGET } = await import('@/app/api/products/[code]/route');
+      const { GET: productGET } = await import('@/app/api/products/[id]/route');
       const { exportXlsx } = await import('@/server/export');
       const ExcelJS = (await import('exceljs')).default;
       await db.execute(sql`UPDATE product_none_serial SET capital_price = 55.00 WHERE product_id = ${P.a.id}`);
@@ -2227,8 +2288,8 @@ try {
         const detail = async (u: TestUser) =>
           (
             await json(
-              await productGET(await request(`/api/products/${P.a.code}`, u), {
-                params: Promise.resolve({ code: P.a.code }),
+              await productGET(await request(`/api/products/${await uuidBy('product', P.a.code)}`, u), {
+                params: Promise.resolve({ id: await uuidBy('product', P.a.code) }),
               }),
             )
           ).body.product as Record<string, unknown>;
@@ -2268,8 +2329,8 @@ try {
         INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, order_status_id, request_date, request_by, grant_qty, return_qty)
           VALUES ('${jobNo}', '${P.a.code}', '', 1, false, true, 1, 1, now(), 9101, 0, 0);`);
       const [log] = (
-        await db.execute<{ id: number }>(
-          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${jobNo}`,
+        await db.execute<{ id: string }>(
+          sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${jobNo}`,
         )
       ).rows;
       const before = await qty(P.a.code);
@@ -2286,7 +2347,12 @@ try {
         await soPOST(
           await request('/api/sale-orders', U.admin, {
             method: 'POST',
-            body: { customerCode: CUSTOMER, salesId: U.admin.id, submit: true, lines: [{ code: P.b.code, qty: 1 }] },
+            body: {
+              customerCode: CUSTOMER,
+              salesId: await uuidOf(U.admin),
+              submit: true,
+              lines: [{ code: P.b.code, qty: 1 }],
+            },
           }),
         ),
       );
@@ -2294,7 +2360,7 @@ try {
       const no = (created.body.order as { no: string }).no;
       const approved = await soApprovePOST(
         await request(`/api/sale-orders/${no}/approve`, U.admin, { method: 'POST', body: { decision: 'approve' } }),
-        { params: Promise.resolve({ no }) },
+        { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
       );
       assert.equal(approved.status, 200);
       const [line] = await listSaleOrderPickLines(no);
@@ -2323,7 +2389,12 @@ try {
         await soPOST(
           await request('/api/sale-orders', u, {
             method: 'POST',
-            body: { customerCode: CUSTOMER, salesId, submit, lines: [{ code: P.a.code, qty: 1 }] },
+            body: {
+              customerCode: CUSTOMER,
+              salesId: await userUuid(salesId),
+              submit,
+              lines: [{ code: P.a.code, qty: 1 }],
+            },
           }),
         ),
       );
@@ -2334,7 +2405,7 @@ try {
       json(
         await soApprovePOST(
           await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body: { decision, remark } }),
-          { params: Promise.resolve({ no }) },
+          { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
         ),
       );
     const approveIdOf = async (no: string) =>
@@ -2517,7 +2588,7 @@ try {
         ],
       );
       assert.equal(j.customerDetail, staff.customerDetail);
-      assert.deepEqual([j.engineer, j.engineerId], ['', 0]);
+      assert.deepEqual([j.engineer, j.engineerId], ['', null]);
       const sq = (await getQuotation('TDQ0281'))!;
       const q = tracking.quotationForCustomer(sq);
       assert.deepEqual(
@@ -2552,7 +2623,8 @@ try {
       await pool.query(`
         INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date,
                          job_closed_date, return_customer_tracking_no, return_shipper_id)
-          VALUES ('TDJ0283', 8, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', now(), current_date, now(), 'TH123', ${p.id})`);
+          VALUES ('TDJ0283', 8, 9281, 'TDC281 คุณสมชาย ใจดี', 'Model TD', now(), current_date, now(), 'TH123',
+                  (SELECT pk FROM shipping_profile WHERE id = '${p.id}'))`);
       await deleteShippingProfile(p.id, U.admin.id);
       assert.ok(!(await listShippingProfiles(false)).some((o) => o.id === p.id), 'not offered any more');
       const j = (await tracking.publicJobByNo('TDJ0283'))!;
@@ -2631,15 +2703,15 @@ try {
       assert.deepEqual(provisionFailure(new Error('connect ECONNREFUSED')), { reason: 'db_unavailable' });
     });
     await test('R2 admin users: the audit line says อนุมัติ / ถอนสิทธิ์ / คืนสิทธิ์ / เปลี่ยนสิทธิ์ / ลบ / กู้คืน, not "แก้ไขผู้ใช้" for all', async () => {
-      const id = U.pending.id;
+      const id = await uuidOf(U.pending);
       const last = async () =>
         (
           await db.execute<{ a: string; s: string }>(
-            sql`SELECT action AS a, summary AS s FROM audit_log WHERE entity = 'app_user' AND entity_key = ${String(id)} ORDER BY id DESC LIMIT 1`,
+            sql`SELECT action AS a, summary AS s FROM audit_log WHERE entity = 'app_user' AND entity_key = ${id} ORDER BY pk DESC LIMIT 1`,
           )
         ).rows[0];
       const save = (role: string, status: string) =>
-        upsertUser({ id: String(id), name: 'TD td-pending', role, status }, U.admin.id);
+        upsertUser({ id, name: 'TD td-pending', role, status }, U.admin.id);
       try {
         await save('TD Job Clerk', 'Active'); // อนุมัติ from the users page (pending → a role)
         assert.deepEqual(await last(), { a: 'APPROVE', s: 'อนุมัติผู้ใช้ TD td-pending → TD Job Clerk' });
@@ -2660,7 +2732,7 @@ try {
         assert.deepEqual(await last(), { a: 'STATUS', s: 'กู้คืนผู้ใช้ TD td-pending (ยังปิดการใช้งาน)' });
       } finally {
         await db.execute(
-          sql`UPDATE app_user SET user_type = NULL, record_status = 'ACTIVE', deleted = false, first_name = 'TD', last_name = 'td-pending' WHERE user_id = ${id}`,
+          sql`UPDATE app_user SET user_type = NULL, record_status = 'ACTIVE', deleted = false, first_name = 'TD', last_name = 'td-pending' WHERE id = ${id}`,
         );
       }
     });
@@ -2739,14 +2811,14 @@ try {
       assert.deepEqual([after.remark, after.repairDetail, after.depositCost], ['TD R2 note', 'TD R2', 600]);
     });
     await test('R2 jobs: taking a job someone else has → 409 unless takeOver (assign + edit); edit assign = NEW → 2 + log', async () => {
-      const r = await fieldsOf(assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id));
+      const r = await fieldsOf(assignJobs(['TDJ0303'], await uuidOf(U.engineer), U.clerk.id));
       assert.equal(r.status, 409);
       assert.match(r.message ?? '', /มีผู้รับงานแล้ว/);
       // audit_log is append-only (rows of earlier runs stay): look only at what this assign writes
       const [{ since }] = (
-        await db.execute<{ since: number }>(sql`SELECT coalesce(max(id), 0) AS since FROM audit_log`)
+        await db.execute<{ since: number }>(sql`SELECT coalesce(max(pk), 0) AS since FROM audit_log`)
       ).rows;
-      await assignJobs(['TDJ0303'], U.engineer.id, U.clerk.id, true);
+      await assignJobs(['TDJ0303'], await uuidOf(U.engineer), U.clerk.id, true);
       const eng = async (no: string) =>
         (
           await db.execute<{ e: number; s: number }>(
@@ -2757,7 +2829,7 @@ try {
       // the batched NEW → 2 writes what setStatus does: one job_log row + ASSIGN then STATUS in the history
       assert.deepEqual(await logRows('TDJ0303'), [2]);
       const trail = await db.execute<{ action: string; changes: unknown }>(
-        sql`SELECT action, changes FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0303' AND id > ${since} ORDER BY id`,
+        sql`SELECT action, changes FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0303' AND pk > ${since} ORDER BY pk`,
       );
       assert.deepEqual(
         trail.rows.map((r) => ({ ...r })),
@@ -2769,7 +2841,7 @@ try {
       const statusRow = (await getJob('TDJ0303'))!.history.find((h) => h.action === 'STATUS');
       assert.equal(statusRow?.summary, `เปลี่ยนสถานะงาน → ${(await statusName(2)).trim()}`);
       const dueDate = (await getJob('TDJ0304'))!.dueDate;
-      const input = { customerCode: CUSTOMER, dueDate, engineerId: U.engineer.id };
+      const input = { customerCode: CUSTOMER, dueDate, engineerId: await uuidOf(U.engineer) };
       assert.equal((await fieldsOf(updateJob('TDJ0304', input, U.clerk.id))).status, 409);
       assert.deepEqual({ ...(await eng('TDJ0304')) }, { e: U.admin.id, s: 1 }, 'unchanged');
       await updateJob('TDJ0304', { ...input, takeOver: true }, U.clerk.id);
@@ -2779,7 +2851,7 @@ try {
       const free = await getJob('TDJ0305');
       await updateJob(
         'TDJ0305',
-        { customerCode: CUSTOMER, dueDate: free!.dueDate, engineerId: U.engineer.id },
+        { customerCode: CUSTOMER, dueDate: free!.dueDate, engineerId: await uuidOf(U.engineer) },
         U.clerk.id,
       );
       assert.deepEqual({ ...(await eng('TDJ0305')) }, { e: U.engineer.id, s: 2 });
@@ -2833,7 +2905,7 @@ try {
       const staff = (await getJob('TDJ0391'))!;
       assert.equal(staff.createByName, 'TD td-admin', 'staff print unchanged');
       const j = tracking.jobForCustomer(staff);
-      assert.deepEqual([j.createByName, j.createBy, j.engineer, j.outsource], ['', 0, '', []]);
+      assert.deepEqual([j.createByName, j.engineer, j.outsource], ['', '', []]);
       const sq = (await getQuotation('TDQ0392'))!;
       assert.equal(sq.createdBy, 'TD td-admin', 'staff print unchanged');
       assert.equal(tracking.quotationForCustomer(sq).createdBy, '');
@@ -2889,10 +2961,10 @@ try {
       await import('@/server/services/sale-orders');
     const post = async (u: TestUser, body: Record<string, unknown>) =>
       json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
-    const so = (u: TestUser, salesId: number, extra: Record<string, unknown> = {}) =>
+    const so = async (u: TestUser, salesId: number, extra: Record<string, unknown> = {}) =>
       post(u, {
         customerCode: CUSTOMER,
-        salesId,
+        salesId: await userUuid(salesId),
         submit: true,
         lines: [{ code: P.a.code, qty: 1, price: 100 }],
         ...extra,
@@ -2929,7 +3001,7 @@ try {
       // no price sent (the server takes the product's 100) — the server's own check
       const noPrice = await post(U.admin, {
         customerCode: CUSTOMER,
-        salesId: U.admin.id,
+        salesId: await uuidOf(U.admin),
         lines: [{ code: P.a.code, qty: 1 }],
         paymentType: 'เงินสด',
         paymentAmount: 9_999_999, // more than any product's price
@@ -2948,12 +3020,12 @@ try {
       const bySeller = noOf(await so(U.seller, U.admin.id)); // CS keys in an order for another salesperson
       assert.deepEqual({ ...(await hdOf(bySeller)) }, { t: '', a: null, c: U.seller.id, s: U.admin.id });
       const o = (await getSaleOrder(bySeller))!;
-      assert.deepEqual([o.createdById, o.createdBy, o.sales], [U.seller.id, 'TD td-seller', 'TD td-admin']);
+      assert.deepEqual([o.createdById, o.createdBy, o.sales], [await uuidOf(U.seller), 'TD td-seller', 'TD td-admin']);
       const approve = async (u: TestUser, no: string) =>
         json(
           await soApprovePOST(
             await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body: { decision: 'approve' } }),
-            { params: Promise.resolve({ no }) },
+            { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
           ),
         );
       // R4: self-approval is checked on an approver (Manager) — CS may not approve at all
@@ -2984,7 +3056,7 @@ try {
             method: 'POST',
             body: { decision: 'reject', remark: 'TD fix' },
           }),
-          { params: Promise.resolve({ no: back }) },
+          { params: Promise.resolve({ id: await uuidBy('sale_out_hd', back) }) },
         ),
       );
       assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -3035,13 +3107,13 @@ try {
     await test('R3 shell: /api/sso/me marks who used this browser (os_seen = user id); a signed-out browser gets signedOut, an expired one does not', async () => {
       const ok = await meGET(await request('/api/sso/me', U.admin));
       assert.equal(ok.status, 200);
-      assert.equal(ok.cookies.get('os_seen')?.value, String(U.admin.id));
+      assert.equal(ok.cookies.get('os_seen')?.value, await uuidOf(U.admin));
       // ออกจากระบบ cleared both cookies → the other open tabs go to /login?bye=1, no `next`
       const out = await json(await meGET(await request('/api/sso/me', null)));
       assert.deepEqual([out.status, out.body.signedOut], [401, true]);
       // idle expiry: the session cookie is gone but os_seen stays → the "expired" flow (back to this page)
       const expired = await json(
-        await meGET(await request('/api/sso/me', null, { headers: { cookie: `os_seen=${U.admin.id}` } })),
+        await meGET(await request('/api/sso/me', null, { headers: { cookie: `os_seen=${await uuidOf(U.admin)}` } })),
       );
       assert.deepEqual([expired.status, expired.body.signedOut], [401, undefined]);
     });
@@ -3065,31 +3137,27 @@ try {
     });
     await test('R3 masters: a duplicate name names the existing row and its state, under the field (brands / models / colors)', async () => {
       // by hand (max + 1): other fixtures insert manufacturer ids directly, the identity sequence lags behind
-      const [brand] = (
-        await db.execute<{
-          id: number;
-        }>(sql`INSERT INTO manufacturer (manufacturer_id, manufacturer_name, record_status, is_active)
-          VALUES ((SELECT coalesce(max(manufacturer_id), 0) + 1 FROM manufacturer), 'TD Trail Brand R3', 'INACTIVE', false)
-          RETURNING manufacturer_id AS id`)
-      ).rows;
+      await db.execute(sql`INSERT INTO manufacturer (manufacturer_id, manufacturer_name, record_status, is_active)
+          VALUES ((SELECT coalesce(max(manufacturer_id), 0) + 1 FROM manufacturer), 'TD Trail Brand R3', 'INACTIVE', false)`);
       const b = await fieldsOf(saveSimple('manufacturers', { name: 'td trail brand  r3' }, U.admin.id));
       assert.equal(b.status, 409);
-      assert.equal(b.message, `มีชื่อนี้อยู่แล้ว: "TD Trail Brand R3" (รหัส ${brand!.id} · Inactive)`);
+      // no รหัส for a simple list (ADR 0008: its id is a uuid nobody reads) — models keep their code
+      assert.equal(b.message, `มีชื่อนี้อยู่แล้ว: "TD Trail Brand R3" (Inactive)`);
       assert.deepEqual(b.fields, { name: b.message });
       const color = await saveSimple('colors', { name: 'TD J R3 Teal' }, U.admin.id); // 'TD J%' rows are reset above
-      await setSimpleStatus('colors', Number(color.id), 'DELETED', U.admin.id);
+      await setSimpleStatus('colors', color.id, 'DELETED', U.admin.id);
       const c = await fieldsOf(saveSimple('colors', { name: 'td j r3 TEAL' }, U.admin.id));
-      assert.deepEqual(c.fields, { name: `มีชื่อนี้อยู่แล้ว: "TD J R3 Teal" (รหัส ${color.id} · อยู่ในรายการที่ลบ)` });
+      assert.deepEqual(c.fields, { name: `มีชื่อนี้อยู่แล้ว: "TD J R3 Teal" (อยู่ในรายการที่ลบ)` });
       const m = await saveModel({ name: 'TD J R3 Model', brand: 'TD J Brand', price: 0 }, U.admin.id);
       const d = await fieldsOf(saveModel({ name: 'td j r3 model', brand: 'TD J Brand', price: 0 }, U.admin.id));
       assert.deepEqual(d.fields, { name: `มีชื่อนี้อยู่แล้ว: "TD J R3 Model" (รหัส ${m.code})` });
     });
     await test('R3 admin users: restoring a deleted user brings them back INACTIVE (revoked stays revoked); restore of a live user → 409', async () => {
-      const id = U.inactive.id; // a fixture already revoked (INACTIVE) — the case that came back ACTIVE
+      const id = await uuidOf(U.inactive); // a fixture already revoked (INACTIVE) — the case that came back ACTIVE
       const row = async () =>
         (
           await db.execute<{ rs: string; act: boolean; del: boolean }>(
-            sql`SELECT record_status AS rs, is_active AS act, deleted AS del FROM app_user WHERE user_id = ${id}`,
+            sql`SELECT record_status AS rs, is_active AS act, deleted AS del FROM app_user WHERE id = ${id}`,
           )
         ).rows[0];
       await setUserDeleted(id, true, U.admin.id);
@@ -3097,7 +3165,7 @@ try {
       assert.deepEqual(await row(), { rs: 'INACTIVE', act: false, del: false });
       const [line] = (
         await db.execute<{ s: string }>(
-          sql`SELECT summary AS s FROM audit_log WHERE entity = 'app_user' AND entity_key = ${String(id)} ORDER BY id DESC LIMIT 1`,
+          sql`SELECT summary AS s FROM audit_log WHERE entity = 'app_user' AND entity_key = ${id} ORDER BY pk DESC LIMIT 1`,
         )
       ).rows;
       assert.equal(line?.s, 'กู้คืนผู้ใช้ TD td-inactive (ยังปิดการใช้งาน)');
@@ -3108,10 +3176,11 @@ try {
       const count = async () =>
         (
           await db.execute<{ n: number }>(
-            sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'app_user' AND entity_key = ${String(U.admin.id)}`,
+            sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'app_user' AND entity_key = ${me}`,
           )
         ).rows[0].n;
-      const self = { id: String(U.admin.id), name: 'TD td-admin', role: 'System Admin', status: 'Active' };
+      const me = await uuidOf(U.admin);
+      const self = { id: me, name: 'TD td-admin', role: 'System Admin', status: 'Active' };
       await upsertUser(self, U.admin.id); // the fixture row → this form's values (may write one line)
       const before = await count();
       await upsertUser(self, U.admin.id);
@@ -3168,8 +3237,8 @@ try {
     await test('R3 jobs: stock issues every เบิก line → เบิกจ่ายอะไหล่ครบแล้ว (10), a เสนอ-only line does not hold it at 3', async () => {
       await setStock(P.a.code, 10);
       const [log] = (
-        await db.execute<{ id: number }>(
-          sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0402' AND is_special`,
+        await db.execute<{ id: string }>(
+          sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = 'TDJ0402' AND is_special`,
         )
       ).rows;
       await issueForJob({ jobNo: 'TDJ0402', lines: [{ logId: log.id, qty: 1 }] }, U.admin.id);
@@ -3180,7 +3249,7 @@ try {
       const [s14, s15] = [await statusName(14), await statusName(15)];
       const send = { to: 'TD Vendor R3', date: '2026-10-10' };
       await saveOutsource('TDJ0403', { send, status: s14 }, U.admin.id);
-      const receive = { from: send.to, date: '2026-10-12', detail: 'TD first note', by: U.admin.id };
+      const receive = { from: send.to, date: '2026-10-12', detail: 'TD first note', by: await uuidOf(U.admin) };
       await saveOutsource('TDJ0403', { receive, status: s15 }, U.admin.id);
       // what the page sends once the row is back: the send block + the receive block (its note edited)
       const r = await fieldsOf(
@@ -3228,8 +3297,14 @@ try {
     const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
     const post = async (u: TestUser, body: Record<string, unknown>) =>
       json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
-    const save = (u: TestUser, submit: boolean, no?: string) =>
-      post(u, { no, customerCode: CUSTOMER, salesId: U.admin.id, submit, lines: [{ code: P.a.code, qty: 1 }] });
+    const save = async (u: TestUser, submit: boolean, no?: string) =>
+      post(u, {
+        no,
+        customerCode: CUSTOMER,
+        salesId: await uuidOf(U.admin),
+        submit,
+        lines: [{ code: P.a.code, qty: 1 }],
+      });
     const create = async (u: TestUser, submit: boolean) => {
       const r = await save(u, submit);
       assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -3242,7 +3317,7 @@ try {
             method: 'POST',
             body: { decision, remark: 'TD R4' },
           }),
-          { params: Promise.resolve({ no }) },
+          { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
         ),
       );
     const statusOfSO = async (no: string) =>
@@ -3306,7 +3381,7 @@ try {
       // a new line is priced at the part's ราคาขาย (saveRepair never takes the page's price)
       await pool.query(`UPDATE product_none_serial SET retail_price = CASE product_id WHEN 9201 THEN 200 ELSE 250 END
                          WHERE product_id IN (9201, 9202)`);
-      const line = (code: string, price: number, pick: boolean, logId?: number) => ({
+      const line = (code: string, price: number, pick: boolean, logId?: string) => ({
         logId,
         code,
         unitPrice: price,
@@ -3360,23 +3435,26 @@ try {
     await test('R4 jobs: only an Engineer / Head Engineer takes a job (400 under engineerId; the current one re-saved passes); history: who gave it to whom', async () => {
       // the มอบหมายงานนี้ให้ picker = the staff list filtered by Job Take (Engineer has it: 0030)
       const offered = (await listStaff()).filter((u) => u.takesJobs).map((u) => u.id);
-      assert.ok(offered.includes(U.engineer.id) && !offered.includes(U.clerk.id), 'engineers only');
-      const assign = await fieldsOf(assignJobs(['TDJ0503'], U.clerk.id, U.admin.id));
+      assert.ok(
+        offered.includes(await uuidOf(U.engineer)) && !offered.includes(await uuidOf(U.clerk)),
+        'engineers only',
+      );
+      const assign = await fieldsOf(assignJobs(['TDJ0503'], await uuidOf(U.clerk), U.admin.id));
       assert.deepEqual([assign.status, assign.fields], [400, { engineerId: NOT_ENGINEER }]);
       const j = (await getJob('TDJ0503'))!;
       // what the edit form sends back (warrantyMonth too: a stored 0 counts as filled once saved)
       const input = { customerCode: CUSTOMER, dueDate: j.dueDate, warrantyMonth: j.warrantyMonth };
-      const edit = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: U.clerk.id }, U.admin.id));
+      const edit = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: await uuidOf(U.clerk) }, U.admin.id));
       assert.deepEqual([edit.status, edit.fields], [400, { engineerId: NOT_ENGINEER }]);
       const assigned = async () => (await getJob('TDJ0503'))!.history.find((h) => h.action === 'ASSIGN')?.summary;
-      await assignJobs(['TDJ0503'], U.engineer.id, U.admin.id);
+      await assignJobs(['TDJ0503'], await uuidOf(U.engineer), U.admin.id);
       assert.equal(await assigned(), 'TD td-admin มอบหมายงานให้ TD td-engineer');
       // an old job on someone who is not an engineer: saved again unchanged → still fine
       await pool.query(`UPDATE job SET engineer_id = ${U.clerk.id} WHERE job_no = 'TDJ0503'`);
-      const kept = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: U.clerk.id }, U.admin.id));
+      const kept = await fieldsOf(updateJob('TDJ0503', { ...input, engineerId: await uuidOf(U.clerk) }, U.admin.id));
       assert.equal(kept.status, 200, JSON.stringify(kept));
       // the edit / repair picker takes it over → the history names both
-      await updateJob('TDJ0503', { ...input, engineerId: U.engineer.id, takeOver: true }, U.admin.id);
+      await updateJob('TDJ0503', { ...input, engineerId: await uuidOf(U.engineer), takeOver: true }, U.admin.id);
       assert.equal(await assigned(), 'TD td-admin เปลี่ยนผู้รับงานจาก TD td-clerk เป็น TD td-engineer');
     });
   }
@@ -3387,7 +3465,12 @@ try {
     const { grantsForUserType } = await import('@/server/auth');
     const { NOT_APPROVER } = await import('@/lib/validation/sale-order');
     const waitingOrder = async (u: TestUser, salesId: number) => {
-      const body = { customerCode: CUSTOMER, salesId, submit: true, lines: [{ code: P.a.code, qty: 1 }] };
+      const body = {
+        customerCode: CUSTOMER,
+        salesId: await userUuid(salesId),
+        submit: true,
+        lines: [{ code: P.a.code, qty: 1 }],
+      };
       const r = await json(await soPOST(await request('/api/sale-orders', u, { method: 'POST', body })));
       assert.equal(r.status, 201, JSON.stringify(r.body));
       return (r.body.order as { no: string }).no;
@@ -3560,7 +3643,12 @@ try {
           )!,
         );
       assert.equal((await login('0')).searchParams.get('expired'), null, 'signed out, not expired');
-      assert.equal((await login(String(U.clerk.id))).searchParams.get('expired'), '1', 'a real idle expiry');
+      assert.equal((await login(await uuidOf(U.clerk))).searchParams.get('expired'), '1', 'a real idle expiry');
+      assert.equal(
+        (await login(String(U.clerk.id))).searchParams.get('expired'),
+        null,
+        'a pre-uuid os_seen reads as none',
+      );
 
       const state = `${crypto.randomUUID()}|/jobs/list`;
       const realFetch = globalThis.fetch;
@@ -3581,8 +3669,8 @@ try {
           return to.pathname + to.search;
         };
         assert.equal(await after('0'), '/', 'a `next` made after ออกจากระบบ is dropped');
-        assert.equal(await after(String(U.admin.id)), '/', "someone else's page is dropped");
-        assert.equal(await after(String(U.clerk.id)), '/jobs/list', 'the same person goes back to their page');
+        assert.equal(await after(await uuidOf(U.admin)), '/', "someone else's page is dropped");
+        assert.equal(await after(await uuidOf(U.clerk)), '/jobs/list', 'the same person goes back to their page');
         assert.equal(await after(), '/jobs/list', 'a browser nobody used before keeps the link it was opened with');
       } finally {
         globalThis.fetch = realFetch;
@@ -3595,7 +3683,7 @@ try {
       const row = async () =>
         (await db.execute(sql`SELECT email_address, username FROM app_user WHERE user_id = ${U.admin.id}`)).rows[0];
       const before = await row();
-      const self = { id: String(U.admin.id), name: 'TD td-admin', role: 'System Admin', status: 'Active' };
+      const self = { id: await uuidOf(U.admin), name: 'TD td-admin', role: 'System Admin', status: 'Active' };
       assert.equal(await statusOf(upsertUser({ ...self, email: 'td-other@example.invalid' }, U.admin.id)), 409);
       assert.equal(await statusOf(upsertUser({ ...self, username: 'td-admin-renamed' }, U.admin.id)), 409);
       assert.deepEqual(await row(), before);
@@ -3615,25 +3703,25 @@ try {
       await wb.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = wb.worksheets[0]!;
       const head = (ws.getRow(1).values as unknown[]).slice(1);
-      const ids = new Set<string>();
+      // no ID column (ADR 0008): the rows are told apart by e-mail
+      const emails = new Set<string>();
       ws.eachRow((r, n) => {
         const v = (r.values as unknown[]).slice(1);
-        if (n > 1 && v[head.indexOf('ID')] != null) {
+        if (n > 1 && v[head.indexOf('อีเมล')] != null) {
           assert.equal(v[head.indexOf('บทบาท')], 'TD Seller');
-          ids.add(String(v[head.indexOf('ID')]));
+          emails.add(String(v[head.indexOf('อีเมล')]));
         }
       });
-      assert.ok(ids.has(String(U.seller.id)) && ids.has(String(U.seller2.id)), [...ids].join());
-      assert.ok(!ids.has(String(U.admin.id)));
+      assert.ok(emails.has(U.seller.email) && emails.has(U.seller2.email), [...emails].join());
+      assert.ok(!emails.has(U.admin.email));
     });
 
     await test('R5 admin users: a DELETED user never goes straight back to Active (users API → 409; records → กู้คืน = INACTIVE)', async () => {
-      const id = U.inactive.id;
+      const id = await uuidOf(U.inactive);
       const rs = async () =>
-        (await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM app_user WHERE user_id = ${id}`)).rows[0]
-          .rs;
+        (await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM app_user WHERE id = ${id}`)).rows[0].rs;
       await setUserDeleted(id, true, U.admin.id);
-      const body = { id: String(id), name: 'TD td-inactive', role: 'TD Customer Viewer', status: 'Active' };
+      const body = { id, name: 'TD td-inactive', role: 'TD Customer Viewer', status: 'Active' };
       const api = await json(await usersPOST(await request('/api/admin/users', U.admin, { method: 'POST', body })));
       assert.deepEqual([api.status, api.body.error], [409, 'ผู้ใช้นี้ถูกลบ — กู้คืนก่อน']);
       assert.equal(await rs(), 'DELETED');
@@ -3653,7 +3741,7 @@ try {
       const order = async () => {
         const body = {
           customerCode: CUSTOMER,
-          salesId: U.seller.id,
+          salesId: await uuidOf(U.seller),
           submit: true,
           lines: [{ code: P.a.code, qty: 1 }],
         };
@@ -3667,10 +3755,14 @@ try {
           method: 'POST',
           body: { decision: 'approve' },
         }),
-        { params: Promise.resolve({ no: approved }) },
+        { params: Promise.resolve({ id: await uuidBy('sale_out_hd', approved) }) },
       );
       assert.equal(ok.status, 200);
-      const cancel = await records(U.admin, { table: 'sale_orders', id: approved, status: 'DELETED' });
+      const cancel = await records(U.admin, {
+        table: 'sale_orders',
+        id: await uuidBy('sale_out_hd', approved),
+        status: 'DELETED',
+      });
       assert.equal(cancel.status, 409, JSON.stringify(cancel.body));
       const [hd] = (
         await db.execute<{ rs: string; doc: boolean }>(
@@ -3680,7 +3772,14 @@ try {
       assert.deepEqual(hd, { rs: 'ACTIVE', doc: true });
       const waiting = await order();
       assert.equal(
-        (await records(U.admin, { table: 'sale_orders', id: waiting, status: 'DELETED', remark: 'TD ยกเลิก' })).status,
+        (
+          await records(U.admin, {
+            table: 'sale_orders',
+            id: await uuidBy('sale_out_hd', waiting),
+            status: 'DELETED',
+            remark: 'TD ยกเลิก',
+          })
+        ).status,
         200,
       );
     });
@@ -3699,9 +3798,11 @@ try {
                    (SELECT string_agg(job_status_id::text, ',' ORDER BY job_log_id) FROM job_log l WHERE l.job_no = j.job_no) AS log
               FROM job j WHERE j.job_no = ${no}`)
         ).rows[0];
-      for (const no of ['TDJ0551', 'TDJ0552']) await setRecordStatus('jobs', no, 'DELETED', U.admin.id);
+      for (const no of ['TDJ0551', 'TDJ0552'])
+        await setRecordStatus('jobs', await uuidBy('job', no), 'DELETED', U.admin.id);
       assert.equal((await state('TDJ0551')).st, 0);
-      for (const no of ['TDJ0551', 'TDJ0552']) await setRecordStatus('jobs', no, 'ACTIVE', U.admin.id);
+      for (const no of ['TDJ0551', 'TDJ0552'])
+        await setRecordStatus('jobs', await uuidBy('job', no), 'ACTIVE', U.admin.id);
       assert.deepEqual(await state('TDJ0551'), { st: 5, rs: 'ACTIVE', log: '1,5,0,5' });
       assert.deepEqual(await state('TDJ0552'), { st: 1, rs: 'ACTIVE', log: '0,1' }, 'no history → งานใหม่');
     });
@@ -3757,7 +3858,7 @@ try {
     const { issueForSaleOrder } = await import('@/server/services/stock');
     const { getQuotation: loadQuotation } = await import('@/server/services/quotations');
     const { listCustomers, findCustomerConflicts } = await import('@/server/services/customers');
-    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const { GET: productGET } = await import('@/app/api/products/[id]/route');
     const { POST: uploadPOST } = await import('@/app/api/upload/route');
     type Order = {
       no: string;
@@ -3770,7 +3871,7 @@ try {
     const newSO = async (u: TestUser, extra: Record<string, unknown> = {}) => {
       const r = await post(u, {
         customerCode: CUSTOMER,
-        salesId: u.id,
+        salesId: await uuidOf(u),
         submit: true,
         lines: [{ code: P.a.code, qty: 1, price: 100 }],
         ...extra,
@@ -3781,7 +3882,7 @@ try {
     const decide = async (u: TestUser, no: string, body: Record<string, unknown>) =>
       json(
         await soApprovePOST(await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body }), {
-          params: Promise.resolve({ no }),
+          params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }),
         }),
       );
     const hdOf = async (no: string) =>
@@ -3809,12 +3910,12 @@ try {
     };
 
     await test('R5 SO: a waiting order is edited only by its creator — Manager changing the salesperson / another CS the price → 403, nothing saved; creator / System Admin 200', async () => {
-      const o = await newSO(U.seller, { salesId: U.manager.id }); // keyed in by a CS, sold by the Manager
-      const edit = (u: TestUser, salesId: number, price: number) =>
+      const o = await newSO(U.seller, { salesId: await uuidOf(U.manager) }); // keyed in by a CS, sold by the Manager
+      const edit = async (u: TestUser, salesId: number, price: number) =>
         post(u, {
           no: o.no,
           customerCode: CUSTOMER,
-          salesId,
+          salesId: await userUuid(salesId),
           submit: true,
           lines: [{ code: P.a.code, qty: 1, price }],
         });
@@ -3838,7 +3939,7 @@ try {
         no: o.no,
         version: onScreen,
         customerCode: CUSTOMER,
-        salesId: U.seller.id,
+        salesId: await uuidOf(U.seller),
         submit: true,
         lines: [{ code: P.a.code, qty: 8, price: 100 }],
       });
@@ -3860,7 +3961,7 @@ try {
         no: o.no,
         version: 999999, // a form opened before the cancel: the cancelled message, not "reload"
         customerCode: CUSTOMER,
-        salesId: U.admin.id,
+        salesId: await uuidOf(U.admin),
         submit: true,
         lines: [{ code: P.a.code, qty: 2, price: 100 }],
       });
@@ -3878,8 +3979,8 @@ try {
     await test('R5 products: the edit version (a hash over ราคาทุน) only goes to who may see the cost', async () => {
       const get = async (u: TestUser) =>
         json(
-          await productGET(await request(`/api/products/${P.a.code}`, u), {
-            params: Promise.resolve({ code: P.a.code }),
+          await productGET(await request(`/api/products/${await uuidBy('product', P.a.code)}`, u), {
+            params: Promise.resolve({ id: await uuidBy('product', P.a.code) }),
           }),
         );
       // a product screen's viewer (the product API needs view on one of them)
@@ -3898,12 +3999,12 @@ try {
         ],
       });
       const rv = (await hdOf(o.no)).rv;
-      const edit = (lines: unknown[]) =>
+      const edit = async (lines: unknown[]) =>
         post(U.admin, {
           no: o.no,
           version: o.version,
           customerCode: CUSTOMER,
-          salesId: U.admin.id,
+          salesId: await uuidOf(U.admin),
           submit: false,
           lines,
         });
@@ -3985,7 +4086,7 @@ try {
         >;
       const before = { hd: await hdRow(), dt: await dtOf(no) };
       const loaded = (await getSaleOrder(no))!;
-      assert.equal(loaded.salesId, U.seller.id, 'the edit form picks the salesperson by id');
+      assert.equal(loaded.salesId, await uuidOf(U.seller), 'the edit form picks the salesperson by id');
       // what the edit form sends back for it (sale-order-form payloadOf)
       const form = {
         no,
@@ -4001,7 +4102,7 @@ try {
       };
       // audit_log is append-only: count only what this save writes
       const [{ mark }] = (
-        await db.execute<{ mark: number }>(sql`SELECT coalesce(max(id), 0)::int AS mark FROM audit_log`)
+        await db.execute<{ mark: number }>(sql`SELECT coalesce(max(pk), 0)::int AS mark FROM audit_log`)
       ).rows;
       const r = await post(U.admin, form);
       assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -4009,7 +4110,7 @@ try {
       assert.deepEqual(await hdRow(), before.hd, 'header untouched (snapshot, remark, status 3, row_version)');
       const [{ n }] = (
         await db.execute<{ n: number }>(
-          sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} AND id > ${mark}`,
+          sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} AND pk > ${mark}`,
         )
       ).rows;
       assert.equal(n, 0, 'no audit row');
@@ -4038,7 +4139,7 @@ try {
       const upload = async (no: string) => {
         const fd = new FormData();
         fd.set('kind', 'sale-order-slip');
-        fd.set('id', no);
+        fd.set('id', await uuidBy('sale_out_hd', no)); // the order's uuid (ADR 0008)
         fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
         const req = new NextRequest('https://svc.example.test/api/upload', {
           method: 'POST',
@@ -4237,7 +4338,7 @@ try {
         VALUES ${waitingLine('TDJ0603')}, ${waitingLine('TDJ0604')};`);
     invalidate('jobstatus'); // 19 / 22 above, by name
     const back = { type: 'ลูกค้ามารับเอง', date: '2026-10-15' };
-    const line = (code: string, qty: number, logId?: number) => ({
+    const line = (code: string, qty: number, logId?: string) => ({
       logId,
       code,
       unitPrice: 100,
@@ -4430,7 +4531,7 @@ try {
     await test('R5 M4: correcting the vendor / send date of a trip already back updates that row (no open row; close works)', async () => {
       const [s14, s15] = [await statusName(14), await statusName(15)];
       await saveOutsource('TDJ0608', { send: { to: 'TD Vendor R5', date: '2026-10-10' }, status: s14 }, U.admin.id);
-      const receive = { from: 'TD Vendor R5', date: '2026-10-12', by: U.admin.id };
+      const receive = { from: 'TD Vendor R5', date: '2026-10-12', by: await uuidOf(U.admin) };
       await saveOutsource('TDJ0608', { receive, status: s15 }, U.admin.id);
       // what the page sends once the trip is back: the send block (corrected) + the receive block
       const fix = { send: { to: 'TD Vendor R5b', date: '2026-10-11' }, receive: { ...receive, from: 'TD Vendor R5b' } };
@@ -4507,7 +4608,7 @@ try {
         boxCost: j.boxCost,
         estimateCost: j.estimateCost ? String(j.estimateCost) : '',
         depositCost: j.depositCost ? String(j.depositCost) : '',
-        engineerId: j.engineerId,
+        engineerId: j.engineerId ?? '',
         dueDate: j.dueDate,
         version: j.version,
       };
@@ -4547,10 +4648,10 @@ try {
       const rowsSince = async (id: number) =>
         (
           await db.execute<{ action: string; summary: string }>(sql`
-            SELECT action, summary FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0610' AND id > ${id} ORDER BY id`)
+            SELECT action, summary FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJ0610' AND pk > ${id} ORDER BY pk`)
         ).rows.map((r) => ({ ...r }));
       const last = async () =>
-        (await db.execute<{ id: number }>(sql`SELECT coalesce(max(id), 0)::int AS id FROM audit_log`)).rows[0].id;
+        (await db.execute<{ id: number }>(sql`SELECT coalesce(max(pk), 0)::int AS id FROM audit_log`)).rows[0].id;
       const j = (await getJob('TDJ0610'))!;
       // what the edit form sends back (it always carries the reception date)
       const input = {
@@ -4561,12 +4662,12 @@ try {
         receptionDate: j.receptionDate,
       };
       let id = await last();
-      await updateJob('TDJ0610', { ...input, engineerId: U.engineer.id }, U.admin.id);
+      await updateJob('TDJ0610', { ...input, engineerId: await uuidOf(U.engineer) }, U.admin.id);
       assert.deepEqual(await rowsSince(id), [
         { action: 'ASSIGN', summary: 'TD td-admin มอบหมายงานให้ TD td-engineer' },
       ]);
       id = await last();
-      await updateJob('TDJ0610', { ...input, engineerId: 0 }, U.admin.id);
+      await updateJob('TDJ0610', { ...input, engineerId: '' }, U.admin.id);
       const cleared = await rowsSince(id);
       assert.deepEqual(cleared[0], { action: 'ASSIGN', summary: 'TD td-admin ยกเลิกผู้รับงาน TD td-engineer' });
       // R6: nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (its own STATUS row)
@@ -4574,7 +4675,7 @@ try {
         cleared.map((r) => r.action),
         ['ASSIGN', 'STATUS'],
       );
-      assert.equal((await getJob('TDJ0610'))!.engineerId, 0);
+      assert.equal((await getJob('TDJ0610'))!.engineerId, null);
     });
 
     await test('R5 L2: job Excel — ยอดชำระ never negative, a refund in คืนเงิน, ค้างชำระ only on a closed job', async () => {
@@ -4640,7 +4741,7 @@ try {
         iat: now - 31 * 60_000,
         sv: SV,
       });
-      const headers = { cookie: `${SESSION_COOKIE}=${idle}; os_seen=${U.admin.id}` };
+      const headers = { cookie: `${SESSION_COOKIE}=${idle}; os_seen=${await uuidOf(U.admin)}` };
       const meIdle = await json(await meGET(await request('/api/sso/me', null, { headers })));
       assert.deepEqual([meIdle.status, meIdle.body.reason, meIdle.body.signedOut], [401, 'expired', undefined]);
       const rfIdle = await refreshGET(await request('/api/sso/refresh', null, { headers }));
@@ -4748,14 +4849,14 @@ try {
           receptionDate: j.receptionDate,
         };
       };
-      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: U.engineer.id }, U.admin.id);
+      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: await uuidOf(U.engineer) }, U.admin.id);
       assert.equal(await statusIdOf('TDJ0702'), 2);
-      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: 0 }, U.admin.id);
+      await updateJob('TDJ0702', { ...(await input('TDJ0702')), engineerId: '' }, U.admin.id);
       const j = (await getJob('TDJ0702'))!;
-      assert.deepEqual([j.statusId, j.engineerId, await logRows('TDJ0702')], [1, 0, [2, 1]]);
+      assert.deepEqual([j.statusId, j.engineerId, await logRows('TDJ0702')], [1, null, [2, 1]]);
       assert.ok(j.history[0].summary.endsWith(' · ไม่มีผู้รับงาน'), j.history[0].summary);
       // a job further along keeps its status when the engineer is cleared
-      await updateJob('TDJ0703', { ...(await input('TDJ0703')), engineerId: 0 }, U.admin.id);
+      await updateJob('TDJ0703', { ...(await input('TDJ0703')), engineerId: '' }, U.admin.id);
       assert.deepEqual([await statusIdOf('TDJ0703'), await logRows('TDJ0703')], [11, []]);
     });
   }
@@ -4767,11 +4868,11 @@ try {
     const { POST: uploadPOST } = await import('@/app/api/upload/route');
     // audit_log is append-only (drizzle/0006): rows of earlier runs stay — only the ones after `since` count
     const lastAuditId = async () =>
-      Number((await db.execute<{ m: number }>(sql`SELECT coalesce(max(id), 0) AS m FROM audit_log`)).rows[0]!.m);
+      Number((await db.execute<{ m: number }>(sql`SELECT coalesce(max(pk), 0) AS m FROM audit_log`)).rows[0]!.m);
     const auditOf = async (entity: string, key: string, since: number) =>
       (
         await db.execute<{ changes: Record<string, unknown> | null }>(
-          sql`SELECT changes FROM audit_log WHERE entity = ${entity} AND entity_key = ${key} AND id > ${since} ORDER BY id`,
+          sql`SELECT changes FROM audit_log WHERE entity = ${entity} AND entity_key = ${key} AND pk > ${since} ORDER BY pk`,
         )
       ).rows.map((r) => r.changes);
 
@@ -4807,7 +4908,7 @@ try {
           before,
           `${code} unchanged (no trim, no re-built address, no stamp, row_version kept)`,
         );
-        assert.deepEqual(await auditOf('customer', code, since), [], `${code} no audit row`);
+        assert.deepEqual(await auditOf('customer', String((await rowOf(code)).id), since), [], `${code} no audit row`);
       }
       assert.equal(await save({ ...(await form('TDC662')), line: 'td-r6' }), 200);
       const r = await rowOf('TDC662');
@@ -4815,7 +4916,8 @@ try {
         [r.line_id, r.customer_address, r.status_changed_at, r.row_version],
         ['td-r6', 'ห้อง 101 ( คอนโด ),  แขวงบางนาใต้ เขตบางนา จ.กรุงเทพมหานคร 10260', null, 1],
       );
-      assert.deepEqual(await auditOf('customer', 'TDC662', since), [{ lineId: ['', 'td-r6'] }]);
+      // the audit key = the customer's uuid (ADR 0008)
+      assert.deepEqual(await auditOf('customer', String(r.id), since), [{ lineId: ['', 'td-r6'] }]);
     });
 
     await test('R6 products: a product saved unchanged writes nothing (no status stamp, no audit); a price change logs only it, with the real old value', async () => {
@@ -4876,7 +4978,7 @@ try {
       const upload = async (u: TestUser, no: string) => {
         const fd = new FormData();
         fd.set('kind', 'sale-order-slip');
-        fd.set('id', no);
+        fd.set('id', await uuidBy('sale_out_hd', no)); // the order's uuid (ADR 0008)
         fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
         const req = new NextRequest('https://svc.example.test/api/upload', {
           method: 'POST',
@@ -4893,7 +4995,7 @@ try {
             method: 'POST',
             body: {
               customerCode: CUSTOMER,
-              salesId: U.seller.id,
+              salesId: await uuidOf(U.seller),
               submit: true,
               lines: [{ code: P.a.code, qty: 1, price: 100 }],
             },
@@ -4927,7 +5029,7 @@ try {
     const { NOT_ENGINEER, REOPEN_LOCKED } = await import('@/lib/validation/job');
     const { hasRight, invalidateGrantCache, grantsForUserType } = await import('@/server/auth');
     const { canViewPath } = await import('@/lib/modules');
-    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const { GET: productGET } = await import('@/app/api/products/[id]/route');
     const { GET: exportGET } = await import('@/app/api/export/[resource]/route');
     // the permissions page's save (POST /api/admin/permissions → savePermissions): it must take effect at once
     const tick = (role: string, menu: string, view: boolean) =>
@@ -4945,7 +5047,7 @@ try {
       const create = async () => {
         const body = {
           customerCode: CUSTOMER,
-          salesId: U.seller.id,
+          salesId: await uuidOf(U.seller),
           submit: true,
           lines: [{ code: P.a.code, qty: 1 }],
         };
@@ -4957,7 +5059,7 @@ try {
         json(
           await soApprovePOST(
             await request(`/api/sale-orders/${no}/approve`, u, { method: 'POST', body: { decision: 'approve' } }),
-            { params: Promise.resolve({ no }) },
+            { params: Promise.resolve({ id: await uuidBy('sale_out_hd', no) }) },
           ),
         );
       const no = await create();
@@ -4983,19 +5085,19 @@ try {
     await test('R6 Job Take: the assignee list + assertAssignee follow the right (clerk role ticked → takes a job; Engineer unticked → 400); Overdue All widens the bell', async () => {
       const offered = async () => (await listStaff()).filter((u) => u.takesJobs).map((u) => u.id);
       const scope = async (u: TestUser) => (await overdueAlerts(await userOf(u))).scope;
-      assert.ok(!(await offered()).includes(U.clerk.id));
-      assert.equal((await fieldsOf(assignJobs(['TDJ0801'], U.clerk.id, U.admin.id))).status, 400);
+      assert.ok(!(await offered()).includes(await uuidOf(U.clerk)));
+      assert.equal((await fieldsOf(assignJobs(['TDJ0801'], await uuidOf(U.clerk), U.admin.id))).status, 400);
       assert.deepEqual([await scope(U.engineer), await scope(U.clerk)], ['mine', 'all']);
       await tick('TD Job Clerk', 'Job Take', true);
       try {
-        assert.ok((await offered()).includes(U.clerk.id), 'offered at once: the save drops the staff cache');
-        assert.equal((await fieldsOf(assignJobs(['TDJ0801'], U.clerk.id, U.admin.id))).status, 200);
+        assert.ok((await offered()).includes(await uuidOf(U.clerk)), 'offered at once: the save drops the staff cache');
+        assert.equal((await fieldsOf(assignJobs(['TDJ0801'], await uuidOf(U.clerk), U.admin.id))).status, 200);
         assert.equal(await scope(U.clerk), 'mine', 'a job taker sees their own overdue jobs');
         await tick('TD Job Clerk', 'Overdue All', true);
         assert.equal(await scope(U.clerk), 'all', 'unless also Overdue All (Head Engineer)');
         await tick('Engineer', 'Job Take', false);
-        assert.ok(!(await offered()).includes(U.engineer.id));
-        const r = await fieldsOf(assignJobs(['TDJ0802'], U.engineer.id, U.admin.id));
+        assert.ok(!(await offered()).includes(await uuidOf(U.engineer)));
+        const r = await fieldsOf(assignJobs(['TDJ0802'], await uuidOf(U.engineer), U.admin.id));
         assert.deepEqual([r.status, r.fields], [400, { engineerId: NOT_ENGINEER }]);
       } finally {
         await tick('TD Job Clerk', 'Job Take', false);
@@ -5029,8 +5131,8 @@ try {
         (
           (
             await json(
-              await productGET(await request(`/api/products/${P.a.code}`, U.seller), {
-                params: Promise.resolve({ code: P.a.code }),
+              await productGET(await request(`/api/products/${await uuidBy('product', P.a.code)}`, U.seller), {
+                params: Promise.resolve({ id: await uuidBy('product', P.a.code) }),
               }),
             )
           ).body.product as { capitalPrice?: number }
@@ -5218,7 +5320,7 @@ try {
             sql`SELECT phone_no AS p, lark_id AS l, department AS d FROM app_user WHERE user_id = ${U.clerk.id}`,
           )
         ).rows[0];
-      const base = { id: String(U.clerk.id), name: 'TD td-clerk', role: U.clerk.type, status: 'Active' };
+      const base = { id: await uuidOf(U.clerk), name: 'TD td-clerk', role: U.clerk.type, status: 'Active' };
       await upsertUser({ ...base, phone: '0812345678', code: 'TD-LARK', branch: 'TD สาขา' }, U.admin.id);
       assert.deepEqual({ ...(await row()) }, { p: '0812345678', l: 'TD-LARK', d: 'TD สาขา' });
       await upsertUser(base, U.admin.id); // a caller that does not send them
@@ -5309,7 +5411,7 @@ try {
         'new user',
       );
       assert.equal((await db.execute(sql`SELECT 1 FROM app_user WHERE email_address = ${email}`)).rows.length, 0);
-      const clerk = { id: String(U.clerk.id), name: 'TD td-clerk', status: 'Active' };
+      const clerk = { id: await uuidOf(U.clerk), name: 'TD td-clerk', status: 'Active' };
       assert.deepEqual(
         await refusal(upsertUser({ ...clerk, role: PENDING_ROLE }, U.admin.id)),
         [400, ['role']],
@@ -5321,7 +5423,7 @@ try {
       assert.equal(await typeOf(U.clerk.id), U.clerk.type, 'role kept');
       // never worse: a still-pending user saved as it is (ถอนสิทธิ์ / แก้ไข) still saves
       await upsertUser(
-        { id: String(U.pending.id), name: 'TD td-pending', role: PENDING_ROLE, status: 'Active' },
+        { id: await uuidOf(U.pending), name: 'TD td-pending', role: PENDING_ROLE, status: 'Active' },
         U.admin.id,
       );
       assert.equal(await typeOf(U.pending.id), null);
@@ -5401,7 +5503,7 @@ try {
     const { POST: recordsPOST } = await import('@/app/api/admin/records/route');
     const { GET: attachGET, DELETE: attachDELETE } = await import('@/app/api/attachments/[id]/route');
     const { GET: filesGET } = await import('@/app/api/files/route');
-    const { GET: productGET } = await import('@/app/api/products/[code]/route');
+    const { GET: productGET } = await import('@/app/api/products/[id]/route');
     const png = await (
       await import('sharp')
     )
@@ -5507,16 +5609,21 @@ try {
               sql`SELECT record_status AS rs FROM customer WHERE customer_code = ${code}`,
             )
           ).rows[0]?.rs;
-        const refused = await records(U.viewer, { table: 'customers', id: 'TDC951', status: 'ACTIVE' });
+        // a customer goes by its uuid (ADR 0008)
+        const idOf = async (code: string) =>
+          (await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = $1`, [code])).rows[0]!
+            .id;
+        const [c951, c952] = [await idOf('TDC951'), await idOf('TDC952')];
+        const refused = await records(U.viewer, { table: 'customers', id: c951, status: 'ACTIVE' });
         assert.equal(refused.status, 403);
         assert.equal(refused.body.error, 'กู้คืนลูกค้าที่ลบแล้วได้เฉพาะผู้ดูแลระบบ');
         assert.equal(await rsOf('TDC951'), 'DELETED');
-        assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'INACTIVE' })).status, 200);
-        assert.equal((await records(U.viewer, { table: 'customers', id: 'TDC952', status: 'ACTIVE' })).status, 200);
+        assert.equal((await records(U.viewer, { table: 'customers', id: c952, status: 'INACTIVE' })).status, 200);
+        assert.equal((await records(U.viewer, { table: 'customers', id: c952, status: 'ACTIVE' })).status, 200);
         // TD Job Clerk holds Customer del — still not enough (owner 2026-10-21: the dialog says ผู้ดูแลระบบ)
-        assert.equal((await records(U.clerk, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 403);
+        assert.equal((await records(U.clerk, { table: 'customers', id: c951, status: 'ACTIVE' })).status, 403);
         assert.equal(await rsOf('TDC951'), 'DELETED');
-        assert.equal((await records(U.admin, { table: 'customers', id: 'TDC951', status: 'ACTIVE' })).status, 200);
+        assert.equal((await records(U.admin, { table: 'customers', id: c951, status: 'ACTIVE' })).status, 200);
         assert.equal(await rsOf('TDC951'), 'ACTIVE');
       } finally {
         await pool.query(
@@ -5528,11 +5635,11 @@ try {
 
     await test('SEC L4 attachments: delete needs Job Management del, is soft (no storage call), and a removed one answers 404', async () => {
       const [{ id }] = (
-        await db.execute<{ id: number }>(sql`
+        await db.execute<{ id: string }>(sql`
           INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name, system_file_name, remark, is_active)
-            VALUES ('Job', 'TDJ0953', 'a.png', 'x.png', '', true) RETURNING document_attach_id AS id`)
+            VALUES ('Job', 'TDJ0953', 'a.png', 'x.png', '', true) RETURNING id::text AS id`)
       ).rows;
-      const ctx = { params: Promise.resolve({ id: String(id) }) };
+      const ctx = { params: Promise.resolve({ id }) };
       const call = async (fn: typeof attachGET, u: TestUser, method: string) =>
         (await fn(await request(`/api/attachments/${id}`, u, { method }), ctx)).status;
       // TD Job Clerk: Job Management view + edit, no del
@@ -5545,13 +5652,13 @@ try {
       });
       const [row] = (
         await db.execute<{ rs: string; f: string }>(
-          sql`SELECT record_status AS rs, system_file_name AS f FROM document_attach WHERE document_attach_id = ${id}`,
+          sql`SELECT record_status AS rs, system_file_name AS f FROM document_attach WHERE id = ${id}`,
         )
       ).rows;
       assert.deepEqual(row, { rs: 'DELETED', f: 'x.png' });
     });
 
-    await test('SEC L5 /api/files: a staff file needs view on its screen (jobs / sale-orders / products); /api/products/:code needs a product screen', async () => {
+    await test('SEC L5 /api/files: a staff file needs view on its screen (jobs / sale-orders / products); /api/products/:id needs a product screen', async () => {
       const file = async (u: TestUser | null, path: string) =>
         (await filesGET(await request(`/api/files?path=${encodeURIComponent(path)}`, u))).status;
       const J = 'jobs/TDJ0953/slip/a.png';
@@ -5566,8 +5673,8 @@ try {
       });
       const product = async (u: TestUser) =>
         (
-          await productGET(await request(`/api/products/${P.a.code}`, u), {
-            params: Promise.resolve({ code: P.a.code }),
+          await productGET(await request(`/api/products/${await uuidBy('product', P.a.code)}`, u), {
+            params: Promise.resolve({ id: await uuidBy('product', P.a.code) }),
           })
         ).status;
       assert.deepEqual([await product(U.viewer), await product(U.clerk), await product(U.picker)], [403, 403, 200]);
@@ -5582,7 +5689,7 @@ try {
 
     await test('SEC savePermissions: one audit entry per role in the payload, keyed by that role', async () => {
       const since = Number(
-        (await db.execute<{ m: number }>(sql`SELECT coalesce(max(id), 0) AS m FROM audit_log`)).rows[0]!.m,
+        (await db.execute<{ m: number }>(sql`SELECT coalesce(max(pk), 0) AS m FROM audit_log`)).rows[0]!.m,
       );
       const set = (view: boolean) =>
         savePermissions(
@@ -5597,7 +5704,7 @@ try {
       try {
         const rows = (
           await db.execute<{ k: string; changes: Record<string, unknown> }>(
-            sql`SELECT entity_key AS k, changes FROM audit_log WHERE entity = 'app_config' AND id > ${since} ORDER BY entity_key`,
+            sql`SELECT entity_key AS k, changes FROM audit_log WHERE entity = 'app_config' AND pk > ${since} ORDER BY entity_key`,
           )
         ).rows;
         assert.deepEqual(
@@ -5688,8 +5795,8 @@ try {
     const { saveProduct } = await import('@/server/services/stock');
     const logOf = async (jobNo: string) =>
       (
-        await db.execute<{ id: number; req: number; g: number; r: number; s: number }>(sql`
-          SELECT job_order_log_id AS id, request_qty AS req, grant_qty AS g, return_qty AS r, order_status_id AS s
+        await db.execute<{ id: string; req: number; g: number; r: number; s: number }>(sql`
+          SELECT id::text AS id, request_qty AS req, grant_qty AS g, return_qty AS r, order_status_id AS s
             FROM job_order_spare_part_log WHERE job_no = ${jobNo}`)
       ).rows[0];
     await pool.query(`
@@ -5705,7 +5812,7 @@ try {
         ('J9900961', '${P.a.code}', '', 1, false, true, 4, 100, 0, 1, now(), 9101, 0, 0),
         ('J9900962', '${P.b.code}', '', 1, false, true, 4, 200, 0, 3, now(), 9101, 4, 0),
         ('J9900963', '${P.c.code}', '', 1, true, true, 1, 300, 300, 1, now(), 9101, 0, 0);`);
-    const pick = async (type: 'job' | 'return', ref: string, logId: number) =>
+    const pick = async (type: 'job' | 'return', ref: string, logId: string) =>
       json(
         await stockIssuePOST(
           await request('/api/stock/issue', U.admin, {
@@ -5769,7 +5876,7 @@ try {
       ).rows[0];
     await test('a DELETED job: edit / repair / close / out-source / swap → 409, nothing written; restored via records it saves again', async () => {
       const no = 'J9900964';
-      await setRecordStatus('jobs', no, 'DELETED', U.admin.id);
+      await setRecordStatus('jobs', await uuidBy('job', no), 'DELETED', U.admin.id);
       const before = await jobState(no);
       const status = (await getJob(no))!.status;
       const calls = {
@@ -5790,7 +5897,7 @@ try {
         assert.deepEqual([name, r.status, r.message], [name, 409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้']);
       }
       assert.deepEqual(await jobState(no), before, 'nothing written');
-      await setRecordStatus('jobs', no, 'ACTIVE', U.admin.id);
+      await setRecordStatus('jobs', await uuidBy('job', no), 'ACTIVE', U.admin.id);
       assert.equal((await fieldsOf(updateJob(no, { ...jobEdit, remark: 'TD restored' }, U.admin.id))).status, 200);
     });
     await test('a DELETED quotation: a save with a new status (and a stale version) → 409 deleted, still DELETED; restored via records it saves', async () => {
@@ -5820,7 +5927,7 @@ try {
           )
         ).rows[0];
       assert.deepEqual({ ...(await row()) }, { quotation_status_id: 1, record_status: 'DELETED', row_version: 0 });
-      await setRecordStatus('quotations', 'TDQ0961', 'ACTIVE', U.admin.id);
+      await setRecordStatus('quotations', await uuidBy('quotation_hd', 'TDQ0961'), 'ACTIVE', U.admin.id);
       assert.equal((await save()).status, 200);
       assert.equal((await row()).quotation_status_id, 2);
     });
@@ -5843,7 +5950,10 @@ try {
         (await db.execute(sql`SELECT customer_name, record_status FROM customer WHERE customer_code = 'TDC961'`))
           .rows[0];
       assert.deepEqual({ ...(await row()) }, { customer_name: 'TD ลูกค้าที่ลบ', record_status: 'DELETED' });
-      await setRecordStatus('customers', 'TDC961', 'ACTIVE', U.admin.id);
+      const [{ id }] = (
+        await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = 'TDC961'`)
+      ).rows;
+      await setRecordStatus('customers', id, 'ACTIVE', U.admin.id); // by its uuid
       assert.equal((await save()).status, 200);
     });
     await test('a DELETED product: an edit with status Active (and a stale version) → 409 deleted, still DELETED; restored via records it saves', async () => {
@@ -5860,7 +5970,7 @@ try {
       const row = async () =>
         (await db.execute(sql`SELECT product_name, record_status FROM product WHERE product_code = 'TDP961'`)).rows[0];
       assert.deepEqual({ ...(await row()) }, { product_name: 'TD อะไหล่ที่ลบ', record_status: 'DELETED' });
-      await setRecordStatus('products', 'TDP961', 'ACTIVE', U.admin.id);
+      await setRecordStatus('products', await uuidBy('product', 'TDP961'), 'ACTIVE', U.admin.id);
       assert.equal((await save()).status, 200);
     });
     await test('a customer deleted while a form was open: new job / job moved to it / new quotation / new sale order → 409, nothing written; restored they save; documents already on it still save', async () => {
@@ -5889,7 +5999,12 @@ try {
         contactName: 'TD',
         lines: [{ itemType: 'SparePart' as const, code: P.a.code, detail: 'TD', qty: 1, unit: 'ชิ้น', unitPrice: 100 }],
       };
-      const order = { customerCode: 'TDC962', salesId: U.admin.id, submit: false, lines: [{ code: P.b.code, qty: 1 }] };
+      const order = {
+        customerCode: 'TDC962',
+        salesId: await uuidOf(U.admin),
+        submit: false,
+        lines: [{ code: P.b.code, qty: 1 }],
+      };
       const admin = { userId: U.admin.id, isAdmin: true };
       const written = async () =>
         (
@@ -5910,7 +6025,10 @@ try {
         assert.deepEqual([name, r.status, r.message], [name, 409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น']);
       }
       assert.deepEqual(await written(), before, 'nothing written');
-      await setRecordStatus('customers', 'TDC962', 'ACTIVE', U.admin.id);
+      const [{ id }] = (
+        await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = 'TDC962'`)
+      ).rows;
+      await setRecordStatus('customers', id, 'ACTIVE', U.admin.id); // by its uuid
       for (const [name, call] of Object.entries(calls))
         assert.deepEqual([name, (await fieldsOf(call())).status], [name, 200]);
       assert.deepEqual({ ...(await written()) }, { jobs: 2, quotations: 1, orders: 1 });
@@ -5925,7 +6043,7 @@ try {
           sql`SELECT sale_out_hd_no AS no FROM sale_out_hd WHERE customer_code = 'TDC962'`,
         )
       ).rows;
-      await setRecordStatus('customers', 'TDC962', 'DELETED', U.admin.id);
+      await setRecordStatus('customers', id, 'DELETED', U.admin.id);
       const keep = {
         updateJob: () => updateJob('J9900964', { ...moved, remark: 'TD keeps a deleted customer' }, U.admin.id),
         saveQuotation: () => saveQuotation({ ...quote, no: q!.no, remark: 'TD keep' }, U.admin.id),
@@ -6111,8 +6229,8 @@ try {
 
     await test('QA 4b: Out-Source saved again as stored (send, a repeated receive) adds no history row', async () => {
       const [s14, s15] = [await statusName(14), await statusName(15)];
-      const send = { to: 'TD Vendor QA', date: '2026-10-20', by: U.admin.id };
-      const receive = { from: send.to, date: '2026-10-22', by: U.admin.id };
+      const send = { to: 'TD Vendor QA', date: '2026-10-20', by: await uuidOf(U.admin) };
+      const receive = { from: send.to, date: '2026-10-22', by: await uuidOf(U.admin) };
       await saveOutsource('TDJQ07', { send, status: s14 }, U.admin.id);
       let before = await trail('TDJQ07');
       await saveOutsource('TDJQ07', { send, status: s14 }, U.admin.id);
@@ -6144,7 +6262,7 @@ try {
       );
       const md = await one(`SELECT model_id AS id, model_code AS n FROM model ORDER BY model_id LIMIT 1`);
       const sy = await one(`SELECT symptom_id AS id, symptom_name AS n FROM symptom ORDER BY symptom_id LIMIT 1`);
-      const sh = await one(`SELECT id, name_th AS n FROM shipping_profile WHERE code = 'TDQA'`);
+      const sh = await one(`SELECT pk AS id, name_th AS n FROM shipping_profile WHERE code = 'TDQA'`);
       const cu = await one(
         `SELECT customer_id AS id, concat_ws(' ', customer_code, customer_name) AS n FROM customer WHERE customer_id = 9001`,
       );
@@ -6208,7 +6326,7 @@ try {
       assert.deepEqual(answer, { name, remark: '😀'.repeat(100) }, 'the answer = what was stored');
       const [row] = (
         await db.execute<{ n: string; r: string }>(
-          sql`SELECT original_file_name AS n, remark AS r FROM document_attach WHERE document_attach_id = ${id}`,
+          sql`SELECT original_file_name AS n, remark AS r FROM document_attach WHERE id = ${id}`,
         )
       ).rows;
       assert.equal(row!.n, name);
@@ -6233,8 +6351,8 @@ try {
       await pool.query(`DELETE FROM job_log WHERE job_no = 'TDJCAN'; DELETE FROM audit_log WHERE entity_key = 'TDJCAN';
         DELETE FROM job WHERE job_no = 'TDJCAN';
         INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJCAN', 2, 'ACTIVE')`);
-      const cancel = (u: TestUser, remark?: string) =>
-        records(u, { table: 'jobs', id: 'TDJCAN', status: 'DELETED', remark });
+      const cancel = async (u: TestUser, remark?: string) =>
+        records(u, { table: 'jobs', id: await uuidBy('job', 'TDJCAN'), status: 'DELETED', remark });
       // TD Job Clerk: Job Management view + edit, no del → 403 (before the reason is looked at)
       assert.equal((await cancel(U.clerk, 'TD เหตุผล')).status, 403);
       for (const remark of [undefined, '', '   ']) {
@@ -6285,9 +6403,18 @@ try {
     await test('deleting a quotation needs a reason too (400 without), which lands on its audit line', async () => {
       await pool.query(`DELETE FROM audit_log WHERE entity_key = 'TDQCAN'; DELETE FROM quotation_hd WHERE quotation_no = 'TDQCAN';
         INSERT INTO quotation_hd (quotation_no, record_status) VALUES ('TDQCAN', 'ACTIVE')`);
-      const r = await records(U.admin, { table: 'quotations', id: 'TDQCAN', status: 'DELETED' });
+      const r = await records(U.admin, {
+        table: 'quotations',
+        id: await uuidBy('quotation_hd', 'TDQCAN'),
+        status: 'DELETED',
+      });
       assert.deepEqual([r.status, r.body.error], [400, 'ระบุเหตุผลที่ยกเลิก']);
-      const ok = await records(U.admin, { table: 'quotations', id: 'TDQCAN', status: 'DELETED', remark: 'TD ซ้ำ' });
+      const ok = await records(U.admin, {
+        table: 'quotations',
+        id: await uuidBy('quotation_hd', 'TDQCAN'),
+        status: 'DELETED',
+        remark: 'TD ซ้ำ',
+      });
       assert.equal(ok.status, 200, JSON.stringify(ok.body));
       const [a] = (await db.execute<{ s: string }>(sql`SELECT summary AS s FROM audit_log WHERE entity_key = 'TDQCAN'`))
         .rows;

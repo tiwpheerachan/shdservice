@@ -25,9 +25,11 @@ import {
   bigserial,
   serial,
 } from 'drizzle-orm/pg-core';
+import { uuidId } from './id';
 import { sql } from 'drizzle-orm';
 
 export const inventoryHd = pgTable('inventory_hd', {
+  id: uuidId(),
   inventoryHdId: integer('inventory_hd_id').primaryKey().generatedByDefaultAsIdentity(),
   inventoryNo: varchar('inventory_no', { length: 50 }),
   inventoryTypeId: integer('inventory_type_id'),
@@ -43,6 +45,7 @@ export const inventoryHd = pgTable('inventory_hd', {
 });
 
 export const inventoryType = pgTable('inventory_type', {
+  id: uuidId(),
   inventoryTypeId: integer('inventory_type_id').primaryKey().notNull(),
   inventoryTypeName: varchar('inventory_type_name', { length: 50 }),
   movementActionType: varchar('movement_action_type', { length: 50 }),
@@ -55,6 +58,7 @@ export const inventoryType = pgTable('inventory_type', {
 });
 
 export const modelTier = pgTable('model_tier', {
+  id: uuidId(),
   tierId: integer('tier_id').primaryKey().generatedByDefaultAsIdentity(),
   tierNo: varchar('tier_no', { length: 50 }),
   minPrice: numeric('min_price', { precision: 18, scale: 2 }),
@@ -63,6 +67,7 @@ export const modelTier = pgTable('model_tier', {
 });
 
 export const product = pgTable('product', {
+  id: uuidId(),
   // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
   recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
   statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -89,6 +94,7 @@ export const product = pgTable('product', {
 });
 
 export const saleOutDt = pgTable('sale_out_dt', {
+  id: uuidId(),
   saleOutDtId: integer('sale_out_dt_id').primaryKey().generatedByDefaultAsIdentity(),
   saleOutHdNo: varchar('sale_out_hd_no', { length: 50 }),
   listNo: integer('list_no'),
@@ -112,6 +118,7 @@ export const saleOutDt = pgTable('sale_out_dt', {
 });
 
 export const productNoneSerial = pgTable('product_none_serial', {
+  id: uuidId(),
   itemId: integer('item_id').primaryKey().generatedByDefaultAsIdentity(),
   productId: integer('product_id'),
   storeLocationId: integer('store_location_id'),
@@ -131,6 +138,7 @@ export const productNoneSerial = pgTable('product_none_serial', {
 });
 
 export const productSerial = pgTable('product_serial', {
+  id: uuidId(),
   itemId: integer('item_id').primaryKey().generatedByDefaultAsIdentity(),
   serialNo: varchar('serial_no', { length: 100 }),
   productId: integer('product_id'),
@@ -155,6 +163,7 @@ export const productSerial = pgTable('product_serial', {
 });
 
 export const mtCity = pgTable('mt_city', {
+  id: uuidId(),
   cityId: integer('city_id').primaryKey().notNull(),
   nameEn: varchar('name_en', { length: 50 }).notNull(),
   nameTh: varchar('name_th', { length: 50 }).notNull(),
@@ -164,6 +173,7 @@ export const mtCity = pgTable('mt_city', {
 export const mtDistrict = pgTable(
   'mt_district',
   {
+    id: uuidId(),
     cityId: integer('city_id').notNull(),
     districtId: integer('district_id').primaryKey().notNull(),
     nameEn: varchar('name_en', { length: 50 }).notNull(),
@@ -182,6 +192,7 @@ export const mtDistrict = pgTable(
 export const customer = pgTable(
   'customer',
   {
+    id: uuidId(),
     // optimistic-locking token (drizzle/0026) — bumped by a trigger on every update; edit forms send it back
     rowVersion: integer('row_version').notNull().default(0),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
@@ -216,6 +227,7 @@ export const customer = pgTable(
 export const mtSubDistrict = pgTable(
   'mt_sub_district',
   {
+    id: uuidId(),
     cityId: integer('city_id').notNull(),
     districtId: integer('district_id').notNull(),
     subDistrictId: integer('sub_district_id').primaryKey().notNull(),
@@ -238,7 +250,8 @@ export const mtSubDistrict = pgTable(
 );
 
 export const appBackUpDbLog = pgTable('app_back_up_db_log', {
-  id: integer().primaryKey().generatedByDefaultAsIdentity(),
+  id: uuidId(),
+  pk: integer().primaryKey().generatedByDefaultAsIdentity(),
   backUpDate: timestamp('back_up_date', { mode: 'string' }),
   backUpBy: integer('back_up_by'),
   backUpFileName: varchar('back_up_file_name', { length: 100 }),
@@ -247,6 +260,7 @@ export const appBackUpDbLog = pgTable('app_back_up_db_log', {
 export const appConfig = pgTable(
   'app_config',
   {
+    id: uuidId(),
     configId: integer('config_id').primaryKey().generatedByDefaultAsIdentity(),
     userType: varchar('user_type', { length: 50 }),
     moduleName: varchar('module_name', { length: 50 }),
@@ -265,6 +279,7 @@ export const appConfig = pgTable(
 );
 
 export const approveStatus = pgTable('approve_status', {
+  id: uuidId(),
   approveStatusId: integer('approve_status_id').primaryKey().notNull(),
   approveNameTh: varchar('approve_name_th', { length: 50 }),
   approveNameEn: varchar('approve_name_en', { length: 50 }),
@@ -276,6 +291,7 @@ export const approveStatus = pgTable('approve_status', {
 export const category = pgTable(
   'category',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -290,17 +306,19 @@ export const category = pgTable(
 );
 
 export const color = pgTable('color', {
+  id: uuidId(),
   // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
   recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
   statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
   statusChangedBy: integer('status_changed_by'),
-  id: integer().primaryKey().generatedByDefaultAsIdentity(),
+  pk: integer().primaryKey().generatedByDefaultAsIdentity(),
   colorName: varchar('color_name', { length: 50 }),
   description: varchar({ length: 100 }),
   isActive: boolean('is_active'),
 });
 
 export const condition = pgTable('condition', {
+  id: uuidId(),
   conditionId: integer('condition_id').primaryKey().generatedByDefaultAsIdentity(),
   conditionName: varchar('condition_name', { length: 50 }),
   conditionDescription: varchar('condition_description', { length: 100 }),
@@ -308,6 +326,7 @@ export const condition = pgTable('condition', {
 });
 
 export const documentAttach = pgTable('document_attach', {
+  id: uuidId(),
   // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
   recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
   statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -322,6 +341,7 @@ export const documentAttach = pgTable('document_attach', {
 });
 
 export const inventoryDt = pgTable('inventory_dt', {
+  id: uuidId(),
   inventoryDtId: integer('inventory_dt_id').primaryKey().generatedByDefaultAsIdentity(),
   inventoryNo: varchar('inventory_no', { length: 50 }),
   itemCode: varchar('item_code', { length: 50 }),
@@ -333,6 +353,7 @@ export const inventoryDt = pgTable('inventory_dt', {
 });
 
 export const job = pgTable('job', {
+  id: uuidId(),
   // optimistic-locking token (drizzle/0026) — see customer.rowVersion
   rowVersion: integer('row_version').notNull().default(0),
   // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
@@ -427,6 +448,7 @@ export const job = pgTable('job', {
 });
 
 export const jobCallLog = pgTable('job_call_log', {
+  id: uuidId(),
   jobCallLogId: integer('job_call_log_id').primaryKey().generatedByDefaultAsIdentity(),
   jobNo: varchar('job_no', { length: 50 }),
   callLogDescription: varchar('call_log_description', { length: 200 }),
@@ -435,7 +457,8 @@ export const jobCallLog = pgTable('job_call_log', {
 });
 
 export const jobCloseTemp = pgTable('job_close_temp', {
-  id: integer().primaryKey().generatedByDefaultAsIdentity(),
+  id: uuidId(),
+  pk: integer().primaryKey().generatedByDefaultAsIdentity(),
   serialNo: varchar('serial_no', { length: 50 }),
   isCanCloseJob: boolean('is_can_close_job'),
   refJobNo: varchar('ref_job_no', { length: 50 }),
@@ -444,7 +467,8 @@ export const jobCloseTemp = pgTable('job_close_temp', {
 });
 
 export const jobCreateTemp = pgTable('job_create_temp', {
-  id: integer().primaryKey().generatedByDefaultAsIdentity(),
+  id: uuidId(),
+  pk: integer().primaryKey().generatedByDefaultAsIdentity(),
   productImeiNo: varchar('product_imei_no', { length: 50 }),
   lotNo: varchar('lot_no', { length: 50 }),
   modelCode: varchar('model_code', { length: 50 }),
@@ -457,6 +481,7 @@ export const jobCreateTemp = pgTable('job_create_temp', {
 });
 
 export const jobLog = pgTable('job_log', {
+  id: uuidId(),
   jobLogId: bigint('job_log_id', { mode: 'number' }).primaryKey().generatedByDefaultAsIdentity(),
   jobNo: varchar('job_no', { length: 50 }),
   jobStatusId: integer('job_status_id'),
@@ -467,6 +492,7 @@ export const jobLog = pgTable('job_log', {
 export const jobOrderSparePartLog = pgTable(
   'job_order_spare_part_log',
   {
+    id: uuidId(),
     jobOrderLogId: integer('job_order_log_id').primaryKey().generatedByDefaultAsIdentity(),
     jobNo: varchar('job_no', { length: 50 }),
     sparePartCode: varchar('spare_part_code', { length: 50 }),
@@ -496,12 +522,14 @@ export const jobOrderSparePartLog = pgTable(
 );
 
 export const jobOrderSparePartStatus = pgTable('job_order_spare_part_status', {
+  id: uuidId(),
   orderStatusId: integer('order_status_id').primaryKey().notNull(),
   orderStatusName: varchar('order_status_name', { length: 50 }),
   orderStatusDescription: varchar('order_status_description', { length: 50 }),
 });
 
 export const jobReturnDt = pgTable('job_return_dt', {
+  id: uuidId(),
   jobReturnDtId: integer('job_return_dt_id').primaryKey().generatedByDefaultAsIdentity(),
   returnNo: varchar('return_no', { length: 50 }),
   itemNo: varchar('item_no', { length: 50 }),
@@ -513,6 +541,7 @@ export const jobReturnDt = pgTable('job_return_dt', {
 });
 
 export const jobReturnHd = pgTable('job_return_hd', {
+  id: uuidId(),
   jobReturnId: integer('job_return_id').primaryKey().generatedByDefaultAsIdentity(),
   returnDate: timestamp('return_date', { mode: 'string' }),
   returnCustomerName: varchar('return_customer_name', { length: 100 }),
@@ -526,7 +555,8 @@ export const jobReturnHd = pgTable('job_return_hd', {
 });
 
 export const jobSendForwardDt = pgTable('job_send_forward_dt', {
-  id: integer().primaryKey().generatedByDefaultAsIdentity(),
+  id: uuidId(),
+  pk: integer().primaryKey().generatedByDefaultAsIdentity(),
   jobNo: varchar('job_no', { length: 50 }),
   sendToName: varchar('send_to_name', { length: 50 }),
   sendDetail: varchar('send_detail', { length: 100 }),
@@ -539,12 +569,14 @@ export const jobSendForwardDt = pgTable('job_send_forward_dt', {
 });
 
 export const jobServiceCode = pgTable('job_service_code', {
+  id: uuidId(),
   serviceCode: varchar('service_code', { length: 50 }).primaryKey().notNull(),
   serviceName: varchar('service_name', { length: 50 }),
   serviceDescription: varchar('service_description', { length: 50 }),
 });
 
 export const jobStatus = pgTable('job_status', {
+  id: uuidId(),
   jobStatusId: integer('job_status_id').primaryKey().notNull(),
   jobStatusName: varchar('job_status_name', { length: 100 }),
   displayOrder: integer('display_order'),
@@ -555,6 +587,7 @@ export const jobStatus = pgTable('job_status', {
 export const jobType = pgTable(
   'job_type',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -572,6 +605,7 @@ export const jobType = pgTable(
 export const manufacturer = pgTable(
   'manufacturer',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -589,6 +623,7 @@ export const manufacturer = pgTable(
 export const model = pgTable(
   'model',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -613,6 +648,7 @@ export const model = pgTable(
 );
 
 export const modelColor = pgTable('model_color', {
+  id: uuidId(),
   itemId: integer('item_id').primaryKey().generatedByDefaultAsIdentity(),
   modelName: varchar('model_name', { length: 50 }),
   colorName: varchar('color_name', { length: 100 }),
@@ -622,6 +658,7 @@ export const modelColor = pgTable('model_color', {
 });
 
 export const modelPart = pgTable('model_part', {
+  id: uuidId(),
   itemPriceId: integer('item_price_id').primaryKey().generatedByDefaultAsIdentity(),
   modelItemId: integer('model_item_id'),
   color: varchar({ length: 50 }),
@@ -632,6 +669,7 @@ export const modelPart = pgTable('model_part', {
 });
 
 export const productModel = pgTable('product_model', {
+  id: uuidId(),
   productModelId: integer('product_model_id').primaryKey().generatedByDefaultAsIdentity(),
   productId: integer('product_id'),
   modelCode: varchar('model_code', { length: 50 }),
@@ -640,6 +678,7 @@ export const productModel = pgTable('product_model', {
 export const productType = pgTable(
   'product_type',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -658,6 +697,7 @@ export const productType = pgTable(
 export const quotationDt = pgTable(
   'quotation_dt',
   {
+    id: uuidId(),
     quotationDtId: integer('quotation_dt_id').primaryKey().generatedByDefaultAsIdentity(),
     quotationNo: varchar('quotation_no', { length: 50 }),
     lineNumber: integer('line_number'),
@@ -678,6 +718,7 @@ export const quotationDt = pgTable(
 export const quotationHd = pgTable(
   'quotation_hd',
   {
+    id: uuidId(),
     // optimistic-locking token (drizzle/0026) — see customer.rowVersion
     rowVersion: integer('row_version').notNull().default(0),
     // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
@@ -721,16 +762,19 @@ export const quotationHd = pgTable(
 );
 
 export const quotationStatus = pgTable('quotation_status', {
+  id: uuidId(),
   quotationStatusId: integer('quotation_status_id').primaryKey().notNull(),
   quotationStatusName: varchar('quotation_status_name', { length: 50 }).notNull(),
 });
 
 export const quotationTemp = pgTable('quotation_temp', {
+  id: uuidId(),
   quotationNo: varchar('quotation_no', { length: 50 }).primaryKey().notNull(),
   isCanEdit: boolean('is_can_edit'),
 });
 
 export const runningNo = pgTable('running_no', {
+  id: uuidId(),
   runningId: integer('running_id').primaryKey().generatedByDefaultAsIdentity(),
   runningType: varchar('running_type', { length: 50 }).notNull(),
   companyId: integer('company_id').notNull(),
@@ -746,6 +790,7 @@ export const runningNo = pgTable('running_no', {
 });
 
 export const saleInDt = pgTable('sale_in_dt', {
+  id: uuidId(),
   saleInDtId: integer('sale_in_dt_id').primaryKey().generatedByDefaultAsIdentity(),
   saleInHdNo: varchar('sale_in_hd_no', { length: 50 }),
   listNo: integer('list_no'),
@@ -762,6 +807,7 @@ export const saleInDt = pgTable('sale_in_dt', {
 });
 
 export const saleInHd = pgTable('sale_in_hd', {
+  id: uuidId(),
   saleInHdId: integer('sale_in_hd_id').primaryKey().generatedByDefaultAsIdentity(),
   saleInHdNo: varchar('sale_in_hd_no', { length: 50 }),
   saleInType: varchar('sale_in_type', { length: 50 }),
@@ -770,6 +816,7 @@ export const saleInHd = pgTable('sale_in_hd', {
 });
 
 export const saleOutHd = pgTable('sale_out_hd', {
+  id: uuidId(),
   // optimistic-locking token (drizzle/0026) — see customer.rowVersion
   rowVersion: integer('row_version').notNull().default(0),
   // --- issuing profile added by this app (drizzle/0007_document_profile.sql); NULL = SHD ---
@@ -819,6 +866,7 @@ export const saleOutHd = pgTable('sale_out_hd', {
 });
 
 export const serviceCost = pgTable('service_cost', {
+  id: uuidId(),
   serviceCode: varchar('service_code', { length: 50 }).primaryKey().notNull(),
   serviceDescription: varchar('service_description', { length: 100 }),
   serviceCost: numeric('service_cost', { precision: 18, scale: 2 }),
@@ -827,6 +875,7 @@ export const serviceCost = pgTable('service_cost', {
 export const storeLocation = pgTable(
   'store_location',
   {
+    id: uuidId(),
     storeLocationId: integer('store_location_id').primaryKey().generatedByDefaultAsIdentity(),
     storeLocationName: varchar('store_location_name', { length: 50 }),
     storeLocationDescription: varchar('store_location_description', { length: 50 }),
@@ -839,6 +888,7 @@ export const storeLocation = pgTable(
 );
 
 export const symptom = pgTable('symptom', {
+  id: uuidId(),
   // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
   recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
   statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -851,13 +901,15 @@ export const symptom = pgTable('symptom', {
 });
 
 export const tempModel = pgTable('temp_model', {
-  id: integer(),
+  id: uuidId(),
+  pk: integer(),
   modelName: varchar('model_name', { length: 50 }),
   modelCode: varchar('model_code', { length: 50 }),
   marketPrice: numeric('market_price', { precision: 18, scale: 2 }),
 });
 
 export const tempSparePart = pgTable('temp_spare_part', {
+  id: uuidId(),
   itemId: integer('item_id'),
   productVenderCode: varchar('product_vender_code', { length: 50 }),
   sparePartNameTh: varchar('spare_part_name_th', { length: 100 }),
@@ -873,6 +925,7 @@ export const tempSparePart = pgTable('temp_spare_part', {
 export const appUser = pgTable(
   'app_user',
   {
+    id: uuidId(),
     // --- soft-delete status added by this app (drizzle/0003_record_status.sql) ---
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -938,6 +991,7 @@ export const viewCustomer = pgView('view_customer', {
 export const jobSymptom = pgTable(
   'job_symptom',
   {
+    id: uuidId(),
     jobNo: varchar('job_no', { length: 50 }).notNull(),
     symptomId: integer('symptom_id').notNull(),
   },
@@ -948,6 +1002,7 @@ export const jobSymptom = pgTable(
 );
 
 export const recordStatus = pgTable('record_status', {
+  id: uuidId(),
   code: varchar({ length: 10 }).primaryKey().notNull(),
   nameTh: varchar('name_th', { length: 50 }).notNull(),
   nameEn: varchar('name_en', { length: 50 }).notNull(),
@@ -958,7 +1013,8 @@ export const recordStatus = pgTable('record_status', {
 export const auditLog = pgTable(
   'audit_log',
   {
-    id: bigserial('id', { mode: 'number' }).primaryKey().notNull(),
+    id: uuidId(),
+    pk: bigserial('pk', { mode: 'number' }).primaryKey().notNull(),
     at: timestamp('at', { mode: 'string' }).notNull(),
     userId: integer('user_id').notNull().default(0),
     userName: varchar('user_name', { length: 100 }).notNull().default(''),
@@ -980,7 +1036,8 @@ export const auditLog = pgTable(
 
 // --- document_profile (drizzle/0007_document_profile.sql) — "ออกเอกสารในนาม" ---
 export const documentProfile = pgTable('document_profile', {
-  id: serial('id').primaryKey().notNull(),
+  id: uuidId(),
+  pk: serial('pk').primaryKey().notNull(),
   code: varchar('code', { length: 20 }).notNull(),
   nameTh: varchar('name_th', { length: 200 }).notNull(),
   nameEn: varchar('name_en', { length: 200 }).notNull().default(''),
@@ -1012,7 +1069,8 @@ export const documentProfile = pgTable('document_profile', {
 
 /** โปรไฟล์บริษัทขนส่ง (drizzle/0013) — logo + tracking URL shown on the public tracking page */
 export const shippingProfile = pgTable('shipping_profile', {
-  id: serial('id').primaryKey(),
+  id: uuidId(),
+  pk: serial('pk').primaryKey(),
   code: varchar('code', { length: 20 }).notNull(),
   nameTh: varchar('name_th', { length: 200 }).notNull(),
   nameEn: varchar('name_en', { length: 200 }).notNull().default(''),

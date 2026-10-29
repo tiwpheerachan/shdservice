@@ -16,7 +16,7 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
     const row = await saveSimple(
       kind,
       {
-        id: b.id,
+        id: b.id ?? undefined,
         name: b.name ?? '',
         detail: b.detail,
         extra: b.extra,
@@ -30,7 +30,14 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
   }
   if (kind === 'symptoms') {
     const row = await saveSymptom(
-      { id: b.id, name: b.name ?? '', detail: b.detail, group: b.group, status: b.status, expect: b.expect },
+      {
+        id: b.id ?? undefined,
+        name: b.name ?? '',
+        detail: b.detail,
+        group: b.group,
+        status: b.status,
+        expect: b.expect,
+      },
       me.userId,
     );
     return NextResponse.json({ ok: true, row });

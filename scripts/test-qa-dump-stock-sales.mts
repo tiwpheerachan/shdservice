@@ -80,11 +80,8 @@ const qty = async () =>
         FROM product_none_serial WHERE product_id = 9960`)
   ).rows[0]!;
 const logId = async () =>
-  (
-    await db.execute<{ id: number }>(
-      sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${JOB}`,
-    )
-  ).rows[0]!.id;
+  (await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${JOB}`))
+    .rows[0]!.id;
 /** the error of a rejected call ({ status: 200 } when it resolved); anything but an HttpError is re-thrown */
 async function err(p: Promise<unknown>) {
   try {
@@ -133,7 +130,10 @@ try {
 
   console.log('\n2. a denied sale order is final (legacy SO2401274)');
   await test('cancelling it is a 409 — even for System Admin; it stays ACTIVE', async () => {
-    const r = await err(setRecordStatus('sale_orders', SO, 'DELETED', ADMIN.id, true, true, 'QA'));
+    const soId = (
+      await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = ${SO}`)
+    ).rows[0]!.id; // records take the uuid (ADR 0008)
+    const r = await err(setRecordStatus('sale_orders', soId, 'DELETED', ADMIN.id, true, true, 'QA'));
     assert.equal(r.status, 409, r.message);
     const [row] = (
       await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = ${SO}`)

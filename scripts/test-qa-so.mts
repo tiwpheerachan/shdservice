@@ -26,8 +26,8 @@ const { signSession, SESSION_COOKIE } = await import('@/lib/session');
 const { nextRunningNo } = await import('@/db/running-no');
 const { BUCKET } = await import('@/server/storage');
 const { POST: soPOST } = await import('@/app/api/sale-orders/route');
-const { POST: approvePOST } = await import('@/app/api/sale-orders/[no]/approve/route');
-const { POST: trackingPOST } = await import('@/app/api/sale-orders/[no]/tracking/route');
+const { POST: approvePOST } = await import('@/app/api/sale-orders/[id]/approve/route');
+const { POST: trackingPOST } = await import('@/app/api/sale-orders/[id]/tracking/route');
 const { POST: uploadPOST } = await import('@/app/api/upload/route');
 
 // ---- fake storage: uploads take UPLOAD_MS, removes are instant ----
@@ -123,14 +123,20 @@ async function request(path: string, u: TestUser, body: unknown) {
 type Res = { status: number; body: Record<string, unknown> & { error?: string; order?: Order } };
 type Order = { no: string; version: number; tracking: string; deliveryDate: string; slip: string; lines: unknown[] };
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
-const params = (no: string) => ({ params: Promise.resolve({ no }) });
+/** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
+const soIdOf = async (no: string) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).rows[0]?.id ??
+  '00000000-0000-7000-8000-000000000000';
+const userUuid = async (userId: number) =>
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
+const params = async (no: string) => ({ params: Promise.resolve({ id: await soIdOf(no) }) });
 
 const save = async (u: TestUser, body: Record<string, unknown>) =>
   json(await soPOST(await request('/api/sale-orders', u, body)));
 const create = async (u: TestUser, extra: Record<string, unknown> = {}) => {
   const r = await save(u, {
     customerCode: CUSTOMER,
-    salesId: u.id,
+    salesId: await userUuid(u.id),
     submit: true,
     lines: [{ code: P.a, qty: 1 }],
     ...extra,
@@ -142,11 +148,11 @@ const decide = async (u: TestUser, no: string, decision: string, extra: Record<s
   json(
     await approvePOST(
       await request(`/api/sale-orders/${no}/approve`, u, { decision, remark: 'QS', ...extra }),
-      params(no),
+      await params(no),
     ),
   );
 const track = async (u: TestUser, no: string, body: Record<string, unknown>) =>
-  json(await trackingPOST(await request(`/api/sale-orders/${no}/tracking`, u, body), params(no)));
+  json(await trackingPOST(await request(`/api/sale-orders/${no}/tracking`, u, body), await params(no)));
 const png = await (
   await import('sharp')
 )
@@ -156,7 +162,7 @@ const png = await (
 const upload = async (u: TestUser, kind: string, id: string) => {
   const fd = new FormData();
   fd.set('kind', kind);
-  fd.set('id', id);
+  fd.set('id', kind === 'sale-order-slip' ? await soIdOf(id) : id);
   fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
   return json(
     await uploadPOST(
@@ -284,7 +290,7 @@ try {
       no: o.no,
       version: o.version,
       customerCode: CUSTOMER,
-      salesId: U.seller.id,
+      salesId: await userUuid(U.seller.id),
       submit: true,
       lines: [{ code: P.a, qty: 2 }],
     });
@@ -298,12 +304,12 @@ try {
     try {
       const r = await save(U.seller, {
         customerCode: CUSTOMER,
-        salesId: U.seller.id,
+        salesId: await userUuid(U.seller.id),
         lines: [{ code: P.gone, qty: 1 }],
       });
       assert.equal(r.status, 400, JSON.stringify(r.body));
       assert.match(r.body.error!, new RegExp(`${P.gone}.*ถูกลบ`));
-      const edit = { no: old.no, customerCode: CUSTOMER, salesId: U.seller.id, submit: false };
+      const edit = { no: old.no, customerCode: CUSTOMER, salesId: await userUuid(U.seller.id), submit: false };
       const kept = await save(U.seller, {
         ...edit,
         remark: 'QS แก้หมายเหตุ',

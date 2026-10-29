@@ -11,8 +11,8 @@ const ROWS = 13;
  * Header = the pick slip profile (IPA, document_profile.purpose = 'pick_slip'), else the quotation's own issuer.
  * Lines and totals: pickSlips (src/server/services/quotations.ts). A skipped quotation is named on screen only.
  */
-export async function PickSlipDoc({ nos }: { nos: string[] }) {
-  const [{ slips, skipped }, header] = await Promise.all([pickSlips(nos), pickSlipProfile()]);
+export async function PickSlipDoc({ ids }: { ids: string[] }) {
+  const [{ slips, skipped }, header] = await Promise.all([pickSlips(ids), pickSlipProfile()]);
   const note = skipped.length > 0 && (
     <p className="no-print mx-auto mb-3 w-[297mm] rounded border border-amber-500 bg-amber-50 px-4 py-2 text-sm">
       ไม่พิมพ์ {skipped.length} ใบ: {skipped.map((s) => `${s.no} (${s.why})`).join(', ')}
@@ -92,7 +92,7 @@ export async function PickSlipDoc({ nos }: { nos: string[] }) {
               </thead>
               <tbody>
                 {lines.map((l, i) => (
-                  <tr key={l.id ?? i}>
+                  <tr key={i}>
                     <td className="num text-center">{i + 1}</td>
                     <td className="num">{l.code}</td>
                     <td>{l.detail}</td>

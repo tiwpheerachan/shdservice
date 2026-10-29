@@ -14,7 +14,7 @@ import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { customerForDocument, getCustomerByCode, addressNames } from './customers';
-import { issuingProfile, SHD_PROFILE_ID } from './document-profiles';
+import { issuingProfile, profileIdOf } from './document-profiles';
 import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
 import {
@@ -31,7 +31,7 @@ import {
 import { trackingSchema } from '@/lib/validation/stock';
 import { clean } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { saleOrderSave } from '@/server/contract/sales';
 import { staffOrKeep } from './users';
 
@@ -43,6 +43,7 @@ const seller = alias(appUser, 'creator');
 const approver = alias(appUser, 'approver');
 
 const listSelect = {
+  id: saleOutHd.id,
   no: saleOutHd.saleOutHdNo,
   date: saleOutHd.documentCreateDate,
   customer: saleOutHd.customerName,
@@ -58,6 +59,7 @@ const listSelect = {
   paymentAmount: saleOutHd.paymentAmount,
   status: saleOutHd.recordStatus,
   approveDate: saleOutHd.approveDate,
+  salesUuid: seller.id,
   approverFirst: approver.firstName,
   approverLast: approver.lastName,
   deliveryDate: saleOutHd.deliveryDate,
@@ -71,6 +73,7 @@ const approveLabel = (name: string | null) => APPROVE_LABEL[name?.trim() ?? ''] 
 
 function toSaleOrder(r: ListRow): SaleOrder {
   return {
+    id: r.id ?? '',
     no: r.no ?? '',
     date: fmtDateTime(r.date),
     customer: r.customer ?? '',
@@ -171,9 +174,10 @@ export function saleOrderWhere(q: string, f: SaleOrderFilters) {
       : undefined,
     from ? gte(saleOutHd.documentCreateDate, `${from} 00:00:00`) : undefined,
     to ? lte(saleOutHd.documentCreateDate, `${to} 23:59:59`) : undefined,
+    // a user's uuid (the report's salesperson picker) or a name
     f.sales
-      ? /^\d+$/.test(f.sales)
-        ? eq(saleOutHd.saleOutBy, Number(f.sales))
+      ? z.uuid().safeParse(f.sales).success
+        ? eq(seller.id, f.sales.toLowerCase())
         : ilike(seller.firstName, likeTerm(f.sales))
       : undefined,
   );
@@ -202,9 +206,7 @@ export async function listSaleOrders(f: SaleOrderFilters & { q?: string; limit?:
 }
 
 export type SaleOrderLine = {
-  id?: number;
   listNo: number;
-  productId: number;
   code: string;
   name: string;
   type: 'SparePart' | 'Service';
@@ -240,17 +242,18 @@ export type SaleOrderDetail = SaleOrder & {
   approveRemark: string;
   /** who keyed the order in (document_create_by) — `sales` is the salesperson (sale_out_by) */
   createdBy: string;
-  createdById: number;
-  /** document_create_by + sale_out_by — neither may decide on the order (System Admin may) */
-  creatorIds: number[];
+  /** the creator's user uuid (null: none / unknown) */
+  createdById: string | null;
+  /** document_create_by + sale_out_by (user uuids) — neither may decide on the order (System Admin may) */
+  creatorIds: string[];
   /** a waiting order: the roles that may decide on it (ticked SO Approve; System Admin always may, not listed) */
   approverRoles: string[];
-  /** ออกเอกสารในนาม — document_profile.id (legacy rows = SHD) */
-  documentProfileId: number;
+  /** ออกเอกสารในนาม — the document profile's uuid (legacy rows = SHD's) */
+  documentProfileId: string;
   /** row_version + newest line id (versionOf) — the edit page sends it back with its save / decision */
   version: number;
-  /** sale_out_by — the edit form picks the salesperson by id (a name may have changed or left) */
-  salesId: number;
+  /** sale_out_by's user uuid — the edit form picks the salesperson by id (a name may have changed or left) */
+  salesId: string | null;
 };
 
 /** a line's description: its product's name, else its remark (a service line); legacy service lines (SV0001,
@@ -279,6 +282,17 @@ const linesOf = (x: Tx, no: string) =>
 const versionOf = (rowVersion: number, lines: { saleOutDtId: number }[]) =>
   rowVersion + Math.max(0, ...lines.map((l) => l.saleOutDtId));
 
+/** the SO number of the order whose uuid is `id` (a link: page, API path, print, upload) — null: none, or not a uuid */
+export async function saleOrderNoOf(id: string): Promise<string | null> {
+  if (!z.uuid().safeParse(id).success) return null;
+  const [r] = await db
+    .select({ no: saleOutHd.saleOutHdNo })
+    .from(saleOutHd)
+    .where(eq(saleOutHd.id, id.toLowerCase()))
+    .limit(1);
+  return r?.no ?? null;
+}
+
 export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> {
   // the list row and the whole header in one read; the lines alongside
   const [[r], dts] = await Promise.all([
@@ -299,15 +313,16 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
   ]);
   if (!r) return null;
   const { hd } = r;
-  const [cust, [made], approverRoles] = await Promise.all([
+  const [cust, [made], approverRoles, profileId] = await Promise.all([
     hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
     (hd.documentCreateBy ?? 0) > 0
       ? db
-          .select({ first: appUser.firstName, last: appUser.lastName })
+          .select({ id: appUser.id, first: appUser.firstName, last: appUser.lastName })
           .from(appUser)
           .where(eq(appUser.userId, hd.documentCreateBy!))
       : [],
     hd.approveStatusId === AS.WAIT ? rolesWithRight('SO Approve') : [],
+    profileIdOf(hd.documentProfileId),
   ]);
   const { subDistrict, district, province } = await addressNames(cust);
   return {
@@ -327,9 +342,7 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     },
     cancelRemark: hd.documentCancelRemark ?? '',
     lines: dts.map(({ d, name }) => ({
-      id: d.saleOutDtId,
       listNo: d.listNo ?? 0,
-      productId: d.productId ?? 0,
       code: d.productCode ?? '',
       name: lineName(name, d),
       type: (d.productType as 'SparePart' | 'Service') ?? 'SparePart',
@@ -344,15 +357,15 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     slip: hd.slipFileName ?? '',
     approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(made?.first, made?.last),
-    createdById: hd.documentCreateBy ?? 0,
+    createdById: made?.id ?? null,
     approverRoles: approverRoles.filter((r) => r !== ADMIN_USER_TYPE),
-    creatorIds: [hd.documentCreateBy, hd.saleOutBy].filter((x): x is number => (x ?? 0) > 0),
-    documentProfileId: hd.documentProfileId ?? SHD_PROFILE_ID,
+    creatorIds: [...new Set([made?.id, r.salesUuid].filter((x): x is string => !!x))],
+    documentProfileId: profileId,
     version: versionOf(
       hd.rowVersion,
       dts.map((x) => x.d),
     ),
-    salesId: hd.saleOutBy ?? 0,
+    salesId: r.salesUuid ?? null,
   };
 }
 
@@ -403,7 +416,7 @@ export async function saveSaleOrder(
     const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerCode);
     if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
     // พนักงานขาย: an active user — or, on an edit, the one already on the order (who may have left since)
-    const salesId = await staffOrKeep(Number(i.salesId), cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
+    const salesId = await staffOrKeep(i.salesId, cur?.salesId, 'salesId', byUserId, 'ไม่พบพนักงานขาย');
     // … whose role sells (Sale Order add) or System Admin — the form lists the same (listStaff `sells`)
     if (salesId !== cur?.salesId && !(await sells(salesId)))
       throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', {
@@ -505,7 +518,7 @@ export async function saveSaleOrder(
     const hdValues = {
       ...(custChanged
         ? {
-            customerId: cust.id,
+            customerId: cust.key,
             customerCode: cust.code,
             customerCardId: cust.taxId,
             customerName: cust.name,
@@ -586,7 +599,7 @@ export async function saveSaleOrder(
       });
       await tx.insert(saleOutHd).values({
         ...hdValues,
-        documentProfileId: profile.id,
+        documentProfileId: profile.pk,
         saleOutHdNo: no,
         documentType: 'SaleOrder',
         documentCreateDate: now,

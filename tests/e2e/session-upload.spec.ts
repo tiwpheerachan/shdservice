@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import sharp from 'sharp';
 import { CLOSER_EMAIL, OWNER_EMAIL } from './support/env';
-import { newJob } from './support/db';
+import { jobUuid, newJob } from './support/db';
 import { call, expect, signIn, test } from './support/fixtures';
 
 /**
@@ -88,7 +88,7 @@ test('a slip upload shows its progress, survives a failed first attempt, and sen
 
   const no = await newJob({ status: 5, service: 500 });
   await signIn(page, CLOSER_EMAIL);
-  await page.goto(`/jobs/close?job=${no}`);
+  await page.goto(`/jobs/close?id=${await jobUuid(no)}`);
   await expect(page.getByLabel('หมายเลขงาน', { exact: true })).toHaveText(no);
   await page.getByRole('tab', { name: 'รายละเอียดการรับชำระเงิน' }).click();
 

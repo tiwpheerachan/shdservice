@@ -14,7 +14,8 @@ import { addDays, today } from '@/lib/dates';
  *  - enums for the choices, so a typo cannot fall through (decision "approvee" = reject)
  */
 const qty = z.coerce.number().int('จำนวนต้องเป็นจำนวนเต็ม').min(0, 'จำนวนต้องไม่ติดลบ').max(100_000, 'จำนวนมากเกินไป');
-const id = z.coerce.number().int().positive();
+/** a row's uuid (ADR 0008: job_order_spare_part_log.id / sale_out_dt.id), read lower-cased */
+const rowId = z.uuid('รหัสอ้างอิงไม่ถูกต้อง').transform((v) => v.toLowerCase());
 const text = (max: number) =>
   z
     .string()
@@ -51,7 +52,7 @@ export const issueSchema = z
       .nullish()
       .transform((v) => v ?? ''),
     remark: maxText(100, 'หมายเหตุ '),
-    lines: lines({ logId: id.nullish(), dtId: id.nullish(), code: z.string().max(50).nullish(), qty }).refine(
+    lines: lines({ logId: rowId.nullish(), dtId: rowId.nullish(), code: z.string().max(50).nullish(), qty }).refine(
       noRepeatedLine,
       REPEATED_LINE,
     ),
@@ -72,7 +73,7 @@ export const issueSchema = z
 
 export const assignSchema = z.looseObject({
   jobNos: z.array(z.string().min(1).max(20)).min(1, 'ยังไม่ได้เลือกงาน').max(500, 'เลือกงานได้ไม่เกิน 500 งาน'),
-  engineerId: id,
+  engineerId: z.uuid({ error: 'ต้องเลือกช่าง' }), // app_user.id
 });
 
 export const approveSchema = z.looseObject({

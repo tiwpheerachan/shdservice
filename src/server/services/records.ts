@@ -5,8 +5,9 @@ import { db, type Tx } from '@/db/client';
 import { appUser, customer, job, jobLog, jobOrderSparePartLog, product, quotationHd, saleOutHd } from '@/db/schema';
 import type { Module } from '@/lib/modules';
 import { JS, PART } from '@/lib/status-ids';
-import { HttpError, invalidateUserCache } from '@/server/auth';
-import { audit } from '@/server/audit';
+import { HttpError, fullName, invalidateUserCache } from '@/server/auth';
+import { audit, isUuid } from '@/server/audit';
+import { pkOf } from '@/server/ids';
 import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
 import { RS, statusStamp, statusSummary, type RecordStatus } from '@/server/record-status';
@@ -77,6 +78,22 @@ export async function setRecordStatus(
   // a document is ACTIVE or DELETED — INACTIVE left a quotation listed as open with nothing to show it
   if (rs === RS.INACTIVE && (table === 'quotations' || table === 'sale_orders'))
     throw new HttpError(400, 'เอกสารปิดใช้งานไม่ได้ — ลบ (ยกเลิก) หรือกู้คืนเท่านั้น');
+  // ADR 0008: a part / job / quotation / sale order comes as its uuid — from here on its code / number
+  // (what the rest of this function, its messages and its audit line work with)
+  const DOC = { products: 'อะไหล่', jobs: 'งาน', quotations: 'ใบเสนอราคา', sale_orders: 'ใบสั่งขาย' } as const;
+  if (table in DOC) {
+    const what = DOC[table as keyof typeof DOC];
+    if (!isUuid(String(id))) throw new HttpError(404, `ไม่พบ${what}`);
+    const uid = String(id).trim().toLowerCase();
+    id =
+      table === 'products'
+        ? await pkOf(product, product.productCode, uid, what)
+        : table === 'jobs'
+          ? await pkOf(job, job.jobNo, uid, what)
+          : table === 'quotations'
+            ? await pkOf(quotationHd, quotationHd.quotationNo, uid, what)
+            : await pkOf(saleOutHd, saleOutHd.saleOutHdNo, uid, what);
+  }
   const stamp = statusStamp(rs, byUserId);
   const ENTITY: Record<string, [string, string]> = {
     users: ['app_user', 'Admin'],
@@ -97,23 +114,11 @@ export async function setRecordStatus(
   };
   // the record_status before this change (read in the change's transaction) — the audit keeps [old, new], not [null, new]
   const OLD: Partial<Record<RecordTable, (tx: Tx) => Promise<{ rs: string }[]>>> = {
-    users: (tx) =>
-      tx
-        .select({ rs: appUser.recordStatus })
-        .from(appUser)
-        .where(eq(appUser.userId, Number(id)))
-        .for('update'),
     products: (tx) =>
       tx
         .select({ rs: product.recordStatus })
         .from(product)
         .where(eq(product.productCode, String(id)))
-        .for('update'),
-    customers: (tx) =>
-      tx
-        .select({ rs: customer.recordStatus })
-        .from(customer)
-        .where(eq(customer.customerCode, String(id)))
         .for('update'),
     quotations: (tx) =>
       tx
@@ -132,7 +137,8 @@ export async function setRecordStatus(
           : `กู้คืนรายการที่ลบแล้วได้เฉพาะผู้มีสิทธิ์ลบใน ${ENTITY[table]?.[1]}`,
       );
   };
-  const log = async (w: Tx, old: string | null, why = '') => {
+  /** `label` = what the summary names (users: the name, customers: the code); the key stays `id` */
+  const log = async (w: Tx, old: string | null, why = '', label: string | number = id) => {
     const e = ENTITY[table];
     if (!e || old === rs) return; // nothing changed (ACTIVE → ACTIVE): nothing to record
     await audit(w, byUserId, {
@@ -141,28 +147,34 @@ export async function setRecordStatus(
       entity: e[0],
       key: id,
       summary:
-        statusSummary({ noun: NOUN[table] ?? e[0], key: id, old, rs, cancel: table === 'sale_orders' }) +
+        statusSummary({ noun: NOUN[table] ?? e[0], key: label, old, rs, cancel: table === 'sale_orders' }) +
         (why && ` · ${why}`),
       changes: { recordStatus: [old, rs] },
       meta: why ? { remark: why } : null, // the summary is cut at 200 characters — the reason whole
     });
   };
-  if (isSimpleKind(table)) return setSimpleStatus(table, Number(id), rs, byUserId);
+  if (isSimpleKind(table)) return setSimpleStatus(table, String(id), rs, byUserId);
   switch (table) {
     case 'symptoms':
-      return setSymptomStatus(Number(id), rs, byUserId);
+      return setSymptomStatus(String(id), rs, byUserId);
     case 'models':
       return setModelStatus(String(id), rs, byUserId);
     case 'users':
+      // `id` = the user's uuid (the route checked it); the audit key stays the uuid, the summary names the person
       await db.transaction(async (tx) => {
-        const old = await oldOf(tx);
+        const [cur] = await tx
+          .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName, u: appUser.username })
+          .from(appUser)
+          .where(eq(appUser.id, String(id)))
+          .for('update');
+        if (!cur) throw new HttpError(404, 'ไม่พบผู้ใช้');
         // out of DELETED only through กู้คืน (users.ts setUserDeleted → INACTIVE)
-        if (old === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
+        if (cur.rs === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
         await tx
           .update(appUser)
           .set({ ...stamp, deleted: rs === RS.DELETED })
-          .where(eq(appUser.userId, Number(id)));
-        await log(tx, old);
+          .where(eq(appUser.id, String(id)));
+        await log(tx, cur.rs, '', fullName(cur.first, cur.last) || clean(cur.u));
       });
       invalidateUserCache();
       invalidate('staff');
@@ -204,14 +216,20 @@ export async function setRecordStatus(
       productsChanged();
       return;
     case 'customers':
+      // `id` = the customer's uuid (the route checked it): the audit key; the summary names its code
       await db.transaction(async (tx) => {
-        const old = await oldOf(tx);
-        refuseRestore(old);
+        const [cur] = await tx
+          .select({ rs: customer.recordStatus, code: customer.customerCode })
+          .from(customer)
+          .where(eq(customer.id, String(id)))
+          .for('update');
+        if (!cur) throw new HttpError(404, 'ไม่พบลูกค้า');
+        refuseRestore(cur.rs);
         await tx
           .update(customer)
           .set(stamp)
-          .where(eq(customer.customerCode, String(id)));
-        await log(tx, old);
+          .where(eq(customer.id, String(id)));
+        await log(tx, cur.rs, '', cur.code ?? '');
       });
       return;
     case 'quotations':

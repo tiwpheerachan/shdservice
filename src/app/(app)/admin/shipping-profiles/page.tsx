@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 
 /** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
 type Profile = {
-  id: number;
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -32,7 +32,7 @@ type Profile = {
   isActive: boolean;
   sortOrder: number;
 };
-type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: number };
+type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: string };
 const EMPTY: FormValues = { code: '', nameTh: '', nameEn: '', trackUrl: '', aliases: '', isActive: true, sortOrder: 0 };
 
 export default function ShippingProfilesPage() {
@@ -85,7 +85,7 @@ export default function ShippingProfilesPage() {
       });
       if (pendingLogo) {
         try {
-          await uploadFile('shipper-logo', String(d.row.id), pendingLogo);
+          await uploadFile('shipper-logo', d.row.id, pendingLogo);
           setPendingLogo(null);
         } catch (e) {
           push({ kind: 'error', title: 'บันทึกแล้ว แต่อัปโหลดโลโก้ไม่สำเร็จ', desc: errMsg(e) });
@@ -114,7 +114,7 @@ export default function ShippingProfilesPage() {
       return;
     }
     try {
-      await uploadFile('shipper-logo', String(editing.id), file);
+      await uploadFile('shipper-logo', editing.id, file);
       push({ kind: 'success', title: 'อัปโหลดโลโก้แล้ว' });
       const fresh = (await load())?.rows.find((r) => r.id === editing.id);
       // only the logo: the rest of `editing` is what this open form loaded — the save's stale check compares
@@ -230,7 +230,7 @@ export default function ShippingProfilesPage() {
         }
       />
 
-      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} rowKey={(r) => String(r.id)} />
+      <DataTable searchable={false} columns={columns} rows={rows} loading={loading} rowKey={(r) => r.id} />
 
       <Modal
         open={open}

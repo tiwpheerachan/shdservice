@@ -272,18 +272,18 @@ try {
   console.log('\nยกเลิกใบเสนอราคา from the list');
   const victim = await saveQuotation(base(), U.admin.id);
   await test('no `del` on Quotation → 403, the quotation stays', async () => {
-    const r = await records(U.clerk, { table: 'quotations', id: victim.no, status: 'DELETED', remark: 'ลูกค้ายกเลิก' });
+    const r = await records(U.clerk, { table: 'quotations', id: victim.id, status: 'DELETED', remark: 'ลูกค้ายกเลิก' });
     assert.equal(r.status, 403, JSON.stringify(r.body));
     assert.equal((await getQuotation(victim.no))!.active, true);
   });
   await test('`del` without a reason → 400 under remark', async () => {
-    const r = await records(U.boss, { table: 'quotations', id: victim.no, status: 'DELETED', remark: '  ' });
+    const r = await records(U.boss, { table: 'quotations', id: victim.id, status: 'DELETED', remark: '  ' });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.match(JSON.stringify(r.body), /remark/);
     assert.equal((await getQuotation(victim.no))!.active, true);
   });
   await test('`del` + reason → DELETED: gone from the list, no save, read as inactive (the print 404s on it)', async () => {
-    const r = await records(U.boss, { table: 'quotations', id: victim.no, status: 'DELETED', remark: 'ลูกค้ายกเลิก' });
+    const r = await records(U.boss, { table: 'quotations', id: victim.id, status: 'DELETED', remark: 'ลูกค้ายกเลิก' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const page = await pageQuotations({ page: 1, pageSize: 100, q: '', sort: null } as never, {
       customerCode: CUSTOMER,
@@ -317,7 +317,8 @@ try {
     );
     const b = await saveQuotation(base(), U.admin.id);
     await pool.query(`UPDATE quotation_hd SET quotation_status_id = 2 WHERE quotation_no = $1`, [b.no]); // เสนอราคาแล้ว
-    const { slips, skipped } = await pickSlips([` ${b.no.toLowerCase()} `, a.no, b.no]);
+    // by uuid (ADR 0008), trimmed, any case, each once
+    const { slips, skipped } = await pickSlips([` ${b.id.toUpperCase()} `, a.id, b.id]);
     assert.deepEqual(skipped, []);
     assert.deepEqual(
       slips.map((x) => x.q.no),
@@ -342,7 +343,13 @@ try {
     const live = await saveQuotation(base(), U.admin.id);
     const off = await saveQuotation(base(), U.admin.id);
     await pool.query(`UPDATE quotation_hd SET quotation_status_id = 5 WHERE quotation_no = $1`, [off.no]);
-    const { slips, skipped } = await pickSlips([live.no, victim.no, off.no, 'Q0000000']);
+    const { slips, skipped } = await pickSlips([
+      live.id,
+      victim.id,
+      off.id,
+      '00000000-0000-7000-8000-000000000000',
+      off.no,
+    ]);
     assert.deepEqual(
       slips.map((x) => x.q.no),
       [live.no],
@@ -350,9 +357,10 @@ try {
     assert.deepEqual(skipped, [
       { no: victim.no, why: 'ถูกลบแล้ว' },
       { no: off.no, why: 'ยกเลิกใบเสนอราคา' },
-      { no: 'Q0000000', why: 'ไม่พบใบเสนอราคา' },
+      { no: '00000000-0000-7000-8000-000000000000', why: 'ไม่พบใบเสนอราคา' },
+      { no: off.no.toLowerCase(), why: 'ไม่พบใบเสนอราคา' }, // a number (an old link) is no id
     ]);
-    assert.deepEqual((await pickSlips([victim.no])).slips, []);
+    assert.deepEqual((await pickSlips([victim.id])).slips, []);
   });
 
   console.log('\nโปรไฟล์หัวใบเบิกสินค้า (IPA, purpose pick_slip)');

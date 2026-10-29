@@ -79,7 +79,7 @@ const LEAVE = 'ยกเลิก: กลับไปรายการงาน
 export const WORKFLOW_TOURS: Record<string, Tour> = {
   '/jobs/repair': {
     title: 'บันทึกงานซ่อม',
-    demo: ['/jobs/repair?job={job}'],
+    demo: ['/jobs/repair?id={job}'],
     steps: [
       {
         title: 'บันทึกผลการซ่อม',
@@ -167,7 +167,7 @@ export const WORKFLOW_TOURS: Record<string, Tour> = {
 
   '/jobs/outsource': {
     title: 'บันทึกงานส่งซ่อมต่อ',
-    demo: ['/jobs/outsource?job={job}'],
+    demo: ['/jobs/outsource?id={job}'],
     steps: [
       {
         title: 'ส่งซ่อมต่อ (Out-Source)',
@@ -220,7 +220,7 @@ export const WORKFLOW_TOURS: Record<string, Tour> = {
 
   '/jobs/swap-refund': {
     title: 'บันทึกงาน Swap/Refund',
-    demo: ['/jobs/swap-refund?job={job}'],
+    demo: ['/jobs/swap-refund?id={job}'],
     steps: [
       {
         title: 'เปลี่ยนเครื่อง หรือคืนเงิน',
@@ -282,7 +282,7 @@ export const WORKFLOW_TOURS: Record<string, Tour> = {
 
   '/jobs/close': {
     title: 'ปิดงาน-ส่งคืนสินค้า',
-    demo: ['/jobs/close?job={job:5}', '/jobs/close?job={job:14}'],
+    demo: ['/jobs/close?id={job:5}', '/jobs/close?id={job:14}'],
     // the payment fields are on their tab: the tour starts there (the other tabs are read-only)
     prepare: 'button:รายละเอียดการรับชำระเงิน',
     steps: [

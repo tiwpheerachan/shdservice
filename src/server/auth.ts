@@ -28,7 +28,10 @@ import {
 
 /** The signed-in person, resolved against app_user (the single user table). */
 export type CurrentUser = {
+  /** app_user.user_id — server-side only (audit actor, the integer foreign keys until ADR 0008 phase 2) */
   userId: number;
+  /** app_user.id — the uuid that leaves the server (the pages' useAccess().userId, os_seen) */
+  id: string;
   email: string;
   name: string;
   avatar: string;
@@ -140,6 +143,7 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
   const isAdmin = userType === ADMIN_USER_TYPE;
   return {
     userId: row.userId,
+    id: row.id,
     email: session.email,
     name: fullName(row.firstName, row.lastName) || session.name,
     avatar: row.avatar || session.avatar || '',

@@ -43,7 +43,7 @@ import { assertVersion } from '@/server/http-error';
 import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { nextRunningNo } from '@/db/running-no';
-import { audit, diff, type AuditEntry } from '@/server/audit';
+import { audit, diff, isUuid, type AuditEntry } from '@/server/audit';
 import { RS, statusFilter, uiStatus, fromUiStatus, statusStamp, type StatusMode } from '@/server/record-status';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
@@ -68,7 +68,8 @@ const LOW_STOCK = 3;
  * Products
  * ------------------------------------------------------------------ */
 const productSelect = {
-  id: product.productId,
+  id: product.id,
+  productId: product.productId,
   sysCode: product.productCode,
   mfgCode: product.productVenderCode,
   name: product.productName,
@@ -118,7 +119,7 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
     onhand: r.onhand ?? 0,
     price: num(r.retail),
     status: uiStatus(r.active),
-    id: r.id ?? 0,
+    id: r.id ?? undefined,
     nameEn: r.nameEn ?? '',
     nameCn: r.nameCn ?? '',
     description: r.description ?? '',
@@ -218,7 +219,7 @@ export async function getProduct(code: string): Promise<(Product & { models: str
   const [[creator], [canceller], models] = await Promise.all([
     nameOf(r.createBy),
     nameOf(r.cancelBy),
-    modelsOf(db, r.id!),
+    modelsOf(db, r.productId!),
   ]);
   return {
     ...toProduct(r, creator ? fullName(creator.f, creator.l) : '', canceller ? fullName(canceller.f, canceller.l) : ''),
@@ -671,7 +672,8 @@ export async function issueOther(
 
 /* ---- job spare-part requests (ใบเบิก) ---- */
 export type PartRequestLine = {
-  logId: number;
+  /** job_order_spare_part_log.id (uuid) */
+  logId: string;
   jobNo: string;
   code: string;
   name: string;
@@ -702,7 +704,7 @@ const PART_STATUS_NAME: Record<number, string> = {
 export async function listPartRequests(jobNo: string, onlyPending = false): Promise<PartRequestLine[]> {
   const rows = await db
     .select({
-      logId: jobOrderSparePartLog.jobOrderLogId,
+      logId: jobOrderSparePartLog.id,
       jobNo: jobOrderSparePartLog.jobNo,
       code: jobOrderSparePartLog.sparePartCode,
       name: product.productName,
@@ -814,7 +816,7 @@ export async function assertJobOpenForIssue(jobNo: string, x: Tx | typeof db = d
 /** จ่ายออกตามงานซ่อม → WHO (type 3) + grant on the request rows; every request issued → the job's status moves
  *  (followParts) in the SAME transaction — done after, a save in between adopted the moved version. */
 export async function issueForJob(
-  i: { jobNo: string; remark?: string; payTo?: string; lines: { logId: number; qty: number }[] },
+  i: { jobNo: string; remark?: string; payTo?: string; lines: { logId: string; qty: number }[] },
   byUserId: number,
 ): Promise<{ no: string; total: number; allGranted: boolean }> {
   const lines = i.lines.filter((l) => l.qty > 0);
@@ -829,13 +831,13 @@ export async function issueForJob(
           and(
             eq(jobOrderSparePartLog.jobNo, i.jobNo),
             inArray(
-              jobOrderSparePartLog.jobOrderLogId,
-              lines.map((l) => l.logId),
+              jobOrderSparePartLog.id,
+              lines.map((l) => l.logId).filter(isUuid), // none sent → 404 below, not a pg cast error
             ),
           ),
         )
         .for('update');
-      const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+      const byId = new Map(reqs.map((r) => [r.id, r]));
       const map = await productsByCode(
         tx,
         reqs.map((r) => r.sparePartCode ?? ''),
@@ -848,7 +850,7 @@ export async function issueForJob(
       const now = nowThai();
       for (const l of lines) {
         const r = byId.get(l.logId);
-        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิกในงาน ${i.jobNo} — โหลดรายการใหม่`);
         if (!r.isSpecial) throw new HttpError(400, `${r.sparePartCode} ไม่ได้ติ๊ก "เบิก" — ไม่ใช่รายการขอเบิก`);
         // issued / cancelled since the list was loaded
         if (r.orderStatusId !== PART.REQUESTED)
@@ -953,7 +955,8 @@ const returnableLine = and(
   sql`coalesce(${jobOrderSparePartLog.grantQty},0) > coalesce(${jobOrderSparePartLog.returnQty},0)`,
 );
 export type ReturnLine = {
-  logId: number;
+  /** job_order_spare_part_log.id (uuid) */
+  logId: string;
   jobNo: string;
   code: string;
   name: string;
@@ -967,7 +970,7 @@ export type ReturnLine = {
 export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> {
   const rows = await db
     .select({
-      logId: jobOrderSparePartLog.jobOrderLogId,
+      logId: jobOrderSparePartLog.id,
       code: jobOrderSparePartLog.sparePartCode,
       name: product.productName,
       onhand: productNoneSerial.quantityRemain,
@@ -1000,7 +1003,7 @@ export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> 
  * used (granted - returned) and the job's parts / total cost follow in the same transaction.
  */
 export async function returnFromJob(
-  i: { jobNo: string; remark?: string; from?: string; lines: { logId: number; qty: number }[] },
+  i: { jobNo: string; remark?: string; from?: string; lines: { logId: string; qty: number }[] },
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
   const lines = i.lines.filter((l) => l.qty > 0);
@@ -1016,13 +1019,13 @@ export async function returnFromJob(
           and(
             eq(jobOrderSparePartLog.jobNo, i.jobNo),
             inArray(
-              jobOrderSparePartLog.jobOrderLogId,
-              lines.map((l) => l.logId),
+              jobOrderSparePartLog.id,
+              lines.map((l) => l.logId).filter(isUuid), // none sent → 404 below, not a pg cast error
             ),
           ),
         )
         .for('update');
-      const byId = new Map(reqs.map((r) => [r.jobOrderLogId, r]));
+      const byId = new Map(reqs.map((r) => [r.id, r]));
       const map = await productsByCode(
         tx,
         reqs.map((r) => r.sparePartCode ?? ''),
@@ -1035,7 +1038,7 @@ export async function returnFromJob(
       const now = nowThai();
       for (const l of lines) {
         const r = byId.get(l.logId);
-        if (!r) throw new HttpError(404, `ไม่พบรายการเบิก #${l.logId} ในงาน ${i.jobNo}`);
+        if (!r) throw new HttpError(404, `ไม่พบรายการเบิกในงาน ${i.jobNo} — โหลดรายการใหม่`);
         if (!RETURNABLE.includes(r.orderStatusId ?? -1))
           throw new HttpError(409, `${r.sparePartCode} ไม่อยู่ในสถานะที่รับคืนได้ — โหลดรายการใหม่`);
         const returnable = (r.grantQty ?? 0) - (r.returnQty ?? 0);
@@ -1102,7 +1105,8 @@ export async function returnFromJob(
 /* ---- sale order picking ---- */
 /** `pickNo`: the WHO that already issued the line ('' = still to issue) */
 export type SoPickLine = {
-  dtId: number;
+  /** sale_out_dt.id (uuid) */
+  dtId: string;
   code: string;
   name: string;
   onhand: number;
@@ -1132,7 +1136,7 @@ export async function saleOrdersToPick(limit = 300): Promise<string[]> {
 export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]> {
   const rows = await db
     .select({
-      dtId: saleOutDt.saleOutDtId,
+      dtId: saleOutDt.id,
       code: saleOutDt.productCode,
       name: product.productName,
       onhand: productNoneSerial.quantityRemain,
@@ -1158,7 +1162,7 @@ export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]
 
 /** จ่ายออกตามใบสั่งขาย → WHO (type 4); stamps pick_inventory_no / reference_no. */
 export async function issueForSaleOrder(
-  i: { soNo: string; remark?: string; payTo?: string; lines?: { dtId: number; qty: number }[] },
+  i: { soNo: string; remark?: string; payTo?: string; lines?: { dtId: string; qty: number }[] },
   byUserId: number,
   tx?: Tx,
 ): Promise<{ no: string; total: number }> {
@@ -1188,7 +1192,7 @@ export async function issueForSaleOrder(
     const picked: number[] = [];
     for (const d of dts) {
       if (d.pickInventoryNo) continue;
-      const qty = want ? (want.get(d.saleOutDtId) ?? 0) : d.saleOutQuantity;
+      const qty = want ? (want.get(d.id) ?? 0) : d.saleOutQuantity;
       if (qty <= 0) continue;
       if (qty > d.saleOutQuantity) throw new HttpError(400, `จ่ายเกินจำนวนในใบสั่งขาย (${d.productCode})`);
       if (!d.productId) throw new HttpError(400, `รายการ ${d.productCode} ไม่มี product_id`);
@@ -1437,8 +1441,8 @@ function productWhere(q: string, f: ProductFilters) {
     f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
     f.creator?.trim()
-      ? /^\d+$/.test(f.creator.trim())
-        ? eq(product.createBy, Number(f.creator.trim()))
+      ? isUuid(f.creator.trim())
+        ? eq(creatorUser.id, f.creator.trim().toLowerCase())
         : // the same name fullName() builds: each part trimmed, empty parts dropped
           sql`concat_ws(' ', nullif(trim(${creatorUser.firstName}),''), nullif(trim(${creatorUser.lastName}),'')) ilike ${likeTerm(f.creator.trim())}`
       : undefined,

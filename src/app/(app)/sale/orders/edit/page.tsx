@@ -22,9 +22,10 @@ import { Modal } from '@/components/ui/modal';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { ApiError, postJson, errMsg, upload } from '@/lib/api';
+import { ApiError, api, postJson, errMsg, upload } from '@/lib/api';
 import { baht } from '@/lib/utils';
 import { RecordKey, useRecord } from '@/lib/use-record';
+import { recordNo } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
@@ -39,12 +40,12 @@ function EditSaleOrder() {
   const confirm = useConfirm();
   const { isAdmin, can, has, userId } = useAccess();
   const sp = useSearchParams();
-  const initialNo = sp.get('no') ?? '';
+  const initialId = sp.get('id') ?? ''; // the order's uuid (ADR 0008)
   const form = React.useRef<SaleOrderFormHandle>(null);
   // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
   // once, when it mounts, so a new record always starts from a clean form
   const [version, setVersion] = React.useState(0);
-  // the number from ?no= opens quietly; the lookup bar's number toasts found / not found
+  // the order from ?id= opens quietly; the lookup bar's number toasts found / not found
   const {
     data: loaded,
     setData: setLoaded,
@@ -53,17 +54,33 @@ function EditSaleOrder() {
     find: load,
     reload,
   } = useRecord<SaleOrderLoaded>({
-    url: (n) => `/api/sale-orders/${encodeURIComponent(n)}`,
+    url: (id) => `/api/sale-orders/${encodeURIComponent(id)}`,
     pick: (d: { order: SaleOrderLoaded }) => d.order,
-    initial: initialNo,
+    initial: initialId,
     onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => {
       push({ kind: 'success', title: 'เรียกข้อมูลใบสั่งขายสำเร็จ', desc: d.no });
-      window.history.replaceState(null, '', `?no=${encodeURIComponent(d.no)}`); // a refresh keeps this one
+      window.history.replaceState(null, '', `?id=${d.id}`); // a refresh keeps this one
     },
-    onMissing: (n) => push({ kind: 'error', title: 'ไม่พบใบสั่งขาย', desc: n }),
+    onMissing: (_, message) => push({ kind: 'error', title: 'ไม่พบใบสั่งขาย', desc: message }),
   });
+  // the lookup bar takes the number (SO…): found through the list, then opened by its uuid
+  const lookUp = async (v: string) => {
+    const typed = recordNo(v);
+    if (!typed) return;
+    try {
+      const rows = await api<{ id: string; no: string }[]>(
+        `/api/data/sale_orders?no=${encodeURIComponent(typed)}&deleted=all&limit=50`,
+      );
+      const hit = rows.find((r) => r.no === typed);
+      if (hit) load(hit.id);
+      else push({ kind: 'error', title: 'ไม่พบใบสั่งขาย', desc: typed });
+    } catch (e) {
+      push({ kind: 'error', title: 'ค้นหาใบสั่งขายไม่สำเร็จ', desc: errMsg(e) });
+    }
+  };
   const no = loaded?.no ?? '';
+  const id = loaded?.id ?? '';
   const [saving, setSaving] = React.useState(false);
 
   const save = async () => {
@@ -92,7 +109,7 @@ function EditSaleOrder() {
   const cancelOrder = async () => {
     setSaving(true);
     try {
-      await postJson('/api/admin/records', { table: 'sale_orders', id: no, status: 'DELETED', remark: reason });
+      await postJson('/api/admin/records', { table: 'sale_orders', id, status: 'DELETED', remark: reason });
       void mutate('/api/alerts/sale-orders-pending'); // a waiting one leaves the bell
       setAsking(null);
       setReason('');
@@ -110,10 +127,10 @@ function EditSaleOrder() {
   // an approved order without a slip: the customer paid later — the slip (and amount) is added once
   const [paidLater, setPaidLater] = React.useState('');
   const attachSlip = async (f: File | undefined) => {
-    if (!f || !no) return;
+    if (!f || !id) return;
     let ok = true;
     try {
-      await upload('/api/upload', { kind: 'sale-order-slip', id: no, paymentAmount: paidLater }, f);
+      await upload('/api/upload', { kind: 'sale-order-slip', id, paymentAmount: paidLater }, f);
       push({ kind: 'success', title: 'แนบสลิปการชำระเงินแล้ว', desc: f.name });
       setPaidLater('');
     } catch (e) {
@@ -139,7 +156,7 @@ function EditSaleOrder() {
     setSaving(true);
     try {
       // the version on screen: the creator saved since (other lines / qty) → 409, nothing is issued
-      const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/approve`, {
+      const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${id}/approve`, {
         decision,
         remark,
         version: loaded?.version,
@@ -161,7 +178,7 @@ function EditSaleOrder() {
     }
   };
 
-  // เลขพัสดุ — only on an approved order (POST /api/sale-orders/:no/tracking; the server checks the format)
+  // เลขพัสดุ — only on an approved order (POST /api/sale-orders/:id/tracking; the server checks the format)
   const [tracking, setTracking] = React.useState('');
   const [trackingOf, setTrackingOf] = React.useState<SaleOrderLoaded | null>(null);
   const te = useFormErrors(); // a bad parcel no. → under the box, with the allowed format
@@ -182,7 +199,7 @@ function EditSaleOrder() {
     setSaving(true);
     try {
       // the version on screen: another user saved a number since → 409, and the reload shows theirs
-      const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${encodeURIComponent(no)}/tracking`, {
+      const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${id}/tracking`, {
         tracking,
         version: loaded?.version,
       });
@@ -224,8 +241,8 @@ function EditSaleOrder() {
         id="so-no"
         label="ระบุ เลขใบสั่งขาย (SO)"
         placeholder="SO2600760"
-        initial={initialNo}
-        onFind={(v) => load(v)}
+        initial={no}
+        onFind={(v) => void lookUp(v)}
       />
       <RecordGate ready={!!loaded} loading={loading} error={error} noun="ใบสั่งขาย" searchId="so-no">
         {loaded && (
@@ -375,7 +392,7 @@ function EditSaleOrder() {
                   }
                   no={no ?? ''}
                   profileId={loaded?.documentProfileId}
-                  href={`/print/sale-order/${encodeURIComponent(no ?? '')}`}
+                  href={`/print/sale-order/${id}`}
                   disabled={!no || loaded?.cancelled}
                 />
               )}
@@ -446,7 +463,7 @@ function EditSaleOrder() {
 export default function EditSaleOrderPage() {
   return (
     <React.Suspense fallback={null}>
-      <RecordKey of={(sp) => sp.get('no') ?? ''}>
+      <RecordKey of={(sp) => sp.get('id') ?? ''}>
         <EditSaleOrder />
       </RecordKey>
     </React.Suspense>

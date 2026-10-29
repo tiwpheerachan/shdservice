@@ -44,3 +44,25 @@
 ความสัมพันธ์ที่ join ด้วยข้อความเติมจากการจับคู่ทุกครั้ง (ข้อความเดิมเก็บไว้) · ข้ามถ้าแปลงแล้ว (`--reset`) ·
 `seed-export.mts` ใช้คอลัมน์ใหม่ · งานเพิ่ม ~1 วัน
 
+## Phase 1 decisions (เจ้าของระบบ 2026-10-29)
+
+Phase 1 = API พูดแต่ `id` uuid (`drizzle/0005` เติมให้ 66 ตารางแล้ว) ขณะที่ join / FK ยังใช้คีย์เดิม — phase 2 ค่อยสร้าง `pk`
+
+1. **ทุก id ของแถว**ที่ข้าม API (params, query, body, คำตอบ, URL, cookie) = `id` uuid ของแถวนั้น · เลข int ออกจาก API ทั้งหมด
+2. **ข้อยกเว้น: รหัสสถานะยังเป็นตัวเลข** — `job_status_id` (JS 0–24), `quotation_status_id` (QS), `approve_status_id` (AS),
+   `order_status_id` ของอะไหล่ (PART) (`src/lib/status-ids.ts`) · ตารางพวกนี้ก็มี `id uuid` แต่ API ส่งรหัส: เป็นค่าคงที่
+   ไม่ใช่ตัวนับ ทุกคนเห็นรายการเต็มอยู่แล้ว ไล่เลขก็ไม่ได้อะไร
+3. **ลิงก์เอกสารใช้ uuid ไม่ใช่เลขเอกสาร** — URL หน้าเว็บและ path ของ API สำหรับงาน ใบเสนอราคา ใบสั่งขาย ลูกค้า สินค้า
+   (`/jobs/edit?id=<uuid>`, `/api/jobs/<uuid>`, หน้าพิมพ์ด้วย) · เลข J… Q… SO… C… P… ยังแสดง ค้นได้ พิมพ์ และอยู่บนบาร์โค้ด —
+   สแกน/พิมพ์เลขแล้วไปผ่านการค้นหาสู่ลิงก์ uuid · **ไม่มี redirect จากลิงก์เลขเก่า** ("ใช้ uuid อย่างเดียว") ลิงก์เก่าตอบไม่พบ
+4. id ที่ส่งแต่หน้าเว็บไม่ได้ใช้ (เช่น `JobDetail.createBy`, `jobTypeId` / `productTypeId` / `brandId` / `modelId` /
+   `symptomIds` / `engineerSymptomId`, `Permission.id`, `AuditRow.userId`, id / productId ของบรรทัดใบสั่งขาย / ใบเสนอราคา)
+   **ตัดทิ้ง** ไม่แปลง — ตรวจว่าไม่มีใครใช้ก่อนทุกตัว
+5. `SHD_PROFILE_ID = 1` → หาโปรไฟล์ SHD ด้วย code `'SHD'` (หรือ `isDefault`) แทนเลข
+6. path โลโก้ที่เก็บไว้แล้ว (`profiles/{int}/…`, `shippers/{int}/…`) คงเดิม · อัปโหลดใหม่ใช้ uuid ใน path
+7. `audit_log`: แถวเก่าคง `entity_key` / `changes` ที่เป็น int (append-only) · แถวใหม่ของ entity ที่อ้างแถวเขียน uuid เป็น `entity_key`
+8. `/track` สาธารณะคงเดิม (ไม่มี id ของแถวอยู่แล้ว) นอกจาก path โลโก้ตามข้อ 6
+
+**ชั้นกลาง (phase 0 ของ phase 1):** `uuid()` / `byUuid()` ใน `src/server/contract/common.ts` (อ่านเป็นตัวเล็ก; ไม่ใช่ uuid
+→ ข้อความของ schema, path → 404 `ไม่พบ<สิ่งนั้น>`) · `src/server/ids.ts` `rowByUuid` / `pkOf` / `pksOf` (uuid → แถว / คีย์ภายใน,
+ไม่พบ → 404 ข้อความเดียวกัน) · `shapes.ts` / `data.ts` / `src/data/types.ts` ส่ง uuid · `useAccess().userId` และ cookie `os_seen` = uuid

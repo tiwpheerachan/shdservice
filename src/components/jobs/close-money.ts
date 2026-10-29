@@ -15,7 +15,8 @@ export type CloseDraft = {
   returnType: string;
   returnDate: string;
   courier: string;
-  shipperId: number;
+  /** shipping_profile.id; '' = none (a typed courier name) */
+  shipperId: string;
   tracking: string;
   returnDetail: string;
   newSerial: string;
@@ -34,7 +35,7 @@ export const EMPTY_CLOSE: CloseDraft = {
   returnType: '',
   returnDate: '',
   courier: '',
-  shipperId: 0,
+  shipperId: '',
   tracking: '',
   returnDetail: '',
   newSerial: '',
@@ -112,7 +113,7 @@ export function closeDraftOf(job: JobDetail, shippers: string[], today: string):
     courier: job.return.detail.includes(' · ')
       ? (job.return.detail.split(' · ')[0] ?? '')
       : (shippers.find((c) => job.return.detail.includes(c)) ?? ''),
-    shipperId: job.return.shipperId ?? 0,
+    shipperId: job.return.shipperId ?? '',
     tracking: job.return.tracking,
     returnDetail: job.return.detail,
     // the "New S/N" the return note prints (spare_part_replace)

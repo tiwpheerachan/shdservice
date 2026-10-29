@@ -235,7 +235,9 @@ await test('G15 a role deleted while an admin gives it to a user → never a use
   const b = await blocker();
   await b.query('BEGIN');
   await b.query('SELECT 1 FROM app_user WHERE user_id = 9932 FOR UPDATE'); // another admin's edit of that user
-  const give = postUser({ id: '9932', role });
+  // the API takes the user's uuid (ADR 0008)
+  const [{ uid }] = await Q<{ uid: string }>(`SELECT id::text uid FROM app_user WHERE user_id = 9932`);
+  const give = postUser({ id: uid, role });
   assert.ok(await lockWaiters(1), 'the role change reached the row lock');
   const del = perms('DELETE', undefined, `?role=${encodeURIComponent(role)}`);
   await Promise.race([del, lockWaiters(2)]);
@@ -249,7 +251,7 @@ await test('G15 a role deleted while an admin gives it to a user → never a use
   // and the other order: a role that no longer exists is refused, not stored
   await Q(`UPDATE app_user SET user_type = 'RA Clerk' WHERE user_id = 9932`);
   invalidateUserCache();
-  assert.equal(await postUser({ id: '9932', role: 'RA Never Existed' }), 400);
+  assert.equal(await postUser({ id: uid, role: 'RA Never Existed' }), 400);
 });
 
 await pool.end();

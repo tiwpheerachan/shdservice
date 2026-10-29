@@ -10,6 +10,8 @@ import { UiStatus } from './common';
 const s = z.string();
 const n = z.number();
 const b = z.boolean();
+/** a row's id (ADR 0008): its uuid — every row id the API sends; status codes (job_status_id …) stay numbers */
+const u = z.uuid();
 
 export const Customer = z
   .object({
@@ -21,14 +23,14 @@ export const Customer = z
     line: s,
     taxId: s,
     status: UiStatus,
-    id: n.optional(),
+    id: u.optional(),
     type: s.optional().meta({ description: '`Normal` = a person; otherwise a company type.' }),
     online: b.optional(),
     address1: s.optional(),
     address2: s.optional(),
-    cityId: n.optional(),
-    districtId: n.optional(),
-    subDistrictId: n.optional(),
+    cityId: u.optional(),
+    districtId: u.optional(),
+    subDistrictId: u.optional(),
     postalCode: s.optional(),
     priceGroup: s.optional(),
     createdDate: s.optional(),
@@ -39,9 +41,8 @@ export const Customer = z
 
 export const AuditRow = z
   .object({
-    id: n,
+    id: u,
     at: s,
-    userId: n,
     user: s,
     action: z.enum([
       'CREATE',
@@ -71,7 +72,7 @@ export const AuditRow = z
 
 export const PartRequestLine = z
   .object({
-    logId: n,
+    logId: u.meta({ description: 'the job_order_spare_part_log row' }),
     jobNo: s,
     code: s,
     name: s,
@@ -93,18 +94,17 @@ export const PartRequestLine = z
 
 export const JobDetail = z
   .object({
+    id: u,
     no: s,
-    documentProfileId: n,
+    documentProfileId: u,
     statusId: n,
     status: s,
     statusGroup: s,
     createDate: s,
-    createBy: n,
     createByName: s,
-    jobTypeId: n,
     jobType: s,
     jobTypeDetail: s,
-    customer: z.object({ id: n, code: s, name: s, taxId: s, address: s, phone: s, line: s, email: s }).nullable(),
+    customer: z.object({ id: u, code: s, name: s, taxId: s, address: s, phone: s, line: s, email: s }).nullable(),
     customerDetail: s,
     so: s,
     channel: s,
@@ -113,13 +113,10 @@ export const JobDetail = z
     warrantyMonth: n,
     expireDate: s,
     warranty: s,
-    productTypeId: n,
     productType: s,
     imei: s,
     serial: s,
-    brandId: n,
     brand: s,
-    modelId: n,
     modelCode: s,
     modelName: s,
     modelDetail: s,
@@ -130,7 +127,6 @@ export const JobDetail = z
     receptionType: s,
     equipment: s,
     fault: s,
-    symptomIds: z.array(n),
     symptoms: z.array(s),
     symptomOther: s,
     remark: s,
@@ -147,9 +143,8 @@ export const JobDetail = z
     outstanding: n,
     dueDate: s,
     dueDateAuto: b,
-    engineerId: n,
+    engineerId: u.nullable().meta({ description: 'null = nobody is on the job' }),
     engineer: s,
-    engineerSymptomId: n,
     engineerSymptom: s,
     repairDetail: s,
     engineerRemark: s,
@@ -159,28 +154,28 @@ export const JobDetail = z
     closedBy: s,
     sparePartReplace: s,
     payment: z.object({ type: s, no: s, amount: n, detail: s, slip: s }),
-    return: z.object({ date: s, type: s, tracking: s, detail: s, shipperId: n }),
+    return: z.object({ date: s, type: s, tracking: s, detail: s, shipperId: u.nullable() }),
     swap: z.object({ detail: s, docNo: s }),
     quotationNo: s,
     isBounce: b,
     gspnNo: s,
     outsource: z.array(
       z.object({
-        id: n,
+        id: u,
         sendTo: s,
         sendDetail: s,
         sendDate: s,
         sendBy: s,
-        sendById: n,
+        sendById: u.nullable(),
         receiveDate: s,
         receiveBy: s,
-        receiveById: n,
+        receiveById: u.nullable(),
         receiveDetail: s,
         status: s,
       }),
     ),
     parts: z.array(PartRequestLine.extend({ total: n })),
-    attachments: z.array(z.object({ id: n, name: s, file: s, remark: s })),
+    attachments: z.array(z.object({ id: u, name: s, file: s, remark: s })),
     logs: z.array(z.object({ statusId: n, status: s, date: s, by: s })),
     history: z.array(AuditRow),
     version: n.meta({ description: 'row_version — send it back on save (409 `stale` if it moved).' }),
@@ -189,6 +184,7 @@ export const JobDetail = z
 
 /** A job as the lists show it (src/data/types.ts Job). */
 const jobRow = {
+  id: u,
   no: s,
   openDate: s,
   customer: s,
@@ -202,8 +198,6 @@ const jobRow = {
   statusId: n.optional(),
   statusGroup: s.optional(),
   isBounce: b.optional(),
-  customerId: n.optional(),
-  engineerId: n.optional(),
   serial: s.optional(),
   channel: s.optional(),
   receptionType: s.optional(),
@@ -231,6 +225,7 @@ const jobRow = {
 export const Job = z.object({ ...jobRow, deposit: n, outstanding: n }).meta({ id: 'Job' });
 
 const quotationRow = {
+  id: u,
   no: s,
   date: s,
   type: z.enum(['Type A (Normal)', 'Type B (VIP)']),
@@ -260,7 +255,6 @@ export const QuotationDetail = z
     job: JobDetail.nullable(),
     lines: z.array(
       z.object({
-        id: n.optional(),
         lineNumber: n,
         itemType: z.enum(['SparePart', 'Service', 'Delivery']),
         code: s,
@@ -284,7 +278,7 @@ export const QuotationDetail = z
     rounding: n,
     netAmount: n,
     approveRemark: s,
-    documentProfileId: n,
+    documentProfileId: u,
     createdByPhone: s,
     createdByEmail: s,
     version: n,
@@ -292,6 +286,7 @@ export const QuotationDetail = z
   .meta({ id: 'QuotationDetail' });
 
 const saleOrderRow = {
+  id: u,
   no: s,
   date: s,
   customer: s,
@@ -330,9 +325,7 @@ export const SaleOrderDetail = z
     cancelRemark: s.meta({ description: 'why it was cancelled (empty unless cancelled)' }),
     lines: z.array(
       z.object({
-        id: n.optional(),
         listNo: n,
-        productId: n,
         code: s,
         name: s,
         type: z.enum(['SparePart', 'Service']),
@@ -348,12 +341,12 @@ export const SaleOrderDetail = z
     slip: s,
     approveRemark: s,
     createdBy: s,
-    createdById: n,
-    creatorIds: z.array(n),
+    createdById: u.nullable(),
+    creatorIds: z.array(u),
     approverRoles: z.array(s),
-    documentProfileId: n,
+    documentProfileId: u,
     version: n,
-    salesId: n,
+    salesId: u.nullable(),
   })
   .meta({ id: 'SaleOrderDetail' });
 
@@ -367,7 +360,7 @@ export const Product = z
     onhand: n,
     price: n,
     status: UiStatus,
-    id: n.optional(),
+    id: u.optional(),
     nameEn: s.optional(),
     nameCn: s.optional(),
     description: s.optional(),
@@ -430,7 +423,7 @@ export const IssuedLine = z
 
 export const SystemUser = z
   .object({
-    id: s,
+    id: u,
     code: s,
     name: s,
     username: s,
@@ -445,14 +438,12 @@ export const SystemUser = z
   })
   .meta({ id: 'SystemUser' });
 
-export const Permission = z
-  .object({ id: s, role: s, menu: s, add: b, edit: b, del: b, view: b })
-  .meta({ id: 'Permission' });
+export const Permission = z.object({ role: s, menu: s, add: b, edit: b, del: b, view: b }).meta({ id: 'Permission' });
 
 /** a row of a simple master list (categories, colors, job types, …) */
 export const MasterRow = z
   .object({
-    id: s,
+    id: u,
     name: s,
     detail: s,
     status: UiStatus,
@@ -467,7 +458,7 @@ export const Model = z
 
 export const DocumentProfile = z
   .object({
-    id: n,
+    id: u,
     code: s,
     nameTh: s,
     nameEn: s,
@@ -494,7 +485,7 @@ export const DocumentProfile = z
 
 export const ShippingProfile = z
   .object({
-    id: n,
+    id: u,
     code: s,
     nameTh: s,
     nameEn: s,

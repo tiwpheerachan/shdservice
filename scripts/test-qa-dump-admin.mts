@@ -58,7 +58,7 @@ const signIn = (email: string) =>
 /** a master row's status + stamp; `reset` first sets the stamp back to 2000-01-01 by user 1 */
 const MASTER = {
   colors: ['color', 'id'],
-  symptoms: ['symptom', 'symptom_id'],
+  symptoms: ['symptom', 'id'],
   models: ['model', 'model_code'],
 } as const;
 async function stampOf(kind: keyof typeof MASTER, key: string, reset = false) {
@@ -145,7 +145,9 @@ try {
 
   console.log('\n4. status_changed_at / _by only on a real status change');
   await test('user: saved with nothing changed → stamp kept; Active → Inactive → stamped', async () => {
-    const base = { id: String(U.edit.id), name: 'QA qa-dump-edit', role: U.edit.type, email: U.edit.email };
+    const [{ id }] = (await db.execute<{ id: string }>(sql`SELECT id::text FROM app_user WHERE user_id = ${U.edit.id}`))
+      .rows;
+    const base = { id, name: 'QA qa-dump-edit', role: U.edit.type, email: U.edit.email };
     await upsertUser({ ...base, status: 'Active' }, U.admin.id);
     assert.deepEqual(await userRow(U.edit.id), { last_login: null, title: null, at: '2000-01-01 00:00:00', by: 1 });
     await upsertUser({ ...base, status: 'Inactive' }, U.admin.id);

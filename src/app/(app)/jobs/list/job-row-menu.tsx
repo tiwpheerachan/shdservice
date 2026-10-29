@@ -25,21 +25,21 @@ const ITEM =
 export function JobRowMenu({ job, onCancel }: { job: Job; onCancel?: (job: Job) => void }) {
   const { canLink } = useAccess();
   const [open, setOpen] = React.useState(false);
-  const no = encodeURIComponent(job.no);
+  const id = job.id; // links use the job's uuid (ADR 0008)
   const group = job.statusGroup ?? '';
   const live = job.statusId !== JS.CANCELLED && group !== JOB_GROUP.CANCEL;
   const items: { label: string; icon: React.ElementType; href: string }[] = [
-    { label: 'พิมพ์ใบรับงาน', icon: Printer, href: `/print/job/${no}` },
+    { label: 'พิมพ์ใบรับงาน', icon: Printer, href: `/print/job/${id}` },
     ...(live && group !== JOB_GROUP.FINISHED && canLink({ href: '/jobs/repair', need: 'edit' })
-      ? [{ label: 'บันทึกการทำงาน', icon: Wrench, href: `/jobs/repair?job=${no}` }]
+      ? [{ label: 'บันทึกการทำงาน', icon: Wrench, href: `/jobs/repair?id=${id}` }]
       : []),
     ...(live &&
     !notClosableMsg(job.statusId ?? null, group, job.status) &&
     canLink({ href: '/jobs/close', need: 'edit' })
-      ? [{ label: 'บันทึกปิดงาน-ส่งคืนสินค้า', icon: PackageCheck, href: `/jobs/close?job=${no}` }]
+      ? [{ label: 'บันทึกปิดงาน-ส่งคืนสินค้า', icon: PackageCheck, href: `/jobs/close?id=${id}` }]
       : []),
     ...(group === JOB_GROUP.FINISHED
-      ? [{ label: 'พิมพ์ใบปิดงาน / ใบส่งคืน', icon: FileText, href: `/print/job/${no}/return` }]
+      ? [{ label: 'พิมพ์ใบปิดงาน / ใบส่งคืน', icon: FileText, href: `/print/job/${id}/return` }]
       : []),
   ];
   return (
@@ -100,7 +100,7 @@ export function useJobCancelModal(onDone: () => void) {
     if (!job) return;
     setSaving(true);
     try {
-      await postJson('/api/admin/records', { table: 'jobs', id: job.no, status: 'DELETED', remark: reason });
+      await postJson('/api/admin/records', { table: 'jobs', id: job.id, status: 'DELETED', remark: reason });
       push({ kind: 'success', title: 'ยกเลิกงานแล้ว', desc: job.no });
       setJob(null);
       onDone();

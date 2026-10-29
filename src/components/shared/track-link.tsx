@@ -51,7 +51,8 @@ function left(ms: number) {
   return `อีก ${h} ชม.${m % 60 ? ` ${m % 60} นาที` : ''}`;
 }
 
-export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean }) {
+/** `jobId` = the job's uuid (its API path) */
+export function TrackLink({ jobId, compact }: { jobId: string; compact?: boolean }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const { edit: canEdit } = useAccess().forPath('/jobs/edit');
@@ -62,7 +63,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
   const [fresh, setFresh] = React.useState<{ url: string; id: string | null } | null>(null);
 
   // the link + its state through swr; re-read every minute (the customer may open it meanwhile)
-  const link = useApi<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, {
+  const link = useApi<LinkResponse>(`/api/jobs/${jobId}/track-link`, {
     fresh: true,
     refreshInterval: 60_000,
   });
@@ -122,7 +123,7 @@ export function TrackLink({ jobNo, compact }: { jobNo: string; compact?: boolean
     }
     setBusy(true);
     try {
-      const d = await postJson<LinkResponse>(`/api/jobs/${encodeURIComponent(jobNo)}/track-link`, {});
+      const d = await postJson<LinkResponse>(`/api/jobs/${jobId}/track-link`, {});
       // show the new link at once, then re-read: one issued at the same moment by someone else replaces it
       void link.mutate({ ...d, ready: d.ready ?? ready });
       setNow(Date.now());

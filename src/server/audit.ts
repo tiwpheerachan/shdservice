@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, desc, eq, gte, ilike, lte, or, sql, count } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql, count } from 'drizzle-orm';
 import { db, type Tx } from '@/db/client';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { appUser, auditLog } from '@/db/schema';
@@ -36,7 +36,7 @@ export type AuditEntry = {
   module: string;
   /** table name */
   entity: string;
-  /** business key: J2612088, Q2600462, P00012, user_id … */
+  /** business key: J2612088, Q2600462, P00012 — or the row's uuid for a row without one (a user, a customer …; rows before ADR 0008 hold the old int) */
   key: string | number;
   /** short human-readable line for the log list */
   summary: string;
@@ -83,6 +83,9 @@ export async function audit(w: Writer, userId: number, entries: AuditEntry | Aud
   );
 }
 
+/** a row's uuid (ADR 0008) — a filter holding one means "this row", anything else is a name / text */
+export const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+
 const norm = (v: unknown): unknown => {
   if (v === undefined || v === null) return null;
   if (typeof v === 'string') {
@@ -126,9 +129,9 @@ export function diff(
  * Reading (admin page + per-record history)
  * ------------------------------------------------------------------ */
 export type AuditRow = {
-  id: number;
+  /** audit_log.id (uuid) */
+  id: string;
   at: string;
-  userId: number;
   user: string;
   action: AuditAction;
   module: string;
@@ -151,7 +154,6 @@ export type AuditFilters = {
 const toRow = (r: typeof auditLog.$inferSelect): AuditRow => ({
   id: r.id,
   at: r.at.slice(0, 19).replace('T', ' '), // to the second: two lines in one minute must still read in order
-  userId: r.userId,
   user: r.userName,
   action: r.action as AuditAction,
   module: r.module,
@@ -174,8 +176,11 @@ function auditWhere(q: string, f: AuditFilters) {
     ymd(f.from) ? gte(auditLog.at, `${ymd(f.from)} 00:00:00`) : undefined, // junk date = no filter, not a 500
     ymd(f.to) ? lte(auditLog.at, `${ymd(f.to)} 23:59:59`) : undefined,
     f.user
-      ? /^\d+$/.test(f.user)
-        ? eq(auditLog.userId, Number(f.user))
+      ? isUuid(f.user)
+        ? inArray(
+            auditLog.userId,
+            db.select({ id: appUser.userId }).from(appUser).where(eq(appUser.id, f.user.trim().toLowerCase())),
+          )
         : ilike(auditLog.userName, likeTerm(f.user))
       : undefined,
     f.module ? eq(auditLog.module, f.module) : undefined,
@@ -202,7 +207,7 @@ export async function pageAudit(p: PageQuery, f: AuditFilters): Promise<Page<Aud
       .select()
       .from(auditLog)
       .where(w)
-      .orderBy(...orderByCols(p.sort, SORT, [desc(auditLog.id)]))
+      .orderBy(...orderByCols(p.sort, SORT, [desc(auditLog.pk)]))
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
@@ -214,7 +219,7 @@ export async function listAudit(f: AuditFilters & { q?: string; limit?: number }
     .select()
     .from(auditLog)
     .where(auditWhere(f.q ?? '', f))
-    .orderBy(desc(auditLog.id))
+    .orderBy(desc(auditLog.pk))
     .limit(Math.min(f.limit ?? 1000, MAX_EXPORT_ROWS));
   return rows.map(toRow);
 }
@@ -225,7 +230,7 @@ export async function auditFor(entity: string, key: string, limit = 100): Promis
     .select()
     .from(auditLog)
     .where(and(eq(auditLog.entity, entity), eq(auditLog.entityKey, key)))
-    .orderBy(desc(auditLog.id))
+    .orderBy(desc(auditLog.pk))
     .limit(limit);
   return rows.map(toRow);
 }

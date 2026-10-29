@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { ENGINEER_EMAIL, STOCK_EMAIL } from './support/env';
-import { movementsOf, newJob, newPart, newPartLine, one, rows, stockOf, userId } from './support/db';
+import { jobUuid, movementsOf, newJob, newPart, newPartLine, one, rows, stockOf, userId } from './support/db';
 import { dismissToasts, expect, signIn, switchUser, test } from './support/fixtures';
 
 /**
@@ -55,7 +55,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
 
   // ---- บันทึกงานซ่อม: request 2 (แบบ A: เบิก + เสนอ) ----
   await signIn(page, ENGINEER_EMAIL);
-  await page.goto(`/jobs/repair?job=${no}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   await expect(page.getByRole('heading', { name: 'บันทึกงานซ่อม' })).toBeVisible();
   await page.getByRole('combobox', { name: 'เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…' }).click();
   await page.keyboard.type(part.code);
@@ -161,7 +161,7 @@ test('picking a part again points at its open line instead of adding a second on
   const no = await newJob({ status: 2 });
   await newPartLine({ jobNo: no, code: part.code, price: PRICE, qty: 1, granted: 1 }); // issued: read-only
   await signIn(page, ENGINEER_EMAIL);
-  await page.goto(`/jobs/repair?job=${no}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   const qty = page.getByLabel(`จำนวน แบบ A ${part.code}`).filter({ visible: true });
   await expect(qty).toHaveCount(1);
   const add = async () => {
@@ -184,7 +184,7 @@ test('a stale save → โหลดใหม่: the form and its save button ar
 }) => {
   const no = await newJob({ status: 2 });
   await signIn(page, ENGINEER_EMAIL);
-  await page.goto(`/jobs/repair?job=${no}`);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   const cost = page.locator('#cost-serviceCost');
   const saveButton = page.getByRole('button', { name: 'บันทึกงานซ่อม' });
   await expect(cost).toBeEditable();
@@ -196,7 +196,7 @@ test('a stale save → โหลดใหม่: the form and its save button ar
   // the re-read held until released: the screen must stay locked while it is in flight
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
-  await page.route(`**/api/jobs/${no}`, async (route) => {
+  await page.route(`**/api/jobs/${await jobUuid(no)}`, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     await held;
     await route.continue();
@@ -207,7 +207,7 @@ test('a stale save → โหลดใหม่: the form and its save button ar
   release();
   await expect(saveButton).toBeEnabled();
   await expect(cost).toHaveValue(/^120(\.00)?$/); // the stored job replaced the form
-  await page.unroute(`**/api/jobs/${no}`);
+  await page.unroute(`**/api/jobs/${await jobUuid(no)}`);
 
   await cost.fill('300');
   await save(page, 'บันทึกงานซ่อม');

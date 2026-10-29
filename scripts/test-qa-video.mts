@@ -267,9 +267,9 @@ const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 1, 
 /** an attachment row of QV0001 (what POST /api/attachments or confirm leaves) → its id */
 const attach = async (file: string, recordStatus = 'ACTIVE', name = 'รูปหน้าเครื่อง.jpg') =>
   (
-    await pool.query<{ id: number }>(
+    await pool.query<{ id: string }>(
       `INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name, system_file_name, record_status)
-       VALUES ('Jobs', 'QV0001', $1, $2, $3) RETURNING document_attach_id AS id`,
+       VALUES ('Jobs', 'QV0001', $1, $2, $3) RETURNING id::text AS id`,
       [name, file, recordStatus],
     )
   ).rows[0]!.id;
@@ -555,7 +555,7 @@ await test('a removed attachment (soft delete), its video thumbnail, a file neve
   stored.set(path(pic), { bytes: MP4, type: 'image/jpeg' });
   const id = await attach(pic);
   assert.equal((await open(path(pic))).status, 307); // now in the picture cache
-  await pool.query(`UPDATE document_attach SET record_status = 'DELETED' WHERE document_attach_id = $1`, [id]);
+  await pool.query(`UPDATE document_attach SET record_status = 'DELETED' WHERE id = $1`, [id]);
   assert.deepEqual(await open(path(pic)).then((r) => [r.status, r.body]), [404, { error: 'ไม่พบไฟล์' }]);
   // a video's thumbnail follows the video's row
   const clip = [...r2.keys()].find((p) => r2.has(`${p}.jpg`))!;
@@ -578,7 +578,7 @@ await test('a picture from the list (/api/attachments/{id}) gets the same day-lo
   stored.set(path(pic), { bytes: MP4, type: 'image/png' });
   const id = await attach(pic);
   signs.length = 0;
-  const viaId = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id: String(id) } });
+  const viaId = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id } });
   const viaPath = await open(path(pic));
   assert.deepEqual([viaId.status, viaPath.status], [307, 307]);
   assert.equal(viaId.location, viaPath.location);
@@ -590,14 +590,14 @@ await test('a picture from the list (/api/attachments/{id}) gets the same day-lo
   assert.equal(signs.length, 1);
   // a PDF from the list: 2 minutes, as before
   const pdf = await attach('a.pdf');
-  const p = await call(attachmentRoute.GET as never, `/api/attachments/${pdf}`, { params: { id: String(pdf) } });
+  const p = await call(attachmentRoute.GET as never, `/api/attachments/${pdf}`, { params: { id: pdf } });
   assert.deepEqual([p.status, p.cache], [307, 'private, max-age=60']);
 });
 await test('a legacy row without a file name → 404 (it would sign the job folder)', async () => {
   for (const file of ['', ' ']) {
     stored.set(path(file), { bytes: MP4, type: 'application/octet-stream' }); // signable, were it asked
     const id = await attach(file, 'ACTIVE', '');
-    const r = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id: String(id) } });
+    const r = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id } });
     assert.equal(r.status, 404);
   }
 });
@@ -608,7 +608,7 @@ await test('storage failing is not a missing file: 503 ระบบจัดเ�
   try {
     const r = await open(path('outage.pdf'));
     assert.deepEqual([r.status, r.body.error], [503, 'ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง']);
-    const viaId = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id: String(id) } });
+    const viaId = await call(attachmentRoute.GET as never, `/api/attachments/${id}`, { params: { id } });
     assert.equal(viaId.status, 503);
   } finally {
     storageDown = false;

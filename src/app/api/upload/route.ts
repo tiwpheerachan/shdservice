@@ -1,19 +1,21 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { job, product, saleOutHd } from '@/db/schema';
+import { documentProfile, job, product, saleOutHd, shippingProfile } from '@/db/schema';
 import { handle, parseForm, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
 import { upload } from '@/server/contract/misc';
 import { rateLimit } from '@/server/rate-limit';
 import { audit } from '@/server/audit';
-import { AS } from '@/server/services/sale-orders';
+import { AS, saleOrderNoOf } from '@/server/services/sale-orders';
 import { overpaidMessage, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { money, num } from '@/server/mappers/format';
 import { moneyLockedMsg } from '@/lib/validation/job';
 import { jobClosed, moneyLocked } from '@/server/services/jobs';
 import { RS } from '@/server/record-status';
-import { getDocumentProfile, setDocumentProfileLogo } from '@/server/services/document-profiles';
-import { getShippingProfile, setShippingProfileLogo } from '@/server/services/shipping-profiles';
+import { setDocumentProfileLogo } from '@/server/services/document-profiles';
+import { setShippingProfileLogo } from '@/server/services/shipping-profiles';
+import { rowByUuid } from '@/server/ids';
 import {
   systemFileName,
   uploadFile,
@@ -29,6 +31,12 @@ import {
 
 const IMAGE_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+/** a profile / order is named by its uuid (ADR 0008) — anything else (an old int id, a number) is none: 404 */
+const uuidOr404 = (id: string, what: string) => {
+  if (!z.uuid().safeParse(id).success) throw new HttpError(404, `ไม่พบ${what}`);
+  return id;
+};
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +44,7 @@ export const dynamic = 'force-dynamic';
  * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
  * and writes the reference into the legacy column:
  *   product-image    → product.pictrue_file_name      (products/{code}/{file}; column keeps the file name)
- *   sale-order-slip  → sale_out_hd.slip_file_name     (full path; + payment_amount when `paymentAmount` is sent)
+ *   sale-order-slip  → sale_out_hd.slip_file_name     (full path; + payment_amount when `paymentAmount` is sent; id = the order's uuid)
  *   job-slip         → job.job_payment_slip_file_name (full path)
  * Replacing a file removes the previous object — except a closed job's slip, kept as evidence.
  */
@@ -87,9 +95,8 @@ export const POST = handle(async (req: NextRequest) => {
   switch (kind) {
     case 'profile-logo': {
       // ออกเอกสารในนาม — logo printed on quotations / labels / return notes (System Admin)
-      const pid = Number(id);
-      const prof = await getDocumentProfile(pid);
-      if (!prof || prof.id !== pid) throw new HttpError(404, 'ไม่พบโปรไฟล์ ' + id);
+      const pid = uuidOr404(id, 'โปรไฟล์');
+      await rowByUuid(documentProfile, pid, 'โปรไฟล์'); // before storing anything
       const path = filePath.profileLogo(pid, sys);
       await uploadFile(path, file);
       await swapSlip(path, () => setDocumentProfileLogo(pid, path, me.userId));
@@ -97,9 +104,8 @@ export const POST = handle(async (req: NextRequest) => {
     }
     case 'shipper-logo': {
       // โลโก้บริษัทขนส่ง — printed on the public tracking page (System Admin)
-      const sid = Number(id);
-      const prof = await getShippingProfile(sid);
-      if (!prof) throw new HttpError(404, 'ไม่พบโปรไฟล์ขนส่ง ' + id);
+      const sid = uuidOr404(id, 'โปรไฟล์ขนส่ง');
+      await rowByUuid(shippingProfile, sid, 'โปรไฟล์ขนส่ง'); // before storing anything
       const path = filePath.shipperLogo(sid, sys);
       await uploadFile(path, body);
       await swapSlip(path, () => setShippingProfileLogo(sid, path, me.userId));
@@ -131,6 +137,8 @@ export const POST = handle(async (req: NextRequest) => {
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'sale-order-slip': {
+      const no = await saleOrderNoOf(id); // the order's uuid → its SO number (the row's key, the slip's folder)
+      if (!no) throw new HttpError(404, 'ไม่พบใบสั่งขาย');
       const cols = {
         old: saleOutHd.slipFileName,
         approve: saleOutHd.approveStatusId,
@@ -152,7 +160,7 @@ export const POST = handle(async (req: NextRequest) => {
       >(
         row?: R,
       ) => {
-        if (!row) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
+        if (!row) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
         // a denied / cancelled order is final, an approved one once it has a slip: the slip the approver saw is
         // the evidence, never swapped (and the old one deleted) — an approved order without one takes it (paid later)
         if (row.status === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} — เปลี่ยนสลิปไม่ได้`);
@@ -169,25 +177,25 @@ export const POST = handle(async (req: NextRequest) => {
         return row;
       };
       // before the upload (a refused one stores nothing), and again under the row lock (swapSlip)
-      guard((await db.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id)))[0]);
-      const path = filePath.saleOrderSlip(id, sys);
+      guard((await db.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)))[0]);
+      const path = filePath.saleOrderSlip(no, sys);
       await uploadFile(path, body);
       await swapSlip(path, () =>
         db.transaction(async (tx) => {
           const row = guard(
-            (await tx.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, id)).for('update'))[0],
+            (await tx.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update'))[0],
           );
           await tx
             .update(saleOutHd)
             .set({ slipFileName: path, ...(paid !== null ? { paymentAmount: money(paid) } : {}) })
-            .where(eq(saleOutHd.saleOutHdNo, id));
+            .where(eq(saleOutHd.saleOutHdNo, no));
           await audit(tx, me.userId, {
             action: 'UPDATE',
             module: 'Sale Order',
             entity: 'sale_out_hd',
-            key: id,
+            key: no,
             summary:
-              `แนบสลิปใบสั่งขาย ${id}` +
+              `แนบสลิปใบสั่งขาย ${no}` +
               (row.approve === AS.APPROVED ? ' (หลังอนุมัติ)' : '') +
               (paid !== null ? ` · ชำระ ${paid.toFixed(2)} บาท` : ''),
             changes: {
@@ -196,7 +204,7 @@ export const POST = handle(async (req: NextRequest) => {
             },
           });
           // only ever delete this order's own slip folder (a stored path is data, not a command)
-          return row.old?.startsWith(`sale-orders/${id}/slip/`) ? row.old : null;
+          return row.old?.startsWith(`sale-orders/${no}/slip/`) ? row.old : null;
         }),
       );
       return NextResponse.json({ ok: true, path, file: sys });

@@ -33,6 +33,8 @@ import {
 
 const s = z.string();
 const n = z.number();
+/** a row's id (ADR 0008) — the status lists (job_statuses, quotation_statuses) keep their numeric codes */
+const u = z.uuid();
 const tags = ['Data'];
 const q = s.optional().meta({ description: 'Free-text search.' });
 /** a date filter: a real day or left out — 2026-02-30 / "abc" is a 400 under its name, not a silently dropped filter */
@@ -100,7 +102,13 @@ const list = <T extends z.ZodType>(row: T) => z.array(row);
 const one = <T extends z.ZodType>(row: T) => z.array(row).length(1);
 const strings = z.array(s);
 
-const auditFilters = { from: ymd, to: ymd, user: s.optional(), module: s.optional(), entity: s.optional() };
+const auditFilters = {
+  from: ymd,
+  to: ymd,
+  user: s.optional().meta({ description: "a user's id (uuid) = that user's lines; anything else = the name contains" }),
+  module: s.optional(),
+  entity: s.optional(),
+};
 resource(
   'audit_log',
   'Audit log (ประวัติการใช้งาน)',
@@ -108,7 +116,10 @@ resource(
   list(AuditRow),
   {
     ...auditFilters,
-    key: s.optional(),
+    key: s.optional().meta({
+      description:
+        "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)",
+    }),
     action: s.optional(),
     q,
     limit,
@@ -137,10 +148,10 @@ resource(
   'staff',
   'Staff names for pickers (ผู้รับ / ช่าง / พนักงานขาย)',
   ANY,
-  list(z.object({ id: n, name: s, userType: s, takesJobs: z.boolean(), sells: z.boolean() })),
+  list(z.object({ id: u, name: s, userType: s, takesJobs: z.boolean(), sells: z.boolean() })),
   { usedAs: choice(['engineer', 'sales']) },
 );
-resource('provinces', 'Provinces', ANY, list(z.object({ id: n, name: s })));
+resource('provinces', 'Provinces', ANY, list(z.object({ id: u, name: s })));
 resource(
   'job_statuses',
   'Job statuses',
@@ -154,9 +165,9 @@ resource(
   'symptom_stats',
   'How often each symptom was reported',
   ANY,
-  list(z.object({ id: n, name: s, group: s, count: n })),
+  list(z.object({ id: u, name: s, group: s, count: n })),
 );
-resource('model_symptoms', 'Symptoms reported for a model', ANY, list(z.object({ id: n, name: s, count: n })), {
+resource('model_symptoms', 'Symptoms reported for a model', ANY, list(z.object({ id: u, name: s, count: n })), {
   model: s.optional(),
 });
 resource('shippers', 'Couriers used before', ANY, strings);
@@ -176,7 +187,7 @@ const productFilters = {
   name: s.optional(),
   brand: s.optional(),
   category: s.optional(),
-  creator: s.optional(),
+  creator: s.optional().meta({ description: "who created the part: a user's id (uuid), or the name contains" }),
   date: ymd,
   model: s.optional(),
   stock: choice(['in', 'low', 'out']),

@@ -135,7 +135,8 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "number"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "name": {
                           "type": "string"
@@ -278,11 +279,11 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\\d{1,9}$",
-              "description": "document_attach id"
+              "format": "uuid",
+              "description": "document_attach.id"
             },
             "required": true,
-            "description": "document_attach id",
+            "description": "document_attach.id",
             "name": "id",
             "in": "path"
           }
@@ -351,11 +352,11 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\\d{1,9}$",
-              "description": "document_attach id"
+              "format": "uuid",
+              "description": "document_attach.id"
             },
             "required": true,
-            "description": "document_attach id",
+            "description": "document_attach.id",
             "name": "id",
             "in": "path"
           }
@@ -647,7 +648,8 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "number"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "name": {
                           "type": "string"
@@ -918,7 +920,7 @@
         }
       }
     },
-    "/jobs/{no}": {
+    "/jobs/{id}": {
       "get": {
         "tags": [
           "Jobs"
@@ -929,11 +931,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -1008,11 +1011,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -1135,7 +1139,7 @@
         }
       }
     },
-    "/jobs/{no}/calls": {
+    "/jobs/{id}/calls": {
       "get": {
         "tags": [
           "Jobs"
@@ -1145,11 +1149,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -1167,7 +1172,8 @@
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "number"
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "detail": {
                             "type": "string"
@@ -1215,6 +1221,16 @@
               }
             }
           },
+          "404": {
+            "description": "No such job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
             "content": {
@@ -1237,11 +1253,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           },
           {
@@ -1299,7 +1316,8 @@
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "number"
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "detail": {
                             "type": "string"
@@ -1421,22 +1439,23 @@
         }
       }
     },
-    "/jobs/{no}/close": {
+    "/jobs/{id}/close": {
       "post": {
         "tags": [
           "Jobs"
         ],
         "summary": "Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)",
-        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number / new serial and the deposit still to refund. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number / new serial and the deposit still to refund. `job` = the page's shared job sections: PATCH /jobs/{id}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -1566,7 +1585,9 @@
                         "nullable": true
                       },
                       "shipperId": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "the courier profile (shipping_profile.id); left out = none"
                       }
                     },
                     "required": [
@@ -1715,22 +1736,23 @@
         }
       }
     },
-    "/jobs/{no}/outsource": {
+    "/jobs/{id}/outsource": {
       "post": {
         "tags": [
           "Jobs"
         ],
         "summary": "Send to / receive back from an outside repairer (ส่งซ่อม Out-Source)",
-        "description": "Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts). `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts). `job` = the page's shared job sections: PATCH /jobs/{id}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -1764,9 +1786,8 @@
                         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                       },
                       "by": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "exclusiveMinimum": true
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "detail": {
                         "type": "string",
@@ -1785,9 +1806,8 @@
                     "type": "object",
                     "properties": {
                       "by": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "exclusiveMinimum": true
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "date": {
                         "anyOf": [
@@ -1953,22 +1973,23 @@
         }
       }
     },
-    "/jobs/{no}/repair": {
+    "/jobs/{id}/repair": {
       "post": {
         "tags": [
           "Jobs"
         ],
         "summary": "Save the repair (บันทึกงานซ่อม): details, costs, part requests, status",
-        "description": "Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it. `job` = the page's shared job sections: PATCH /jobs/{id}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -2114,7 +2135,9 @@
                           }
                         },
                         "logId": {
-                          "type": "number"
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "a stored line (its id); left out = a new line"
                         },
                         "code": {
                           "type": "string"
@@ -2270,22 +2293,23 @@
         }
       }
     },
-    "/jobs/{no}/swap-refund": {
+    "/jobs/{id}/swap-refund": {
       "post": {
         "tags": [
           "Jobs"
         ],
         "summary": "Record a swap or a refund (Swap / Refund)",
-        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund (`newSerial` is never required). `status`: job_status 17 / 18 (swap) or 17 / 19 (refund), or the job's current one. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund (`newSerial` is never required). `status`: job_status 17 / 18 (swap) or 17 / 19 (refund), or the job's current one. `job` = the page's shared job sections: PATCH /jobs/{id}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -2496,7 +2520,7 @@
         }
       }
     },
-    "/jobs/{no}/track-link": {
+    "/jobs/{id}/track-link": {
       "get": {
         "tags": [
           "Jobs"
@@ -2507,11 +2531,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -2596,11 +2621,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "หมายเลขงาน (J…)"
+              "format": "uuid",
+              "description": "the job (job.id) — not its number"
             },
             "required": true,
-            "description": "หมายเลขงาน (J…)",
-            "name": "no",
+            "description": "the job (job.id) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -2695,9 +2721,8 @@
                     "maxItems": 500
                   },
                   "engineerId": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "exclusiveMinimum": true
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "takeOver": {
                     "type": "boolean",
@@ -2903,6 +2928,11 @@
                           "items": {
                             "type": "object",
                             "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "job.id — the link"
+                              },
                               "no": {
                                 "type": "string"
                               },
@@ -2922,6 +2952,7 @@
                               }
                             },
                             "required": [
+                              "id",
                               "no",
                               "date",
                               "sameCustomer",
@@ -2954,6 +2985,11 @@
                           "items": {
                             "type": "object",
                             "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "job.id — the link"
+                              },
                               "no": {
                                 "type": "string"
                               },
@@ -2973,6 +3009,7 @@
                               }
                             },
                             "required": [
+                              "id",
                               "no",
                               "date",
                               "sameCustomer",
@@ -3153,20 +3190,22 @@
           {
             "schema": {
               "type": "string",
-              "description": "province id (level=district)"
+              "format": "uuid",
+              "description": "the province's uuid (level=district); left out or no uuid = no rows"
             },
             "required": false,
-            "description": "province id (level=district)",
+            "description": "the province's uuid (level=district); left out or no uuid = no rows",
             "name": "city",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "district id (level=subdistrict)"
+              "format": "uuid",
+              "description": "the district's uuid (level=subdistrict); left out or no uuid = no rows"
             },
             "required": false,
-            "description": "district id (level=subdistrict)",
+            "description": "the district's uuid (level=subdistrict); left out or no uuid = no rows",
             "name": "district",
             "in": "query"
           }
@@ -3185,7 +3224,8 @@
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "number"
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "name": {
                             "type": "string"
@@ -3267,9 +3307,9 @@
                 "type": "object",
                 "properties": {
                   "district": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "exclusiveMinimum": true
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "the district's uuid (GET /address)"
                   },
                   "name": {
                     "type": "string"
@@ -3305,7 +3345,8 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "number"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "name": {
                           "type": "string"
@@ -3534,7 +3575,7 @@
             }
           },
           "404": {
-            "description": "No customer with that `code`.",
+            "description": "No customer with that `code`, or no province / district / sub-district with that uuid.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3602,7 +3643,7 @@
           "Customers"
         ],
         "summary": "Find customers by code, tax id, name or phone (job / quotation / sale-order forms)",
-        "description": "An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its code).",
+        "description": "An exact code — or a customer's uuid (the customers page `?edit=` link) — answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its uuid).",
         "parameters": [
           {
             "schema": {
@@ -3865,7 +3906,7 @@
         }
       }
     },
-    "/quotations/{no}": {
+    "/quotations/{id}": {
       "get": {
         "tags": [
           "Quotations"
@@ -3875,11 +3916,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "เลขที่ใบเสนอราคา"
+              "format": "uuid",
+              "description": "the quotation's id (uuid) — not its number"
             },
             "required": true,
-            "description": "เลขที่ใบเสนอราคา",
-            "name": "no",
+            "description": "the quotation's id (uuid) — not its number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -4119,7 +4161,7 @@
         }
       }
     },
-    "/sale-orders/{no}": {
+    "/sale-orders/{id}": {
       "get": {
         "tags": [
           "Sale orders"
@@ -4129,11 +4171,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "เลขที่ใบสั่งขาย (SO…)"
+              "format": "uuid",
+              "description": "the sale order's id (uuid) — not its SO number"
             },
             "required": true,
-            "description": "เลขที่ใบสั่งขาย (SO…)",
-            "name": "no",
+            "description": "the sale order's id (uuid) — not its SO number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -4199,7 +4242,7 @@
         }
       }
     },
-    "/sale-orders/{no}/approve": {
+    "/sale-orders/{id}/approve": {
       "post": {
         "tags": [
           "Sale orders"
@@ -4210,11 +4253,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "เลขที่ใบสั่งขาย (SO…)"
+              "format": "uuid",
+              "description": "the sale order's id (uuid) — not its SO number"
             },
             "required": true,
-            "description": "เลขที่ใบสั่งขาย (SO…)",
-            "name": "no",
+            "description": "the sale order's id (uuid) — not its SO number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -4371,7 +4415,7 @@
         }
       }
     },
-    "/sale-orders/{no}/tracking": {
+    "/sale-orders/{id}/tracking": {
       "post": {
         "tags": [
           "Sale orders"
@@ -4382,11 +4426,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "เลขที่ใบสั่งขาย (SO…)"
+              "format": "uuid",
+              "description": "the sale order's id (uuid) — not its SO number"
             },
             "required": true,
-            "description": "เลขที่ใบสั่งขาย (SO…)",
-            "name": "no",
+            "description": "the sale order's id (uuid) — not its SO number",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -4556,9 +4601,9 @@
                     "description": "The document number (upper-cased)."
                   },
                   "profileId": {
-                    "type": "number",
-                    "minimum": 0,
-                    "exclusiveMinimum": true
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "the document profile id"
                   }
                 },
                 "required": [
@@ -4588,7 +4633,8 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "number"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "code": {
                           "type": "string"
@@ -4852,7 +4898,7 @@
         }
       }
     },
-    "/products/{code}": {
+    "/products/{id}": {
       "get": {
         "tags": [
           "Products"
@@ -4863,11 +4909,12 @@
           {
             "schema": {
               "type": "string",
-              "description": "รหัสอะไหล่ (system code)"
+              "format": "uuid",
+              "description": "the part's id (product.id) — not its system code"
             },
             "required": true,
-            "description": "รหัสอะไหล่ (system code)",
-            "name": "code",
+            "description": "the part's id (product.id) — not its system code",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -5036,16 +5083,14 @@
                       "type": "object",
                       "properties": {
                         "logId": {
-                          "type": "integer",
+                          "type": "string",
                           "nullable": true,
-                          "minimum": 0,
-                          "exclusiveMinimum": true
+                          "format": "uuid"
                         },
                         "dtId": {
-                          "type": "integer",
+                          "type": "string",
                           "nullable": true,
-                          "minimum": 0,
-                          "exclusiveMinimum": true
+                          "format": "uuid"
                         },
                         "code": {
                           "type": "string",
@@ -5364,7 +5409,9 @@
                             "type": "object",
                             "properties": {
                               "dtId": {
-                                "type": "number"
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "the sale_out_dt row"
                               },
                               "code": {
                                 "type": "string"
@@ -5402,7 +5449,9 @@
                             "type": "object",
                             "properties": {
                               "logId": {
-                                "type": "number"
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "the job_order_spare_part_log row"
                               },
                               "jobNo": {
                                 "type": "string"
@@ -5806,8 +5855,10 @@
                       ]
                     },
                     "engineerId": {
-                      "type": "number",
-                      "nullable": true
+                      "type": "string",
+                      "nullable": true,
+                      "format": "uuid",
+                      "description": "app_user.id of the engineer a \"mine\" list is limited to"
                     },
                     "total": {
                       "type": "number"
@@ -5821,8 +5872,9 @@
                         "type": "object",
                         "properties": {
                           "engineerId": {
-                            "type": "number",
-                            "nullable": true
+                            "type": "string",
+                            "nullable": true,
+                            "format": "uuid"
                           },
                           "name": {
                             "type": "string"
@@ -5843,6 +5895,11 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "job.id — the link (`no` is shown)"
+                          },
                           "no": {
                             "type": "string"
                           },
@@ -5870,6 +5927,7 @@
                           }
                         },
                         "required": [
+                          "id",
                           "no",
                           "product",
                           "customer",
@@ -5950,6 +6008,10 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
                           "no": {
                             "type": "string"
                           },
@@ -5970,6 +6032,7 @@
                           }
                         },
                         "required": [
+                          "id",
                           "no",
                           "customer",
                           "amount",
@@ -6168,7 +6231,7 @@
                   },
                   "id": {
                     "type": "string",
-                    "description": "product code / sale order no / job no / profile id"
+                    "description": "product code / job no / the sale order's id / the profile's id (uuids; anything else → 404)"
                   },
                   "paymentAmount": {
                     "type": "string",
@@ -6390,9 +6453,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "a user's id (uuid) = that user's lines; anything else = the name contains"
             },
             "required": false,
+            "description": "a user's id (uuid) = that user's lines; anything else = the name contains",
             "name": "user",
             "in": "query"
           },
@@ -6414,9 +6479,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)"
             },
             "required": false,
+            "description": "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)",
             "name": "key",
             "in": "query"
           },
@@ -9143,7 +9210,8 @@
                     "type": "object",
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "name": {
                         "type": "string"
@@ -9847,9 +9915,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "who created the part: a user's id (uuid), or the name contains"
             },
             "required": false,
+            "description": "who created the part: a user's id (uuid), or the name contains",
             "name": "creator",
             "in": "query"
           },
@@ -10200,9 +10270,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "who created the part: a user's id (uuid), or the name contains"
             },
             "required": false,
+            "description": "who created the part: a user's id (uuid), or the name contains",
             "name": "creator",
             "in": "query"
           },
@@ -10295,7 +10367,8 @@
                                 ]
                               },
                               "id": {
-                                "type": "number"
+                                "type": "string",
+                                "format": "uuid"
                               },
                               "nameEn": {
                                 "type": "string"
@@ -10531,7 +10604,8 @@
                     "type": "object",
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "name": {
                         "type": "string"
@@ -12073,7 +12147,8 @@
                     "type": "object",
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "name": {
                         "type": "string"
@@ -12161,7 +12236,8 @@
                     "type": "object",
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "name": {
                         "type": "string"
@@ -12796,8 +12872,9 @@
                     ]
                   },
                   "id": {
-                    "type": "number",
+                    "type": "string",
                     "nullable": true,
+                    "format": "uuid",
                     "description": "Set = edit that profile."
                   },
                   "code": {
@@ -12841,7 +12918,8 @@
                     "nullable": true,
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "code": {
                         "type": "string"
@@ -13031,9 +13109,8 @@
         "parameters": [
           {
             "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "exclusiveMinimum": true,
+              "type": "string",
+              "format": "uuid",
               "description": "profile id"
             },
             "required": true,
@@ -13065,7 +13142,7 @@
             }
           },
           "400": {
-            "description": "`id` missing or not a positive number.",
+            "description": "SHD (the built-in profile) or the default profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13478,15 +13555,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      }
-                    ],
-                    "description": "The record key (users: the app_user id)."
+                    "type": "string",
+                    "description": "The row's uuid (models: the model code). No such row → 404."
                   },
                   "table": {
                     "type": "string",
@@ -13739,8 +13809,9 @@
                     ]
                   },
                   "id": {
-                    "type": "number",
+                    "type": "string",
                     "nullable": true,
+                    "format": "uuid",
                     "description": "Set = edit that profile."
                   },
                   "code": {
@@ -13769,7 +13840,8 @@
                     "nullable": true,
                     "properties": {
                       "id": {
-                        "type": "number"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       "code": {
                         "type": "string"
@@ -13922,9 +13994,8 @@
         "parameters": [
           {
             "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "exclusiveMinimum": true,
+              "type": "string",
+              "format": "uuid",
               "description": "profile id"
             },
             "required": true,
@@ -13955,16 +14026,6 @@
               }
             }
           },
-          "400": {
-            "description": "`id` missing or not a positive number.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
           "401": {
             "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
             "content": {
@@ -13986,7 +14047,7 @@
             }
           },
           "404": {
-            "description": "No such profile.",
+            "description": "No such profile (or `id` no uuid).",
             "content": {
               "application/json": {
                 "schema": {
@@ -14113,9 +14174,22 @@
                     "nullable": true
                   },
                   "id": {
-                    "type": "string",
-                    "nullable": true,
-                    "description": "Set = edit that user."
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "The user's uuid: set = edit that user; left out or empty = a new one."
                   },
                   "expect": {
                     "type": "object",
@@ -14561,7 +14635,22 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ],
+                    "description": "The row's uuid (simple lists and symptoms): set = edit it; left out or empty = a new one."
                   },
                   "code": {
                     "type": "string",
@@ -16373,11 +16462,16 @@
       "JobDetail": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "statusId": {
             "type": "number"
@@ -16391,14 +16485,8 @@
           "createDate": {
             "type": "string"
           },
-          "createBy": {
-            "type": "number"
-          },
           "createByName": {
             "type": "string"
-          },
-          "jobTypeId": {
-            "type": "number"
           },
           "jobType": {
             "type": "string"
@@ -16411,7 +16499,8 @@
             "nullable": true,
             "properties": {
               "id": {
-                "type": "number"
+                "type": "string",
+                "format": "uuid"
               },
               "code": {
                 "type": "string"
@@ -16470,9 +16559,6 @@
           "warranty": {
             "type": "string"
           },
-          "productTypeId": {
-            "type": "number"
-          },
           "productType": {
             "type": "string"
           },
@@ -16482,14 +16568,8 @@
           "serial": {
             "type": "string"
           },
-          "brandId": {
-            "type": "number"
-          },
           "brand": {
             "type": "string"
-          },
-          "modelId": {
-            "type": "number"
           },
           "modelCode": {
             "type": "string"
@@ -16520,12 +16600,6 @@
           },
           "fault": {
             "type": "string"
-          },
-          "symptomIds": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
           },
           "symptoms": {
             "type": "array",
@@ -16579,13 +16653,13 @@
             "type": "boolean"
           },
           "engineerId": {
-            "type": "number"
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "null = nobody is on the job"
           },
           "engineer": {
             "type": "string"
-          },
-          "engineerSymptomId": {
-            "type": "number"
           },
           "engineerSymptom": {
             "type": "string"
@@ -16654,7 +16728,9 @@
                 "type": "string"
               },
               "shipperId": {
-                "type": "number"
+                "type": "string",
+                "nullable": true,
+                "format": "uuid"
               }
             },
             "required": [
@@ -16695,7 +16771,8 @@
               "type": "object",
               "properties": {
                 "id": {
-                  "type": "number"
+                  "type": "string",
+                  "format": "uuid"
                 },
                 "sendTo": {
                   "type": "string"
@@ -16710,7 +16787,9 @@
                   "type": "string"
                 },
                 "sendById": {
-                  "type": "number"
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
                 },
                 "receiveDate": {
                   "type": "string"
@@ -16719,7 +16798,9 @@
                   "type": "string"
                 },
                 "receiveById": {
-                  "type": "number"
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
                 },
                 "receiveDetail": {
                   "type": "string"
@@ -16749,7 +16830,9 @@
               "type": "object",
               "properties": {
                 "logId": {
-                  "type": "number"
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "the job_order_spare_part_log row"
                 },
                 "jobNo": {
                   "type": "string"
@@ -16831,7 +16914,8 @@
               "type": "object",
               "properties": {
                 "id": {
-                  "type": "number"
+                  "type": "string",
+                  "format": "uuid"
                 },
                 "name": {
                   "type": "string"
@@ -16889,15 +16973,14 @@
           }
         },
         "required": [
+          "id",
           "no",
           "documentProfileId",
           "statusId",
           "status",
           "statusGroup",
           "createDate",
-          "createBy",
           "createByName",
-          "jobTypeId",
           "jobType",
           "jobTypeDetail",
           "customer",
@@ -16909,13 +16992,10 @@
           "warrantyMonth",
           "expireDate",
           "warranty",
-          "productTypeId",
           "productType",
           "imei",
           "serial",
-          "brandId",
           "brand",
-          "modelId",
           "modelCode",
           "modelName",
           "modelDetail",
@@ -16926,7 +17006,6 @@
           "receptionType",
           "equipment",
           "fault",
-          "symptomIds",
           "symptoms",
           "symptomOther",
           "remark",
@@ -16945,7 +17024,6 @@
           "dueDateAuto",
           "engineerId",
           "engineer",
-          "engineerSymptomId",
           "engineerSymptom",
           "repairDetail",
           "engineerRemark",
@@ -16972,13 +17050,11 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "at": {
             "type": "string"
-          },
-          "userId": {
-            "type": "number"
           },
           "user": {
             "type": "string"
@@ -17030,7 +17106,6 @@
         "required": [
           "id",
           "at",
-          "userId",
           "user",
           "action",
           "module",
@@ -17047,7 +17122,8 @@
             "type": "string"
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "jobType": {
             "type": "string"
@@ -17261,10 +17337,14 @@
           "engineerId": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "enum": [
+                  ""
+                ]
               },
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               }
             ]
           },
@@ -17378,7 +17458,8 @@
             ]
           },
           "id": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "type": {
             "type": "string",
@@ -17394,13 +17475,16 @@
             "type": "string"
           },
           "cityId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "districtId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "subDistrictId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "postalCode": {
             "type": "string"
@@ -17459,13 +17543,49 @@
             "type": "boolean"
           },
           "cityId": {
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ],
+            "description": "จังหวัด: its uuid (GET /address); `\"\"` = not picked."
           },
           "districtId": {
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ],
+            "description": "เขต / อำเภอ: its uuid; `\"\"` = not picked."
           },
           "subDistrictId": {
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ],
+            "description": "แขวง / ตำบล: its uuid; `\"\"` = not picked."
           },
           "postalCode": {
             "type": "string"
@@ -17507,6 +17627,10 @@
       "QuotationDetail": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
@@ -17596,9 +17720,6 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": {
-                  "type": "number"
-                },
                 "lineNumber": {
                   "type": "number"
                 },
@@ -17683,7 +17804,8 @@
             "type": "string"
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "createdByPhone": {
             "type": "string"
@@ -17696,6 +17818,7 @@
           }
         },
         "required": [
+          "id",
           "no",
           "date",
           "type",
@@ -17798,9 +17921,6 @@
                     }
                   ]
                 },
-                "id": {
-                  "type": "number"
-                },
                 "code": {
                   "type": "string"
                 }
@@ -17862,7 +17982,9 @@
             "description": "Set = edit that quotation."
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid",
+            "description": "ออกเอกสารในนาม (a document profile id)"
           },
           "type": {
             "type": "string"
@@ -17910,6 +18032,10 @@
       "SaleOrderDetail": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
@@ -18022,13 +18148,7 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": {
-                  "type": "number"
-                },
                 "listNo": {
-                  "type": "number"
-                },
-                "productId": {
                   "type": "number"
                 },
                 "code": {
@@ -18062,7 +18182,6 @@
               },
               "required": [
                 "listNo",
-                "productId",
                 "code",
                 "name",
                 "type",
@@ -18090,12 +18209,15 @@
             "type": "string"
           },
           "createdById": {
-            "type": "number"
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
           },
           "creatorIds": {
             "type": "array",
             "items": {
-              "type": "number"
+              "type": "string",
+              "format": "uuid"
             }
           },
           "approverRoles": {
@@ -18105,16 +18227,20 @@
             }
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "version": {
             "type": "number"
           },
           "salesId": {
-            "type": "number"
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
           }
         },
         "required": [
+          "id",
           "no",
           "date",
           "customer",
@@ -18146,14 +18272,9 @@
             "type": "string"
           },
           "salesId": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ]
+            "type": "string",
+            "format": "uuid",
+            "description": "พนักงานขาย (a user id)"
           },
           "lines": {
             "type": "array",
@@ -18239,7 +18360,9 @@
             "type": "string"
           },
           "documentProfileId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid",
+            "description": "ออกเอกสารในนาม (a document profile id)"
           },
           "no": {
             "type": "string",
@@ -18303,7 +18426,8 @@
             ]
           },
           "id": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "nameEn": {
             "type": "string"
@@ -18492,7 +18616,9 @@
         "type": "object",
         "properties": {
           "logId": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid",
+            "description": "the job_order_spare_part_log row"
           },
           "jobNo": {
             "type": "string"
@@ -18567,7 +18693,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "code": {
             "type": "string"
@@ -18626,9 +18753,6 @@
       "Permission": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string"
-          },
           "role": {
             "type": "string"
           },
@@ -18649,7 +18773,6 @@
           }
         },
         "required": [
-          "id",
           "role",
           "menu",
           "add",
@@ -18662,7 +18785,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -18701,7 +18825,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -18772,7 +18897,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "code": {
             "type": "string"
@@ -18871,7 +18997,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "number"
+            "type": "string",
+            "format": "uuid"
           },
           "code": {
             "type": "string"
@@ -19033,6 +19160,10 @@
       "Job": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
@@ -19071,12 +19202,6 @@
           },
           "isBounce": {
             "type": "boolean"
-          },
-          "customerId": {
-            "type": "number"
-          },
-          "engineerId": {
-            "type": "number"
           },
           "serial": {
             "type": "string"
@@ -19152,6 +19277,7 @@
           }
         },
         "required": [
+          "id",
           "no",
           "openDate",
           "customer",
@@ -19169,6 +19295,10 @@
       "Quotation": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
@@ -19232,6 +19362,7 @@
           }
         },
         "required": [
+          "id",
           "no",
           "date",
           "type",
@@ -19246,6 +19377,10 @@
       "SaleOrder": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "no": {
             "type": "string"
           },
@@ -19299,6 +19434,7 @@
           }
         },
         "required": [
+          "id",
           "no",
           "date",
           "customer",

@@ -261,13 +261,6 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         ]
       : []),
     {
-      key: 'id',
-      header: 'ID',
-      width: '110px',
-      hideBelow: 'sm',
-      cell: (r) => <span className="num text-xs text-muted-foreground">{r.id}</span>,
-    },
-    {
       key: 'status',
       header: 'สถานะ',
       width: '110px',

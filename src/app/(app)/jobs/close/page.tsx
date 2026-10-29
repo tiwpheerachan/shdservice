@@ -26,7 +26,7 @@ import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
-import { jobNoParam } from '@/data/keys';
+import { jobIdParam } from '@/data/keys';
 import { PrintButton } from '@/components/shared/print-button';
 import { ClosePaymentSection } from '@/components/jobs/close-payment';
 import { CloseJobInfoSection, CloseReturnSection, CloseWorkSection } from '@/components/jobs/close-sections';
@@ -57,7 +57,7 @@ function CloseForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset } = useJobForm();
-  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
   const confirm = useConfirm();
   const lock = useMoneyLock(); // a closed job: the payment stays as recorded (Job Money After Close may change it)
@@ -110,7 +110,7 @@ function CloseForm() {
 
   const go = (v: string) => find(v);
 
-  // POST /api/jobs/:no/close → payment + return fields, job_closed_date/by, status + job_log
+  // POST /api/jobs/:id/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const p = job.payment;
@@ -176,7 +176,7 @@ function CloseForm() {
     setSaving(true);
     try {
       // the version the page loaded: someone else's save since → 409 (reload)
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/close`, {
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${job.id}/close`, {
         ...body,
         job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
         version: form.version,
@@ -207,7 +207,7 @@ function CloseForm() {
               locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
               no={job?.no ?? ''}
               profileId={job?.documentProfileId}
-              href={`/print/job/${encodeURIComponent(job?.no ?? '')}/return`}
+              href={`/print/job/${job?.id ?? ''}/return`}
               disabled={!job}
             />
             <PrintButton
@@ -217,7 +217,7 @@ function CloseForm() {
               locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
               no={job?.no ?? ''}
               profileId={job?.documentProfileId}
-              href={`/print/job/${encodeURIComponent(job?.no ?? '')}/label`}
+              href={`/print/job/${job?.id ?? ''}/label`}
               disabled={!job}
             />
           </div>
@@ -290,7 +290,7 @@ function CloseForm() {
 export default function ClosePage() {
   return (
     <JobScreen>
-      <RecordKey of={jobNoParam}>
+      <RecordKey of={jobIdParam}>
         <CloseForm />
       </RecordKey>
     </JobScreen>

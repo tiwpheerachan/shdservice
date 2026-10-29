@@ -38,17 +38,19 @@ export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> 
   กำลังดำเนินการจัดทำ: 'info',
 };
 
-/** GET /api/sale-orders/:no (subset the form uses) */
+/** GET /api/sale-orders/:id (subset the form uses) */
 export type SaleOrderLoaded = {
+  /** the order's uuid — its links (edit page, print, API, slip upload) */
+  id: string;
   no: string;
   date: string;
   sales: string;
   /** sale_out_by — the salesperson is picked by id (a name can change; one who left is not in the list) */
-  salesId?: number;
+  salesId?: string | null;
   /** record_status DELETED — the server refuses any change */
   cancelled?: boolean;
   createdBy: string;
-  createdById?: number;
+  createdById?: string | null;
   /** a waiting order: the roles that may approve it */
   approverRoles?: string[];
   approve: string;
@@ -60,7 +62,7 @@ export type SaleOrderLoaded = {
   /** stamped when the tracking no. is saved */
   deliveryDate?: string;
   /** who may not decide on it (the server refuses them; System Admin may) */
-  creatorIds?: number[];
+  creatorIds?: string[];
   paymentType?: string;
   paymentAmount?: number;
   /** net amount (lines + fee) */
@@ -68,7 +70,7 @@ export type SaleOrderLoaded = {
   fee?: number;
   remark?: string;
   slip: string;
-  documentProfileId?: number; // ออกเอกสารในนาม
+  documentProfileId?: string; // ออกเอกสารในนาม (a profile's uuid)
   version?: number; // row_version — the edit page sends it back with its save
   customerDetail: {
     code: string;
@@ -88,9 +90,9 @@ export type SaleOrderLoaded = {
 
 export type SaleOrderPayload = {
   no?: string;
-  documentProfileId?: number;
+  documentProfileId?: string;
   customerCode: string;
-  salesId?: number;
+  salesId?: string;
   lines: { code: string; qty: number; price: number; name: string; type: 'SparePart' | 'Service' }[];
   paymentType: string;
   paymentAmount: string;
@@ -105,8 +107,8 @@ export type SaleOrderFormHandle = {
   validate: () => boolean;
   /** API field errors → under the fields; false for any other error */
   fromApi: (err: unknown, reload?: () => void) => boolean;
-  /** upload a slip chosen before the SO existed (new page calls this after create) */
-  uploadPendingSlip: (soNo: string) => Promise<void>;
+  /** upload a slip chosen before the SO existed (new page calls this after create, with the order's uuid) */
+  uploadPendingSlip: (soId: string) => Promise<void>;
 };
 
 export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: string; initial?: SaleOrderLoaded | null }>(
@@ -127,7 +129,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         type: l.type,
       })),
     );
-    const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม
+    const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? ''); // ออกเอกสารในนาม
     const [customer, setCustomer] = React.useState<Customer | null>(() => {
       const c = initial?.customerDetail;
       return c
@@ -145,14 +147,14 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     });
     // พนักงานขาย: the one picked here, else the order's own salesperson, else (a new order) the
     // signed-in user — derived, so it is right whichever of the order / the staff list arrives first
-    const [pickedSalesId, setSalesId] = React.useState<number>(0);
+    const [pickedSalesId, setSalesId] = React.useState('');
     const salesId =
       pickedSalesId ||
       (initial
-        ? initial.salesId || (STAFF.find((x) => x.name === initial.sales)?.id ?? 0)
+        ? initial.salesId || (STAFF.find((x) => x.name === initial.sales)?.id ?? '')
         : userId && STAFF.some((x) => x.id === userId && x.sells)
           ? userId
-          : 0);
+          : '');
     // who sells (Sale Order add, or System Admin) — plus the order's own salesperson; the server allows the same.
     // The order's salesperson who has left is not in the staff list — still shown (and kept) as picked
     const salesOptions = STAFF.filter((u) => u.sells || u.id === initial?.salesId).map((u) => ({
@@ -162,7 +164,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     }));
     if (initial?.salesId && !STAFF.some((x) => x.id === initial.salesId))
       salesOptions.push({
-        value: String(initial.salesId),
+        value: initial.salesId,
         label: `${initial.sales || '—'} (ไม่ใช้งานแล้ว)`,
         sub: undefined,
       });
@@ -208,17 +210,17 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     // the edit page's "แนบสลิปการชำระเงิน" (an approved order without a slip) — the same rule as there
     const canAttachLater = initial?.approveId === 4 && !initial.cancelled && !initial.slip && can('Sale Order', 'edit');
 
-    // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name)
+    // สลิป → bucket oneservice/sale-orders/{no}/slip/… (path เก็บใน sale_out_hd.slip_file_name) — named by the order's uuid
     const onPickSlip = async (f: File | undefined) => {
       if (!f) return;
-      const no = soNo || initial?.no;
-      if (!no) {
+      const id = initial?.id;
+      if (!id) {
         setPendingSlip(f);
         setSlip(f.name);
         return;
       }
       try {
-        const d = await uploadFile('sale-order-slip', no, f);
+        const d = await uploadFile('sale-order-slip', id, f);
         setSlip(d.path);
         setSaved((x) => ({ ...x, slip: d.path })); // saved to the order right away — not an edit
         push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
@@ -272,10 +274,10 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       submit,
     });
     React.useImperativeHandle(ref, () => ({
-      uploadPendingSlip: async (no: string) => {
+      uploadPendingSlip: async (soId: string) => {
         if (!pendingSlip) return;
         try {
-          await uploadFile('sale-order-slip', no, pendingSlip);
+          await uploadFile('sale-order-slip', soId, pendingSlip);
           setPendingSlip(null);
         } catch (e) {
           push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
@@ -334,8 +336,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
             </Field>
             <Field label="พนักงานขาย" required error={fe.errors.salesId} lookup={staffLookup}>
               <SearchSelect
-                value={salesId ? String(salesId) : ''}
-                onChange={(v) => setSalesId(Number(v) || 0)}
+                value={salesId}
+                onChange={(v) => setSalesId(v)}
                 options={salesOptions}
                 placeholder="- - ยังไม่ระบุ - -"
                 emptyLabel="- - ยังไม่ระบุ - -"

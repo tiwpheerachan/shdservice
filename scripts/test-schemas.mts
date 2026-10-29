@@ -199,9 +199,11 @@ test('outsource: sending needs to + date; receiving back needs neither', () => {
   assert.ok(errorsOf(outsourceActionSchema, { status: 'x' })['send.to'], 'neither send nor receive');
 });
 
-test('outsource: ส่งโดย / รับโดย are optional user ids — never names, 0 or negatives', () => {
+test('outsource: ส่งโดย / รับโดย are optional user ids (uuid) — never names or the old numbers', () => {
   const send = { to: 'ร้าน A', date: '2026-09-28' };
-  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', send: { ...send, by: 12 } }), {});
+  const U = '0190f3c2-7a4e-7b1c-8d2e-3f4a5b6c7d8e';
+  assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', send: { ...send, by: U } }), {});
+  assert.ok(errorsOf(outsourceActionSchema, { status: 'x', send: { ...send, by: 12 } })['send.by']);
   assert.deepEqual(
     errorsOf(outsourceActionSchema, { status: 'x', send }),
     {},
@@ -359,14 +361,14 @@ test('numbers: qty > 0 per row, no negatives, discount and VAT ≤ 100', () => {
 console.log('\nSale order');
 const so = {
   customerCode: 'C00001',
-  salesId: 7,
+  salesId: '0190c0de-0000-7000-8000-000000000007', // a user's uuid (ADR 0008)
   lines: [{ code: 'P00001', qty: 1, price: 100 }],
   paymentAmount: '',
   fee: 0,
 };
 test('a complete order passes', () => assert.deepEqual(errorsOf(saleOrderSchema(), so), {}));
 test('customer, salesperson and a product line are required', () => {
-  assert.deepEqual(Object.keys(errorsOf(saleOrderSchema(), { customerCode: '', salesId: 0, lines: [] })).sort(), [
+  assert.deepEqual(Object.keys(errorsOf(saleOrderSchema(), { customerCode: '', salesId: '', lines: [] })).sort(), [
     'customerCode',
     'lines',
     'salesId',
@@ -380,13 +382,13 @@ test('qty > 0 per row; price and paid amount not negative', () => {
   const e = errorsOf(saleOrderSchema(), { ...so, lines: [{ code: 'P1', qty: 0, price: -1 }], paymentAmount: -5 });
   assert.deepEqual(Object.keys(e).sort(), ['lines.0.price', 'lines.0.qty', 'paymentAmount']);
 });
-test('qty a whole number (1.5 used to be cut to 1); salesperson id whole', () => {
+test('qty a whole number (1.5 used to be cut to 1); salesperson a uuid string', () => {
   assert.equal(
     errorsOf(saleOrderSchema(), { ...so, lines: [{ code: 'P1', qty: 1.5 }] })['lines.0.qty'],
     'จำนวนต้องเป็นจำนวนเต็ม 1–1000',
   );
   assert.deepEqual(errorsOf(saleOrderSchema(), { ...so, lines: [{ code: 'P1', qty: '2' }] }), {});
-  assert.ok(errorsOf(saleOrderSchema(), { ...so, salesId: 7.5 }).salesId);
+  assert.ok(errorsOf(saleOrderSchema(), { ...so, salesId: 7 }).salesId, 'an old int id');
 });
 
 console.log('\nBack office');
@@ -473,9 +475,14 @@ test('receive / issue need 1–500 lines; issue type is one of four', () => {
       type: 'job',
       ref: 'J2600001',
       payTo: 'ช่าง A',
-      lines: [{ logId: 5, dtId: null, code: null, qty: 1 }],
+      lines: [{ logId: '0190f3c2-7a4e-7b1c-8d2e-3f4a5b6c7d8e', dtId: null, code: null, qty: 1 }],
     }),
     true,
+  );
+  // logId / dtId = the row's uuid (ADR 0008): the old number is refused
+  assert.equal(
+    ok(issueSchema, { type: 'job', ref: 'J2600001', payTo: 'ช่าง A', lines: [{ logId: 5, qty: 1 }] }),
+    false,
   );
   assert.equal(ok(issueSchema, { type: 'steal', lines: [{ code: 'P1', qty: 1 }] }), false);
 });
@@ -504,8 +511,10 @@ test('SO decision is approve | deny | reject — a typo is refused, not treated 
   assert.equal(ok(approveSchema, {}), false);
 });
 test('assign needs jobs + an engineer id; call log needs text', () => {
-  assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: '12' }), true);
-  assert.equal(ok(assignSchema, { jobNos: [], engineerId: 12 }), false);
+  const U = '0190f3c2-7a4e-7b1c-8d2e-3f4a5b6c7d8e';
+  assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: U }), true);
+  assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: '12' }), false); // a user's uuid (ADR 0008)
+  assert.equal(ok(assignSchema, { jobNos: [], engineerId: U }), false);
   assert.equal(ok(assignSchema, { jobNos: ['J1'], engineerId: 0 }), false);
   assert.equal(ok(callLogSchema, { detail: '   ' }), false);
   assert.equal(ok(callLogSchema, { detail: 'x'.repeat(201) }), false); // the column is varchar(200)
@@ -773,7 +782,11 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
     assert.deepEqual(errorsOf(quotationSchema(), { ...qq, remark: 'ก'.repeat(1000) }), {});
   });
 
-  const order = { customerCode: 'C00001', salesId: 7, lines: [{ code: 'P1', qty: 1, price: 100 }] };
+  const order = {
+    customerCode: 'C00001',
+    salesId: '0190c0de-0000-7000-8000-000000000007',
+    lines: [{ code: 'P1', qty: 1, price: 100 }],
+  };
   test('sale order: qty 1–1000, paid ≤ 10,000,000 (1e9 was a 500), remark ≤ 100, payment type from the list', () => {
     assert.ok(errorsOf(saleOrderSchema(), { ...order, lines: [{ code: 'P1', qty: 1001 }] })['lines.0.qty']);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentAmount: 1e9 }).paymentAmount);

@@ -35,7 +35,7 @@ import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
-import { jobNoParam } from '@/data/keys';
+import { jobIdParam } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
@@ -64,7 +64,7 @@ function OutsourceForm() {
   // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, set } = useJobForm();
-  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const [tab, setTab] = React.useState('device');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
@@ -109,11 +109,11 @@ function OutsourceForm() {
       repairDetail: job.repairDetail,
       sendTo: last?.sendTo ?? '',
       sendDate: last?.sendDate || today,
-      sendBy: String(last?.sendById || meId),
+      sendBy: last?.sendById || meId,
       sendDetail: last?.sendDetail ?? '',
       recvFrom: last?.sendTo ?? '', // received back from the vendor it was sent to (no column of its own)
       recvDate: last?.receiveDate ?? '',
-      recvBy: last?.receiveById ? String(last.receiveById) : '',
+      recvBy: last?.receiveById ?? '',
       recvDetail: last?.receiveDetail ?? '',
       // the job's current status, so saving without a change keeps it (the field is required)
       status: job.status,
@@ -129,7 +129,7 @@ function OutsourceForm() {
   // a legacy row received without a date is saved with the send block only
   const back = !open && job?.outsource.at(-1)?.status === SEND_STATUS.RECEIVED && !!d.recvDate;
 
-  // POST /api/jobs/:no/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
+  // POST /api/jobs/:id/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const sendTo = d.sendTo.trim();
@@ -137,12 +137,10 @@ function OutsourceForm() {
     const body = {
       symptomOther: form.symptomOther,
       repairDetail: d.repairDetail,
-      send: !receiving
-        ? { to: sendTo, date: d.sendDate, detail: d.sendDetail, by: Number(d.sendBy) || undefined }
-        : undefined,
+      send: !receiving ? { to: sendTo, date: d.sendDate, detail: d.sendDetail, by: d.sendBy || undefined } : undefined,
       receive:
         receiving || back
-          ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail, by: Number(d.recvBy || meId) || undefined }
+          ? { from: d.recvFrom, date: d.recvDate, detail: d.recvDetail, by: d.recvBy || meId || undefined }
           : undefined,
       status: d.status || undefined,
     };
@@ -151,7 +149,7 @@ function OutsourceForm() {
     setSaving(true);
     try {
       // the version the page loaded: someone else's save since → 409 (reload), not overwritten
-      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/outsource`, {
+      const r = await postJson<{ job: JobDetail }>(`/api/jobs/${job.id}/outsource`, {
         ...body,
         job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
         version: form.version,
@@ -169,7 +167,7 @@ function OutsourceForm() {
   // longer in the staff list (left) stays selectable so they are not silently replaced
   const staffOptions = React.useMemo(() => {
     const opts = STAFF.map((st) => ({
-      value: String(st.id),
+      value: st.id,
       label: st.name,
       sub: st.id === meId ? 'ฉัน' : st.userType || undefined,
     }));
@@ -179,8 +177,8 @@ function OutsourceForm() {
       { id: last?.receiveById, name: last?.receiveBy },
     ];
     for (const p of saved) {
-      if (p.id && !opts.some((o) => o.value === String(p.id)))
-        opts.unshift({ value: String(p.id), label: p.name || `#${p.id}`, sub: 'ไม่อยู่ในรายชื่อปัจจุบัน' });
+      if (p.id && !opts.some((o) => o.value === p.id))
+        opts.unshift({ value: p.id, label: p.name || 'ผู้ใช้เดิม', sub: 'ไม่อยู่ในรายชื่อปัจจุบัน' });
     }
     return opts;
   }, [STAFF, meId, job]);
@@ -375,7 +373,7 @@ function OutsourceForm() {
 export default function OutsourcePage() {
   return (
     <JobScreen>
-      <RecordKey of={jobNoParam}>
+      <RecordKey of={jobIdParam}>
         <OutsourceForm />
       </RecordKey>
     </JobScreen>

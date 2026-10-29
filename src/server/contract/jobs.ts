@@ -14,13 +14,14 @@ import {
   Ok,
   RATE_LIMITED,
   SIGNED_IN,
-  byNo,
+  byUuid,
   choice,
   errorResponse,
   flag,
   jsonResponse,
   notFound,
   redirect,
+  uuid,
   version,
 } from './common';
 import { defineOperation } from './registry';
@@ -31,12 +32,13 @@ import { JobDetail, LinkStatus } from './shapes';
 const s = z.string();
 const n = z.number();
 const tags = ['Jobs'];
-const jobNo = byNo('หมายเลขงาน (J…)');
+/** a job in a path: its uuid (ADR 0008) — the number (J…) is searched (GET /data/jobs), never a path; a non-uuid → 404 */
+const jobId = byUuid('งาน', 'the job (job.id) — not its number');
+const BY_ID = { params: 404 } as const;
 const answer = (what: string) => jsonResponse(what, z.object({ ok: z.literal(true), job: JobDetail }));
 
-/** a field the pages always send as text / a number (never null) */
+/** a field the pages always send as text (never null) */
 const optText = s.optional();
-const optNum = n.optional();
 
 /**
  * The job form's fields (jobSchema in src/lib/validation/job.ts) without a stored job: SO / Serial / IMEI /
@@ -58,7 +60,7 @@ const JobBody = z
 /** a workflow page's shared job sections, sent with its action (one request: they save — or not — with it) */
 const pageJob = JobBody.optional();
 const PAGE_JOB =
-  " `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).";
+  " `job` = the page's shared job sections: PATCH /jobs/{id}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).";
 
 /** ปิดงาน's fields without a stored job: the receipt no, the return parcel no and the new serial are only text here */
 const close = closeSchema().shape;
@@ -74,7 +76,12 @@ const CloseBody = z.looseObject({
     .optional()
     .meta({ description: 'Left out when nobody paid (an in-warranty job).' }),
   refund: close.refund.meta({ description: 'The deposit given back.' }),
-  return: close.return.extend({ tracking: optText, shipperId: optNum }),
+  return: close.return.extend({
+    tracking: optText,
+    shipperId: uuid('ไม่พบโปรไฟล์บริษัทขนส่ง')
+      .optional()
+      .meta({ description: 'the courier profile (shipping_profile.id); left out = none' }),
+  }),
   job: pageJob,
   version,
 });
@@ -92,6 +99,7 @@ const SwapBody = z.looseObject({
 });
 
 const SeenJob = z.object({
+  id: z.uuid().meta({ description: 'job.id — the link' }),
   no: s,
   date: s.meta({ description: 'Opened on, YYYY-MM-DD.' }),
   sameCustomer: z.boolean(),
@@ -149,11 +157,12 @@ export const jobSuggestionsGet = defineOperation({
 
 export const jobGet = defineOperation({
   method: 'get',
-  path: '/jobs/{no}',
+  path: '/jobs/{id}',
   tags,
   summary: 'A job with everything every job screen shows',
   description: 'Needs view on any job screen or Quotation.',
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   responses: {
     200: jsonResponse('The job.', z.object({ job: JobDetail })),
     ...SIGNED_IN,
@@ -163,12 +172,13 @@ export const jobGet = defineOperation({
 
 export const jobUpdate = defineOperation({
   method: 'patch',
-  path: '/jobs/{no}',
+  path: '/jobs/{id}',
   tags,
   summary: 'Edit a job (แก้ไขข้อมูลงาน)',
   description:
     'Job Management edit. Rules: `jobSchema(keep, check)` in src/lib/validation/job.ts, run by the service against the stored job — a required field that had a value must keep one, and an unchanged legacy value passes ("never worse").',
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   body: JobBody,
   responses: {
     200: answer('Saved; the job as stored now.'),
@@ -215,26 +225,31 @@ export const jobAssign = defineOperation({
   },
 });
 
-export const CallLog = z.object({ id: n, detail: s, date: s, by: s });
+export const CallLog = z.object({ id: z.uuid(), detail: s, date: s, by: s });
 
 export const jobCalls = defineOperation({
   method: 'get',
-  path: '/jobs/{no}/calls',
+  path: '/jobs/{id}/calls',
   tags,
   summary: "A job's call log (บันทึกการโทร)",
-  params: jobNo,
-  responses: { 200: jsonResponse('Newest first.', z.object({ rows: z.array(CallLog) })), ...SIGNED_IN },
+  params: jobId,
+  invalid: BY_ID,
+  responses: {
+    200: jsonResponse('Newest first.', z.object({ rows: z.array(CallLog) })),
+    ...SIGNED_IN,
+    ...notFound('No such job.'),
+  },
 });
 
 export const jobCallAdd = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/calls',
+  path: '/jobs/{id}/calls',
   tags,
   summary: 'Add a call log line',
   description: 'Job Management edit. Rules: `callLogSchema` (src/lib/validation/stock.ts). Takes an Idempotency-Key.',
-  params: jobNo,
+  params: jobId,
   headers: IDEMPOTENCY.headers,
-  invalid: IDEMPOTENCY.invalid,
+  invalid: { ...BY_ID, ...IDEMPOTENCY.invalid },
   body: callLogSchema,
   responses: {
     200: jsonResponse('The call log after the add.', z.object({ ok: z.literal(true), rows: z.array(CallLog) })),
@@ -247,13 +262,14 @@ export const jobCallAdd = defineOperation({
 
 export const jobClose = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/close',
+  path: '/jobs/{id}/close',
   tags,
   summary: 'Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)',
   description:
     'Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number / new serial and the deposit still to refund.' +
     PAGE_JOB,
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   body: CloseBody,
   responses: {
     200: answer('Closed; the job as stored now.'),
@@ -266,11 +282,12 @@ export const jobClose = defineOperation({
 
 export const jobOutsource = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/outsource',
+  path: '/jobs/{id}/outsource',
   tags,
   summary: 'Send to / receive back from an outside repairer (ส่งซ่อม Out-Source)',
   description: 'Job Repair edit. Rules: `outsourceActionSchema` (src/lib/validation/job.ts).' + PAGE_JOB,
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   body: outsourceActionSchema.safeExtend({
     engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
     receive: outsourceActionSchema.shape.receive.unwrap().extend({ from: optText }).optional(),
@@ -292,19 +309,22 @@ const partPick = { pick: z.boolean().optional(), quote: z.boolean().optional() }
 
 export const jobRepair = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/repair',
+  path: '/jobs/{id}/repair',
   tags,
   summary: 'Save the repair (บันทึกงานซ่อม): details, costs, part requests, status',
   description:
     'Job Repair edit. Rules: `repairActionSchema` (src/lib/validation/job.ts). Each part line is quoted as option A and B; `pick` = take from stock, `quote` = charge it.' +
     PAGE_JOB,
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   body: repairActionSchema.extend({
     engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
     parts: z
       .array(
         repairPart.extend({
-          logId: optNum,
+          logId: uuid('ไม่พบรายการอะไหล่นี้')
+            .optional()
+            .meta({ description: 'a stored line (its id); left out = a new line' }),
           code: optText,
           // both always sent (the page's A and B columns); saveRepair reads each
           a: repairPart.shape.a.unwrap().extend(partPick),
@@ -326,13 +346,14 @@ export const jobRepair = defineOperation({
 
 export const jobSwapRefund = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/swap-refund',
+  path: '/jobs/{id}/swap-refund',
   tags,
   summary: 'Record a swap or a refund (Swap / Refund)',
   description:
     "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund (`newSerial` is never required). `status`: job_status 17 / 18 (swap) or 17 / 19 (refund), or the job's current one." +
     PAGE_JOB,
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   body: SwapBody,
   responses: {
     200: answer('Saved; the job as stored now.'),
@@ -345,12 +366,13 @@ export const jobSwapRefund = defineOperation({
 
 export const trackLinkGet = defineOperation({
   method: 'get',
-  path: '/jobs/{no}/track-link',
+  path: '/jobs/{id}/track-link',
   tags,
   summary: "The customer's tracking link: its state (read-only)",
   description:
     'Job Management view. Never issues a link: only a hash of a link is stored, so an existing link is never shown again — POST issues one (the first one too).',
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   responses: {
     200: jsonResponse(
       'State of the link.',
@@ -367,11 +389,12 @@ export const trackLinkGet = defineOperation({
 
 export const trackLinkNew = defineOperation({
   method: 'post',
-  path: '/jobs/{no}/track-link',
+  path: '/jobs/{id}/track-link',
   tags,
   summary: 'Issue a new tracking link (the previous one stops working)',
   description: 'Job Management edit. The URL is returned once, to the person who generated it.',
-  params: jobNo,
+  params: jobId,
+  invalid: BY_ID,
   responses: {
     200: jsonResponse('The new link.', z.object({ url: s, status: LinkStatus })),
     ...SIGNED_IN,
@@ -396,7 +419,7 @@ const attachRemark = z
   .meta({ type: 'string', description: 'Read up to 100 characters (the column; the rest is dropped).' });
 const AttachmentRow = z.object({
   ok: z.literal(true),
-  row: z.object({ id: n, name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),
+  row: z.object({ id: z.uuid(), name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),
 });
 
 export const attachmentAdd = defineOperation({
@@ -518,7 +541,7 @@ export const attachmentVideoConfirm = defineOperation({
 
 const STORE_DOWN =
   'The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).';
-const attachmentId = z.object({ id: s.regex(/^\d{1,9}$/, 'not found').meta({ description: 'document_attach id' }) });
+const attachmentId = byUuid('ไฟล์แนบ', 'document_attach.id');
 
 export const attachmentGet = defineOperation({
   method: 'get',

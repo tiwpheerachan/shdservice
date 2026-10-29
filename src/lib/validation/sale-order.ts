@@ -40,7 +40,7 @@ export function saleOrderSchema(
     z
       .looseObject({
         customerCode: z.string().optional(),
-        salesId: z.union([z.number(), z.string()]).optional(),
+        salesId: z.string().optional(), // the user's uuid (ADR 0008)
         lines: z
           .array(
             z.looseObject({
@@ -71,8 +71,7 @@ export function saleOrderSchema(
       .superRefine((v, ctx) => {
         if (!isFilled(v.customerCode))
           ctx.addIssue({ code: 'custom', path: ['customerCode'], message: 'ต้องเลือกลูกค้า' });
-        if (!(Number(v.salesId) > 0) || !Number.isInteger(Number(v.salesId)))
-          ctx.addIssue({ code: 'custom', path: ['salesId'], message: 'ต้องเลือกพนักงานขาย' });
+        if (!isFilled(v.salesId)) ctx.addIssue({ code: 'custom', path: ['salesId'], message: 'ต้องเลือกพนักงานขาย' });
         if (!(v.lines ?? []).some((l) => isFilled(l.code)))
           ctx.addIssue({ code: 'custom', path: ['lines'], message: 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ' });
         const paid = num(v.paymentAmount);

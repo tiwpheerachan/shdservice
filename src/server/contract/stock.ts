@@ -1,7 +1,17 @@
 import { z } from 'zod';
 import { productSchema } from '@/lib/validation/admin';
 import { issueSchema, receiveSchema } from '@/lib/validation/stock';
-import { IDEMPOTENCY, JSON_BODY, SIGNED_IN, byNo, errorResponse, jsonResponse, notFound, version } from './common';
+import {
+  IDEMPOTENCY,
+  JSON_BODY,
+  SIGNED_IN,
+  byNo,
+  byUuid,
+  errorResponse,
+  jsonResponse,
+  notFound,
+  version,
+} from './common';
 import { defineOperation } from './registry';
 import { PartRequestLine, Product } from './shapes';
 
@@ -25,12 +35,13 @@ export const StockCardLine = z.object({
 
 export const productGet = defineOperation({
   method: 'get',
-  path: '/products/{code}',
+  path: '/products/{id}',
   tags: ['Products'],
   summary: 'A spare part with its stock card (product-detail modal)',
   description:
     'View on any product / stock module (Product, Product Onhand, Product Receive Stock, Product Pick Stock). ราคาทุน and `version` only for a role with the special right Product Cost.',
-  params: z.object({ code: s.meta({ description: 'รหัสอะไหล่ (system code)' }) }),
+  params: byUuid('อะไหล่', "the part's id (product.id) — not its system code"),
+  invalid: { params: 404 },
   responses: {
     200: jsonResponse(
       'The part and its movements.',
@@ -140,7 +151,7 @@ export const stockMovementLines = defineOperation({
 
 /** services/stock.ts SoPickLine */
 export const SaleOrderPickLine = z.object({
-  dtId: n,
+  dtId: z.uuid().meta({ description: 'the sale_out_dt row' }),
   code: s,
   name: s,
   onhand: n,
@@ -151,7 +162,7 @@ export const SaleOrderPickLine = z.object({
 
 /** services/stock.ts ReturnLine */
 export const ReturnableLine = z.object({
-  logId: n,
+  logId: z.uuid().meta({ description: 'the job_order_spare_part_log row' }),
   jobNo: s,
   code: s,
   name: s,

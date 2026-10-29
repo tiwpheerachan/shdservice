@@ -2,6 +2,7 @@
  * Shared TypeScript types of the domain records the screens and services exchange.
  * All DATA comes from the legacy database (src/server/services/*); the core fields of each type are what
  * the screens render, the optional ones the extra DB-backed values the forms need for editing.
+ * Every row id is the row's uuid `id` (ADR 0008, string); status codes (statusId, approveId) stay numbers.
  */
 
 export type Status = 'Active' | 'Inactive' | 'Cancel';
@@ -32,7 +33,6 @@ export type User = {
 };
 
 export type Permission = {
-  id: string;
   role: string;
   menu: string;
   add: boolean;
@@ -62,7 +62,7 @@ export type Product = {
   price: number;
   status: Status;
   // DB-backed extras (product + product_none_serial)
-  id?: number;
+  id?: string;
   nameEn?: string;
   nameCn?: string;
   description?: string;
@@ -109,14 +109,14 @@ export type Customer = {
   taxId: string;
   status: Status;
   // DB-backed extras (customer table)
-  id?: number;
+  id?: string;
   type?: string;
   online?: boolean;
   address1?: string;
   address2?: string;
-  cityId?: number;
-  districtId?: number;
-  subDistrictId?: number;
+  cityId?: string;
+  districtId?: string;
+  subDistrictId?: string;
   postalCode?: string;
   priceGroup?: string;
   createdDate?: string;
@@ -126,6 +126,7 @@ export type Customer = {
 };
 
 export type Job = {
+  id: string;
   no: string;
   openDate: string;
   customer: string;
@@ -140,8 +141,6 @@ export type Job = {
   statusId?: number;
   statusGroup?: string;
   isBounce?: boolean; // job.is_job_bounce — งานเด้ง (สินค้ากลับมาซ่อมซ้ำ)
-  customerId?: number;
-  engineerId?: number;
   serial?: string;
   channel?: string;
   receptionType?: string;
@@ -167,6 +166,7 @@ export type Job = {
 };
 
 export type Quotation = {
+  id: string;
   no: string;
   date: string;
   type: 'Type A (Normal)' | 'Type B (VIP)';
@@ -190,6 +190,7 @@ export type Quotation = {
 };
 
 export type SaleOrder = {
+  id: string;
   no: string;
   date: string;
   customer: string;

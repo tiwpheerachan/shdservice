@@ -6,7 +6,7 @@ import { PickSlipDoc } from '@/components/print/docs/pick-slip';
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'ใบเบิกสินค้า' };
 
-/** ใบเบิกสินค้า of the quotations ticked in the list: /print/pick-slip?nos=Q2600533,Q2600534 (login: app/print/layout.tsx) */
+/** ใบเบิกสินค้า of the quotations ticked in the list: /print/pick-slip?ids=<uuid>,<uuid> (login: app/print/layout.tsx) */
 export default async function Page({
   searchParams,
 }: {
@@ -15,6 +15,6 @@ export default async function Page({
   // the quotation print's rule: the role must be able to view quotations
   const user = await userFromCookies();
   if (!user || !(await canViewAny(user, ['Quotation']))) notFound();
-  const nos = [(await searchParams).nos ?? ''].flat().flatMap((v) => v.split(','));
-  return <PickSlipDoc nos={nos} />;
+  const ids = [(await searchParams).ids ?? ''].flat().flatMap((v) => v.split(','));
+  return <PickSlipDoc ids={ids} />;
 }

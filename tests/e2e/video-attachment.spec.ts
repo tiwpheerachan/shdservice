@@ -1,6 +1,6 @@
 import type { Request } from '@playwright/test';
 import { OWNER_EMAIL, SERVER_ENV } from './support/env';
-import { newJob } from './support/db';
+import { jobUuid, newJob } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -58,7 +58,7 @@ test('a video is converted, uploaded straight to R2 (cancel, then again), and pl
   );
 
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
   // every progress line shown, however short it was on screen
   await page.evaluate(() => {
     const seen: string[] = ((window as unknown as { seen: string[] }).seen = []);

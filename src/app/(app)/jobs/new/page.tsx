@@ -33,7 +33,7 @@ function NewJobForm() {
   const canRepair = can('Job Repair', 'edit');
   // after saving we stop here first so the tracking link can be copied and sent
   // to the customer right away (the job is trackable from the moment it exists)
-  const [opened, setOpened] = React.useState<string | null>(null);
+  const [opened, setOpened] = React.useState<{ id: string; no: string } | null>(null);
 
   // POST /api/jobs → job (running J), job_log(1), job_symptom, customer link
   const save = async () => {
@@ -45,7 +45,7 @@ function NewJobForm() {
       await attach.current?.uploadPending(d.job.no);
       push({ kind: 'success', title: 'เปิดงานใหม่เรียบร้อย', desc: `หมายเลขงาน ${d.job.no}` });
       reset();
-      setOpened(d.job.no);
+      setOpened({ id: d.job.id, no: d.job.no });
     } catch (e) {
       if (!fromApi(e)) push({ kind: 'error', title: 'เปิดงานไม่สำเร็จ', desc: errMsg(e) });
     } finally {
@@ -75,17 +75,13 @@ function NewJobForm() {
       <Modal
         open={!!opened}
         onClose={() => setOpened(null)}
-        title={`เปิดงานเรียบร้อย · ${opened ?? ''}`}
+        title={`เปิดงานเรียบร้อย · ${opened?.no ?? ''}`}
         description="พิมพ์ใบรับงานให้ลูกค้า และส่งลิงก์ติดตามงานได้เลย"
         footer={
           <>
             {/* the repair screen is the technician's — offered only to a role that may save it */}
             {canRepair && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => opened && router.push(`/jobs/repair?job=${encodeURIComponent(opened)}`)}
-              >
+              <Button variant="ghost" size="sm" onClick={() => opened && router.push(`/jobs/repair?id=${opened.id}`)}>
                 ไปบันทึกงานซ่อม
               </Button>
             )}
@@ -93,17 +89,13 @@ function NewJobForm() {
             <Button variant="outline" size="sm" onClick={() => setOpened(null)}>
               เปิดงานใหม่อีกงาน
             </Button>
-            <Button
-              size="sm"
-              data-autofocus
-              onClick={() => opened && window.open(`/print/job/${encodeURIComponent(opened)}`, '_blank')}
-            >
+            <Button size="sm" data-autofocus onClick={() => opened && window.open(`/print/job/${opened.id}`, '_blank')}>
               พิมพ์ใบรับงาน
             </Button>
           </>
         }
       >
-        {opened && <TrackLink jobNo={opened} compact />}
+        {opened && <TrackLink jobId={opened.id} compact />}
       </Modal>
     </>
   );

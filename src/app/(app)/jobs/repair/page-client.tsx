@@ -87,11 +87,11 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     onRecord: (j) => {
       const b = builtFrom.current;
       builtFrom.current = undefined;
-      if (b?.no !== j.no || b.version !== j.version) prefill(j);
+      if (b?.id !== j.id || b.version !== j.version) prefill(j);
     },
   });
   const { s: form, reset } = useJobForm();
-  const act = useWorkflowErrors(() => find(jobNo)); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
   const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (Job Money After Close may change them)
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
@@ -122,7 +122,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
 
   const go = (v: string) => find(v);
 
-  // POST /api/jobs/:no/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
+  // POST /api/jobs/:id/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     const body = {
@@ -147,7 +147,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     try {
       // the version the page loaded: someone else's save since → 409 (reload) instead of
       // silently cancelling the part requests they added
-      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}/repair`, {
+      const d = await postJson<{ job: JobDetail }>(`/api/jobs/${job.id}/repair`, {
         ...body,
         job: commonSections(form, canEdit), // the shared sections: saved with the action or not at all
         version: form.version,
@@ -231,14 +231,14 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
           cancelHref="/jobs/list"
           extra={
             <>
-              <QuoteLink jobNo={job?.no} />
+              <QuoteLink jobId={job?.id} />
               <PrintButton
                 label="พิมพ์ใบรับงาน"
                 kind="job"
                 locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                 no={job?.no ?? ''}
                 profileId={job?.documentProfileId}
-                href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+                href={`/print/job/${job?.id ?? ''}`}
                 disabled={!job}
               />
             </>

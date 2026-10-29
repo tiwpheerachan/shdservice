@@ -60,8 +60,12 @@ const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
 /** 409 under the name field: the same name ignoring case and spaces exists.
  *  The message names the row that has it — it may be Inactive or deleted, i.e. not in the list — and the
  *  field error IS that message: the toast fades, the line under the name stays. */
-function duplicate(dup: { name: string | null; ref: string | number; rs?: string | null }) {
-  const msg = `${DUPLICATE_NAME}: "${clean(dup.name)}" (รหัส ${dup.ref}${dup.rs === RS.DELETED ? ' · อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? ' · Inactive' : ''})`;
+function duplicate(dup: { name: string | null; ref?: string; rs?: string | null }) {
+  const where = [
+    dup.ref && `รหัส ${dup.ref}`,
+    dup.rs === RS.DELETED ? 'อยู่ในรายการที่ลบ' : dup.rs === RS.INACTIVE ? 'Inactive' : '',
+  ].filter(Boolean);
+  const msg = `${DUPLICATE_NAME}: "${clean(dup.name)}"${where.length ? ` (${where.join(' · ')})` : ''}`;
   return new HttpError(409, msg, { fields: { name: msg } });
 }
 
@@ -98,6 +102,7 @@ const SIMPLE = {
   categories: {
     table: category,
     id: category.categoryId,
+    uuid: category.id,
     name: category.categoryName,
     detail: category.categoryDescription,
     extra: category.shotCode,
@@ -110,6 +115,7 @@ const SIMPLE = {
   manufacturers: {
     table: manufacturer,
     id: manufacturer.manufacturerId,
+    uuid: manufacturer.id,
     name: manufacturer.manufacturerName,
     detail: manufacturer.logoName,
     extra: null,
@@ -120,7 +126,8 @@ const SIMPLE = {
   },
   colors: {
     table: color,
-    id: color.id,
+    id: color.pk,
+    uuid: color.id,
     name: color.colorName,
     detail: color.description,
     extra: null,
@@ -132,6 +139,7 @@ const SIMPLE = {
   job_types: {
     table: jobType,
     id: jobType.jobTypeId,
+    uuid: jobType.id,
     name: jobType.jobTypeName,
     detail: jobType.jobTypeDescription,
     extra: null,
@@ -149,6 +157,7 @@ const SIMPLE = {
   product_types: {
     table: productType,
     id: productType.productTypeId,
+    uuid: productType.id,
     name: productType.productTypeName,
     detail: productType.productTypeDescription,
     extra: null,
@@ -170,7 +179,7 @@ async function loadSimple(kind: SimpleKind, deleted: DeletedMode): Promise<Maste
   const d = SIMPLE[kind];
   const rows = await db
     .select({
-      id: d.id,
+      id: d.uuid,
       name: d.name,
       detail: d.detail ?? sql<string>`''`,
       extra: d.extra ?? sql<string>`''`,
@@ -181,7 +190,7 @@ async function loadSimple(kind: SimpleKind, deleted: DeletedMode): Promise<Maste
     .where(statusFilter(d.active, deleted))
     .orderBy(asc(d.id));
   return rows.map((r) => ({
-    id: String(r.id),
+    id: r.id,
     name: r.name ?? '',
     detail: r.detail ?? '',
     status: status(r.active),
@@ -215,17 +224,11 @@ export async function saveSimple(
   if (d.keys.extra && input.extra !== undefined) values[d.keys.extra] = clean(input.extra).slice(0, 50);
   if (d.keys.days) values[d.keys.days] = Number(input.days);
 
-  /** the row's id: the one edited, or the one inserted */
+  /** the row's uuid (input.id — checked by the contract): the one edited, or the one inserted */
   const id = await db.transaction(async (tx) => {
     await lockName(tx, kind, name);
-    const [before] = input.id
-      ? await tx
-          .select()
-          .from(d.table)
-          .where(eq(d.id, Number(input.id)))
-          .for('update')
-      : [];
-    if (input.id && !before) throw new HttpError(404, `ไม่พบรายการ ${kind} #${input.id}`);
+    const [before] = input.id ? await tx.select().from(d.table).where(eq(d.uuid, input.id)).for('update') : [];
+    if (input.id && !before) throw new HttpError(404, `ไม่พบ${KIND_NOUN[kind]}นี้ — โหลดหน้าใหม่`);
     const old = before as Record<string, unknown> | undefined;
     if (old)
       assertLoaded(
@@ -241,32 +244,27 @@ export async function saveSimple(
     // name is not checked — 5 legacy symptom pairs already clash and must stay editable
     if (!old || masterNameKey(old[d.keys.name]) !== masterNameKey(name)) {
       const dup = await tx
-        .select({ id: d.id, name: d.name, rs: d.active })
+        .select({ name: d.name, rs: d.active })
         .from(d.table)
-        .where(
-          and(sql`${nameKeyOf(d.name)} = ${masterNameKey(name)}`, input.id ? ne(d.id, Number(input.id)) : undefined),
-        )
+        .where(and(sql`${nameKeyOf(d.name)} = ${masterNameKey(name)}`, input.id ? ne(d.uuid, input.id) : undefined))
         .limit(1);
-      if (dup[0]) throw duplicate({ name: dup[0].name, ref: dup[0].id, rs: dup[0].rs });
+      if (dup[0]) throw duplicate({ name: dup[0].name, rs: dup[0].rs });
     }
     if (old) {
-      await tx
-        .update(d.table)
-        .set(values)
-        .where(eq(d.id, Number(input.id)));
+      await tx.update(d.table).set(values).where(eq(d.uuid, input.id!));
       // saved with nothing changed → no audit line (as a user save)
       const changes = diff(old, values);
       if (changes)
         await audit(tx, byUserId, {
-          ...editAudit(changes, KIND_NOUN[kind], input.id!, name, `แก้ไข${KIND_NOUN[kind]}: ${name}`),
+          ...editAudit(changes, KIND_NOUN[kind], name, '', `แก้ไข${KIND_NOUN[kind]}: ${name}`),
           module: 'Admin',
           entity: kind,
           key: input.id!,
           changes,
         });
-      return Number(input.id);
+      return input.id!;
     }
-    const [row] = await tx.insert(d.table).values(values).returning({ id: d.id });
+    const [row] = await tx.insert(d.table).values(values).returning({ id: d.uuid });
     if (!row) throw new Error(`${kind} insert returned no row`);
     await audit(tx, byUserId, {
       action: 'CREATE',
@@ -288,28 +286,29 @@ export async function saveSimple(
     if (!saved) throw new Error(`${kind} #${input.id} not found after update`);
     return saved;
   }
-  const created = (await listSimple(kind, 'all')).find((r) => r.id === String(id));
+  const created = (await listSimple(kind, 'all')).find((r) => r.id === id);
   if (!created) throw new Error(`${kind} #${id} not found after insert`);
   return created;
 }
 
 /** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
-export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordStatus, byUserId: number) {
+/** `id` = the row's uuid (records route checked it) — the audit key; the summary names the row */
+export async function setSimpleStatus(kind: SimpleKind, id: string, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
   await db.transaction(async (tx) => {
-    const [old] = await tx.select({ rs: d.active, name: d.name }).from(d.table).where(eq(d.id, id)).for('update');
-    if (!old) throw new HttpError(404, `ไม่พบรายการ ${kind} #${id}`);
+    const [old] = await tx.select({ rs: d.active, name: d.name }).from(d.table).where(eq(d.uuid, id)).for('update');
+    if (!old) throw new HttpError(404, `ไม่พบ${KIND_NOUN[kind]}นี้ — โหลดหน้าใหม่`);
     if (old.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
     await tx
       .update(d.table)
       .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
-      .where(eq(d.id, id));
+      .where(eq(d.uuid, id));
     await audit(tx, byUserId, {
       action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
       module: 'Admin',
       entity: kind,
       key: id,
-      summary: statusSummary({ noun: KIND_NOUN[kind], key: id, name: old.name, old: old.rs, rs }),
+      summary: statusSummary({ noun: KIND_NOUN[kind], key: clean(old.name), old: old.rs, rs }),
       changes: { recordStatus: [old.rs ?? null, rs] },
     });
   });
@@ -329,7 +328,7 @@ async function loadSymptoms(deleted: DeletedMode): Promise<Symptom[]> {
     .where(statusFilter(symptom.recordStatus, deleted))
     .orderBy(asc(symptom.symptomId));
   return rows.map((r) => ({
-    id: String(r.symptomId),
+    id: r.id,
     name: r.symptomName ?? '',
     detail: r.symptomDescription ?? '',
     group: r.symptomGroupName ?? '',
@@ -358,13 +357,8 @@ export async function saveSymptom(
   };
   const id = await db.transaction(async (tx) => {
     await lockName(tx, 'symptoms', name);
-    const [before] = input.id
-      ? await tx
-          .select()
-          .from(symptom)
-          .where(eq(symptom.symptomId, Number(input.id)))
-          .for('update')
-      : [];
+    const [before] = input.id ? await tx.select().from(symptom).where(eq(symptom.id, input.id)).for('update') : [];
+    if (input.id && !before) throw new HttpError(404, 'ไม่พบอาการเสียนี้ — โหลดหน้าใหม่');
     if (before)
       assertLoaded(
         { name: before.symptomName, detail: before.symptomDescription, status: status(before.recordStatus) },
@@ -372,25 +366,25 @@ export async function saveSymptom(
       );
     if (!before || masterNameKey(before.symptomName) !== masterNameKey(name)) {
       const [dup] = await tx
-        .select({ id: symptom.symptomId, name: symptom.symptomName, rs: symptom.recordStatus })
+        .select({ name: symptom.symptomName, rs: symptom.recordStatus })
         .from(symptom)
         .where(
           and(
             sql`${nameKeyOf(symptom.symptomName)} = ${masterNameKey(name)}`,
-            input.id ? ne(symptom.symptomId, Number(input.id)) : undefined,
+            input.id ? ne(symptom.id, input.id) : undefined,
           ),
         )
         .limit(1);
-      if (dup) throw duplicate({ name: dup.name, ref: dup.id, rs: dup.rs });
+      if (dup) throw duplicate({ name: dup.name, rs: dup.rs });
     }
     if (input.id) {
-      const id = Number(input.id);
+      const id = input.id;
       const set = { ...values, ...saveStamp(input.status, before, byUserId) };
-      await tx.update(symptom).set(set).where(eq(symptom.symptomId, id));
+      await tx.update(symptom).set(set).where(eq(symptom.id, id));
       const changes = diff(before as Record<string, unknown>, set as Record<string, unknown>);
       if (changes)
         await audit(tx, byUserId, {
-          ...editAudit(changes, 'อาการเสีย', id, name, `แก้ไขอาการเสีย: ${name}`),
+          ...editAudit(changes, 'อาการเสีย', name, '', `แก้ไขอาการเสีย: ${name}`),
           module: 'Admin',
           entity: 'symptom',
           key: id,
@@ -401,7 +395,7 @@ export async function saveSymptom(
     const [row] = await tx
       .insert(symptom)
       .values({ ...values, ...saveStamp(input.status, undefined, byUserId) })
-      .returning({ id: symptom.symptomId });
+      .returning({ id: symptom.id });
     if (!row) throw new Error('symptom insert returned no row');
     await audit(tx, byUserId, {
       action: 'CREATE',
@@ -413,25 +407,27 @@ export async function saveSymptom(
     return row.id;
   });
   invalidate('master:symptoms:');
-  return (await listSymptoms('exclude')).find((r) => r.id === String(id))!;
+  return (await listSymptoms('exclude')).find((r) => r.id === id)!;
 }
 
-export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: number) {
+/** `id` = the symptom's uuid (records route checked it) */
+export async function setSymptomStatus(id: string, rs: RecordStatus, byUserId: number) {
   await db.transaction(async (tx) => {
     const [old] = await tx
       .select({ rs: symptom.recordStatus, name: symptom.symptomName })
       .from(symptom)
-      .where(eq(symptom.symptomId, id))
+      .where(eq(symptom.id, id))
       .for('update');
-    if (old?.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
-    await tx.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
+    if (!old) throw new HttpError(404, 'ไม่พบอาการเสียนี้ — โหลดหน้าใหม่');
+    if (old.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
+    await tx.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.id, id));
     await audit(tx, byUserId, {
       action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
       module: 'Admin',
       entity: 'symptom',
       key: id,
-      summary: statusSummary({ noun: 'อาการเสีย', key: id, name: old?.name, old: old?.rs, rs }),
-      changes: { recordStatus: [old?.rs ?? null, rs] },
+      summary: statusSummary({ noun: 'อาการเสีย', key: clean(old.name), old: old.rs, rs }),
+      changes: { recordStatus: [old.rs ?? null, rs] },
     });
   });
   invalidate('master:symptoms:');

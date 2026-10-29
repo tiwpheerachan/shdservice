@@ -56,19 +56,19 @@ export const GET = checked(async (request: NextRequest) => {
     if (active === true) {
       chk = Date.now();
       // rollout: proves the endpoint answers for real users before switching to enforce
-      if (mode === 'log') log.info('sso central session active', { userId: u.userId });
+      if (mode === 'log') log.info('sso central session active', { userId: u.id });
     } else if (active === false) {
-      log.warn('sso central session inactive', { userId: u.userId, mode });
+      log.warn('sso central session inactive', { userId: u.id, mode });
       if (mode === 'enforce') {
         const res = NextResponse.json({ user: null, reason: 'elsewhere' }, { status: 401 });
         res.cookies.set(SESSION_COOKIE, '', { secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 0 });
         return res;
       }
-    } else log.warn('sso central session check unavailable', { userId: u.userId });
+    } else log.warn('sso central session check unavailable', { userId: u.id });
   } else if (mode === 'log' && !current.sub) {
     // rollout visibility: a session without sub is never checked (a cookie issued before
     // sub was stored, or /sso/verify not sending sub) — say so instead of looking like "all fine"
-    log.info('sso central session check skipped: no sub', { userId: u.userId });
+    log.info('sso central session check skipped: no sub', { userId: u.id });
   }
 
   // renew the idle timer, but never past the absolute lifetime counted from sign-in
@@ -89,7 +89,7 @@ export const GET = checked(async (request: NextRequest) => {
     path: '/',
     maxAge: Math.max(0, Math.floor((exp - Date.now()) / 1000)),
   });
-  res.cookies.set(SEEN_COOKIE, String(u.userId), {
+  res.cookies.set(SEEN_COOKIE, u.id, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

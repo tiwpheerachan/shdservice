@@ -13,7 +13,7 @@ import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 import { useTourRestore } from '@/components/tour/tour';
 import { type ProductForm, modelRows } from './product-form';
 
-/** a row of GET /api/products/:code's stock card */
+/** a row of GET /api/products/:id's stock card */
 export type StockCardRow = {
   no: string;
   date: string;

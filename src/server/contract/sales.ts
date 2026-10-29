@@ -9,11 +9,12 @@ import {
   JSON_BODY,
   RATE_LIMITED,
   SIGNED_IN,
-  byNo,
+  byUuid,
   choice,
   errorResponse,
   jsonResponse,
   notFound,
+  uuid,
   version,
 } from './common';
 import { defineOperation } from './registry';
@@ -23,9 +24,14 @@ import { Customer, QuotationDetail, SaleOrderDetail } from './shapes';
 
 const s = z.string();
 const n = z.number();
-/** a field the pages always send as text / a number (never null) */
+/** a field the pages always send as text (never null) */
 const optText = s.optional();
-const optNum = n.optional();
+/** an address level of a customer: its uuid, or "" (the form's "not picked") = left out */
+const place = z
+  .literal('')
+  .transform(() => undefined)
+  .or(uuid())
+  .optional();
 
 /**
  * saleOrderSchema(prev)'s fields without a stored order: the payment type and parcel no are checked
@@ -49,9 +55,9 @@ export const customerSave = defineOperation({
       taxId: optText,
       type: optText.meta({ description: '`Normal` = a person.' }),
       online: z.boolean().optional(),
-      cityId: optNum,
-      districtId: optNum,
-      subDistrictId: optNum,
+      cityId: place.meta({ description: 'จังหวัด: its uuid (GET /address); `""` = not picked.' }),
+      districtId: place.meta({ description: 'เขต / อำเภอ: its uuid; `""` = not picked.' }),
+      subDistrictId: place.meta({ description: 'แขวง / ตำบล: its uuid; `""` = not picked.' }),
       postalCode: optText,
       phone: optText,
       email: optText,
@@ -66,7 +72,7 @@ export const customerSave = defineOperation({
     201: jsonResponse('Created.', z.object({ ok: z.literal(true), row: Customer })),
     ...SIGNED_IN,
     ...JSON_BODY,
-    ...notFound('No customer with that `code`.'),
+    ...notFound('No customer with that `code`, or no province / district / sub-district with that uuid.'),
     ...IDEMPOTENCY.responses,
   },
 });
@@ -77,7 +83,7 @@ export const customerLookup = defineOperation({
   tags: ['Customers'],
   summary: 'Find customers by code, tax id, name or phone (job / quotation / sale-order forms)',
   description:
-    'An exact code answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its code).',
+    "An exact code — or a customer's uuid (the customers page `?edit=` link) — answers that one customer; otherwise up to 20 matches. View on Customer or any form that picks one. Never a DELETED customer, except to System Admin asking `deleted=all` (the customers page opening one by its uuid).",
   query: z.object({
     q: s.optional(),
     deleted: choice(['all']).meta({
@@ -93,10 +99,11 @@ export const customerLookup = defineOperation({
 
 export const quotationGet = defineOperation({
   method: 'get',
-  path: '/quotations/{no}',
+  path: '/quotations/{id}',
   tags: ['Quotations'],
   summary: 'A quotation with its lines, customer and job',
-  params: byNo('เลขที่ใบเสนอราคา'),
+  params: byUuid('ใบเสนอราคา', "the quotation's id (uuid) — not its number"),
+  invalid: { params: 404 },
   responses: {
     200: jsonResponse('The quotation.', z.object({ quotation: QuotationDetail })),
     ...SIGNED_IN,
@@ -116,18 +123,11 @@ export const quotationSave = defineOperation({
   body: quotationFields
     .extend({
       no: optText.meta({ description: 'Set = edit that quotation.' }),
-      documentProfileId: optNum,
+      documentProfileId: uuid().optional().meta({ description: 'ออกเอกสารในนาม (a document profile id)' }),
       type: optText,
       customerCode: optText,
       jobNo: optText,
-      lines: z
-        .array(
-          quotationLine.extend({
-            id: optNum,
-            code: optText,
-          }),
-        )
-        .optional(),
+      lines: z.array(quotationLine.extend({ code: optText })).optional(),
       discountType: optText,
       discountUnit: optText.meta({ description: '`บาท` or `%`' }),
       status: optText.meta({ description: 'A new quotation: `รอเสนอราคา` (default) or `เสนอราคาแล้ว`.' }),
@@ -148,15 +148,16 @@ export const quotationSave = defineOperation({
   },
 });
 
-const soNo = byNo('เลขที่ใบสั่งขาย (SO…)');
+const soId = byUuid('ใบสั่งขาย', "the sale order's id (uuid) — not its SO number");
 const order = (what: string) => jsonResponse(what, z.object({ ok: z.literal(true), order: SaleOrderDetail }));
 
 export const saleOrderGet = defineOperation({
   method: 'get',
-  path: '/sale-orders/{no}',
+  path: '/sale-orders/{id}',
   tags: ['Sale orders'],
   summary: 'A sale order with its lines',
-  params: soNo,
+  params: soId,
+  invalid: { params: 404 },
   responses: {
     200: jsonResponse('The sale order.', z.object({ order: SaleOrderDetail })),
     ...SIGNED_IN,
@@ -185,7 +186,8 @@ export const saleOrderSave = defineOperation({
         .optional(),
       paymentType: optText,
       tracking: optText,
-      documentProfileId: optNum,
+      documentProfileId: uuid().optional().meta({ description: 'ออกเอกสารในนาม (a document profile id)' }),
+      salesId: uuid('ไม่พบพนักงานขาย').optional().meta({ description: 'พนักงานขาย (a user id)' }),
       no: optText.meta({ description: 'Set = edit that order.' }),
       slip: optText,
       submit: z.boolean().optional(),
@@ -204,12 +206,13 @@ export const saleOrderSave = defineOperation({
 
 export const saleOrderApprove = defineOperation({
   method: 'post',
-  path: '/sale-orders/{no}/approve',
+  path: '/sale-orders/{id}/approve',
   tags: ['Sale orders'],
   summary: 'Approve, deny, or send back a sale order (อนุมัติ / ปฏิเสธ / ส่งกลับแก้ไข)',
   description:
     'Sale Order edit + the special right SO Approve; never your own order. Approving issues the stock (a WHO document). Rules: `approveSchema` (src/lib/validation/stock.ts); a remark is required to deny.',
-  params: soNo,
+  params: soId,
+  invalid: { params: 404 },
   body: approveSchema.extend({ version }),
   responses: {
     200: order('Decided; the order as stored now.'),
@@ -222,12 +225,13 @@ export const saleOrderApprove = defineOperation({
 
 export const saleOrderTracking = defineOperation({
   method: 'post',
-  path: '/sale-orders/{no}/tracking',
+  path: '/sale-orders/{id}/tracking',
   tags: ['Sale orders'],
   summary: "Set a sale order's parcel number (เลขพัสดุ)",
   description:
     'Sale Order edit. Rules: `trackingSchema(prev)` (src/lib/validation/stock.ts), run by the service — an unchanged legacy number passes.',
-  params: soNo,
+  params: soId,
+  invalid: { params: 404 },
   body: z.object({
     tracking: z
       .unknown()
@@ -265,13 +269,13 @@ export const documentProfileSet = defineOperation({
       )
       .pipe(z.string().min(1, 'no required'))
       .meta({ type: 'string', description: 'The document number (upper-cased).' }),
-    profileId: z.coerce.number({ error: 'profileId required' }).positive('profileId required'),
+    profileId: uuid('profileId required').meta({ description: 'the document profile id' }),
   }),
   invalid: { body: 400 },
   responses: {
     200: jsonResponse(
       'The profile now on the document.',
-      z.object({ ok: z.literal(true), profile: z.object({ id: n, code: s, nameTh: s }) }),
+      z.object({ ok: z.literal(true), profile: z.object({ id: z.uuid(), code: s, nameTh: s }) }),
     ),
     ...SIGNED_IN,
     ...JSON_BODY,
@@ -285,12 +289,13 @@ export const documentProfileSet = defineOperation({
 /** services/alerts.ts OverdueAlerts */
 export const OverdueAlertsBody = z.object({
   scope: z.enum(['mine', 'all']),
-  engineerId: n.nullable(),
+  engineerId: z.uuid().nullable().meta({ description: 'app_user.id of the engineer a "mine" list is limited to' }),
   total: n,
   unassigned: n,
-  owners: z.array(z.object({ engineerId: n.nullable(), name: s, count: n })),
+  owners: z.array(z.object({ engineerId: z.uuid().nullable(), name: s, count: n })),
   items: z.array(
     z.object({
+      id: z.uuid().meta({ description: 'job.id — the link (`no` is shown)' }),
       no: s,
       product: s,
       customer: s,
@@ -318,7 +323,7 @@ export const alertsOverdue = defineOperation({
 /** services/alerts.ts PendingSaleOrders */
 export const PendingSaleOrdersBody = z.object({
   total: n,
-  items: z.array(z.object({ no: s, customer: s, amount: n, createdBy: s, date: s, days: n })),
+  items: z.array(z.object({ id: z.uuid(), no: s, customer: s, amount: n, createdBy: s, date: s, days: n })),
 });
 
 export const alertsSaleOrders = defineOperation({

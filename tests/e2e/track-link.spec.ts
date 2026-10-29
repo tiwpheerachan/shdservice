@@ -1,5 +1,5 @@
 import { OWNER_EMAIL } from './support/env';
-import { newJob } from './support/db';
+import { jobUuid, newJob } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -8,9 +8,9 @@ import { expect, signIn, test } from './support/fixtures';
  */
 test('a link replaced by someone else since the last read is not copied', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const no = await newJob({ status: 2 });
+  const id = await jobUuid(await newJob({ status: 2 }));
   await signIn(page, OWNER_EMAIL);
-  await page.goto(`/jobs/edit?no=${no}`);
+  await page.goto(`/jobs/edit?id=${id}`);
   await page.getByRole('button', { name: 'สร้างลิงก์ใหม่' }).click();
   await expect(page.getByText('สร้างลิงก์ใหม่แล้ว').first()).toBeVisible();
   const copy = page.getByRole('button', { name: 'คัดลอกลิงก์' });
@@ -21,7 +21,7 @@ test('a link replaced by someone else since the last read is not copied', async 
   const other = await page.evaluate(
     async (url) =>
       (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status,
-    `/api/jobs/${no}/track-link`,
+    `/api/jobs/${id}/track-link`,
   );
   expect(other).toBe(200);
   await page.evaluate(() => navigator.clipboard.writeText('before'));

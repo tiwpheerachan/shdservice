@@ -22,6 +22,8 @@ import { AS } from './sale-orders';
  *    (~6 ms per query), so the cost does not grow with the job history
  */
 export type OverdueItem = {
+  /** job.id — the link; `no` is what is shown */
+  id: string;
   no: string;
   product: string;
   customer: string;
@@ -31,11 +33,12 @@ export type OverdueItem = {
   engineer: string | null;
   openedBy: string;
 };
-export type OverdueOwner = { engineerId: number | null; name: string; count: number };
+/** engineerId = app_user.id (null = the user row is gone) */
+export type OverdueOwner = { engineerId: string | null; name: string; count: number };
 export type OverdueAlerts = {
   scope: 'mine' | 'all';
-  /** the engineer the list is limited to (scope "mine") — for the "ดูทั้งหมด" link */
-  engineerId: number | null;
+  /** app_user.id of the engineer the list is limited to (scope "mine") — for the "ดูทั้งหมด" link */
+  engineerId: string | null;
   total: number;
   unassigned: number;
   owners: OverdueOwner[];
@@ -53,10 +56,11 @@ const assigned = sql`coalesce(${job.engineerId}, 0) > 0`;
 export async function overdueAlerts(u: CurrentUser): Promise<OverdueAlerts> {
   const mine = (await hasRight(u, 'Job Take')) && !(await hasRight(u, 'Overdue All'));
   // one minute is fresh enough for a bell; keyed by scope so engineers never share a list
-  return cached(`alerts:overdue:${mine ? u.userId : 'all'}`, 60_000, () => load(mine ? u.userId : null));
+  return cached(`alerts:overdue:${mine ? u.userId : 'all'}`, 60_000, () => load(mine ? u : null));
 }
 
-async function load(engineerId: number | null): Promise<OverdueAlerts> {
+async function load(me: Pick<CurrentUser, 'userId' | 'id'> | null): Promise<OverdueAlerts> {
+  const engineerId = me?.userId ?? null;
   const where = and(
     ne(job.recordStatus, RS.DELETED),
     overdueWhere,
@@ -71,16 +75,17 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
     engineerId !== null
       ? Promise.resolve([])
       : db
-          .select({ engineerId: job.engineerId, name: nameOf(eng), count: count() })
+          .select({ engineerId: eng.id, name: nameOf(eng), count: count() })
           .from(job)
           .leftJoin(eng, eq(eng.userId, job.engineerId))
           .where(and(where, assigned))
-          .groupBy(job.engineerId, eng.firstName, eng.lastName)
+          .groupBy(job.engineerId, eng.id, eng.firstName, eng.lastName)
           .orderBy(desc(count()))
           .limit(OWNER_LIMIT),
     // most recently overdue first: the ones someone can still act on today
     db
       .select({
+        id: job.id,
         no: job.jobNo,
         brand: manufacturer.manufacturerName,
         model: job.productModelName,
@@ -106,15 +111,16 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
 
   return {
     scope: engineerId === null ? 'all' : 'mine',
-    engineerId,
+    engineerId: me?.id ?? null,
     total: Number(totals?.total ?? 0),
     unassigned: Number(totals?.unassigned ?? 0),
     owners: owners.map((o) => ({
       engineerId: o.engineerId,
-      name: o.name || `ผู้ใช้ #${o.engineerId}`,
+      name: o.name || 'ไม่ทราบชื่อผู้ใช้',
       count: Number(o.count),
     })),
     items: items.map((r) => ({
+      id: r.id,
       no: r.no,
       product: [r.brand, r.model].filter(Boolean).join(' ').trim(),
       // customer_detail = "C43600 ชื่อ เบอร์" when the customer row is missing
@@ -122,7 +128,7 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
       status: (r.status ?? '').trim(),
       dueDate: fmtDate(r.dueDate),
       daysOver: r.daysOver,
-      engineer: (r.engineerId ?? 0) > 0 ? r.engineer || `ผู้ใช้ #${r.engineerId}` : null,
+      engineer: (r.engineerId ?? 0) > 0 ? r.engineer || 'ไม่ทราบชื่อผู้ใช้' : null,
       openedBy: r.openedBy,
     })),
   };
@@ -136,6 +142,8 @@ async function load(engineerId: number | null): Promise<OverdueAlerts> {
  * old order should count from its submit.
  */
 export type PendingSaleOrder = {
+  /** sale_out_hd.id — the link; `no` is what is shown */
+  id: string;
   no: string;
   customer: string;
   amount: number;
@@ -160,6 +168,7 @@ export async function pendingSaleOrders(u: Pick<CurrentUser, 'userId' | 'isAdmin
     db.select({ total: count() }).from(saleOutHd).where(where),
     db
       .select({
+        id: saleOutHd.id,
         no: saleOutHd.saleOutHdNo,
         customer: saleOutHd.customerName,
         amount: saleOutHd.netAmount,
@@ -179,6 +188,7 @@ export async function pendingSaleOrders(u: Pick<CurrentUser, 'userId' | 'isAdmin
   return {
     total: Number(totals?.total ?? 0),
     items: rows.map((r) => ({
+      id: r.id,
       no: r.no ?? '',
       customer: (r.customer ?? '').trim(),
       amount: num(r.amount),

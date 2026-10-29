@@ -31,7 +31,7 @@ export function jobColumns({
       header: 'เลขที่งาน',
       width: '130px',
       cell: (r) => (
-        <Link {...jobLink(r.no)} prefetch={false} className="num font-medium text-primary hover:underline">
+        <Link {...jobLink(r.id)} prefetch={false} className="num font-medium text-primary hover:underline">
           {r.no}
         </Link>
       ),
@@ -126,10 +126,7 @@ export function jobColumns({
           >
             <Phone className="h-3.5 w-3.5" />
           </button>
-          <RowActions
-            viewHref={jobLink(r.no).href}
-            editHref={canEdit ? `/jobs/edit?job=${encodeURIComponent(r.no)}` : undefined}
-          />
+          <RowActions viewHref={jobLink(r.id).href} editHref={canEdit ? `/jobs/edit?id=${r.id}` : undefined} />
           <JobRowMenu job={r} onCancel={onCancel} />
         </span>
       ),

@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { QUOTATION_STATUS_OPTIONS } from '@/data/options';
 import type { Customer } from '@/data/types';
 import { api, errMsg, qs } from '@/lib/api';
-import type { JobDetail } from '@/lib/use-job';
+import { jobIdOf, type JobDetail } from '@/lib/use-job';
 import { quoteJobNote } from '@/lib/quote-job';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
@@ -28,8 +28,10 @@ import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
 
-/** Shape returned by GET /api/quotations/:no (subset the form uses). */
+/** Shape returned by GET /api/quotations/:id (subset the form uses). */
 export type QuotationLoaded = {
+  /** the quotation's uuid — its links (edit page, print) */
+  id: string;
   no: string;
   date: string;
   type: string;
@@ -46,7 +48,6 @@ export type QuotationLoaded = {
   discountFormula: string;
   vatRate: number;
   lines: {
-    id?: number;
     itemType: string;
     code: string;
     detail: string;
@@ -59,14 +60,14 @@ export type QuotationLoaded = {
   job: JobDetail | null;
   approveDate?: string; // quotation_hd.customer_approve_date
   createdBy?: string;
-  documentProfileId?: number; // ออกเอกสารในนาม
+  documentProfileId?: string; // ออกเอกสารในนาม (a profile's uuid)
   version?: number; // row_version — the edit page sends it back with its save
 };
 
 /** What the page posts to /api/quotations. */
 export type QuotationPayload = {
   no?: string;
-  documentProfileId?: number;
+  documentProfileId?: string;
   type: string;
   customerCode: string;
   contactName: string;
@@ -122,10 +123,10 @@ export const QuotationForm = React.forwardRef<
     mode: 'new' | 'edit';
     quotationNo?: string;
     initial?: QuotationLoaded | null;
-    /** job to prefill from (?job= on the new page) */
-    jobNo?: string;
+    /** the job (its uuid) to prefill from (?job= on the new page) */
+    jobId?: string;
   }
->(function QuotationForm({ mode, quotationNo, initial, jobNo }, ref) {
+>(function QuotationForm({ mode, quotationNo, initial, jobId }, ref) {
   const { push } = useToast();
   const fe = useFormErrors();
   // an existing quotation fills the form when it mounts — the edit page remounts the form (key) for
@@ -133,7 +134,7 @@ export const QuotationForm = React.forwardRef<
   const [type, setType] = React.useState<'A' | 'B'>(() =>
     initial && (initial.type.startsWith('Type B') || initial.type === 'VIP') ? 'B' : 'A',
   );
-  const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? 0); // ออกเอกสารในนาม — from the job when raised from one
+  const [profileId, setProfileId] = React.useState(initial?.documentProfileId ?? ''); // ออกเอกสารในนาม — from the job when raised from one
   const [lines, setLines] = React.useState<Line[]>(() =>
     (initial?.lines ?? []).map((l, i) => ({
       id: i + 2,
@@ -246,7 +247,7 @@ export const QuotationForm = React.forwardRef<
   const applyJob = React.useCallback(
     async (j: JobDetail, withParts: boolean) => {
       setJob(j);
-      if (mode === 'new') setProfileId(j.documentProfileId || 0);
+      if (mode === 'new') setProfileId(j.documentProfileId || '');
       setJobRef(j.no);
       if (withParts) {
         fillQuoted(j, type);
@@ -281,23 +282,25 @@ export const QuotationForm = React.forwardRef<
     const v = no.trim().toUpperCase();
     if (!v) return;
     try {
-      const d = await api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(v)}`);
+      const id = await jobIdOf(v); // the number typed → the job's uuid (its API path)
+      if (!id) return push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: v });
+      const d = await api<{ job: JobDetail }>(`/api/jobs/${id}`);
       await applyJob(d.job, withParts);
     } catch (e) {
       push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: errMsg(e) });
     }
   };
 
-  // /quotation/new?job=J… opens with that job, its customer and its quoted parts filled in — once.
-  // A direct read, NOT the swr cache: the job screens keep the bare JobDetail under /api/jobs/<no>
+  // /quotation/new?job=<the job's uuid> opens with that job, its customer and its quoted parts filled in — once.
+  // A direct read, NOT the swr cache: the job screens keep the bare JobDetail under /api/jobs/<id>
   // (useRecord, and the server prefetch seeds it), this answer is { job } — sharing the key handed
   // each screen the other's shape.
   const urlJobApplied = React.useRef(false);
   React.useEffect(() => {
-    const no = jobNo?.trim().toUpperCase();
-    if (!no || initial || urlJobApplied.current) return;
+    const id = jobId?.trim();
+    if (!id || initial || urlJobApplied.current) return;
     urlJobApplied.current = true;
-    api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(no)}`).then(
+    api<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(id)}`).then(
       (d) =>
         applyJob(d.job, true)
           .catch((e) => push({ kind: 'error', title: 'โหลดข้อมูลลูกค้าไม่สำเร็จ', desc: errMsg(e) }))
@@ -305,7 +308,7 @@ export const QuotationForm = React.forwardRef<
       (e) => push({ kind: 'error', title: 'ไม่พบหมายเลขงาน', desc: errMsg(e) }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page: the URL's job, not every render of applyJob
-  }, [jobNo, initial]);
+  }, [jobId, initial]);
 
   const add = () =>
     setLines((s) => [

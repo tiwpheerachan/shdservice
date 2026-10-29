@@ -179,7 +179,7 @@ export async function uploadVideo(
   body.set('name', v.file.name);
   body.set('remark', v.converted ? remark : [MAY_NOT_PLAY, remark].filter(Boolean).join(' · '));
   if (v.thumb) body.set('thumb', new File([v.thumb], 'thumb.jpg', { type: 'image/jpeg' }));
-  return api<{ ok: true; row: { id: number; name: string; file: string; remark: string } }>(
+  return api<{ ok: true; row: { id: string; name: string; file: string; remark: string } }>(
     '/api/attachments/video/confirm',
     { method: 'POST', body },
   );

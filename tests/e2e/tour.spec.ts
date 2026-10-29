@@ -271,7 +271,7 @@ test('"ไม่ต้องถามอีก (ทุกหน้า)": kept fo
 
 test('unsaved edits and a link during a tour: no "leave?" dialog over it, the edit kept', async ({ page }) => {
   await signIn(page, OWNER_EMAIL);
-  await page.goto(await demoUrl(page, '/jobs/repair?job={job}'));
+  await page.goto(await demoUrl(page, '/jobs/repair?id={job}'));
   await page.getByLabel('วิธีการซ่อม').fill('ยังไม่บันทึก'); // the form has an unsaved edit before the tour
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
   await expect(card(page)).toBeVisible();

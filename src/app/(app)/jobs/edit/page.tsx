@@ -26,7 +26,7 @@ import { useToast } from '@/components/ui/toast';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
-import { jobNoParam } from '@/data/keys';
+import { jobIdParam } from '@/data/keys';
 import { PrintButton } from '@/components/shared/print-button';
 import { TrackLink } from '@/components/shared/track-link';
 import { patchJson, errMsg } from '@/lib/api';
@@ -41,21 +41,21 @@ function EditJobForm() {
   const [saving, setSaving] = React.useState(false);
   const { can } = useAccess();
 
-  // prefill the form whenever a job is loaded (from ?job=, the search bar or a save)
+  // prefill the form whenever a job is loaded (from ?id=, the search bar or a save)
   function prefill(job: JobDetail) {
     reset(fromJob(job));
   }
 
   const go = (v: string) => find(v);
 
-  // PATCH /api/jobs/:no — updates the job row. Status is display-only here (it moves through the
+  // PATCH /api/jobs/:id — updates the job row. Status is display-only here (it moves through the
   // workflow screens), so it is not sent: a stale value must never roll back a newer status.
   const save = async () => {
     if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
     if (report(validate())) return; // a required field that had a value must keep one
     setSaving(true);
     try {
-      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${encodeURIComponent(job.no)}`, {
+      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${job.id}`, {
         ...toJobInput(s),
         status: undefined,
       });
@@ -115,7 +115,7 @@ function EditJobForm() {
           </Section>
         )}
         <AttachmentSection jobNo={job?.no} files={job?.attachments} />
-        {job?.no && <TrackLink jobNo={job.no} />}
+        {job && <TrackLink jobId={job.id} />}
         <JobHistorySection job={job} />
 
         <FormActions
@@ -126,14 +126,14 @@ function EditJobForm() {
           denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
           extra={
             <>
-              <QuoteLink jobNo={job?.no} />
+              <QuoteLink jobId={job?.id} />
               <PrintButton
                 label="พิมพ์ใบรับงาน"
                 kind="job"
                 locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                 no={job?.no ?? ''}
                 profileId={job?.documentProfileId}
-                href={`/print/job/${encodeURIComponent(job?.no ?? '')}`}
+                href={`/print/job/${job?.id ?? ''}`}
                 disabled={!job}
               />
               {/* a closed job is no longer on the close screen's list: its return note is printed from here */}
@@ -144,7 +144,7 @@ function EditJobForm() {
                   locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
                   no={job.no}
                   profileId={job.documentProfileId}
-                  href={`/print/job/${encodeURIComponent(job.no)}/return`}
+                  href={`/print/job/${job.id}/return`}
                 />
               )}
             </>
@@ -158,7 +158,7 @@ function EditJobForm() {
 export default function EditJobPage() {
   return (
     <JobScreen>
-      <RecordKey of={jobNoParam}>
+      <RecordKey of={jobIdParam}>
         <EditJobForm />
       </RecordKey>
     </JobScreen>

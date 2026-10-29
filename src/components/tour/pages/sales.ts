@@ -210,7 +210,7 @@ function quotationForm(edit: boolean): Tour {
     },
   ];
   return edit
-    ? { title: 'แก้ไขใบเสนอราคา', steps, demo: ['/quotation/edit?no={quotation}'] }
+    ? { title: 'แก้ไขใบเสนอราคา', steps, demo: ['/quotation/edit?id={quotation}'] }
     : { title: 'สร้างใบเสนอราคา', steps };
 }
 
@@ -462,7 +462,7 @@ function saleOrderForm(edit: boolean): Tour {
     },
   ];
   return edit
-    ? { title: 'แก้ไขใบสั่งขาย', steps, demo: ['/sale/orders/edit?no={saleOrder}'] }
+    ? { title: 'แก้ไขใบสั่งขาย', steps, demo: ['/sale/orders/edit?id={saleOrder}'] }
     : { title: 'สร้างใบสั่งขาย', steps };
 }
 

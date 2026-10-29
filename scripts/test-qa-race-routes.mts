@@ -55,8 +55,8 @@ const { jobNoForLink } = await import('@/server/services/tracking');
 const { exportXlsx } = await import('@/server/export');
 const { deleteDocumentProfile, setDocumentProfile } = await import('@/server/services/document-profiles');
 const products = await import('@/app/api/products/route');
-const calls = await import('@/app/api/jobs/[no]/calls/route');
-const trackLink = await import('@/app/api/jobs/[no]/track-link/route');
+const calls = await import('@/app/api/jobs/[id]/calls/route');
+const trackLink = await import('@/app/api/jobs/[id]/track-link/route');
 const upload = await import('@/app/api/upload/route');
 const docProfiles = await import('@/app/api/admin/document-profiles/route');
 const shipProfiles = await import('@/app/api/admin/shipping-profiles/route');
@@ -68,6 +68,9 @@ const J = (n: number) => `QRR${String(n).padStart(4, '0')}`;
 const PART = 'QRRP1';
 const Q = async <T = Record<string, unknown>,>(text: string, params: unknown[] = []) =>
   (await pool.query(text, params)).rows as T[];
+/** a job's uuid — its API path (ADR 0008) */
+const jobIdOf = async (no: string) =>
+  (await Q<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no]))[0]!.id;
 
 await pool.query(`
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
@@ -86,8 +89,8 @@ await pool.query(`
   INSERT INTO product (product_id, product_code, product_name, record_status, pictrue_file_name) VALUES (9870, '${PART}', 'อะไหล่ QRR', 'ACTIVE', '');
   DELETE FROM document_profile WHERE code LIKE 'QRR%';
   DELETE FROM shipping_profile WHERE code LIKE 'QRR%';
-  UPDATE document_profile SET is_default = false WHERE id <> 1;
-  UPDATE document_profile SET is_default = true, is_active = true, deleted_at = NULL WHERE id = 1;
+  UPDATE document_profile SET is_default = false WHERE pk <> 1;
+  UPDATE document_profile SET is_default = true, is_active = true, deleted_at = NULL WHERE pk = 1;
 `);
 
 // ---- helpers ----
@@ -152,7 +155,7 @@ const saveDocProfile = (body: Record<string, unknown>) =>
   call(docProfiles.POST, '/api/admin/document-profiles', { method: 'POST', body });
 const liveDefaults = async () =>
   (
-    await Q<{ code: string }>(`SELECT code FROM document_profile WHERE is_default AND deleted_at IS NULL ORDER BY id`)
+    await Q<{ code: string }>(`SELECT code FROM document_profile WHERE is_default AND deleted_at IS NULL ORDER BY pk`)
   ).map((r) => r.code);
 
 let passed = 0;
@@ -188,12 +191,13 @@ try {
   });
   await test('G3 POST /api/jobs/{no}/calls ×5 (one key) → one call-log line', async () => {
     const detail = `QRR call ${Date.now()}`;
+    const j1 = await jobIdOf(J(1));
     const rs = await fire(5, () =>
       call(
         calls.POST,
-        `/api/jobs/${J(1)}/calls`,
+        `/api/jobs/${j1}/calls`,
         { method: 'POST', body: { detail }, headers: { 'Idempotency-Key': `qrr-c-${detail}` } },
-        { no: J(1) },
+        { id: j1 },
       ),
     );
     const [{ n }] = await Q<{ n: number }>(`SELECT count(*)::int n FROM job_call_log WHERE call_log_description = $1`, [
@@ -204,16 +208,17 @@ try {
 
   console.log('\n2 · two track links issued at once (G11)');
   await test('the job\'s first link: one "first link" audit line, the other logged as a new link (old one dead)', async () => {
-    const [{ mark }] = await Q<{ mark: number }>(`SELECT coalesce(max(id), 0)::int mark FROM audit_log`);
+    const [{ mark }] = await Q<{ mark: number }>(`SELECT coalesce(max(pk), 0)::int mark FROM audit_log`);
     for (const no of [J(2), J(3), J(4)]) {
-      const rs = await fire(2, () => call(trackLink.POST, `/api/jobs/${no}/track-link`, { method: 'POST' }, { no }));
+      const id = await jobIdOf(no);
+      const rs = await fire(2, () => call(trackLink.POST, `/api/jobs/${id}/track-link`, { method: 'POST' }, { id }));
       assert.deepEqual(statuses(rs), [200, 200]);
       const live = await Promise.all(
         rs.map(async (r) => (await jobNoForLink(String(r.body.url).split('/track/')[1] ?? '')) !== null),
       );
       assert.equal(live.filter(Boolean).length, 1, 'the later link works, the earlier one is dead');
       const audits = await Q<{ s: string }>(
-        `SELECT summary s FROM audit_log WHERE entity = 'job' AND entity_key = $1 AND id > $2 ORDER BY id`,
+        `SELECT summary s FROM audit_log WHERE entity = 'job' AND entity_key = $1 AND pk > $2 ORDER BY pk`,
         [no, mark],
       );
       assert.deepEqual(
@@ -226,15 +231,16 @@ try {
 
   await test('each answer carries its own link id; the status read (GET) matches only the live one', async () => {
     for (const no of [J(6), J(7), J(8)]) {
+      const id = await jobIdOf(no);
       // same second on purpose: issue times compare equal, the ids must not
-      const rs = await fire(2, () => call(trackLink.POST, `/api/jobs/${no}/track-link`, { method: 'POST' }, { no }));
+      const rs = await fire(2, () => call(trackLink.POST, `/api/jobs/${id}/track-link`, { method: 'POST' }, { id }));
       const ids = rs.map((r) => (r.body.status as { id?: string }).id);
       assert.ok(
         ids.every((id) => typeof id === 'string' && id.length > 0),
         `ids ${ids}`,
       );
       assert.notEqual(ids[0], ids[1], 'two issues → two ids');
-      const now = (await call(trackLink.GET, `/api/jobs/${no}/track-link`, {}, { no })).body.status as { id: string };
+      const now = (await call(trackLink.GET, `/api/jobs/${id}/track-link`, {}, { id })).body.status as { id: string };
       const live = await Promise.all(
         rs.map(async (r) => (await jobNoForLink(String(r.body.url).split('/track/')[1] ?? '')) !== null),
       );
@@ -248,11 +254,12 @@ try {
 
   console.log('\n3 · two uploads replacing the same picture at once leave no orphan (G8)');
   {
-    const [{ id: shipperId }] = await Q<{ id: number }>(
-      `INSERT INTO shipping_profile (code, name_th, name_en, track_url, sort_order) VALUES ('QRRSHIP', 'ขนส่ง QRR', '', '', 99) RETURNING id`,
+    // profiles by their uuid (ADR 0008) — a new logo goes under profiles/{uuid}/
+    const [{ id: shipperId }] = await Q<{ id: string }>(
+      `INSERT INTO shipping_profile (code, name_th, name_en, track_url, sort_order) VALUES ('QRRSHIP', 'ขนส่ง QRR', '', '', 99) RETURNING id::text AS id`,
     );
     const mk = await saveDocProfile({ code: 'QRRLOGO', nameTh: 'QRR โลโก้' });
-    const docId = (mk.body.row as { id: number }).id;
+    const docId = (mk.body.row as { id: string }).id;
     for (const [kind, id, prefix] of [
       ['profile-logo', docId, `profiles/${docId}/`],
       ['shipper-logo', shipperId, `shippers/${shipperId}/`],
@@ -345,7 +352,7 @@ try {
     const b = await blocker();
     await b.query('SELECT 1 FROM document_profile WHERE id = $1 FOR UPDATE', [row.id]); // both writes wait on it
     const save = saveDocProfile({ ...row, isDefault: true });
-    const del = status(deleteDocumentProfile(Number(row.id), ADMIN.id));
+    const del = status(deleteDocumentProfile(String(row.id), ADMIN.id));
     await sleep(300);
     await b.query('COMMIT');
     await b.end();
@@ -355,7 +362,7 @@ try {
   });
   await test('a profile deleted while a job is being moved to it → the move does not commit after the delete', async () => {
     const mk = await saveDocProfile({ code: 'QRRSET', nameTh: 'QRR ย้าย' });
-    const pid = (mk.body.row as { id: number }).id;
+    const pid = (mk.body.row as { id: string }).id;
     const b = await blocker();
     await b.query('SELECT 1 FROM job WHERE job_no = $1 FOR UPDATE', [J(5)]); // the move waits at its write
     const order: string[] = [];
@@ -400,8 +407,8 @@ try {
 } finally {
   await pool.query(`
     UPDATE job SET document_profile_id = NULL WHERE job_no LIKE 'QRR%';
-    UPDATE document_profile SET is_default = false WHERE id <> 1;
-    UPDATE document_profile SET is_default = true WHERE id = 1;
+    UPDATE document_profile SET is_default = false WHERE pk <> 1;
+    UPDATE document_profile SET is_default = true WHERE pk = 1;
     UPDATE document_profile SET deleted_at = coalesce(deleted_at, now()::timestamp) WHERE code LIKE 'QRR%';
   `);
   await pool.end();

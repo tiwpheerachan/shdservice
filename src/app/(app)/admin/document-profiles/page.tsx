@@ -19,7 +19,7 @@ import { useTourRestore } from '@/components/tour/tour';
 import { documentProfileSchema } from '@/lib/validation/admin';
 
 type Profile = {
-  id: number;
+  id: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -41,7 +41,7 @@ type Profile = {
   purpose: 'document' | 'pick_slip';
 };
 
-type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: number };
+type FormValues = Omit<Profile, 'id' | 'logoPath' | 'logoUrl'> & { id?: string };
 const EMPTY: FormValues = {
   code: '',
   nameTh: '',
@@ -119,7 +119,7 @@ export default function DocumentProfilesPage() {
       if (pendingLogo) {
         // new profile: the logo chosen before saving goes up now that there is an id
         try {
-          await uploadFile('profile-logo', String(row.id), pendingLogo);
+          await uploadFile('profile-logo', row.id, pendingLogo);
           setPendingLogo(null);
           row =
             (await api<{ rows: Profile[] }>('/api/admin/document-profiles')).rows.find((r) => r.id === d.row.id) ?? row;
@@ -153,7 +153,7 @@ export default function DocumentProfilesPage() {
       return;
     }
     try {
-      await uploadFile('profile-logo', String(editing.id), file);
+      await uploadFile('profile-logo', editing.id, file);
       push({ kind: 'success', title: 'อัปโหลดโลโก้แล้ว' });
       const fresh = (await load())?.rows.find((r) => r.id === editing.id);
       // only the logo: the rest of `editing` is what this open form loaded — the save's stale check compares
@@ -247,8 +247,8 @@ export default function DocumentProfilesPage() {
       width: '90px',
       align: 'center',
       sortable: false,
-      // SHD (id 1) is the built-in fallback — edit only
-      cell: (r) => <RowActions onEdit={() => openForm(r)} onDelete={r.id === 1 ? undefined : () => remove(r)} />,
+      // SHD (by its code) is the built-in fallback — edit only
+      cell: (r) => <RowActions onEdit={() => openForm(r)} onDelete={r.code === 'SHD' ? undefined : () => remove(r)} />,
     },
   ];
 
@@ -269,7 +269,7 @@ export default function DocumentProfilesPage() {
         columns={columns}
         rows={rows}
         loading={loading}
-        rowKey={(r) => String(r.id)}
+        rowKey={(r) => r.id}
         searchPlaceholder="ค้นหารหัส / ชื่อบริษัท…"
       />
 

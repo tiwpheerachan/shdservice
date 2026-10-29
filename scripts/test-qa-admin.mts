@@ -88,9 +88,9 @@ const userRow = async (id: number) =>
     )
   ).rows[0]!;
 /** the row as the users page loaded it (GET /api/admin/users) */
-const loaded = async (id: number) => {
+const loaded = async (u: Who) => {
   const r = await json(await usersRoute.GET(await request('/api/admin/users', U.a)));
-  return (r.body.rows as Record<string, string>[]).find((x) => x.id === String(id))!;
+  return (r.body.rows as Record<string, string>[]).find((x) => x.email === u.email)!;
 };
 async function statusOf(p: Promise<unknown>): Promise<number> {
   try {
@@ -118,7 +118,7 @@ async function test(name: string, fn: () => Promise<void>) {
 try {
   console.log('\n1. users — a stale view never undoes another admin');
   await test('U1: A revokes, B saves the edit dialog it opened before → 409 stale, the user stays revoked', async () => {
-    const seen = await loaded(U.t1.id); // B opens แก้ไข
+    const seen = await loaded(U.t1); // B opens แก้ไข
     // A revokes from the edit dialog (the whole row it loaded, status changed)
     const a = await postUser(U.a, { ...seen, phone: undefined, status: 'Inactive', expect: { status: seen.status } });
     assert.equal(a.status, 200, JSON.stringify(a.body));
@@ -133,7 +133,7 @@ try {
     assert.deepEqual([row.rs, row.first], ['INACTIVE', 'QA']);
   });
   await test('U2: A changes the role, B (stale) presses ถอนสิทธิ์ → revoked, the new role kept', async () => {
-    const seen = await loaded(U.t2.id);
+    const seen = await loaded(U.t2);
     const a = await postUser(U.a, { ...seen, phone: undefined, role: 'QA Clerk2', expect: { role: seen.role } });
     assert.equal(a.status, 200, JSON.stringify(a.body));
     // the quick action sends only what it changes
@@ -166,7 +166,7 @@ try {
     assert.deepEqual([g.Customer?.view, g['Sale Order']?.view, g.Quotation?.view], [true, true, false]);
     const lines = (
       await db.execute<{ u: number; c: Record<string, unknown> }>(
-        sql`SELECT user_id AS u, changes AS c FROM audit_log WHERE entity = 'app_config' AND entity_key = 'QA Grid' ORDER BY id DESC LIMIT 2`,
+        sql`SELECT user_id AS u, changes AS c FROM audit_log WHERE entity = 'app_config' AND entity_key = 'QA Grid' ORDER BY pk DESC LIMIT 2`,
       )
     ).rows;
     assert.deepEqual(
@@ -228,7 +228,7 @@ try {
     assert.equal(b.status, 409, JSON.stringify(b.body));
     const [now] = (
       await db.execute<{ n: string; d: string }>(
-        sql`SELECT color_name AS n, coalesce(description, '') AS d FROM color WHERE id = ${Number(row.id)}`,
+        sql`SELECT color_name AS n, coalesce(description, '') AS d FROM color WHERE id = ${row.id}`,
       )
     ).rows;
     assert.deepEqual([now?.n, now?.d], [`QA Edit A ${rand}`, '']);

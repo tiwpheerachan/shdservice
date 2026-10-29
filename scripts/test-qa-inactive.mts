@@ -96,10 +96,16 @@ await pool.query(`
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
 // ---- helpers ----
+/** the admin's app_user.id — what a salesperson pick sends (ADR 0008) */
+const adminUuid = (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [ADMIN.id]))
+  .rows[0]!.id;
 const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(q)).rows[0]!;
 const line = (no: string) =>
-  one<{ id: number }>(
-    sql`SELECT job_order_log_id AS id FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`,
+  one<{
+    id: string;
+  }> // the request line's uuid (ADR 0008) — what the pick / repair pages send
+  (
+    sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`,
   );
 async function err(p: Promise<unknown>) {
   try {
@@ -110,7 +116,7 @@ async function err(p: Promise<unknown>) {
     throw e;
   }
 }
-const partLine = (code: string, qty: number, logId?: number) => ({
+const partLine = (code: string, qty: number, logId?: string) => ({
   logId,
   code,
   unitPrice: 0,
@@ -153,7 +159,7 @@ try {
     ADMIN.id,
   );
   const oldOrder = await saveSaleOrder(
-    { customerCode: C.off, salesId: ADMIN.id, submit: false, lines: [{ code: P.off, qty: 1 }] },
+    { customerCode: C.off, salesId: adminUuid, submit: false, lines: [{ code: P.off, qty: 1 }] },
     by,
   );
   await pool.query(`UPDATE customer SET record_status = 'INACTIVE' WHERE customer_code = '${C.off}';
@@ -181,7 +187,7 @@ try {
       saveQuotation: () =>
         saveQuotation({ jobNo: QJOB, customerCode: C.off, contactName: 'QI', lines: [quoteLine('')] }, ADMIN.id),
       saveSaleOrder: () =>
-        saveSaleOrder({ customerCode: C.off, salesId: ADMIN.id, submit: false, lines: [{ code: P.on, qty: 1 }] }, by),
+        saveSaleOrder({ customerCode: C.off, salesId: adminUuid, submit: false, lines: [{ code: P.on, qty: 1 }] }, by),
     };
     for (const [name, call] of Object.entries(calls))
       assert.deepEqual([name, ...Object.values(await err(call()))], [name, 409, OFF_CUSTOMER]);
@@ -206,7 +212,7 @@ try {
           {
             no: oldOrder.no,
             customerCode: C.off,
-            salesId: ADMIN.id,
+            salesId: adminUuid,
             submit: false,
             remark: 'QI keep',
             lines: [{ code: P.off, qty: 1, price: 50 }],
@@ -223,7 +229,7 @@ try {
   console.log('\n2 · an Inactive product goes on no new / changed line');
   await test('sale order: a new line → 400 naming it; the old order changing its line → 400', async () => {
     const r = await err(
-      saveSaleOrder({ customerCode: C.on, salesId: ADMIN.id, submit: false, lines: [{ code: P.off, qty: 1 }] }, by),
+      saveSaleOrder({ customerCode: C.on, salesId: adminUuid, submit: false, lines: [{ code: P.off, qty: 1 }] }, by),
     );
     assert.equal(r.status, 400);
     assert.match(r.message, new RegExp(`${P.off}.*ปิดใช้งาน`));
@@ -232,7 +238,7 @@ try {
         {
           no: oldOrder.no,
           customerCode: C.off,
-          salesId: ADMIN.id,
+          salesId: adminUuid,
           submit: false,
           lines: [{ code: P.off, qty: 3, price: 50 }],
         },
