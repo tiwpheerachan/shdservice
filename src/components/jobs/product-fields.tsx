@@ -459,7 +459,13 @@ export function ShipperField({ f: { s, set, errors } }: P) {
             {p.nameTh}
           </option>
         ))}
-        {legacyShipper && <option value={legacyShipper}>{legacyShipper} (ค่าเดิม)</option>}
+        {/* not "(ค่าเดิม)" before the profiles are in: it may still turn out to be one ("F" → Flash Express) */}
+        {legacyShipper && (
+          <option value={legacyShipper}>
+            {legacyShipper}
+            {shippingLookup.loading ? '' : ' (ค่าเดิม)'}
+          </option>
+        )}
       </Select>
     </Field>
   );

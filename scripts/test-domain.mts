@@ -1268,6 +1268,67 @@ try {
     const s = await jobReportSummary(filtersFromQuery(FEB));
     assert.deepEqual([s.total, s.done], [3, 2]);
   });
+  await test('TAT = the legacy table: every status but 0 in display order, days to the return date, link = row', async () => {
+    // its own month: dashboard() is memoised per range for 30 s
+    await pool.query(`
+      INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_return_date) VALUES
+        ('TDJ0104', 20, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', '2001-06-01', '2001-06-01', '2001-07-31', '2001-06-06'),
+        ('TDJ0105', 20, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', '2001-06-02', '2001-06-02', '2001-06-12', '1900-01-01'),
+        ('TDJ0106', 1, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', '2001-06-03', '2001-06-03', '1900-01-01', NULL);`);
+    try {
+      const JUNE = { from: '2001-06-01', to: '2001-06-30' };
+      const d = await dashboard(JUNE);
+      const ids = (
+        await pool.query<{ id: number }>(
+          'SELECT job_status_id id FROM job_status WHERE job_status_id <> 0 ORDER BY display_order, job_status_id',
+        )
+      ).rows.map((r) => r.id);
+      assert.deepEqual(
+        d.tat.map((r) => r.statusId),
+        ids,
+      );
+      const K = ['d13', 'd47', 'd814', 'd1530', 'over30'] as const;
+      const rowTotals = d.tat.reduce((a, r) => a + K.reduce((b, k) => b + r[k], 0), 0);
+      const bucketTotals = K.reduce((a, k) => a + d.tat.reduce((b, r) => b + r[k], 0), 0);
+      assert.equal(rowTotals, bucketTotals);
+      // the same jobs as the cards (the range, not deleted) — counted straight from the table: the cards group by
+      // job_status_group, and this fixture's status 1 is in an "Open" group the cards do not show
+      const [{ n }] = (
+        await pool.query<{ n: number }>(
+          `SELECT count(*)::int n FROM job WHERE record_status <> 'DELETED' AND job_status_id <> 0
+             AND job_create_date >= '2001-06-01' AND job_create_date < '2001-07-01'`,
+        )
+      ).rows;
+      assert.equal(rowTotals, n, 'every job of the range, once');
+      const row = (id: number) => d.tat.find((r) => r.statusId === id);
+      // returned after 5 days (closed after 60): 4-7; no return → the close date (10 days); still open → today
+      assert.deepEqual([row(20)?.d47, row(20)?.d814, row(20)?.over30], [1, 1, 0]);
+      assert.equal(row(1)?.over30, 1);
+      assert.equal(row(2)?.d13, 0, 'a status with no jobs is still a row');
+      for (const id of [1, 20]) {
+        const r = row(id)!;
+        const listed = await pageJobs(
+          { page: 1, pageSize: 25, q: '', f: {} },
+          filtersFromQuery({ statusId: String(id), ...JUNE }),
+        );
+        assert.equal(
+          listed.total,
+          K.reduce((a, k) => a + r[k], 0),
+          `status ${id}: list = row total`,
+        );
+        // every number opens exactly its jobs: the list filters by the same TAT days
+        for (const k of K) {
+          const cell = await pageJobs(
+            { page: 1, pageSize: 25, q: '', f: {} },
+            filtersFromQuery({ statusId: String(id), tat: k, ...JUNE }),
+          );
+          assert.equal(cell.total, r[k], `status ${id} ${k}: list = cell`);
+        }
+      }
+    } finally {
+      await pool.query(`DELETE FROM job WHERE job_no IN ('TDJ0104', 'TDJ0105', 'TDJ0106')`);
+    }
+  });
   await test('withStatementTimeout cancels a read past its limit (57014), and the setting ends with it', async () => {
     const { withStatementTimeout } = await import('@/db/client');
     const err = await withStatementTimeout((tx) => tx.execute(sql`select pg_sleep(2)`), 100).catch((e) => e);
@@ -3080,7 +3141,7 @@ try {
       UPDATE job SET service_cost = 1300, spare_part_total_cost = 0, job_total_cost = 1300, deposit_cost = 300,
                      job_payment_type = 'เงินสด', job_payment_amount = 500 WHERE job_no = 'TDJ0405';`);
     await test('R3 jobs: a closed job re-saved with its own status stays closed; an open status → 409 (not System Admin); admin may', async () => {
-      const [s20, s5, s2] = [await statusName(20), await statusName(5), await statusName(2)];
+      const [s20, s5] = [await statusName(20), await statusName(5)];
       // what /jobs/repair now sends for a closed job: its current status, unchanged
       const same = await fieldsOf(saveRepair('TDJ0401', { status: s20, repairDetail: 'TD R3 note' }, U.clerk.id));
       assert.equal(same.status, 200, JSON.stringify(same));
@@ -3088,7 +3149,10 @@ try {
       // picking an open status by mistake: refused on every path (setStatus), nothing written
       const repair = await fieldsOf(saveRepair('TDJ0401', { status: s5, repairDetail: 'TD R3 x' }, U.clerk.id));
       assert.deepEqual([repair.status, repair.fields], [409, { status: REOPEN_LOCKED }]);
-      const swap = await fieldsOf(saveSwapRefund('TDJ0401', { status: s2, newSerial: 'TDR3SERIAL' }, U.clerk.id));
+      // a status the Swap page offers (17, open) on a closed job
+      const swap = await fieldsOf(
+        saveSwapRefund('TDJ0401', { status: await statusName(17), newSerial: 'TDR3SERIAL' }, U.clerk.id),
+      );
       assert.equal(swap.status, 409);
       const s14 = await statusName(14);
       const out = await fieldsOf(
@@ -3388,6 +3452,24 @@ try {
       for (const t of ['J&T', '่j&t', 'jt']) assert.equal(code(t), 'JNT', t);
       for (const t of ['speed-d', 'SPEED D', '7-11']) assert.equal(code(t), 'SPEEDD', t);
       for (const t of ['มาส่งเอง', '0', '-', 'other', '']) assert.equal(code(t), null, t);
+    });
+    await test('R5 legacy cleanup (drizzle/0002): no legacy password kept, no loose "Thailand" alias, merge re-runs clean', async () => {
+      // the test seed adds users with a password after the migration ran: run 0002's own statement over them
+      const clear = readFile('drizzle/0002_legacy_cleanup.sql', 'utf8').match(
+        /^UPDATE app_user SET password = NULL[^;]*;/m,
+      )![0];
+      await db.execute(sql.raw(clear));
+      const [{ n }] = (await db.execute(sql`SELECT count(*)::int AS n FROM app_user WHERE password IS NOT NULL`))
+        .rows as { n: number }[];
+      assert.equal(n, 0);
+      const thp = (await listShippingProfiles(false)).find((p) => p.code === 'THP')!;
+      assert.ok(!/(^|,)\s*thailand\s*(,|$)/i.test(thp.aliases), thp.aliases);
+      const { shipperFor } = await import('@/lib/shipper');
+      assert.equal(shipperFor(await listShippingProfiles(false), 'Thailand'), null);
+      // the pairs are by legacy user_id + username: a second run (seed.sql calls it after the seed) changes nothing
+      await db.execute(sql`SELECT merge_legacy_users()`);
+      const [{ again }] = (await db.execute(sql`SELECT merge_legacy_users() AS again`)).rows as { again: number }[];
+      assert.equal(again, 0);
     });
     await test('R5 track: the parcel the customer sent in — its tracking no. + the courier the legacy name means', async () => {
       await db.execute(
@@ -4117,6 +4199,8 @@ try {
       EDIT_STATUS_ONLY,
       REPAIR_STATUS_ONLY,
       SWAP_STATUS_OPTIONS,
+      SWAP_STATUS_ONLY,
+      parseSwap,
     } = await import('@/lib/validation/job');
     const { exportXlsx } = await import('@/server/export');
     const ExcelJS = (await import('exceljs')).default;
@@ -4238,6 +4322,19 @@ try {
         400,
         { status: STATUS_DELETE_ONLY },
       ]);
+      // Swap: 17 / 18 only, Refund: 17 / 19 only (owner 2026-10-28) — ซ่อมเสร็จ / 19 on a swap, 18 on a refund refused
+      const [s17, s18, s19] = [await statusName(17), await statusName(18), await statusName(19)];
+      const refund = { refundAmount: 100, refundMethod: 'เงินสด' };
+      for (const [body, why] of [
+        [{ ...swap, status: s5 }, 'swap → ซ่อมเสร็จ'],
+        [{ ...swap, status: s19 }, 'swap → 19'],
+        [{ ...refund, status: s18 }, 'refund → 18'],
+      ] as const)
+        assert.deepEqual(
+          await err(saveSwapRefund('TDJ0605', body, U.admin.id)),
+          [400, { status: SWAP_STATUS_ONLY }],
+          why,
+        );
       const j = (await getJob('TDJ0605'))!;
       const edit = {
         customerCode: CUSTOMER,
@@ -4248,9 +4345,59 @@ try {
       };
       assert.deepEqual(await err(updateJob('TDJ0605', edit, U.admin.id)), [400, { status: EDIT_STATUS_ONLY }]);
       assert.deepEqual([(await jobRow('TDJ0605')).s, await logRows('TDJ0605')], [2, []]);
-      // the Swap / Refund page offers the same list the server takes
-      assert.ok(!SWAP_STATUS_OPTIONS.includes('ปิดงาน (Complete)') && !SWAP_STATUS_OPTIONS.includes('ยกเลิกข้อมูล'));
-      assert.ok(SWAP_STATUS_OPTIONS.includes('ซ่อมเสร็จ'));
+      // the Swap / Refund page offers the same list the server takes (job_status names, 18 not renamed)
+      assert.deepEqual(SWAP_STATUS_OPTIONS, { swap: [s17, s18], refund: [s17, s19] });
+    });
+
+    await test("R5 H5: Swap without a New Serial saves; the job's own status (outside the list) re-saves; close writes Serial เครื่องใหม่", async () => {
+      await pool.query(`
+        INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_id)
+          VALUES ${job('TDJ0616', 2)}, ${job('TDJ0617', 5)};`);
+      const [s5, s17, s18, s20] = await Promise.all([5, 17, 18, 20].map(statusName));
+      assert.equal((await fieldsOf(saveSwapRefund('TDJ0616', { status: s17 }, U.admin.id))).status, 200);
+      const swap = await fieldsOf(saveSwapRefund('TDJ0616', { status: s18, swapDate: '2026-10-28' }, U.admin.id));
+      assert.equal(swap.status, 200, JSON.stringify(swap));
+      const j = (await getJob('TDJ0616'))!;
+      assert.deepEqual([j.statusId, j.swap.detail, j.sparePartReplace], [18, 'วันที่เปลี่ยนเครื่อง: 2026-10-28', '']);
+      // ซ่อมเสร็จ is not on the Swap list, but it is TDJ0617's own status: saved unchanged → 200
+      const same = await fieldsOf(saveSwapRefund('TDJ0617', { status: s5 }, U.admin.id));
+      assert.equal(same.status, 200, JSON.stringify(same));
+      // legacy: the old system's free-text swap detail, a part list
+      await pool.query(
+        `UPDATE job SET swap_refund_detail = 'เปลี่ยนสินค้า', spare_part_replace = 'แบตเตอรี่' WHERE job_no = 'TDJ0617'`,
+      );
+      // ปิดงาน: Serial เครื่องใหม่ of a swap job → the part list's "New S/N" line (what the return note prints)
+      // and the swap detail's, as the Swap page stores it
+      const ret = { type: 'ลูกค้ามารับเอง', date: '2026-10-28' };
+      const close = await fieldsOf(
+        closeJob('TDJ0616', { status: s20, return: ret, newSerial: 'close0001' }, U.admin.id),
+      );
+      assert.equal(close.status, 200, JSON.stringify(close));
+      const k = (await getJob('TDJ0616'))!;
+      assert.deepEqual(
+        [k.statusId, k.sparePartReplace, k.swap.detail],
+        [20, 'New S/N: CLOSE0001', 'New S/N: CLOSE0001\nวันที่เปลี่ยนเครื่อง: 2026-10-28'],
+      );
+      assert.equal(parseSwap(k.sparePartReplace)['New S/N'], 'CLOSE0001', 'the return note reads it from here');
+      assert.ok(
+        k.history.some((h) => h.module === 'Job Closing'),
+        'in ประวัติการแก้ไข',
+      );
+      // a legacy swap: the part list is kept (never written over), the free text kept as its รายละเอียด
+      const bad = await fieldsOf(closeJob('TDJ0617', { status: s20, return: ret, newSerial: 'SN ใหม่' }, U.admin.id));
+      assert.deepEqual([bad.status, Object.keys(bad.fields ?? {})], [400, ['newSerial']]);
+      const legacy = await fieldsOf(
+        closeJob('TDJ0617', { status: s20, return: ret, newSerial: 'LEG0001' }, U.admin.id),
+      );
+      assert.equal(legacy.status, 200, JSON.stringify(legacy));
+      const m = (await getJob('TDJ0617'))!;
+      assert.deepEqual(
+        [m.sparePartReplace, m.swap.detail],
+        ['แบตเตอรี่\nNew S/N: LEG0001', 'New S/N: LEG0001\nรายละเอียด: เปลี่ยนสินค้า'],
+      );
+      // re-closed with it unchanged: not rewritten
+      await closeJob('TDJ0617', { status: s20, return: ret, newSerial: 'LEG0001' }, U.admin.id);
+      assert.equal((await getJob('TDJ0617'))!.swap.detail, m.swap.detail);
     });
 
     await test('R5 M2: a repair save that adds / changes no part line keeps the legacy parts cost (2,000, no part rows)', async () => {
@@ -5636,8 +5783,7 @@ try {
             { send: { to: 'TD Vendor', date: '2026-10-01' }, status: await statusName(14) },
             U.admin.id,
           ),
-        saveSwapRefund: () =>
-          saveSwapRefund(no, { status: 'ซ่อมเสร็จ', newSerial: 'SWAP0964', docNo: 'DOC964' }, U.admin.id),
+        saveSwapRefund: () => saveSwapRefund(no, { status, newSerial: 'SWAP0964', docNo: 'DOC964' }, U.admin.id),
       };
       for (const [name, call] of Object.entries(calls)) {
         const r = await fieldsOf(call());

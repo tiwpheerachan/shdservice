@@ -117,7 +117,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'status', header: 'สถานะงาน', width: 34 },
       { key: 'repairedDate', header: 'วันที่ซ่อมเสร็จ', width: 18 },
       { key: 'closedDate', header: 'วันที่ปิดงาน', width: 18 },
-      { key: 'tat', header: 'TAT (วัน)', width: 10 }, // closed jobs: calendar days open → closed
+      { key: 'tat', header: 'TAT (วัน)', width: 10 }, // calendar days open → return / close / today
       { key: 'returnType', header: 'วิธีส่งคืน', width: 18 },
       { key: 'returnTracking', header: 'เลขพัสดุ', width: 18 },
       { key: 'partsCost', header: 'ค่าอะไหล่', width: 12, money: true },
@@ -286,7 +286,8 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
       // in the order the table shows (its sort, as on screen)
       return (await pageJobs({ ...p, page: 1, pageSize: MAX_ROWS }, filtersFromQuery(f))).rows.map((j) => ({
         ...j,
-        tat: j.closedDate && j.openDate ? calendarDays(j.openDate, j.closedDate) : '',
+        // as the dashboard's TAT (jobs.ts tatDays): to the return, else the close, else today
+        tat: j.openDate ? calendarDays(j.openDate, j.returnDate || j.closedDate || today()) : '',
         paymentAmount: Math.max(0, j.paymentAmount ?? 0),
         refund: Math.max(0, -(j.paymentAmount ?? 0)),
         outstanding: j.statusGroup === 'Finished' ? j.outstanding : 0,

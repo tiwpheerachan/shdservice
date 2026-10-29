@@ -40,6 +40,9 @@ export function envProblems(): { required: string[]; optional: string[] } {
   want('NEXT_PUBLIC_SUPABASE_URL', 'uploads and attachments fail');
   if (!has('SUPABASE_SECRET_KEY') && !has('SUPABASE_SERVICE_ROLE_KEY'))
     optional.push('SUPABASE_SECRET_KEY missing — uploads and attachments fail');
+  const r2 = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'].filter((k) => !has(k));
+  if (r2.length)
+    optional.push(`${r2.join(' / ')} missing — no video attachments (Cloudflare R2; the video API answers 503)`);
   want('CENTRAL_API_KEY', 'no directory profile / staff search');
   want('TURNSTILE_SECRET_KEY', 'public tracking closed');
   want('NEXT_PUBLIC_TURNSTILE_SITE_KEY', 'public tracking closed');

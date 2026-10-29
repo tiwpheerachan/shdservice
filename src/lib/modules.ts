@@ -50,6 +50,17 @@ export const MODULE_LABELS: Record<Exclude<Module, Right>, string> = {
   'Sale Order': 'ข้อมูลใบสั่งขาย',
 };
 
+/** the audit log's module column + filter: the menu name, or the log's own modules; an unknown key shows as it is */
+const LOG_MODULE_LABELS: Record<string, string> = {
+  ...MODULE_LABELS,
+  'Job PickStock': 'ตัดจ่ายอะไหล่งานซ่อม',
+  'Job ReturnStock': 'รับคืนอะไหล่งานซ่อม',
+  Report: 'รายงาน',
+  Admin: 'ข้อมูลระบบ',
+  Auth: 'เข้าสู่ระบบ',
+};
+export const moduleLabel = (m: string) => (Object.hasOwn(LOG_MODULE_LABELS, m) ? LOG_MODULE_LABELS[m]! : m);
+
 /**
  * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
  * permissions page, section สิทธิ์พิเศษ). Rules read these, never a role name.

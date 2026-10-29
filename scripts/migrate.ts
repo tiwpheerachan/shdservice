@@ -12,6 +12,9 @@
  *    journal so every migration — all written to be idempotent — runs again.
  *
  *  - `--reset` forces that behaviour.
+ *  - `--deploy` (db:migrate:deploy, and db:migrate while Render's dashboard still calls it): Render's pre-deploy
+ *    only — from a laptop it is refused and names the two commands that are (ADR 0009).
+ *  - `--prod`: run by scripts/db-prod-migrate.mts (db:prod:migrate) after it asked; never with --reset.
  */
 import 'dotenv/config';
 import { Pool } from 'pg';
@@ -24,6 +27,19 @@ const JOURNAL_SCHEMA = 'drizzle';
 const JOURNAL_TABLE = '__drizzle_migrations';
 
 async function main() {
+  // which database is said out loud: dev (db:dev:migrate), production (db:prod:migrate — asks first), deploy (Render)
+  if (process.argv.includes('--deploy') && !process.env.RENDER) {
+    console.error(
+      'REFUSED: db:migrate / db:migrate:deploy run on Render (pre-deploy) only. Local dev DB: npm run db:dev:migrate · production from here: npm run db:prod:migrate (asks first).',
+    );
+    process.exit(1);
+  }
+  if (process.argv.includes('--prod') && process.argv.includes('--reset')) {
+    console.error(
+      'REFUSED: --reset is never run against production from here (a reload is setupdata/load_supabase.sh).',
+    );
+    process.exit(1);
+  }
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is not set (use the Supabase *Session pooler*, port 5432).');

@@ -382,6 +382,54 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [x] **แผนวันเปิดระบบ** [ops/cutover.md](../ops/cutover.md) — เกณฑ์ go/no-go, `recon.sql`, ลำดับวันเปิด, แผนถอยกลับ
 - [ ] 👤 **ต้องตัดสินใจ:** โหลดข้อมูลวันเปิดลงโปรเจกต์ Supabase ใหม่ (แนะนำ) หรือ dump ทับ (ข้อมูลในระบบใหม่หาย + deploy ล้ม) · Supabase **Pro** (ไฟล์เดิม 1.8 GB เกินแพ็กเกจฟรี) · ล้างรหัสผ่านระบบเก่า 106 บัญชีที่เก็บเป็นข้อความธรรมดา (ระบบใช้ SSO ไม่ได้ใช้แล้ว — migration ย้อนไม่ได้) · ไฟล์แนบที่หายจากเซิร์ฟเวอร์เก่า 1,453 + สลิป 980 จะตามกู้ไหม · export: ลดเพดาน 20,000 แถว หรือบังคับช่วงวันที่ (export เต็มทำให้ทั้งระบบช้าลง ~5 เท่า 5–20 วิ) · PDPA: ประกาศความเป็นส่วนตัว (`/track`, ใบรับเครื่อง, พนักงาน), ระยะเก็บข้อมูล, นโยบายลบ/ทำให้ระบุตัวไม่ได้ (เอกสารการเงินเก็บ 5–7 ปีตามกฎหมาย), ใครควร export / เห็นเลขบัตร (ตอนนี้ทุก role export ได้, System Admin 35 คน), audit_log เก็บค่าก่อน-หลังที่มีเบอร์/ที่อยู่ลูกค้า, บันทึกการอ่านข้อมูลลูกค้า, ดึงรายชื่อลูกค้าทั้งหมดผ่าน API ได้ไม่มีบันทึก, DPA กับ Render (สิงคโปร์)/Supabase/Cloudflare/ThaiBulkSMS/Lark · Dependabot ไม่ทำงานจนกว่าไฟล์จะอยู่บน `main`
 
+## id ภายนอกเป็น uuid v7 แบบ OneLink (2026-10-28 — [ADR 0008](../adr/0008-bigint-pk-uuid7-id.md), เริ่มหลัง cutover)
+
+ทำหลังโหลดข้อมูลจริงรอบสุดท้ายและระบบเก่าหยุดรับงาน — ก่อนนั้นทุกการโหลด dump สร้างตารางใหม่หมด
+
+- [ ] **ID-1 สำรวจ** · M — ทุกตาราง: PK เดิม, คอลัมน์ที่อ้างถึง (FK จริง 31 + join ด้วยข้อความ เช่น `job_no`, `sale_out_hd_no`,
+  `customer_code`), จุดที่ id ออกนอกฐาน (contract ~50 จุด, URL ของหน้า, export, audit_log.record_id) → ตาราง mapping
+- [ ] **ID-2 migration สร้างตารางใหม่** · L — `uuid_generate_v7()` (จาก OneLink 0027), ทุกตาราง `pk` + `id` หน้าสุด, FK `<table>_pk` /
+  `<บทบาท>_<table>_pk`, backfill uuid ตามวันที่สร้างแถว, ทั้งไฟล์ใน transaction เดียว · ซ้อมกับสำเนา prod ใน dev ก่อน
+- [ ] **ID-3 แอป** · L — drizzle schema, service/route รับ-ส่ง `id` (uuid) แทน int, หน้าเว็บ/URL, export, `seed-export.mts`;
+  แบ่ง agent ตามกลุ่ม API (ผู้ใช้/สิทธิ์ · งาน/ไฟล์แนบ · ขาย/เสนอราคา · คลัง · ข้อมูลหลัก/โปรไฟล์)
+- [ ] **ID-4 เทสต์บังคับกติกา** · S — ทุกตารางมี `pk` + `id`; ไม่มีคำตอบ API ไหนมี `pk` / `*_pk` (แบบ OL `public-ids.test.ts`)
+- [ ] **ID-5 ตรวจครบ** · M — `test:db`, e2e ทุก project, OpenAPI snapshot, QA เบราว์เซอร์ · เลิกใช้ `load_supabase.sh` / `db:dev:load`
+
+## วิดีโอแนบงาน (2026-10-28 — คลิปอาการเสียจากลูกค้า)
+
+- [x] **แนบวิดีโอ** — MP4 / MOV / WebM ≤ 3 นาที ที่ "เอกสารแนบ" · เบราว์เซอร์แปลงเป็น MP4 H.264 + AAC ≤ 1080p ≤ 30fps คุณภาพคงที่ (quantizer 26, สำรอง VBR 2.5 Mbps; ใหญ่เกิน 120 MB → แปลงใหม่ VBR 5 Mbps), เสียง 96 kbps, คีย์เฟรมทุก 2 วิ, faststart — คลิป 3 นาที ~35–60 MB ไม่เกิน ~115 MB
+  (mediabunny, โหลดเมื่อเลือกวิดีโอเท่านั้น) แล้ว PUT ตรงเข้า **Cloudflare R2** ด้วย presigned URL (2 ชม., Content-Type
+  และ `If-None-Match: *` อยู่ในลายเซ็น — เขียนทับไฟล์ที่มีอยู่ไม่ได้ R2 ตอบ 412) — ไม่ผ่าน Render · `POST /api/attachments/video` → `…/confirm` ตรวจไฟล์ใน R2 (ranged GET ที่ลงชื่อ:
+  มีจริง ≤ 200 MB ไบต์แรกเป็น ftyp / EBML) ก่อนเพิ่มแถว ไม่ผ่าน → ลบออกจาก R2 · ภาพตัวอย่าง `{file}.jpg` ข้างวิดีโอ (R2 เช่นกัน) ·
+  พนักงานเท่านั้น (`/track` ไม่เห็น) · `scripts/test-qa-video.mts` (R2 ปลอม), `tests/e2e/video-attachment.spec.ts`
+- [x] **แยกที่เก็บ** (`src/server/storage.ts` `onR2`) — R2 เก็บเฉพาะชื่อที่ route วิดีโอออกให้: `jobs/{no}/attachments/v{14 หลัก}{20 hex}.mp4|mov|webm`
+  และ `….jpg` ของมัน · อย่างอื่นทั้งหมดอยู่ Supabase เหมือนเดิม (รูป PDF สลิป โลโก้ และ .mp4 2 ไฟล์จากระบบเก่า — ชื่อไม่มี `v`
+  จึงยังเปิดจาก Supabase) · `/api/files` → presigned GET 15 นาที (`download=1` → `response-content-disposition=attachment`) ·
+  ไม่ได้ตั้ง R2 → API วิดีโอตอบ 503 "ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ", ช่องแนบไม่รับวิดีโอ, env check เตือน (รูป / PDF ใช้ได้ปกติ)
+- [ ] 👤 **ก่อนใช้จริง — ตั้งค่า Cloudflare R2:**
+  1. R2 → Create bucket `shd-oneservice-videos` · Location hint **Asia-Pacific (APAC)** · Storage class **Standard** · ไม่เปิด public access / custom domain
+  2. bucket → Settings → **CORS policy**:
+     ```json
+     [
+       {
+         "AllowedOrigins": ["https://oneservice.shd-technology.co.th"],
+         "AllowedMethods": ["GET", "HEAD", "PUT"],
+         "AllowedHeaders": ["content-type", "range", "if-none-match"],
+         "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
+         "MaxAgeSeconds": 3600
+       }
+     ]
+     ```
+  3. R2 → Manage API tokens → Create **Account API token** · permission **Object Read & Write** · _Apply to specific buckets only_ →
+     `shd-oneservice-videos` เท่านั้น · จด Access Key ID / Secret Access Key (แสดงครั้งเดียว) และ Account ID
+  4. bucket → Settings → **Object lifecycle rules**: ย้ายเป็น Infrequent Access หลัง 30 วัน · Abort incomplete multipart uploads หลัง 7 วัน
+  5. Render → Environment: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET=shd-oneservice-videos` → deploy
+     (CSP `media-src` / `connect-src` เพิ่ม `https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com` เองจาก env)
+  6. ทดสอบแนบคลิปจริง 1 ไฟล์ เปิดเล่น + ดาวน์โหลด แล้วลบแถวทดสอบ
+  - ขีดจำกัด 50 MB ของ Supabase Storage ไม่เกี่ยวกับวิดีโอแล้ว (วิดีโอไม่เข้า Supabase) — ไม่ต้องปรับ
+  - ทดสอบคลิป iPhone HEVC/HDR จริงบน Chrome / Safari / Firefox (ความเร็วแปลง, สี HDR)
+- [ ] **ระยะเก็บ** — ตอนนี้เก็บตลอด (R2 → IA หลัง 30 วัน) · อาจเพิ่มกฎลบวิดีโอ N วันหลังปิดงาน (~35–60 MB/คลิป 3 นาที)
+
 ## จุดแข็งที่มีอยู่แล้ว (ห้าม regress)
 
 - Session: HMAC cookie, idle 30 นาที + absolute 12 ชม., `session_version` logout ทุกเครื่อง, role/status อ่านจาก DB ทุก request (DB ล่ม = 503 ไม่ trust cookie)

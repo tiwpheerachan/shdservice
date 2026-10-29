@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { ArrowRight, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { TableScroll } from '@/components/ui/data-table';
@@ -11,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { jobTone, type Tone } from '@/components/ui/badge';
 import { TAT_BUCKET_LABEL } from '@/data/options';
 import { SearchSelect } from '@/components/shared/search-select';
-import { useDashboard, useJobs, useJobStatuses, useJobTypes } from '@/data/db';
+import { useDashboard, useJobs, useJobTypes } from '@/data/db';
 import { int, cn } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { useAccess } from '@/lib/use-access';
@@ -52,7 +53,14 @@ function LoadFailed({ error, onRetry }: { error: string; onRetry: () => void }) 
 }
 
 /** first load: placeholder rows that keep a table's height (each as tall as a data row: py-2.5 + a 20px line) */
-const TAT_SKELETON_ROWS = 16;
+const TAT_SKELETON_ROWS = 25; // every job status but 0 (24) + Total
+
+/* the TAT row's colour bar, by job_status_group — the legacy table's red / yellow / green */
+const TAT_GROUP_BG: Record<string, string> = {
+  Pending: 'bg-danger',
+  Repaired: 'bg-warning',
+  Finished: 'bg-success',
+};
 
 function SkeletonRows({ rows, cols }: { rows: number; cols: number }) {
   return Array.from({ length: rows }, (_, i) => (
@@ -92,27 +100,23 @@ function Panel({
 }
 
 const TH_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-/* TAT deep links → job list. Buckets count days from the Thai calendar day (same as the server query),
-   so each bucket is a create-date range: 1–3 = from today−3, 4–7 = today−7…today−4, …, >30 = up to today−31. */
-type TatKey = 'd13' | 'd47' | 'd814' | 'd1530' | 'over30' | 'total';
-const TAT_RANGE: Record<TatKey, [from: number | null, to: number | null]> = {
-  d13: [3, null],
-  d47: [7, 4],
-  d814: [14, 8],
-  d1530: [30, 15],
-  over30: [null, 31],
-  total: [null, null],
-};
-function tatHref(bucket: TatKey, type: string, status?: { id?: number; name: string }) {
-  const [f, t] = TAT_RANGE[bucket];
-  const p = new URLSearchParams({ src: 'tat', bucket, open: '1' });
+/* TAT deep links → job list: the status (none for the Total row) + the TAT bucket (none for the Total column) in
+   the dashboard's range + type — the list filters by the same TAT days (jobs.ts tatDays), so it opens exactly
+   the number that was clicked. */
+function tatHref(
+  range: { from: string; to: string; type: string },
+  status?: { id?: number; name: string },
+  bucket?: string,
+) {
+  const p = new URLSearchParams({ src: 'tat' });
+  if (bucket) p.set('tat', bucket);
   if (status?.id) {
     p.set('statusId', String(status.id));
     p.set('status', status.name);
   }
-  if (f !== null) p.set('from', daysAgo(f));
-  if (t !== null) p.set('to', daysAgo(t));
-  if (type) p.set('type', type);
+  if (range.from) p.set('from', range.from);
+  if (range.to) p.set('to', range.to);
+  if (range.type) p.set('type', range.type);
   return `/jobs/list?${p}`;
 }
 /** KPI card → the job list counting the same jobs: status group (the card's `sub` is the group name)
@@ -124,9 +128,9 @@ function kpiHref(g: { sub: string; label: string }, from: string, to: string, ty
   if (type) p.set('type', type);
   return `/jobs/list?${p}`;
 }
-/** a clickable TAT count — zero stays a quiet dash */
+/** a clickable TAT count — zero is a blank cell, as in the legacy table */
 function TatNum({ n, href, className }: { n: number; href: string; className?: string }) {
-  if (!n) return <span className="text-muted-foreground">–</span>;
+  if (!n) return null;
   return (
     <Link
       href={href}
@@ -145,13 +149,17 @@ const thai = (iso: string) => {
   return `${d} ${TH_MONTH[m - 1]} ${String(y + 543).slice(-2)}`;
 };
 
-export default function DashboardPage() {
+export default function DashboardPage({ initial }: { initial: { from: string; to: string; type: string } }) {
   const canAdd = useAccess().can('Job Management', 'add'); // เปิดงานใหม่ only for a role that may
-  // date range (default: last 30 days) — every panel except TAT follows it; both empty = ทั้งหมด
-  const [from, setFrom] = React.useState(() => daysAgo(29));
-  const [to, setTo] = React.useState(() => today());
-  // job type (name, same as the job list filter) — "" = every type; applies to every panel incl. TAT
-  const [type, setType] = React.useState('');
+  // date range (default: last 30 days) — every panel follows it; both empty = ทั้งหมด
+  // the URL first: Back from a TAT / KPI link shows the router's cached page (its first props) under the URL the
+  // effect below wrote — read the URL itself, then the server's range
+  const url = useSearchParams();
+  const fromUrl = (k: 'from' | 'to' | 'type', or: string) => url.get(k) ?? or;
+  const [from, setFrom] = React.useState(() => fromUrl('from', initial.from));
+  const [to, setTo] = React.useState(() => fromUrl('to', initial.to));
+  // job type (name, same as the job list filter) — "" = every type; applies to every panel
+  const [type, setType] = React.useState(() => fromUrl('type', initial.type));
   // a บทสอน leaves the filters as it found them
   useTourRestore(
     () => ({ from, to, type }),
@@ -170,6 +178,17 @@ export default function DashboardPage() {
   const [range, setRange] = React.useState({ from, to, type });
   if (!reversed && whole(from) && whole(to) && (range.from !== from || range.to !== to || range.type !== type))
     setRange({ from, to, type });
+  // the range in the URL (page.tsx reads it): Back from a TAT / KPI link comes back to it; the default stays bare
+  React.useEffect(() => {
+    const p = new URLSearchParams();
+    if (range.from !== daysAgo(29) || range.to !== today() || range.type) {
+      p.set('from', range.from);
+      p.set('to', range.to);
+      if (range.type) p.set('type', range.type);
+    }
+    const q = p.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}`);
+  }, [range]);
   // presets use the Thai calendar (lib/dates), like the server's date filters
   const preset = (key: '7d' | '30d' | '90d' | 'month' | 'all') => {
     const now = today();
@@ -204,7 +223,6 @@ export default function DashboardPage() {
   const { data: dashData, loading: dashLoading, error: dashError, refetch: retryDash } = useDashboard(range);
   const DASH = dashError ? null : dashData; // no stale range's numbers under an error
   const dashFirstLoad = dashLoading && !DASH;
-  const { data: STATUSES } = useJobStatuses(); // status → group, for the TAT row colour
   const DASH_GROUPS = DASH?.groups ?? [];
   const TAT_ROWS = DASH?.tat ?? [];
   const MONTHLY = DASH?.monthly ?? [];
@@ -260,9 +278,7 @@ export default function DashboardPage() {
         <div>
           <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Service Operations</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">ภาพรวมงานบริการ</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            การ์ดสรุปและกราฟ: งานที่เปิดในช่วง {rangeText} · ตาราง TAT: งานค้างทั้งหมด ณ ตอนนี้
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">งานที่เปิดในช่วง {rangeText}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="w-[190px]">
@@ -338,8 +354,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KPI band — hairline-separated cells, no gradient fills. Its scope said out loud: the TAT table
-          below and the bell count every open job now, so the numbers differ on purpose */}
+      {/* KPI band — hairline-separated cells, no gradient fills. Its scope said out loud: the bell counts every
+          open job now, so the numbers differ on purpose */}
       <section className="space-y-2" aria-label="สรุปงานที่เปิดในช่วงวันที่เลือก">
         <p className="text-xs text-muted-foreground">งานที่เปิดในช่วงวันที่เลือก ({rangeText})</p>
         {dashError && (
@@ -390,35 +406,45 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* TAT matrix */}
+      {/* TAT matrix — the legacy table: every job status (but ยกเลิกข้อมูล), its jobs by days to the return */}
       <Panel
-        title="TAT — ระยะเวลาตั้งแต่วันเปิดงานถึงวันส่งคืน"
-        meta={
-          <span>
-            งานค้างทั้งหมด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) · จำแนกตามสถานะงานและช่วงจำนวนวัน{type ? ` · ${type}` : ''}
-          </span>
-        }
+        title="TAT — จำนวนงานตามสถานะ"
+        meta={<span>งานที่เปิดในช่วง {rangeText} · กดตัวเลขเพื่อเปิดรายการงานชุดนั้น</span>}
         bodyClass="p-0"
       >
-        <TableScroll label="งานค้างตามสถานะและจำนวนวัน">
+        <TableScroll label="จำนวนงานตามสถานะและ TAT">
           {/* a phone scrolls it sideways: the status column stays on the left (sticky) so every number keeps
               its row's name. border-separate: a sticky cell keeps its own hairline (collapsed borders stay behind) */}
-          <table className="w-full min-w-[680px] border-separate border-spacing-0 text-sm [&_tbody_td]:border-b [&_tbody_td]:border-border/60 [&_tbody_tr:last-child_td]:border-b-0 [&_tfoot_td]:border-t [&_tfoot_td]:border-border [&_th]:border-b [&_th]:border-border">
-            <thead>
-              <tr className="text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="w-10 py-2.5 pl-5 text-left font-medium">#</th>
-                <th className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-left font-medium">สถานะงาน</th>
+          <table className="w-full min-w-[680px] border-separate border-spacing-0 text-sm [&_tbody_tr>*]:border-b [&_tbody_tr>*]:border-border/60 [&_tbody_tr:last-child>*]:border-b-0 [&_tfoot_tr>*]:border-t [&_tfoot_tr>*]:border-border [&_thead_th]:border-b [&_thead_th]:border-border">
+            <thead className="text-2xs tracking-wide text-muted-foreground">
+              <tr>
+                <th scope="col" rowSpan={2} className="w-10 py-2.5 pl-5 text-left font-medium">
+                  #
+                </th>
+                <th
+                  scope="col"
+                  rowSpan={2}
+                  className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-left font-medium"
+                >
+                  สถานะงาน
+                </th>
+                <th scope="colgroup" colSpan={dayCols.length} className="px-4 pt-2.5 pb-1.5 text-center font-medium">
+                  TAT (วันเปิดงาน ถึง วันส่งคืน)
+                </th>
+                <th scope="col" rowSpan={2} className="py-2.5 pr-5 pl-4 text-right font-medium">
+                  Total
+                </th>
+              </tr>
+              <tr>
                 {dayCols.map((c) => (
-                  <th key={c.k} className="px-4 py-2.5 text-right font-medium">
+                  <th key={c.k} scope="col" className="px-4 py-2 text-right font-medium whitespace-nowrap">
                     {c.label}
                   </th>
                 ))}
-                <th className="py-2.5 pr-5 text-right font-medium">รวม</th>
               </tr>
             </thead>
             <tbody>
-              {/* a FIXED height (the usual 15 open statuses + total): it must not wait for job_statuses — sizing
-                  it from that second request makes the panel grow 7 → 19 → 16 rows (CLS 0.15) */}
+              {/* a FIXED height (every status but 0 + Total), so the panel does not grow when the data comes in */}
               {dashFirstLoad && <SkeletonRows rows={TAT_SKELETON_ROWS} cols={8} />}
               {dashError && (
                 <tr>
@@ -427,52 +453,48 @@ export default function DashboardPage() {
                   </td>
                 </tr>
               )}
-              {tat.map((r, i) => (
-                <tr key={r.status}>
-                  <td className="py-2.5 pl-5">
-                    <span className="flex items-center gap-2.5">
-                      <span
-                        className={cn(
-                          'h-3.5 w-[3px] rounded-full',
-                          TONE_BG[jobTone(r.status, STATUSES.find((s) => s.id === r.statusId)?.group)],
-                        )}
-                      />
-                      <span className="num text-xs text-muted-foreground tabular-nums">{i + 1}</span>
-                    </span>
-                  </td>
-                  <td className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 font-medium">{r.status}</td>
-                  {(['d13', 'd47', 'd814', 'd1530'] as const).map((k) => (
-                    <td key={k} className="num px-4 py-2.5 text-right tabular-nums">
-                      <TatNum n={r[k]} href={tatHref(k, type, { id: r.statusId, name: r.status })} />
+              {tat.map((r, i) => {
+                const status = { id: r.statusId, name: r.status };
+                return (
+                  <tr key={r.statusId ?? r.status}>
+                    <td className="py-2.5 pl-5">
+                      <span className="flex items-center gap-2.5">
+                        <span className={cn('h-3.5 w-[3px] rounded-full', TAT_GROUP_BG[r.group] ?? TONE_BG.neutral)} />
+                        <span className="num text-xs text-muted-foreground tabular-nums">{i + 1}</span>
+                      </span>
                     </td>
-                  ))}
-                  <td className="num px-4 py-2.5 text-right tabular-nums">
-                    <TatNum
-                      n={r.over30}
-                      href={tatHref('over30', type, { id: r.statusId, name: r.status })}
-                      className={cn(r.over30 > 20 && 'font-semibold text-danger')}
-                    />
-                  </td>
-                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums">
-                    <TatNum n={r.total} href={tatHref('total', type, { id: r.statusId, name: r.status })} />
-                  </td>
-                </tr>
-              ))}
+                    <th scope="row" className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-left font-medium">
+                      {r.status}
+                    </th>
+                    {dayCols.map((c) => (
+                      <td key={c.k} className="num px-4 py-2.5 text-right tabular-nums">
+                        <TatNum n={r[c.k]} href={tatHref(range, status, c.k)} />
+                      </td>
+                    ))}
+                    <td className="num py-2.5 pr-5 pl-4 text-right font-semibold tabular-nums">
+                      <TatNum n={r.total} href={tatHref(range, status)} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             {tat.length > 0 && (
               <tfoot>
                 <tr className="text-sm">
                   <td />
-                  <td className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-xs uppercase tracking-wide text-muted-foreground">
-                    รวมทั้งสิ้น
-                  </td>
+                  <th
+                    scope="row"
+                    className="sticky left-0 z-1 bg-card py-2.5 pr-4 pl-3 text-left text-xs font-medium tracking-wide text-muted-foreground"
+                  >
+                    Total
+                  </th>
                   {dayCols.map((c) => (
                     <td key={c.k} className="num px-4 py-2.5 text-right font-medium tabular-nums">
-                      {grand[c.k] ? <TatNum n={grand[c.k]} href={tatHref(c.k, type)} /> : 0}
+                      <TatNum n={grand[c.k]} href={tatHref(range, undefined, c.k)} />
                     </td>
                   ))}
-                  <td className="num py-2.5 pr-5 text-right font-semibold tabular-nums text-primary">
-                    <TatNum n={grand.total} href={tatHref('total', type)} />
+                  <td className="num py-2.5 pr-5 pl-4 text-right font-semibold tabular-nums text-primary">
+                    <TatNum n={grand.total} href={tatHref(range)} />
                   </td>
                 </tr>
               </tfoot>

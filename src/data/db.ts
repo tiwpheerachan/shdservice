@@ -258,7 +258,7 @@ export const useJobsPage = (params: PageParams) => usePagedTable<Job>('jobs', pa
 export const useQuotationsPage = (params: PageParams) => usePagedTable<Quotation>('quotations', params);
 export const useSaleOrdersPage = (params: PageParams) => usePagedTable<SaleOrder>('sale_orders', params);
 
-/** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT is a live snapshot (date-independent, but follows `type`) */
+/** Dashboard — `range` = { from, to, type } (YYYY-MM-DD, both empty = all time; type = job type name); TAT counts the same jobs as the cards */
 export type DashRange = { from?: string; to?: string; type?: string };
 export type Dashboard = {
   groups: DashGroup[];

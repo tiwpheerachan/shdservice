@@ -60,10 +60,14 @@ const pageJob = JobBody.optional();
 const PAGE_JOB =
   " `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).";
 
-/** ปิดงาน's fields without a stored job: the receipt no and the return parcel no are only text here */
+/** ปิดงาน's fields without a stored job: the receipt no, the return parcel no and the new serial are only text here */
 const close = closeSchema().shape;
 const CloseBody = z.looseObject({
   ...close,
+  newSerial: optText.meta({
+    description:
+      'Serial เครื่องใหม่ of a swap job, optional: a changed one is written as the swap saves it (a "New S/N" line of the part list and the swap detail).',
+  }),
   payment: close.payment
     .unwrap()
     .extend({ no: optText })
@@ -247,7 +251,7 @@ export const jobClose = defineOperation({
   tags,
   summary: 'Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)',
   description:
-    'Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund.' +
+    'Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number / new serial and the deposit still to refund.' +
     PAGE_JOB,
   params: jobNo,
   body: CloseBody,
@@ -326,7 +330,7 @@ export const jobSwapRefund = defineOperation({
   tags,
   summary: 'Record a swap or a refund (Swap / Refund)',
   description:
-    'Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required.' +
+    "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund (`newSerial` is never required). `status`: job_status 17 / 18 (swap) or 17 / 19 (refund), or the job's current one." +
     PAGE_JOB,
   params: jobNo,
   body: SwapBody,
@@ -375,6 +379,26 @@ export const trackLinkNew = defineOperation({
   },
 });
 
+/** หมายเลขงาน a file is stored for — upper-cased; must exist (404) */
+const attachJobNo = z
+  .unknown()
+  .optional()
+  .transform((v) =>
+    String(v ?? '')
+      .trim()
+      .toUpperCase(),
+  )
+  .meta({ type: 'string', description: 'หมายเลขงาน — must exist (404).' });
+const attachRemark = z
+  .unknown()
+  .optional()
+  .transform((v) => String(v ?? '').slice(0, 200))
+  .meta({ type: 'string', description: 'Read up to 200 characters (the rest is dropped).' });
+const AttachmentRow = z.object({
+  ok: z.literal(true),
+  row: z.object({ id: n, name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),
+});
+
 export const attachmentAdd = defineOperation({
   method: 'post',
   path: '/attachments',
@@ -387,32 +411,14 @@ export const attachmentAdd = defineOperation({
     file: z
       .custom<File>((v) => v instanceof File, { error: 'ไม่พบไฟล์' })
       .meta({ type: 'string', format: 'binary', description: 'image / PDF, ≤ 10 MB' }),
-    jobNo: z
-      .unknown()
-      .optional()
-      .transform((v) =>
-        String(v ?? '')
-          .trim()
-          .toUpperCase(),
-      )
-      .meta({ type: 'string', description: 'หมายเลขงาน — must exist (404).' }),
-    remark: z
-      .unknown()
-      .optional()
-      .transform((v) => String(v ?? '').slice(0, 200))
-      .meta({ type: 'string', description: 'Read up to 200 characters (the rest is dropped).' }),
+    jobNo: attachJobNo,
+    remark: attachRemark,
   }),
   headers: IDEMPOTENCY.headers,
   invalid: { form: 400, ...IDEMPOTENCY.invalid },
   responses: {
     ...IDEMPOTENCY.responses,
-    200: jsonResponse(
-      'Stored.',
-      z.object({
-        ok: z.literal(true),
-        row: z.object({ id: n, name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),
-      }),
-    ),
+    200: jsonResponse('Stored.', AttachmentRow),
     ...SIGNED_IN,
     400: errorResponse('Not multipart/form-data, or no file.'),
     ...notFound('No such job.'),
@@ -421,6 +427,85 @@ export const attachmentAdd = defineOperation({
     ),
     413: errorResponse('File over 10 MB.'),
     415: errorResponse('Not an allowed file type.'),
+    ...RATE_LIMITED,
+  },
+});
+
+const VIDEO_TYPE = 'รองรับเฉพาะวิดีโอ MP4, MOV, WebM';
+const VIDEO_STORE_DOWN =
+  'The database did not answer, or video storage (Cloudflare R2: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET) is not configured — `ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ`.';
+
+export const attachmentVideoUrl = defineOperation({
+  method: 'post',
+  path: '/attachments/video',
+  tags,
+  summary: 'Get a one-time URL to upload a video attachment straight to storage',
+  description:
+    "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type` and `If-None-Match: *` are signed — send both; an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
+  body: z.object({
+    jobNo: attachJobNo,
+    type: z
+      .enum(['video/mp4', 'video/quicktime', 'video/webm'], { error: VIDEO_TYPE })
+      .meta({ description: 'the type of the file to be PUT (a converted clip: video/mp4) — sets its extension' }),
+  }),
+  invalid: { body: 400 },
+  responses: {
+    200: jsonResponse(
+      'Where to PUT the file (`Content-Type` = `type`, `If-None-Match: *`).',
+      z.object({
+        file: s.meta({ description: 'the stored file name — sent back to confirm' }),
+        url: s.meta({ description: 'R2 presigned upload URL' }),
+      }),
+    ),
+    ...SIGNED_IN,
+    503: errorResponse(VIDEO_STORE_DOWN),
+    ...JSON_BODY,
+    400: errorResponse('Not JSON (`invalid_json`), or a type other than MP4 / MOV / WebM.'),
+    ...notFound('No such job.'),
+    409: errorResponse('The job is deleted (cancelled).'),
+    ...RATE_LIMITED,
+  },
+});
+
+export const attachmentVideoConfirm = defineOperation({
+  method: 'post',
+  path: '/attachments/video/confirm',
+  tags,
+  summary: 'Attach a video uploaded with POST /attachments/video',
+  description:
+    'Job Management edit. Checks what arrived in R2 — there, ≤ 200 MB, stored as a video and its first bytes an MP4 / MOV `ftyp` box or a WebM EBML header (a ranged read, not the whole file) — then inserts the attachment row as POST /attachments does. Refused → the object is removed. `thumb` (a JPEG of the frame ~1 s in) is stored next to it as {file}.jpg. Staff only, like every job attachment.',
+  form: z.object({
+    // in the order the route checks them
+    jobNo: attachJobNo,
+    file: z
+      .string({ error: 'ไม่พบไฟล์วิดีโอที่อัปโหลด' })
+      .regex(/^v\d{14}[0-9a-f]{20}\.(?:mp4|mov|webm)$/, 'ไม่พบไฟล์วิดีโอที่อัปโหลด')
+      .meta({ description: 'the `file` POST /attachments/video answered' }),
+    name: z
+      .unknown()
+      .optional()
+      .transform((v) => String(v ?? '').slice(0, 200))
+      .meta({ type: 'string', description: 'the file name to show' }),
+    remark: attachRemark,
+    thumb: z
+      .custom<File>((v) => v instanceof File, { error: 'ภาพตัวอย่างต้องเป็นไฟล์ JPEG' })
+      .optional()
+      .meta({
+        type: 'string',
+        format: 'binary',
+        description: 'JPEG, optional (a browser that cannot decode the clip sends none)',
+      }),
+  }),
+  invalid: { form: 400 },
+  responses: {
+    200: jsonResponse('Attached.', AttachmentRow),
+    ...SIGNED_IN,
+    503: errorResponse(VIDEO_STORE_DOWN),
+    400: errorResponse('Not multipart/form-data, or no / not an issued file name.'),
+    ...notFound('No such job, or nothing was uploaded under that name.'),
+    409: errorResponse('The job is deleted (cancelled), or this video is already attached.'),
+    413: errorResponse('Video over 200 MB, or a thumbnail over 1 MB.'),
+    415: errorResponse('Not a real MP4 / MOV / WebM video, or the thumbnail is not a JPEG.'),
     ...RATE_LIMITED,
   },
 });

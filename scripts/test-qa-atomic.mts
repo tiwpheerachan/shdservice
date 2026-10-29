@@ -239,15 +239,17 @@ try {
     });
     assert.equal((await jobRow(no)).s, 14);
   });
-  await test('Swap to ซ่อมเสร็จ while a requested part is not issued (400) → swap + job sections not saved', async () => {
+  await test('Swap whose New S/N does not fit the part list (400, in the transaction) → swap + job sections not saved', async () => {
     const no = J(7);
-    const status = await statusName(5);
+    // the Swap page offers ซ่อมเสร็จ no more (17 / 18 only): the refusal after the job sections is a full part list
+    await db.execute(sql`UPDATE job SET spare_part_replace = ${'ก'.repeat(295)} WHERE job_no = ${no}`);
+    const { status } = (await getJob(no))!;
     const r = await nothingSaved(
       no,
       () => saveSwapRefund(no, { status, newSerial: 'QATSN7', job: common(`QAT ${no}`) }, U.admin.id),
       400,
     );
-    assert.match(r.message, /QATP1/);
+    assert.match(r.message, /300 ตัวอักษร/);
   });
   await test('Swap valid: the swap + the job sections saved together', async () => {
     const no = J(8);

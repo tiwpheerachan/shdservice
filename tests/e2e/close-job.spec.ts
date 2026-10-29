@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { CLOSER_EMAIL } from './support/env';
+import { CLOSER_EMAIL, OWNER_EMAIL } from './support/env';
 import { newJob, newPart, newPartLine, one, rows, userId } from './support/db';
 import { call, expect, signIn, test } from './support/fixtures';
 
@@ -157,4 +157,42 @@ test('a closed job keeps its money for a role without Job Money After Close: inp
   );
   expect(await closeState(no)).toEqual(before); // nothing of the save stuck — not even the return type
   expect(await logsOf(no)).toEqual([]);
+});
+
+test('a swapped job: Serial เครื่องใหม่ prefilled, optional, saved with the close and printed on the return note', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 18 }); // อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว (Repaired)
+  // as the Swap / Refund page stores it: the swap detail and the part list's "New S/N" line
+  await rows(
+    `UPDATE job SET swap_refund_detail = 'New S/N: OLD00001', spare_part_replace = 'New S/N: OLD00001' WHERE job_no = $1`,
+    [no],
+  );
+  await openClose(page, no);
+  const history = page.getByRole('heading', { name: 'ประวัติการแก้ไข' });
+  await expect(history).toBeVisible();
+  const serial = page.getByLabel('Serial เครื่องใหม่');
+  await expect(serial).toHaveValue('OLD00001');
+  await serial.fill('NEW00001');
+  await page.getByLabel('วิธีการส่งคืนสินค้า').selectOption(RETURN_TYPE);
+  await page.getByLabel('โปรดระบุ สถานะงาน').selectOption(CLOSE_STATUS);
+  await page.getByRole('button', { name: 'ยืนยันปิดงาน' }).click();
+  await expect(page.getByText('ปิดงานและบันทึกการส่งคืนเรียบร้อย')).toBeVisible();
+  // the history section is refreshed by the save (the job the server answers with)
+  await expect(page.getByText(`ล่าสุด:`).filter({ hasText: `เปลี่ยนสถานะงาน → ${CLOSE_STATUS}` })).toBeVisible();
+  expect(
+    await one(`SELECT spare_part_replace AS parts, swap_refund_detail AS swap FROM job WHERE job_no = $1`, [no]),
+  ).toEqual({ parts: 'New S/N: NEW00001', swap: 'New S/N: NEW00001' });
+
+  await page.goto(`/print/job/${no}/return?auto=0`);
+  await expect(page.getByRole('row', { name: /New S\/N : NEW00001/ }).first()).toBeVisible();
+});
+
+test('ประวัติการแก้ไข on the Out-Source, Swap / Refund and close pages', async ({ page }) => {
+  const no = await newJob({ status: 5 });
+  await signIn(page, OWNER_EMAIL);
+  for (const path of ['/jobs/outsource', '/jobs/swap-refund', '/jobs/close']) {
+    await page.goto(`${path}?job=${no}`);
+    await expect(page.getByRole('heading', { name: 'ประวัติการแก้ไข' }), path).toBeVisible();
+  }
 });

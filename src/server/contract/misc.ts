@@ -53,7 +53,7 @@ export const files = defineOperation({
   security: SESSION_OR_NONE,
   summary: 'Open a stored file by its storage path (a short-lived signed URL)',
   description:
-    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403.',
+    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A video URL is valid 15 minutes (it plays from it), others 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.',
   query: z.object({
     path: z
       .string({ error: PATH_REQUIRED })
@@ -67,6 +67,7 @@ export const files = defineOperation({
           .refine((v) => !v.includes('..') && !/[\x00-\x1f\\]/.test(v), PATH_REQUIRED),
       )
       .meta({ type: 'string', maxLength: 300, example: 'products/P00230/x.jpg', description: 'Leading `/` ignored.' }),
+    download: choice(['1']).meta({ description: '`1` = sent as a download (Content-Disposition: attachment).' }),
   }),
   invalid: { query: 400 },
   responses: {

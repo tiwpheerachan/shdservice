@@ -55,6 +55,7 @@ export const AuditRow = z
       'RETURN',
       'UPLOAD',
       'LOGIN',
+      'LOGIN_FAILED',
       'EXPORT',
     ]),
     module: s,

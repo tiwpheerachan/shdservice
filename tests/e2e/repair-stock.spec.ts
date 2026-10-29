@@ -111,7 +111,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   const back = (await movementsOf(no)).filter((m) => m.type === 2);
   expect(back).toEqual([{ no: expect.stringMatching(/^WHI\d+$/), type: 2, code: part.code, qty: 1 }]);
   expect(await movementsOf(no)).toHaveLength(2);
-  expect(await stockOf(part.code)).toEqual({ available: 5, used: 1, booking: 0, remain: 4 });
+  expect(await stockOf(part.code)).toEqual({ available: 6, used: 2, booking: 0, remain: 4 }); // a return counts in (legacy)
   expect(await lineOf(no)).toMatchObject({ granted: 2, returned: 1, status: 3, total: PRICE }); // re-priced to 1 used
   expect(await jobCosts(no)).toEqual({ status: 10, parts: 250, total: 250 });
 });

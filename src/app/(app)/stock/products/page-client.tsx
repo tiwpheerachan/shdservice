@@ -171,7 +171,7 @@ export default function ProductsPage() {
     }
   };
 
-  // phones (below sm): รหัส / ชื่อ / คงเหลือ first, Action after them
+  // phones (below sm): ชื่อ (รหัส under it) / คงเหลือ, Action after them — a รหัส column pushed ยกเลิก off-screen
   const columns: Column<Product>[] = [
     {
       key: 'no',
@@ -186,6 +186,7 @@ export default function ProductsPage() {
       key: 'sysCode',
       header: 'รหัส (ระบบ)',
       width: '100px',
+      hideBelow: 'sm',
       cell: (r) => <span className="num font-medium">{r.sysCode}</span>,
     },
     {
@@ -202,6 +203,7 @@ export default function ProductsPage() {
         const alt = [r.nameEn, r.nameCn].find((n) => n && nameHit(n) && !nameHit(r.name));
         return (
           <>
+            <span className="num block text-2xs text-muted-foreground sm:hidden">{r.sysCode}</span>
             <span className="line-clamp-2 max-w-[420px] font-medium">{r.name}</span>
             {alt && <span className="line-clamp-1 max-w-[420px] text-xs text-muted-foreground">{alt}</span>}
           </>
@@ -221,7 +223,7 @@ export default function ProductsPage() {
       // "พร้อมใช้" would be remain − booking, which the ใกล้หมด / หมด filters and the sort do not use
       header: 'คงเหลือ',
       align: 'right',
-      width: '130px',
+      width: '96px',
       value: (r) => r.onhand,
       cell: (r) => (
         <>

@@ -13,8 +13,10 @@ import { SEND_STATUS } from '@/lib/outsource-status';
 import { trackingAccepts, type FieldErrors } from '@/lib/validation';
 import { CodeInput } from '@/components/shared/code-input';
 import {
+  isSwap,
   noteMaxLength,
   returnDetailOf,
+  serialAccepts,
   OUTSOURCE_NOT_BACK,
   STATUS_CLOSED_TRACKED,
   STATUS_CLOSED_WAIT_TRACKING,
@@ -175,6 +177,19 @@ export function CloseReturnSection({
             onFix={(v) => upd({ tracking: v })}
           />
         </Field>
+        {/* a swap job: the new device's serial may be entered / corrected here — optional (owner 2026-10-28) */}
+        {job && isSwap(job.swap.detail) && (
+          <Field label="Serial เครื่องใหม่" error={errors.newSerial} hint="พิมพ์ในใบส่งคืนสินค้า (New S/N)">
+            <CodeInput
+              className="num"
+              maxLength={50}
+              value={d.newSerial}
+              onChange={(e) => upd({ newSerial: e.target.value })}
+              accepts={serialAccepts}
+              onFix={(v) => upd({ newSerial: v })}
+            />
+          </Field>
+        )}
         <Field
           label="รายละเอียดการส่งคืน"
           wide

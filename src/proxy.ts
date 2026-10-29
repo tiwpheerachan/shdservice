@@ -97,13 +97,19 @@ async function withCsp(request: NextRequest, track: boolean): Promise<NextRespon
   const nonce = btoa(crypto.randomUUID());
   const dev = process.env.NODE_ENV !== 'production';
   const turnstile = 'https://challenges.cloudflare.com';
+  // job videos (src/server/storage.ts onR2): uploaded from the browser straight to Cloudflare R2 and played from its
+  // presigned URL; the legacy .mp4 attachments play from Supabase (blob: = the local preview)
+  const storage = URL.parse(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')?.origin ?? '';
+  const r2Account = (process.env.R2_ACCOUNT_ID ?? '').trim();
+  const r2 = /^[0-9a-z-]+$/i.test(r2Account) ? `https://${r2Account}.r2.cloudflarestorage.com` : '';
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' ${await themeScriptHash()} 'strict-dynamic'${track ? ` ${turnstile}` : ''}${dev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `media-src 'self' blob: ${[storage, r2].filter(Boolean).join(' ')}`.trim(),
+    `connect-src 'self' ${r2}`.trim(),
     ...(track ? [`frame-src ${turnstile}`] : []),
     "object-src 'none'",
     "base-uri 'none'",

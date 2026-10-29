@@ -1,5 +1,5 @@
 import 'server-only';
-import { audit, diff } from '@/server/audit';
+import { audit, diff, type AuditEntry } from '@/server/audit';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { and, asc, eq, ne, or, sql, type AnyColumn } from 'drizzle-orm';
 import { db, type Tx } from '@/db/client';
@@ -52,7 +52,8 @@ export type SsoProfile = {
 
 /**
  * Called from the SSO callback. Finds the app_user by email (creating a pending
- * one when unknown), refreshes the SSO profile columns + last_login, forces
+ * one when unknown), refreshes the SSO profile columns + last_login (an ACTIVE row only — a disabled
+ * account's refused sign-in is no visit; a pending one does sign in, to the waiting page), forces
  * owners to System Admin, and returns the effective role/state.
  */
 export async function provisionSsoUser(
@@ -62,6 +63,7 @@ export async function provisionSsoUser(
   userId: number;
   userType: string | null;
   isActive: boolean;
+  recordStatus: string | null;
   /** app_user.session_version — stamped into the session cookie (drizzle/0015) */
   sessionVersion: number;
 }> {
@@ -95,7 +97,7 @@ export async function provisionSsoUser(
       department: profile.department ?? undefined,
       title: profile.title ?? undefined,
       avatar: profile.avatar ?? undefined,
-      lastLogin: profile.lastLogin,
+      lastLogin: sql`CASE WHEN ${appUser.recordStatus} = ${RS.ACTIVE} THEN ${profile.lastLogin}::timestamp ELSE ${appUser.lastLogin} END`,
     })
     .where(sql`lower(trim(${appUser.emailAddress})) = ${email}`)
     .returning({
@@ -109,6 +111,7 @@ export async function provisionSsoUser(
       userId: existing.userId,
       userType: existing.userType,
       isActive: existing.recordStatus === RS.ACTIVE,
+      recordStatus: existing.recordStatus,
       sessionVersion: existing.sessionVersion ?? 0,
     };
 
@@ -148,8 +151,21 @@ export async function provisionSsoUser(
     userId: row.userId,
     userType: owner ? ADMIN_USER_TYPE : null,
     isActive: true,
+    recordStatus: RS.ACTIVE,
     sessionVersion: row.sessionVersion ?? 0,
   };
+}
+
+/** A sign-in's audit line: let in — or pending, to the waiting page — = LOGIN with the role (or รออนุมัติ); refused
+ *  (Inactive / deleted: turned away to /pending) = LOGIN_FAILED with the reason, never the role as if granted. */
+export function signInAuditLine(
+  email: string,
+  role: string,
+  recordStatus: string | null,
+): Pick<AuditEntry, 'action' | 'summary'> {
+  if (recordStatus === RS.ACTIVE) return { action: 'LOGIN', summary: `เข้าสู่ระบบ ${email} · ${role}` };
+  const reason = recordStatus === RS.DELETED ? 'บัญชีถูกลบ' : 'บัญชีถูกปิดการใช้งาน';
+  return { action: 'LOGIN_FAILED', summary: `เข้าสู่ระบบไม่สำเร็จ ${email} — ${reason}` };
 }
 
 /** Name of the violated constraint of a Postgres unique error (drizzle wraps it in .cause). */
@@ -423,7 +439,6 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       firstName: keepName ? undefined : first,
       lastName: keepName ? undefined : last,
       userType: input.role === undefined ? undefined : userType,
-      ...(input.status === undefined ? {} : statusStamp(rs, actorId)),
       deleted: false,
       emailAddress: email || undefined,
       // optional contact fields: sent empty = cleared; not sent at all = left as stored
@@ -440,10 +455,15 @@ export async function upsertUser(input: UpsertUserInput, actorId = 0): Promise<{
       const [locked] = await tx.select().from(appUser).where(eq(appUser.userId, targetId)).for('update');
       if (!locked) throw new HttpError(404, 'user not found');
       assertLoaded(locked, input.expect);
-      const [row] = await tx.update(appUser).set(userValues).where(eq(appUser.userId, targetId)).returning();
+      // stamped only when the status really changes: saving an Active user as Active keeps who / when it last changed
+      const values = {
+        ...userValues,
+        ...(input.status === undefined || rs === locked.recordStatus ? {} : statusStamp(rs, actorId)),
+      };
+      const [row] = await tx.update(appUser).set(values).where(eq(appUser.userId, targetId)).returning();
       if (!row) throw new HttpError(404, 'user not found');
       // recordStatus stays in the diff: disable / re-enable is what an audit must show
-      const changes = diff(locked as Record<string, unknown>, userValues as Record<string, unknown>, {
+      const changes = diff(locked as Record<string, unknown>, values as Record<string, unknown>, {
         skip: ['deleted', 'isActive'],
       });
       // saved with nothing changed (e.g. opening your own account and pressing บันทึก) → no audit line

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { PageHeader } from '@/components/shared/page-header';
 import { FilterBar } from '@/components/shared/filter-bar';
-import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { SearchSelect } from '@/components/shared/search-select';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge, type Tone } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import { useAuditPage, useAuditModules, type AuditRow } from '@/data/db';
 import { exportXlsx } from '@/lib/api';
 import { useServerTable } from '@/lib/use-server-table';
 import { fieldLabel } from '@/lib/field-labels';
+import { moduleLabel } from '@/lib/modules';
 import { ExportButton } from '@/components/shared/export-button';
 
 /** a sale order is cancelled, not deleted (its DELETE is the cancel: the summary says "ยกเลิกใบสั่งขาย") */
@@ -33,6 +34,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   RETURN: { label: 'รับคืน', tone: 'success' },
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
   LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
+  LOGIN_FAILED: { label: 'เข้าสู่ระบบไม่สำเร็จ', tone: 'danger' },
   EXPORT: { label: 'ส่งออก Excel', tone: 'warning' },
 };
 
@@ -76,7 +78,7 @@ export default function AuditPage() {
         </Badge>
       ),
     },
-    { key: 'module', header: 'โมดูล', hideBelow: 'lg', width: '160px' },
+    { key: 'module', header: 'โมดูล', hideBelow: 'lg', width: '160px', cell: (r) => moduleLabel(r.module) },
     {
       key: 'key',
       header: 'เลขที่ / รหัส',
@@ -133,7 +135,7 @@ export default function AuditPage() {
             emptyLabel="ทั้งหมด"
             value={draft.module}
             onChange={(v) => setD('module', v)}
-            options={strOptions(MODULES)}
+            options={MODULES.map((m) => ({ value: m, label: moduleLabel(m), sub: m }))}
           />
         </Field>
         <Field label="การกระทำ">

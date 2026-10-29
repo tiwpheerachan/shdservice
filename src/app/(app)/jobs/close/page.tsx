@@ -22,6 +22,7 @@ import { useToast } from '@/components/ui/toast';
 import { useShippers } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { RecordGate } from '@/components/shared/record-gate';
+import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
@@ -39,7 +40,14 @@ import {
 } from '@/components/jobs/close-money';
 import { postJson, errMsg, uploadFile } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { closePaymentEdited, closeSchema, jobBalance, notClosableMsg, partsWaitingMsg } from '@/lib/validation/job';
+import {
+  closePaymentEdited,
+  closeSchema,
+  isSwap,
+  jobBalance,
+  notClosableMsg,
+  partsWaitingMsg,
+} from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
 
@@ -129,12 +137,14 @@ function CloseForm() {
         shipperId: d.shipperId || undefined,
       },
       status: d.status,
+      newSerial: isSwap(job.swap.detail) ? d.newSerial : undefined, // Serial เครื่องใหม่: a swap job only
     };
     const canEdit = can('Job Management', 'edit');
     // the receipt / parcel no as loaded: an unchanged legacy value still passes
     const prev = {
       payNo: saved?.payNo,
       tracking: saved?.tracking,
+      newSerial: saved?.newSerial,
       refund: { max: bal.refund, required: refundNeeded },
     };
     if (!act.check(closeSchema(prev), body, canEdit)) {
@@ -263,6 +273,7 @@ function CloseForm() {
           shippers={SHIPPERS}
           shippersLookup={shippersLookup}
         />
+        <JobHistorySection job={job} />
 
         <FormActions
           saveLabel="ยืนยันปิดงาน"

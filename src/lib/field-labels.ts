@@ -1,4 +1,4 @@
-import { RIGHTS } from '@/lib/modules';
+import { MODULE_LABELS, RIGHTS } from '@/lib/modules';
 import { JOB_COLUMN_LABEL } from '@/lib/validation/job';
 
 /**
@@ -8,7 +8,8 @@ import { JOB_COLUMN_LABEL } from '@/lib/validation/job';
  */
 export const FIELD_LABEL: Record<string, string> = {
   ...JOB_COLUMN_LABEL,
-  ...RIGHTS, // app_config: one key per permission row
+  ...MODULE_LABELS, // app_config: one key per permission row (a menu or a right)
+  ...RIGHTS,
   lines: 'รายการ',
   recordStatus: 'สถานะรายการ',
   isActive: 'เปิดใช้งาน',

@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { AccessProvider } from '@/lib/use-access';
 import { userFromCookies, grantsForUserType } from '@/server/auth';
 import { tourState } from '@/server/services/tour';
+import { r2Ready } from '@/server/storage';
 
 // Always evaluate the access gate at request time (never statically cached).
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         isAdmin: user.isAdmin,
         grants,
         tour,
+        videos: r2Ready(),
       }}
     >
       <AppShell>{children}</AppShell>

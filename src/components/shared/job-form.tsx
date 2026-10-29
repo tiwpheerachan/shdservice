@@ -31,6 +31,7 @@ import {
   WarrantyMonthField,
 } from '@/components/jobs/product-fields';
 import { useJobChecks } from '@/components/jobs/job-checks';
+import { LEGACY_ADJUST_LABEL, legacyAdjust } from '@/components/jobs/close-money';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Checkbox, moneyShown } from '@/components/ui/input';
@@ -120,6 +121,8 @@ export type JobFormState = {
   deliveryCost: number;
   boxCost: number;
   partsCost: number;
+  /** job_total_cost as loaded (not sent: the server adds up the costs once one changes — withTotal) */
+  totalCost: number;
   estimateCost: string;
   depositCost: string;
   engineerId: number;
@@ -173,6 +176,7 @@ export const EMPTY_JOB_FORM: JobFormState = {
   deliveryCost: 0,
   boxCost: 0,
   partsCost: 0,
+  totalCost: 0,
   estimateCost: '',
   depositCost: '',
   engineerId: 0,
@@ -237,6 +241,7 @@ export function fromJob(j: JobDetail): JobFormState {
     deliveryCost: j.deliveryCost,
     boxCost: j.boxCost,
     partsCost: j.partsCost,
+    totalCost: j.totalCost,
     estimateCost: j.estimateCost ? String(j.estimateCost) : '',
     depositCost: j.depositCost ? String(j.depositCost) : '',
     engineerId: j.engineerId,
@@ -836,13 +841,18 @@ export function CostSummary({
   partsTotal?: number;
   action?: { errors: FieldErrors; clear: (key: string) => void };
 }) {
-  const { s, set, errors } = useJobForm();
+  const { s, set, errors, loaded } = useJobForm();
   const lock = useMoneyLock();
   // the cost being typed, exactly as typed ("0.7"); the others as money ("123.00") — set on typing, never on focus
   // (a focus that changes the text loses its select-all: typing then appended to the amount)
   const [draft, setDraft] = React.useState<{ key: string; text: string } | null>(null);
   const parts = partsTotal ?? s.partsCost;
-  const net = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
+  const sum = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
+  // a legacy total that is not its costs' sum (VAT / a discount) stands while no cost is edited — one edit and
+  // the server adds the costs up again (withTotal), so the row goes and the net is the sum
+  const asLoaded = parts === loaded.partsCost && COST_FIELDS.every((f) => s[f.key] === loaded[f.key]);
+  const adjust = asLoaded ? legacyAdjust(loaded.totalCost, sum) : 0;
+  const net = sum + adjust;
   const deposit = Number(s.depositCost) || 0;
   const bal = jobBalance(net, deposit, 0);
 
@@ -889,6 +899,15 @@ export function CostSummary({
             </div>
           );
         })}
+
+        {adjust !== 0 && (
+          <CostRow label={LEGACY_ADJUST_LABEL}>
+            <div className="num flex h-9 items-center justify-end rounded-md border border-border bg-muted/60 px-3 text-right text-sm">
+              {adjust > 0 && '+'}
+              {baht(adjust)}
+            </div>
+          </CostRow>
+        )}
 
         <div className="border-t border-border pt-2.5">
           <CostRow label="รวมเป็นเงินสุทธิ" strong>

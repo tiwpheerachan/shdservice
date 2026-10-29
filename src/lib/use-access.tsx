@@ -21,6 +21,8 @@ export type AccessValue = {
   grants: GrantMap;
   /** the บทสอน already offered (drizzle/0039): page paths answered, never ask again */
   tour?: { seen: string[]; off: boolean };
+  /** video attachments can be stored (Cloudflare R2 configured — src/server/storage.ts r2Ready) */
+  videos?: boolean;
 };
 
 const Ctx = React.createContext<AccessValue>({

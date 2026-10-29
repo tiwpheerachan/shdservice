@@ -1,6 +1,6 @@
 import * as z from 'zod';
 import { addDays, today } from '@/lib/dates';
-import { CHANNELS, CLOSE_STATUS_OPTIONS, JOB_STATUS_OPTIONS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
+import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
 import { rightLabel } from '@/lib/modules';
 import { JOB_GROUP, JS } from '@/lib/status-ids';
@@ -435,10 +435,13 @@ export const STATUS_CLOSE_ONLY = 'เปลี่ยนเป็นสถาน�
 export const STATUS_DELETE_ONLY = 'ยกเลิกข้อมูลงานได้เฉพาะ System Admin (ลบงาน) เท่านั้น';
 /** บันทึกงานซ่อม: REPAIR_STATUS_OPTIONS only (saveRepair, by id) */
 export const REPAIR_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า บันทึกงานซ่อม';
-/** Swap / Refund's list: every status except the closed ones and ยกเลิกข้อมูล (what saveSwapRefund takes) */
-export const SWAP_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
-  (s) => !CLOSE_STATUS_OPTIONS.includes(s) && s !== 'ยกเลิกข้อมูล',
-);
+/** Swap / Refund's list by mode (owner 2026-10-28): job_status 17 + 18 (Swap) / 17 + 19 (Refund) — saveSwapRefund
+ *  takes these ids (SWAP_STATUS_IDS); the job's own status re-saved unchanged still passes */
+export const SWAP_STATUS_OPTIONS = {
+  swap: ['อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว', 'อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว'],
+  refund: ['อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว', 'อยู่ระหว่างดำเนินการ - เบิกจ่ายเงินแล้ว'],
+};
+export const SWAP_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า Swap / Refund (ตามแบบที่เลือก)';
 /** แก้ไขข้อมูลงาน shows the status only — it moves through the workflow pages (updateJob) */
 export const EDIT_STATUS_ONLY =
   'หน้าแก้ไขข้อมูลงานเปลี่ยนสถานะไม่ได้ — ใช้หน้า บันทึกงานซ่อม / Out-Source / Swap-Refund / ปิดงาน';
@@ -459,6 +462,9 @@ export function parseSwap(text: string): Record<string, string> {
  * same way and is not the Swap / Refund page's to rewrite.
  */
 export const swapRefundOf = (detail: string) => parseSwap(detail)['ยอดเงินคืน'] ?? '';
+
+/** a job that went through Swap: a swap / refund detail that is not a refund (ปิดงาน offers Serial เครื่องใหม่) */
+export const isSwap = (detail: string) => !!detail.trim() && !swapRefundOf(detail);
 
 /**
  * บันทึกงาน Swap / Refund → POST /api/jobs/:no/swap-refund (refund = the body carries refund fields).
@@ -489,8 +495,6 @@ export function swapRefundSchema(
           ctx.addIssue({ code: 'custom', path: ['refundAmount'], message: 'ต้องระบุยอดเงินคืน (มากกว่า 0)' });
         if (!isFilled(v.refundMethod))
           ctx.addIssue({ code: 'custom', path: ['refundMethod'], message: 'ต้องเลือกวิธีการคืนเงิน' });
-      } else if (!isFilled(v.newSerial)) {
-        ctx.addIssue({ code: 'custom', path: ['newSerial'], message: 'ต้องระบุ New Serial No.' });
       }
     });
 }
@@ -571,18 +575,25 @@ export const refundDateOf = (detail: string) => /^คืนมัดจำ (\d{4
 export const REFUND_REQUIRED = 'ต้องบันทึกการคืนเงินมัดจำ (วิธี / จำนวน / วันที่)';
 
 /**
- * ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close. `prev` = the receipt / parcel no stored now.
+ * ปิดงาน-ส่งคืนสินค้า → POST /api/jobs/:no/close. `prev` = the receipt / parcel no / new serial stored now.
  * `payment` is left out when nobody entered one (an in-warranty job): nothing is written then.
  * `refund` = the deposit to give back (jobBalance) — `max` caps the amount, `required` = nothing recorded
  * yet on an open job (closeJob decides it from the stored row).
  */
 export function closeSchema(
-  prev: { payNo?: string | null; tracking?: string | null; refund?: { max: number; required: boolean } } = {},
+  prev: {
+    payNo?: string | null;
+    tracking?: string | null;
+    newSerial?: string | null;
+    refund?: { max: number; required: boolean };
+  } = {},
 ) {
   return z
     .looseObject({
       status: req('โปรดระบุสถานะงาน'),
       repairDetail: maxNote(200, 'วิธีการซ่อม '),
+      // Serial เครื่องใหม่ of a swap job: never required, checked only when typed (owner 2026-10-28)
+      newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG, prev.newSerial),
       payment: z
         .looseObject(
           {

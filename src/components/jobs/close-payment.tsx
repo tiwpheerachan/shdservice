@@ -11,7 +11,7 @@ import type { JobDetail } from '@/lib/use-job';
 import { baht } from '@/lib/utils';
 import type { FieldErrors } from '@/lib/validation';
 import { noteMaxLength, paymentDetailOf, refundDateOf } from '@/lib/validation/job';
-import { type Balance, type CloseDraft, costRows, netOf } from './close-money';
+import { type Balance, type CloseDraft, costRows, LEGACY_ADJUST_LABEL, netOf } from './close-money';
 
 type Draft = { d: CloseDraft; upd: (p: Partial<CloseDraft>) => void; errors: FieldErrors; lock?: string };
 
@@ -77,7 +77,10 @@ function CostBreakdown({
         {SUMMARY.map((s) => (
           <li key={s.label} className="flex justify-between gap-3">
             <span className="text-muted-foreground">{s.label}</span>
-            <span className="num">{baht(s.v)}</span>
+            <span className="num">
+              {s.label === LEGACY_ADJUST_LABEL && s.v > 0 && '+'}
+              {baht(s.v)}
+            </span>
           </li>
         ))}
         <li className="flex justify-between gap-3 border-t border-border pt-2 text-base font-semibold">

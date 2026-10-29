@@ -28,6 +28,7 @@ import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { RecordGate } from '@/components/shared/record-gate';
+import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
@@ -48,7 +49,7 @@ function SwapRefundForm() {
   const { can } = useAccess();
   const lock = useMoneyLock(); // a closed job: the refund stays as recorded (Job Money After Close may change it)
   const [tab, setTab] = React.useState('product');
-  const [mode, setMode] = React.useState('swap');
+  const [mode, setMode] = React.useState<'swap' | 'refund'>('swap');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
     inspection: '',
@@ -235,14 +236,21 @@ function SwapRefundForm() {
 
         <Section title="ข้อมูลการดำเนินงาน" icon={RefreshCcw}>
           <div role="group" aria-label="Swap หรือ Refund" className="mb-4 flex gap-2">
-            {[
-              { k: 'swap', l: 'Swap — เปลี่ยนเครื่องใหม่' },
-              { k: 'refund', l: 'Refund — คืนเงิน' },
-            ].map((o) => (
+            {(
+              [
+                { k: 'swap', l: 'Swap — เปลี่ยนเครื่องใหม่' },
+                { k: 'refund', l: 'Refund — คืนเงิน' },
+              ] as const
+            ).map((o) => (
               <button
                 key={o.k}
                 aria-pressed={mode === o.k}
-                onClick={() => setMode(o.k)}
+                onClick={() => {
+                  setMode(o.k);
+                  // a status of the other mode's list goes (the server would refuse it); the job's own one stays
+                  if (d.status && d.status !== job?.status && !SWAP_STATUS_OPTIONS[o.k].includes(d.status))
+                    upd({ status: '' });
+                }}
                 className={
                   'flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ' +
                   (mode === o.k
@@ -258,7 +266,7 @@ function SwapRefundForm() {
           <FieldGrid>
             {mode === 'swap' ? (
               <>
-                <Field label="New Serial No." required error={act.errors.newSerial}>
+                <Field label="New Serial No." error={act.errors.newSerial}>
                   <CodeInput
                     className="num"
                     maxLength={50}
@@ -342,11 +350,11 @@ function SwapRefundForm() {
               <SearchSelect
                 value={d.status}
                 onChange={(v) => upd({ status: v })}
-                // not the closed ones / ยกเลิกข้อมูล (saveSwapRefund refuses them); the job's own status may stay
+                // the mode's list only (saveSwapRefund refuses any other); the job's own status may stay
                 options={strOptions(
-                  job && !SWAP_STATUS_OPTIONS.includes(job.status)
-                    ? [job.status, ...SWAP_STATUS_OPTIONS]
-                    : SWAP_STATUS_OPTIONS,
+                  job && !SWAP_STATUS_OPTIONS[mode].includes(job.status)
+                    ? [job.status, ...SWAP_STATUS_OPTIONS[mode]]
+                    : SWAP_STATUS_OPTIONS[mode],
                 )}
                 searchPlaceholder="พิมพ์ชื่อสถานะ…"
               />
@@ -356,6 +364,7 @@ function SwapRefundForm() {
 
         <CostSummary />
         <AttachmentSection jobNo={job?.no} files={job?.attachments} />
+        <JobHistorySection job={job} />
 
         <FormActions
           saveLabel="บันทึกข้อมูล"

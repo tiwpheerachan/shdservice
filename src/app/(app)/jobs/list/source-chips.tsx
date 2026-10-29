@@ -55,7 +55,6 @@ export function SourceChips({
                   {' · '}
                   {TAT_BUCKET[tat.bucket] ?? tat.bucket}
                   {tat.type && ` · ${tat.type}`}
-                  {' · '}งานที่ยังไม่ปิด
                 </>
               ) : (
                 <>

@@ -175,6 +175,13 @@ try {
   };
   await expect([400], '/api/upload', { method: 'POST', form: form({ kind: 'product-image', id: 'TDP1' }) });
   await expect([400], '/api/attachments', { method: 'POST', form: form({ jobNo: 'TDJ0004' }) });
+  // video attachments: the storage side (signed upload, the checks of what arrived) is scripts/test-qa-video.mts
+  await expect([404], '/api/attachments/video', { method: 'POST', body: { jobNo: 'NOPE' + rand, type: 'video/mp4' } });
+  await expect([404], '/api/attachments/video/confirm', {
+    method: 'POST',
+    form: form({ jobNo: 'NOPE' + rand, file: 'v20261028120000abcdef0123456789abcd.mp4' }),
+  });
+  await expect([404, 503], '/api/files?path=jobs/TDJ0004/attachments/x.mp4&download=1');
   await test('POST /api/attachments to a deleted job → 409, nothing stored', async () => {
     await pool.query(`DELETE FROM job WHERE job_no = 'TDJDEL';
       INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJDEL', 1, 'DELETED')`);
@@ -235,6 +242,20 @@ try {
   await expect([400], '/api/jobs/TDJ0004/outsource', { method: 'POST', body: {} });
   await expect([400], '/api/jobs/TDJ0004/repair', { method: 'POST', body: {} });
   await expect([400], '/api/jobs/TDJ0004/swap-refund', { method: 'POST', body: {} });
+  await test("POST /api/jobs/TDJ0004/swap-refund → 400: a status off the Swap list (19 = Refund's); no New Serial asked", async () => {
+    const { n } = (
+      await pool.query<{ n: string }>('SELECT job_status_name AS n FROM job_status WHERE job_status_id = 19')
+    ).rows[0]!;
+    const r = await call('/api/jobs/TDJ0004/swap-refund', { method: 'POST', body: { status: n } });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.deepEqual(Object.keys((r.body.details as { fields: object }).fields), ['status']);
+  });
+  await test('POST /api/jobs/TDJ0004/close → 400: Serial เครื่องใหม่ checked when typed (newSerial)', async () => {
+    const body = { status: 'x', newSerial: 'SN ใหม่', return: { type: 'ลูกค้ามารับเอง', date: '2026-10-28' } };
+    const r = await call('/api/jobs/TDJ0004/close', { method: 'POST', body });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.ok((r.body.details as { fields: Record<string, string> }).fields.newSerial);
+  });
   await expect([200], '/api/jobs/TDJ0004/track-link');
   let linkToken = '';
   await test('POST /api/jobs/TDJ0004/track-link → 200 (a new link)', async () => {
@@ -668,6 +689,14 @@ try {
   });
   await refuses(400, { error: 'expected multipart/form-data' }, '/api/upload', { method: 'POST', body: {} });
   await refuses(400, { error: 'ไม่พบไฟล์' }, '/api/attachments', { method: 'POST', form: form({ jobNo: 'TDJ0004' }) });
+  await refuses(400, { error: 'รองรับเฉพาะวิดีโอ MP4, MOV, WebM' }, '/api/attachments/video', {
+    method: 'POST',
+    body: { jobNo: 'TDJ0004', type: 'video/x-msvideo' },
+  });
+  await refuses(400, { error: 'ไม่พบไฟล์วิดีโอที่อัปโหลด' }, '/api/attachments/video/confirm', {
+    method: 'POST',
+    form: form({ jobNo: 'TDJ0004', file: '../slip/x.mp4' }),
+  });
   await refuses(400, { error: 'Idempotency-Key ยาวเกินไป' }, '/api/customers', {
     method: 'POST',
     body: { name: 'x' },

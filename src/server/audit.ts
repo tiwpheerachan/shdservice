@@ -24,6 +24,8 @@ export type AuditAction =
   | 'RETURN'
   | 'UPLOAD'
   | 'LOGIN'
+  /** a refused sign-in (Inactive / deleted account) — summary says why */
+  | 'LOGIN_FAILED'
   | 'EXPORT';
 
 export type AuditChanges = Record<string, [unknown, unknown]>;

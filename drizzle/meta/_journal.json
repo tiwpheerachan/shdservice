@@ -15,6 +15,13 @@
       "when": 1761609600000,
       "tag": "0001_shipping_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1761696000000,
+      "tag": "0002_legacy_cleanup",
+      "breakpoints": true
     }
   ]
 }

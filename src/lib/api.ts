@@ -214,8 +214,8 @@ export async function shrinkImage(file: File, edge = 1600): Promise<File> {
 }
 
 /** XMLHttpRequest, not fetch: only it reports how much of the body has gone up. A network error / abort rejects
- *  with a TypeError, as fetch does (errMsg says "เชื่อมต่อไม่สำเร็จ…"). */
-const xhrSend =
+ *  with a TypeError, as fetch does (errMsg says "เชื่อมต่อไม่สำเร็จ…"); `init.signal` aborts it. */
+export const xhrSend =
   (onProgress: (sent: number, total: number) => void): Send =>
   (url, init) =>
     new Promise((resolve, reject) => {
@@ -232,6 +232,7 @@ const xhrSend =
           }),
         );
       x.onerror = x.onabort = x.ontimeout = () => reject(new TypeError('upload failed'));
+      init.signal?.addEventListener('abort', () => x.abort());
       x.send(init.body as XMLHttpRequestBodyInit);
     });
 

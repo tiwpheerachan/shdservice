@@ -107,7 +107,9 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
       <Box title="เงื่อนไขการรับซ่อม">
         <ol className="list-decimal space-y-0.5 pl-5 text-[11px]">
           {REPAIR_TERMS.map((t) => (
-            <li key={t}>{t}</li>
+            <li key={t.text} className={t.strong ? 'font-bold' : undefined}>
+              {t.text}
+            </li>
           ))}
         </ol>
       </Box>

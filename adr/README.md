@@ -9,9 +9,11 @@
 | 0002 | [Soft delete แบบเดียวทั้งระบบด้วย `record_status`](0002-soft-delete-record-status.md) | Accepted |
 | 0003 | [Instance เดียว: cache และ rate limit อยู่ใน memory](0003-single-instance-in-memory.md) | Accepted |
 | 0004 | [หน้าติดตามสาธารณะ fail-closed](0004-public-tracking-fail-closed.md) | Accepted |
-| 0005 | [ความปลอดภัยของ DB production](0005-production-db-safety.md) | Accepted |
+| 0005 | [ความปลอดภัยของ DB production](0005-production-db-safety.md) | Accepted (ข้อ migrate จากเครื่อง → 0009) |
 | 0006 | [แบ่งงาน agent ตามพื้นที่โค้ด](0006-agents-split-by-area.md) | Accepted |
 | 0007 | [API แบบ contract-first: zod → OpenAPI → /api-docs, คำตอบถูกตรวจกับสัญญา](0007-contract-first-api.md) | Accepted |
+| 0008 | [`pk bigint` ภายใน + `id uuid v7` ภายนอก ทุกตาราง (แบบ OneLink) — หลังเลิกใช้ระบบเก่า](0008-bigint-pk-uuid7-id.md) | Deferred |
+| 0009 | [Migrate ฐานที่ระบุชื่อเอง: dev / prod (ถามก่อน) / deploy — แบบ OneLink](0009-migrate-target-said-out-loud.md) | Accepted |
 
 ## เขียน ADR ใหม่
 

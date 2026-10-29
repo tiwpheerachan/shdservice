@@ -217,11 +217,21 @@ function CustomersPageInner() {
     }
   };
 
+  const statusBadge = (r: Customer) =>
+    deletedView ? (
+      <Badge tone="neutral">ลบแล้ว</Badge>
+    ) : (
+      <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
+        {r.status}
+      </Badge>
+    );
+
   const columns: Column<Customer>[] = [
     {
       key: 'code',
       header: 'รหัสลูกค้า',
       width: '120px',
+      hideBelow: 'sm', // phones: name (+ code / phone / status under it) + action
       cell: (r) => <span className="num font-medium">{r.code}</span>,
     },
     {
@@ -229,9 +239,17 @@ function CustomersPageInner() {
       header: 'ชื่อ-สกุล',
       cell: (r) => (
         // a long company name would keep the column (and the table) wide — cut it, the full name on hover
-        <div className="min-w-0 max-w-[320px]" title={r.name}>
+        <div className="min-w-0 max-w-[180px] sm:max-w-[320px]" title={r.name}>
           <p className="truncate font-medium">{r.name}</p>
           <p className="num truncate text-2xs text-muted-foreground">เลขผู้เสียภาษี {r.taxId || '—'}</p>
+          {/* a phone: the code / phone / status columns are hidden — shown here, so the actions fit beside the name */}
+          <div className="mt-1 flex flex-wrap items-center gap-1 sm:hidden">
+            <span className="num text-2xs">
+              {r.code}
+              {r.phone && ` · ${r.phone}`}
+            </span>
+            {statusBadge(r)}
+          </div>
         </div>
       ),
     },
@@ -250,6 +268,7 @@ function CustomersPageInner() {
       key: 'phone',
       header: 'เบอร์โทรศัพท์',
       width: '140px',
+      hideBelow: 'sm',
       cell: (r) => <span className="num">{r.phone}</span>,
     },
     { key: 'email', header: 'Email', hideBelow: 'xl' },
@@ -257,14 +276,8 @@ function CustomersPageInner() {
       key: 'status',
       header: 'สถานะ',
       width: '100px',
-      cell: (r) =>
-        deletedView ? (
-          <Badge tone="neutral">ลบแล้ว</Badge>
-        ) : (
-          <Badge tone={r.status === 'Active' ? 'success' : 'neutral'} dot>
-            {r.status}
-          </Badge>
-        ),
+      hideBelow: 'sm',
+      cell: (r) => statusBadge(r),
     },
     {
       key: 'action',

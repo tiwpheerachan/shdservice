@@ -1,6 +1,7 @@
 import 'server-only';
 import sharp from 'sharp';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { AwsClient } from 'aws4fetch';
 import { isoDateTime } from '@/lib/dates';
 import { HttpError } from '@/server/http-error';
 import { logError } from '@/lib/log';
@@ -15,6 +16,7 @@ import { logError } from '@/lib/log';
  * Legacy product images and job attachments (the old server's FileUpload folder)
  * were copied into the same layout; rows whose file was missing on the old server
  * just show their file name.
+ * Video attachments are the exception: Cloudflare R2 (onR2 below), same paths.
  */
 export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'oneservice';
 
@@ -35,6 +37,15 @@ export function resolvePath(stored: string, fallback: (file: string) => string):
 export const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Video job attachments (a customer's clip of the fault): converted in the browser (src/lib/video.ts) and PUT
+ * straight to Cloudflare R2 with a presigned URL — never through this server — then checked by
+ * checkStoredVideo. Kept forever for now; a retention rule (e.g. delete N days after the job closes) may come
+ * (R2 moves them to Infrequent Access after 30 days — a lifecycle rule set in Cloudflare).
+ */
+export const VIDEO_TYPES: ReadonlySet<string> = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
 /** extension stored for each accepted type — never the one in the user's file name */
 const EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -42,6 +53,9 @@ const EXT: Record<string, string> = {
   'image/webp': '.webp',
   'application/pdf': '.pdf',
   'image/svg+xml': '.svg',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
 };
 /** a logo may also be an SVG (logos only — never a photo / slip: sharp would rasterise it) */
 export const LOGO_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
@@ -55,6 +69,10 @@ const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
   'application/pdf': (b) => ascii(b, 0, 5) === '%PDF-',
   // text: checked whole by svgProblem
   'image/svg+xml': () => true,
+  // ISO base media (MP4 / MOV): the first box is `ftyp`; WebM: the EBML header
+  'video/mp4': (b) => ascii(b, 4, 8) === 'ftyp',
+  'video/quicktime': (b) => ascii(b, 4, 8) === 'ftyp',
+  'video/webm': (b) => b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3,
 };
 
 /**
@@ -201,26 +219,142 @@ export function systemFileName(type: string): string {
   return `${stamp}${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}${ext}`;
 }
 
-export async function uploadFile(path: string, file: File | Blob, contentType?: string): Promise<void> {
+/**
+ * Which store a path is in. A video POST /api/attachments/video issues is named `v` + systemFileName — the `v`
+ * is what sends it to Cloudflare R2: jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm, and its thumbnail
+ * (the same + `.jpg`). Everything else stays in Supabase: images, PDFs, slips, logos — and the legacy system's
+ * .mp4 attachments, whose names have no such `v` (so a video is never routed by its extension alone).
+ */
+const ON_R2 = /^jobs\/[^/]+\/attachments\/v\d{14}[0-9a-f]{20}\.(?:mp4|mov|webm)(?:\.jpg)?$/;
+export const onR2 = (path: string) => ON_R2.test(path);
+/** a new video's stored name (40 chars) — see onR2 */
+export const videoFileName = (type: string) => `v${systemFileName(type)}`;
+
+/**
+ * Cloudflare R2 — bucket R2_BUCKET (private), S3 API signed with SigV4 (aws4fetch), path-style
+ * https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{bucket}/{key}. Unset → the video API answers 503 and the
+ * attach box offers no video (R2_MISSING); images / PDFs are unaffected.
+ */
+const R2_ENV = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'] as const;
+export const R2_MISSING = 'ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ';
+const r2Env = (k: (typeof R2_ENV)[number]) => (process.env[k] ?? '').trim();
+export const r2Ready = () => R2_ENV.every((k) => !!r2Env(k));
+let r2Client: AwsClient | null = null;
+/** the client and the object's URL; 503 when R2 is not configured */
+function r2(path: string) {
+  if (!r2Ready()) throw new HttpError(503, R2_MISSING);
+  r2Client ??= new AwsClient({
+    accessKeyId: r2Env('R2_ACCESS_KEY_ID'),
+    secretAccessKey: r2Env('R2_SECRET_ACCESS_KEY'),
+    service: 's3',
+    region: 'auto',
+    retries: 1, // its default (10, with backoff) would hold a request far past the 15 s timeout
+  });
+  const url = new URL(`https://${r2Env('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com/${r2Env('R2_BUCKET')}/${path}`);
+  return { client: r2Client, url };
+}
+/** a presigned R2 URL (the query carries the signature and `X-Amz-Expires`) */
+const r2Presign = async (client: AwsClient, url: URL, init: RequestInit) =>
+  (await client.sign(url, { ...init, aws: { signQuery: true, allHeaders: true } })).url;
+
+/** the bucket, created on first use per process (no-op if it exists) — not a round-trip per upload */
+async function bucket() {
   const s = storage();
-  // create the bucket on first use per process (no-op if it exists) — not a round-trip per upload
   bucketReady ??= s.createBucket(BUCKET, { public: false }).then(
     () => undefined,
     () => undefined,
   );
   await bucketReady;
+  return s;
+}
+
+export async function uploadFile(path: string, file: File | Blob, contentType?: string): Promise<void> {
   const buf = Buffer.from(await file.arrayBuffer());
-  const { error } = await s
-    .from(BUCKET)
-    .upload(path, buf, { contentType: contentType || (file as File).type || 'application/octet-stream', upsert: true });
+  const type = contentType || (file as File).type || 'application/octet-stream';
+  if (onR2(path)) {
+    const { client, url } = r2(path);
+    const res = await client.fetch(url, {
+      method: 'PUT',
+      body: buf,
+      headers: { 'content-type': type },
+      signal: AbortSignal.timeout(15_000),
+    });
+    await res.body?.cancel();
+    if (!res.ok) throw new Error(`อัปโหลดไฟล์ไม่สำเร็จ (R2: ${res.status}) — ตรวจสอบ R2_ACCESS_KEY_ID / R2_BUCKET`);
+    return;
+  }
+  const s = await bucket();
+  const { error } = await s.from(BUCKET).upload(path, buf, { contentType: type, upsert: true });
   if (error)
     throw new Error(
       `อัปโหลดไฟล์ไม่สำเร็จ (Supabase Storage: ${error.message}) — ตรวจสอบ SUPABASE_SECRET_KEY / bucket "${BUCKET}"`,
     );
 }
 
-export async function signedUrl(path: string, seconds = 120): Promise<string | null> {
-  const { data, error } = await storage().from(BUCKET).createSignedUrl(path, seconds);
+/**
+ * A presigned R2 URL the browser PUTs one video to, valid 2 h — a video is too big to pass through this server.
+ * Signed with Content-Type `type` (no other type) and `If-None-Match: *` (a conditional write: R2 answers 412 when
+ * the key exists), so like Supabase's upload URL it can never overwrite — not even the video it put there.
+ */
+export async function signedUploadUrl(path: string, type: string): Promise<string> {
+  const { client, url } = r2(path);
+  url.searchParams.set('X-Amz-Expires', String(2 * 60 * 60));
+  return r2Presign(client, url, { method: 'PUT', headers: { 'content-type': type, 'if-none-match': '*' } });
+}
+
+/**
+ * A video the browser put straight into the bucket (signedUploadUrl — nothing here saw it): there, not empty,
+ * ≤ MAX_VIDEO_BYTES, stored as the type its name says, and its first bytes say so too (`ftyp` / EBML). One ranged
+ * GET reads 16 bytes and the size (Content-Range) — never the whole file. Throws 404 / 413 / 415 (Thai).
+ */
+export async function checkStoredVideo(path: string): Promise<void> {
+  const type = [...VIDEO_TYPES].find((t) => path.endsWith(EXT[t]!));
+  const init = { headers: { Range: 'bytes=0-15' }, signal: AbortSignal.timeout(15_000) };
+  let res: Response | null;
+  if (onR2(path)) {
+    const { client, url } = r2(path);
+    res = await client.fetch(url, init);
+  } else {
+    const url = await signedUrl(path, 60);
+    res = url ? await fetch(url, init) : null;
+  }
+  if (!res?.ok) {
+    await res?.body?.cancel();
+    throw new HttpError(404, 'ไม่พบไฟล์วิดีโอที่อัปโหลด — แนบใหม่อีกครั้ง');
+  }
+  const size = Number(res.headers.get('content-range')?.split('/')[1] ?? res.headers.get('content-length'));
+  const head = await firstBytes(res, 16);
+  if (size > MAX_VIDEO_BYTES) throw new HttpError(413, 'วิดีโอใหญ่เกิน 200MB');
+  if (!(size > 0) || !type || res.headers.get('content-type')?.split(';')[0] !== type || !SIGNATURES[type]!(head))
+    throw new HttpError(415, 'ไฟล์ที่อัปโหลดไม่ใช่วิดีโอ MP4 / MOV / WebM จริง');
+}
+
+/** the first `n` bytes of a body; the rest is dropped unread (a server ignoring Range would send it all) */
+async function firstBytes(res: Response, n: number): Promise<Uint8Array> {
+  const out = new Uint8Array(n);
+  let got = 0;
+  const reader = res.body?.getReader();
+  while (reader && got < n) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const part = value.subarray(0, n - got);
+    out.set(part, got);
+    got += part.length;
+  }
+  await reader?.cancel();
+  return out.subarray(0, got);
+}
+
+export async function signedUrl(path: string, seconds = 120, download = false): Promise<string | null> {
+  if (onR2(path)) {
+    const { client, url } = r2(path);
+    url.searchParams.set('X-Amz-Expires', String(seconds));
+    if (download) url.searchParams.set('response-content-disposition', 'attachment');
+    return r2Presign(client, url, { method: 'GET' });
+  }
+  const { data, error } = await storage()
+    .from(BUCKET)
+    .createSignedUrl(path, seconds, download ? { download: true } : undefined);
   if (error) {
     logError(error, 'storage signedUrl failed');
     return null;
@@ -230,6 +364,18 @@ export async function signedUrl(path: string, seconds = 120): Promise<string | n
 
 export async function removeFile(path: string): Promise<void> {
   // a leftover object is not worth failing the save that replaced it — logged, then dropped
+  if (onR2(path)) {
+    if (!r2Ready()) return; // nothing can be there
+    try {
+      const { client, url } = r2(path);
+      const res = await client.fetch(url, { method: 'DELETE', signal: AbortSignal.timeout(15_000) });
+      await res.body?.cancel();
+      if (!res.ok) throw new Error(`R2 DELETE answered ${res.status}`);
+    } catch (e) {
+      logError(e, 'storage removeFile failed');
+    }
+    return;
+  }
   const { error } = await storage()
     .from(BUCKET)
     .remove([path])

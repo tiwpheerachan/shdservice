@@ -14,7 +14,7 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     # migrations run only AFTER a successful build (a failed build leaves the schema untouched),
     # just before the new version takes traffic. db:migrate is idempotent (scripts/migrate.ts).
-    preDeployCommand: npm run db:migrate
+    preDeployCommand: npm run db:migrate:deploy
     # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains;
     # the heap cap (512 MB Starter) is here, not in NODE_OPTIONS: env vars reach the build too, and
     # `next build` runs out of memory under 400 MB

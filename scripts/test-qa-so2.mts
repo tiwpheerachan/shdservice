@@ -212,13 +212,13 @@ try {
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.equal((await hd(o.no)).rs, 'ACTIVE');
   });
-  await test('a denied order: its creator may not cancel it (403), an SO Approve user may', async () => {
+  await test('a denied order is final: neither its creator nor an SO Approve user cancels it (409)', async () => {
     const o = await create(U.seller);
     assert.equal((await decide(U.approver, o.no, 'deny')).status, 200);
     const mine = await cancel(U.seller, o.no, 'Q2');
-    assert.equal(mine.status, 403, JSON.stringify(mine.body));
+    assert.equal(mine.status, 409, JSON.stringify(mine.body));
+    assert.equal((await cancel(U.approver, o.no, 'Q2')).status, 409);
     assert.equal((await hd(o.no)).rs, 'ACTIVE');
-    assert.equal((await cancel(U.approver, o.no, 'Q2')).status, 200);
   });
   await test('cancelled orders: hidden from the list by default, listed with deleted=all for a view-only role', async () => {
     const o = await create(U.seller, { submit: false });

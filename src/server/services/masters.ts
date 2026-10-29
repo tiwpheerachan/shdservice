@@ -7,7 +7,7 @@ import type { MasterRow, Symptom, Model } from '@/data/types';
 import { HttpError } from '@/server/auth';
 import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
 import { nextRunningNo } from '@/db/running-no';
-import { audit, diff } from '@/server/audit';
+import { audit, diff, type AuditChanges } from '@/server/audit';
 import { productsChanged } from './stock';
 import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
 import {
@@ -34,6 +34,25 @@ import { clean } from '@/lib/validation';
 export type DeletedMode = StatusMode;
 
 const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
+
+/** an edit that only switched the status reads as a status change in the audit log — as the status switch writes it */
+function editAudit(changes: AuditChanges | null, noun: string, key: string | number, name: string, summary: string) {
+  const rs = changes?.recordStatus;
+  const onlyStatus = !!rs && Object.keys(changes!).every((k) => k === 'recordStatus' || k === 'isActive');
+  return onlyStatus
+    ? {
+        action: rs[1] === 'DELETED' ? ('DELETE' as const) : ('STATUS' as const),
+        summary: statusSummary({ noun, key, name, old: rs[0] as string, rs: rs[1] as string }),
+      }
+    : { action: 'UPDATE' as const, summary };
+}
+
+/** a save's status columns, judged on the locked row: an edit that sends no status or keeps the stored one writes none
+ *  (status_changed_at / _by say when the status last changed, not when the row was last saved) */
+const saveStamp = (sent: string | undefined, before: { recordStatus: string | null } | undefined, byUserId: number) =>
+  before && (sent === undefined || fromUiStatus(sent) === before.recordStatus)
+    ? {}
+    : statusStamp(fromUiStatus(sent), byUserId);
 
 /** the column as masterNameKey() sees a name (no spaces, lower case) */
 const nameKeyOf = (col: Parameters<typeof eq>[0]) =>
@@ -190,14 +209,7 @@ export async function saveSimple(
     input,
   );
   const name = clean(input.name);
-  const rs = fromUiStatus(input.status);
-  const values: Record<string, unknown> = {
-    [d.keys.name]: name,
-    [d.keys.active]: rs === 'ACTIVE',
-    recordStatus: rs,
-    statusChangedAt: nowThai(),
-    statusChangedBy: byUserId,
-  };
+  const values: Record<string, unknown> = { [d.keys.name]: name };
   if (d.keys.detail) values[d.keys.detail] = clean(input.detail);
   // the page has no field for it (categories.shot_code): not sent = keep it
   if (d.keys.extra && input.extra !== undefined) values[d.keys.extra] = clean(input.extra).slice(0, 50);
@@ -224,6 +236,7 @@ export async function saveSimple(
         },
         input.expect,
       );
+    Object.assign(values, saveStamp(input.status, old as { recordStatus: string | null } | undefined, byUserId));
     // unique name ignoring case + spaces (legacy has unique indexes on most names); a row keeping its own
     // name is not checked — 5 legacy symptom pairs already clash and must stay editable
     if (!old || masterNameKey(old[d.keys.name]) !== masterNameKey(name)) {
@@ -241,14 +254,16 @@ export async function saveSimple(
         .update(d.table)
         .set(values)
         .where(eq(d.id, Number(input.id)));
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Admin',
-        entity: kind,
-        key: input.id!,
-        summary: `แก้ไข ${kind}: ${name}`,
-        changes: diff(old, values),
-      });
+      // saved with nothing changed → no audit line (as a user save)
+      const changes = diff(old, values);
+      if (changes)
+        await audit(tx, byUserId, {
+          ...editAudit(changes, KIND_NOUN[kind], input.id!, name, `แก้ไข${KIND_NOUN[kind]}: ${name}`),
+          module: 'Admin',
+          entity: kind,
+          key: input.id!,
+          changes,
+        });
       return Number(input.id);
     }
     const [row] = await tx.insert(d.table).values(values).returning({ id: d.id });
@@ -258,7 +273,7 @@ export async function saveSimple(
       module: 'Admin',
       entity: kind,
       key: row.id,
-      summary: `เพิ่ม ${kind}: ${name}`,
+      summary: `เพิ่ม${KIND_NOUN[kind]}: ${name}`,
     });
     return row.id;
   });
@@ -284,6 +299,7 @@ export async function setSimpleStatus(kind: SimpleKind, id: number, rs: RecordSt
   await db.transaction(async (tx) => {
     const [old] = await tx.select({ rs: d.active, name: d.name }).from(d.table).where(eq(d.id, id)).for('update');
     if (!old) throw new HttpError(404, `ไม่พบรายการ ${kind} #${id}`);
+    if (old.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
     await tx
       .update(d.table)
       .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
@@ -339,7 +355,6 @@ export async function saveSymptom(
     symptomName: name,
     symptomDescription: clean(input.detail),
     symptomGroupName: clean(input.group),
-    ...statusStamp(fromUiStatus(input.status), byUserId),
   };
   const id = await db.transaction(async (tx) => {
     await lockName(tx, 'symptoms', name);
@@ -370,18 +385,23 @@ export async function saveSymptom(
     }
     if (input.id) {
       const id = Number(input.id);
-      await tx.update(symptom).set(values).where(eq(symptom.symptomId, id));
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Admin',
-        entity: 'symptom',
-        key: id,
-        summary: `แก้ไขอาการเสีย: ${name}`,
-        changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
-      });
+      const set = { ...values, ...saveStamp(input.status, before, byUserId) };
+      await tx.update(symptom).set(set).where(eq(symptom.symptomId, id));
+      const changes = diff(before as Record<string, unknown>, set as Record<string, unknown>);
+      if (changes)
+        await audit(tx, byUserId, {
+          ...editAudit(changes, 'อาการเสีย', id, name, `แก้ไขอาการเสีย: ${name}`),
+          module: 'Admin',
+          entity: 'symptom',
+          key: id,
+          changes,
+        });
       return id;
     }
-    const [row] = await tx.insert(symptom).values(values).returning({ id: symptom.symptomId });
+    const [row] = await tx
+      .insert(symptom)
+      .values({ ...values, ...saveStamp(input.status, undefined, byUserId) })
+      .returning({ id: symptom.symptomId });
     if (!row) throw new Error('symptom insert returned no row');
     await audit(tx, byUserId, {
       action: 'CREATE',
@@ -403,6 +423,7 @@ export async function setSymptomStatus(id: number, rs: RecordStatus, byUserId: n
       .from(symptom)
       .where(eq(symptom.symptomId, id))
       .for('update');
+    if (old?.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
     await tx.update(symptom).set(statusStamp(rs, byUserId)).where(eq(symptom.symptomId, id));
     await audit(tx, byUserId, {
       action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
@@ -471,7 +492,6 @@ export async function saveModel(
     modelName: name,
     manufacturerId: brandId,
     marketPrice: money(num(input.price)),
-    ...statusStamp(fromUiStatus(input.status), byUserId),
     lastUpdate: nowThai(),
   };
 
@@ -514,19 +534,23 @@ export async function saveModel(
       if (dup) throw duplicate({ name: dup.name, ref: dup.code ?? '', rs: dup.rs });
     }
     if (input.code) {
-      await tx.update(model).set(values).where(eq(model.modelCode, input.code));
-      await audit(tx, byUserId, {
-        action: 'UPDATE',
-        module: 'Admin',
-        entity: 'model',
-        key: input.code,
-        summary: `แก้ไขรุ่นสินค้า ${name}`,
-        changes: diff(before as Record<string, unknown>, values as Record<string, unknown>),
-      });
+      const set = { ...values, ...saveStamp(input.status, before, byUserId) };
+      await tx.update(model).set(set).where(eq(model.modelCode, input.code));
+      const changes = diff(before as Record<string, unknown>, set as Record<string, unknown>);
+      if (changes)
+        await audit(tx, byUserId, {
+          ...editAudit(changes, 'รุ่นสินค้า', input.code, name, `แก้ไขรุ่นสินค้า ${name}`),
+          module: 'Admin',
+          entity: 'model',
+          key: input.code,
+          changes,
+        });
       return input.code;
     }
     const c = await nextRunningNo(tx, 'Model');
-    await tx.insert(model).values({ ...values, modelCode: c, tierId: 0 });
+    await tx
+      .insert(model)
+      .values({ ...values, ...saveStamp(input.status, undefined, byUserId), modelCode: c, tierId: 0 });
     await audit(tx, byUserId, {
       action: 'CREATE',
       module: 'Admin',
@@ -547,6 +571,7 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
       .from(model)
       .where(eq(model.modelCode, code))
       .for('update');
+    if (old?.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
     await tx
       .update(model)
       .set({ ...statusStamp(rs, byUserId), lastUpdate: nowThai() })

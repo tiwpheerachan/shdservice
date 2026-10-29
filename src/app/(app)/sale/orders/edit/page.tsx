@@ -208,14 +208,14 @@ function EditSaleOrder() {
   // a waiting order is edited only by its creator (System Admin may) — the server refuses anyone else
   const waitingLocked = approveId === 2 && !isAdmin && userId !== loaded?.createdById;
   const canEditTracking = isAdmin || can('Sale Order', 'edit');
-  // who may cancel — the records API's rule: Sale Order delete, and System Admin / SO Approve, or the creator
-  // while it is not denied; never an approved (stock issued) or cancelled one
+  // who may cancel — the records API's rule: Sale Order delete, and System Admin / SO Approve, or the creator;
+  // never a closed (approved = stock issued, or denied) or cancelled one
   const canCancel =
     !!loaded &&
     !loaded.cancelled &&
-    approveId !== 4 &&
+    !closed &&
     can('Sale Order', 'edit') &&
-    (isAdmin || has('SO Approve') || (userId === loaded.createdById && approveId !== 5));
+    (isAdmin || has('SO Approve') || userId === loaded.createdById);
 
   return (
     <>

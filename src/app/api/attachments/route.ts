@@ -1,13 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { job } from '@/db/schema';
 import { handle, parseForm, requireCan, HttpError } from '@/server/auth';
 import { attachmentAdd } from '@/server/contract/jobs';
 import { idempotent } from '@/server/idempotency';
 import { rateLimit } from '@/server/rate-limit';
-import { addAttachment } from '@/server/services/jobs';
-import { RS } from '@/server/record-status';
+import { addAttachment, attachableJob } from '@/server/services/jobs';
 import {
   systemFileName,
   uploadFile,
@@ -36,13 +32,8 @@ export const POST = handle(async (req: NextRequest) => {
   return idempotent(req, user.userId, async () => {
     // 400 "expected multipart/form-data" / "ไม่พบไฟล์"; jobNo upper-cased, remark cut at 200
     const { file: sent, jobNo, remark } = await parseForm(req, attachmentAdd);
-    // jobNo becomes part of the storage path — it must be a real job, not any string
-    const [row] = jobNo
-      ? await db.select({ no: job.jobNo, status: job.recordStatus }).from(job).where(eq(job.jobNo, jobNo)).limit(1)
-      : [];
-    if (!row) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
-    // a deleted job takes no writes (lockJob's rule) — refused before the upload, so no orphan file is stored
-    if (row.status === RS.DELETED) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้');
+    // jobNo becomes part of the storage path — a real job (404), not deleted (409): refused before the upload
+    const no = await attachableJob(jobNo);
     const problem = await fileProblem(sent);
     if (problem) throw new HttpError(problem.startsWith('ไฟล์ใหญ่') ? 413 : 415, problem);
     // photos resized + re-encoded (EXIF — GPS, camera serial — goes), as /api/upload; video / PDF untouched
@@ -54,10 +45,10 @@ export const POST = handle(async (req: NextRequest) => {
       throw e;
     }
     const sys = systemFileName(file.type); // after optimizeImage: a photo-PNG may now be a JPEG
-    const path = filePath.attachment(row.no, sys);
+    const path = filePath.attachment(no, sys);
     await uploadFile(path, file);
     // the job is checked again under its lock when the row goes in (deleted during the upload → 409): no orphan file
-    const id = await addAttachment(row.no, file.name.slice(0, 200), sys, remark, user.userId).catch(async (e) => {
+    const id = await addAttachment(no, file.name.slice(0, 200), sys, remark, user.userId).catch(async (e) => {
       await removeFile(path);
       throw e;
     });

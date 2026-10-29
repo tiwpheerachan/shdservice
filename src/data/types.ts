@@ -227,6 +227,7 @@ export type DashGroup = {
 export type TatRow = {
   statusId?: number; // job_status_id — used to deep-link a cell into the job list
   status: string;
+  group: string; // job_status_group (Pending / Repaired / Finished) — the row's colour bar
   d13: number;
   d47: number;
   d814: number;

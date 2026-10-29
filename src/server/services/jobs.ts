@@ -81,6 +81,7 @@ import {
   moneyLockedMsg,
   cleanSerial,
   parseSwap,
+  isSwap,
   paymentDetailOf,
   returnDetailOf,
   RECEIVE_BEFORE_SEND,
@@ -95,6 +96,7 @@ import {
   STATUS_CLOSE_ONLY,
   STATUS_DELETE_ONLY,
   REPAIR_STATUS_ONLY,
+  SWAP_STATUS_ONLY,
   EDIT_STATUS_ONLY,
   partCharge,
   NOT_ENGINEER,
@@ -469,6 +471,9 @@ const baseQuery = () =>
     .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
     .leftJoin(customer, eq(customer.customerId, job.customerId));
 
+/** TAT days as the dashboard counts them (the legacy table): opening → the return, else the close, else today
+ *  (the Thai calendar day — job dates are stored as Thai wall-clock). 0 days counts in 1-3. */
+const tatDays = sql`((case when ${job.jobReturnDate} > '1901-01-01' then ${job.jobReturnDate} when ${job.jobClosedDate} > '1901-01-01' then ${job.jobClosedDate} else now() AT TIME ZONE 'Asia/Bangkok' end)::date - ${job.jobCreateDate}::date)`;
 const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   no: job.jobNo,
   openDate: job.jobCreateDate,
@@ -484,12 +489,24 @@ const SORT: Record<string, Parameters<typeof orderBy>[1][string]> = {
   repairedDate: job.jobRepairedDate,
   // รายงานการปิดงานซ่อม: TAT = วันที่ปิดงาน − วันที่เปิดงาน
   // calendar days, as the report's TAT cell and its "เกิน 30 วัน" count read it (not hours: 6.9 days would sort after 7)
-  tat: sql`(${job.jobClosedDate}::date - ${job.jobCreateDate}::date)`,
+  tat: tatDays, // as the dashboard counts it
   returnType: job.returnCustomerType,
   paymentAmount: job.jobPaymentAmount,
 };
 
+export const TAT_BUCKETS = ['d13', 'd47', 'd814', 'd1530', 'over30'] as const;
+export type TatBucket = (typeof TAT_BUCKETS)[number];
+const TAT_IN: Record<TatBucket, SQL> = {
+  d13: sql`${tatDays} <= 3`,
+  d47: sql`${tatDays} between 4 and 7`,
+  d814: sql`${tatDays} between 8 and 14`,
+  d1530: sql`${tatDays} between 15 and 30`,
+  over30: sql`${tatDays} > 30`,
+};
+
 export type JobFilters = {
+  /** dashboard TAT bucket (a number in the TAT table opens exactly its jobs) */
+  tat?: TatBucket;
   status?: string; // status name
   statusId?: number;
   statusGroup?: string; // Pending | Repaired | Finished | Cancel
@@ -626,6 +643,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.statusId !== undefined ? eq(job.jobStatusId, f.statusId) : undefined,
     f.statusGroup ? inKpiGroup(f.statusGroup) : undefined,
     f.open ? isOpenJob : undefined,
+    f.tat ? TAT_IN[f.tat] : undefined,
     f.overdue ? overdueWhere : undefined,
     f.type ? eq(jobType.jobTypeName, f.type) : undefined,
     f.engineer
@@ -701,6 +719,7 @@ export function filtersFromQuery(f: Record<string, string>): JobFilters {
     statusId: /^\d+$/.test(f.statusId ?? '') ? Number(f.statusId) : undefined, // junk → NaN would 500
     statusGroup: f.statusGroup,
     open: f.open === '1',
+    tat: (TAT_BUCKETS as readonly string[]).includes(f.tat ?? '') ? (f.tat as TatBucket) : undefined,
     type: f.type,
     engineer: f.engineer,
     channel: f.channel,
@@ -1487,6 +1506,11 @@ const REPAIR_STATUS_IDS: number[] = [
   JS.REPAIRED_PAID,
   JS.REPAIRED_NO_FAULT,
 ];
+/** Swap / Refund's statuses by mode (SWAP_STATUS_OPTIONS, by id) */
+const SWAP_STATUS_IDS = {
+  swap: [JS.RETURNED_TO_STOCK, JS.SWAP_ISSUED],
+  refund: [JS.RETURNED_TO_STOCK, JS.REFUND_PAID],
+};
 
 /**
  * A status picked on a workflow page (บันทึกซ่อม / Swap-Refund / แก้ไขงาน): never a closed one or ยกเลิกข้อมูล
@@ -1934,6 +1958,17 @@ function withNewSerial(replace: string | null, serial: string): string {
     throw new HttpError(400, msg, { fields: { newSerial: msg } });
   }
   return v;
+}
+
+/**
+ * job.swap_refund_detail with its "New S/N" line set (first, as the Swap page writes it) — ปิดงาน's Serial
+ * เครื่องใหม่. A legacy free text ("เปลี่ยนสินค้า") is kept as its รายละเอียด, as a Swap page save keeps it.
+ */
+function swapDetailWithSerial(detail: string, serial: string): string {
+  const rest = Object.keys(parseSwap(detail)).length
+    ? detail.split('\n').filter((l) => l.trim() && !l.startsWith('New S/N:'))
+    : [`รายละเอียด: ${clean(detail)}`];
+  return [`New S/N: ${serial}`, ...rest].join('\n');
 }
 
 /** บันทึกงานซ่อม's job columns: what the page sent (a cost left out keeps the stored one) + the parts total */
@@ -2542,8 +2577,9 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i,
   );
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
-  // any status but a closed one / ยกเลิกข้อมูล (SWAP_STATUS_OPTIONS): a close is ปิดงาน's, a delete System Admin's
-  await assertPageStatus(newStatus, cur.status, null);
+  // only the mode's list (SWAP_STATUS_OPTIONS; refund fields = Refund, as swapRefundSchema) or the job's own status
+  const refund = i.refundAmount !== undefined || i.refundMethod !== undefined;
+  await assertPageStatus(newStatus, cur.status, SWAP_STATUS_IDS[refund ? 'refund' : 'swap'], SWAP_STATUS_ONLY);
   const newSerial = cleanSerial(i.newSerial);
   const refundRef = cleanCode(i.refundRef);
   const lines = [
@@ -2621,7 +2657,12 @@ async function assertClose(j: JobRow, i: CloseInput, byUserId: number) {
   // money is locked — it keeps what it has)
   const back = jobBalance(num(j.jobTotalCost), num(j.depositCost), 0).refund;
   const required = back > 0 && num(j.jobPaymentAmount) === 0 && !(await moneyLocked(j.jobStatusId, byUserId));
-  const prev = { payNo: j.jobPaymentNo, tracking: j.returnCustomerTrackingNo, refund: { max: back, required } };
+  const prev = {
+    payNo: j.jobPaymentNo,
+    tracking: j.returnCustomerTrackingNo,
+    newSerial: parseSwap(j.sparePartReplace ?? '')['New S/N'],
+    refund: { max: back, required },
+  };
   assertValid(closeSchema(prev), i);
 }
 
@@ -2649,8 +2690,15 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     const ret = i.return ?? {};
     // a refund stored as a negative payment (Swap/Refund, คืนมัดจำ) is never wiped by a payment of nothing
     const payNothing = num(before.jobPaymentAmount) < 0 && !(num(pay.amount) > 0);
+    // Serial เครื่องใหม่ (a swap job): stored as the Swap page stores it — only a changed one is written
+    const newSerial = cleanSerial(i.newSerial);
+    const serialNew = !!newSerial && newSerial !== parseSwap(before.sparePartReplace ?? '')['New S/N'];
     const fields = {
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
+      ...(serialNew ? { sparePartReplace: withNewSerial(before.sparePartReplace, newSerial) } : {}),
+      ...(serialNew && isSwap(before.swapRefundDetail ?? '')
+        ? { swapRefundDetail: swapDetailWithSerial(before.swapRefundDetail ?? '', newSerial) }
+        : {}),
       ...(i.refund
         ? {
             jobPaymentType: clean(i.refund.type).slice(0, 50), // a list value — safety net
@@ -2705,6 +2753,20 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
 /* ------------------------------------------------------------------ *
  * Attachments (document_attach) — files live in Supabase Storage
  * ------------------------------------------------------------------ */
+/**
+ * The job a file is about to be stored for (its number becomes part of the storage path): there (404) and not
+ * deleted (409, lockJob's rule) — checked before the upload, so a refused one stores nothing. addAttachment
+ * checks again under the lock. Returns the stored job_no.
+ */
+export async function attachableJob(jobNo: string): Promise<string> {
+  const [row] = jobNo
+    ? await db.select({ no: job.jobNo, status: job.recordStatus }).from(job).where(eq(job.jobNo, jobNo)).limit(1)
+    : [];
+  if (!row) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + jobNo);
+  if (row.status === RS.DELETED) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้');
+  return row.no;
+}
+
 export async function addAttachment(
   jobNo: string,
   originalName: string,
@@ -2802,9 +2864,8 @@ function periodKeys(lo: string, hi: string, daily: boolean): string[] {
 const TH_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
 /**
- * Everything except the TAT table follows the date range (job_create_date;
- * the "closed" line of the chart uses job_closed_date). Empty from/to = all time.
- * TAT is a snapshot of the jobs still open right now, by design.
+ * Every panel follows the date range (job_create_date; the "closed" line of the chart uses
+ * job_closed_date). Empty from/to = all time.
  */
 async function computeDashboard(from: string, to: string, type = '') {
   // optional job-type filter: resolve the name once, then filter every query by id (unknown name → no rows)
@@ -2819,10 +2880,8 @@ async function computeDashboard(from: string, to: string, type = '') {
     from ? gte(job.jobCreateDate, `${from} 00:00:00`) : undefined,
     to ? lte(job.jobCreateDate, `${to} 23:59:59`) : undefined,
   );
-  // TAT buckets for open jobs (days since job_create_date) per status — snapshot, not range-bound.
-  // "today" is the Thai calendar day (job dates are stored as Thai wall-clock), so each bucket maps
-  // exactly onto a create-date range in the job list (dashboard cells deep-link there).
-  const age = sql`GREATEST(1, ((now() AT TIME ZONE 'Asia/Bangkok')::date - ${job.jobCreateDate}::date))`;
+  // TAT = the legacy table (tatDays), for the same jobs as the cards
+  const age = tatDays;
   const bucket = (cond: SQL) => sql<string>`count(*) filter (where ${cond})`;
   // open / close trend: daily when the range is ≤ 62 days, otherwise monthly (all time = from the first job).
   // Counts come grouped from Postgres; the empty days / months in between are filled in here.
@@ -2869,21 +2928,23 @@ async function computeDashboard(from: string, to: string, type = '') {
       .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
       .where(createdIn)
       .groupBy(kpiGroup),
+    // every status but ยกเลิกข้อมูล (0), with or without jobs (left join: a status with none counts 0 everywhere)
     db
       .select({
         statusId: jobStatus.jobStatusId,
         status: jobStatus.jobStatusName,
+        group: jobStatus.jobStatusGroup,
         d13: bucket(sql`${age} <= 3`),
         d47: bucket(sql`${age} between 4 and 7`),
         d814: bucket(sql`${age} between 8 and 14`),
         d1530: bucket(sql`${age} between 15 and 30`),
         over30: bucket(sql`${age} > 30`),
       })
-      .from(job)
-      .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-      .where(and(ne(job.recordStatus, RS.DELETED), ofType, isOpenJob))
-      .groupBy(jobStatus.jobStatusId, jobStatus.jobStatusName, jobStatus.displayOrder)
-      .orderBy(asc(jobStatus.displayOrder)),
+      .from(jobStatus)
+      .leftJoin(job, and(eq(job.jobStatusId, jobStatus.jobStatusId), createdIn))
+      .where(ne(jobStatus.jobStatusId, JS.CANCELLED))
+      .groupBy(jobStatus.jobStatusId, jobStatus.jobStatusName, jobStatus.jobStatusGroup, jobStatus.displayOrder)
+      .orderBy(asc(jobStatus.displayOrder), asc(jobStatus.jobStatusId)),
     trendQ(),
     db
       .select({ name: symptom.symptomName, n: count() })
@@ -2916,6 +2977,7 @@ async function computeDashboard(from: string, to: string, type = '') {
   const tatRows = tat.map((r) => ({
     statusId: Number(r.statusId),
     status: String(r.status ?? '').trim(),
+    group: r.group ?? '',
     d13: Number(r.d13),
     d47: Number(r.d47),
     d814: Number(r.d814),

@@ -10,7 +10,7 @@ import {
   type SessionUser,
 } from '@/lib/session';
 import { lookupByEmail } from '@/lib/directory';
-import { provisionFailure, provisionSsoUser } from '@/server/services/users';
+import { provisionFailure, provisionSsoUser, signInAuditLine } from '@/server/services/users';
 import { audit } from '@/server/audit';
 import { db } from '@/db/client';
 import { PENDING_ROLE, isApproved } from '@/lib/access';
@@ -40,13 +40,16 @@ async function provision(opts: {
   avatar: string;
   title: string;
 }): Promise<
-  { role: string; status: string; userId: number; sessionVersion: number } | 'user_conflict' | 'db_unavailable'
+  | { role: string; status: string; recordStatus: string | null; userId: number; sessionVersion: number }
+  | 'user_conflict'
+  | 'db_unavailable'
 > {
   try {
     const r = await provisionSsoUser(opts);
     return {
       role: r.userType ?? PENDING_ROLE,
       status: r.isActive ? 'Active' : 'Inactive',
+      recordStatus: r.recordStatus,
       userId: r.userId,
       sessionVersion: r.sessionVersion,
     };
@@ -157,16 +160,15 @@ export const GET = checked(async (request: NextRequest) => {
     title: prof?.title ?? '',
   });
   if (typeof provisioned === 'string') return fail(request, provisioned);
-  const { role, status, userId, sessionVersion } = provisioned;
+  const { role, status, recordStatus, userId, sessionVersion } = provisioned;
 
-  // audit: LOGIN (best-effort — never blocks sign-in)
+  // audit: LOGIN, or LOGIN_FAILED for a refused (Inactive / deleted) account (best-effort — never blocks sign-in)
   try {
     await audit(db, userId, {
-      action: 'LOGIN',
+      ...signInAuditLine(email, role, recordStatus),
       module: 'Auth',
       entity: 'app_user',
       key: userId || email,
-      summary: `เข้าสู่ระบบ ${email} · ${role}`,
       meta: { ip: clientIp(request.headers), ua: request.headers.get('user-agent')?.slice(0, 200) ?? null },
     });
   } catch (e) {

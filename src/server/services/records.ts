@@ -300,14 +300,17 @@ export async function setRecordStatus(
           .for('update');
         if (!cur) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
         refuseRestore(cur.rs);
-        // the creator cancels their own while it is draft / waiting / sent back — a denied one is the approver's
-        if (rs === RS.DELETED && !mayCancelOthers && (cur.by !== byUserId || cur.ap === AS.DENIED))
+        // the creator cancels their own while it is draft / waiting / sent back
+        if (rs === RS.DELETED && !mayCancelOthers && cur.by !== byUserId)
           throw new HttpError(403, 'ยกเลิกได้เฉพาะผู้สร้างใบสั่งขาย ผู้อนุมัติ หรือผู้ดูแลระบบ');
         if (rs === RS.DELETED && cur.ap === AS.APPROVED)
           throw new HttpError(
             409,
             'ใบสั่งขายนี้อนุมัติแล้ว ตัดสต็อกไปแล้ว — ยกเลิกไม่ได้ ต้องรับคืนสินค้าเข้าสต็อกก่อน',
           );
+        // denied is final, as approved (saveSaleOrder / approveSaleOrder refuse it too; legacy never cancelled one)
+        if (rs === RS.DELETED && cur.ap === AS.DENIED)
+          throw new HttpError(409, 'ใบสั่งขายนี้ถูกปฏิเสธแล้ว — ยกเลิกไม่ได้');
         // a second cancel (two people at once, a stale page) must not overwrite who cancelled it and why
         if (rs === RS.DELETED && cur.rs === RS.DELETED)
           throw new HttpError(409, 'ใบสั่งขายนี้ถูกยกเลิกไปแล้ว — โหลดหน้าใหม่');

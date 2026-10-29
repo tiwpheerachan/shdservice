@@ -11,6 +11,7 @@ import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { parseSwap, refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
+import { LEGACY_ADJUST_LABEL, legacyAdjust } from '@/components/jobs/close-money';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -59,6 +60,8 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
     .filter(Boolean)
     .join('  ');
   const shipping = j.deliveryCost + j.boxCost;
+  // legacy VAT / discount folded into job_total_cost: its own line, so the lines add up to the Grand Total
+  const adjust = legacyAdjust(j.totalCost, j.partsCost + j.serviceCost + j.toolCost + shipping);
   // the deposit given back at close (closeJob): a negative payment "คืนมัดจำ <date>"
   const refunded = j.payment.amount < 0 && j.payment.detail.startsWith(REFUND_DETAIL);
   const lbl = 'text-neutral-700';
@@ -304,7 +307,10 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
       <table className="sum">
         <tbody>
           <tr>
-            <td rowSpan={5 + (j.depositCost > 0 ? 2 : 0) + (j.outstanding > 0 ? 2 : 0)} style={{ width: '58%' }}>
+            <td
+              rowSpan={5 + (adjust ? 1 : 0) + (j.depositCost > 0 ? 2 : 0) + (j.outstanding > 0 ? 2 : 0)}
+              style={{ width: '58%' }}
+            >
               <table className="kv text-[11px]">
                 <tbody>
                   <tr>
@@ -356,6 +362,15 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
             <td className="text-right font-semibold">ค่าขนส่ง + กล่อง / Shipping :</td>
             <td className="num text-right">{money(shipping)}</td>
           </tr>
+          {adjust !== 0 && (
+            <tr>
+              <td className="text-right font-semibold">{LEGACY_ADJUST_LABEL} :</td>
+              <td className="num text-right">
+                {adjust > 0 && '+'}
+                {money(adjust)}
+              </td>
+            </tr>
+          )}
           {/* the job's own total; a deposit is taken off below it, never hidden inside it */}
           <tr>
             <td className="text-right font-bold">รวมทั้งสิ้น / Grand Total :</td>

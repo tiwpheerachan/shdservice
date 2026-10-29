@@ -14,14 +14,13 @@ export const TAT_BUCKET: Record<string, string> = { ...TAT_BUCKET_LABEL, total: 
 
 /**
  * The list in the URL (filters, table, dashboard chip) — written as it changes, read on load, so a refresh keeps
- * it. Same names as the deep links into it: dashboard TAT  ?src=tat&bucket=d814&open=1&statusId=3&status=…&from=…
+ * it. Same names as the deep links into it: dashboard TAT  ?src=tat&tat=d814&statusId=3&status=…&from=…
  * &to=…&type=…, dashboard KPI  ?src=kpi&group=Pending&label=…, bell  ?src=overdue[&engineer=<id>], customer page
  * ?customer=C43600.
  */
 function toQuery(f: Filters, t: ServerTableState, tat: TatSource | null, kpi: string | null) {
   const p = new URLSearchParams();
   if (tat) p.set('src', 'tat');
-  if (tat?.bucket) p.set('bucket', tat.bucket);
   if (kpi) p.set('src', 'kpi');
   if (kpi) p.set('label', kpi);
   for (const k of Object.keys(NO_FILTER) as (keyof Filters)[])
@@ -78,7 +77,7 @@ export function useJobListUrl() {
     const TAT_KEYS = ['status', 'statusId', 'dateBy', 'from', 'to', 'type'] as const;
     const next =
       (tat || kpi) && TAT_KEYS.some((k) => draft[k] !== filters[k])
-        ? { ...draft, open: false, statusGroup: '' }
+        ? { ...draft, open: false, statusGroup: '', tat: '' }
         : draft;
     if (next !== draft) {
       setTat(null);

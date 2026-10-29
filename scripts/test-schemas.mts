@@ -213,8 +213,9 @@ test('outsource: ส่งโดย / รับโดย are optional user ids �
   assert.ok(errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '2026-09-28', by: -1 } })['receive.by']);
   assert.ok(errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '2026-09-28', by: 1.5 } })['receive.by']);
 });
-test('swap needs New Serial; refund needs amount > 0 and a method', () => {
-  assert.ok(errorsOf(swapRefundSchema(), { status: 'x', newSerial: '' }).newSerial);
+test('swap never needs New Serial (owner 2026-10-28); refund needs amount > 0 and a method', () => {
+  assert.deepEqual(errorsOf(swapRefundSchema(), { status: 'x', newSerial: '' }), {});
+  assert.deepEqual(errorsOf(swapRefundSchema(), { status: 'x' }), {});
   assert.deepEqual(errorsOf(swapRefundSchema(), { status: 'x', newSerial: 'SN0002' }), {});
   const r = errorsOf(swapRefundSchema(), { status: 'x', refundAmount: '0', refundMethod: '' });
   assert.deepEqual(Object.keys(r).sort(), ['refundAmount', 'refundMethod']);
@@ -261,6 +262,13 @@ test('close: "ลงเลขที่พัสดุแล้ว" needs a track
   assert.deepEqual(errorsOf(closeSchema(), { ...body, return: { ...body.return, tracking: 'TH12345678' } }), {});
   // 7 = the number is still to come
   assert.deepEqual(errorsOf(closeSchema(), { ...body, status: 'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)' }), {});
+});
+test('close: Serial เครื่องใหม่ optional — checked only when typed; an unchanged stored one passes', () => {
+  const body = { status: 'x', return: { type: 'ลูกค้ามารับเอง', date: '2026-10-15' } };
+  assert.deepEqual(errorsOf(closeSchema(), { ...body, newSerial: '' }), {});
+  assert.deepEqual(errorsOf(closeSchema(), { ...body, newSerial: 'SWAP0001' }), {});
+  assert.ok(errorsOf(closeSchema(), { ...body, newSerial: 'ใหม่' }).newSerial);
+  assert.deepEqual(errorsOf(closeSchema({ newSerial: 'รอเลข' }), { ...body, newSerial: 'รอเลข' }), {});
 });
 test('outsource: receive date not before the send date (both in the payload)', () => {
   const send = { to: 'ร้าน A', date: '2026-10-10' };
@@ -444,7 +452,7 @@ test('an empty body still reports every rule (no early stop)', () => {
   assert.deepEqual(Object.keys(errorsOf(quotationSchema(), {})).sort(), ['customerCode', 'jobNo']);
   assert.deepEqual(Object.keys(errorsOf(customerSchema(), {})).sort(), ['name', 'phone']);
   assert.deepEqual(Object.keys(errorsOf(outsourceActionSchema, {})).sort(), ['send.to', 'status']);
-  assert.deepEqual(Object.keys(errorsOf(swapRefundSchema(), {})).sort(), ['newSerial', 'status']);
+  assert.deepEqual(Object.keys(errorsOf(swapRefundSchema(), {})).sort(), ['status']);
   assert.deepEqual(Object.keys(errorsOf(saleOrderSchema(), {})).sort(), ['customerCode', 'lines', 'salesId']);
 });
 

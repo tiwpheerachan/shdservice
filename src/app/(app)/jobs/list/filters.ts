@@ -34,6 +34,8 @@ export type Filters = {
   statusGroup: string;
   /** open + past the customer due date — set only by the notification bell's link */
   overdue: boolean;
+  /** dashboard TAT bucket (d13 … over30) — set only by a TAT number's link */
+  tat: string;
 };
 export const NO_FILTER: Filters = {
   no: '',
@@ -60,6 +62,7 @@ export const NO_FILTER: Filters = {
   open: false,
   statusGroup: '',
   overdue: false,
+  tat: '',
 };
 /** query-string form of the applied filters — shared by the table hook and the Excel export */
 export const toParams = (f: Filters) => ({
@@ -88,6 +91,7 @@ export const toParams = (f: Filters) => ({
   open: f.open ? 1 : '',
   statusGroup: f.statusGroup,
   overdue: f.overdue ? 1 : '',
+  tat: f.tat,
 });
 
 export type TatSource = { bucket: string; status: string; type: string };
@@ -105,11 +109,12 @@ export function fromQuery(p: Pick<URLSearchParams, 'get'>) {
   for (const k of ['statusId', 'engineer', 'createdBy'] as const) if (!/^\d+$/.test(f[k])) f[k] = '';
   if (!['create', 'reception', 'closed'].includes(f.dateBy)) f.dateBy = 'create';
   if (!['', 'yes', 'no'].includes(f.cost)) f.cost = '';
+  if (!['', 'd13', 'd47', 'd814', 'd1530', 'over30'].includes(f.tat)) f.tat = '';
   // sort=<key>.<dir> (an unknown key is ignored by the server's column map)
   const [, sortKey, sortDir] = /^(.+)\.(asc|desc)$/.exec(g('sort')) ?? [];
   return {
     filters: f,
-    tat: g('src') === 'tat' ? { bucket: g('bucket'), status: f.status, type: f.type } : null,
+    tat: g('src') === 'tat' ? { bucket: f.tat || 'total', status: f.status, type: f.type } : null,
     kpi: g('src') === 'kpi' ? g('label') || f.statusGroup : null,
     page: Math.max(1, parseInt(g('page'), 10) || 1),
     pageSize: PAGE_SIZES.includes(Number(g('size'))) ? Number(g('size')) : 25,

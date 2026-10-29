@@ -2,13 +2,14 @@
  * Static option lists for dropdowns and validation — they mirror the legacy lookup values exactly.
  * (Lists that live in a DB master table are read from it at runtime; these are the fixed ones.)
  */
-/** TAT age buckets (TatRow keys) — dashboard column headers + the job list's "from the dashboard" note */
+/** TAT age buckets (TatRow keys) — dashboard column headers, worded as the legacy table + the job list's
+ *  "from the dashboard" note */
 export const TAT_BUCKET_LABEL = {
-  d13: '1–3 วัน',
-  d47: '4–7 วัน',
-  d814: '8–14 วัน',
-  d1530: '15–30 วัน',
-  over30: 'เกิน 30 วัน',
+  d13: '1-3 Days',
+  d47: '4-7 Days',
+  d814: '8-14 Days',
+  d1530: '15-30 Days',
+  over30: 'Over 30 Days',
 } as const;
 
 /* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก app_config ผ่าน useRoles) */

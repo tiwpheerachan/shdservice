@@ -108,6 +108,10 @@ SELECT u.user_id, s.seen, s.off, s.updated_at
   FROM s_tour s JOIN app_user u ON lower(btrim(u.email_address)) = lower(btrim(s.email))
 ON CONFLICT (user_id) DO UPDATE SET seen = excluded.seen, off = excluded.off, updated_at = excluded.updated_at;
 
+-- a legacy row of someone who signs in through SSO (bell → belle.kridsawan …) goes INACTIVE — drizzle/0002; their SSO
+-- rows have only just arrived above
+SELECT merge_legacy_users();
+
 COMMIT;
 `;
 writeFileSync(out, sql);

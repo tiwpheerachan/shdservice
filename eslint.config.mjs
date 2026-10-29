@@ -43,7 +43,7 @@ export default defineConfig([
   {
     files: [
       'src/components/print/**',
-      'src/components/shared/{logo,people-picker,product-detail-modal}.tsx',
+      'src/components/shared/{logo,people-picker,product-detail-modal,attachments}.tsx',
       'src/components/layout/topbar.tsx',
       'src/app/track/**',
       'src/app/pending/page.tsx',

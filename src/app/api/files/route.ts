@@ -37,10 +37,13 @@ const STAFF_PATHS: [RegExp, readonly Module[]][] = [
 ];
 const PUBLIC_PATH = /^(?:shippers|profiles)\/\d+\/[^/]+$/;
 const URL_TTL_S = 120;
+// a video plays from the signed URL itself, fetching ranges while it plays and seeks — valid long enough to watch
+const VIDEO_TTL_S = 15 * 60;
+const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 export const GET = handle(async (req: NextRequest) => {
   // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"
-  const { path } = parseQuery(req, files);
+  const { path, download } = parseQuery(req, files);
 
   const isPublic = PUBLIC_PATH.test(path);
   // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)
@@ -52,10 +55,15 @@ export const GET = handle(async (req: NextRequest) => {
     if (!modules) throw new HttpError(404, 'ไม่พบไฟล์');
     if (!(await canViewAny(user, modules))) throw new HttpError(403, 'ไม่มีสิทธิ์ดูข้อมูลส่วนนี้');
   }
-  const url = await signedUrl(path, URL_TTL_S);
+  const ttl = VIDEO.test(path) ? VIDEO_TTL_S : URL_TTL_S;
+  // Which store signs it (storage.ts onR2): a video POST /api/attachments/video named — v{14 digits}{20 hex}.mp4|
+  // mov|webm under jobs/{no}/attachments/ — and its thumbnail ({file}.jpg) are in Cloudflare R2 (a presigned GET;
+  // download=1 adds response-content-disposition=attachment). Every other path is in Supabase — images, PDFs,
+  // slips, logos, and the legacy .mp4 attachments (their names have no leading `v`), which keep opening from there.
+  const url = await signedUrl(path, ttl, download === '1');
   if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)');
   // the browser may reuse the redirect only while the signed URL is still valid
   return NextResponse.redirect(url, {
-    headers: { 'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${URL_TTL_S - 60}` },
+    headers: { 'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${ttl - 60}` },
   });
 });

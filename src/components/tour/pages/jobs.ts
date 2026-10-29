@@ -33,7 +33,7 @@ export const JOBS_TOURS: Record<string, Tour> = {
     steps: [
       {
         title: 'ภาพรวมงานบริการ',
-        body: 'ดูภาพรวมงานซ่อมในหน้าเดียว: จำนวนงานแต่ละกลุ่ม งานค้างนานกี่วัน แนวโน้มเปิด / ปิดงาน และอาการเสียที่พบบ่อย · ตัวเลขส่วนใหญ่กดเปิดรายการงานชุดนั้นได้ · ลองเปลี่ยนตัวกรองในช่องที่สว่างได้ จบแล้วกลับเป็นเหมือนเดิม',
+        body: 'ดูภาพรวมงานซ่อมในหน้าเดียว: จำนวนงานแต่ละกลุ่ม TAT แต่ละสถานะ แนวโน้มเปิด / ปิดงาน และอาการเสียที่พบบ่อย · ตัวเลขส่วนใหญ่กดเปิดรายการงานชุดนั้นได้ · ลองเปลี่ยนตัวกรองในช่องที่สว่างได้ จบแล้วกลับเป็นเหมือนเดิม',
       },
       {
         target: 'main button[role="combobox"][aria-label="ทุกประเภทงาน"]',
@@ -43,7 +43,7 @@ export const JOBS_TOURS: Record<string, Tour> = {
       {
         target: 'main div:has(> input[aria-label="วันที่เริ่ม"])',
         title: 'ช่วงวันที่',
-        body: 'นับจากวันเปิดงาน (กราฟเส้นปิดงานนับจากวันปิดงาน) ใช้กับการ์ดสรุป กราฟ อาการเสียที่พบบ่อย และงานล่าสุด (ตาราง TAT ไม่ขึ้นกับช่วงวันที่) · ลบวันที่ออกทั้งสองช่อง = ทั้งหมด',
+        body: 'นับจากวันเปิดงาน (กราฟเส้นปิดงานนับจากวันปิดงาน) ใช้กับทุกส่วนของหน้า รวมตาราง TAT · ลบวันที่ออกทั้งสองช่อง = ทั้งหมด',
       },
       {
         target: 'main div:has(> input[aria-label="วันที่เริ่ม"]) ~ div',
@@ -63,12 +63,12 @@ export const JOBS_TOURS: Record<string, Tour> = {
         look: true,
       },
       {
-        // the header row, not the whole table: ~15 status rows are taller than a phone, the card would cover them
-        target: 'main [aria-label="งานค้างตามสถานะและจำนวนวัน"] thead',
-        title: 'TAT — งานค้าง',
-        body: 'แถวด้านล่างคือแต่ละสถานะของงานที่ยังไม่ปิด ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) · คอลัมน์คือจำนวนวันนับจากวันเปิดงาน · ช่อง "เกิน 30 วัน" ที่มีเกิน 20 งานเป็นตัวแดง ควรตามก่อน · กดตัวเลขเพื่อเปิดรายการงานชุดนั้น',
+        // the header row, not the whole table: 24 status rows are taller than a phone, the card would cover them
+        target: 'main [aria-label="จำนวนงานตามสถานะและ TAT"] thead',
+        title: 'TAT',
+        body: 'งานที่เปิดในช่วงวันที่เลือก แยกทุกสถานะ · คอลัมน์คือจำนวนวันจากวันเปิดงานถึงวันส่งคืน (ยังไม่คืน = วันปิดงาน หรือวันนี้) · แถบ แดง = ระหว่างดำเนินการ เหลือง = ซ่อมเสร็จ เขียว = ปิดงาน · กดตัวเลขเปิดรายการงานของสถานะนั้น',
         look: true,
-        toEnd: true, // a phone: the table (the thead's .table-scroll) scrolled to "เกิน 30 วัน" — the status column stays on the left
+        toEnd: true, // a phone: the table (the thead's .table-scroll) scrolled to its last column (Total) — the status column stays on the left
       },
       {
         target: 'main section:has(> div > svg[role="img"])',
@@ -324,10 +324,10 @@ export const JOBS_TOURS: Record<string, Tour> = {
         target: 'body:เอกสารแนบ',
         title: 'เอกสารแนบ',
         body: ({ can }) =>
-          'รูปและเอกสารของงานนี้' +
+          'รูป เอกสาร และวิดีโอของงานนี้' +
           (can('Job Management', 'edit')
-            ? ' · แนบเพิ่ม: เลือกไฟล์ PDF, JPG, PNG ไม่เกิน 10 MB ใส่คำอธิบาย แล้วกด "แนบไฟล์" — ไฟล์ขึ้นทันที ไม่ต้องกดบันทึกการแก้ไข (ระหว่างบทสอนแนบไม่ได้)'
-            : ' · กดชื่อไฟล์เพื่อเปิดดู'),
+            ? ' · แนบเพิ่ม: PDF, JPG, PNG ไม่เกิน 10 MB หรือวิดีโอ MP4, MOV, WebM ไม่เกิน 3 นาที ใส่คำอธิบาย แล้วกด "แนบไฟล์" — ขึ้นทันที ไม่ต้องกดบันทึกการแก้ไข (ระหว่างบทสอนแนบไม่ได้)'
+            : ' · กดชื่อไฟล์เพื่อเปิดดู วิดีโอเล่นในหน้านี้'),
         look: true,
       },
       {

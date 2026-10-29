@@ -63,6 +63,12 @@ export const SERVER_ENV = {
   SUPABASE_SECRET_KEY: 'e2e-no-storage',
   SUPABASE_SERVICE_ROLE_KEY: '',
   SUPABASE_STORAGE_BUCKET: 'oneservice-e2e',
+  // video storage (Cloudflare R2): fake keys — a signed call to that host would be refused; the video spec
+  // answers the browser's PUT itself (page.route) and nothing on the server side reaches R2
+  R2_ACCOUNT_ID: 'e2e-no-r2',
+  R2_ACCESS_KEY_ID: 'e2e-no-r2',
+  R2_SECRET_ACCESS_KEY: 'e2e-no-r2',
+  R2_BUCKET: 'oneservice-e2e-videos',
   // Cloudflare's always-pass test keys — production refuses them, so /track stays closed here
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: '1x00000000000000000000BB',
   TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',

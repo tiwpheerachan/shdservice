@@ -67,7 +67,8 @@ test('the other list pages open with their first page and counts from the HTML',
   expect(await (await page.request.get('/customers')).text()).toContain(E2E_CUSTOMER); // the rows are in the HTML
   const asked = await offline(page);
   await page.goto('/customers');
-  await expect(page.getByRole('cell', { name: E2E_CUSTOMER, exact: true }).first()).toBeVisible();
+  // a row, not a cell: on a phone the code sits under the name, in the name's cell
+  await expect(page.getByRole('row').filter({ hasText: E2E_CUSTOMER }).first()).toBeVisible();
   await page.waitForLoadState('networkidle');
   for (const path of ['/jobs/dashboard', '/stock/products', '/sale/orders', '/reports/open-job']) {
     await page.goto(path);

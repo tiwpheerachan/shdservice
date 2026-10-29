@@ -18,9 +18,12 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-// a pending sign-up (no role yet) is Active in the table but cannot use anything — say so
-function StatusBadge({ r }: { r: User }) {
-  return r.role === PENDING_ROLE ? (
+// a pending sign-up (no role yet) is Active in the table but cannot use anything — say so;
+// the trash view says ลบแล้ว like the master pages (uiStatus reads DELETED as Inactive)
+function StatusBadge({ r, deleted }: { r: User; deleted: boolean }) {
+  return deleted ? (
+    <Badge tone="neutral">ลบแล้ว</Badge>
+  ) : r.role === PENDING_ROLE ? (
     <Badge tone="warning" dot>
       รออนุมัติ
     </Badge>
@@ -85,7 +88,8 @@ export function userColumns({
             {/* a phone: the role and status columns are hidden — shown here, so Action fits beside the name */}
             <div className="mt-1 flex flex-wrap items-center gap-1 sm:hidden">
               <RoleBadge role={r.role} />
-              {r.role !== PENDING_ROLE && <StatusBadge r={r} /> /* a pending sign-up: its role badge already says it */}
+              {/* a pending sign-up: its role badge already says it */}
+              {(view === 'deleted' || r.role !== PENDING_ROLE) && <StatusBadge r={r} deleted={view === 'deleted'} />}
             </div>
           </div>
         </div>
@@ -128,7 +132,7 @@ export function userColumns({
       header: 'สถานะ',
       width: '100px',
       hideBelow: 'sm', // a pending sign-up still shows: its action is "อนุมัติ"
-      cell: (r) => <StatusBadge r={r} />,
+      cell: (r) => <StatusBadge r={r} deleted={view === 'deleted'} />,
     },
     {
       key: 'action',

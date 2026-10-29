@@ -31,6 +31,7 @@ import { useVendors, useStaff, useJobStatuses } from '@/data/db';
 import { JS } from '@/lib/status-ids';
 import { SEND_STATUS } from '@/lib/outsource-status';
 import { RecordGate } from '@/components/shared/record-gate';
+import { JobHistorySection } from '@/components/shared/job-history';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { RecordKey } from '@/lib/use-record';
@@ -357,6 +358,7 @@ function OutsourceForm() {
           <CostSummary />
         </JobEditLock>
         <AttachmentSection jobNo={job?.no} files={job?.attachments} />
+        <JobHistorySection job={job} />
 
         <FormActions
           saveLabel="บันทึกข้อมูล Out-Source"

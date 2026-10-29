@@ -409,7 +409,7 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
 
 /* ------------------------------------------------------------------ *
  * Quantities — the one place that touches product_none_serial counters.
- *   available = cumulative received, used = cumulative issued,
+ *   available = cumulative received (returns from a job included, as legacy), used = cumulative issued,
  *   booking   = requested-not-yet-granted, remain = available - used
  * ------------------------------------------------------------------ */
 type QtyDelta = { available?: number; used?: number; booking?: number };
@@ -994,8 +994,8 @@ export async function listReturnableLines(jobNo: string): Promise<ReturnLine[]> 
 }
 
 /**
- * รับคืนจากการเบิก → WHI (type 2), reverses the issue on the counters
- * (used -= qty → remain += qty) and records return_qty/date/by on the ใบเบิก row;
+ * รับคืนจากการเบิก → WHI (type 2), counted in like a receive, as legacy did
+ * (available += qty → remain += qty; used keeps the issue) and records return_qty/date/by on the ใบเบิก row;
  * a fully returned line becomes status 5 (คืนแล้ว). A charged line is re-priced to what is still
  * used (granted - returned) and the job's parts / total cost follow in the same transaction.
  */
@@ -1042,7 +1042,7 @@ export async function returnFromJob(
         if (l.qty > returnable) throw new HttpError(400, `รับคืนเกินจำนวนที่จ่ายไป (${r.sparePartCode})`);
         const p = map.get(r.sparePartCode ?? '');
         if (!p) throw new HttpError(400, `ไม่พบรหัสอะไหล่ ${r.sparePartCode}`);
-        await stock.adjust(p.id, { used: -l.qty });
+        await stock.adjust(p.id, { available: l.qty });
         const returned = (r.returnQty ?? 0) + l.qty;
         // a partly issued line still waits for the rest: it stays รอเบิก, charged for what it will use
         const partly = r.orderStatusId === PART.REQUESTED;

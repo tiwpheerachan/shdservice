@@ -184,19 +184,19 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   ).toBeVisible();
 });
 
-test('dashboard TAT step: the table is scrolled to its last column (เกิน 30 วัน on a phone), the card clear of it', async ({
+test('dashboard TAT step: the table is scrolled to its last column (Over 30 Days / Total on a phone), the card clear of it', async ({
   page,
 }) => {
   await signIn(page, OWNER_EMAIL);
   await page.goto('/jobs/dashboard');
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
-  while ((await card(page).locator('#tour-title').innerText()) !== 'TAT — งานค้าง')
+  while ((await card(page).locator('#tour-title').innerText()) !== 'TAT')
     await card(page)
       .getByRole('button', { name: /^(เริ่มเลย|ถัดไป)$/ })
       .click();
-  const table = page.locator('main [aria-label="งานค้างตามสถานะและจำนวนวัน"]');
-  // the header row is lit, not the whole table (taller than a phone with ~15 statuses)
+  const table = page.locator('main [aria-label="จำนวนงานตามสถานะและ TAT"]');
+  // the header row is lit, not the whole table (taller than a phone with 24 statuses)
   await expect(table.locator('thead')).toHaveAttribute('data-tour-target', '');
   await expect
     .poll(

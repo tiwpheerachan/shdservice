@@ -424,6 +424,343 @@
         }
       }
     },
+    "/attachments/video": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get a one-time URL to upload a video attachment straight to storage",
+        "description": "Job Management edit, the job's checks of POST /attachments. The browser converts the clip first (MP4 H.264 + AAC, ≤ 3 minutes — src/lib/video.ts), PUTs it to `url` (a Cloudflare R2 presigned URL, valid 2 h; `Content-Type` and `If-None-Match: *` are signed — send both; an existing object is never overwritten, 412) — never through this server — then calls POST /attachments/video/confirm. The path is chosen here: jobs/{jobNo}/attachments/{file}, `file` = `v` + 14 digits + 20 hex + the extension (the `v` keeps it in R2).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jobNo": {
+                    "type": "string",
+                    "description": "หมายเลขงาน — must exist (404)."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "video/mp4",
+                      "video/quicktime",
+                      "video/webm"
+                    ],
+                    "description": "the type of the file to be PUT (a converted clip: video/mp4) — sets its extension"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Where to PUT the file (`Content-Type` = `type`, `If-None-Match: *`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "description": "the stored file name — sent back to confirm"
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "R2 presigned upload URL"
+                    }
+                  },
+                  "required": [
+                    "file",
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not JSON (`invalid_json`), or a type other than MP4 / MOV / WebM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is deleted (cancelled).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 1 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or video storage (Cloudflare R2: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET) is not configured — `ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attachments/video/confirm": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Attach a video uploaded with POST /attachments/video",
+        "description": "Job Management edit. Checks what arrived in R2 — there, ≤ 200 MB, stored as a video and its first bytes an MP4 / MOV `ftyp` box or a WebM EBML header (a ranged read, not the whole file) — then inserts the attachment row as POST /attachments does. Refused → the object is removed. `thumb` (a JPEG of the frame ~1 s in) is stored next to it as {file}.jpg. Staff only, like every job attachment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jobNo": {
+                    "type": "string",
+                    "description": "หมายเลขงาน — must exist (404)."
+                  },
+                  "file": {
+                    "type": "string",
+                    "pattern": "^v\\d{14}[0-9a-f]{20}\\.(?:mp4|mov|webm)$",
+                    "description": "the `file` POST /attachments/video answered"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "the file name to show"
+                  },
+                  "remark": {
+                    "type": "string",
+                    "description": "Read up to 200 characters (the rest is dropped)."
+                  },
+                  "thumb": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "JPEG, optional (a browser that cannot decode the clip sends none)"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "row": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string",
+                          "description": "the stored file name"
+                        },
+                        "remark": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "file",
+                        "remark"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "row"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not multipart/form-data, or no / not an issued file name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or nothing was uploaded under that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is deleted (cancelled), or this video is already attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Video over 200 MB, or a thumbnail over 1 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Not a real MP4 / MOV / WebM video, or the thumbnail is not a JPEG.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or video storage (Cloudflare R2: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET) is not configured — `ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs": {
       "post": {
         "tags": [
@@ -1082,7 +1419,7 @@
           "Jobs"
         ],
         "summary": "Close a job and return the device (ปิดงาน-ส่งคืนสินค้า)",
-        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number and the deposit still to refund. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Closing edit. Rules: `closeSchema(prev)` in src/lib/validation/job.ts, run by the service against the stored receipt / parcel number / new serial and the deposit still to refund. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -1109,6 +1446,10 @@
                   "repairDetail": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "newSerial": {
+                    "type": "string",
+                    "description": "Serial เครื่องใหม่ of a swap job, optional: a changed one is written as the swap saves it (a \"New S/N\" line of the part list and the swap detail)."
                   },
                   "payment": {
                     "type": "object",
@@ -1927,7 +2268,7 @@
           "Jobs"
         ],
         "summary": "Record a swap or a refund (Swap / Refund)",
-        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund, otherwise `newSerial` is required. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
+        "description": "Job Management edit. Rules: `swapRefundSchema(job)` (src/lib/validation/job.ts), run by the service against the stored job — refund fields make it a refund (`newSerial` is never required). `status`: job_status 17 / 18 (swap) or 17 / 19 (refund), or the job's current one. `job` = the page's shared job sections: PATCH /jobs/{no}'s body and rules (its `version` / `status` unused — the action's count), saved in the action's transaction, so a refused action saves none of them; needs Job Management edit (else 403).",
         "parameters": [
           {
             "schema": {
@@ -5497,7 +5838,7 @@
           "Files"
         ],
         "summary": "Open a stored file by its storage path (a short-lived signed URL)",
-        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403.",
+        "description": "Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A video URL is valid 15 minutes (it plays from it), others 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL; everything else (legacy .mp4 attachments included) to Supabase Storage.",
         "security": [
           {},
           {
@@ -5515,6 +5856,19 @@
             "required": true,
             "description": "Leading `/` ignored.",
             "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ],
+              "description": "`1` = sent as a download (Content-Disposition: attachment)."
+            },
+            "required": false,
+            "description": "`1` = sent as a download (Content-Disposition: attachment).",
+            "name": "download",
             "in": "query"
           }
         ],
@@ -6583,6 +6937,9 @@
                             "status": {
                               "type": "string"
                             },
+                            "group": {
+                              "type": "string"
+                            },
                             "d13": {
                               "type": "number"
                             },
@@ -6602,6 +6959,7 @@
                           "required": [
                             "statusId",
                             "status",
+                            "group",
                             "d13",
                             "d47",
                             "d814",
@@ -7463,6 +7821,21 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "d13",
+                "d47",
+                "d814",
+                "d1530",
+                "over30"
+              ]
+            },
+            "required": false,
+            "name": "tat",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "required": false,
@@ -8081,6 +8454,21 @@
             },
             "required": false,
             "name": "open",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "d13",
+                "d47",
+                "d814",
+                "d1530",
+                "over30"
+              ]
+            },
+            "required": false,
+            "name": "tat",
             "in": "query"
           },
           {
@@ -16129,6 +16517,7 @@
               "RETURN",
               "UPLOAD",
               "LOGIN",
+              "LOGIN_FAILED",
               "EXPORT"
             ]
           },

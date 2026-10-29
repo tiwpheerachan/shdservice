@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Plus, Printer, Layers, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
+import { Plus, Printer, Layers, Sparkles, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
@@ -29,7 +29,7 @@ function StatChip({
   icon: React.ElementType;
   label: string;
   value: number;
-  tone: 'primary' | 'info' | 'warning' | 'success';
+  tone: 'primary' | 'info' | 'warning' | 'success' | 'danger';
   loading?: boolean;
 }) {
   const c = {
@@ -37,6 +37,7 @@ function StatChip({
     info: 'text-info bg-info-soft',
     warning: 'text-warning bg-warning-soft',
     success: 'text-success bg-success-soft',
+    danger: 'text-danger bg-danger-soft',
   }[tone];
   return (
     <div className="surface flex items-center gap-3 p-3">
@@ -74,6 +75,8 @@ export default function JobListPage() {
   const { openCall, modal: callModal } = useJobCallModal();
 
   const stats = statRows[0] ?? { total: 0, fresh: 0, done: 0, progress: 0 };
+  // ยกเลิกซ่อม (6): counted as Cancel like the dashboard (kpiGroup) — the rest of total, so the chips add up to it
+  const declined = stats.total - stats.fresh - stats.progress - stats.done;
   const columns = jobColumns({ jobLink: access.jobLink, canEdit, onCall: openCall });
 
   return (
@@ -104,7 +107,7 @@ export default function JobListPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatChip icon={Layers} label="งานทั้งหมด" value={stats.total} tone="primary" loading={statsLoading} />
         <StatChip icon={Sparkles} label="งานใหม่" value={stats.fresh} tone="info" loading={statsLoading} />
         <StatChip icon={Loader2} label="กำลังดำเนินการ" value={stats.progress} tone="warning" loading={statsLoading} />
@@ -115,6 +118,7 @@ export default function JobListPage() {
           tone="success"
           loading={statsLoading}
         />
+        <StatChip icon={XCircle} label="ยกเลิก / ลูกค้าไม่ซ่อม" value={declined} tone="danger" loading={statsLoading} />
       </div>
 
       <JobFilterBar

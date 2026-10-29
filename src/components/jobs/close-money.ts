@@ -1,8 +1,8 @@
 import type { JobDetail } from '@/lib/use-job';
 import { CLOSE_STATUS_OPTIONS } from '@/data/options';
-import { refundDateOf, type jobBalance } from '@/lib/validation/job';
+import { parseSwap, refundDateOf, type jobBalance } from '@/lib/validation/job';
 
-/** ปิดงาน's own fields: payment / deposit refund / return / new status */
+/** ปิดงาน's own fields: payment / deposit refund / return / Serial เครื่องใหม่ (a swap job) / new status */
 export type CloseDraft = {
   payType: string;
   payAmount: string;
@@ -18,6 +18,7 @@ export type CloseDraft = {
   shipperId: number;
   tracking: string;
   returnDetail: string;
+  newSerial: string;
   status: string;
 };
 
@@ -36,6 +37,7 @@ export const EMPTY_CLOSE: CloseDraft = {
   shipperId: 0,
   tracking: '',
   returnDetail: '',
+  newSerial: '',
   status: '',
 };
 
@@ -55,6 +57,7 @@ export const CLOSE_ERR_KEY: Partial<Record<keyof CloseDraft, string>> = {
   returnDetail: 'return.detail',
   returnDate: 'return.date',
   tracking: 'return.tracking',
+  newSerial: 'newSerial',
 };
 
 export type Balance = ReturnType<typeof jobBalance>;
@@ -62,17 +65,30 @@ export type Balance = ReturnType<typeof jobBalance>;
 /** the date saved inside job_payment_detail ("ชำระ <date> · …") */
 export const payDateOf = (detail: string) => /^ชำระ (\d{4}-\d{2}-\d{2})/.exec(detail)?.[1] ?? '';
 
-/** cost summary straight from the job row */
-export const costRows = (job: JobDetail | null | undefined) => [
-  { label: 'รวมค่าอะไหล่', v: job?.partsCost ?? 0 },
-  { label: 'ค่าบริการการซ่อม', v: job?.serviceCost ?? 0 },
-  { label: 'ค่าเครื่องมือพิเศษ', v: job?.toolCost ?? 0 },
-  { label: 'ค่าขนส่ง', v: job?.deliveryCost ?? 0 },
-  { label: 'ค่ากล่องพัสดุ', v: job?.boxCost ?? 0 },
-];
-
 /** รวมเป็นเงินสุทธิ of costRows */
 export const netOf = (rows: { v: number }[]) => rows.reduce((s, x) => s + x.v, 0);
+
+export const LEGACY_ADJUST_LABEL = 'ปรับยอดจากระบบเดิม (VAT / ส่วนลด)';
+
+/**
+ * job_total_cost less the sum of its cost columns: the legacy system folded VAT / a discount into the total
+ * with no column of its own. The stored total is what is billed (jobBalance, withTotal keeps it until a cost
+ * changes), so this row makes the costs add up to it. 0 = the total is the sum.
+ */
+export const legacyAdjust = (total: number, sum: number) => Math.round((total - sum) * 100) / 100;
+
+/** cost summary straight from the job row — adds up to job_total_cost (legacyAdjust) */
+export const costRows = (job: JobDetail | null | undefined) => {
+  const rows = [
+    { label: 'รวมค่าอะไหล่', v: job?.partsCost ?? 0 },
+    { label: 'ค่าบริการการซ่อม', v: job?.serviceCost ?? 0 },
+    { label: 'ค่าเครื่องมือพิเศษ', v: job?.toolCost ?? 0 },
+    { label: 'ค่าขนส่ง', v: job?.deliveryCost ?? 0 },
+    { label: 'ค่ากล่องพัสดุ', v: job?.boxCost ?? 0 },
+  ];
+  const adjust = legacyAdjust(job?.totalCost ?? 0, netOf(rows));
+  return adjust ? [...rows, { label: LEGACY_ADJUST_LABEL, v: adjust }] : rows;
+};
 
 /** the close fields as the job stores them (prefill) — `today`: the default refund / return date */
 export function closeDraftOf(job: JobDetail, shippers: string[], today: string): CloseDraft {
@@ -99,6 +115,8 @@ export function closeDraftOf(job: JobDetail, shippers: string[], today: string):
     shipperId: job.return.shipperId ?? 0,
     tracking: job.return.tracking,
     returnDetail: job.return.detail,
+    // the "New S/N" the return note prints (spare_part_replace)
+    newSerial: parseSwap(job.sparePartReplace)['New S/N'] ?? '',
     status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : '',
   };
 }
