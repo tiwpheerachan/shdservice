@@ -1,5 +1,6 @@
 import * as React from 'react';
 import type { AuditRow } from '@/data/db';
+import { Email } from '@/components/shared/email';
 
 /** GET /api/audit (src/server/contract/audit.ts AuditLogRow): the actor and request as at the time */
 export type AuditLogRow = AuditRow & {
@@ -13,8 +14,17 @@ export type AuditLogRow = AuditRow & {
 
 /** the identity lines of a log row (the detail modal of both log pages) */
 export function Identity({ r }: { r: Omit<AuditLogRow, keyof AuditRow | 'reason'> & { user: string } }) {
-  const lines: [string, string | null][] = [
-    ['ผู้ใช้', [r.user, r.email].filter(Boolean).join(' · ') || null],
+  const lines: [string, React.ReactNode][] = [
+    [
+      'ผู้ใช้',
+      r.user || r.email ? (
+        <>
+          {r.user}
+          {r.user && r.email ? ' · ' : ''}
+          <Email value={r.email} />
+        </>
+      ) : null,
+    ],
     ['ตำแหน่ง / แผนก (ขณะนั้น)', [r.role, r.department].filter(Boolean).join(' · ') || null],
     ['เลขที่ / id', [r.no, r.entityId].filter(Boolean).join(' · ') || null],
   ];

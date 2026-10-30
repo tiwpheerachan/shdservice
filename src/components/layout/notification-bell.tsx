@@ -106,9 +106,12 @@ export function NotificationBell() {
               <p className="text-sm font-semibold">
                 ใบสั่งขายรออนุมัติ (<span className="num">{waiting.toLocaleString('en-US')}</span>)
               </p>
-              <p className="text-2xs text-muted-foreground">
-                ไม่รวมใบที่คุณสร้างเองหรือเป็นพนักงานขาย (อนุมัติเองไม่ได้)
-              </p>
+              {/* System Admin may approve their own (sale-orders.ts SELF_APPROVE) — the note is for everyone else */}
+              {!isAdmin && (
+                <p className="text-2xs text-muted-foreground">
+                  ไม่รวมใบที่คุณสร้างเองหรือเป็นพนักงานขาย (อนุมัติเองไม่ได้)
+                </p>
+              )}
             </div>
             {!so.data ? (
               <p className="px-4 py-4 text-center text-sm text-muted-foreground">

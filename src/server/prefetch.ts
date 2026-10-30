@@ -6,7 +6,8 @@ import { GET as jobGet } from '@/app/api/jobs/[id]/route';
 import { GET as quotationGet } from '@/app/api/quotations/[id]/route';
 import { GET as auditGet } from '@/app/api/audit/route';
 import { GET as documentProfilesGet } from '@/app/api/admin/document-profiles/route';
-import { PREFETCH_ID } from '@/data/keys';
+import { PREFETCH_ID, PREFETCH_PACKED } from '@/data/keys';
+import { pack } from '@/lib/obscure';
 
 /**
  * A page's first data, read while the server renders it, so it arrives in the HTML instead of after
@@ -33,7 +34,21 @@ const ROUTES: [RegExp, (req: NextRequest, segment: string) => Promise<Response>]
   [/^\/api\/admin\/(document-profiles)$/, (req) => documentProfilesGet(req)],
 ];
 
-export async function prefetch(urls: string[], { timeoutMs = 1500 } = {}): Promise<Record<string, unknown>> {
+export async function prefetch(urls: string[], opts: { timeoutMs?: number } = {}): Promise<Record<string, unknown>> {
+  return packPrefetched(await prefetchRaw(urls, opts));
+}
+
+/**
+ * <Prefetched>'s payload: the answers packed (they hold e-mail addresses, and none may be in the server HTML —
+ * src/lib/obscure.ts); <Prefetched> unpacks them. For a page that reads an answer itself first (prefetchRaw).
+ */
+export function packPrefetched(all: Record<string, unknown>): Record<string, unknown> {
+  const { [PREFETCH_ID]: id, ...answers } = all;
+  return { [PREFETCH_PACKED]: pack(JSON.stringify(answers)), [PREFETCH_ID]: id ?? crypto.randomUUID() };
+}
+
+/** prefetch(), the answers as they are (not packed) — a page that reads one itself, then packPrefetched() */
+export async function prefetchRaw(urls: string[], { timeoutMs = 1500 } = {}): Promise<Record<string, unknown>> {
   const incoming = await headers(); // also makes the page dynamic: rendered per request, never cached
   const origin = `http://${incoming.get('host') ?? 'localhost'}`;
   const done: Record<string, unknown> = {};

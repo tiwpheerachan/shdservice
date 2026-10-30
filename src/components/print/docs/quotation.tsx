@@ -6,6 +6,7 @@ import { QUOTE_VALID_DAYS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { bahtText } from '@/lib/thai-baht';
 import { quotationForCustomer, quoteSignState } from '@/server/services/tracking';
+import { Email } from '@/components/shared/email';
 
 const dmy = (s: string) => {
   // "2026-09-17 16:37" / "2026-09-17" → "17-09-2026" (legacy prints dd-mm-yyyy)
@@ -40,7 +41,19 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
   // a line discount (legacy ส่วนลด % / บาท) gets its own column — none, the sheet is as before
   const lineDiscount = q.lines.some((l) => l.discount > 0);
   // ติดต่อสอบถาม… = the issuing company (document profile); nothing set → the line is left out
-  const contactLine = [co.phone && `Tel. : ${co.phone}`, co.email && `Email : ${co.email}`].filter(Boolean).join('  ');
+  // the address only after hydration — never in the server HTML (src/lib/obscure.ts)
+  const contactLine =
+    co.phone || co.email ? (
+      <>
+        {co.phone && `Tel. : ${co.phone}`}
+        {co.phone && co.email ? '  ' : ''}
+        {co.email && (
+          <>
+            Email : <Email value={co.email} />
+          </>
+        )}
+      </>
+    ) : null;
   // the job's engineer — not the quotation's creator (a CS clerk printed as ช่าง); none assigned → —
   const engineer = forCustomer ? '' : j?.engineer?.trim() || '—';
   const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
@@ -332,7 +345,11 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
                   <p className="text-[10.5px]">
                     กรุณาลงนามยืนยันการตกลงซ่อม และส่งใบเสนอราคาฉบับนี้{co.email ? 'มาที่' : 'กลับมาที่ศูนย์บริการ'}
                   </p>
-                  {co.email && <p className="mt-1">Email : {co.email}</p>}
+                  {co.email && (
+                    <p className="mt-1">
+                      Email : <Email value={co.email} />
+                    </p>
+                  )}
                   <p className="mt-3 font-semibold">ตกลงซ่อมโดย</p>
                   <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
                     <span>(</span>

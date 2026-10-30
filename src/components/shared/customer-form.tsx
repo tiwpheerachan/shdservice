@@ -15,6 +15,7 @@ import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useToast } from '@/components/ui/toast';
 import { isIndividual } from '@/lib/validation/customer';
+import { Email } from '@/components/shared/email';
 
 /**
  * Customer form shared by the ข้อมูลลูกค้า page (modal) and CustomerSelect
@@ -160,7 +161,8 @@ export function ConflictNotice({
             <span>{c.name}</span>
             <span className="num text-xs text-muted-foreground">
               {c.phone}
-              {c.email ? ` · ${c.email}` : ''}
+              {c.email ? ' · ' : ''}
+              <Email value={c.email} />
               {c.taxId ? ` · ${c.taxId}` : ''}
             </span>
             <span className="text-xs text-danger">ซ้ำ: {c.fields.join(', ')}</span>

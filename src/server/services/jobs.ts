@@ -51,7 +51,15 @@ import type { Job } from '@/data/types';
 import { HttpError, fullName, hasRight, userHasRight } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
-import { audit, actorName, diff, auditFor, type AuditChanges, type AuditEntry, type AuditRow } from '@/server/audit';
+import {
+  audit as writeAudit,
+  actorName,
+  diff,
+  auditFor,
+  type AuditChanges,
+  type AuditEntry,
+  type AuditRow,
+} from '@/server/audit';
 import { orderBy, likeEscape, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import {
   dateOrNull,
@@ -340,6 +348,21 @@ const outsourceOpen = (jobPk: number) => and(eq(jobOutsource.jobPk, jobPk), notB
 /** the trip's status text as send_status held it */
 const sendStatusOf = (receiveDate: string | null) =>
   isSentinelDate(receiveDate) ? SEND_STATUS.SENT : SEND_STATUS.RECEIVED;
+
+/**
+ * Every job history row goes through here: a change whose before and after read the same once named (a stamp re-written
+ * by the same person, ["QA Eng Anan", "QA Eng Anan"]) is not a change — dropped, for every key alike.
+ */
+async function audit(w: Tx, byUserId: number | null, entries: AuditEntry | AuditEntry[]) {
+  const real = (c: AuditChanges | null | undefined) =>
+    c &&
+    Object.fromEntries(Object.entries(c).filter(([, [a, b]]) => JSON.stringify(a ?? '') !== JSON.stringify(b ?? '')));
+  const list = (Array.isArray(entries) ? entries : [entries])
+    .map((e) => ({ ...e, changes: real(e.changes) }))
+    // an edit left with nothing changed is no history row (CREATE / UPLOAD / … never carry changes)
+    .filter((e) => e.action !== 'UPDATE' || Object.keys(e.changes ?? {}).length);
+  if (list.length) await writeAudit(w, byUserId, list);
+}
 
 /** the audit pair of a user stamp: names, never a pk */
 const userPair = async (tx: Tx, from: number | null, to: number | null) =>

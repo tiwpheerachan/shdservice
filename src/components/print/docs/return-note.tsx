@@ -13,6 +13,7 @@ import { bahtText } from '@/lib/thai-baht';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { parseSwap, refundDateOf, REFUND_DETAIL } from '@/lib/validation/job';
 import { LEGACY_ADJUST_LABEL, legacyAdjust } from '@/components/jobs/close-money';
+import { Email } from '@/components/shared/email';
 
 const dmy = (s: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -60,9 +61,19 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   // ขนส่ง: the staff copy's return detail ("<courier> · <note>"); the customer's has no note (jobForCustomer) —
   // its courier from the shipping profile chosen at close (a deleted one still names it)
   const courier = forCustomer ? ((await getShippingProfile(j.return.shipperId))?.nameTh ?? '') : j.return.detail;
-  const contactLine = [contact?.phone && `Tel. : ${contact.phone}`, contact?.email && `Email : ${contact.email}`]
-    .filter(Boolean)
-    .join('  ');
+  // the address only after hydration — never in the server HTML (src/lib/obscure.ts)
+  const contactLine =
+    contact?.phone || contact?.email ? (
+      <>
+        {contact.phone && `Tel. : ${contact.phone}`}
+        {contact.phone && contact.email ? '  ' : ''}
+        {contact.email && (
+          <>
+            Email : <Email value={contact.email} />
+          </>
+        )}
+      </>
+    ) : null;
   const shipping = j.deliveryCost + j.boxCost;
   // legacy VAT / discount folded into job_total_cost: its own line, so the lines add up to the Grand Total
   const adjust = legacyAdjust(j.totalCost, j.partsCost + j.serviceCost + j.toolCost + shipping);

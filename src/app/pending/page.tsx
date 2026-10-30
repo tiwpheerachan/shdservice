@@ -5,6 +5,7 @@ import { Clock, RefreshCw, LogOut, Mail, BadgeCheck } from 'lucide-react';
 import { Logo } from '@/components/shared/logo';
 import { AuthSplit } from '@/components/ui/sign-in';
 import { hardNavigate } from '@/lib/navigation';
+import { Email } from '@/components/shared/email';
 
 type Me = { name: string; email: string; avatar?: string };
 
@@ -96,7 +97,7 @@ export default function PendingPage() {
                 <p className="truncate text-sm font-semibold">{me.name}</p>
                 <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                   <Mail className="h-3 w-3 shrink-0" />
-                  {me.email}
+                  <Email value={me.email} />
                 </p>
               </div>
               <span className="shrink-0 rounded-full bg-primary-soft px-2.5 py-1 text-2xs font-medium text-primary">

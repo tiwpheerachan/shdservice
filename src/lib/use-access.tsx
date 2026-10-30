@@ -11,6 +11,7 @@ import {
   type Module,
   type Right,
 } from '@/lib/modules';
+import { unpack } from '@/lib/obscure';
 
 export type AccessValue = {
   /** the signed-in user's uuid (app_user.id, ADR 0008) — '' outside the provider */
@@ -35,8 +36,10 @@ const Ctx = React.createContext<AccessValue>({
   grants: {},
 });
 
+/** `value.email` arrives packed from the server layout (no e-mail address in the HTML — src/lib/obscure.ts) */
 export function AccessProvider({ value, children }: { value: AccessValue; children: React.ReactNode }) {
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const v = React.useMemo(() => ({ ...value, email: value.email ? unpack(value.email) : '' }), [value]);
+  return <Ctx.Provider value={v}>{children}</Ctx.Provider>;
 }
 
 /**

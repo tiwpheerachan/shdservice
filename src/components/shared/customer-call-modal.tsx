@@ -11,6 +11,7 @@ import { useApi, useJobs } from '@/data/db';
 import type { Customer } from '@/data/types';
 import { baht, cn } from '@/lib/utils';
 import { postJson, errMsg } from '@/lib/api';
+import { Email } from '@/components/shared/email';
 
 type CallLog = { id: string; detail: string; date: string; by: string };
 
@@ -28,11 +29,14 @@ function InfoRow({
   label,
   value,
   mono,
+  email,
 }: {
   icon: React.ElementType;
   label: string;
   value?: string;
   mono?: boolean;
+  /** an e-mail address: shown after hydration only (src/lib/obscure.ts) */
+  email?: boolean;
 }) {
   return (
     <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
@@ -42,7 +46,15 @@ function InfoRow({
       <div className="min-w-0">
         <p className="text-2xs text-muted-foreground">{label}</p>
         <p className={cn('wrap-break-word text-sm text-foreground', mono && 'num')}>
-          {value?.trim() ? value : <span className="text-muted-foreground/60">—</span>}
+          {value?.trim() ? (
+            email ? (
+              <Email value={value} />
+            ) : (
+              value
+            )
+          ) : (
+            <span className="text-muted-foreground/60">—</span>
+          )}
         </p>
       </div>
     </div>
@@ -173,7 +185,7 @@ export function CustomerCallModal({
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <InfoRow icon={Phone} label="เบอร์โทรศัพท์" value={customer.phone} mono />
             <InfoRow icon={IdCard} label="เลขบัตร / ผู้เสียภาษี" value={customer.taxId} mono />
-            <InfoRow icon={Mail} label="Email" value={customer.email} />
+            <InfoRow icon={Mail} label="Email" value={customer.email} email />
             <InfoRow icon={MessageSquare} label="Line ID" value={customer.line} />
             <div className="sm:col-span-2">
               <InfoRow icon={MapPin} label="ที่อยู่" value={customer.address} />

@@ -221,7 +221,7 @@ composite / ไม่มี key: `row_number()` ตาม key เดิม (temp
   อ่าน "ใบที่ตกลง" จาก quotation (job_pk, สถานะตกลง 3/6/9) — `ux_quotation_agreed_job` UNIQUE (job_pk) WHERE status IN (3, 6, 9) (legacy: 0 งานมี 2 ใบ) ·
   product.cancel_date / cancelled_by_app_user_pk / cancel_remark — 70 แถวยกเลิกจริงที่ status_changed_* ไม่มี → คงไว้, แถวใหม่ใช้ status_changed_*
 - **คงไว้ให้ข้อมูลเก่า แถวใหม่ NULL** (nullable + COMMENT "legacy snapshot — new rows NULL, read via …"): job.customer_detail (customer_pk),
-  product_model_name (model_pk), job_reception_shipper (reception_shipping_profile_pk), return_customer_detail (customer_pk), spare_part_replace (job_part),
+  product_model_name (model_pk), job_reception_shipper (reception_shipping_profile_pk), return_customer_detail (แถวใหม่เก็บเฉพาะหมายเหตุการส่งคืนที่พนักงานพิมพ์ — ขนส่งอ่านจาก return_shipping_profile_pk; หมายเหตุไม่ใช่สำเนาของข้อมูลอื่น), spare_part_replace (job_part),
   swap_refund_detail (new_serial_no), reported_symptom_pk (job_symptom), approved_quotation_pk · quotation_line.item_code (product_pk) ·
   sale_order_line.product_code (product_pk; บรรทัดค่าบริการเก็บรหัสเป็นข้อความ) · stock_move.reference_out_to (job_pk / sale_order_pk) ·
   customer.customer_address (customer_address1/2 + province/district/sub_district)

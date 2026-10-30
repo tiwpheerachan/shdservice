@@ -15,6 +15,7 @@ import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { userSchema } from '@/lib/validation/admin';
 import { PENDING_ROLE } from '@/lib/access';
 import { useTourRestore } from '@/components/tour/tour';
+import { Email } from '@/components/shared/email';
 
 export type UserForm = {
   id: string;
@@ -199,7 +200,9 @@ export function UserDialog({
           )}
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{form.name || '—'}</p>
-            <p className="truncate text-2xs text-muted-foreground">{form.email || 'ยังไม่ได้เลือกพนักงาน'}</p>
+            <p className="truncate text-2xs text-muted-foreground">
+              {form.email ? <Email value={form.email} /> : 'ยังไม่ได้เลือกพนักงาน'}
+            </p>
           </div>
         </div>
       )}

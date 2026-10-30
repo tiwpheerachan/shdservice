@@ -7,6 +7,7 @@ import { useFieldControl } from '@/components/ui/field';
 import { useApi } from '@/data/db';
 import { qs } from '@/lib/api';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { Email } from '@/components/shared/email';
 
 export type Person = {
   id: string;
@@ -88,7 +89,7 @@ export function PeoplePicker({
         )}
         <span className="min-w-0 flex-1 truncate text-sm">
           {value.name}
-          {value.email && <span className="ml-1.5 text-2xs text-muted-foreground">{value.email}</span>}
+          {value.email && <Email value={value.email} className="ml-1.5 text-2xs text-muted-foreground" />}
         </span>
         <button
           type="button"
@@ -195,7 +196,9 @@ export function PeoplePicker({
                         )}
                       </span>
                       <span className="block truncate text-2xs text-muted-foreground">
-                        {[p.title, p.department, p.email].filter(Boolean).join(' · ')}
+                        {[p.title, p.department].filter(Boolean).join(' · ')}
+                        {p.email && (p.title || p.department) ? ' · ' : ''}
+                        <Email value={p.email} />
                       </span>
                     </span>
                     {i === active && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}

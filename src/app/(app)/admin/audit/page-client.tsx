@@ -18,6 +18,7 @@ import { NO_FILTER, PAGE_SIZE, listKey } from './filters';
 import { fieldLabel, fieldValue } from '@/lib/field-labels';
 import { moduleLabel } from '@/lib/modules';
 import { ExportButton } from '@/components/shared/export-button';
+import { WithEmails } from '@/components/shared/email';
 /** entities come by their drizzle/0006 names — the server maps rows written under the old ones (audit.ts LEGACY_ENTITY) */
 const isSaleOrder = (entity: string) => entity === 'sale_order';
 /** the server already reads an old sale-order deny / send-back (logged APPROVE) as STATUS (audit.ts readable) */
@@ -68,7 +69,7 @@ export default function AuditPage() {
     {
       key: 'user',
       header: 'ผู้ใช้',
-      cell: (r) => <span className="line-clamp-1">{r.user || '—'}</span>,
+      cell: (r) => <span className="line-clamp-1">{r.user ? <WithEmails text={r.user} /> : '—'}</span>,
     },
     { key: 'role', header: 'ตำแหน่ง', hideBelow: 'lg', width: '130px', cell: (r) => r.role || '—' },
     {
@@ -87,14 +88,22 @@ export default function AuditPage() {
       header: 'เลขที่ / รหัส',
       width: '130px',
       hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ — the user name was squeezed to "perf-…"
-      cell: (r) => <span className="num font-medium">{r.no || r.key}</span>,
+      cell: (r) => (
+        <span className="num font-medium">
+          <WithEmails text={r.no || r.key} />
+        </span>
+      ),
     },
     {
       key: 'summary',
       header: 'รายละเอียด',
       sortable: false,
       hideBelow: 'sm',
-      cell: (r) => <span className="line-clamp-2">{r.summary}</span>,
+      cell: (r) => (
+        <span className="line-clamp-2">
+          <WithEmails text={r.summary} />
+        </span>
+      ),
     },
     {
       key: 'changes',

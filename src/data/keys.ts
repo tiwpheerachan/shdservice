@@ -53,3 +53,5 @@ export const quotationKey = (no: string) => `/api/quotations/${encodeURIComponen
 export const jobIdParam = (sp: Pick<URLSearchParams, 'get'>) => sp.get('id') || '';
 /** not a URL: the id prefetch() stamps on each answer set, so <Prefetched> seeds one set only once */
 export const PREFETCH_ID = 'prefetch:id';
+/** not a URL: prefetch()'s answers, packed (src/lib/obscure.ts — no e-mail address in the server HTML) */
+export const PREFETCH_PACKED = 'prefetch:packed';

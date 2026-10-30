@@ -39,6 +39,7 @@ import { useServerTable } from '@/lib/use-server-table';
 import { NO_FILTER, type CustomerFilter } from './filters';
 import { ExportButton } from '@/components/shared/export-button';
 import { useTourRestore } from '@/components/tour/tour';
+import { Email } from '@/components/shared/email';
 
 function CustomersPageInner() {
   const { push } = useToast();
@@ -271,7 +272,7 @@ function CustomersPageInner() {
       hideBelow: 'sm',
       cell: (r) => <span className="num">{r.phone}</span>,
     },
-    { key: 'email', header: 'Email', hideBelow: 'xl' },
+    { key: 'email', header: 'Email', hideBelow: 'xl', cell: (r) => <Email value={r.email} /> },
     {
       key: 'status',
       header: 'สถานะ',
@@ -348,7 +349,7 @@ function CustomersPageInner() {
           />
         </Field>
         <Field label="Email">
-          <Input placeholder="name@example.com" value={draft.email} onChange={(e) => setD('email', e.target.value)} />
+          <Input placeholder="อีเมลบางส่วน" value={draft.email} onChange={(e) => setD('email', e.target.value)} />
         </Field>
         <Field label="เลขบัตรประชาชน / เลขผู้เสียภาษี">
           <Input className="num" value={draft.taxId} onChange={(e) => setD('taxId', e.target.value)} />

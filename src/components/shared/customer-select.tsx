@@ -26,6 +26,7 @@ import { customerSchema } from '@/lib/validation/customer';
 import { useApi } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { useTourRestore } from '@/components/tour/tour';
+import { useHydrated } from '@/components/shared/email-text';
 
 /**
  * Customer block used by job / quotation / sale-order forms.
@@ -51,6 +52,7 @@ export function CustomerSelect({
 }) {
   const { push } = useToast();
   const { can } = useAccess();
+  const hydrated = useHydrated();
   const canAdd = allowNew && can('Customer', 'add');
   const canEdit = can('Customer', 'edit');
   const [mode, setMode] = React.useState<Mode>('existing');
@@ -153,7 +155,8 @@ export function CustomerSelect({
             <Input readOnly value={c.line ?? ''} placeholder="—" />
           </Field>
           <Field label="Email" className="lg:col-span-2">
-            <Input readOnly value={c.email ?? ''} placeholder="—" />
+            {/* the address only after hydration — never in the server HTML (src/lib/obscure.ts) */}
+            <Input readOnly value={hydrated ? (c.email ?? '') : ''} placeholder="—" />
           </Field>
         </FieldGrid>
         {c.status === 'Inactive' && (

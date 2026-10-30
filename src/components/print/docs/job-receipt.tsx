@@ -56,7 +56,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
             { k: 'โทรศัพท์', v: c?.phone },
             { k: 'Line ID', v: c?.line },
             { k: 'ที่อยู่', v: c?.address },
-            { k: 'อีเมล', v: c?.email },
+            { k: 'อีเมล', v: c?.email, email: true },
           ]}
         />
       </Box>

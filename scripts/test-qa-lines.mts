@@ -334,6 +334,17 @@ try {
       assert.equal(after.length, 3);
       assert.deepEqual(after.slice(0, 2), before, 'pk, id, code text and figures of the recorded lines unchanged');
       assert.deepEqual(K.codeOf(after[2]!), [null, 9582], 'the new line: product_pk, no code text');
+      // the history names the line change readably (codes, never pks): 2 lines before, 3 after
+      const log = await one<{ lines: [string[], string[]] | null }>(
+        sql`SELECT changes->'lines' AS lines FROM audit_log WHERE entity = ${hd} AND entity_no = ${K.legacyNo}
+             ORDER BY pk DESC LIMIT 1`,
+      );
+      assert.ok(log.lines, 'the edit logs its lines');
+      assert.deepEqual([log.lines[0].length, log.lines[1].length], [2, 3]);
+      assert.ok(
+        log.lines[1].some((l) => l.includes(P2)),
+        'the added line by its code',
+      );
       // and a recorded line is System Admin's alone: changing one or dropping one → 403 for the clerk
       const v = (await K.read(K.legacyNo)).version;
       const now = (await K.read(K.legacyNo)).lines;

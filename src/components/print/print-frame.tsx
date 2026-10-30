@@ -1,5 +1,6 @@
 import type { DocumentProfile } from '@/server/services/document-profiles';
 import { AutoPrint } from './auto-print';
+import { Email } from '@/components/shared/email';
 
 /**
  * A4 document shell shared by every print view: company header, title box,
@@ -31,7 +32,11 @@ export function PrintFrame({
             {co.address && <p>{co.address}</p>}
             <p>
               {co.phone && <>โทร {co.phone} </>}
-              {co.email && <>· {co.email} </>}
+              {co.email && (
+                <>
+                  · <Email value={co.email} />{' '}
+                </>
+              )}
               {co.taxId && <>· เลขประจำตัวผู้เสียภาษี {co.taxId}</>}
             </p>
           </div>
@@ -73,14 +78,27 @@ export function Box({
   );
 }
 
-export function KV({ items, cols = 2 }: { items: { k: string; v?: string | number | null }[]; cols?: 2 | 3 }) {
+export function KV({
+  items,
+  cols = 2,
+}: {
+  /** `email`: the value is an e-mail address — shown after hydration only (src/lib/obscure.ts) */
+  items: { k: string; v?: string | number | null; email?: boolean }[];
+  cols?: 2 | 3;
+}) {
   return (
     <dl className={`grid gap-x-6 gap-y-1 ${cols === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
       {items.map((it) => (
         <div key={it.k} className="flex gap-2">
           <dt className={`${cols === 3 ? 'w-24' : 'w-32'} shrink-0 text-neutral-500`}>{it.k}</dt>
           <dd className="min-w-0 flex-1 wrap-break-word">
-            {it.v === null || it.v === undefined || it.v === '' ? '—' : it.v}
+            {it.v === null || it.v === undefined || it.v === '' ? (
+              '—'
+            ) : it.email ? (
+              <Email value={String(it.v)} />
+            ) : (
+              it.v
+            )}
           </dd>
         </div>
       ))}

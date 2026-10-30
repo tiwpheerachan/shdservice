@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { pack } from '@/lib/obscure';
 import { headers, cookies } from 'next/headers';
 import { SESSION_COOKIE } from '@/lib/session';
 import { AppShell } from '@/components/layout/app-shell';
@@ -45,7 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       value={{
         userId: user.id,
         name: user.name,
-        email: user.email,
+        email: pack(user.email), // packed: no e-mail address in the HTML (src/lib/obscure.ts)
         role: user.role,
         isAdmin: user.isAdmin,
         grants,

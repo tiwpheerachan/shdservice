@@ -709,8 +709,17 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
           summary: statusChanged
             ? `สถานะใบเสนอราคา → ${statusName}`
             : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${(figuresChanged ? t.net : num(prev.netAmount)).toFixed(2)} บาท`,
-          // the customer and job as their codes (what the log showed before drizzle/0006), not their pks
-          changes,
+          // the customer and job as their codes (what the log showed before drizzle/0006), not their pks; the lines
+          // before → after as sale orders log them ("P00291 x1 @100", a service line by its text)
+          changes: linesChanged
+            ? {
+                ...changes,
+                lines: [
+                  old.map((o) => `${str(o.code) || clean(o.itemDetail)} x${num(o.quantity)} @${num(o.unitPrice)}`),
+                  lines.map((l) => `${str(l.code) || clean(l.detail)} x${l.qty} @${l.unitPrice}`),
+                ],
+              }
+            : changes,
         });
     } else {
       const profile = await issuingProfile(i.documentProfileId ?? jobProfileId);

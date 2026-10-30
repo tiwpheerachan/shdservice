@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useMe } from '@/lib/use-me';
 import { startSignOut } from '@/lib/navigation';
 import { useTour } from '@/components/tour/tour';
+import { Email } from '@/components/shared/email';
 
 export function Topbar({
   onOpenMobile,
@@ -147,7 +148,9 @@ export function Topbar({
         {/* one line each, cut with … — a long email wrapped the topbar at 1280px; xl: no room beside the sidebar at 1024 */}
         <div className="hidden min-w-0 max-w-48 leading-tight xl:block" title={me?.email}>
           <p className="truncate text-xs font-medium">{me?.name ?? 'กำลังโหลด…'}</p>
-          <p className="truncate text-2xs text-muted-foreground">{me?.email ?? ''}</p>
+          <p className="truncate text-2xs text-muted-foreground">
+            <Email value={me?.email} />
+          </p>
         </div>
         {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
             /api/sso/logout silently signed the user out after every page load. onClick: the /me poll's

@@ -3,7 +3,8 @@
 import * as React from 'react';
 import useSWR, { mutate, SWRConfig, useSWRConfig, type SWRConfiguration } from 'swr';
 import { api, errMsg, onApiWrite } from '@/lib/api';
-import { qs, tableKey, pagedKey, PREFETCH_ID, type Params } from './keys';
+import { qs, tableKey, pagedKey, PREFETCH_ID, PREFETCH_PACKED, type Params } from './keys';
+import { unpack } from '@/lib/obscure';
 import type { Order, DeletedMode } from './queries';
 import type {
   User,
@@ -91,7 +92,13 @@ export function Prefetched({
   fallback: Record<string, unknown>;
   children: React.ReactNode;
 }) {
-  const { [PREFETCH_ID]: id, ...answers } = all;
+  const { [PREFETCH_ID]: id, [PREFETCH_PACKED]: packed, ...rest } = all;
+  // the answers arrive packed (no e-mail address in the HTML — src/lib/obscure.ts); unpacked once per set
+  const answers = React.useMemo(
+    () => (typeof packed === 'string' ? (JSON.parse(unpack(packed)) as Record<string, unknown>) : rest),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one answer set = one `all`
+    [all],
+  );
   const fallback = id !== undefined && seeded.has(id) ? {} : answers;
   React.useEffect(() => {
     if (id !== undefined) seeded.add(id);

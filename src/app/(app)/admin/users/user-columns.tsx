@@ -6,6 +6,7 @@ import type { Column } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import type { User } from '@/data/types';
 import { PENDING_ROLE } from '@/lib/access';
+import { Email } from '@/components/shared/email';
 
 /** the role chip — a pending sign-up (no role yet) shows as a warning */
 function RoleBadge({ role }: { role: string }) {
@@ -111,7 +112,7 @@ export function userColumns({
       cell: (r) => (
         <div className="space-y-0.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5">
-            <Mail className="h-3 w-3" /> {r.email}
+            <Mail className="h-3 w-3" /> <Email value={r.email} />
           </p>
           {r.phone && (
             <p className="num flex items-center gap-1.5">

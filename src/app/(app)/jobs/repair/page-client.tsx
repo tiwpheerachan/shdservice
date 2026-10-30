@@ -35,6 +35,7 @@ import { postJson, errMsg } from '@/lib/api';
 import { repairActionSchema } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
+import { unpack } from '@/lib/obscure';
 
 const NO_DETAIL: RepairDetail = {
   engineerSymptom: '',
@@ -258,7 +259,9 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   );
 }
 
-export default function RepairPage({ job }: { job?: JobDetail }) {
+/** `jobPacked`: the job that came with the page, packed (src/lib/obscure.ts — its customer's e-mail stays out of the HTML) */
+export default function RepairPage({ jobPacked }: { jobPacked?: string }) {
+  const job = React.useMemo(() => (jobPacked ? (JSON.parse(unpack(jobPacked)) as JobDetail) : undefined), [jobPacked]);
   return (
     <JobScreen initial={job && fromJob(job)}>
       <RepairForm initial={job} />
