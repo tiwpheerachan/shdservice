@@ -37,13 +37,17 @@ DECLARE
   tables text[] := ARRAY['app_back_up_db_log', 'app_config', 'app_user', 'app_user_tour', 'approve_status', 'audit_log', 'category', 'color', 'condition', 'customer', 'document_attach', 'document_profile', 'idempotency_key', 'inventory_dt', 'inventory_hd', 'inventory_type', 'job', 'job_call_log', 'job_close_temp', 'job_create_temp', 'job_log', 'job_order_spare_part_log', 'job_order_spare_part_status', 'job_return_dt', 'job_return_hd', 'job_send_forward_dt', 'job_service_code', 'job_status', 'job_symptom', 'job_type', 'manufacturer', 'model', 'model_color', 'model_part', 'model_tier', 'mt_city', 'mt_district', 'mt_sub_district', 'product', 'product_model', 'product_none_serial', 'product_serial', 'product_type', 'quotation_dt', 'quotation_hd', 'quotation_status', 'quotation_temp', 'record_status', 'running_no', 'sale_in_dt', 'sale_in_hd', 'sale_out_dt', 'sale_out_hd', 'service_cost', 'shipping_profile', 'store_location', 'symptom', 'temp_model', 'temp_spare_part', 'track_block', 'track_doc_ticket', 'track_event', 'track_otp', 'track_rate', 'track_session', 'track_ticket'];
   found text;
 BEGIN
-  SELECT string_agg(polname || ' on ' || polrelid::regclass::text, ', ') INTO found FROM pg_policy;
+  -- only the tables rebuilt here, in schema public: Supabase's own schemas (storage, realtime, auth …) have policies,
+  -- triggers and publications of their own that this file never touches
+  SELECT string_agg(p.polname || ' on ' || c.relname, ', ') INTO found
+    FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables);
   IF found IS NOT NULL THEN RAISE EXCEPTION 'row level security policies this migration would drop: %', found; END IF;
 
-  SELECT string_agg(tgname || ' on ' || tgrelid::regclass::text, ', ') INTO found
-    FROM pg_trigger
-   WHERE NOT tgisinternal
-     AND (tgrelid::regclass::text, tgname) NOT IN (('audit_log', 'trg_audit_log_no_truncate'), ('audit_log', 'trg_audit_log_readonly'), ('customer', 'tr_customer_row_version'), ('job', 'tr_job_row_version'), ('job', 'trg_job_track_token_hash'), ('quotation_hd', 'tr_quotation_hd_row_version'), ('sale_out_hd', 'tr_sale_out_hd_row_version'));
+  SELECT string_agg(g.tgname || ' on ' || c.relname, ', ') INTO found
+    FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
+   WHERE NOT g.tgisinternal AND c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables)
+     AND (c.relname::text, g.tgname::text) NOT IN (('audit_log', 'trg_audit_log_no_truncate'), ('audit_log', 'trg_audit_log_readonly'), ('customer', 'tr_customer_row_version'), ('job', 'tr_job_row_version'), ('job', 'trg_job_track_token_hash'), ('quotation_hd', 'tr_quotation_hd_row_version'), ('sale_out_hd', 'tr_sale_out_hd_row_version'));
   IF found IS NOT NULL THEN RAISE EXCEPTION 'triggers this migration does not know how to recreate: %', found; END IF;
 
   SELECT string_agg(DISTINCT v.oid::regclass::text, ', ') INTO found
@@ -52,7 +56,9 @@ BEGIN
      AND v.oid <> d.refobjid AND v.oid <> 'public.view_customer'::regclass;
   IF found IS NOT NULL THEN RAISE EXCEPTION 'views on the tables being rebuilt: %', found; END IF;
 
-  SELECT string_agg(pr.prrelid::regclass::text, ', ') INTO found FROM pg_publication_rel pr;
+  SELECT string_agg(c.relname || ' in ' || pb.pubname, ', ') INTO found
+    FROM pg_publication_rel pr JOIN pg_class c ON c.oid = pr.prrelid JOIN pg_publication pb ON pb.oid = pr.prpubid
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables);
   IF found IS NOT NULL THEN RAISE EXCEPTION 'tables in a publication: %', found; END IF;
 
   WITH want AS (
@@ -6570,4 +6576,4 @@ END $$;
 --> statement-breakpoint
 COMMENT ON TABLE legacy_boundary IS 'drizzle/0006: the highest pk each table had when the legacy data was converted. A row with pk <= max_pk came from the legacy system — its money / quantity fields are locked (owner 2026-10-30).';
 --> statement-breakpoint
-ANALYZE;
+ANALYZE app_back_up_db_log, role_permission, app_user, app_user_tour, approve_status, audit_log, category, color, condition, customer, job_attachment, document_profile, idempotency_key, stock_move_line, stock_move, stock_move_type, job, job_call_log, job_close_temp, job_create_temp, job_status_log, job_part, job_part_status, job_return_dt, job_return_hd, job_outsource, job_service_code, job_status, job_symptom, job_type, brand, model, model_color, model_part, model_tier, province, district, sub_district, product, product_compatible_model, product_stock, product_serial, product_type, quotation_line, quotation, quotation_status, quotation_temp, record_status, running_no, sale_in_dt, sale_in_hd, sale_order_line, sale_order, service_cost, shipping_profile, store_location, symptom, temp_model, temp_spare_part, track_block, track_doc_ticket, track_event, track_otp, track_rate, track_session, track_ticket, legacy_orphan_ref, legacy_boundary, security_log;

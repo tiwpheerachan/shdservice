@@ -1243,7 +1243,8 @@ const cons = await q<{ t: string; name: string; type: string; def: string }>(`
     FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND contype IN ('c', 'f', 'u', 'x') ORDER BY 1, 2`);
 const trigs = await q<{ t: string; name: string; def: string }>(`
   SELECT tgrelid::regclass::text AS t, tgname AS name, pg_get_triggerdef(oid) AS def
-    FROM pg_trigger WHERE NOT tgisinternal ORDER BY 1, 2`);
+    FROM pg_trigger WHERE NOT tgisinternal
+     AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace) ORDER BY 1, 2`);
 const comments = await q<{ t: string; col: string | null; text: string }>(`
   SELECT c.relname AS t, a.attname AS col, d.description AS text
     FROM pg_description d JOIN pg_class c ON c.oid = d.objoid AND d.classoid = 'pg_class'::regclass
@@ -1516,13 +1517,17 @@ DECLARE
   tables text[] := ${tablesArr};
   found text;
 BEGIN
-  SELECT string_agg(polname || ' on ' || polrelid::regclass::text, ', ') INTO found FROM pg_policy;
+  -- only the tables rebuilt here, in schema public: Supabase's own schemas (storage, realtime, auth …) have policies,
+  -- triggers and publications of their own that this file never touches
+  SELECT string_agg(p.polname || ' on ' || c.relname, ', ') INTO found
+    FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables);
   IF found IS NOT NULL THEN RAISE EXCEPTION 'row level security policies this migration would drop: %', found; END IF;
 
-  SELECT string_agg(tgname || ' on ' || tgrelid::regclass::text, ', ') INTO found
-    FROM pg_trigger
-   WHERE NOT tgisinternal
-     AND (tgrelid::regclass::text, tgname) NOT IN (${trigs.map((g) => `(${lit(g.t)}, ${lit(g.name)})`).join(', ')});
+  SELECT string_agg(g.tgname || ' on ' || c.relname, ', ') INTO found
+    FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
+   WHERE NOT g.tgisinternal AND c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables)
+     AND (c.relname::text, g.tgname::text) NOT IN (${trigs.map((g) => `(${lit(g.t)}, ${lit(g.name)})`).join(', ')});
   IF found IS NOT NULL THEN RAISE EXCEPTION 'triggers this migration does not know how to recreate: %', found; END IF;
 
   SELECT string_agg(DISTINCT v.oid::regclass::text, ', ') INTO found
@@ -1531,7 +1536,9 @@ BEGIN
      AND v.oid <> d.refobjid AND v.oid <> 'public.view_customer'::regclass;
   IF found IS NOT NULL THEN RAISE EXCEPTION 'views on the tables being rebuilt: %', found; END IF;
 
-  SELECT string_agg(pr.prrelid::regclass::text, ', ') INTO found FROM pg_publication_rel pr;
+  SELECT string_agg(c.relname || ' in ' || pb.pubname, ', ') INTO found
+    FROM pg_publication_rel pr JOIN pg_class c ON c.oid = pr.prrelid JOIN pg_publication pb ON pb.oid = pr.prpubid
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (tables);
   IF found IS NOT NULL THEN RAISE EXCEPTION 'tables in a publication: %', found; END IF;
 
   WITH want AS (
@@ -2042,7 +2049,8 @@ for (const f of ['log_row_hash()', 'log_append_only()', 'legacy_boundary_readonl
 emit(
   `COMMENT ON TABLE legacy_boundary IS 'drizzle/0006: the highest pk each table had when the legacy data was converted. A row with pk <= max_pk came from the legacy system — its money / quantity fields are locked (owner 2026-10-30).';`,
 );
-emit(`ANALYZE;`);
+// the rebuilt tables only (a bare ANALYZE would walk Supabase's schemas too)
+emit(`ANALYZE ${[...TABLES.map(tn), 'legacy_orphan_ref', 'legacy_boundary', 'security_log'].join(', ')};`);
 
 // GEN_MAP=<file>: the old → new name map as JSON (adr/0008-phase2-renames.md, the drizzle schema)
 if (process.env.GEN_MAP)
