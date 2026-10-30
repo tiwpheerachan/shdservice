@@ -142,14 +142,27 @@ export async function stepTo(page: Page, is: (title: string) => boolean) {
  * Every step of the tour on the page that is open, started from `start` (the ? button or the first-visit
  * offer), each one checked; ends on the last step. Returns the number of steps.
  */
-/** the first-visit offer shows only after the user's first tap / key (it must never be the page's LCP element) */
+/**
+ * The first-visit offer shows only after the user's first tap / key (it must never be the page's LCP element): a key
+ * press once the tour is up (its ? button rendered) — for the checks that it does NOT come.
+ */
 export async function wakeTourOffer(page: Page) {
+  await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).waitFor();
   await page.keyboard.press('Shift');
+}
+
+/** wake the offer and wait for it: pressed again while it has not shown (a key before the page listens is lost — CI) */
+export async function offerShown(page: Page) {
+  const offer = page.getByRole('button', { name: 'เริ่มบทสอน' });
+  await expect(async () => {
+    await page.keyboard.press('Shift');
+    await expect(offer).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 export async function walkTour(page: Page, start: 'button' | 'offer' = 'button'): Promise<number> {
   await page.evaluate(() => delete (window as Window & { __tourPrev?: Element }).__tourPrev);
-  if (start === 'offer') await wakeTourOffer(page);
+  if (start === 'offer') await offerShown(page);
   await page.getByRole('button', { name: start === 'offer' ? 'เริ่มบทสอน' : 'สอนการใช้งานหน้านี้' }).click();
   const n = Number((await card(page).locator('.num').locator('visible=true').first().innerText()).split('/')[1]);
   for (let k = 1; k <= n; k++) {

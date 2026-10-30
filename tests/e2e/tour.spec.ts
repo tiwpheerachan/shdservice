@@ -3,7 +3,7 @@ import { TOURS } from '../../src/components/tour/tours';
 import { OWNER_EMAIL } from './support/env';
 import { rows, userId } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
-import { card, demoUrl, stepTo, tourOn, wakeTourOffer, walkTour } from './support/tour';
+import { card, demoUrl, offerShown, stepTo, tourOn, wakeTourOffer, walkTour } from './support/tour';
 
 /**
  * บทสอน — what a new user sees must be right on every page and screen size: the steps in reading order, only
@@ -90,7 +90,7 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   await signIn(page, OWNER_EMAIL);
   await tourOn();
   await page.goto('/jobs/new');
-  await wakeTourOffer(page);
+  await offerShown(page);
   await page.getByRole('button', { name: 'ไม่ใช่ตอนนี้' }).click();
   // a real entry made before the tour stays; what is tried during it goes
   await page.getByRole('combobox', { name: 'จุดตำหนิ' }).fill('รอยจริงก่อนบทสอน');
@@ -257,7 +257,7 @@ test('"ไม่ต้องถามอีก (ทุกหน้า)": kept fo
   await signIn(page, OWNER_EMAIL);
   await tourOn();
   await page.goto('/jobs/new');
-  await wakeTourOffer(page);
+  await offerShown(page);
   await page.getByRole('button', { name: 'ไม่ต้องถามอีก (ทุกหน้า)' }).click();
   await expect
     .poll(
