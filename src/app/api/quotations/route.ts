@@ -11,8 +11,8 @@ export const POST = handle(async (req: NextRequest) => {
   // before the permission check: add or edit depends on `no`
   const body = await parseBody(req, quotationSave);
   const user = await requireCan(req, 'Quotation', body.no ? 'edit' : 'add');
-  return idempotent(req, user.userId, async () => {
-    const quotation = await saveQuotation(body, user.userId);
+  return idempotent(req, user.pk, async () => {
+    const quotation = await saveQuotation(body, user.pk, user.isAdmin);
     return NextResponse.json({ ok: true, quotation }, { status: body.no ? 200 : 201 });
   });
 });

@@ -88,6 +88,7 @@ export function QuotationSummary({
   errors,
   clear,
   showZero,
+  locked = {},
 }: {
   partsTotal: number;
   deliveryTotal: number;
@@ -105,6 +106,8 @@ export function QuotationSummary({
   clear: (key: string) => void;
   /** a loaded quotation shows its 0 amounts as 0 */
   showZero: boolean;
+  /** a legacy quotation's recorded service / discount / VAT: System Admin's alone (read-only for anyone else) */
+  locked?: { service?: boolean; discount?: boolean; vat?: boolean };
 }) {
   const presetsId = React.useId();
   return (
@@ -117,6 +120,7 @@ export function QuotationSummary({
           <dd>
             <NumberInput
               aria-label="ค่าบริการ"
+              disabled={locked.service}
               list={presetsId}
               aria-invalid={!!errors.serviceAmount || undefined}
               step="0.01"
@@ -142,6 +146,7 @@ export function QuotationSummary({
           <dd className="flex gap-1">
             <NumberInput
               aria-label={`ส่วนลด (${discountUnit})`}
+              disabled={locked.discount}
               aria-invalid={!!errors.discountValue || undefined}
               step="0.01"
               placeholder="0"
@@ -155,6 +160,7 @@ export function QuotationSummary({
             />
             <Select
               aria-label="หน่วยส่วนลด"
+              disabled={locked.discount}
               value={discountUnit}
               onChange={(e) => {
                 setDiscountUnit(e.target.value === 'บาท' ? 'บาท' : '%');
@@ -175,6 +181,7 @@ export function QuotationSummary({
           <dd>
             <Select
               aria-label="ภาษีมูลค่าเพิ่ม (%)"
+              disabled={locked.vat}
               aria-invalid={!!errors.vatRate || undefined}
               value={String(vatRate)}
               onChange={(e) => {

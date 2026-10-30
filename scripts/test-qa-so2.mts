@@ -62,41 +62,56 @@ const CUSTOMER = 'Q2C001';
 const PART = 'Q2P1';
 
 await pool.query(`
-  INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
     SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
                           (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
                           (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
-     WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
   INSERT INTO store_location (store_location_id, store_location_name, is_active)
     SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
      WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
-  DELETE FROM app_config WHERE user_type IN ('Q2 Seller', 'Q2 Approver', 'Q2 Viewer', 'Q2 Clerk');
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  -- sale_order.approve_status_id / sale_order_line.condition_id have foreign keys (drizzle/0006): src/lib/status-ids.ts
+  INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+    SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ', 'In Progess', true, true), (2, 'รออนุมัติ', 'Wait Approve', true, true),
+                          (3, 'แก้ไขข้อมูล', 'Reject', true, true), (4, 'อนุมัติแล้ว', 'Approved', false, false),
+                          (5, 'ปฏิเสธ', 'Deny', false, false)) v(id, th, en, ed, rv)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  INSERT INTO condition (condition_id, condition_name, is_active)
+    SELECT 1, 'สินค้าใหม่', true WHERE NOT EXISTS (SELECT 1 FROM condition WHERE condition_id = 1);
+  DELETE FROM role_permission WHERE user_type IN ('Q2 Seller', 'Q2 Approver', 'Q2 Viewer', 'Q2 Clerk');
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('Q2 Seller', 'Sale Order', true, true, true, true),
     ('Q2 Approver', 'Sale Order', false, true, true, true), ('Q2 Approver', 'SO Approve', false, false, false, true),
     ('Q2 Viewer', 'Sale Order', false, false, false, true),
     ('Q2 Clerk', 'Customer', true, true, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9800 AND 9819 OR email_address LIKE 'q2-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- fixture users keep their pk (audit_log, append-only, points at them: never deleted) — upserted
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'Q2', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code = '${CUSTOMER}');
-  DELETE FROM sale_out_hd WHERE customer_code = '${CUSTOMER}';
-  DELETE FROM customer WHERE customer_id = 9801 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9801, '${CUSTOMER}', 'ลูกค้า QA SO2', '02-980-0001');
-  DELETE FROM product_none_serial WHERE product_id = 9801 OR item_id = 9801;
-  DELETE FROM product WHERE product_id = 9801 OR product_code = '${PART}';
-  INSERT INTO product (product_id, product_code, product_name) VALUES (9801, '${PART}', 'อะไหล่ Q2');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9801, 9801, 1000, 0, 0, 1000, 100.00);
+      .join(', ')}
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = 'ACTIVE',
+      session_version = excluded.session_version, last_login = DEFAULT;
+  -- children before parents (RESTRICT, drizzle/0006): lines, movements, orders, the customer, the part
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9801) OR product_pk = 9801;
+  DELETE FROM stock_move_line WHERE product_pk = 9801 OR stock_move_pk IN (SELECT pk FROM stock_move
+    WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9801));
+  DELETE FROM stock_move WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9801);
+  DELETE FROM sale_order WHERE customer_pk = 9801;
+  DELETE FROM customer WHERE pk = 9801 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9801, '${CUSTOMER}', 'ลูกค้า QA SO2', '02-980-0001');
+  DELETE FROM product_stock WHERE product_pk = 9801 OR pk = 9801;
+  DELETE FROM product WHERE pk = 9801 OR product_code = '${PART}';
+  INSERT INTO product (pk, product_code, product_name) OVERRIDING SYSTEM VALUE VALUES (9801, '${PART}', 'อะไหล่ Q2');
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+    OVERRIDING SYSTEM VALUE VALUES (9801, 9801, 1000, 0, 0, 1000, 100.00);
 `);
 // as test-domain: this year's Inventory-Out series past the numbers other suites already used
 await db.transaction((tx) => nextRunningNo(tx, 'Inventory-Out'));
 await pool.query(`
   UPDATE running_no r SET number = greatest(r.number, coalesce((
-    SELECT max(substring(h.inventory_no FROM length(r.prefix) + 3)::int) FROM inventory_hd h
-     WHERE h.inventory_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
+    SELECT max(substring(h.stock_move_no FROM length(r.prefix) + 3)::int) FROM stock_move h
+     WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type = 'Inventory-Out' AND r.length_year = 2`);
 
 // ---- helpers ----
@@ -120,10 +135,10 @@ type Res = { status: number; body: Record<string, unknown> & { error?: string; o
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
 /** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
 const soIdOf = async (no: string) =>
-  (await pool.query<{ id: string }>('SELECT id::text FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).rows[0]?.id ??
+  (await pool.query<{ id: string }>('SELECT id::text FROM sale_order WHERE sale_order_no = $1', [no])).rows[0]?.id ??
   '00000000-0000-7000-8000-000000000000';
 const userUuid = async (userId: number) =>
-  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [userId])).rows[0]!.id;
 const params = async (no: string) => ({ params: Promise.resolve({ id: await soIdOf(no) }) });
 
 const save = async (u: TestUser, body: Record<string, unknown>) =>
@@ -175,13 +190,13 @@ const hd = async (no: string) =>
   (
     await db.execute<{ rs: string; remark: string | null; slip: string | null; paid: string | null }>(
       sql`SELECT record_status AS rs, document_cancel_remark AS remark, slip_file_name AS slip, payment_amount::text AS paid
-            FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
+            FROM sale_order WHERE sale_order_no = ${no}`,
     )
   ).rows[0];
 const lastAudit = async (no: string) =>
   (
     await db.execute<{ summary: string; changes: Record<string, unknown> | null }>(
-      sql`SELECT summary, changes FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = ${no} ORDER BY pk DESC LIMIT 1`,
+      sql`SELECT summary, changes FROM audit_log WHERE entity = 'sale_order' AND entity_key = ${no} ORDER BY pk DESC LIMIT 1`,
     )
   ).rows[0];
 const listNos = async (u: TestUser, deleted?: string) => {
@@ -270,7 +285,7 @@ try {
     const staff = new Map((await listStaff()).map((s) => [s.id, s.sells]));
     // the staff list carries each user's uuid (ADR 0008)
     const uuidOf = async (u: { id: number }) =>
-      (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [u.id])).rows[0]!.id;
+      (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [u.id])).rows[0]!.id;
     const got = [];
     for (const u of [U.admin, U.seller, U.approver, U.clerk]) got.push(staff.get(await uuidOf(u)));
     assert.deepEqual(got, [true, true, false, false]);
@@ -295,7 +310,7 @@ try {
     );
     // an order already naming the clerk (legacy) keeps them on an edit
     const o = await create(U.seller, { submit: false });
-    await db.execute(sql`UPDATE sale_out_hd SET sale_out_by = ${U.clerk.id} WHERE sale_out_hd_no = ${o.no}`);
+    await db.execute(sql`UPDATE sale_order SET sale_out_by_app_user_pk = ${U.clerk.id} WHERE sale_order_no = ${o.no}`);
     const kept = await save(U.seller, {
       no: o.no,
       customerCode: CUSTOMER,
@@ -307,6 +322,10 @@ try {
     assert.equal(kept.status, 200, JSON.stringify(kept.body));
   });
 } finally {
+  // its roles go: an SO Approve role left behind would be named as an approver by test:domain's next run
+  await pool.query(
+    `DELETE FROM role_permission WHERE user_type IN ('Q2 Seller', 'Q2 Approver', 'Q2 Viewer', 'Q2 Clerk')`,
+  );
   await pool.end();
 }
 

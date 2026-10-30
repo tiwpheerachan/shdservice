@@ -127,7 +127,17 @@ export const quotationSave = defineOperation({
       type: optText,
       customerCode: optText,
       jobNo: optText,
-      lines: z.array(quotationLine.extend({ code: optText })).optional(),
+      lines: z
+        .array(
+          quotationLine.extend({
+            code: optText,
+            id: uuid().optional().meta({
+              description:
+                "an existing line's id (from GET): that line is kept / updated; none = a new line; a stored line whose id is not sent is removed",
+            }),
+          }),
+        )
+        .optional(),
       discountType: optText,
       discountUnit: optText.meta({ description: '`บาท` or `%`' }),
       status: optText.meta({ description: 'A new quotation: `รอเสนอราคา` (default) or `เสนอราคาแล้ว`.' }),
@@ -179,9 +189,14 @@ export const saleOrderSave = defineOperation({
       ...saleOrderFields,
       lines: z
         .array(
-          saleOrderFields.lines
-            .unwrap()
-            .element.extend({ name: optText, type: optText.meta({ description: '`SparePart` | `Service`' }) }),
+          saleOrderFields.lines.unwrap().element.extend({
+            name: optText,
+            type: optText.meta({ description: '`SparePart` | `Service`' }),
+            id: uuid().optional().meta({
+              description:
+                "an existing line's id (from GET): that line is kept / updated; none = a new line; a stored line whose id is not sent is removed",
+            }),
+          }),
         )
         .optional(),
       paymentType: optText,

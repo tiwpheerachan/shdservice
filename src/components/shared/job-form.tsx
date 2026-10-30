@@ -135,6 +135,10 @@ export type JobFormState = {
   dueDateAuto: boolean;
   /** job.row_version as loaded — sent back so a save over someone else's newer edit is refused (409) */
   version: number;
+  /** a legacy job's money fields that already hold a value — System Admin's (JobDetail.figuresLocked) */
+  figuresLocked: JobDetail['figuresLocked'];
+  /** a legacy job: the server keeps its recorded totals and moves them by what a save changes (withTotal) */
+  legacy: boolean;
 };
 
 export const EMPTY_JOB_FORM: JobFormState = {
@@ -186,6 +190,8 @@ export const EMPTY_JOB_FORM: JobFormState = {
   dueDate: '',
   dueDateAuto: false,
   version: 0,
+  figuresLocked: [],
+  legacy: false,
 };
 
 /** Prefill the form from a job loaded through /api/jobs/:id */
@@ -250,6 +256,8 @@ export function fromJob(j: JobDetail): JobFormState {
     dueDate: j.dueDate,
     dueDateAuto: j.dueDateAuto,
     version: j.version,
+    figuresLocked: j.figuresLocked,
+    legacy: j.legacy,
   };
 }
 
@@ -444,12 +452,28 @@ export function useJobForm(): Ctx {
   return ctx;
 }
 
-/** why the money fields are read-only: a closed job and no Job Money After Close (the API refuses a change) */
-export function useMoneyLock(): string | undefined {
+/** a legacy job's money field that already holds a value: read-only but for System Admin (the API refuses a change) */
+export const FIGURES_LOCKED = 'ข้อมูลจากระบบเก่า — ตัวเลขที่บันทึกไว้แล้วแก้ได้เฉพาะ System Admin';
+type MoneyKey = JobDetail['figuresLocked'][number] | 'payment';
+
+/**
+ * Why a money field is read-only (undefined = editable): a closed job and no Job Money After Close; or — `key` given —
+ * a legacy job's field that already holds a value ('payment' = any payment field). The API refuses either change.
+ */
+export function useMoneyLockOf(): (key?: MoneyKey) => string | undefined {
   const { s } = useJobForm();
   const { has } = useAccess();
-  return s.statusGroup === 'Finished' && !has('Job Money After Close') ? MONEY_LOCKED : undefined;
+  const closed = s.statusGroup === 'Finished' && !has('Job Money After Close');
+  return (key) => {
+    if (closed) return MONEY_LOCKED;
+    const locked =
+      key === 'payment'
+        ? s.figuresLocked.some((k) => k.startsWith('payment.'))
+        : !!key && s.figuresLocked.includes(key);
+    return locked ? FIGURES_LOCKED : undefined;
+  };
 }
+export const useMoneyLock = (key?: MoneyKey) => useMoneyLockOf()(key);
 
 /* ---------------- lookup bar ---------------- */
 
@@ -613,8 +637,9 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
  *  picker is first focused / pressed, not with the page: the chosen symptoms show from the form meanwhile */
 export function useSymptomLists(modelCode: string) {
   const [wanted, setWanted] = React.useState(false);
-  const symptoms = useSymptoms('active', wanted);
   const stats = useSymptomStats(wanted);
+  // the by-usage list holds every active symptom: the plain list (~2× its size) only when that one failed
+  const symptoms = useSymptoms('active', wanted && !!stats.error);
   const { data: suggested } = useModelSymptoms(modelCode, wanted);
   const options = stats.data.length ? stats.data : symptoms.data.map((sy) => ({ id: sy.id, name: sy.name }));
   return {
@@ -845,16 +870,24 @@ export function CostSummary({
   action?: { errors: FieldErrors; clear: (key: string) => void };
 }) {
   const { s, set, errors, loaded } = useJobForm();
-  const lock = useMoneyLock();
+  const lockOf = useMoneyLockOf();
+  // the note under the costs: the closed-job lock, else a legacy cost already recorded
+  const lock = lockOf() ?? COST_FIELDS.map((f) => lockOf(f.key)).find(Boolean);
   // the cost being typed, exactly as typed ("0.7"); the others as money ("123.00") — set on typing, never on focus
   // (a focus that changes the text loses its select-all: typing then appended to the amount)
   const [draft, setDraft] = React.useState<{ key: string; text: string } | null>(null);
   const parts = partsTotal ?? s.partsCost;
   const sum = parts + s.serviceCost + s.toolCost + s.deliveryCost + s.boxCost;
-  // a legacy total that is not its costs' sum (VAT / a discount) stands while no cost is edited — one edit and
-  // the server adds the costs up again (withTotal), so the row goes and the net is the sum
+  // a total that is not its costs' sum (VAT / a discount) stands while no cost is edited. A new job: one edit and the
+  // server adds the costs up again (withTotal), so the row goes and the net is the sum. A legacy job: the server
+  // never recomputes it — it moves by what changed, so the row stays as loaded and the net = stored + the change
   const asLoaded = parts === loaded.partsCost && COST_FIELDS.every((f) => s[f.key] === loaded[f.key]);
-  const adjust = asLoaded ? legacyAdjust(loaded.totalCost, sum) : 0;
+  const loadedSum = loaded.partsCost + COST_FIELDS.reduce((t, f) => t + loaded[f.key], 0);
+  const adjust = loaded.legacy
+    ? legacyAdjust(loaded.totalCost, loadedSum)
+    : asLoaded
+      ? legacyAdjust(loaded.totalCost, sum)
+      : 0;
   const net = sum + adjust;
   const deposit = Number(s.depositCost) || 0;
   const bal = jobBalance(net, deposit, 0);
@@ -881,7 +914,7 @@ export function CostSummary({
                   inputMode="decimal"
                   list={f.key === 'serviceCost' ? 'service-cost-presets' : undefined}
                   value={draft?.key === f.key ? draft.text : s[f.key] === 0 ? '' : moneyShown(s[f.key])}
-                  disabled={!!lock}
+                  disabled={!!lockOf(f.key)}
                   placeholder="0.00"
                   aria-invalid={!!error || undefined}
                   aria-describedby={error ? `cost-${f.key}-error` : undefined}
@@ -954,7 +987,7 @@ export function CostSummary({
 
 export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   const { s, set, patch, errors, loaded } = useJobForm();
-  const lock = useMoneyLock();
+  const lockOf = useMoneyLockOf();
   const confirm = useConfirm();
   const { data: STAFF, ...staffLookup } = useStaff();
   // "มอบหมายงานนี้ให้" = job.engineer_id → an active user whose role has Job Take (the API refuses anyone else)
@@ -1001,13 +1034,17 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
             inputMode="decimal"
             placeholder="0.00"
             value={s.estimateCost}
-            disabled={!!lock}
+            disabled={!!lockOf('estimateCost')}
             onChange={(e) => set('estimateCost', e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"
           />
         </Field>
-        <Field label="ค่ามัดจำงานซ่อม (บาท)" error={errors.depositCost} hint={lock}>
+        <Field
+          label="ค่ามัดจำงานซ่อม (บาท)"
+          error={errors.depositCost}
+          hint={lockOf('depositCost') ?? lockOf('estimateCost')}
+        >
           <Input
             type="number"
             step="0.01"
@@ -1015,7 +1052,7 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
             inputMode="decimal"
             placeholder="0.00"
             value={s.depositCost}
-            disabled={!!lock}
+            disabled={!!lockOf('depositCost')}
             onChange={(e) => set('depositCost', e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             className="num text-right"

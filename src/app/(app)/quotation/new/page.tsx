@@ -17,7 +17,7 @@ function NewQuotation() {
   const form = React.useRef<QuotationFormHandle>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // POST /api/quotations → quotation_hd (running Q) + quotation_dt
+  // POST /api/quotations → quotation (running Q) + quotation_line
   const save = async () => {
     const p = form.current?.payload();
     if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)

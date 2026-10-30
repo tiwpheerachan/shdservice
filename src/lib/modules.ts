@@ -1,7 +1,7 @@
-// Permission modules — the values of app_config.module_name in the legacy DB —
+// Permission modules — the values of role_permission.module_name in the legacy DB —
 // and which app routes each one guards. Shared by server (API enforcement) and
 // client (sidebar / button visibility). Admin screens have no legacy module:
-// they are System Admin only. Special rights (RIGHTS) are app_config rows too.
+// they are System Admin only. Special rights (RIGHTS) are role_permission rows too.
 
 export type Action = 'add' | 'edit' | 'del' | 'view';
 
@@ -35,7 +35,7 @@ export const PAGE_MODULES: readonly Module[] = [
   'Sale Order',
 ];
 
-/** a page module the way the sidebar names its menu — what messages say instead of the app_config key */
+/** a page module the way the sidebar names its menu — what messages say instead of the role_permission key */
 export const MODULE_LABELS: Record<Exclude<Module, Right>, string> = {
   'Job Management': 'ข้อมูลงานบริการ',
   'Job Assign': 'จนท.รับมอบหมายงาน',
@@ -62,7 +62,7 @@ const LOG_MODULE_LABELS: Record<string, string> = {
 export const moduleLabel = (m: string) => (Object.hasOwn(LOG_MODULE_LABELS, m) ? LOG_MODULE_LABELS[m]! : m);
 
 /**
- * Special rights: an app_config row under a pseudo module name, can_view = "has the right" (set on the
+ * Special rights: an role_permission row under a pseudo module name, can_view = "has the right" (set on the
  * permissions page, section สิทธิ์พิเศษ). Rules read these, never a role name.
  * System Admin holds all of them implicitly, except Job Take (checkRight).
  * The value is the right's one short name — the permissions page, the error messages and the hints all

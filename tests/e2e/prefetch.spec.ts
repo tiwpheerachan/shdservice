@@ -23,12 +23,12 @@ async function offline(page: Page) {
 async function newQuotation(remark: string): Promise<string> {
   const { no } = await one<{ no: string }>(
     `SELECT 'Q97' || lpad((coalesce(max(substring(quotation_no FROM 4)::int), 0) + 1)::text, 5, '0') AS no
-       FROM quotation_hd WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
+       FROM quotation WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
   );
   const { id } = await one<{ id: string }>(
-    `INSERT INTO quotation_hd (quotation_no, customer_code, create_date, create_by, remark, quotation_status_id,
-                               is_active, record_status)
-     VALUES ($1, $2, now(), -1, $3, 1, true, 'ACTIVE') RETURNING id::text AS id`,
+    `INSERT INTO quotation (quotation_no, customer_pk, create_date, remark, quotation_status_id, record_status)
+     VALUES ($1, (SELECT pk FROM customer WHERE customer_code = $2), now(), $3, 1, 'ACTIVE')
+     RETURNING id::text AS id`,
     [no, E2E_CUSTOMER, remark],
   );
   return id;
@@ -105,11 +105,11 @@ function hydrationErrors(page: Page): string[] {
 /** a role holding Job Take and one active person in it, so มอบหมายงานนี้ให้'s hint names a role (kept between
  *  runs: the server caches the staff list, an earlier spec may have read it before this one inserts) */
 async function ensureTaker() {
-  await rows(`INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  await rows(`INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
               SELECT 'E2E Taker', 'Job Take', false, false, false, true
-               WHERE NOT EXISTS (SELECT 1 FROM app_config WHERE user_type = 'E2E Taker' AND module_name = 'Job Take')`);
-  await rows(`INSERT INTO app_user (username, password, first_name, user_type, is_active, email_address, record_status)
-              SELECT 'e2e-taker', '', 'E2E Taker', 'E2E Taker', true, 'taker@e2e-prefetch.test', 'ACTIVE'
+               WHERE NOT EXISTS (SELECT 1 FROM role_permission WHERE user_type = 'E2E Taker' AND module_name = 'Job Take')`);
+  await rows(`INSERT INTO app_user (username, first_name, user_type, email_address, record_status)
+              SELECT 'e2e-taker', 'E2E Taker', 'E2E Taker', 'taker@e2e-prefetch.test', 'ACTIVE'
                WHERE NOT EXISTS (SELECT 1 FROM app_user WHERE email_address = 'taker@e2e-prefetch.test')`);
 }
 
@@ -123,9 +123,8 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
   const file = `e2e-prefetch-${no}.pdf`;
   // id from the sequence: an explicit max+1 leaves it behind and the next insert (app or test:db) collides
   await rows(
-    `INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name,
-                                  system_file_name, remark, is_active, record_status)
-     VALUES ('Jobs', $1, $2, $2, '', true, 'ACTIVE')`,
+    `INSERT INTO job_attachment (job_pk, original_file_name, system_file_name, remark, record_status)
+     VALUES ((SELECT pk FROM job WHERE job_no = $1), $2, $2, '', 'ACTIVE')`,
     [no, file],
   );
   await ensureTaker();

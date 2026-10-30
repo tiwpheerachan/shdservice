@@ -61,7 +61,7 @@ export type Product = {
   onhand: number;
   price: number;
   status: Status;
-  // DB-backed extras (product + product_none_serial)
+  // DB-backed extras (product + product_stock)
   id?: string;
   nameEn?: string;
   nameCn?: string;
@@ -72,14 +72,14 @@ export type Product = {
   issued?: number;
   reserved?: number;
   ubRepairOnly?: boolean;
-  /** product.is_serial_control — คุม S/N (null / not sent = False) */
+  /** product.is_serial_control (dropped in drizzle/0006) — always False */
   serialControl?: boolean;
   forModelColor?: string;
   createdDate?: string;
   createdBy?: string;
   models?: string[];
   image?: string; // products/{code}/{file} — serve via fileUrl()
-  stockRemark?: string; // product_none_serial.remark — legacy stock-adjustment log
+  stockRemark?: string; // product_stock.remark — legacy stock-adjustment log
   cancelRemark?: string; // product.cancel_remark / cancel_date / cancel_by (เหตุผลที่ยกเลิกอะไหล่)
   cancelDate?: string;
   cancelBy?: string;
@@ -94,7 +94,7 @@ export type Movement = {
   from: string;
   to: string;
   remark: string;
-  // DB-backed extras (inventory_hd/dt)
+  // DB-backed extras (stock_move / stock_move_line)
   qty?: number;
   items?: string;
 };
@@ -163,6 +163,8 @@ export type Job = {
   serviceCost?: number;
   partsCost?: number;
   modelDetail?: string;
+  /** the job's customer (customer.id) — none on a job without one */
+  customerId?: string;
 };
 
 export type Quotation = {
@@ -176,7 +178,7 @@ export type Quotation = {
   brandModel: string;
   amount: number;
   status: string;
-  // DB-backed extras (quotation_hd)
+  // DB-backed extras (quotation)
   statusId?: number;
   customerCode?: string;
   warranty?: string;
@@ -199,7 +201,7 @@ export type SaleOrder = {
   approve: string;
   stockDoc: string;
   tracking: string;
-  // DB-backed extras (sale_out_hd)
+  // DB-backed extras (sale_order)
   approveId?: number;
   customerCode?: string;
   paymentType?: string;

@@ -33,6 +33,8 @@ export const NAV: NavGroup[] = [
       { title: 'โปรไฟล์ผู้ออกเอกสาร', href: '/admin/document-profiles' },
       { title: 'โปรไฟล์บริษัทขนส่ง', href: '/admin/shipping-profiles' },
       { title: 'ประวัติการใช้งาน', href: '/admin/audit' },
+      { title: 'ประวัติความปลอดภัย', href: '/admin/security' },
+      { title: 'ค่าที่ไม่สมเหตุสมผล', href: '/admin/anomalies' },
       { title: 'คู่มือการใช้งาน', href: '/admin/guide' },
     ],
   },

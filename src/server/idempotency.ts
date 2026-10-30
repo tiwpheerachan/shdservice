@@ -7,9 +7,9 @@ import { parseHeaders } from '@/server/auth';
 import { IDEMPOTENCY } from '@/server/contract/common';
 
 /**
- * Idempotency-Key on create POSTs (drizzle/0026 idempotency_key). The client sends one key per
- * logical submit (src/lib/api.ts postJson); the same key from the same user on the same route runs
- * `fn` once and every repeat (double-click, network resend, retry after a timeout) gets the stored
+ * Idempotency-Key on create POSTs (drizzle/0026 idempotency_key; per app_user_pk since 0006). The client sends one
+ * key per logical submit (src/lib/api.ts postJson); the same key from the same user (`userPk` = app_user.pk) on the
+ * same route runs `fn` once and every repeat (double-click, network resend, retry after a timeout) gets the stored
  * answer back instead of a second document. A repeat that arrives while the first is still running
  * → 409 — it never runs in parallel. Only a 2xx answer is stored: a refused request (400 / 409 …)
  * created nothing, so its key is released and the same submit may be sent again.
@@ -17,7 +17,7 @@ import { IDEMPOTENCY } from '@/server/contract/common';
  */
 let lastPurge = 0;
 
-export async function idempotent(req: NextRequest, userId: number, fn: () => Promise<Response>): Promise<Response> {
+export async function idempotent(req: NextRequest, userPk: number, fn: () => Promise<Response>): Promise<Response> {
   // trimmed; over 100 → 400 "Idempotency-Key ยาวเกินไป" (the header as src/server/contract declares it)
   const key = parseHeaders(req, IDEMPOTENCY)['Idempotency-Key'];
   if (!key) return fn();
@@ -30,15 +30,15 @@ export async function idempotent(req: NextRequest, userId: number, fn: () => Pro
   }
   // claim the key; a claim left unfinished > 2 min (the process died mid-request) may be taken over
   const claimed = await db.execute(sql`
-    INSERT INTO idempotency_key (user_id, key, route) VALUES (${userId}, ${key}, ${route})
-    ON CONFLICT (user_id, key) DO UPDATE SET created_at = now()
+    INSERT INTO idempotency_key (app_user_pk, key, route) VALUES (${userPk}, ${key}, ${route})
+    ON CONFLICT (app_user_pk, key) DO UPDATE SET created_at = now()
       WHERE idempotency_key.response IS NULL AND idempotency_key.route = EXCLUDED.route
         AND idempotency_key.created_at < now() - interval '2 minutes'
     RETURNING 1`);
   if (!claimed.rows.length) {
     const [hit] = (
       await db.execute<{ route: string; status: number | null; response: unknown }>(
-        sql`SELECT route, status, response FROM idempotency_key WHERE user_id = ${userId} AND key = ${key}`,
+        sql`SELECT route, status, response FROM idempotency_key WHERE app_user_pk = ${userPk} AND key = ${key}`,
       )
     ).rows;
     if (hit && hit.route !== route) throw new HttpError(422, 'Idempotency-Key นี้ใช้กับคำขออื่นไปแล้ว');
@@ -48,7 +48,7 @@ export async function idempotent(req: NextRequest, userId: number, fn: () => Pro
   }
 
   const release = () =>
-    db.execute(sql`DELETE FROM idempotency_key WHERE user_id = ${userId} AND key = ${key} AND response IS NULL`);
+    db.execute(sql`DELETE FROM idempotency_key WHERE app_user_pk = ${userPk} AND key = ${key} AND response IS NULL`);
   let res: Response;
   try {
     res = await fn();
@@ -62,7 +62,7 @@ export async function idempotent(req: NextRequest, userId: number, fn: () => Pro
   }
   const body: unknown = await res.clone().json();
   await db.execute(
-    sql`UPDATE idempotency_key SET status = ${res.status}, response = ${JSON.stringify(body)}::jsonb WHERE user_id = ${userId} AND key = ${key}`,
+    sql`UPDATE idempotency_key SET status = ${res.status}, response = ${JSON.stringify(body)}::jsonb WHERE app_user_pk = ${userPk} AND key = ${key}`,
   );
   return res;
 }

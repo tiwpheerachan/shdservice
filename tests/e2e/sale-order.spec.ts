@@ -13,17 +13,20 @@ const PRICE = 150;
 /** what the order holds in the database */
 const orderState = (no: string) =>
   one<{ approve: number; created_by: number; sales: number; approve_by: number; remark: string; lines: string }>(
-    `SELECT h.approve_status_id AS approve, h.document_create_by AS created_by, h.sale_out_by AS sales,
-            h.approve_by, coalesce(h.approve_remark, '') AS remark,
-            (SELECT string_agg(d.product_code || ' x' || d.sale_out_quantity || ' @' || d.sale_out_price::float, ', ')
-               FROM sale_out_dt d WHERE d.sale_out_hd_no = h.sale_out_hd_no) AS lines
-       FROM sale_out_hd h WHERE h.sale_out_hd_no = $1`,
+    `SELECT h.approve_status_id AS approve, h.created_by_app_user_pk::int AS created_by,
+            h.sale_out_by_app_user_pk::int AS sales, h.approved_by_app_user_pk::int AS approve_by,
+            coalesce(h.approve_remark, '') AS remark,
+            -- a product line's code is the product's (sale_order_line.product_code: service lines / legacy only, ADR 0008)
+            (SELECT string_agg(coalesce(p.product_code, d.product_code) || ' x' || d.sale_out_quantity || ' @' ||
+                               d.sale_out_price::float, ', ')
+               FROM sale_order_line d LEFT JOIN product p ON p.pk = d.product_pk WHERE d.sale_order_pk = h.pk) AS lines
+       FROM sale_order h WHERE h.sale_order_no = $1`,
     [no],
   );
 
 /** the order's uuid — its link (ADR 0008); the number is what's shown and what the rows reference */
 const soId = async (no: string) =>
-  (await one<{ id: string }>('SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).id;
+  (await one<{ id: string }>('SELECT id::text AS id FROM sale_order WHERE sale_order_no = $1', [no])).id;
 
 /** an order sent for approval through the API, as the signed-in user (the UI path is the first test's) */
 async function createOrder(page: Page, code: string, qty: number, salesEmail: string): Promise<string> {
@@ -77,7 +80,7 @@ test('a seller sends an order for approval; the manager approves it and the stoc
   await page.getByRole('radio', { name: 'ส่งขออนุมัติ' }).check();
   await page.getByRole('button', { name: 'บันทึกใบสั่งขาย' }).click();
   await page.waitForURL(/\/sale\/orders\/edit\?id=[0-9a-f-]{36}$/);
-  const { no } = await one<{ no: string }>('SELECT sale_out_hd_no AS no FROM sale_out_hd WHERE id = $1', [
+  const { no } = await one<{ no: string }>('SELECT sale_order_no AS no FROM sale_order WHERE id = $1', [
     new URL(page.url()).searchParams.get('id'),
   ]);
   await expect(page.getByText('รออนุมัติ', { exact: true })).toBeVisible();

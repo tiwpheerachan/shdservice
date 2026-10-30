@@ -8,6 +8,8 @@ import './stock';
 import './admin';
 import './data';
 import './misc';
+import './audit';
 import './track';
+import './alerts';
 
 export { registry } from './registry';

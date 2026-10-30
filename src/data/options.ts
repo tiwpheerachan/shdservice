@@ -12,7 +12,7 @@ export const TAT_BUCKET_LABEL = {
   over30: 'Over 30 Days',
 } as const;
 
-/* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก app_config ผ่าน useRoles) */
+/* บทบาท = app_user.user_type ของระบบเดิม (รายการจริงดึงจาก role_permission ผ่าน useRoles) */
 export const ROLES: [string, ...string[]] = [
   'System Admin',
   'Customer Service',
@@ -125,7 +125,7 @@ export const RECEIVE_METHODS: [string, ...string[]] = ['Walk-In', 'Carry-In', 'O
 /* วิธีการส่งคืนสินค้า (5) */
 export const RETURN_METHODS = ['ลูกค้ามารับเอง', 'ส่งไปรษณีย์', 'บริษัทขนส่งเอกชน', 'พนักงานจัดส่ง', 'ไม่ต้องส่งคืน'];
 
-/* วิธีชำระเงินของใบสั่งขาย (= sale_out_hd.payment_type) — COD = ยังไม่มีสลิป ยอดชำระไม่บังคับ (เหมือนระบบเดิม) */
+/* วิธีชำระเงินของใบสั่งขาย (= sale_order.payment_type) — COD = ยังไม่มีสลิป ยอดชำระไม่บังคับ (เหมือนระบบเดิม) */
 export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 'เงินสด', 'บัตรเครดิต', 'เก็บเงินปลายทาง (COD)'];
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
 export const JOB_PAYMENT_METHODS: [string, ...string[]] = ['เงินโอน', 'เงินสด', 'บัตรเครดิต'];
@@ -142,7 +142,7 @@ export const STOCK_PICK_TYPES = [
   'จ่ายออกตามงานซ่อม',
   'จ่ายออกตามใบสั่งขาย',
   'จ่ายออกอื่นๆ',
-  'รับคืนจากการเบิก', // inventory_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
+  'รับคืนจากการเบิก', // stock_move_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
 ];
 
 /* ลูกค้า */

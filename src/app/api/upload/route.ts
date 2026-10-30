@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { documentProfile, job, product, saleOutHd, shippingProfile } from '@/db/schema';
+import { db, writeTx } from '@/db/client';
+import { documentProfile, job, product, saleOrder, shippingProfile } from '@/db/schema';
 import { handle, parseForm, requireUser, requireCan, requireAdmin, HttpError } from '@/server/auth';
 import { upload } from '@/server/contract/misc';
 import { rateLimit } from '@/server/rate-limit';
@@ -43,8 +43,8 @@ export const dynamic = 'force-dynamic';
 /**
  * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
  * and writes the reference into the legacy column:
- *   product-image    → product.pictrue_file_name      (products/{code}/{file}; column keeps the file name)
- *   sale-order-slip  → sale_out_hd.slip_file_name     (full path; + payment_amount when `paymentAmount` is sent; id = the order's uuid)
+ *   product-image    → product.picture_file_name      (products/{code}/{file}; column keeps the file name)
+ *   sale-order-slip  → sale_order.slip_file_name      (full path; + payment_amount when `paymentAmount` is sent; id = the order's uuid)
  *   job-slip         → job.job_payment_slip_file_name (full path)
  * Replacing a file removes the previous object — except a closed job's slip, kept as evidence.
  */
@@ -99,7 +99,7 @@ export const POST = handle(async (req: NextRequest) => {
       await rowByUuid(documentProfile, pid, 'โปรไฟล์'); // before storing anything
       const path = filePath.profileLogo(pid, sys);
       await uploadFile(path, file);
-      await swapSlip(path, () => setDocumentProfileLogo(pid, path, me.userId));
+      await swapSlip(path, () => setDocumentProfileLogo(pid, path, me.pk));
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'shipper-logo': {
@@ -108,22 +108,22 @@ export const POST = handle(async (req: NextRequest) => {
       await rowByUuid(shippingProfile, sid, 'โปรไฟล์ขนส่ง'); // before storing anything
       const path = filePath.shipperLogo(sid, sys);
       await uploadFile(path, body);
-      await swapSlip(path, () => setShippingProfileLogo(sid, path, me.userId));
+      await swapSlip(path, () => setShippingProfileLogo(sid, path, me.pk));
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'product-image': {
-      const cols = { old: product.pictrueFileName };
+      const cols = { old: product.pictureFileName };
       const missing = () => new HttpError(404, 'ไม่พบรหัสอะไหล่ ' + id);
       if (!(await db.select(cols).from(product).where(eq(product.productCode, id))).length) throw missing();
       const path = filePath.productImage(id, sys);
       await uploadFile(path, body);
       // the replaced picture is read under the row lock: of two uploads at once, the second replaces the first's
       await swapSlip(path, () =>
-        db.transaction(async (tx) => {
+        writeTx(async (tx) => {
           const [row] = await tx.select(cols).from(product).where(eq(product.productCode, id)).for('update');
           if (!row) throw missing();
-          await tx.update(product).set({ pictrueFileName: sys }).where(eq(product.productCode, id));
-          await audit(tx, me.userId, {
+          await tx.update(product).set({ pictureFileName: sys }).where(eq(product.productCode, id));
+          await audit(tx, me.pk, {
             action: 'UPDATE',
             module: 'Product',
             entity: 'product',
@@ -140,12 +140,12 @@ export const POST = handle(async (req: NextRequest) => {
       const no = await saleOrderNoOf(id); // the order's uuid → its SO number (the row's key, the slip's folder)
       if (!no) throw new HttpError(404, 'ไม่พบใบสั่งขาย');
       const cols = {
-        old: saleOutHd.slipFileName,
-        approve: saleOutHd.approveStatusId,
-        status: saleOutHd.recordStatus,
-        createdBy: saleOutHd.documentCreateBy,
-        net: saleOutHd.netAmount,
-        paid: saleOutHd.paymentAmount,
+        old: saleOrder.slipFileName,
+        approve: saleOrder.approveStatusId,
+        status: saleOrder.recordStatus,
+        createdBy: saleOrder.createdByAppUserPk,
+        net: saleOrder.netAmount,
+        paid: saleOrder.paymentAmount,
       };
       // the amount paid, sent with the slip (an approved order's customer paying later) — never over the total
       const paid = paymentAmount != null && paymentAmount !== '' ? num(paymentAmount) : null;
@@ -168,7 +168,7 @@ export const POST = handle(async (req: NextRequest) => {
           throw new HttpError(409, 'ใบสั่งขายอนุมัติแล้ว — เปลี่ยนสลิปไม่ได้');
         if (row.approve === AS.DENIED) throw new HttpError(409, 'ใบสั่งขายถูกปฏิเสธแล้ว — เปลี่ยนสลิปไม่ได้');
         // … and a waiting one is its creator's (or System Admin's), as editing it is (saveSaleOrder)
-        if (row.approve === AS.WAIT && !me.isAdmin && row.createdBy !== me.userId)
+        if (row.approve === AS.WAIT && !me.isAdmin && row.createdBy !== me.pk)
           throw new HttpError(403, WAITING_CREATOR_ONLY);
         if (paid !== null && paid > num(row.net))
           throw new HttpError(400, overpaidMessage(num(row.net)), {
@@ -177,22 +177,22 @@ export const POST = handle(async (req: NextRequest) => {
         return row;
       };
       // before the upload (a refused one stores nothing), and again under the row lock (swapSlip)
-      guard((await db.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)))[0]);
+      guard((await db.select(cols).from(saleOrder).where(eq(saleOrder.saleOrderNo, no)))[0]);
       const path = filePath.saleOrderSlip(no, sys);
       await uploadFile(path, body);
       await swapSlip(path, () =>
-        db.transaction(async (tx) => {
+        writeTx(async (tx) => {
           const row = guard(
-            (await tx.select(cols).from(saleOutHd).where(eq(saleOutHd.saleOutHdNo, no)).for('update'))[0],
+            (await tx.select(cols).from(saleOrder).where(eq(saleOrder.saleOrderNo, no)).for('update'))[0],
           );
           await tx
-            .update(saleOutHd)
+            .update(saleOrder)
             .set({ slipFileName: path, ...(paid !== null ? { paymentAmount: money(paid) } : {}) })
-            .where(eq(saleOutHd.saleOutHdNo, no));
-          await audit(tx, me.userId, {
+            .where(eq(saleOrder.saleOrderNo, no));
+          await audit(tx, me.pk, {
             action: 'UPDATE',
             module: 'Sale Order',
-            entity: 'sale_out_hd',
+            entity: 'sale_order',
             key: no,
             summary:
               `แนบสลิปใบสั่งขาย ${no}` +
@@ -215,17 +215,17 @@ export const POST = handle(async (req: NextRequest) => {
         if (!row) throw new HttpError(404, 'ไม่พบหมายเลขงาน ' + id);
         if (row.rs === RS.DELETED) throw new HttpError(409, 'งานนี้ถูกยกเลิกแล้ว — เปลี่ยนสลิปไม่ได้');
         // the slip is part of the job's money: a closed job's needs Job Money After Close, like the payment fields
-        if (await moneyLocked(row.status, me.userId)) throw new HttpError(409, moneyLockedMsg('สลิปการชำระเงิน'));
+        if (await moneyLocked(row.status, me.pk)) throw new HttpError(409, moneyLockedMsg('สลิปการชำระเงิน'));
         return row;
       };
       await guard((await db.select(cols).from(job).where(eq(job.jobNo, id)))[0]);
       const path = filePath.jobSlip(id, sys);
       await uploadFile(path, body);
       await swapSlip(path, () =>
-        db.transaction(async (tx) => {
+        writeTx(async (tx) => {
           const row = await guard((await tx.select(cols).from(job).where(eq(job.jobNo, id)).for('update'))[0]);
           await tx.update(job).set({ jobPaymentSlipFileName: path }).where(eq(job.jobNo, id));
-          await audit(tx, me.userId, {
+          await audit(tx, me.pk, {
             action: 'UPDATE',
             module: 'Job Closing',
             entity: 'job',

@@ -70,18 +70,14 @@ export function QuotationTypeSection({
   );
 }
 
-/** ข้อมูลลูกค้า — the customer + the contact name */
+/** ข้อมูลลูกค้า — the customer (ชื่อผู้ติดต่อ is gone: quotation.customer_contact_name was dropped in drizzle/0006) */
 export function QuotationCustomerSection({
   customer,
   setCustomer,
-  contact,
-  setContact,
   errors,
 }: {
   customer: Customer | null;
   setCustomer: (c: Customer | null) => void;
-  contact: string;
-  setContact: (v: string) => void;
   errors: FieldErrors;
 }) {
   return (
@@ -95,11 +91,6 @@ export function QuotationCustomerSection({
       <Field error={errors.customerCode}>
         <CustomerSelect value={customer} onChange={setCustomer} />
       </Field>
-      <FieldGrid className="mt-4">
-        <Field label="ชื่อผู้ติดต่อ" className="lg:col-span-2" error={errors.contactName}>
-          <Input maxLength={100} value={contact} onChange={(e) => setContact(e.target.value)} />
-        </Field>
-      </FieldGrid>
     </Section>
   );
 }

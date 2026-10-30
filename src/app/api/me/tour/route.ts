@@ -8,6 +8,6 @@ export const dynamic = 'force-dynamic';
 
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireUser(req);
-  await saveTour(user.userId, await parseBody(req, meTour));
+  await saveTour(user.pk, await parseBody(req, meTour));
   return NextResponse.json({ ok: true });
 });

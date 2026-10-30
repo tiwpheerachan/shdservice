@@ -9,9 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Select, NumberInput } from '@/components/ui/input';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
-import { matchProducts } from '@/lib/product-match';
+import { ProductPicker } from '@/components/shared/product-picker';
 import { useToast } from '@/components/ui/toast';
-import { useApi, useProducts, useJobNos, useStaff } from '@/data/db';
+import { useApi, useJobNos, useStaff } from '@/data/db';
 import { STOCK_PICK_TYPES } from '@/data/options';
 import { int, cn } from '@/lib/utils';
 import { api, postJson, errMsg, qs } from '@/lib/api';
@@ -19,10 +19,9 @@ import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { issueSchema } from '@/lib/validation/stock';
-import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 import { useTourRestore } from '@/components/tour/tour';
 
-const DOC_TYPES = STOCK_PICK_TYPES; // = inventory_type 3 / 4 / 5
+const DOC_TYPES = STOCK_PICK_TYPES; // = stock_move_type 3 / 4 / 5
 /** รับคืนจากการเบิก is by job: a WHO document no. (or a job nothing went out to) has nothing to return */
 const RETURN_REF_HINT = 'ใส่เลขงาน (J…) ที่เคยเบิกอะไหล่ — ไม่ใช่เลขเอกสารจ่ายออก (WHO…)';
 
@@ -34,8 +33,8 @@ type Line = {
   onhand: number;
   need: number;
   issue: number;
-  logId?: string; // job_order_spare_part_log id, a uuid (จ่ายออกตามงานซ่อม)
-  dtId?: string; // sale_out_dt id, a uuid (จ่ายออกตามใบสั่งขาย)
+  logId?: string; // job_part id, a uuid (จ่ายออกตามงานซ่อม)
+  dtId?: string; // sale_order_line id, a uuid (จ่ายออกตามใบสั่งขาย)
 };
 
 type PartLine = {
@@ -84,18 +83,16 @@ export default function PickPage() {
   const [ref, setRef] = React.useState('');
   const [lines, setLines] = React.useState<Line[]>([]);
   const [loaded, setLoaded] = React.useState(false);
-  const [find, setFind] = React.useState(''); // จ่ายออกอื่นๆ: narrows the shown lines (typed quantities stay)
   const [payTo, setPayTo] = React.useState('');
   const [remark, setRemark] = React.useState('');
   // บทสอน: the document type, its reference, the lines (Get Data / quantities) and the footer go back
   useTourRestore(
-    () => ({ docType, ref, lines, loaded, find, payTo, remark }),
+    () => ({ docType, ref, lines, loaded, payTo, remark }),
     (v) => {
       setDocType(v.docType);
       setRef(v.ref);
       setLines(v.lines);
       setLoaded(v.loaded);
-      setFind(v.find);
       setPayTo(v.payTo);
       setRemark(v.remark);
     },
@@ -112,14 +109,6 @@ export default function PickPage() {
         : docType === 'รับคืนจากการเบิก'
           ? 'return'
           : 'other';
-  // the whole catalog only for จ่ายออกอื่นๆ (its lines ARE the in-stock parts) — the other types read their
-  // lines from the reference document
-  const {
-    data: PRODUCTS,
-    loading: productsLoading,
-    error: productsError,
-    refetch: refetchProducts,
-  } = useProducts(kind === 'other');
   // อ้างอิง: งานที่ค้างเบิก / งานที่รับคืนได้ / ใบสั่งขายที่รอจ่าย / (อื่นๆ ไม่ต้องอ้างอิง)
   const refOptions =
     kind === 'job' ? PENDING_JOB_NOS : kind === 'return' ? RETURNABLE_JOB_NOS : kind === 'sale' ? SALE_ORDERS : [];
@@ -132,46 +121,20 @@ export default function PickPage() {
           ? { error: pickOrders.error, refetch: () => void pickOrders.mutate() }
           : undefined;
   const isReturn = kind === 'return';
-  // จ่ายออกอื่นๆ takes parts out of the store — never back to it (the API refuses it too)
-  const RECIPIENTS = React.useMemo(
-    () => [...(kind === 'other' ? [] : [STORE_LOCATION_NAME]), ...STAFF.map((s) => s.name)],
-    [STAFF, kind],
-  );
+  // จ่ายให้ (จ่ายออกอื่นๆ only): staff — never the store itself (the API refuses it too)
+  const RECIPIENTS = React.useMemo(() => STAFF.map((s) => s.name), [STAFF]);
 
   // another document type → its reference and lines start over (the change event does it)
   const changeDocType = (t: string) => {
     setDocType(t);
-    setPayTo((p) => (p === STORE_LOCATION_NAME ? '' : p)); // not a destination of every type (RECIPIENTS)
     setRef('');
     setLines([]);
     setLoaded(false);
-    setFind('');
     fe.setErrors({}); // another document → the old one's errors no longer apply
   };
 
   // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
   const getData = async () => {
-    if (kind === 'other') {
-      if (productsError) {
-        push({ kind: 'error', title: 'โหลดรายการอะไหล่ไม่สำเร็จ', desc: productsError });
-        refetchProducts();
-        return;
-      }
-      // จ่ายออกอื่นๆ: เลือกจากรายการอะไหล่ทั้งหมด (ใส่จำนวนเฉพาะที่ต้องการจ่าย)
-      setLines(
-        PRODUCTS.filter((p) => p.onhand > 0).map((p) => ({
-          docNo: '-',
-          code: p.sysCode,
-          name: p.name,
-          pickStatus: 'พร้อมจ่าย',
-          onhand: p.onhand,
-          need: p.onhand,
-          issue: 0,
-        })),
-      );
-      setLoaded(true);
-      return;
-    }
     if (!ref) {
       const e = { ref: 'ต้องเลือกอ้างอิงเลขเอกสาร' };
       fe.setErrors(e);
@@ -258,15 +221,26 @@ export default function PickPage() {
   const overCount = lines.filter((l) => l.issue > maxOf(l)).length;
 
   const totalIssue = lines.reduce((s, l) => s + l.issue, 0);
-  const term = find.trim().toLowerCase();
-  // the same word search as the product pickers (code / part no / TH-EN-CN name / brand), plus the line's own name
-  const hit = React.useMemo(
-    () => (term ? new Set(matchProducts(PRODUCTS, term, Infinity).map((p) => p.sysCode)) : null),
-    [PRODUCTS, term],
-  );
-  const shown = hit
-    ? lines.filter((l) => hit.has(l.code) || l.code.toLowerCase().includes(term) || l.name.toLowerCase().includes(term))
-    : lines;
+  /** จ่ายออกอื่นๆ: a part picked (server search — never the whole catalog) becomes a line, once */
+  const addOther = (p: { code: string; name: string; onhand: number }) => {
+    setLines((s) =>
+      s.some((l) => l.code === p.code)
+        ? s
+        : [
+            ...s,
+            {
+              docNo: '-',
+              code: p.code,
+              name: p.name,
+              pickStatus: p.onhand > 0 ? 'พร้อมจ่าย' : 'รออะไหล่',
+              onhand: p.onhand,
+              need: p.onhand,
+              issue: p.onhand > 0 ? 1 : 0,
+            },
+          ],
+    );
+    setLoaded(true);
+  };
   const columns: Column<Line>[] = [
     // a phone: code, name, stock and the quantity box first — the rest from sm up
     { key: 'i', header: '#', width: '40px', align: 'center', sortable: false, hideBelow: 'sm', cell: (_, i) => i + 1 },
@@ -343,7 +317,7 @@ export default function PickPage() {
   ];
   useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
 
-  // WHO document (type 3/4/5) → inventory_hd/dt + quantity_used/remain (+ grant on ใบเบิก)
+  // WHO document (type 3/4/5) → stock_move / stock_move_line + quantity_used/remain (+ grant on ใบเบิก)
   const save = async () => {
     const body = {
       type: kind,
@@ -373,7 +347,6 @@ export default function PickPage() {
       setLoaded(false);
       setRef('');
       setRemark('');
-      refetchProducts();
       if (kind === 'sale') pickOrders.mutate();
     } catch (e) {
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
@@ -450,10 +423,12 @@ export default function PickPage() {
                   />
                 </div>
               )}
-              <Button size="md" variant="outline" onClick={getData} disabled={kind === 'other' && productsLoading}>
-                <Search className="h-3.5 w-3.5" />
-                Get Data
-              </Button>
+              {kind !== 'other' && (
+                <Button size="md" variant="outline" onClick={getData}>
+                  <Search className="h-3.5 w-3.5" />
+                  Get Data
+                </Button>
+              )}
             </div>
           </Field>
           {kind === 'sale' && (
@@ -466,8 +441,7 @@ export default function PickPage() {
         </FieldGrid>
       </div>
 
-      {/* items table — DataTable pages it (จ่ายออกอื่นๆ = every in-stock part, ~hundreds of rows); quantities
-          typed on another page or in a row the search hides stay in `lines` and are saved */}
+      {/* items table — the reference document's lines, or (จ่ายออกอื่นๆ) the parts picked with the search above it */}
       {fe.errors.lines && (
         <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
           {fe.errors.lines}
@@ -477,34 +451,28 @@ export default function PickPage() {
         label="รายการเบิกอะไหล่"
         searchable={false}
         toolbar={
-          kind === 'other' && lines.length > 0 ? (
-            <div className="flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <Input
-                type="search"
-                aria-label="ค้นหาอะไหล่ (รหัส หรือชื่อ)"
-                placeholder="ค้นหารหัส หรือชื่ออะไหล่…"
-                value={find}
-                onChange={(e) => setFind(e.target.value)}
-                className="h-8 w-72 max-w-full"
+          kind === 'other' ? (
+            <div className="w-96 max-w-full">
+              <ProductPicker
+                id="pick-other-product"
+                placeholder="ค้นหาอะไหล่ที่จะจ่าย (รหัส / ชื่อ / เลข part)…"
+                onPick={(p) => p?.product && addOther({ code: p.code, name: p.name, onhand: p.product.onhand })}
               />
             </div>
           ) : undefined
         }
-        narrowed={!!term}
-        onClearFilters={() => setFind('')}
         columns={columns}
-        rows={shown}
+        rows={lines}
         rowKey={(l) => String(l.logId ?? l.dtId ?? l.code)}
         emptyText={
           loaded
             ? kind === 'other'
-              ? 'ไม่มีอะไหล่ที่มีของในสต๊อก'
+              ? 'ค้นหาอะไหล่ที่ช่องด้านบนเพื่อเพิ่มรายการ'
               : isReturn
                 ? `ไม่มีอะไหล่ที่รับคืนได้ — ${RETURN_REF_HINT}`
                 : 'ไม่มีรายการค้างจ่าย'
             : kind === 'other'
-              ? 'กด Get Data เพื่อดึงรายการอะไหล่ที่มีของในสต๊อก'
+              ? 'ค้นหาอะไหล่ที่ช่องด้านบนเพื่อเพิ่มรายการ'
               : kind === 'sale'
                 ? 'เลือกใบสั่งขายแล้วกด Get Data เพื่อดึงรายการ'
                 : 'เลือกหรือพิมพ์เลขงานแล้วกด Get Data เพื่อดึงรายการ'
@@ -522,14 +490,17 @@ export default function PickPage() {
       {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
-          <Field label={isReturn ? 'รับคืนจาก' : 'จ่ายให้'} required error={fe.errors.payTo} lookup={staffLookup}>
-            <SearchSelect
-              value={payTo}
-              onChange={setPayTo}
-              options={strOptions(RECIPIENTS)}
-              searchPlaceholder="พิมพ์ชื่อ…"
-            />
-          </Field>
+          {/* a job / sale-order movement's reference is that document (stock_move.reference_out_to is not stored) */}
+          {kind === 'other' && (
+            <Field label="จ่ายให้" required error={fe.errors.payTo} lookup={staffLookup}>
+              <SearchSelect
+                value={payTo}
+                onChange={setPayTo}
+                options={strOptions(RECIPIENTS)}
+                searchPlaceholder="พิมพ์ชื่อ…"
+              />
+            </Field>
+          )}
           <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
             <Input
               maxLength={100}

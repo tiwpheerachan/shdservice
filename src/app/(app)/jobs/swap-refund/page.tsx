@@ -47,7 +47,9 @@ function SwapRefundForm() {
   const { s: form, reset, set } = useJobForm();
   const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
-  const lock = useMoneyLock(); // a closed job: the refund stays as recorded (Job Money After Close may change it)
+  // a closed job: the refund stays as recorded (Job Money After Close may change it); a legacy job's
+  // payment already recorded: System Admin only (an empty one may be filled)
+  const lock = useMoneyLock('payment');
   const [tab, setTab] = React.useState('product');
   const [mode, setMode] = React.useState<'swap' | 'refund'>('swap');
   const [saving, setSaving] = React.useState(false);

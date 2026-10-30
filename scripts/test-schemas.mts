@@ -494,11 +494,12 @@ test('receive: date required and a real day (the page prefills today)', () => {
   assert.equal(errorsOf(receiveSchema, { date: '2026-02-30', lines }).date, 'วันที่ไม่ถูกต้อง (ไม่มีวันนี้ในปฏิทิน)');
   assert.deepEqual(errorsOf(receiveSchema, { date: '2026-10-01', lines }), {});
 });
-test('issue: จ่ายให้ / รับคืนจาก required (message by type), trimmed, max 50 — reported with other errors', () => {
+test('issue: จ่ายให้ required for "other" only (job / SO / return name it through the document), trimmed, max 50 — reported with other errors', () => {
   const lines = [{ code: 'P1', qty: 1 }];
-  for (const type of ['job', 'sale', 'other'])
-    assert.equal(errorsOf(issueSchema, { type, lines }).payTo, 'ต้องเลือก จ่ายให้', type);
-  assert.equal(errorsOf(issueSchema, { type: 'return', payTo: '  ', lines }).payTo, 'ต้องเลือก รับคืนจาก');
+  assert.equal(errorsOf(issueSchema, { type: 'other', lines }).payTo, 'ต้องเลือก จ่ายให้');
+  // ADR 0008 "no redundant data": the job / sale order is the reference (stock_move.reference_out_to is '' for them)
+  for (const type of ['job', 'sale', 'return'])
+    assert.equal(errorsOf(issueSchema, { type, payTo: '  ', lines }).payTo, undefined, type);
   assert.equal(errorsOf(issueSchema, { type: 'other', payTo: null, lines }).payTo, 'ต้องเลือก จ่ายให้');
   assert.ok(errorsOf(issueSchema, { type: 'other', payTo: 'x'.repeat(51), lines }).payTo);
   assert.deepEqual(Object.keys(errorsOf(issueSchema, { type: 'other', lines: [] })).sort(), ['lines', 'payTo']);

@@ -233,7 +233,6 @@ export type AuditRow = {
   summary: string;
   changes: Record<string, [unknown, unknown]> | null;
 };
-export const useAuditPage = (params: PageParams) => usePagedTable<AuditRow>('audit_log', params, 'all');
 export const useAuditModules = () => useTable<string>('audit_modules', undefined, 'exclude', {}, TTL_MASTER);
 /** The whole ACTIVE catalog, lite fields only (code/name/onhand/price/brand/category) — for the screens whose
  *  lines ARE the catalog (รับเข้า, จ่ายออกอื่นๆ). Part pickers search instead: useProductSearch.
@@ -242,8 +241,12 @@ export const useProducts = (enabled = true, mode: DeletedMode = 'active') =>
   useTable<Product>('products', { column: 'sysCode' }, mode, { fields: 'lite' }, TTL_DEFAULT, enabled);
 /** ACTIVE products (lite rows) whose code / part no / TH·EN·CN name contains `q`, searched on the server;
  *  '' = nothing loaded. Same rows and cache rules as useProducts (re-read after any write). */
-export const useProductSearch = (q: string, opts: ApiOpts<Product[]> = {}) =>
-  useApi<Product[]>(q ? `/api/data/products${qs({ deleted: 'active', fields: 'lite', q })}` : null, opts);
+export const useProductSearch = (
+  q: string,
+  opts: ApiOpts<Product[]> = {},
+  /** 'exclude' = INACTIVE too (stock receive: a part no new document may use still arrives) */
+  deleted: 'active' | 'exclude' = 'active',
+) => useApi<Product[]>(q ? `/api/data/products${qs({ deleted, fields: 'lite', q })}` : null, opts);
 export const useProductsPage = (params: PageParams, mode: DeletedMode = 'exclude') =>
   usePagedTable<Product & { value: number }>('products', params, mode);
 export type ProductStats = { total: number; qty: number; value: number; low: number; out: number; noPrice: number };

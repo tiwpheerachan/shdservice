@@ -7,7 +7,7 @@ import { Menu, Search, LogOut, ChevronRight, PanelLeft, CircleHelp } from 'lucid
 import { findBreadcrumb } from '@/lib/nav';
 import { ThemeToggle } from './theme-toggle';
 import { SessionTimer } from './session-timer';
-import { OverdueBell } from './overdue-bell';
+import { NotificationBell } from './notification-bell';
 import { cn } from '@/lib/utils';
 import { useMe } from '@/lib/use-me';
 import { startSignOut } from '@/lib/navigation';
@@ -127,7 +127,7 @@ export function Topbar({
         </Link>
       )}
 
-      <OverdueBell />
+      <NotificationBell />
 
       <ThemeToggle />
 

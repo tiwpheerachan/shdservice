@@ -53,7 +53,7 @@ export const POST = handle(async (req: NextRequest) => {
       title: str(body.title) || prof?.title || undefined,
       expect: body.expect,
     },
-    me.userId,
+    me.pk,
   );
   return NextResponse.json({ ok: true, user, created });
 });

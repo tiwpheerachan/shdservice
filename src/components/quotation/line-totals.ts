@@ -3,6 +3,8 @@ import { lineAmount } from '@/lib/validation/quotation';
 /** a row of the quotation's รายการอะไหล่และบริการ */
 export type QuotationLine = {
   id: number;
+  /** a stored line's uuid (sent back with the save: that line is kept / updated); none = a new line */
+  uid?: string;
   code: string;
   name: string;
   qty: number;

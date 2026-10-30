@@ -102,7 +102,7 @@ export function phonesIn(field: string): Set<string> {
 export async function customerIdsForPhone(phone10: string): Promise<number[]> {
   const core = phone10.slice(1); // 9 digits without the leading 0 — a cheap prefilter for 0…, 66…, "a / b"; phonesIn decides
   const rows = await db
-    .select({ id: customer.customerId, phone: customer.phoneNumber })
+    .select({ id: customer.pk, phone: customer.phoneNumber })
     .from(customer)
     .where(
       and(
@@ -187,7 +187,7 @@ async function issueDecoy(key: string, requestId: string, ip: string) {
   await db.insert(trackOtp).values({
     requestHash: sha256(requestId),
     phoneHash: key,
-    customerIds: [],
+    customerPks: [],
     codeHash: randomBytes(32), // the length of a real one — the comparison takes the same branch
     issuedIp: ip,
     expiresAt: dbNowPlus(OTP_TTL_SEC),
@@ -218,7 +218,7 @@ async function issueOtp(
   await db.insert(trackOtp).values({
     requestHash: rh,
     phoneHash: key,
-    customerIds: ids,
+    customerPks: ids,
     codeHash: own ? codeHash(requestId, own) : null,
     issuedIp: ip,
     expiresAt: dbNowPlus(OTP_TTL_SEC),
@@ -287,8 +287,8 @@ export async function verifyOtp(
     .update(trackOtp)
     .set({ consumedAt: dbNow })
     .where(and(eq(trackOtp.requestHash, rh), isNull(trackOtp.consumedAt)))
-    .returning({ customerIds: trackOtp.customerIds, phoneHash: trackOtp.phoneHash });
-  if (!row?.customerIds.length) return null; // a decoy never matches; never a session for nobody either
+    .returning({ customerPks: trackOtp.customerPks, phoneHash: trackOtp.phoneHash });
+  if (!row?.customerPks.length) return null; // a decoy never matches; never a session for nobody either
 
   await db.delete(trackSession).where(lt(trackSession.maxExpiresAt, dbNow)); // housekeeping
   const token = newToken();
@@ -296,7 +296,7 @@ export async function verifyOtp(
     .insert(trackSession)
     .values({
       tokenHash: sha256(token),
-      customerIds: row.customerIds,
+      customerPks: row.customerPks,
       phoneHash: row.phoneHash,
       issuedIp: ip,
       uaHash: sha256(normalizeUa(ua)),
@@ -341,13 +341,13 @@ export async function touchSession(
       ),
     )
     .returning({
-      customerIds: trackSession.customerIds,
+      customerPks: trackSession.customerPks,
       expiresAt: trackSession.expiresAt,
       maxExpiresAt: trackSession.maxExpiresAt,
     });
   if (!row) return null;
   return {
-    customerIds: row.customerIds.map(Number),
+    customerIds: row.customerPks.map(Number),
     expiresAt: row.expiresAt.toISOString(),
     maxExpiresAt: row.maxExpiresAt.toISOString(),
   };

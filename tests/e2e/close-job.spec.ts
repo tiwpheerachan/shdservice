@@ -5,7 +5,7 @@ import { call, expect, signIn, test } from './support/fixtures';
 
 /**
  * ปิดงาน-ส่งคืนสินค้า (/jobs/close) by a cashier whose role has Job Closing but not Job Money After Close:
- * the payment of a repaired job, the close itself (status, closed date, job_log) and the return note's
+ * the payment of a repaired job, the close itself (status, closed date, job_status_log) and the return note's
  * amounts; refused while a part requested from stock is not issued; a closed job's money stays as recorded.
  */
 const CLOSE_STATUS = 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ'; // job_status 24, group Finished
@@ -23,14 +23,18 @@ async function openClose(page: Page, no: string) {
 const closeState = (no: string) =>
   one(
     `SELECT j.job_status_id AS status, s.job_status_group AS grp, j.job_payment_type AS pay_type,
-            j.job_payment_amount::float AS paid, j.job_closed_by AS closed_by,
+            j.job_payment_amount::float AS paid, j.closed_by_app_user_pk::int AS closed_by,
             to_char(j.job_closed_date, 'YYYY-MM-DD') AS closed_day, coalesce(j.return_customer_type, '') AS return_type,
             j.job_total_cost::float AS total
        FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id WHERE j.job_no = $1`,
     [no],
   );
 const logsOf = (no: string) =>
-  rows('SELECT job_status_id AS status, job_action_by AS by FROM job_log WHERE job_no = $1 ORDER BY job_log_id', [no]);
+  rows(
+    `SELECT job_status_id AS status, action_by_app_user_pk::int AS by FROM job_status_log
+      WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1) ORDER BY pk`,
+    [no],
+  );
 
 test('closing a repaired job: the amount due is prefilled, the payment and the close are stored and logged', async ({
   page,
@@ -163,11 +167,10 @@ test('a swapped job: Serial เครื่องใหม่ prefilled, optiona
   page,
 }) => {
   const no = await newJob({ status: 18 }); // อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว (Repaired)
-  // as the Swap / Refund page stores it: the swap detail and the part list's "New S/N" line
-  await rows(
-    `UPDATE job SET swap_refund_detail = 'New S/N: OLD00001', spare_part_replace = 'New S/N: OLD00001' WHERE job_no = $1`,
-    [no],
-  );
+  // as the Swap / Refund page stores it: the swap detail (what makes it a swap job) + job.new_serial_no (the serial)
+  await rows(`UPDATE job SET swap_refund_detail = 'New S/N: OLD00001', new_serial_no = 'OLD00001' WHERE job_no = $1`, [
+    no,
+  ]);
   await openClose(page, no);
   const history = page.getByRole('heading', { name: 'ประวัติการแก้ไข' });
   await expect(history).toBeVisible();
@@ -181,8 +184,11 @@ test('a swapped job: Serial เครื่องใหม่ prefilled, optiona
   // the history section is refreshed by the save (the job the server answers with)
   await expect(page.getByText(`ล่าสุด:`).filter({ hasText: `เปลี่ยนสถานะงาน → ${CLOSE_STATUS}` })).toBeVisible();
   expect(
-    await one(`SELECT spare_part_replace AS parts, swap_refund_detail AS swap FROM job WHERE job_no = $1`, [no]),
-  ).toEqual({ parts: 'New S/N: NEW00001', swap: 'New S/N: NEW00001' });
+    await one(
+      `SELECT new_serial_no AS serial, spare_part_replace AS parts, swap_refund_detail AS swap FROM job WHERE job_no = $1`,
+      [no],
+    ),
+  ).toEqual({ serial: 'NEW00001', parts: null, swap: 'New S/N: OLD00001' }); // the close writes the serial column only
 
   await page.goto(`/print/job/${await jobUuid(no)}/return?auto=0`);
   await expect(page.getByRole('row', { name: /New S\/N : NEW00001/ }).first()).toBeVisible();

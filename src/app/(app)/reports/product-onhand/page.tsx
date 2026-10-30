@@ -1,7 +1,8 @@
 'use client';
 
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
-import { useProductStats, useCategories, useManufacturers, useColors, useModels, useReportRows } from '@/data/db';
+import { useProductStats, useCategories, useManufacturers, useColors, useReportRows } from '@/data/db';
+import { useBrandModels } from '../use-brand-models';
 import { baht, int } from '@/lib/utils';
 import { kpisOr, useReportAccess } from '../report-access';
 import { useServerTable } from '@/lib/use-server-table';
@@ -16,7 +17,7 @@ export default function Page() {
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
   const { data: COLORS, ...colorsLookup } = useColors('exclude');
-  const { data: MODELS, ...modelsLookup } = useModels('exclude');
+  const { MODELS, modelsLookup, wantModels } = useBrandModels();
   const { filters: f, setFilters: setF, table, pageArgs, server } = useServerTable<ReportValues>({});
   const modelLabel = (m: { code: string; name: string }) => `${m.name} · ${m.code}`;
   // filters + KPIs on the server, table paged; ACTIVE parts unless สถานะ says otherwise
@@ -65,6 +66,7 @@ export default function Page() {
           key: 'model',
           label: 'รุ่น',
           options: (d) => ['ทั้งหมด', ...modelsOfBrand(MODELS, d.brand).map(modelLabel)],
+          onWant: wantModels,
           lookup: modelsLookup,
         },
         {

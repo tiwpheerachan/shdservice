@@ -45,50 +45,71 @@ await pool.query(`
                           (15, 'อยู่ระหว่างการซ่อม - รับคืนจาก Out-Source แล้ว', 15, 'Pending', true),
                           (20, 'ปิดงาน (Complete)', 20, 'Finished', true)) v(id, name, ord, grp, act)
      WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
-  DELETE FROM app_config WHERE user_type = 'QAT Repairer';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  DELETE FROM role_permission WHERE user_type = 'QAT Repairer';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('QAT Repairer', 'Job Repair', true, true, false, true), ('QAT Repairer', 'Job Management', false, false, false, true);
-  DELETE FROM job_log WHERE job_no LIKE 'QAT%';
-  DELETE FROM job_send_forward_dt WHERE job_no LIKE 'QAT%';
-  DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'QAT%';
-  DELETE FROM job WHERE job_no LIKE 'QAT%' OR customer_id = 9861;
-  DELETE FROM app_user WHERE user_id BETWEEN 9860 AND 9869 OR email_address LIKE 'qat-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+    SELECT * FROM (VALUES (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM job_part_status s WHERE s.job_part_status_id = v.id);
+  INSERT INTO store_location (store_location_id, store_location_name, is_active)
+    SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
+     WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
+    SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
+                          (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
+                          (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
+  -- children before parents (RESTRICT, drizzle/0006)
+  CREATE TEMP TABLE qat_job ON COMMIT DROP AS SELECT pk FROM job WHERE job_no LIKE 'QAT%' OR customer_pk = 9861;
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM qat_job);
+  DELETE FROM job_outsource WHERE job_pk IN (SELECT pk FROM qat_job);
+  DELETE FROM job_part WHERE job_pk IN (SELECT pk FROM qat_job) OR product_pk = 9861;
+  DELETE FROM stock_move_line WHERE stock_move_pk IN (SELECT pk FROM stock_move WHERE job_pk IN (SELECT pk FROM qat_job)) OR product_pk = 9861;
+  DELETE FROM stock_move WHERE job_pk IN (SELECT pk FROM qat_job);
+  DELETE FROM job WHERE pk IN (SELECT pk FROM qat_job);
+  -- the users stay (audit_log, append-only, points at them): upserted at their fixed pk
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QAT', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM customer WHERE customer_id = 9861 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9861, '${CUSTOMER}', 'ลูกค้า QAT เดิม', '02-986-0001');
-  DELETE FROM product_none_serial WHERE product_id = 9861 OR item_id = 9861;
-  DELETE FROM product WHERE product_id = 9861 OR product_code = '${PART}';
-  INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9861, '${PART}', 'อะไหล่ QAT', 'ACTIVE');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9861, 9861, 100, 0, 0, 100, 100.00);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date,
-                   job_closed_date, job_closed_by, job_repaired_date, record_status, service_cost, spare_part_total_cost, job_total_cost, job_remark)
-    SELECT 'QAT' || lpad(n::text, 4, '0'), s, 9861, '${CUSTOMER} ลูกค้า QAT เดิม 02-986-0001', 'Model QAT', now(), current_date,
-           '1900-01-01', 0, '1900-01-01', 'ACTIVE', 0, p, p, 'QAT เดิม'
+      .join(', ')}
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
+  DELETE FROM customer WHERE pk = 9861 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE
+    VALUES (9861, '${CUSTOMER}', 'ลูกค้า QAT เดิม', '02-986-0001');
+  DELETE FROM product_stock WHERE product_pk = 9861 OR pk = 9861;
+  DELETE FROM product WHERE pk = 9861 OR product_code = '${PART}';
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE
+    VALUES (9861, '${PART}', 'อะไหล่ QAT', 'ACTIVE');
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+  OVERRIDING SYSTEM VALUE VALUES (9861, 9861, 100, 0, 0, 100, 100.00);
+  -- job.model_pk is NOT NULL (drizzle/0006): the fixture jobs' model (shared, never deleted)
+  INSERT INTO model (model_code, model_name, record_status) SELECT 'TST-M', 'Test model', 'ACTIVE'
+   WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (job_no, job_status_id, customer_pk, customer_detail, model_pk, product_model_name, job_create_date, job_reception_date,
+                   job_closed_date, job_repaired_date, record_status, service_cost, spare_part_total_cost, job_total_cost, job_remark)
+    SELECT 'QAT' || lpad(n::text, 4, '0'), s, 9861, '${CUSTOMER} ลูกค้า QAT เดิม 02-986-0001', (SELECT pk FROM model WHERE model_code = 'TST-M'), 'Model QAT', now(), current_date,
+           '1900-01-01', '1900-01-01', 'ACTIVE', 0, p, p, 'QAT เดิม'
       FROM (VALUES (1, 10, 100), (2, 10, 100), (3, 2, 0), (4, 5, 0), (5, 14, 0), (6, 2, 0), (7, 2, 100), (8, 2, 0),
                    (11, 11, 300), (12, 10, 100), (13, 10, 100), (14, 5, 100), (15, 11, 100), (16, 11, 300), (17, 2, 0),
                    (18, 2, 0)) v(n, s, p);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, record_status)
-    VALUES ('${J(19)}', 2, NULL, 'หน้าร้าน QAT 02-986-0019', 'Model QAT', now(), current_date, 'ACTIVE');
+  INSERT INTO job (job_no, job_status_id, customer_pk, customer_detail, model_pk, product_model_name, job_create_date, job_reception_date, record_status)
+    VALUES ('${J(19)}', 2, NULL, 'หน้าร้าน QAT 02-986-0019', (SELECT pk FROM model WHERE model_code = 'TST-M'), 'Model QAT', now(), current_date, 'ACTIVE');
   -- part lines (เบิก A, 100 each): 3 = issued in full (1 of 1), 1 = requested (partly issued when grant > 0)
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty,
-                                        spare_part_unit_price, spare_part_total_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-    VALUES ('${J(1)}', '${PART}', '', 1, true, true, 1, 100, 100, 3, now(), 9861, 1, 0),
-           ('${J(2)}', '${PART}', '', 1, true, true, 1, 100, 100, 3, now(), 9861, 1, 0),
-           ('${J(7)}', '${PART}', '', 1, true, true, 1, 100, 100, 1, now(), 9861, 0, 0),
-           ('${J(11)}', '${PART}', '', 1, true, true, 3, 100, 300, 1, now(), 9861, 1, 0),
-           ('${J(12)}', '${PART}', '', 1, true, true, 1, 100, 100, 3, now(), 9861, 1, 0),
-           ('${J(13)}', '${PART}', '', 1, true, true, 1, 100, 100, 3, now(), 9861, 1, 0),
-           ('${J(14)}', '${PART}', '', 1, true, true, 1, 100, 100, 3, now(), 9861, 1, 0),
-           ('${J(15)}', '${PART}', '', 1, true, true, 1, 100, 100, 1, now(), 9861, 0, 0),
-           ('${J(16)}', '${PART}', '', 1, true, true, 3, 100, 300, 1, now(), 9861, 1, 0);
-  UPDATE product_none_serial SET quantity_booking = 6 WHERE product_id = 9861;
+  INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty,
+                                        spare_part_unit_price, spare_part_total_price, job_part_status_id, request_date,
+                                        requested_by_app_user_pk, grant_qty, return_qty)
+    SELECT j.pk, 9861, true, true, v.req, 100, v.req * 100, v.st, now(), 9861, v.got, 0
+      FROM (VALUES ('${J(1)}', 1, 3, 1), ('${J(2)}', 1, 3, 1), ('${J(7)}', 1, 1, 0), ('${J(11)}', 3, 1, 1),
+                   ('${J(12)}', 1, 3, 1), ('${J(13)}', 1, 3, 1), ('${J(14)}', 1, 3, 1), ('${J(15)}', 1, 1, 0),
+                   ('${J(16)}', 3, 1, 1)) v(no, req, st, got)
+      JOIN job j ON j.job_no = v.no;
+  UPDATE product_stock SET quantity_booking = 6 WHERE product_pk = 9861;
   -- QAT0005 is out at a vendor since today
-  INSERT INTO job_send_forward_dt (job_no, send_to_name, send_detail, send_date, send_by, receive_date, receive_by, receive_detail, send_status)
-    VALUES ('${J(5)}', 'QAT Vendor', '', current_date, 9861, '1900-01-01', -1, '', 'ส่งเครื่องซ่อมแล้ว');
+  INSERT INTO job_outsource (job_pk, send_to_name, send_detail, send_date, sent_by_app_user_pk, receive_date, receive_detail)
+    VALUES ((SELECT pk FROM job WHERE job_no = '${J(5)}'), 'QAT Vendor', '', current_date, 9861, '1900-01-01', '');
 `);
 
 // ---- helpers ----
@@ -96,21 +117,28 @@ const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Recor
 const statusName = async (id: number) =>
   (await one<{ n: string }>(sql`SELECT job_status_name AS n FROM job_status WHERE job_status_id = ${id}`)).n;
 const jobRow = (no: string) =>
-  one<{ s: number; v: number; service: string; total: string; remark: string; swap: string | null }>(sql`
+  one<{
+    s: number;
+    v: number;
+    service: string;
+    total: string;
+    remark: string;
+    swap: string | null;
+    sn: string | null;
+  }>(sql`
     SELECT job_status_id AS s, row_version AS v, service_cost AS service, job_total_cost AS total, job_remark AS remark,
-           swap_refund_detail AS swap
+           swap_refund_detail AS swap, new_serial_no AS sn
       FROM job WHERE job_no = ${no}`);
 const audits = async (no: string) =>
   (await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'job' AND entity_key = ${no}`))
     .n;
 /** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
-const ADMIN_UUID = (
-  await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.admin.id])
-).rows[0]!.id;
+const ADMIN_UUID = (await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE pk = $1', [U.admin.id]))
+  .rows[0]!.id;
 const line = (no: string) =>
   one<{ id: string; st: number; req: number; got: number }>(sql`
-    SELECT id::text AS id, order_status_id AS st, request_qty AS req, grant_qty AS got
-      FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`);
+    SELECT id::text AS id, job_part_status_id AS st, request_qty AS req, grant_qty AS got
+      FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${no}) ORDER BY pk DESC LIMIT 1`);
 /** the error of a rejected call ({ status: 200 } when it resolved); anything but an HttpError is re-thrown */
 async function err(p: Promise<unknown>) {
   try {
@@ -132,6 +160,7 @@ const partLine = (qty: number, logId?: string) => ({
 /** the page's shared job sections (commonSections): service cost 250 + a remark */
 const common = (remark: string) => ({
   customerCode: CUSTOMER,
+  modelCode: 'TST-M', // every job has its model now (job.model_pk NOT NULL) — "never worse" keeps it required
   dueDate: addDays(today(), 30),
   remark,
   serviceCost: 250,
@@ -243,17 +272,17 @@ try {
     });
     assert.equal((await jobRow(no)).s, 14);
   });
-  await test('Swap whose New S/N does not fit the part list (400, in the transaction) → swap + job sections not saved', async () => {
+  await test('Swap to a status the Swap page does not offer (400, in the transaction) → swap + job sections not saved', async () => {
     const no = J(7);
-    // the Swap page offers ซ่อมเสร็จ no more (17 / 18 only): the refusal after the job sections is a full part list
-    await db.execute(sql`UPDATE job SET spare_part_replace = ${'ก'.repeat(295)} WHERE job_no = ${no}`);
-    const { status } = (await getJob(no))!;
+    // the New S/N goes to job.new_serial_no now (never appended to a text that could overflow): the refusal after
+    // the job sections is the status check — ซ่อมเสร็จ is not on the Swap page (17 / 18 only)
+    const repaired = await statusName(5);
     const r = await nothingSaved(
       no,
-      () => saveSwapRefund(no, { status, newSerial: 'QATSN7', job: common(`QAT ${no}`) }, U.admin.id),
+      () => saveSwapRefund(no, { status: repaired, newSerial: 'QATSN7', job: common(`QAT ${no}`) }, U.admin.id),
       400,
     );
-    assert.match(r.message, /300 ตัวอักษร/);
+    assert.ok((r.details as { fields?: Record<string, string> }).fields?.status, r.message);
   });
   await test('Swap valid: the swap + the job sections saved together', async () => {
     const no = J(8);
@@ -261,7 +290,11 @@ try {
     await bothSaved(no, (version) =>
       saveSwapRefund(no, { status, newSerial: 'QATSN8', job: common(`QAT ${no}`), version }, U.admin.id),
     );
-    assert.match((await jobRow(no)).swap ?? '', /QATSN8/);
+    // job.new_serial_no = the serial now; swap_refund_detail = the swap page's own record of that swap (what makes the
+    // job a swap job, as before drizzle/0006 — a New S/N from บันทึกซ่อม never does)
+    const row = await jobRow(no);
+    assert.equal(row.sn, 'QATSN8');
+    assert.match(row.swap ?? '', /QATSN8/);
   });
   await test('the job sections need Job Management edit: Job Repair only → 403 with `job`, 200 without', async () => {
     const no = J(17);
@@ -344,7 +377,7 @@ try {
   console.log('\n4 · the job list (and its export) shows the customer as they are now');
   await test('after the customer is renamed: list + export show the new name / phone; a walk-in keeps its text', async () => {
     await db.execute(
-      sql`UPDATE customer SET customer_name = 'ลูกค้า QAT ชื่อใหม่', phone_number = '089-986-7777' WHERE customer_id = 9861`,
+      sql`UPDATE customer SET customer_name = 'ลูกค้า QAT ชื่อใหม่', phone_number = '089-986-7777' WHERE pk = 9861`,
     );
     const now = `${CUSTOMER} ลูกค้า QAT ชื่อใหม่ 089-986-7777`;
     const page = async (q: string) =>

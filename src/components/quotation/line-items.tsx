@@ -20,6 +20,7 @@ export function QuotationLineTable({
   errors,
   clear,
   showZero,
+  locked = () => false,
 }: {
   lines: QuotationLine[];
   setLines: React.Dispatch<React.SetStateAction<QuotationLine[]>>;
@@ -27,6 +28,8 @@ export function QuotationLineTable({
   clear: (key: string) => void;
   /** a loaded quotation shows its 0 prices as 0 */
   showZero: boolean;
+  /** a legacy quotation's recorded line: its qty / price / discount are System Admin's alone, and it stays */
+  locked?: (l: QuotationLine) => boolean;
 }) {
   const upd = (id: number, patch: Partial<QuotationLine>) =>
     setLines((s) => s.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -59,20 +62,23 @@ export function QuotationLineTable({
               <tr key={l.id} className="border-b border-border/70 last:border-0">
                 <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
                 <td className="px-3 py-2">
-                  <ProductPicker
-                    value={l.code}
-                    fallbackName={l.name}
-                    extras={DELIVERY_EXTRA}
-                    size="sm"
-                    onPick={(p) =>
-                      upd(l.id, {
-                        code: p?.code ?? '',
-                        name: p ? p.name : l.name,
-                        price: p && p.price !== undefined ? p.price : l.price,
-                        itemType: p?.code === 'SVD0001' ? 'Delivery' : 'SparePart',
-                      })
-                    }
-                  />
+                  {/* a locked line's product is recorded too (it sets the price): the picker's controls disabled */}
+                  <fieldset disabled={locked(l)} className="contents">
+                    <ProductPicker
+                      value={l.code}
+                      fallbackName={l.name}
+                      extras={DELIVERY_EXTRA}
+                      size="sm"
+                      onPick={(p) =>
+                        upd(l.id, {
+                          code: p?.code ?? '',
+                          name: p ? p.name : l.name,
+                          price: p && p.price !== undefined ? p.price : l.price,
+                          itemType: p?.code === 'SVD0001' ? 'Delivery' : 'SparePart',
+                        })
+                      }
+                    />
+                  </fieldset>
                 </td>
                 <td className="px-3 py-2">
                   <Input
@@ -89,6 +95,7 @@ export function QuotationLineTable({
                 </td>
                 <td className="px-3 py-2">
                   <NumberInput
+                    disabled={locked(l)}
                     aria-label={`จำนวน แถว ${i + 1}`}
                     aria-invalid={!!errors[`lines.${i}.qty`] || undefined}
                     min={1}
@@ -106,6 +113,7 @@ export function QuotationLineTable({
                 </td>
                 <td className="px-3 py-2">
                   <NumberInput
+                    disabled={locked(l)}
                     aria-label={`ราคา/หน่วย แถว ${i + 1}`}
                     aria-invalid={!!errors[`lines.${i}.unitPrice`] || undefined}
                     step="0.01"
@@ -120,6 +128,7 @@ export function QuotationLineTable({
                 </td>
                 <td className="px-3 py-2">
                   <NumberInput
+                    disabled={locked(l)}
                     aria-label={`ส่วนลด (%) แถว ${i + 1}`}
                     aria-invalid={!!errors[`lines.${i}.discountPercent`] || undefined}
                     min={0}
@@ -138,6 +147,7 @@ export function QuotationLineTable({
                 <td className="px-3 py-2">
                   {/* a % set → its บาท shown here; typing บาท drops the % */}
                   <NumberInput
+                    disabled={locked(l)}
                     aria-label={`ส่วนลด (บาท) แถว ${i + 1}`}
                     aria-invalid={!!errors[`lines.${i}.discount`] || undefined}
                     min={0}
@@ -155,6 +165,7 @@ export function QuotationLineTable({
                 <td className="num px-3 py-2 text-right font-medium">{baht(lineOf(l).total)}</td>
                 <td className="px-3 py-2 text-center">
                   <button
+                    disabled={locked(l)}
                     onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
                     className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
                     aria-label="ลบ"

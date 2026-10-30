@@ -94,7 +94,7 @@ export const userFields = z.looseObject({
  * ผู้ใช้ระบบ. `prev` = the user being edited: an unchanged legacy username / phone still passes.
  * email ≤ 100 (unique — the API answers 409), username 3–50 of A-Z a-z 0-9 . _ - (unique ignoring
  * case — 409), phone 0 + 8–9 digits, Lark ID ≤ 50, branch ≤ 100; the role must be one of the
- * roles (checked by the API against app_config).
+ * roles (checked by the API against role_permission).
  */
 export function userSchema(prev?: { username?: string | null; phone?: string | null } | null) {
   return userFields.superRefine((v, ctx) => {

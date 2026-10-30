@@ -1,12 +1,13 @@
 import 'server-only';
 import { and, desc, eq, ilike, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { customer, job, manufacturer } from '@/db/schema';
+import { brand, customer, job, model } from '@/db/schema';
 import { cached, TTL_MASTER } from '@/server/cache';
 import { likeTerm } from '@/server/paging';
 import { RS } from '@/server/record-status';
 import { cleanCode } from '@/lib/validation';
 import { cleanSerial } from '@/lib/validation/job';
+import { jobModelName } from './jobs';
 
 /**
  * Warnings while a job is typed in (never a refusal): the Serial No. already on another job, the Sale Order
@@ -16,7 +17,7 @@ import { cleanSerial } from '@/lib/validation/job';
  */
 
 /** brands of one family share serials and shops (MOVA / TROUVER are Dreame's, Soundcore / eufy Anker's …) */
-// read from the jobs (prod 2026-10), confirmed by the owner 2026-10-27 — a family column on manufacturer could come later
+// read from the jobs (prod 2026-10), confirmed by the owner 2026-10-27 — a family column on brand could come later
 const FAMILIES = [
   ['dreame', 'mova', 'trouver'],
   ['xiaomi', 'redmi', 'mijia'],
@@ -59,9 +60,11 @@ type Stats = {
 const stats = () => cached('jobchecks:stats', 5 * TTL_MASTER, loadStats);
 async function loadStats(): Promise<Stats> {
   const rows = await db
-    .select({ s: job.productSerial, shop: job.productSaleOutShopName, b: manufacturer.manufacturerName })
+    .select({ s: job.productSerial, shop: job.productSaleOutShopName, b: brand.brandName })
     .from(job)
-    .innerJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
+    // the brand is the model's (job.brand_manufacturer_pk dropped, drizzle/0006)
+    .innerJoin(model, eq(model.pk, job.modelPk))
+    .innerJoin(brand, eq(brand.pk, model.brandPk))
     .where(ne(job.recordStatus, RS.DELETED));
   const bySig = new Map<string, Count>();
   const famSigs = new Map<string, Count>();
@@ -109,7 +112,7 @@ export async function jobChecks(q: {
   const [custId, st] = await Promise.all([
     q.customer
       ? db
-          .select({ id: customer.customerId })
+          .select({ id: customer.pk })
           .from(customer)
           .where(eq(customer.customerCode, q.customer.trim()))
           .then((r) => r[0]?.id ?? null)
@@ -126,18 +129,19 @@ export async function jobChecks(q: {
         id: job.id,
         no: job.jobNo,
         date: job.jobCreateDate,
-        cust: job.customerId,
+        cust: job.customerPk,
         bounce: job.isJobBounce,
-        model: job.productModelName,
+        model: jobModelName,
       })
       .from(job)
+      .leftJoin(model, eq(model.pk, job.modelPk))
       .where(
         and(
           ilike(col, likeTerm(v)), // the trigram index finds the few candidates, the next line keeps the equal ones
           sql`upper(btrim(${col})) = ${v}`,
           ne(job.recordStatus, RS.DELETED),
           q.job ? ne(job.jobNo, q.job) : undefined,
-          otherCustomersOnly && custId != null ? ne(job.customerId, custId) : undefined,
+          otherCustomersOnly && custId != null ? sql`${job.customerPk} is distinct from ${custId}` : undefined,
         ),
       )
       .orderBy(desc(job.jobCreateDate))

@@ -41,7 +41,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
   // billed qty = issued less returned to stock (รับคืนจากการเบิก); a line returned in full is not printed
   const used = (p: (typeof j.parts)[number]) => (p.granted > 0 ? p.granted - p.returned : p.requested);
   const parts = j.parts.filter((p) => (p.statusId === 3 || p.granted > 0) && used(p) > 0);
-  // ผู้ส่งคืน = who closed the job (job_closed_by — often CS, not the technician), on the staff copy only;
+  // ผู้ส่งคืน = who closed the job (job.closed_by_app_user_pk — often CS, not the technician), on the staff copy only;
   // the customer's copy names no staff and gets the company's contact
   const [closer] = forCustomer
     ? [undefined]
@@ -53,7 +53,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
           email: appUser.emailAddress,
         })
         .from(job)
-        .innerJoin(appUser, eq(appUser.userId, job.jobClosedBy))
+        .innerJoin(appUser, eq(appUser.pk, job.closedByAppUserPk))
         .where(eq(job.jobNo, j.no))
         .limit(1);
   const contact = forCustomer ? { phone: co.phone, email: co.email } : closer;

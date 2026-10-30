@@ -8,19 +8,19 @@ export const card = (page: Page) => page.locator('[aria-describedby="tour-body"]
 
 /** the account asked afresh on every page (signIn turned the offer off for every other spec) */
 export async function tourOn(email = OWNER_EMAIL) {
-  await rows('DELETE FROM app_user_tour WHERE user_id = $1', [await userId(email)]);
+  await rows('DELETE FROM app_user_tour WHERE app_user_pk = $1', [await userId(email)]);
 }
 
 /** a legacy quotation of the e2e customer (Q97 + 5 digits: a series the app never issues) — its uuid (the link) */
 async function newQuotation(): Promise<string> {
   const { no } = await one<{ no: string }>(
     `SELECT 'Q97' || lpad((coalesce(max(substring(quotation_no FROM 4)::int), 0) + 1)::text, 5, '0') AS no
-       FROM quotation_hd WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
+       FROM quotation WHERE quotation_no ~ '^Q97[0-9]{5}$'`,
   );
   const [q] = await rows<{ id: string }>(
-    `INSERT INTO quotation_hd (quotation_no, customer_code, create_date, create_by, remark, quotation_status_id,
-                               is_active, record_status)
-     VALUES ($1, $2, now(), -1, 'E2E บทสอน', 1, true, 'ACTIVE') RETURNING id::text AS id`,
+    `INSERT INTO quotation (quotation_no, customer_pk, create_date, remark, quotation_status_id, record_status)
+     VALUES ($1, (SELECT pk FROM customer WHERE customer_code = $2), now(), 'E2E บทสอน', 1, 'ACTIVE')
+     RETURNING id::text AS id`,
     [no, E2E_CUSTOMER],
   );
   return q!.id;
@@ -142,8 +142,14 @@ export async function stepTo(page: Page, is: (title: string) => boolean) {
  * Every step of the tour on the page that is open, started from `start` (the ? button or the first-visit
  * offer), each one checked; ends on the last step. Returns the number of steps.
  */
+/** the first-visit offer shows only after the user's first tap / key (it must never be the page's LCP element) */
+export async function wakeTourOffer(page: Page) {
+  await page.keyboard.press('Shift');
+}
+
 export async function walkTour(page: Page, start: 'button' | 'offer' = 'button'): Promise<number> {
   await page.evaluate(() => delete (window as Window & { __tourPrev?: Element }).__tourPrev);
+  if (start === 'offer') await wakeTourOffer(page);
   await page.getByRole('button', { name: start === 'offer' ? 'เริ่มบทสอน' : 'สอนการใช้งานหน้านี้' }).click();
   const n = Number((await card(page).locator('.num').locator('visible=true').first().innerText()).split('/')[1]);
   for (let k = 1; k <= n; k++) {

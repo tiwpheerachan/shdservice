@@ -14,8 +14,8 @@ export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Product', body.sysCode ? 'edit' : 'add');
   // ราคาทุน: only a user who may see it sets it (an add-only role: a new part starts at 0) or gets it back
   const cost = await canSeeCost(user);
-  return idempotent(req, user.userId, async () => {
-    const row = await saveProduct(cost ? body : { ...body, capitalPrice: undefined }, user.userId);
+  return idempotent(req, user.pk, async () => {
+    const row = await saveProduct(cost ? body : { ...body, capitalPrice: undefined }, user.pk);
     // the same vendor code on another product: saved anyway (legacy has real pairs), the form warns
     const sameMfgCode = await productsWithMfgCode(row.mfgCode, row.sysCode);
     return NextResponse.json({ ok: true, row: cost ? row : withoutCost(row), sameMfgCode });

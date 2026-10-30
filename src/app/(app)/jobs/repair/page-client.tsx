@@ -30,7 +30,7 @@ import { PrintButton } from '@/components/shared/print-button';
 import { QuoteLink } from '@/components/jobs/quote-link';
 import { RepairPartsSection } from '@/components/jobs/repair-parts';
 import { RepairDetailSection, RepairJobInfoSection, type RepairDetail } from '@/components/jobs/repair-detail';
-import { type Line, chargedTotal, partsBlockOf } from '@/components/jobs/repair-lines';
+import { type Line, chargedTotal, legacyPartsTotal, partsBlockOf } from '@/components/jobs/repair-lines';
 import { postJson, errMsg } from '@/lib/api';
 import { repairActionSchema } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
@@ -69,7 +69,9 @@ function repairStateOf(job: JobDetail, lastId: number): { detail: RepairDetail; 
       bQty: p.requestQtyB,
       status: p.status,
       total: p.total,
-      locked: p.statusId !== 1,
+      locked: p.statusId !== 1 || p.figuresLocked, // issued / returned, or a legacy line (System Admin's)
+      // a legacy line still pending with nothing issued: cancelling it is the normal workflow (the server allows it)
+      cancellable: p.statusId === 1 && p.granted === 0 && p.figuresLocked,
       // partly issued: แบบ A's qty may come down to what stock issued (the rest is cancelled) — nothing else
       issued: p.statusId === 1 && p.granted > 0 ? { granted: p.granted, requested: p.requested } : undefined,
       waiting: p.statusId === 1 && p.isSpecial && p.requested > p.granted,
@@ -93,7 +95,9 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   const { s: form, reset } = useJobForm();
   const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
-  const lock = useMoneyLock(); // a closed job: part lines / prices stay as they are (Job Money After Close may change them)
+  // a closed job: part lines / prices stay as they are (Job Money After Close may change them) — new lines may
+  // always be added (a legacy line's own qty / price: figuresLocked on the line)
+  const lock = useMoneyLock();
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState(() => (initial ? repairStateOf(initial, 0) : null));
   const [lines, setLines] = React.useState<Line[]>(() => saved?.lines ?? []);
@@ -183,7 +187,12 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   // what the job charges (ค่าอะไหล่ in the summary) = what saveRepair stores: the stored total while no line
   // changed; otherwise issued / returned lines keep their stored amount, the others เบิก + เสนอ only
   const linesEdited = !!saved && JSON.stringify(lines) !== JSON.stringify(saved.lines);
-  const charged = linesEdited ? chargedTotal(lines) : (job?.partsCost ?? 0);
+  // what saveRepair will store: a new job sums its lines; a legacy job's recorded cost moves by what changed here
+  const charged = !linesEdited
+    ? (job?.partsCost ?? 0)
+    : job?.legacy
+      ? legacyPartsTotal(lines, saved.lines, job.partsCost)
+      : chargedTotal(lines);
   // the server refuses the change to ซ่อมเสร็จ / ไม่ซ่อม while these are not issued — say so before saving
   const partsBlock = partsBlockOf(lines, detail.status, job?.status);
 

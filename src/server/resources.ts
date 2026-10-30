@@ -10,7 +10,7 @@ import {
   HttpError,
 } from '@/server/auth';
 import type { Module } from '@/lib/modules';
-import { pageAudit, listAudit, auditModules } from '@/server/audit';
+import { auditModules } from '@/server/audit';
 import { clampInt, parsePageQuery, searchOf, type Page } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
 import { listSimple, isSimpleKind, listSymptoms, listModels, pageModels } from '@/server/services/masters';
@@ -111,19 +111,9 @@ export async function readResource(
   const limit = clampInt(sp.get('limit'), LIST_DEFAULT, LIST_MAX);
 
   // admin-only resources
-  if (resource === 'audit_log' || resource === 'audit_modules') {
+  if (resource === 'audit_modules') {
     await requireAdmin(req);
-    if (resource === 'audit_modules') return auditModules();
-    const f = {
-      from: p.f.from,
-      to: p.f.to,
-      user: p.f.user,
-      module: p.f.module,
-      entity: p.f.entity,
-      key: p.f.key,
-      action: p.f.action,
-    };
-    return paged ? pageAudit(p, f) : listAudit({ ...f, q: p.q, limit });
+    return auditModules();
   }
   if (resource === 'users' || resource === 'permissions' || resource === 'roles' || resource === 'modules') {
     await requireAdmin(req);

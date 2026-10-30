@@ -72,9 +72,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # then every migration AGAIN on the filled database (--reset clears the journal): they must
-      # be re-runnable — a legacy reload re-runs them all (README)
-      - name: Migrations (empty database, then re-run all)
+      # then wipe (scripts/db-wipe.sql, `-- --reset`) and migrate again from nothing: a database drizzle/0006
+      # converted is rebuilt, never re-migrated in place (ADR 0008 decision 12) — and the wipe must leave nothing behind
+      - name: Migrations (empty database, then wipe and migrate again)
         run: npm run db:test:prepare && npm run db:test:prepare -- --reset
 
       - name: Database tests

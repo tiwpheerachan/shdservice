@@ -19,14 +19,14 @@ import {
   pageIssuedLines,
   productFiltersFromQuery,
 } from '@/server/services/stock';
-import { audit, listAudit, pageAudit } from '@/server/audit';
+import { audit, listAudit, listSecurity, pageAudit, pageSecurity } from '@/server/audit';
 import { db } from '@/db/client';
-import { clientIp } from '@/lib/client-ip';
+import { ANOMALY_CATEGORIES, ANOMALY_KEYS, anomalyPage, type AnomalyCategory } from '@/server/services/anomalies';
 import { filtersFromQuery, pageJobs } from '@/server/services/jobs';
 import { listQuotations, quotationFiltersFromQuery, pageQuotations } from '@/server/services/quotations';
 import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
-import { fieldLabel } from '@/lib/field-labels';
+import { fieldLabel, fieldValue } from '@/lib/field-labels';
 import { logError } from '@/lib/log';
 import { rateLimit } from '@/server/rate-limit';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
@@ -230,14 +230,87 @@ SPECS.audit_log = {
   cols: [
     { key: 'at', header: 'เวลา', width: 18 },
     { key: 'user', header: 'ผู้ใช้', width: 24 },
+    { key: 'email', header: 'อีเมล', width: 28 },
+    { key: 'role', header: 'ตำแหน่ง (ขณะนั้น)', width: 18 },
+    { key: 'department', header: 'แผนก (ขณะนั้น)', width: 18 },
     { key: 'action', header: 'การกระทำ', width: 10 },
     { key: 'module', header: 'โมดูล', width: 20 },
+    { key: 'permission', header: 'สิทธิ์ที่ใช้', width: 24 },
     { key: 'entity', header: 'ตาราง', width: 16 },
-    { key: 'key', header: 'เลขที่/รหัส', width: 16 },
+    { key: 'no', header: 'เลขที่', width: 16 },
+    { key: 'key', header: 'รหัสรายการ', width: 16 },
     { key: 'summary', header: 'รายละเอียด', width: 60 },
     { key: 'changesText', header: 'ค่าที่เปลี่ยน', width: 60 },
+    { key: 'reason', header: 'เหตุผล', width: 30 },
+    { key: 'ip', header: 'IP', width: 16 },
+    { key: 'sessionId', header: 'Session', width: 34 },
+    { key: 'requestId', header: 'Request', width: 20 },
   ],
 };
+
+/** a security_log detail as people read it: "key: value; …" — changes as before → after, field names in Thai */
+function detailText(d: Record<string, unknown> | null): string {
+  if (!d) return '';
+  return Object.entries(d)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) =>
+      k === 'changes' && typeof v === 'object'
+        ? Object.entries(v as Record<string, [unknown, unknown]>)
+            .map(([f, pair]) =>
+              Array.isArray(pair)
+                ? `${fieldLabel(f)}: ${fieldValue(pair[0])} → ${fieldValue(pair[1])}`
+                : `${f}: ${fieldValue(pair)}`,
+            )
+            .join('; ')
+        : `${k}: ${typeof v === 'object' ? fieldValue(Object.entries(v as object).map(([a, b]) => `${a}=${fieldValue(b)}`)) : fieldValue(v)}`,
+    )
+    .join('; ');
+}
+
+SPECS.security_log = {
+  title: 'บันทึกความปลอดภัย',
+  module: null,
+  cols: [
+    { key: 'at', header: 'เวลา', width: 18 },
+    { key: 'user', header: 'ผู้ใช้', width: 24 },
+    { key: 'email', header: 'อีเมล', width: 28 },
+    { key: 'role', header: 'บทบาท', width: 18 },
+    { key: 'event', header: 'เหตุการณ์', width: 16 },
+    { key: 'result', header: 'ผล', width: 10 },
+    { key: 'module', header: 'โมดูล', width: 20 },
+    { key: 'permission', header: 'สิทธิ์', width: 24 },
+    { key: 'entity', header: 'ตาราง', width: 16 },
+    { key: 'no', header: 'เลขที่/รหัส', width: 16 },
+    { key: 'ip', header: 'IP', width: 16 },
+    { key: 'requestId', header: 'Request', width: 20 },
+    { key: 'detailText', header: 'รายละเอียด', width: 60 },
+  ],
+};
+
+SPECS.anomalies = {
+  title: 'ข้อมูลผิดปกติ',
+  module: null,
+  cols: [
+    { key: 'categoryLabel', header: 'ประเภท', width: 34 },
+    { key: 'ref', header: 'เลขที่/รหัส', width: 16 },
+    { key: 'message', header: 'รายละเอียด', width: 60 },
+    { key: 'stored', header: 'ค่าที่บันทึก', width: 14, money: true },
+    { key: 'expected', header: 'ค่าที่ควรเป็น', width: 14, money: true },
+  ],
+};
+
+/** ?category= of the anomaly export: one of ANOMALY_KEYS, else every category */
+const anomalyCategory = (v: string | undefined) =>
+  ANOMALY_KEYS.includes(v as AnomalyCategory) ? (v as AnomalyCategory) : undefined;
+/** the audit / security logs' filters, as their pages send them */
+const logFilters = (f: Record<string, string>) => ({
+  from: f.from,
+  to: f.to,
+  user: f.user,
+  role: f.role,
+  no: f.no,
+  ip: f.ip,
+});
 
 for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'product_types', 'symptoms']) {
   SPECS[k] = { title: k, module: null, cols: MASTER_COLS };
@@ -341,9 +414,7 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
       return (
         await listAudit({
           q: p.q,
-          from: f.from,
-          to: f.to,
-          user: f.user,
+          ...logFilters(f),
           module: f.module,
           entity: f.entity,
           key: f.key,
@@ -354,9 +425,19 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         ...r,
         changesText: r.changes
           ? Object.entries(r.changes)
-              .map(([k, [a, b]]) => `${fieldLabel(k)}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`)
+              .map(([k, [a, b]]) => `${fieldLabel(k)}: ${fieldValue(a)} → ${fieldValue(b)}`)
               .join('; ')
           : '',
+      }));
+    case 'security_log':
+      return (await listSecurity({ q: p.q, ...logFilters(f), event: f.event, result: f.result, limit: MAX_ROWS })).map(
+        (r) => ({ ...r, detailText: detailText(r.detail) }),
+      );
+    case 'anomalies':
+      // one SQL page of at most MAX_ROWS (anomalyPage's own LIMIT) — never the whole set
+      return (await anomalyPage({ ...p, page: 1, pageSize: MAX_ROWS }, anomalyCategory(f.category))).rows.map((r) => ({
+        ...r,
+        categoryLabel: ANOMALY_CATEGORIES[r.category],
       }));
   }
   throw new HttpError(404, `unknown export: ${resource}`);
@@ -395,15 +476,17 @@ async function totalRows(sp: URLSearchParams, resource: string, user: CurrentUse
     case 'audit_log':
       return (
         await pageAudit(p, {
-          from: f.from,
-          to: f.to,
-          user: f.user,
+          ...logFilters(f),
           module: f.module,
           entity: f.entity,
           key: f.key,
           action: f.action,
         })
       ).total;
+    case 'security_log':
+      return (await pageSecurity(p, { ...logFilters(f), event: f.event, result: f.result })).total;
+    case 'anomalies':
+      return (await anomalyPage(p, anomalyCategory(f.category))).matched;
   }
   return MAX_ROWS; // the small lists (masters, users) never reach the cap
 }
@@ -462,13 +545,14 @@ export async function exportXlsx(
     const filters = Object.fromEntries(
       Object.entries(query).filter(([k, v]) => v !== undefined && v !== '' && k !== 'file'),
     );
-    await audit(db, user.userId, {
-      action: 'EXPORT',
+    // a Word / print (PDF) view is a printout (security_log PRINT); the request's ip is audit()'s own
+    await audit(db, user.pk, {
+      action: format === 'xlsx' ? 'EXPORT' : 'PRINT',
       module: spec.module ?? 'Admin',
       entity: resource,
       key: resource,
       summary: `ส่งออก ${what} ${spec.title} ${Math.min(rows.length, cap).toLocaleString('en-US')} แถว`,
-      meta: { rows: Math.min(rows.length, cap), filters, ip: clientIp(req.headers) },
+      meta: { rows: Math.min(rows.length, cap), filters },
     });
   } catch (e) {
     release();

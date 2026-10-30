@@ -65,47 +65,69 @@ const P = { a: 'QSP1', gone: 'QSP2' };
 const JOB = 'QSJ0001';
 
 await pool.query(`
-  INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
     SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
                           (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
                           (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
-     WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
   INSERT INTO store_location (store_location_id, store_location_name, is_active)
     SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
      WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 2, 'กำลังดำเนินการ', 2, 'Open', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 2);
-  DELETE FROM app_config WHERE user_type = 'QS Seller';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  -- sale_order.approve_status_id has a foreign key (drizzle/0006): src/lib/status-ids.ts AS
+  INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+    SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ', 'In Progess', true, true), (2, 'รออนุมัติ', 'Wait Approve', true, true),
+                          (3, 'แก้ไขข้อมูล', 'Reject', true, true), (4, 'อนุมัติแล้ว', 'Approved', false, false),
+                          (5, 'ปฏิเสธ', 'Deny', false, false)) v(id, th, en, ed, rv)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  -- and sale_order_line.condition_id (CONDITION_ID 1)
+  INSERT INTO condition (condition_id, condition_name, is_active)
+    SELECT 1, 'สินค้าใหม่', true WHERE NOT EXISTS (SELECT 1 FROM condition WHERE condition_id = 1);
+  DELETE FROM role_permission WHERE user_type = 'QS Seller';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('QS Seller', 'Sale Order', true, true, false, true);
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('Manager', 'Sale Order', true, true, true, true), ('Manager', 'SO Approve', false, false, false, true)
     ON CONFLICT (user_type, module_name) DO UPDATE SET can_insert = true, can_edit = true, can_view = true;
-  DELETE FROM app_user WHERE user_id BETWEEN 9700 AND 9799 OR email_address LIKE 'qs-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- fixture users keep their pk (audit_log, append-only, points at them: never deleted) — upserted
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QS', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM job_log WHERE job_no = '${JOB}';
-  DELETE FROM job WHERE job_no = '${JOB}' OR customer_id = 9701;
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code = '${CUSTOMER}');
-  DELETE FROM sale_out_hd WHERE customer_code = '${CUSTOMER}';
-  DELETE FROM customer WHERE customer_id = 9701 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9701, '${CUSTOMER}', 'ลูกค้า QA SO', '02-977-0001');
-  DELETE FROM product_none_serial WHERE product_id IN (9701, 9702) OR item_id IN (9701, 9702);
-  DELETE FROM product WHERE product_id IN (9701, 9702) OR product_code IN ('${P.a}', '${P.gone}');
-  INSERT INTO product (product_id, product_code, product_name) VALUES (9701, '${P.a}', 'อะไหล่ QS 1'), (9702, '${P.gone}', 'อะไหล่ QS ลบแล้ว');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9701, 9701, 1000, 0, 0, 1000, 100.00), (9702, 9702, 1000, 0, 0, 1000, 50.00);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_payment_slip_file_name)
-    VALUES ('${JOB}', 2, 9701, '${CUSTOMER} ลูกค้า QA SO', 'Model QS', now(), current_date, '1900-01-01', 'jobs/${JOB}/slip/old.png');
+      .join(', ')}
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = 'ACTIVE',
+      session_version = excluded.session_version, last_login = DEFAULT;
+  -- children before parents (RESTRICT, drizzle/0006): lines, movements, orders, the job, the customer, the parts
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9701)
+    OR product_pk IN (9701, 9702);
+  DELETE FROM stock_move_line WHERE product_pk IN (9701, 9702) OR stock_move_pk IN (SELECT h.pk FROM stock_move h
+    WHERE h.sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9701)
+       OR h.job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9701));
+  DELETE FROM stock_move WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk = 9701)
+    OR job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9701);
+  DELETE FROM sale_order WHERE customer_pk = 9701;
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9701);
+  DELETE FROM job WHERE job_no = '${JOB}' OR customer_pk = 9701;
+  DELETE FROM customer WHERE pk = 9701 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9701, '${CUSTOMER}', 'ลูกค้า QA SO', '02-977-0001');
+  DELETE FROM product_stock WHERE product_pk IN (9701, 9702) OR pk IN (9701, 9702);
+  DELETE FROM product WHERE pk IN (9701, 9702) OR product_code IN ('${P.a}', '${P.gone}');
+  INSERT INTO product (pk, product_code, product_name) OVERRIDING SYSTEM VALUE VALUES (9701, '${P.a}', 'อะไหล่ QS 1'), (9702, '${P.gone}', 'อะไหล่ QS ลบแล้ว');
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+    OVERRIDING SYSTEM VALUE VALUES (9701, 9701, 1000, 0, 0, 1000, 100.00), (9702, 9702, 1000, 0, 0, 1000, 50.00);
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_payment_slip_file_name)
+    VALUES ((SELECT pk FROM model WHERE model_code = 'TST-M'), '${JOB}', 2, 9701, '${CUSTOMER} ลูกค้า QA SO', 'Model QS', now(), current_date, '1900-01-01', 'jobs/${JOB}/slip/old.png');
 `);
 // as test-domain: this year's Inventory-Out series past the numbers other suites already used
 await db.transaction((tx) => nextRunningNo(tx, 'Inventory-Out'));
 await pool.query(`
   UPDATE running_no r SET number = greatest(r.number, coalesce((
-    SELECT max(substring(h.inventory_no FROM length(r.prefix) + 3)::int) FROM inventory_hd h
-     WHERE h.inventory_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
+    SELECT max(substring(h.stock_move_no FROM length(r.prefix) + 3)::int) FROM stock_move h
+     WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type = 'Inventory-Out' AND r.length_year = 2`);
 
 // ---- helpers ----
@@ -121,14 +143,21 @@ async function request(path: string, u: TestUser, body: unknown) {
   });
 }
 type Res = { status: number; body: Record<string, unknown> & { error?: string; order?: Order } };
-type Order = { no: string; version: number; tracking: string; deliveryDate: string; slip: string; lines: unknown[] };
+type Order = {
+  no: string;
+  version: number;
+  tracking: string;
+  deliveryDate: string;
+  slip: string;
+  lines: { id: string }[];
+};
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
 /** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
 const soIdOf = async (no: string) =>
-  (await pool.query<{ id: string }>('SELECT id::text FROM sale_out_hd WHERE sale_out_hd_no = $1', [no])).rows[0]?.id ??
+  (await pool.query<{ id: string }>('SELECT id::text FROM sale_order WHERE sale_order_no = $1', [no])).rows[0]?.id ??
   '00000000-0000-7000-8000-000000000000';
 const userUuid = async (userId: number) =>
-  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [userId])).rows[0]!.id;
 const params = async (no: string) => ({ params: Promise.resolve({ id: await soIdOf(no) }) });
 
 const save = async (u: TestUser, body: Record<string, unknown>) =>
@@ -176,14 +205,14 @@ const upload = async (u: TestUser, kind: string, id: string) => {
 };
 const hd = async (no: string) =>
   (
-    await db.execute<{ slip: string | null; tracking: string | null; delivery: string }>(
-      sql`SELECT slip_file_name AS slip, delivery_tracking_no AS tracking, delivery_date::text AS delivery FROM sale_out_hd WHERE sale_out_hd_no = ${no}`,
+    await db.execute<{ slip: string | null; tracking: string | null; delivery: string | null }>(
+      sql`SELECT slip_file_name AS slip, delivery_tracking_no AS tracking, delivery_date::text AS delivery FROM sale_order WHERE sale_order_no = ${no}`,
     )
   ).rows[0];
 /** a slip already on the order (and in storage), as an earlier upload left it */
 const presetSlip = async (no: string) => {
   const old = `sale-orders/${no}/slip/old.png`;
-  await db.execute(sql`UPDATE sale_out_hd SET slip_file_name = ${old} WHERE sale_out_hd_no = ${no}`);
+  await db.execute(sql`UPDATE sale_order SET slip_file_name = ${old} WHERE sale_order_no = ${no}`);
   stored.add(old);
   return old;
 };
@@ -271,7 +300,7 @@ try {
     const cleared = await track(U.seller, o.no, { tracking: '', version: set.body.order!.version });
     assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
     assert.equal(cleared.body.order!.deliveryDate, '');
-    assert.match((await hd(o.no)).delivery, /^1900-01-01/);
+    assert.equal((await hd(o.no)).delivery, null, 'no date: NULL, never 1900-01-01 (owner rule 2026-10-30)');
   });
 
   console.log('\nQA sale orders — race messages');
@@ -310,14 +339,16 @@ try {
       assert.equal(r.status, 400, JSON.stringify(r.body));
       assert.match(r.body.error!, new RegExp(`${P.gone}.*ถูกลบ`));
       const edit = { no: old.no, customerCode: CUSTOMER, salesId: await userUuid(U.seller.id), submit: false };
+      // the stored line is sent back by its id (a line without one is a new line)
+      const id = old.lines[0]!.id;
       const kept = await save(U.seller, {
         ...edit,
         remark: 'QS แก้หมายเหตุ',
-        lines: [{ code: P.gone, qty: 1, price: 50 }],
+        lines: [{ id, code: P.gone, qty: 1, price: 50 }],
       });
       assert.equal(kept.status, 200, JSON.stringify(kept.body));
       assert.equal(kept.body.order!.lines.length, 1);
-      const changed = await save(U.seller, { ...edit, lines: [{ code: P.gone, qty: 3, price: 50 }] });
+      const changed = await save(U.seller, { ...edit, lines: [{ id, code: P.gone, qty: 3, price: 50 }] });
       assert.equal(changed.status, 400, JSON.stringify(changed.body));
     } finally {
       await db.execute(sql`UPDATE product SET record_status = 'ACTIVE' WHERE product_code = ${P.gone}`);

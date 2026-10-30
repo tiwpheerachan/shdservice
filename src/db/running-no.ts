@@ -52,7 +52,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
     companyId === null ? undefined : eq(runningNo.companyId, companyId),
   );
   const cols = {
-    runningId: runningNo.runningId,
+    pk: runningNo.pk,
     prefix: runningNo.prefix,
     pyear: runningNo.pyear,
     number: runningNo.number,
@@ -60,7 +60,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
     lengthNumber: runningNo.lengthNumber,
   };
   let [row]: {
-    runningId: number;
+    pk: number;
     prefix: string;
     pyear: number;
     number: number;
@@ -70,7 +70,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
     .select(cols)
     .from(runningNo)
     .where(and(sameSeries, eq(runningNo.pyear, year)))
-    .orderBy(desc(runningNo.runningId))
+    .orderBy(desc(runningNo.pk))
     .limit(1)
     .for('update');
 
@@ -88,7 +88,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
       })
       .from(runningNo)
       .where(sameSeries)
-      .orderBy(desc(runningNo.pyear), desc(runningNo.runningId))
+      .orderBy(desc(runningNo.pyear), desc(runningNo.pk))
       .limit(1);
     const [ins] = await tx
       .insert(runningNo)
@@ -128,10 +128,31 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   }
   if (!row) throw new Error(`running_no: insert … returning gave no row for ${type} ${year}`);
 
-  const next = Number(row.number) + 1;
-  await tx.update(runningNo).set({ number: next }).where(eq(runningNo.runningId, row.runningId));
-
   const yy =
     Number(row.lengthYear) === 2 ? String(row.pyear).slice(-2) : Number(row.lengthYear) === 4 ? String(row.pyear) : '';
-  return `${row.prefix}${yy}${String(next).padStart(Number(row.lengthNumber), '0')}`;
+  // a counter behind the table (a reload, a row keyed in by hand) skips the numbers already taken: the number is
+  // UNIQUE (drizzle/0006), and a refused insert rolls the counter back with it, so it would never get past them
+  const [table, column] = ISSUED_IN[type];
+  let next = Number(row.number);
+  let no: string;
+  do {
+    next++;
+    no = `${row.prefix}${yy}${String(next).padStart(Number(row.lengthNumber), '0')}`;
+  } while (
+    (await tx.execute(sql`SELECT 1 FROM ${sql.identifier(table)} WHERE ${sql.identifier(column)} = ${no}`)).rows.length
+  );
+  await tx.update(runningNo).set({ number: next }).where(eq(runningNo.pk, row.pk));
+  return no;
 }
+
+/** where each series' numbers are stored (their UNIQUE column) */
+const ISSUED_IN: Record<RunningType, [string, string]> = {
+  Job: ['job', 'job_no'],
+  Quotation: ['quotation', 'quotation_no'],
+  SaleOrder: ['sale_order', 'sale_order_no'],
+  'Inventory-In': ['stock_move', 'stock_move_no'],
+  'Inventory-Out': ['stock_move', 'stock_move_no'],
+  Customer: ['customer', 'customer_code'],
+  Product: ['product', 'product_code'],
+  Model: ['model', 'model_code'],
+};

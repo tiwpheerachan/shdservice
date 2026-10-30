@@ -37,5 +37,7 @@ test('call log from the job list (a phone too); a double click on เพิ่�
   await page.waitForTimeout(500); // a second answer would be in by now
   await expect(page.getByText('บันทึกไม่สำเร็จ')).toHaveCount(0);
   expect(posts, 'one submit sent').toBe(1);
-  expect(await rows('SELECT 1 FROM job_call_log WHERE job_no = $1', [no])).toHaveLength(1);
+  expect(
+    await rows('SELECT 1 FROM job_call_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)', [no]),
+  ).toHaveLength(1);
 });

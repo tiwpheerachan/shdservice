@@ -62,7 +62,11 @@ function SaleOrderList() {
       header: 'เลขใบสั่งขาย',
       width: '120px',
       cell: (r) => (
-        <Link href={`/sale/orders/edit?id=${r.id}`} className="num font-medium text-primary hover:underline">
+        <Link
+          prefetch={false}
+          href={`/sale/orders/edit?id=${r.id}`}
+          className="num font-medium text-primary hover:underline"
+        >
           {r.no}
         </Link>
       ),

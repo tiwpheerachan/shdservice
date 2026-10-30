@@ -33,17 +33,25 @@ type TestUser = (typeof U)[keyof typeof U];
 const SV = 1;
 
 await pool.query(`
-  DELETE FROM app_config WHERE user_type LIKE 'QC %';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type LIKE 'QC %';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QC CS', 'Customer', true, true, false, true),
     ('QC CS', 'Job Management', true, true, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9600 AND 9699;
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QC', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(',\n    ')};
-  DELETE FROM idempotency_key WHERE user_id BETWEEN 9600 AND 9699;
-  DELETE FROM customer WHERE customer_name LIKE 'QC-CUST%';`);
+      .join(',\n    ')}
+    -- fixture users stay (audit_log, append-only, points at them): reset in place
+    ON CONFLICT (pk) DO UPDATE SET (first_name, last_name, email_address, user_type, record_status, session_version, last_login, title, avatar, department)
+      = ROW(excluded.first_name, excluded.last_name, excluded.email_address, excluded.user_type, excluded.record_status, excluded.session_version, NULL, NULL, NULL, NULL);
+  DELETE FROM idempotency_key WHERE app_user_pk BETWEEN 9600 AND 9699;
+  DELETE FROM customer WHERE customer_name LIKE 'QC-CUST%';
+  -- customer_code is UNIQUE (drizzle/0006) and tests/seed.mts holds C00001/C00002 with no Customer running_no row:
+  -- the series starts past them (as test-domain's)
+  INSERT INTO running_no (running_type, company_id, branch_id, prefix, pyear, pmonth, pday, number, length_year, length_month, length_number)
+    SELECT 'Customer', 0, 0, 'C', 0, 0, 0, 90000, 0, 0, 5
+     WHERE NOT EXISTS (SELECT 1 FROM running_no WHERE running_type = 'Customer');`);
 
 async function request(path: string, u: TestUser, init: { method?: string; body?: unknown } = {}) {
   const now = Date.now();
@@ -226,12 +234,26 @@ try {
   });
 
   console.log('\nBug 9 — nothing cut silently');
-  await test('a one-line address over 200 characters → 400 under address1, nothing saved (was cut at 200)', async () => {
+  await test('an address line over 100 characters → 400 under address1, nothing saved (never cut)', async () => {
     const name = `QC-CUST long address ${rnd(6)}`;
-    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(100), address2: 'ข'.repeat(100) });
+    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(101) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.ok((r.body.details as { fields?: Record<string, string> }).fields?.address1, JSON.stringify(r.body));
     assert.equal((await rowsWith(`SELECT 1 FROM customer WHERE customer_name = $1`, [name])).length, 0);
+  });
+  await test('two full address lines (100 + 100) → saved whole; no one-line copy stored (customer_address)', async () => {
+    // the one-line customer_address is a legacy snapshot (drizzle/0006): a new row never writes it, so its 200 is no limit
+    const name = `QC-CUST two lines ${rnd(6)}`;
+    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(100), address2: 'ข'.repeat(100) });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepEqual(
+      await rowsWith(
+        `SELECT length(customer_address1) a1, length(customer_address2) a2, customer_address one FROM customer
+          WHERE customer_name = $1`,
+        [name],
+      ),
+      [{ a1: 100, a2: 100, one: null }],
+    );
   });
   await test('a 201-character name → 400 (the server never cuts it)', async () => {
     const r = await save({ name: 'QC-CUST ' + 'ก'.repeat(193), phone: mobile() });
@@ -239,6 +261,26 @@ try {
       [r.status, (r.body.details as { fields: Record<string, string> }).fields.name],
       [400, 'ชื่อลูกค้ายาวเกิน 200 ตัวอักษร'],
     );
+  });
+
+  console.log('\nCustomer codes — customer_code is UNIQUE (drizzle/0006)');
+  await test('the code series behind a code already taken (typed by hand / a legacy row) → the next free code, not a 409', async () => {
+    const taken = await save({ name: 'QC-CUST code taken', phone: mobile() });
+    assert.equal(taken.status, 201, JSON.stringify(taken.body));
+    const n = Number(taken.body.row!.code.slice(1));
+    // the series one behind: its next number is the code just issued
+    await pool.query(`UPDATE running_no SET number = $1 WHERE running_type = 'Customer'`, [n - 1]);
+    try {
+      const next = await save({ name: 'QC-CUST code after taken', phone: mobile() });
+      assert.equal(next.status, 201, JSON.stringify(next.body));
+      assert.notEqual(next.body.row!.code, taken.body.row!.code);
+    } finally {
+      // past every code issued, whatever happened above
+      await pool.query(
+        `UPDATE running_no SET number = (SELECT max(substring(customer_code FROM 2)::int) FROM customer
+          WHERE customer_code ~ '^C[0-9]{5,}$') WHERE running_type = 'Customer'`,
+      );
+    }
   });
 } finally {
   await pool.end();

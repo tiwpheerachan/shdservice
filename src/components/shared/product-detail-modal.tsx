@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useCategories } from '@/data/db';
 import type { Product } from '@/data/types';
-import { postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
+import { api, postJson, errMsg, isStale, uploadFile, fileUrl } from '@/lib/api';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
 import { useAccess } from '@/lib/use-access';
 import { productSchema } from '@/lib/validation/admin';
@@ -65,12 +65,30 @@ export function ProductDetailModal({
   // full detail + stock card from the DB (product / product_none_serial / inventory_*)
   // by the part's uuid (ADR 0008) — the code stays what the dialog shows and saves by
   const detailKey = open && mode !== 'add' && product?.id ? `/api/products/${product.id}` : null;
-  const loaded = useApi<{ product: Detail; card: Card[] }>(detailKey, {
+  const loaded = useApi<{ product: Detail; card: Card[]; cardTotal: number }>(detailKey, {
     fresh: true,
     onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลอะไหล่ไม่สำเร็จ', desc: msg }),
   });
   const detail = detailKey ? (loaded.data?.product ?? null) : null;
-  const stockCard = React.useMemo(() => (detailKey ? (loaded.data?.card ?? []) : []), [detailKey, loaded.data]);
+  // the stock card's newest page comes with the detail; โหลดเพิ่ม appends the next (GET /products/{id}/card)
+  const [moreCard, setMoreCard] = React.useState<{ key: string; rows: Card[] }>({ key: '', rows: [] });
+  const stockCard = React.useMemo(
+    () => (detailKey ? [...(loaded.data?.card ?? []), ...(moreCard.key === detailKey ? moreCard.rows : [])] : []),
+    [detailKey, loaded.data, moreCard],
+  );
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const loadMoreCard = async () => {
+    if (!detailKey) return;
+    setLoadingMore(true);
+    try {
+      const d = await api<{ card: Card[] }>(`${detailKey}/card?offset=${stockCard.length}`);
+      setMoreCard((m) => ({ key: detailKey, rows: [...(m.key === detailKey ? m.rows : []), ...d.card] }));
+    } catch (e) {
+      push({ kind: 'error', title: 'โหลดประวัติเพิ่มไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
   const [image, setImage] = React.useState('');
@@ -241,7 +259,15 @@ export function ProductDetailModal({
         {mode !== 'add' && <ProductLegacyNotes detail={detail} />}
 
         {/* view-only stock tables */}
-        {mode === 'view' && <ProductStockTables p={p} stockCard={stockCard} />}
+        {mode === 'view' && (
+          <ProductStockTables
+            p={p}
+            stockCard={stockCard}
+            total={loaded.data?.cardTotal ?? stockCard.length}
+            onMore={loadMoreCard}
+            loadingMore={loadingMore}
+          />
+        )}
       </div>
     </Modal>
   );

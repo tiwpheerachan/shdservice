@@ -8,13 +8,13 @@ import {
   useJobTypeDetails,
   useJobTypes,
   useManufacturers,
-  useModels,
   useReportRows,
   useStaff,
   type JobSummary,
 } from '@/data/db';
 import { useServerTable } from '@/lib/use-server-table';
 import { kpisOr, useReportAccess, JOB_SCREENS } from './report-access';
+import { useBrandModels } from './use-brand-models';
 import { reportExport, useReportColumns } from './report-table';
 import {
   JOB_BOUNCE,
@@ -66,7 +66,7 @@ export function JobReport({
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
   const { data: DETAILS, ...detailsLookup } = useJobTypeDetails();
   const { data: BRANDS, ...brandsLookup } = useManufacturers('exclude');
-  const { data: MODELS, ...modelsLookup } = useModels('exclude');
+  const { MODELS, modelsLookup, wantModels } = useBrandModels();
   const dateKeys = Object.keys(dates);
   const dateLabel = dateKeys.length === 1 ? dateKeys[0] : 'วันที่';
   const query = jobReportQuery(
@@ -110,6 +110,7 @@ export function JobReport({
       label: 'รุ่น',
       options: (d) => ['ทั้งหมด', ...modelsOfBrand(MODELS, d.brand).map((m) => m.name)],
       lookup: modelsLookup,
+      onWant: wantModels,
     },
     { kind: 'select', key: 'bounce', label: 'งานซ่อมซ้ำ', options: ['ทั้งหมด', ...Object.keys(JOB_BOUNCE)] },
     {

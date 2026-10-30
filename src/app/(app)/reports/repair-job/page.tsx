@@ -1,12 +1,15 @@
 'use client';
 
-import { useSymptoms } from '@/data/db';
+import * as React from 'react';
+import { useSymptomStats } from '@/data/db';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { JobReport } from '../job-report';
 
 export default function Page() {
-  const { data: SYMPTOMS, ...symptomsLookup } = useSymptoms();
+  // the active symptoms (the smaller by-usage list), read when the field is first focused — not with the page
+  const [wanted, setWanted] = React.useState(false);
+  const { data: SYMPTOMS, ...symptomsLookup } = useSymptomStats(wanted);
   return (
     <JobReport
       report="repair_job"
@@ -21,6 +24,7 @@ export default function Page() {
           label: 'อาการเสีย',
           options: ['ทั้งหมด', ...SYMPTOMS.map((s) => s.name)],
           lookup: symptomsLookup,
+          onWant: () => setWanted(true),
         },
       ]}
       file="report-repair-job"

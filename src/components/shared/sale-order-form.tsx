@@ -15,6 +15,7 @@ import { useStaff } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { FIGURES_LOCKED } from '@/lib/validation';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import {
@@ -72,6 +73,8 @@ export type SaleOrderLoaded = {
   slip: string;
   documentProfileId?: string; // ออกเอกสารในนาม (a profile's uuid)
   version?: number; // row_version — the edit page sends it back with its save
+  /** from the legacy system: its figures are System Admin's alone (the server refuses anyone else's change) */
+  figuresLocked?: boolean;
   customerDetail: {
     code: string;
     taxId: string;
@@ -85,7 +88,7 @@ export type SaleOrderLoaded = {
   };
   /** why it was cancelled */
   cancelRemark?: string;
-  lines: { code: string; name: string; type: 'SparePart' | 'Service'; qty: number; price: number }[];
+  lines: { id?: string; code: string; name: string; type: 'SparePart' | 'Service'; qty: number; price: number }[];
 };
 
 export type SaleOrderPayload = {
@@ -93,7 +96,7 @@ export type SaleOrderPayload = {
   documentProfileId?: string;
   customerCode: string;
   salesId?: string;
-  lines: { code: string; qty: number; price: number; name: string; type: 'SparePart' | 'Service' }[];
+  lines: { id?: string; code: string; qty: number; price: number; name: string; type: 'SparePart' | 'Service' }[];
   paymentType: string;
   paymentAmount: string;
   slip: string;
@@ -122,6 +125,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     const [lines, setLines] = React.useState<Line[]>(() =>
       (initial?.lines ?? []).map((l, i) => ({
         id: i + 1,
+        uid: l.id,
         code: l.code,
         name: l.name,
         qty: l.qty,
@@ -207,6 +211,11 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       !!initial?.cancelled ||
       (initial?.approveId === 2 && !canSubmit) ||
       viewOnly;
+    // a legacy order's recorded figures are System Admin's alone (legacy-lock.ts): its loaded lines (ids 1…n, below
+    // every added one) and a payment it holds — new lines and a first payment stay editable
+    const figuresLocked = !!initial?.figuresLocked && !isAdmin;
+    const loadedLines = initial?.lines.length ?? 0;
+    const payLocked = figuresLocked && !!initial?.paymentAmount;
     // the edit page's "แนบสลิปการชำระเงิน" (an approved order without a slip) — the same rule as there
     const canAttachLater = initial?.approveId === 4 && !initial.cancelled && !initial.slip && can('Sale Order', 'edit');
 
@@ -266,7 +275,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
       documentProfileId: profileId || undefined,
       customerCode: customer?.code ?? '',
       salesId: salesId || undefined,
-      lines: lines.map((l) => ({ code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
+      lines: lines.map((l) => ({ id: l.uid, code: l.code, qty: l.qty, price: l.price, name: l.name, type: l.type })),
       paymentType: payment,
       paymentAmount: payAmount,
       slip: slip.includes('/') ? slip : '',
@@ -352,6 +361,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
           setLines={setLines}
           total={total}
           readOnly={readOnly}
+          locked={(l) => figuresLocked && l.id <= loadedLines}
           errors={fe.errors}
           clear={fe.clear}
           showZero={!!initial}
@@ -412,9 +422,10 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 <Field
                   label="จำนวนเงินที่ชำระ (บาท)"
                   error={fe.errors.paymentAmount || (overpaid ? overpaidMessage(net) : undefined)}
-                  hint={`ยอดรวม ${baht(net)} — ใส่เฉพาะยอดที่ลูกค้าชำระแล้ว`}
+                  hint={payLocked ? FIGURES_LOCKED : `ยอดรวม ${baht(net)} — ใส่เฉพาะยอดที่ลูกค้าชำระแล้ว`}
                 >
                   <Input
+                    disabled={payLocked}
                     type="number"
                     step="0.01"
                     min={0}

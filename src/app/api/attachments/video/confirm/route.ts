@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { documentAttach } from '@/db/schema';
+import { jobAttachment, job } from '@/db/schema';
 import { handle, parseForm, requireCan, HttpError } from '@/server/auth';
 import { attachmentVideoConfirm } from '@/server/contract/jobs';
 import { rateLimit } from '@/server/rate-limit';
@@ -31,9 +31,10 @@ export const POST = handle(async (req: NextRequest) => {
   const no = await attachableJob(jobNo); // 404 / 409 — nothing removed: an unchecked job is not this caller's
   // a confirmed video is never confirmed (nor removed below) again
   const [done] = await db
-    .select({ id: documentAttach.id })
-    .from(documentAttach)
-    .where(and(eq(documentAttach.referenceItemCode, no), eq(documentAttach.systemFileName, file)))
+    .select({ id: jobAttachment.id })
+    .from(jobAttachment)
+    .innerJoin(job, eq(job.pk, jobAttachment.jobPk))
+    .where(and(eq(job.jobNo, no), eq(jobAttachment.systemFileName, file)))
     .limit(1);
   if (done) throw new HttpError(409, 'แนบวิดีโอนี้ไว้แล้ว');
   const path = filePath.attachment(no, file);
@@ -44,7 +45,7 @@ export const POST = handle(async (req: NextRequest) => {
     await checkStoredVideo(path);
     // re-encoded like every photo (sharp decodes it: a real JPEG, nothing else rides along)
     if (thumb) await uploadFile(thumbPath, await optimizeImage(thumb));
-    const row = await addAttachment(no, name, file, remark, user.userId);
+    const row = await addAttachment(no, name, file, remark, user.pk);
     return NextResponse.json({ ok: true, row: { ...row, file } });
   } catch (e) {
     // never attached: what was uploaded for it goes (the job deleted meanwhile, a wrong / oversize file)

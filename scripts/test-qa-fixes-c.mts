@@ -34,37 +34,46 @@ const SO = 'QFCSO0001';
 await pool.query(`
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 8, 'ปิดงาน', 8, 'Finished', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 8);
-  DELETE FROM app_config WHERE user_type IN ('QFC Seller', 'QFC Manager', 'QFC Stock');
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type IN ('QFC Seller', 'QFC Manager', 'QFC Stock');
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QFC Seller', 'Sale Order', true, true, false, true),
     ('QFC Manager', 'Job Management', false, false, false, true),
     ('QFC Stock', 'Product Onhand', false, false, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9961 AND 9969 OR email_address LIKE 'qfc-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  INSERT INTO approve_status (approve_status_id, approve_name_th)
+    SELECT * FROM (VALUES (2, 'รออนุมัติ'), (3, 'แก้ไขข้อมูล'), (4, 'อนุมัติแล้ว'), (5, 'ปฏิเสธ')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  -- the users stay (audit_log, append-only, points at them): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QFC', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
+      .join(', ')}
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
   DELETE FROM job WHERE job_no LIKE 'QFCJ%';
   DELETE FROM shipping_profile WHERE pk = 9961 OR code = 'QFC';
-  INSERT INTO shipping_profile (pk, code, name_th) VALUES (9961, 'QFC', 'ขนส่ง QFC');
+  INSERT INTO shipping_profile (pk, code, name_th) OVERRIDING SYSTEM VALUE VALUES (9961, 'QFC', 'ขนส่ง QFC');
   -- A: opened 09-01, closed 09-20, returned 10-10 → TAT 39 (the close alone says 19); paid 500
   -- B: opened 10-01, closed 10-05, not returned → TAT 4; the deposit given back: -200
-  INSERT INTO job (job_no, job_status_id, record_status, job_create_date, job_closed_date, job_return_date,
-                   job_payment_amount, job_payment_detail, return_customer_detail, return_customer_tracking_no, return_shipper_id)
-    VALUES ('QFCJ0001', 8, 'ACTIVE', '2026-09-01 10:00', '2026-09-20 10:00', '2026-10-10 10:00',
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (job_no, job_status_id, record_status, model_pk, job_create_date, job_closed_date, job_return_date,
+                   job_payment_amount, job_payment_detail, return_customer_detail, return_customer_tracking_no, return_shipping_profile_pk)
+    VALUES ('QFCJ0001', 8, 'ACTIVE', (SELECT pk FROM model WHERE model_code = 'TST-M'), '2026-09-01 10:00', '2026-09-20 10:00', '2026-10-10 10:00',
             500, 'ชำระ 2026-09-20 · โอนเข้าบัญชีส่วนตัวพนักงาน', 'ขนส่ง QFC · ลูกค้าโทรตามบ่อย', 'QFC123456TH', 9961),
-           ('QFCJ0002', 8, 'ACTIVE', '2026-10-01 10:00', '2026-10-05 10:00', '1900-01-01',
+           ('QFCJ0002', 8, 'ACTIVE', (SELECT pk FROM model WHERE model_code = 'TST-M'), '2026-10-01 10:00', '2026-10-05 10:00', '1900-01-01',
             -200, 'คืนมัดจำ 2026-10-05', '', '', null);
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no LIKE 'QFCSO%';
-  DELETE FROM sale_out_hd WHERE sale_out_hd_no LIKE 'QFCSO%';
-  INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, record_status, document_create_by, sale_out_by, customer_name)
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE sale_order_no LIKE 'QFCSO%');
+  DELETE FROM sale_order WHERE sale_order_no LIKE 'QFCSO%';
+  INSERT INTO sale_order (sale_order_no, approve_status_id, record_status, created_by_app_user_pk, sale_out_by_app_user_pk, customer_name)
     VALUES ('${SO}', 2, 'ACTIVE', ${U.seller.id}, ${U.seller.id}, 'ลูกค้า QFC');
-  DELETE FROM product_none_serial WHERE product_id BETWEEN 9961 AND 9963;
-  DELETE FROM product WHERE product_id BETWEEN 9961 AND 9963 OR product_code LIKE 'QFCP%';
-  INSERT INTO product (product_id, product_code, product_name) VALUES
+  DELETE FROM product_stock WHERE product_pk IN (SELECT pk FROM product WHERE pk BETWEEN 9961 AND 9963 OR product_code LIKE 'QFCP%');
+  DELETE FROM product WHERE pk BETWEEN 9961 AND 9963 OR product_code LIKE 'QFCP%';
+  INSERT INTO product (pk, product_code, product_name) OVERRIDING SYSTEM VALUE VALUES
     (9961, 'QFCP1', 'อะไหล่ QFC 1'), (9962, 'QFCP2', 'อะไหล่ QFC 2'), (9963, 'QFCP3', 'อะไหล่ QFC 3');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9961, 9961, 5, 0, 0, 5, 100), (9962, 9962, 5, 0, 0, 5, 100), (9963, 9963, 5, 0, 0, 5, 100);
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+    OVERRIDING SYSTEM VALUE VALUES (9961, 9961, 5, 0, 0, 5, 100), (9962, 9962, 5, 0, 0, 5, 100), (9963, 9963, 5, 0, 0, 5, 100);
 `);
 
 async function getData(resource: string, query: string, u: (typeof U)[keyof typeof U]) {
@@ -102,9 +111,9 @@ await test('TAT เฉลี่ย / เกิน 30 วัน: opening → the 
 
 console.log('\nAudit log: a denied sale order is no อนุมัติ');
 await test('ปฏิเสธ → audit action STATUS (เปลี่ยนสถานะ), not APPROVE', async () => {
-  await approveSaleOrder(SO, 'deny', 'QFC ไม่ผ่าน', { userId: U.admin.id, isAdmin: true, userType: 'System Admin' });
+  await approveSaleOrder(SO, 'deny', 'QFC ไม่ผ่าน', { pk: U.admin.id, isAdmin: true, userType: 'System Admin' });
   const { rows } = await pool.query(
-    `SELECT action, summary FROM audit_log WHERE entity = 'sale_out_hd' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
+    `SELECT action, summary FROM audit_log WHERE entity = 'sale_order' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
     [SO],
   );
   assert.deepEqual(rows[0], { action: 'STATUS', summary: 'ปฏิเสธใบสั่งขาย · QFC ไม่ผ่าน' });

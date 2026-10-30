@@ -40,7 +40,7 @@ export function AccessProvider({ value, children }: { value: AccessValue; childr
 }
 
 /**
- * Client-side view of the signed-in user's permissions (from app_config).
+ * Client-side view of the signed-in user's permissions (from role_permission).
  * `can(module, action)` / `canPath(pathname)` mirror the server checks; use them
  * to hide menus and buttons. The API enforces the same rules on every write.
  */

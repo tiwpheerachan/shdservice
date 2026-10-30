@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { clientIp } from '@/lib/client-ip';
 import { DEFAULT_AFTER_LOGIN, SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
 import {
   signSession,
@@ -11,8 +10,10 @@ import {
 } from '@/lib/session';
 import { lookupByEmail } from '@/lib/directory';
 import { provisionFailure, provisionSsoUser, signInAuditLine } from '@/server/services/users';
-import { audit } from '@/server/audit';
+import { audit, security } from '@/server/audit';
 import { db } from '@/db/client';
+import { setRequestSession } from '@/server/request-context';
+import { rateLimit, rateLimitKey } from '@/server/rate-limit';
 import { PENDING_ROLE, isApproved } from '@/lib/access';
 import { log, logError, scrubText } from '@/lib/log';
 import { checked, parseQuery } from '@/server/auth';
@@ -40,7 +41,15 @@ async function provision(opts: {
   avatar: string;
   title: string;
 }): Promise<
-  | { role: string; status: string; recordStatus: string | null; userId: number; id: string; sessionVersion: number }
+  | {
+      role: string;
+      status: string;
+      recordStatus: string | null;
+      pk: number;
+      id: string;
+      sessionVersion: number;
+      created: boolean;
+    }
   | 'user_conflict'
   | 'db_unavailable'
 > {
@@ -50,9 +59,11 @@ async function provision(opts: {
       role: r.userType ?? PENDING_ROLE,
       status: r.isActive ? 'Active' : 'Inactive',
       recordStatus: r.recordStatus,
-      userId: r.userId,
+      pk: r.pk,
       id: r.id,
       sessionVersion: r.sessionVersion,
+      // services/users.ts answers `created` once it has it (a first sign-in → the CREATE line)
+      created: 'created' in r && r.created === true,
     };
   } catch (e) {
     const { reason, constraint } = provisionFailure(e);
@@ -70,6 +81,45 @@ function shapeOf(v: unknown, depth = 0): unknown {
     return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shapeOf(x, depth + 1)]));
   }
   return typeof v === 'string' ? `string(${v.length})` : typeof v;
+}
+
+/**
+ * A refused sign-in that got past the state check → security_log LOGIN_FAILED (best effort: the person still gets the
+ * error page). Anyone can call this route and the log is append-only, so rows are bounded: one per client (IP bucket,
+ * rate-limit.ts) per minute; the refusals in between are counted into the next row of that client (detail.count = this
+ * one + those not written). The SSO's own refusal of a code (verify_4xx: junk anyone can send) also shares a cap of
+ * FAIL_ROWS_PER_MIN rows in all — so a flood of those never crowds out a real account's failure (no_email, user_conflict …).
+ * ponytail: counters per process (one Render instance); a client never seen again leaves its last count unwritten.
+ */
+const FAIL_ROWS_PER_MIN = 30;
+const failWindow = { at: 0, rows: 0 };
+const unwritten = new Map<string, number>();
+
+async function failLogged(request: NextRequest, reason: string, email?: string) {
+  const who = await rateLimitKey(request);
+  const now = Date.now();
+  if (now - failWindow.at >= 60_000) Object.assign(failWindow, { at: now, rows: 0 });
+  const anonymous = reason.startsWith('verify_');
+  const slot =
+    (!anonymous || failWindow.rows < FAIL_ROWS_PER_MIN) &&
+    (await rateLimit(request, 'sso-fail-log', 1).then(
+      () => true,
+      () => false,
+    ));
+  if (!slot) {
+    if (unwritten.has(who) || unwritten.size < 10_000) unwritten.set(who, (unwritten.get(who) ?? 0) + 1);
+    return fail(request, reason);
+  }
+  if (anonymous) failWindow.rows++;
+  const count = 1 + (unwritten.get(who) ?? 0);
+  unwritten.delete(who);
+  await security(db, null, {
+    event: 'LOGIN_FAILED',
+    result: 'FAILED',
+    module: 'Auth',
+    detail: { reason, count, ...(email && { email }) },
+  }).catch((e) => logError(e, 'security_log LOGIN_FAILED write failed'));
+  return fail(request, reason);
 }
 
 function fail(request: NextRequest, reason: string) {
@@ -116,7 +166,7 @@ export const GET = checked(async (request: NextRequest) => {
       // the central service names the account in its 403 text ("account x@… is inactive") — scrubbed
       log.warn('sso verify failed', { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
       // a code that was already exchanged (page reload) while a session exists → just continue
-      return continueIfSignedIn() ?? fail(request, `verify_${res.status}`);
+      return continueIfSignedIn() ?? (await failLogged(request, `verify_${res.status}`));
     }
     identity = await res.json();
     // SSO_DEBUG=shape (or 1): what /sso/verify answered — field names, types and sizes,
@@ -142,7 +192,7 @@ export const GET = checked(async (request: NextRequest) => {
       topKeys: Object.keys(identity),
       userKeys: Object.keys(u ?? {}),
     });
-    return fail(request, 'no_email');
+    return failLogged(request, 'no_email');
   }
 
   // Enrich with the full directory profile (department, title, phone, avatar).
@@ -160,20 +210,36 @@ export const GET = checked(async (request: NextRequest) => {
     avatar,
     title: prof?.title ?? '',
   });
-  if (typeof provisioned === 'string') return fail(request, provisioned);
-  const { role, status, recordStatus, userId, id, sessionVersion } = provisioned;
+  if (typeof provisioned === 'string') return failLogged(request, provisioned, email);
+  const { role, status, recordStatus, pk, id, sessionVersion, created } = provisioned;
 
-  // audit: LOGIN, or LOGIN_FAILED for a refused (Inactive / deleted) account (best-effort — never blocks sign-in)
+  // security_log LOGIN (or LOGIN_FAILED for a refused Inactive / deleted account) and, for a first sign-in, the
+  // CREATE line of the new pending user — one transaction; no line, no session (ip / agent / session id: the request
+  // context). ponytail: provisionSsoUser writes in its own statement until it takes a tx (services/users.ts).
+  const iat = Date.now();
+  setRequestSession(email, iat);
   try {
-    await audit(db, userId, {
-      ...signInAuditLine(email, role, recordStatus),
-      module: 'Auth',
-      entity: 'app_user',
-      key: id,
-      meta: { ip: clientIp(request.headers), ua: request.headers.get('user-agent')?.slice(0, 200) ?? null },
+    await db.transaction(async (tx) => {
+      if (created)
+        await audit(tx, pk, {
+          action: 'CREATE',
+          module: 'Auth',
+          entity: 'app_user',
+          key: id,
+          summary: `ผู้ใช้ใหม่จาก SSO ${email} · ${role}`,
+          // an owner email starts as System Admin: that role grant is a ROLE_CHANGE in security_log too
+          changes: { emailAddress: [null, email], ...(role !== PENDING_ROLE && { userType: [null, role] }) },
+        });
+      await audit(tx, pk, {
+        ...signInAuditLine(email, role, recordStatus),
+        module: 'Auth',
+        entity: 'app_user',
+        key: id,
+      });
     });
   } catch (e) {
-    logError(e, 'sso audit login failed');
+    logError(e, 'sso sign-in log failed');
+    return fail(request, 'db_unavailable');
   }
 
   const user: SessionUser = {
@@ -186,8 +252,8 @@ export const GET = checked(async (request: NextRequest) => {
     chk: Date.now(),
     role,
     approved: isApproved(role, status),
-    exp: Date.now() + SESSION_TTL_MS,
-    iat: Date.now(),
+    exp: iat + SESSION_TTL_MS,
+    iat,
     sv: sessionVersion,
   };
 

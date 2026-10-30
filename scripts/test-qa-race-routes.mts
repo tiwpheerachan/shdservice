@@ -75,18 +75,30 @@ const jobIdOf = async (no: string) =>
 await pool.query(`
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 2, 'กำลังดำเนินการ', 2, 'Open', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 2);
-  DELETE FROM job_call_log WHERE job_no LIKE 'QRR%';
-  DELETE FROM job_log WHERE job_no LIKE 'QRR%';
+  DELETE FROM job_call_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QRR%');
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QRR%');
   DELETE FROM job WHERE job_no LIKE 'QRR%';
-  DELETE FROM app_user WHERE user_id IN (${ADMIN.id}, ${ADMIN2.id}) OR email_address LIKE 'qrr-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version)
+  -- the users stay (audit_log, append-only, points at them): upserted at their fixed pk
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE
     VALUES (${ADMIN.id}, 'QRR', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', ${SV}),
-           (${ADMIN2.id}, 'QRR', 'admin2', '${ADMIN2.email}', 'System Admin', 'ACTIVE', ${SV});
-  INSERT INTO job (job_no, job_status_id, customer_detail, product_model_name, job_create_date, job_reception_date, record_status)
-    SELECT 'QRR' || lpad(n::text, 4, '0'), 2, 'ลูกค้า QRR', 'Model QRR', now(), current_date, 'ACTIVE' FROM generate_series(1, 9) n;
-  DELETE FROM product_none_serial WHERE product_id IN (SELECT product_id FROM product WHERE product_code = '${PART}' OR product_name LIKE 'QRR %');
+           (${ADMIN2.id}, 'QRR', 'admin2', '${ADMIN2.email}', 'System Admin', 'ACTIVE', ${SV})
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
+  -- job.model_pk is NOT NULL (drizzle/0006): the fixture jobs' model (shared, never deleted)
+  INSERT INTO model (model_code, model_name, record_status) SELECT 'TST-M', 'Test model', 'ACTIVE'
+   WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (job_no, job_status_id, customer_detail, model_pk, product_model_name, job_create_date, job_reception_date, record_status)
+    SELECT 'QRR' || lpad(n::text, 4, '0'), 2, 'ลูกค้า QRR', (SELECT pk FROM model WHERE model_code = 'TST-M'), 'Model QRR', now(), current_date, 'ACTIVE' FROM generate_series(1, 9) n;
+  -- category 1 ยังไม่ระบุ (legacy row): a product saved without a category points at it (stock.ts, a foreign key since drizzle/0006)
+  INSERT INTO category (pk, category_name, record_status) OVERRIDING SYSTEM VALUE
+    SELECT 1, 'ยังไม่ระบุ', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM category WHERE pk = 1);
+  SELECT setval(pg_get_serial_sequence('category', 'pk'), (SELECT max(pk) FROM category));
+  DELETE FROM product_stock WHERE product_pk IN (SELECT pk FROM product WHERE product_code = '${PART}' OR product_name LIKE 'QRR %');
   DELETE FROM product WHERE product_code = '${PART}' OR product_name LIKE 'QRR %';
-  INSERT INTO product (product_id, product_code, product_name, record_status, pictrue_file_name) VALUES (9870, '${PART}', 'อะไหล่ QRR', 'ACTIVE', '');
+  INSERT INTO product (pk, product_code, product_name, record_status, picture_file_name) OVERRIDING SYSTEM VALUE
+    VALUES (9870, '${PART}', 'อะไหล่ QRR', 'ACTIVE', '');
   DELETE FROM document_profile WHERE code LIKE 'QRR%';
   DELETE FROM shipping_profile WHERE code LIKE 'QRR%';
   UPDATE document_profile SET is_default = false WHERE pk <> 1;
@@ -276,7 +288,7 @@ try {
             : kind === 'shipper-logo'
               ? await Q<{ p: string }>(`SELECT logo_path p FROM shipping_profile WHERE id = $1`, [id])
               : await Q<{ p: string }>(
-                  `SELECT 'products/${PART}/' || pictrue_file_name p FROM product WHERE product_code = $1`,
+                  `SELECT 'products/${PART}/' || picture_file_name p FROM product WHERE product_code = $1`,
                   [id],
                 );
         assert.deepEqual(
@@ -406,7 +418,7 @@ try {
   });
 } finally {
   await pool.query(`
-    UPDATE job SET document_profile_id = NULL WHERE job_no LIKE 'QRR%';
+    UPDATE job SET document_profile_pk = NULL WHERE job_no LIKE 'QRR%';
     UPDATE document_profile SET is_default = false WHERE pk <> 1;
     UPDATE document_profile SET is_default = true WHERE pk = 1;
     UPDATE document_profile SET deleted_at = coalesce(deleted_at, now()::timestamp) WHERE code LIKE 'QRR%';

@@ -70,7 +70,6 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
             { k: 'ประเภทสินค้า', v: j.productType },
             { k: 'Serial No.', v: j.serial },
             { k: 'IMEI', v: j.imei },
-            { k: 'สี', v: j.color },
             {
               k: 'การรับประกัน',
               v: j.warranty

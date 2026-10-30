@@ -7,8 +7,8 @@ import { nowThai } from '@/server/mappers/format';
  *   ACTIVE   — normal
  *   INACTIVE — kept in lists and pickers with an "Inactive" badge (a picked one shows a warning)
  *   DELETED  — hidden everywhere; restore is done in SQL only (by decision)
- * The legacy flags (is_active / document_status / app_user.deleted) are written
- * alongside so the old reports stay consistent.
+ * record_status is the only flag: the legacy is_active / document_status / app_user.deleted mirrors were
+ * dropped in drizzle/0006 (ADR 0008 "no redundant data").
  */
 export const RS = { ACTIVE: 'ACTIVE', INACTIVE: 'INACTIVE', DELETED: 'DELETED' } as const;
 export type RecordStatus = (typeof RS)[keyof typeof RS];
@@ -60,12 +60,11 @@ export const uiStatus = (rs: string | null | undefined): 'Active' | 'Inactive' =
 export const fromUiStatus = (s: string | null | undefined): RecordStatus =>
   (s ?? 'Active').trim().toLowerCase() === 'inactive' ? RS.INACTIVE : RS.ACTIVE;
 
-/** Columns to set on every status change (+ legacy is_active mirror when the table has it). */
-export function statusStamp(status: RecordStatus, byUserId: number, withIsActive = true) {
+/** Columns to set on every status change. */
+export function statusStamp(status: RecordStatus, byUserPk: number) {
   return {
     recordStatus: status,
     statusChangedAt: nowThai(),
-    statusChangedBy: byUserId,
-    ...(withIsActive ? { isActive: status === RS.ACTIVE } : {}),
+    statusChangedByAppUserPk: byUserPk > 0 ? byUserPk : null, // FK to app_user.pk (drizzle/0006): no actor = NULL
   };
 }

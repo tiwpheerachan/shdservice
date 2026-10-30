@@ -23,19 +23,22 @@ const { addDays, today } = await import('@/lib/dates');
 
 // ---- fixtures ----
 const ADMIN = { id: 9451, email: 'qi-admin@example.invalid' };
-const by = { userId: ADMIN.id, isAdmin: true };
+const by = { pk: ADMIN.id, isAdmin: true };
 const C = { on: 'QIC001', off: 'QIC002' }; // QIC002 INACTIVE
 const P = { on: 'QIP1', off: 'QIP2' }; // QIP2 INACTIVE
 const J = (n: number) => `QIJ${String(n).padStart(4, '0')}`;
 const QJOB = 'J9904501'; // a quotation's job no is J + 7 digits
+/** the fixture jobs' / customers' pks — what their logs, part lines, documents point at (drizzle/0006) */
+const JOBS = `(SELECT pk FROM job WHERE job_no LIKE 'QIJ%' OR job_no = 'J9904501' OR customer_pk IN (9451, 9452))`;
+const QUOTES = `(SELECT pk FROM quotation WHERE customer_pk IN (9451, 9452) OR job_pk IN ${JOBS})`;
 const OFF_CUSTOMER = 'ลูกค้ารายนี้ปิดใช้งาน (Inactive) — เปิดใช้งานก่อน หรือเลือกรายอื่น';
 
 await pool.query(`
-  INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
     SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
                           (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
                           (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
-     WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
   INSERT INTO store_location (store_location_id, store_location_name, is_active)
     SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
      WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
@@ -53,59 +56,82 @@ await pool.query(`
     SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (2, 'เสนอราคาแล้ว'), (3, 'ลูกค้าตกลงซ่อม'), (4, 'ลูกค้าไม่ตกลงซ่อม'),
                           (5, 'ยกเลิกใบเสนอราคา')) v(id, name)
      WHERE NOT EXISTS (SELECT 1 FROM quotation_status s WHERE s.quotation_status_id = v.id);
-  DELETE FROM app_user WHERE user_id = ${ADMIN.id} OR email_address = '${ADMIN.email}';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version)
-    VALUES (${ADMIN.id}, 'QI', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', 1);
-  DELETE FROM quotation_dt WHERE quotation_no IN (SELECT quotation_no FROM quotation_hd WHERE customer_code LIKE 'QIC%');
-  DELETE FROM quotation_hd WHERE customer_code LIKE 'QIC%';
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code LIKE 'QIC%');
-  DELETE FROM sale_out_hd WHERE customer_code LIKE 'QIC%';
-  DELETE FROM job_log WHERE job_no LIKE 'QIJ%' OR job_no = 'J9904501';
-  DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'QIJ%';
-  DELETE FROM job WHERE job_no LIKE 'QIJ%' OR job_no = 'J9904501' OR customer_id IN (9451, 9452);
-  DELETE FROM customer WHERE customer_id IN (9451, 9452) OR customer_code LIKE 'QIC%';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status) VALUES
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+    SELECT * FROM (VALUES (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM job_part_status s WHERE s.job_part_status_id = v.id);
+  INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+    SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ', 'In Progess', true, true), (2, 'รออนุมัติ', 'Wait Approve', true, true),
+                          (3, 'แก้ไขข้อมูล', 'Reject', true, true), (4, 'อนุมัติแล้ว', 'Approved', false, false),
+                          (5, 'ปฏิเสธ', 'Deny', false, false)) v(id, th, en, ed, rv)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  INSERT INTO condition (condition_id, condition_name, is_active)
+    SELECT 1, 'สินค้าใหม่', true WHERE NOT EXISTS (SELECT 1 FROM condition WHERE condition_id = 1);
+  -- the user stays (audit_log, append-only, points at it): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE
+    VALUES (${ADMIN.id}, 'QI', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', 1)
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+      session_version = excluded.session_version, last_login = DEFAULT;
+  -- children before parents (every relation is a RESTRICT foreign key, drizzle/0006); a job points at its approved
+  -- quotation and the quotation at its job: that link goes first
+  UPDATE job SET approved_quotation_pk = NULL WHERE pk IN ${JOBS};
+  DELETE FROM quotation_line WHERE quotation_pk IN ${QUOTES};
+  DELETE FROM quotation WHERE pk IN ${QUOTES};
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE customer_pk IN (9451, 9452));
+  DELETE FROM sale_order WHERE customer_pk IN (9451, 9452);
+  DELETE FROM stock_move_line WHERE product_pk IN (9451, 9452)
+     OR stock_move_pk IN (SELECT pk FROM stock_move WHERE job_pk IN ${JOBS});
+  DELETE FROM stock_move WHERE job_pk IN ${JOBS};
+  DELETE FROM job_status_log WHERE job_pk IN ${JOBS};
+  DELETE FROM job_part WHERE job_pk IN ${JOBS} OR product_pk IN (9451, 9452);
+  DELETE FROM job WHERE pk IN ${JOBS};
+  DELETE FROM customer WHERE pk IN (9451, 9452) OR customer_code LIKE 'QIC%';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number, record_status) OVERRIDING SYSTEM VALUE VALUES
     (9451, '${C.on}', 'ลูกค้า QI ใช้งาน', '02-945-0001', 'ACTIVE'), (9452, '${C.off}', 'ลูกค้า QI ปิดใช้งาน', '02-945-0002', 'ACTIVE');
-  DELETE FROM product_none_serial WHERE product_id IN (9451, 9452) OR item_id IN (9451, 9452);
-  DELETE FROM product WHERE product_id IN (9451, 9452) OR product_code LIKE 'QIP%';
-  INSERT INTO product (product_id, product_code, product_name, record_status) VALUES
+  DELETE FROM product_stock WHERE product_pk IN (9451, 9452) OR pk IN (9451, 9452);
+  DELETE FROM product WHERE pk IN (9451, 9452) OR product_code LIKE 'QIP%';
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE VALUES
     (9451, '${P.on}', 'อะไหล่ QI', 'ACTIVE'), (9452, '${P.off}', 'อะไหล่ QI ปิดใช้งาน', 'ACTIVE');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price) VALUES
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price) OVERRIDING SYSTEM VALUE VALUES
     (9451, 9451, 100, 0, 6, 100, 100.00), (9452, 9452, 100, 0, 1, 100, 50.00);
   -- 1: a job of the customer about to go Inactive; 2: of the active one; 3, 4: a request of 3 (none issued yet);
   -- 5: a request of the product about to go Inactive;
   -- J9904501: the job the quotations are raised for
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
-    SELECT 'QIJ' || lpad(n::text, 4, '0'), s, c, 'QI', 'Model QI', now(), current_date, '1900-01-01'
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+    SELECT (SELECT pk FROM model WHERE model_code = 'TST-M'), 'QIJ' || lpad(n::text, 4, '0'), s, c, 'QI', 'Model QI', now(), current_date, '1900-01-01'
       FROM (VALUES (1, 2, 9452), (2, 2, 9451), (3, 11, 9451), (4, 11, 9451), (5, 11, 9451)) v(n, s, c);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
-    VALUES ('J9904501', 2, 9451, 'QI', 'Model QI', now(), current_date, '1900-01-01');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
+    VALUES ((SELECT pk FROM model WHERE model_code = 'TST-M'), 'J9904501', 2, 9451, 'QI', 'Model QI', now(), current_date, '1900-01-01');
   -- 4's request is เบิก only (not charged) and its costs are what a return computes: the return writes no job column
   UPDATE job SET spare_part_total_cost = 0, job_total_cost = 0 WHERE job_no = 'QIJ0004';
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty,
-                                        spare_part_unit_price, spare_part_total_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-    VALUES ('QIJ0003', '${P.on}', '', 1, true, true, 3, 100, 300, 1, now(), 9451, 0, 0),
-           ('QIJ0004', '${P.on}', '', 1, false, true, 3, 100, 0, 1, now(), 9451, 0, 0),
-           ('QIJ0005', '${P.off}', '', 1, true, true, 1, 50, 50, 1, now(), 9451, 0, 0);
+  INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty,
+                                        spare_part_unit_price, spare_part_total_price, job_part_status_id, request_date, requested_by_app_user_pk, grant_qty, return_qty)
+    SELECT j.pk, p.pk, v.quote, true, v.qty, v.price, v.total, 1, now(), 9451, 0, 0
+      FROM (VALUES ('QIJ0003', '${P.on}', true, 3, 100, 300), ('QIJ0004', '${P.on}', false, 3, 100, 0),
+                   ('QIJ0005', '${P.off}', true, 1, 50, 50)) v(no, code, quote, qty, price, total)
+      JOIN job j ON j.job_no = v.no JOIN product p ON p.product_code = v.code;
 `);
 for (const t of ['Inventory-In', 'Inventory-Out'] as const) await db.transaction((tx) => nextRunningNo(tx, t));
 await pool.query(`
   UPDATE running_no r SET number = greatest(r.number, coalesce((
-    SELECT max(substring(h.inventory_no FROM length(r.prefix) + 3)::int) FROM inventory_hd h
-     WHERE h.inventory_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
+    SELECT max(substring(h.stock_move_no FROM length(r.prefix) + 3)::int) FROM stock_move h
+     WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
 // ---- helpers ----
 /** the admin's app_user.id — what a salesperson pick sends (ADR 0008) */
-const adminUuid = (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [ADMIN.id]))
-  .rows[0]!.id;
+const adminUuid = (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [ADMIN.id])).rows[0]!
+  .id;
 const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(q)).rows[0]!;
 const line = (no: string) =>
   one<{
     id: string;
   }> // the request line's uuid (ADR 0008) — what the pick / repair pages send
   (
-    sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`,
+    sql`SELECT id::text AS id FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${no}) ORDER BY pk DESC LIMIT 1`,
   );
 async function err(p: Promise<unknown>) {
   try {
@@ -133,6 +159,7 @@ const quoteLine = (code: string) => ({
 });
 const jobEdit = (customerCode: string) => ({
   customerCode,
+  modelCode: 'TST-M', // the form always sends the job's model (job.model_pk is NOT NULL)
   jobType: '',
   dueDate: addDays(today(), 30),
   warrantyMonth: 0,
@@ -203,7 +230,7 @@ try {
             customerCode: C.off,
             contactName: 'QI',
             remark: 'QI keep',
-            lines: [quoteLine(P.off)],
+            lines: [{ ...quoteLine(P.off), id: oldQuote.lines[0]!.id }], // the stored line, by its id
           },
           ADMIN.id,
         ),
@@ -215,7 +242,7 @@ try {
             salesId: adminUuid,
             submit: false,
             remark: 'QI keep',
-            lines: [{ code: P.off, qty: 1, price: 50 }],
+            lines: [{ id: oldOrder.lines[0]!.id, code: P.off, qty: 1, price: 50 }], // the stored line, by its id
           },
           by,
         ),
@@ -240,7 +267,7 @@ try {
           customerCode: C.off,
           salesId: adminUuid,
           submit: false,
-          lines: [{ code: P.off, qty: 3, price: 50 }],
+          lines: [{ id: oldOrder.lines[0]!.id, code: P.off, qty: 3, price: 50 }],
         },
         by,
       ),

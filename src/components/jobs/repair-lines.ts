@@ -25,6 +25,8 @@ export type Line = {
   status: string;
   total?: number; // the stored line total (what the job is charged for it)
   locked?: boolean; // already issued / returned — read-only
+  /** read-only but may still be removed (= cancelled): a legacy line nothing was issued from (its qty / price are System Admin's) */
+  cancellable?: boolean;
   /** partly issued (เบิกบางส่วน): only แบบ A's qty, down to `granted` at least (saveRepair cancels the rest) */
   issued?: { granted: number; requested: number };
   waiting?: boolean; // requested from stock (เบิก) and not all issued yet
@@ -53,6 +55,32 @@ export const quoteTotal = (lines: Line[], k: 'a' | 'b') =>
 
 /** what saveRepair stores for edited lines: issued / returned lines keep their stored amount, the others เบิก + เสนอ only */
 export const chargedTotal = (lines: Line[]) => lines.reduce((s, l) => s + (l.locked ? (l.total ?? 0) : chargeOf(l)), 0);
+
+/**
+ * A legacy job's parts cost after this save, as saveRepair computes it: its recorded cost is never recomputed (it may
+ * have no lines behind it) — it moves by what the lines added / changed / removed here add up to (chargeOf, the same
+ * formula); a line kept as loaded moves nothing. A line counts only as the job's parts cost counts it: ticked เบิก
+ * (stock.ts partsTotalOf) — a quote-only line's stored total was never in it.
+ */
+export function legacyPartsTotal(lines: Line[], loaded: Line[], stored: number) {
+  const same = (a: Line, b: Line) =>
+    a.aPick === b.aPick &&
+    a.aQuote === b.aQuote &&
+    a.aQty === b.aQty &&
+    a.bPick === b.bPick &&
+    a.bQuote === b.bQuote &&
+    a.bQty === b.bQty;
+  const before = (l: Line) => (l.aPick ? (l.total ?? 0) : 0);
+  const after = (l: Line) => (l.aPick ? chargeOf(l) : 0);
+  let delta = 0;
+  for (const was of loaded) if (was.logId && !lines.some((l) => l.logId === was.logId)) delta -= before(was);
+  for (const l of lines) {
+    const was = l.logId ? loaded.find((x) => x.logId === l.logId) : undefined;
+    if (!was) delta += after(l);
+    else if (!l.locked && !same(l, was)) delta += after(l) - before(was);
+  }
+  return stored + delta;
+}
 
 /** the server refuses the change to ซ่อมเสร็จ / ไม่ซ่อม while parts are not issued — the message, else undefined */
 export function partsBlockOf(lines: Line[], status: string, jobStatus: string | undefined) {

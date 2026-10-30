@@ -1,4 +1,5 @@
 import 'server-only';
+import { customerAddressSql } from '@/server/services/customers';
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type AnyColumn } from 'drizzle-orm';
 import { alias, type PgSelect } from 'drizzle-orm/pg-core';
 import { db, withStatementTimeout, type Tx } from '@/db/client';
@@ -8,26 +9,26 @@ import {
   category,
   customer,
   job,
-  jobOrderSparePartLog,
-  jobOrderSparePartStatus,
-  jobSendForwardDt,
+  jobPart,
+  jobPartStatus,
+  jobOutsource,
   jobStatus,
   jobType,
-  manufacturer,
+  brand,
   model,
   product,
-  productModel,
-  productNoneSerial,
+  productCompatibleModel,
+  productStock,
   productType,
-  quotationDt,
-  quotationHd,
+  quotationLine,
+  quotation,
   quotationStatus,
-  saleOutDt,
-  saleOutHd,
+  saleOrderLine,
+  saleOrder,
   storeLocation,
   symptom,
 } from '@/db/schema';
-import { AS, JS, QS } from '@/lib/status-ids';
+import { AS, JS, QS, STORE_LOCATION_ID } from '@/lib/status-ids';
 import { quoteExpired } from '@/lib/quote-expiry';
 import { fmtDate, fmtDateTime, num } from '@/server/mappers/format';
 import { likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
@@ -36,9 +37,25 @@ import { isUuid } from '@/server/audit';
 import { JOB_MODULES, SALE_ORDER_READERS } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { REPORT_SPECS, type ReportKey, type ReportRow } from '@/app/(app)/reports/report-specs';
-import { filtersFromQuery, jobWhere, kpiGroup, type JobFilters } from './jobs';
+import {
+  filtersFromQuery,
+  jobModelIs,
+  jobModelName,
+  jobWhere,
+  kpiGroup,
+  mainSymptomPk,
+  partsReplacedText,
+  partsReplaceShown,
+  type JobFilters,
+} from './jobs';
 import { quotationFiltersFromQuery, quotationWhere, withQuotationJoins, type QuotationFilters } from './quotations';
-import { saleOrderFiltersFromQuery, saleOrderWhere, withSaleOrderJoins, type SaleOrderFilters } from './sale-orders';
+import {
+  saleOrderFiltersFromQuery,
+  saleOrderWhere,
+  stockDoc,
+  withSaleOrderJoins,
+  type SaleOrderFilters,
+} from './sale-orders';
 
 /**
  * KPI tiles for the report screens — computed in one query over the SAME
@@ -68,9 +85,8 @@ async function jobBase(tx: Tx, f: JobFilters, q = '', raw: Raw = {}) {
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
-    .leftJoin(eng, eq(eng.userId, job.engineerId))
-    .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
+    .leftJoin(jobType, eq(jobType.pk, job.jobTypePk))
+    .leftJoin(eng, eq(eng.pk, job.engineerAppUserPk))
     .where(jobReportWhere(q, f, raw));
 }
 
@@ -82,9 +98,8 @@ export async function jobReportSummary(f: JobFilters, q = '', raw: Raw = {}) {
       .select({ channel: job.productSaleOutChannel, n: count() })
       .from(job)
       .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-      .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
-      .leftJoin(eng, eq(eng.userId, job.engineerId))
-      .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
+      .leftJoin(jobType, eq(jobType.pk, job.jobTypePk))
+      .leftJoin(eng, eq(eng.pk, job.engineerAppUserPk))
       .where(jobReportWhere(q, f, raw))
       .groupBy(job.productSaleOutChannel)
       .orderBy(sql`count(*) desc`)
@@ -107,7 +122,7 @@ export async function jobReportSummary(f: JobFilters, q = '', raw: Raw = {}) {
 }
 
 export async function quotationReportSummary(f: QuotationFilters, q = '', raw: Raw = {}) {
-  const agreed = inArray(quotationHd.quotationStatusId, [QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
+  const agreed = inArray(quotation.quotationStatusId, [QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
   const [r] = await withStatementTimeout((tx) =>
     withQuotationJoins(
       tx
@@ -115,11 +130,11 @@ export async function quotationReportSummary(f: QuotationFilters, q = '', raw: R
           total: count(),
           agreed: sql<string>`count(*) filter (where ${agreed})`,
           // มูลค่ารวม leaves out cancelled quotations (QS.CANCELLED ยกเลิกใบเสนอราคา); the card shows that amount apart
-          amount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} is distinct from ${QS.CANCELLED}),0)`,
-          cancelledAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${quotationHd.quotationStatusId} = ${QS.CANCELLED}),0)`,
-          agreedAmount: sql<string>`coalesce(sum(${quotationHd.netAmount}) filter (where ${agreed}),0)`,
+          amount: sql<string>`coalesce(sum(${quotation.netAmount}) filter (where ${quotation.quotationStatusId} is distinct from ${QS.CANCELLED}),0)`,
+          cancelledAmount: sql<string>`coalesce(sum(${quotation.netAmount}) filter (where ${quotation.quotationStatusId} = ${QS.CANCELLED}),0)`,
+          agreedAmount: sql<string>`coalesce(sum(${quotation.netAmount}) filter (where ${agreed}),0)`,
         })
-        .from(quotationHd)
+        .from(quotation)
         .$dynamic(),
     ).where(and(quotationWhere(q, f), quotationExtra(raw))),
   );
@@ -139,12 +154,12 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = '', raw: R
       tx
         .select({
           total: count(),
-          approved: sql<string>`count(*) filter (where ${saleOutHd.approveStatusId} = ${AS.APPROVED})`,
+          approved: sql<string>`count(*) filter (where ${saleOrder.approveStatusId} = ${AS.APPROVED})`,
           // ยอดขายรวม = approved orders only (AS.APPROVED อนุมัติแล้ว); waiting / rejected / denied are shown apart
-          amount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} = ${AS.APPROVED}),0)`,
-          notApprovedAmount: sql<string>`coalesce(sum(${saleOutHd.netAmount}) filter (where ${saleOutHd.approveStatusId} is distinct from ${AS.APPROVED}),0)`,
+          amount: sql<string>`coalesce(sum(${saleOrder.netAmount}) filter (where ${saleOrder.approveStatusId} = ${AS.APPROVED}),0)`,
+          notApprovedAmount: sql<string>`coalesce(sum(${saleOrder.netAmount}) filter (where ${saleOrder.approveStatusId} is distinct from ${AS.APPROVED}),0)`,
         })
-        .from(saleOutHd)
+        .from(saleOrder)
         .$dynamic(),
     ).where(and(saleOrderWhere(q, f), saleExtra(raw))),
   );
@@ -185,7 +200,7 @@ const fullNameSql = (u: { firstName: AnyColumn; lastName: AnyColumn }) =>
 function jobReportWhere(q: string, jf: JobFilters, raw: Raw) {
   const none = raw.warranty === 'NONE';
   const forward = raw.dateBy === 'forward';
-  const sent = forward ? fromTo(jobSendForwardDt.sendDate, raw) : undefined;
+  const sent = forward ? fromTo(jobOutsource.sendDate, raw) : undefined;
   return and(
     jobWhere(q, {
       ...jf,
@@ -193,13 +208,11 @@ function jobReportWhere(q: string, jf: JobFilters, raw: Raw) {
       ...(forward ? { from: undefined, to: undefined } : {}),
     }),
     none ? sql`coalesce(trim(${job.productWarranty}), '') not in ('IN', 'OUT')` : undefined,
-    sent
-      ? sql`exists (select 1 from ${jobSendForwardDt} where ${jobSendForwardDt.jobNo} = ${job.jobNo} and ${sent})`
-      : undefined,
+    sent ? sql`exists (select 1 from ${jobOutsource} where ${jobOutsource.jobPk} = ${job.pk} and ${sent})` : undefined,
   );
 }
 const lastSend = (col: AnyColumn) =>
-  sql<string | null>`(select max(${col}) from ${jobSendForwardDt} where ${jobSendForwardDt.jobNo} = ${job.jobNo})`;
+  sql<string | null>`(select max(${col}) from ${jobOutsource} where ${jobOutsource.jobPk} = ${job.pk})`;
 /** TAT as the job list counts it: opening → the return, else the close, else today (calendar days) */
 const rowTat =
   sql<number>`greatest(0, (case when ${job.jobReturnDate} > '1901-01-01' then ${job.jobReturnDate} when ${job.jobClosedDate} > '1901-01-01' then ${job.jobClosedDate} else now() at time zone 'Asia/Bangkok' end)::date - ${job.jobCreateDate}::date)`.mapWith(
@@ -211,9 +224,8 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
   const joins = <T extends PgSelect>(x: T) =>
     x
       .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-      .leftJoin(jobType, eq(jobType.jobTypeId, job.jobTypeId))
-      .leftJoin(eng, eq(eng.userId, job.engineerId))
-      .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId));
+      .leftJoin(jobType, eq(jobType.pk, job.jobTypePk))
+      .leftJoin(eng, eq(eng.pk, job.engineerAppUserPk));
   const [counted, rows] = await Promise.all([
     joins(db.select({ total: count() }).from(job).$dynamic()).where(w),
     joins(
@@ -230,15 +242,15 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
           soDate: job.productSaleOrderDate,
           serial: job.productSerial,
           imei: job.productImeiNo,
-          brand: manufacturer.manufacturerName,
-          model: job.productModelName,
+          brand: brand.brandName,
+          model: jobModelName,
           productType: productType.productTypeName,
           warranty: job.productWarranty,
           bounce: job.isJobBounce,
           jobType: jobType.jobTypeName,
           jobTypeDetail: job.jobTypeDetail,
-          outSent: lastSend(jobSendForwardDt.sendDate),
-          outReceived: lastSend(jobSendForwardDt.receiveDate),
+          outSent: lastSend(jobOutsource.sendDate),
+          outReceived: lastSend(jobOutsource.receiveDate),
           symptom: symptom.symptomName,
           symptomOther: job.productSymptomOther,
           fault: job.productFault,
@@ -256,7 +268,8 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
           status: jobStatus.jobStatusName,
           tat: rowTat,
           receptionDate: job.jobReceptionDate,
-          partsReplaced: job.sparePartReplace,
+          partsReplaced: partsReplacedText,
+          newSerialNo: job.newSerialNo,
           repairDetail: job.engineerRepairDetail,
           engineerRemark: job.engineerRemark,
           repairedDate: job.jobRepairedDate,
@@ -269,11 +282,13 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
         .from(job)
         .$dynamic(),
     )
-      .leftJoin(customer, eq(customer.customerId, job.customerId))
-      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
-      .leftJoin(productType, eq(productType.productTypeId, job.productTypeId))
-      .leftJoin(opener, eq(opener.userId, job.jobCreateBy))
-      .leftJoin(closer, eq(closer.userId, job.jobClosedBy))
+      .leftJoin(customer, eq(customer.pk, job.customerPk))
+      .leftJoin(model, eq(model.pk, job.modelPk))
+      .leftJoin(brand, eq(brand.pk, model.brandPk))
+      .leftJoin(symptom, eq(symptom.pk, mainSymptomPk))
+      .leftJoin(productType, eq(productType.pk, job.productTypePk))
+      .leftJoin(opener, eq(opener.pk, job.createdByAppUserPk))
+      .leftJoin(closer, eq(closer.pk, job.closedByAppUserPk))
       .where(w)
       .orderBy(desc(job.jobCreateDate), desc(job.jobNo))
       .limit(limit)
@@ -281,7 +296,7 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
   ]);
   return {
     total: totalOf(counted),
-    rows: rows.map((r) => {
+    rows: rows.map(({ newSerialNo, ...r }) => {
       // customer_detail = "code name phone" as it was at the opening — the fallback for a job with no customer row
       const [code = '', ...name] = (r.detail ?? '').trim().split(/\s+/);
       const phone = /^[\d+-]{6,}$/.test(name.at(-1) ?? '') ? name.pop() : '';
@@ -298,6 +313,7 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
         outReceived: fmtDateTime(r.outReceived),
         status: r.status?.trim() ?? '',
         receptionDate: fmtDate(r.receptionDate),
+        partsReplaced: partsReplaceShown({ sparePartReplace: r.partsReplaced, newSerialNo }),
         repairedDate: fmtDateTime(r.repairedDate),
         closedDate: fmtDateTime(r.closedDate),
       };
@@ -308,9 +324,9 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
 /** quotation / quotation-detail filters beyond quotationWhere: รุ่น, วันที่เปิดงานซ่อม, วันที่ตกลงซ่อม */
 const quotationExtra = (f: Raw) =>
   and(
-    f.model ? eq(job.productModelName, f.model) : undefined,
+    f.model ? jobModelIs(f.model) : undefined,
     fromTo(job.jobCreateDate, f, 'jobFrom', 'jobTo'),
-    fromTo(quotationHd.customerApproveDate, f, 'agreedFrom', 'agreedTo'),
+    fromTo(quotation.customerApproveDate, f, 'agreedFrom', 'agreedTo'),
   );
 const quotationReportWhere = (p: PageQuery) =>
   and(quotationWhere(p.q, quotationFiltersFromQuery(p.f, 'exclude')), quotationExtra(p.f));
@@ -322,14 +338,15 @@ const qStatus = (r: {
   status: string | null;
 }) => (quoteExpired(r.statusId, r.date, r.jobStatusId) ? 'พ้นกำหนดเสนอราคา' : (r.status?.trim() ?? ''));
 const qHead = {
-  no: quotationHd.quotationNo,
-  date: quotationHd.createDate,
+  no: quotation.quotationNo,
+  date: quotation.createDate,
   status: quotationStatus.quotationStatusName,
-  statusId: quotationHd.quotationStatusId,
+  statusId: quotation.quotationStatusId,
   jobStatusId: job.jobStatusId,
-  jobRef: quotationHd.referenceJobNo,
-  customerCode: quotationHd.customerCode,
-  customerName: customer.customerName,
+  jobRef: job.jobNo,
+  customerCode: customer.customerCode,
+  // the snapshot taken when the customer agreed (drizzle/0006), else the customer as they are now
+  customerName: sql<string | null>`coalesce(${quotation.customerName}, ${customer.customerName})`,
 };
 const qHeadOut = <T extends { [K in keyof typeof qHead]: unknown }>(r: T) => ({
   ...r,
@@ -341,27 +358,27 @@ const qHeadOut = <T extends { [K in keyof typeof qHead]: unknown }>(r: T) => ({
 async function quotationRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
   const w = quotationReportWhere(p);
   const [counted, rows] = await Promise.all([
-    withQuotationJoins(db.select({ total: count() }).from(quotationHd).$dynamic()).where(w),
+    withQuotationJoins(db.select({ total: count() }).from(quotation).$dynamic()).where(w),
     withQuotationJoins(
       db
         .select({
           ...qHead,
-          brand: manufacturer.manufacturerName,
-          model: job.productModelName,
+          brand: brand.brandName,
+          model: jobModelName,
           serial: job.productSerial,
           symptom: symptom.symptomName,
-          parts: sql<string>`(select string_agg(${quotationDt.itemDetail}, ', ' order by ${quotationDt.lineNumber}) from ${quotationDt} where ${quotationDt.quotationNo} = ${quotationHd.quotationNo} and ${quotationDt.itemType} = 'SparePart')`,
-          amount: quotationHd.netAmount,
+          parts: sql<string>`(select string_agg(${quotationLine.itemDetail}, ', ' order by ${quotationLine.lineNumber}) from ${quotationLine} where ${quotationLine.quotationPk} = ${quotation.pk} and ${quotationLine.itemType} = 'SparePart')`,
+          amount: quotation.netAmount,
           engineer: fullNameSql(qEng),
-          remark: quotationHd.remark,
+          remark: quotation.remark,
         })
-        .from(quotationHd)
+        .from(quotation)
         .$dynamic(),
     )
-      .leftJoin(symptom, eq(symptom.symptomId, job.productSymptomId))
-      .leftJoin(qEng, eq(qEng.userId, job.engineerId))
+      .leftJoin(symptom, eq(symptom.pk, mainSymptomPk))
+      .leftJoin(qEng, eq(qEng.pk, job.engineerAppUserPk))
       .where(w)
-      .orderBy(desc(quotationHd.createDate), desc(quotationHd.quotationHdId))
+      .orderBy(desc(quotation.createDate), desc(quotation.pk))
       .limit(limit)
       .offset(offset),
   ]);
@@ -371,26 +388,28 @@ async function quotationRows(p: PageQuery, limit: number, offset: number): Promi
 async function quotationLineRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
   const w = quotationReportWhere(p);
   const lines = <T extends PgSelect>(x: T) =>
-    withQuotationJoins(x.innerJoin(quotationHd, eq(quotationHd.quotationNo, quotationDt.quotationNo)));
+    withQuotationJoins(x.innerJoin(quotation, eq(quotation.pk, quotationLine.quotationPk)));
   const [counted, rows] = await Promise.all([
-    lines(db.select({ total: count() }).from(quotationDt).$dynamic()).where(w),
+    lines(db.select({ total: count() }).from(quotationLine).$dynamic()).where(w),
     lines(
       db
         .select({
           ...qHead,
-          itemCode: quotationDt.itemCode,
-          itemDetail: quotationDt.itemDetail,
-          qty: quotationDt.quantity,
-          unit: quotationDt.unit,
-          unitPrice: quotationDt.unitPrice,
-          totalPrice: quotationDt.totalPrice,
+          // the part's code now (product_pk); item_code = a service line's code / the legacy text
+          itemCode: sql<string | null>`coalesce(${product.productCode}, ${quotationLine.itemCode})`,
+          itemDetail: quotationLine.itemDetail,
+          qty: quotationLine.quantity,
+          unit: sql<string>`'หน่วย'`, // quotation_line.unit dropped (drizzle/0006): 'หน่วย' on every line
+          unitPrice: quotationLine.unitPrice,
+          totalPrice: quotationLine.totalPrice,
           jobRefNo: job.jobReferenceNo,
         })
-        .from(quotationDt)
+        .from(quotationLine)
         .$dynamic(),
     )
+      .leftJoin(product, eq(product.pk, quotationLine.productPk))
       .where(w)
-      .orderBy(desc(quotationHd.createDate), desc(quotationHd.quotationHdId), asc(quotationDt.lineNumber))
+      .orderBy(desc(quotation.createDate), desc(quotation.pk), asc(quotationLine.lineNumber))
       .limit(limit)
       .offset(offset),
   ]);
@@ -401,20 +420,21 @@ async function quotationLineRows(p: PageQuery, limit: number, offset: number): P
 const saleExtra = (f: Raw) =>
   isUuid(f.createdBy ?? '') // the user's uuid (ADR 0008); anything else = no filter, as before
     ? inArray(
-        saleOutHd.documentCreateBy,
-        db.select({ id: appUser.userId }).from(appUser).where(eq(appUser.id, f.createdBy!.trim().toLowerCase())),
+        saleOrder.createdByAppUserPk,
+        db.select({ id: appUser.pk }).from(appUser).where(eq(appUser.id, f.createdBy!.trim().toLowerCase())),
       )
     : undefined;
 const saleReportWhere = (p: PageQuery) =>
   and(saleOrderWhere(p.q, saleOrderFiltersFromQuery(p.f, 'exclude')), saleExtra(p.f));
 const soHead = {
-  no: saleOutHd.saleOutHdNo,
-  date: saleOutHd.documentCreateDate,
-  customerCode: saleOutHd.customerCode,
-  customerName: saleOutHd.customerName,
+  no: saleOrder.saleOrderNo,
+  date: saleOrder.documentCreateDate,
+  customerCode: customer.customerCode, // withSaleOrderJoins joins the customer
+  // the snapshot taken at approval, else (a draft / waiting order) the customer now
+  customerName: sql<string | null>`coalesce(${saleOrder.customerName}, ${customer.customerName})`,
   createdBy: fullNameSql(keyer),
   approve: approveStatus.approveNameTh,
-  rs: saleOutHd.recordStatus,
+  rs: saleOrder.recordStatus,
 };
 /** as the sale-order list labels it: cancelled = ยกเลิก, approve_status 3 "แก้ไขข้อมูล" = ส่งกลับแก้ไข */
 const soOut = <T extends { date: string | null; approve: string | null; rs: string | null }>({
@@ -430,28 +450,29 @@ const soOut = <T extends { date: string | null; approve: string | null; rs: stri
 async function saleRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
   const w = saleReportWhere(p);
   const [counted, rows] = await Promise.all([
-    withSaleOrderJoins(db.select({ total: count() }).from(saleOutHd).$dynamic()).where(w),
+    withSaleOrderJoins(db.select({ total: count() }).from(saleOrder).$dynamic()).where(w),
     withSaleOrderJoins(
       db
         .select({
           ...soHead,
-          address: saleOutHd.customerAddress,
-          phone: saleOutHd.customerPhoneNumber,
-          base: saleOutHd.totalBaseAmount,
-          vat: saleOutHd.vatAmount,
-          total: saleOutHd.netAmount,
-          remark: saleOutHd.remarkHd,
-          approveDate: saleOutHd.approveDate,
-          stockDoc: saleOutHd.referenceNo,
-          tracking: saleOutHd.deliveryTrackingNo,
-          deliveryDate: saleOutHd.deliveryDate,
+          // the customer's address now (customers.ts composes it the same way the customer screens show it)
+          address: sql<string | null>`coalesce(${saleOrder.customerAddress}, ${customerAddressSql})`,
+          phone: sql<string | null>`coalesce(${saleOrder.customerPhoneNumber}, ${customer.phoneNumber})`,
+          base: saleOrder.totalBaseAmount,
+          vat: saleOrder.vatAmount,
+          total: saleOrder.netAmount,
+          remark: saleOrder.remark,
+          approveDate: saleOrder.approveDate,
+          stockDoc,
+          tracking: saleOrder.deliveryTrackingNo,
+          deliveryDate: saleOrder.deliveryDate,
         })
-        .from(saleOutHd)
+        .from(saleOrder)
         .$dynamic(),
     )
-      .leftJoin(keyer, eq(keyer.userId, saleOutHd.documentCreateBy))
+      .leftJoin(keyer, eq(keyer.pk, saleOrder.createdByAppUserPk))
       .where(w)
-      .orderBy(desc(saleOutHd.documentCreateDate), desc(saleOutHd.saleOutHdId))
+      .orderBy(desc(saleOrder.documentCreateDate), desc(saleOrder.pk))
       .limit(limit)
       .offset(offset),
   ]);
@@ -468,55 +489,57 @@ async function saleRows(p: PageQuery, limit: number, offset: number): Promise<Q>
 async function saleLineRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
   const w = saleReportWhere(p);
   const lines = <T extends PgSelect>(x: T) =>
-    withSaleOrderJoins(x.innerJoin(saleOutHd, eq(saleOutHd.saleOutHdNo, saleOutDt.saleOutHdNo)));
+    withSaleOrderJoins(x.innerJoin(saleOrder, eq(saleOrder.pk, saleOrderLine.saleOrderPk)));
   const [counted, rows] = await Promise.all([
-    lines(db.select({ total: count() }).from(saleOutDt).$dynamic()).where(w),
+    lines(db.select({ total: count() }).from(saleOrderLine).$dynamic()).where(w),
     lines(
       db
         .select({
           ...soHead,
-          itemCode: saleOutDt.productCode,
+          // the part's code now (product_pk); product_code = a service line's code / the legacy text
+          itemCode: sql<string | null>`coalesce(${product.productCode}, ${saleOrderLine.productCode})`,
           itemName: product.productName,
-          qty: saleOutDt.saleOutQuantity,
-          unitPrice: saleOutDt.saleOutPrice,
-          amount: saleOutDt.amountDt,
+          qty: saleOrderLine.saleOutQuantity,
+          unitPrice: saleOrderLine.saleOutPrice,
+          amount: saleOrderLine.amount,
         })
-        .from(saleOutDt)
+        .from(saleOrderLine)
         .$dynamic(),
     )
-      .leftJoin(keyer, eq(keyer.userId, saleOutHd.documentCreateBy))
-      .leftJoin(product, eq(product.productCode, saleOutDt.productCode))
+      .leftJoin(keyer, eq(keyer.pk, saleOrder.createdByAppUserPk))
+      .leftJoin(product, eq(product.pk, saleOrderLine.productPk))
       .where(w)
-      .orderBy(desc(saleOutHd.documentCreateDate), desc(saleOutHd.saleOutHdId), asc(saleOutDt.listNo))
+      .orderBy(desc(saleOrder.documentCreateDate), desc(saleOrder.pk), asc(saleOrderLine.listNo))
       .limit(limit)
       .offset(offset),
   ]);
   return { total: totalOf(counted), rows: rows.map(soOut) };
 }
 
-/** the job part log (job_order_spare_part_log): every เบิก / ขอคืน / จ่ายแล้ว / คืนแล้ว line, dated by its request */
+/** the job part log (job_part): every เบิก / ขอคืน / จ่ายแล้ว / คืนแล้ว line, dated by its request */
 async function partLogRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
   const f = p.f;
-  const L = jobOrderSparePartLog;
+  const L = jobPart;
   const term = p.q.trim();
   const w = and(
-    term ? or(has(L.sparePartCode, term), has(product.productName, term), has(L.jobNo, term)) : undefined,
-    f.code?.trim() ? or(has(L.sparePartCode, f.code), has(product.productVenderCode, f.code)) : undefined,
+    term ? or(has(product.productCode, term), has(product.productName, term), has(job.jobNo, term)) : undefined,
+    f.code?.trim() ? or(has(product.productCode, f.code), has(product.productVendorCode, f.code)) : undefined,
     f.name?.trim() ? or(has(product.productName, f.name), has(product.productNameEn, f.name)) : undefined,
-    has(L.jobNo, f.jobNo),
-    f.status ? sql`trim(${jobOrderSparePartStatus.orderStatusName}) = ${f.status.trim()}` : undefined,
+    has(job.jobNo, f.jobNo),
+    f.status ? sql`trim(${jobPartStatus.jobPartStatusName}) = ${f.status.trim()}` : undefined,
     fromTo(L.requestDate, f),
   );
   const joins = <T extends PgSelect>(x: T) =>
     x
-      .leftJoin(product, eq(product.productCode, L.sparePartCode))
-      .leftJoin(jobOrderSparePartStatus, eq(jobOrderSparePartStatus.orderStatusId, L.orderStatusId));
+      .innerJoin(job, eq(job.pk, L.jobPk))
+      .leftJoin(product, eq(product.pk, L.productPk))
+      .leftJoin(jobPartStatus, eq(jobPartStatus.jobPartStatusId, L.jobPartStatusId));
   const [counted, rows] = await Promise.all([
     joins(db.select({ total: count() }).from(L).$dynamic()).where(w),
     joins(
       db
         .select({
-          code: L.sparePartCode,
+          code: product.productCode,
           name: product.productName,
           nameEn: product.productNameEn,
           isQuotation: L.isQuotation,
@@ -526,14 +549,14 @@ async function partLogRows(p: PageQuery, limit: number, offset: number): Promise
           grantDate: L.grantDate,
           returnQty: L.returnQty,
           returnDate: L.returnDate,
-          status: jobOrderSparePartStatus.orderStatusName,
-          jobNo: L.jobNo,
+          status: jobPartStatus.jobPartStatusName,
+          jobNo: job.jobNo,
         })
         .from(L)
         .$dynamic(),
     )
       .where(w)
-      .orderBy(desc(L.requestDate), desc(L.jobOrderLogId))
+      .orderBy(desc(L.requestDate), desc(L.pk))
       .limit(limit)
       .offset(offset),
   ]);
@@ -553,16 +576,16 @@ async function partLogRows(p: PageQuery, limit: number, offset: number): Promise
   };
 }
 
-/** a product's models (product_model) — codes, and their names from the model master */
+/** a product's models (product_compatible_model) — codes, and their names from the model master */
 const modelsOf = (col: AnyColumn) =>
-  sql<string>`(select string_agg(distinct ${col}, ', ') from ${productModel} left join ${model} on ${model.modelCode} = ${productModel.modelCode} where ${productModel.productId} = ${product.productId})`;
+  sql<string>`(select string_agg(distinct ${col}, ', ') from ${productCompatibleModel} join ${model} on ${model.pk} = ${productCompatibleModel.modelPk} where ${productCompatibleModel.productPk} = ${product.pk})`;
 
 /** the on-hand report: ACTIVE parts by default; สี + "และอะไหล่ที่ใช้ได้กับทุกสี" (allColors=1: no colour = fits all) */
 async function onhandRows(p: PageQuery, limit: number, offset: number, cost: boolean): Promise<Q> {
   const f = p.f;
   const term = p.q.trim();
   const LOW = 3; // ใกล้หมด = 1..3, as the product list (stock.ts LOW_STOCK)
-  const remain = sql`coalesce(${productNoneSerial.quantityRemain}, 0)`;
+  const remain = sql`coalesce(${productStock.quantityRemain}, 0)`;
   const w = and(
     f.status === 'Inactive'
       ? eq(product.recordStatus, RS.INACTIVE)
@@ -570,18 +593,18 @@ async function onhandRows(p: PageQuery, limit: number, offset: number, cost: boo
         ? eq(product.recordStatus, RS.ACTIVE)
         : ne(product.recordStatus, RS.DELETED),
     term
-      ? or(has(product.productCode, term), has(product.productVenderCode, term), has(product.productName, term))
+      ? or(has(product.productCode, term), has(product.productVendorCode, term), has(product.productName, term))
       : undefined,
     has(product.productCode, f.sysCode),
-    has(product.productVenderCode, f.mfgCode),
+    has(product.productVendorCode, f.mfgCode),
     f.name?.trim()
       ? or(has(product.productName, f.name), has(product.productNameEn, f.name), has(product.productNameCn, f.name))
       : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,
-    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    f.brand ? eq(brand.brandName, f.brand) : undefined,
     // a รุ่น of another ยี่ห้อ than the one chosen: no rows (the job / quotation reports behave so by themselves)
     f.model
-      ? sql`exists (select 1 from ${productModel} join ${model} on ${model.modelCode} = ${productModel.modelCode} where ${productModel.productId} = ${product.productId} and ${productModel.modelCode} = ${f.model}${f.brand ? sql` and ${model.manufacturerId} in (select ${manufacturer.manufacturerId} from ${manufacturer} where ${manufacturer.manufacturerName} = ${f.brand})` : sql``})`
+      ? sql`exists (select 1 from ${productCompatibleModel} join ${model} on ${model.pk} = ${productCompatibleModel.modelPk} where ${productCompatibleModel.productPk} = ${product.pk} and ${model.modelCode} = ${f.model}${f.brand ? sql` and ${model.brandPk} in (select ${brand.pk} from ${brand} where ${brand.brandName} = ${f.brand})` : sql``})`
       : undefined,
     f.color
       ? or(
@@ -595,35 +618,36 @@ async function onhandRows(p: PageQuery, limit: number, offset: number, cost: boo
   );
   const joins = <T extends PgSelect>(x: T) =>
     x
-      .leftJoin(category, eq(category.categoryId, product.categoryId))
-      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, product.manufacturerId))
-      .leftJoin(productNoneSerial, eq(productNoneSerial.productId, product.productId));
+      .leftJoin(category, eq(category.pk, product.categoryPk))
+      .leftJoin(brand, eq(brand.pk, product.brandPk))
+      .leftJoin(productStock, eq(productStock.productPk, product.pk));
   const [counted, rows] = await Promise.all([
     joins(db.select({ total: count() }).from(product).$dynamic()).where(w),
     joins(
       db
         .select({
           code: product.productCode,
-          mfgCode: product.productVenderCode,
+          mfgCode: product.productVendorCode,
           name: product.productName,
           description: product.productDescription,
           category: category.categoryName,
-          brand: manufacturer.manufacturerName,
-          modelCode: modelsOf(productModel.modelCode),
+          brand: brand.brandName,
+          modelCode: modelsOf(model.modelCode),
           modelName: modelsOf(model.modelName),
           color: product.forModelColor,
-          available: productNoneSerial.quantityAvailable,
-          used: productNoneSerial.quantityUsed,
-          booking: productNoneSerial.quantityBooking,
-          remain: productNoneSerial.quantityRemain,
-          capitalPrice: productNoneSerial.capitalPrice,
-          price: productNoneSerial.retailPrice,
+          available: productStock.quantityAvailable,
+          used: productStock.quantityUsed,
+          booking: productStock.quantityBooking,
+          remain: productStock.quantityRemain,
+          capitalPrice: productStock.capitalPrice,
+          price: productStock.retailPrice,
           location: storeLocation.storeLocationName,
         })
         .from(product)
         .$dynamic(),
     )
-      .leftJoin(storeLocation, eq(storeLocation.storeLocationId, productNoneSerial.storeLocationId))
+      // the one store every stock row is in (product_stock.store_location_id dropped, drizzle/0006)
+      .leftJoin(storeLocation, eq(storeLocation.storeLocationId, STORE_LOCATION_ID))
       .where(w)
       .orderBy(asc(product.productCode))
       .limit(limit)

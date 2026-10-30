@@ -1,13 +1,23 @@
 import 'server-only';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm';
-import { db, type Tx } from '@/db/client';
-import { customer, job, jobLog, jobStatus, manufacturer, quotationHd, trackDocTicket, trackSession } from '@/db/schema';
+import { db, type Tx, writeTx } from '@/db/client';
+import {
+  brand,
+  customer,
+  job,
+  jobStatus,
+  jobStatusLog,
+  model,
+  quotation,
+  trackDocTicket,
+  trackSession,
+} from '@/db/schema';
 import { RS } from '@/server/record-status';
 import { fmtDate, isSentinelDate, nowThai } from '@/server/mappers/format';
 import { today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
 import { JOB_GROUP, QS } from '@/lib/status-ids';
-import { JS, effectiveDueText, type JobDetail } from './jobs';
+import { JS, effectiveDueText, jobModelName, receptionShipperName, type JobDetail } from './jobs';
 import type { QuotationDetail } from './quotations';
 import { getShippingProfile, listShippingProfiles, trackUrlFor, type ShippingProfile } from './shipping-profiles';
 import { shipperFor } from '@/lib/shipper';
@@ -136,7 +146,7 @@ const CUSTOMER_QUOTATION_STATUSES: number[] = [
 /** the job's latest quotation the customer was sent (CUSTOMER_QUOTATION_STATUSES) — status + date */
 type LastQuote = { st: number; at: string } | null;
 const lastQuote = sql<LastQuote>`(SELECT json_build_object('st', q.quotation_status_id, 'at', to_char(q.create_date, 'YYYY-MM-DD'))
-    FROM quotation_hd q WHERE q.reference_job_no = ${job.jobNo} AND q.record_status <> ${RS.DELETED}
+    FROM quotation q WHERE q.job_pk = ${job.pk} AND q.record_status <> ${RS.DELETED}
       AND q.quotation_status_id = ANY(${sql.param(CUSTOMER_QUOTATION_STATUSES)}) ORDER BY q.create_date DESC LIMIT 1)`;
 
 /** วันที่รับเครื่อง — ONE source for the header, the timeline and the documents' date (a legacy 1900 → opened) */
@@ -210,14 +220,15 @@ export const tokenHash = (token: string) => sha256(token).toString('hex');
 function base(where: SQL | undefined) {
   return db
     .select({
+      pk: job.pk,
       no: job.jobNo,
       statusId: job.jobStatusId,
       group: jobStatus.jobStatusGroup,
       customerDetail: job.customerDetail,
       customerName: customer.customerName,
       phone: customer.phoneNumber,
-      brand: manufacturer.manufacturerName,
-      model: job.productModelName,
+      brand: brand.brandName,
+      model: jobModelName,
       serial: job.productSerial,
       imei: job.productImeiNo,
       receivedDate: job.jobReceptionDate,
@@ -226,16 +237,17 @@ function base(where: SQL | undefined) {
       closedDate: job.jobClosedDate,
       shipper: job.returnCustomerType,
       trackingNo: job.returnCustomerTrackingNo,
-      shipperId: job.returnShipperId,
-      receptionShipper: job.jobReceptionShipper,
+      shipperId: job.returnShippingProfilePk,
+      receptionShipper: receptionShipperName,
       receptionTrackingNo: job.jobReceptionTrackingNo,
       recordStatus: job.recordStatus,
       lastQuote,
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .leftJoin(customer, eq(customer.customerId, job.customerId))
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
+    .leftJoin(customer, eq(customer.pk, job.customerPk))
+    .leftJoin(model, eq(model.pk, job.modelPk))
+    .leftJoin(brand, eq(brand.pk, model.brandPk))
     .where(where)
     .limit(1);
 }
@@ -251,6 +263,7 @@ type Row = Awaited<ReturnType<typeof base>>[number];
  *   ใบรับงานซ่อม (every job) · ใบเสนอราคา (each sent quotation) · ใบส่งคืนสินค้า (once the job is closed)
  */
 async function docsFor(row: {
+  pk: number;
   no: string;
   statusId: number | null;
   group: string | null;
@@ -268,16 +281,16 @@ async function docsFor(row: {
     },
   ];
   const qs = await db
-    .select({ no: quotationHd.quotationNo, at: quotationHd.createDate, st: quotationHd.quotationStatusId })
-    .from(quotationHd)
+    .select({ no: quotation.quotationNo, at: quotation.createDate, st: quotation.quotationStatusId })
+    .from(quotation)
     .where(
       and(
-        eq(quotationHd.referenceJobNo, row.no),
-        ne(quotationHd.recordStatus, RS.DELETED),
-        inArray(quotationHd.quotationStatusId, CUSTOMER_QUOTATION_STATUSES),
+        eq(quotation.jobPk, row.pk),
+        ne(quotation.recordStatus, RS.DELETED),
+        inArray(quotation.quotationStatusId, CUSTOMER_QUOTATION_STATUSES),
       ),
     )
-    .orderBy(asc(quotationHd.createDate))
+    .orderBy(asc(quotation.createDate))
     .limit(10);
   for (const q of qs) {
     const no = (q.no ?? '').trim();
@@ -336,9 +349,16 @@ export async function issueDocLink(
   const raw = newToken();
   await db.insert(trackDocTicket).values({
     tokenHash: sha256(raw),
-    jobNo: d.jobNo,
+    // the job and (a quotation) the document, by pk (ADR 0008 decision 11) — d came from findDoc, both exist;
+    // a quotation's ref is its number trimmed (docsFor), matched the same way and only among the job's own
+    jobPk: sql`(select ${job.pk} from ${job} where ${job.jobNo} = ${d.jobNo})`,
     kind: d.kind,
-    ref: d.ref,
+    quotationPk:
+      d.kind === 'quotation'
+        ? sql`(select ${quotation.pk} from ${quotation} where btrim(${quotation.quotationNo}) = ${d.ref}
+            and ${quotation.jobPk} = (select ${job.pk} from ${job} where ${job.jobNo} = ${d.jobNo})
+            order by ${quotation.pk} desc limit 1)`
+        : null,
     issuedIp: ip,
     uaHash: sha256(auth),
     expiresAt: sql`now() + make_interval(mins => ${DOC_LINK_MINUTES})`,
@@ -352,12 +372,14 @@ export async function docForLink(raw: unknown): Promise<{ jobNo: string; kind: s
     if (typeof raw !== 'string' || !TOKEN_SHAPE.test(raw)) return null;
     const [t] = await db
       .select({
-        jobNo: trackDocTicket.jobNo,
+        jobNo: job.jobNo,
         kind: trackDocTicket.kind,
-        ref: trackDocTicket.ref,
+        quotationNo: quotation.quotationNo,
         auth: trackDocTicket.uaHash,
       })
       .from(trackDocTicket)
+      .innerJoin(job, eq(job.pk, trackDocTicket.jobPk))
+      .leftJoin(quotation, eq(quotation.pk, trackDocTicket.quotationPk))
       .where(and(eq(trackDocTicket.tokenHash, sha256(raw)), gt(trackDocTicket.expiresAt, sql`now()`)))
       .limit(1);
     if (!t) return null;
@@ -373,17 +395,19 @@ export async function docForLink(raw: unknown): Promise<{ jobNo: string; kind: s
           .from(job)
           .where(and(eq(job.jobNo, t.jobNo), eq(job.trackTokenHash, t.auth.toString('hex')), linkLive))
           .limit(1);
-    return link ? { jobNo: t.jobNo, kind: t.kind, ref: t.ref } : null;
+    // ref as findDoc names it: the quotation's number, else the job's
+    const ref = t.kind === 'quotation' ? (t.quotationNo ?? '').trim() : t.jobNo;
+    return link ? { jobNo: t.jobNo, kind: t.kind, ref } : null;
   });
 }
 
 async function toPublic(row: Row): Promise<PublicJob> {
   const logs = await db
-    .select({ statusId: jobLog.jobStatusId, at: jobLog.jobLogDate, group: jobStatus.jobStatusGroup })
-    .from(jobLog)
-    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, jobLog.jobStatusId))
-    .where(eq(jobLog.jobNo, row.no))
-    .orderBy(asc(jobLog.jobLogDate), asc(jobLog.jobLogId));
+    .select({ statusId: jobStatusLog.jobStatusId, at: jobStatusLog.logDate, group: jobStatus.jobStatusGroup })
+    .from(jobStatusLog)
+    .leftJoin(jobStatus, eq(jobStatus.jobStatusId, jobStatusLog.jobStatusId))
+    .where(eq(jobStatusLog.jobPk, row.pk))
+    .orderBy(asc(jobStatusLog.logDate), asc(jobStatusLog.pk));
 
   const docs = await docsFor(row);
   // a PASSED quotation step the customer has no quotation for (only cancelled / draft ones) is not shown:
@@ -608,7 +632,7 @@ export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
 /** how far back "ประวัติ" goes (finished + cancelled jobs) */
 const HISTORY_YEARS = 2;
 
-/** customer ids from a session, as integers */
+/** customer pks from a session, as integers */
 const cleanIds = (customerIds: number[]) => customerIds.map((n) => Math.trunc(Number(n))).filter(Number.isFinite);
 /** a job number as the customer may type it ("j2612088 ") → "J2612088"; null when it cannot be one */
 const jobNoOf = (v: unknown) => {
@@ -630,8 +654,8 @@ export async function listJobsForCustomers(
       no: job.jobNo,
       statusId: job.jobStatusId,
       group: jobStatus.jobStatusGroup,
-      brand: manufacturer.manufacturerName,
-      model: job.productModelName,
+      brand: brand.brandName,
+      model: jobModelName,
       serial: job.productSerial,
       imei: job.productImeiNo,
       receivedDate: job.jobReceptionDate,
@@ -641,10 +665,11 @@ export async function listJobsForCustomers(
     })
     .from(job)
     .leftJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
+    .leftJoin(model, eq(model.pk, job.modelPk))
+    .leftJoin(brand, eq(brand.pk, model.brandPk))
     .where(
       and(
-        inArray(job.customerId, ids),
+        inArray(job.customerPk, ids),
         ne(job.recordStatus, RS.DELETED),
         // in progress, or closed / cancelled within the history window (1900-01-01 = "not closed" in the legacy DB)
         sql`(coalesce(${jobStatus.jobStatusGroup}, '') NOT IN (${JOB_GROUP.FINISHED}, ${JOB_GROUP.CANCEL})
@@ -680,7 +705,7 @@ export async function publicJobForCustomers(jobNo: string, customerIds: number[]
     const no = jobNoOf(jobNo);
     const ids = cleanIds(customerIds);
     if (!no || !ids.length) return null;
-    const [row] = await base(and(eq(job.jobNo, no), inArray(job.customerId, ids)));
+    const [row] = await base(and(eq(job.jobNo, no), inArray(job.customerPk, ids)));
     if (!row || row.recordStatus === RS.DELETED) return null;
     return toPublic(row);
   });
@@ -695,7 +720,7 @@ export async function jobNoForCustomers(jobNo: unknown, customerIds: number[]): 
     const [row] = await db
       .select({ no: job.jobNo })
       .from(job)
-      .where(and(eq(job.jobNo, no), ne(job.recordStatus, RS.DELETED), inArray(job.customerId, ids)))
+      .where(and(eq(job.jobNo, no), ne(job.recordStatus, RS.DELETED), inArray(job.customerPk, ids)))
       .limit(1);
     return row?.no ?? null;
   });
@@ -709,25 +734,10 @@ export function trackLinkFor(token: string, baseUrl: string): string {
 /** a new link: only its hash is stored, fresh 1-day window, not opened yet */
 const issue = (token: string) => ({
   trackTokenHash: tokenHash(token),
-  trackToken: null, // legacy raw column (drizzle/0012): never written again; existing values emptied by drizzle/0033
   trackTokenAt: nowThai(),
   trackOpenedAt: null,
   trackLinkExpiresAt: null,
 });
-
-/**
- * Issue a link for a job that has none (jobs are created without one) and return its token.
- * "" when the job already has a link — its token is not stored, so it cannot be shown again.
- */
-export async function ensureToken(jobNo: string): Promise<string> {
-  const token = newToken();
-  const r = await db
-    .update(job)
-    .set(issue(token))
-    .where(and(eq(job.jobNo, jobNo), isNull(job.trackTokenHash)))
-    .returning({ no: job.jobNo });
-  return r.length ? token : '';
-}
 
 /**
  * staff action: old link stops working immediately; the new one gets a fresh 1-day window.
@@ -740,7 +750,7 @@ export async function rotateToken(
   onIssued?: (tx: Tx, first: boolean) => Promise<unknown>,
 ): Promise<{ token: string; status: LinkStatus }> {
   const token = newToken();
-  return db.transaction(async (tx) => {
+  return writeTx(async (tx) => {
     const [row] = await tx.select({ at: job.trackTokenAt }).from(job).where(eq(job.jobNo, jobNo)).for('update');
     await tx.update(job).set(issue(token)).where(eq(job.jobNo, jobNo));
     await onIssued?.(tx, !row?.at);

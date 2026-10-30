@@ -38,7 +38,7 @@ export const GET = checked(async (request: NextRequest) => {
   const maint = maintenanceOn() ? { maintenance: true } : {};
   if (!me?.isAdmin) {
     try {
-      await db.select({ id: appUser.userId }).from(appUser).limit(1);
+      await db.select({ id: appUser.pk }).from(appUser).limit(1);
       return NextResponse.json({ ok: true, ...maint });
     } catch (e) {
       logError(e, 'health: database unreachable', {}, request);

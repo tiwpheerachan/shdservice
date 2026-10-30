@@ -3,8 +3,8 @@ import type { z } from 'zod';
 import type { documentProfileSave } from '@/server/contract/admin';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { asc, eq, ne, and, isNull, sql, type SQL } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { documentProfile, job, jobStatus, quotationHd, saleOutHd } from '@/db/schema';
+import { db, writeTx } from '@/db/client';
+import { documentProfile, job, jobStatus, quotation, saleOrder } from '@/db/schema';
 import { HttpError } from '@/server/auth';
 import { assertValid } from '@/server/validate';
 import { documentProfileSchema } from '@/lib/validation/admin';
@@ -62,7 +62,7 @@ export type ProfilePurpose = (typeof PROFILE_PURPOSES)[number];
 
 /** the built-in profile: legacy documents (no profile) print under it; it cannot be deleted or lose this code */
 export const SHD_CODE = 'SHD';
-/** the profile a new document is issued under: `pk` is what job / quotation_hd / sale_out_hd store — never sent */
+/** the profile a new document is issued under: `pk` is what job / quotation / sale_order store — never sent */
 export type IssuingProfile = DocumentProfile & { pk: number };
 const BUILTIN_LOGO = '/logo-shd-mark.png';
 
@@ -161,7 +161,7 @@ export async function shdProfileId(): Promise<string> {
   return shd.id;
 }
 
-/** the uuid of the profile a document row stores (`document_profile_id`, a pk); NULL (legacy) = SHD's */
+/** the uuid of the profile a document row stores (`document_profile_pk`); NULL (legacy) = SHD's */
 export async function profileIdOf(pk: number | null | undefined): Promise<string> {
   if (pk == null) return shdProfileId();
   // a profile added since the map was read (another instance, a test's insert) is read itself
@@ -227,7 +227,7 @@ export async function issuingProfile(requested: string | number | null | undefin
  * default cannot be deleted — pick another default first.
  */
 export async function deleteDocumentProfile(id: string, byUserId: number): Promise<void> {
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     await tx.execute(lockProfiles());
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
@@ -237,31 +237,32 @@ export async function deleteDocumentProfile(id: string, byUserId: number): Promi
       throw new HttpError(400, 'โปรไฟล์นี้เป็นค่าเริ่มต้นอยู่ ตั้งโปรไฟล์อื่นเป็นค่าเริ่มต้นก่อนแล้วค่อยลบ');
     // any document ever issued under this profile? (stops at the first hit)
     const hadDocuments =
-      (await tx.select({ id: job.documentProfileId }).from(job).where(eq(job.documentProfileId, before.pk)).limit(1))
+      (await tx.select({ id: job.documentProfilePk }).from(job).where(eq(job.documentProfilePk, before.pk)).limit(1))
         .length > 0 ||
       (
         await tx
-          .select({ id: quotationHd.documentProfileId })
-          .from(quotationHd)
-          .where(eq(quotationHd.documentProfileId, before.pk))
+          .select({ id: quotation.documentProfilePk })
+          .from(quotation)
+          .where(eq(quotation.documentProfilePk, before.pk))
           .limit(1)
       ).length > 0 ||
       (
         await tx
-          .select({ id: saleOutHd.documentProfileId })
-          .from(saleOutHd)
-          .where(eq(saleOutHd.documentProfileId, before.pk))
+          .select({ id: saleOrder.documentProfilePk })
+          .from(saleOrder)
+          .where(eq(saleOrder.documentProfilePk, before.pk))
           .limit(1)
       ).length > 0;
     await tx
       .update(documentProfile)
-      .set({ deletedAt: nowThai(), deletedBy: byUserId, isDefault: false, updatedAt: nowThai() })
+      .set({ deletedAt: nowThai(), deletedByAppUserPk: byUserId, isDefault: false, updatedAt: nowThai() })
       .where(eq(documentProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Admin',
       entity: 'document_profile',
       key: id,
+      no: before.code,
       summary: `ลบโปรไฟล์ผู้ออกเอกสาร ${before.code} — ${before.nameTh}${hadDocuments ? ' (เคยออกเอกสารแล้ว เอกสารเดิมยังพิมพ์ได้)' : ''}`,
       changes: { deletedAt: [before.deletedAt, nowThai()] }, // before.deletedAt is null here (checked above)
     });
@@ -302,7 +303,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
     updatedAt: nowThai(),
   };
 
-  const saved = await db.transaction(async (tx) => {
+  const saved = await writeTx(async (tx) => {
     await tx.execute(lockProfiles());
     // the short code is what dropdowns show — unique among LIVE profiles (a deleted one frees its code)
     const others = await tx
@@ -359,6 +360,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
       module: 'Admin',
       entity: 'document_profile',
       key: row.id,
+      no: row.code,
       summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์ผู้ออกเอกสาร ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
@@ -370,7 +372,7 @@ export async function saveDocumentProfile(i: DocumentProfileInput, byUserId: num
 
 /** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
 export async function setDocumentProfileLogo(id: string, logoPath: string, byUserId: number): Promise<string> {
-  const old = await db.transaction(async (tx) => {
+  const old = await writeTx(async (tx) => {
     const [before] = await tx.select().from(documentProfile).where(eq(documentProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(documentProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(documentProfile.pk, before.pk));
@@ -379,6 +381,7 @@ export async function setDocumentProfileLogo(id: string, logoPath: string, byUse
       module: 'Admin',
       entity: 'document_profile',
       key: id,
+      no: before.code,
       summary: `เปลี่ยนโลโก้โปรไฟล์ ${before.code}`,
       changes: { logoPath: [before.logoPath, logoPath] },
     });
@@ -399,7 +402,7 @@ const DOC = {
   job: {
     table: job,
     key: job.jobNo,
-    col: job.documentProfileId,
+    col: job.documentProfilePk,
     status: job.jobStatusId,
     rs: job.recordStatus,
     module: 'Job Management',
@@ -407,23 +410,23 @@ const DOC = {
     label: 'งาน',
   },
   quotation: {
-    table: quotationHd,
-    key: quotationHd.quotationNo,
-    col: quotationHd.documentProfileId,
-    status: quotationHd.quotationStatusId,
-    rs: quotationHd.recordStatus,
+    table: quotation,
+    key: quotation.quotationNo,
+    col: quotation.documentProfilePk,
+    status: quotation.quotationStatusId,
+    rs: quotation.recordStatus,
     module: 'Quotation',
-    entity: 'quotation_hd',
+    entity: 'quotation',
     label: 'ใบเสนอราคา',
   },
   sale_order: {
-    table: saleOutHd,
-    key: saleOutHd.saleOutHdNo,
-    col: saleOutHd.documentProfileId,
-    status: saleOutHd.approveStatusId,
-    rs: saleOutHd.recordStatus,
+    table: saleOrder,
+    key: saleOrder.saleOrderNo,
+    col: saleOrder.documentProfilePk,
+    status: saleOrder.approveStatusId,
+    rs: saleOrder.recordStatus,
     module: 'Sale Order',
-    entity: 'sale_out_hd',
+    entity: 'sale_order',
     label: 'ใบสั่งขาย',
   },
 } as const;
@@ -437,7 +440,7 @@ export async function setDocumentProfile(
   byAdmin = false,
 ): Promise<IssuingProfile> {
   const d = DOC[kind];
-  return db.transaction(async (tx) => {
+  return writeTx(async (tx) => {
     await tx.execute(lockProfiles(true)); // the target is not deleted / deactivated until this commits
     const target = await issuingProfile(profileId); // must exist, be active and not deleted
     const [row] = await tx
@@ -463,15 +466,15 @@ export async function setDocumentProfile(
     // a sale order waiting for approval is its creator's alone, as its save (sale-orders.ts saveSaleOrder)
     if (kind === 'sale_order' && row.status === AS.WAIT && !byAdmin) {
       const [so] = await tx
-        .select({ by: saleOutHd.documentCreateBy })
-        .from(saleOutHd)
-        .where(eq(saleOutHd.saleOutHdNo, no));
+        .select({ by: saleOrder.createdByAppUserPk })
+        .from(saleOrder)
+        .where(eq(saleOrder.saleOrderNo, no));
       if (so?.by !== byUserId) throw new HttpError(403, WAITING_CREATOR_ONLY);
     }
     const cur = await profileIdOf(row.cur); // NULL (legacy) = SHD
     if (cur === target.id) return target;
     const from = await getDocumentProfile(cur);
-    await tx.update(d.table).set({ documentProfileId: target.pk }).where(eq(d.key, no));
+    await tx.update(d.table).set({ documentProfilePk: target.pk }).where(eq(d.key, no));
     await audit(tx, byUserId, {
       action: 'UPDATE',
       module: d.module,

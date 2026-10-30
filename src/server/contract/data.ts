@@ -5,7 +5,6 @@ import { deletedMode } from './admin';
 import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, page } from './common';
 import { defineOperation, type Operation } from './registry';
 import {
-  AuditRow,
   Customer,
   DocumentProfile,
   IssuedLine,
@@ -102,30 +101,6 @@ const list = <T extends z.ZodType>(row: T) => z.array(row);
 const one = <T extends z.ZodType>(row: T) => z.array(row).length(1);
 const strings = z.array(s);
 
-const auditFilters = {
-  from: ymd,
-  to: ymd,
-  user: s.optional().meta({ description: "a user's id (uuid) = that user's lines; anything else = the name contains" }),
-  module: s.optional(),
-  entity: s.optional(),
-};
-resource(
-  'audit_log',
-  'Audit log (ประวัติการใช้งาน)',
-  ADMIN,
-  list(AuditRow),
-  {
-    ...auditFilters,
-    key: s.optional().meta({
-      description:
-        "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)",
-    }),
-    action: s.optional(),
-    q,
-    limit,
-  },
-  AuditRow,
-);
 resource('audit_modules', 'The modules that appear in the audit log', ADMIN, strings);
 resource('users', 'System users', ADMIN, list(SystemUser), { deleted: deletedMode });
 resource('permissions', 'The permission matrix', ADMIN, list(Permission));
@@ -436,7 +411,7 @@ export const exportXlsx = defineOperation({
   tags,
   summary: 'Download a list as Excel (.xlsx), with the same filters as GET /data/{resource}',
   description:
-    "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
+    "View on the list's module (users, master data, audit / security log, anomalies: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
   params: z.object({
     resource: z.enum(
       [
@@ -450,6 +425,8 @@ export const exportXlsx = defineOperation({
         'movements',
         'issued_lines',
         'audit_log',
+        'security_log',
+        'anomalies',
         ...REPORT_KEYS.map((k) => `report_${k}`),
         'categories',
         'manufacturers',

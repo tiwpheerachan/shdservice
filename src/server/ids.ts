@@ -5,14 +5,13 @@ import { db, type Db, type Tx } from '@/db/client';
 import { HttpError } from './http-error';
 
 /**
- * uuid → row (ADR 0008 phase 1). The API speaks only the uuid `id`; joins and foreign keys still use the
- * legacy integer / text keys until phase 2 makes `pk` the key. The uuid comes from the contract's
- * `uuid()` / `byUuid()` (src/server/contract/common.ts) — already checked and lower-cased.
+ * uuid → row / pk (ADR 0008). The API speaks only the uuid `id`; joins and foreign keys use the bigint
+ * `pk` (phase 2, drizzle/0006). The uuid comes from the contract's `uuid()` / `byUuid()`
+ * (src/server/contract/common.ts) — already checked and lower-cased.
  * Not found → 404 `ไม่พบ<what>` (`what` = 'งาน', 'ผู้ใช้', 'โปรไฟล์' …), the same answer byUuid gives a non-uuid.
- * ponytail: phase-1 bridge, a lookup per id — phase 2 drops pkOf / pksOf once FKs are on `pk`.
  */
 
-type WithId = PgTable & { id: PgColumn };
+type WithId = PgTable & { pk: PgColumn; id: PgColumn };
 type Reader = Db | Tx;
 
 const notFound = (what: string) => new HttpError(404, `ไม่พบ${what}`);
@@ -33,38 +32,31 @@ export async function rowByUuid<T extends WithId>(
   return row as T['$inferSelect'];
 }
 
-/** the internal key (`key`, a column of `table`: user_id, job_no …) of the row whose uuid is `id` */
-export async function pkOf<T extends WithId, K extends PgColumn>(
-  table: T,
-  key: K,
-  id: string,
-  what: string,
-  q: Reader = db,
-): Promise<NonNullable<K['_']['data']>> {
+/** the `pk` of the row whose uuid is `id` */
+export async function pkOf(table: WithId, id: string, what: string, q: Reader = db): Promise<number> {
   const [row] = await q
-    .select({ k: key })
+    .select({ pk: table.pk })
     .from(table as PgTable)
     .where(eq(table.id, id))
     .limit(1);
-  if (row?.k == null) throw notFound(what);
-  return row.k as NonNullable<K['_']['data']>;
+  if (row?.pk == null) throw notFound(what);
+  return Number(row.pk);
 }
 
-/** pkOf for a list: uuid → key for every id (duplicates read once); any id without a row → 404 */
-export async function pksOf<T extends WithId, K extends PgColumn>(
-  table: T,
-  key: K,
+/** pkOf for a list: uuid → pk for every id (duplicates read once); any id without a row → 404 */
+export async function pksOf(
+  table: WithId,
   ids: readonly string[],
   what: string,
   q: Reader = db,
-): Promise<Map<string, NonNullable<K['_']['data']>>> {
+): Promise<Map<string, number>> {
   const want = [...new Set(ids)];
   if (!want.length) return new Map();
   const rows = await q
-    .select({ id: table.id, k: key })
+    .select({ id: table.id, pk: table.pk })
     .from(table as PgTable)
     .where(inArray(table.id, want));
-  const map = new Map(rows.filter((r) => r.k != null).map((r) => [String(r.id), r.k as NonNullable<K['_']['data']>]));
+  const map = new Map(rows.map((r) => [String(r.id), Number(r.pk)]));
   if (map.size < want.length) throw notFound(what);
   return map;
 }

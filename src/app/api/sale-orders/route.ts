@@ -11,7 +11,7 @@ export const POST = handle(async (req: NextRequest) => {
   // before the permission check: add or edit depends on `no`
   const body = await parseBody(req, saleOrderSave);
   const user = await requireCan(req, 'Sale Order', body.no ? 'edit' : 'add');
-  return idempotent(req, user.userId, async () => {
+  return idempotent(req, user.pk, async () => {
     const order = await saveSaleOrder(body, user);
     return NextResponse.json({ ok: true, order }, { status: body.no ? 200 : 201 });
   });

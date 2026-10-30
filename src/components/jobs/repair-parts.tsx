@@ -107,7 +107,7 @@ function IssuedHint({ l }: { l: Line }) {
 }
 
 function RemoveLine({ line, lock, remove }: { line: Line; lock?: string; remove: (l: Line) => void }) {
-  if (line.locked || line.issued || lock) return null;
+  if ((line.locked && !line.cancellable) || line.issued || lock) return null;
   return (
     <button
       onClick={() => remove(line)}

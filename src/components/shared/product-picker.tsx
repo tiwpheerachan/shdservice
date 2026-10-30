@@ -36,6 +36,7 @@ export function ProductPicker({
   align = 'start',
   clearable = false,
   id,
+  inactive = false,
 }: {
   /** selected sysCode (or an extra's code); empty = nothing chosen */
   value?: string;
@@ -50,6 +51,8 @@ export function ProductPicker({
   align?: 'start' | 'end';
   clearable?: boolean;
   id?: string;
+  /** INACTIVE parts too (stock receive — the owner rule: they still arrive); default ACTIVE only */
+  inactive?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(id, { label: placeholder });
@@ -62,7 +65,7 @@ export function ProductPicker({
   const settled = useDebouncedValue(term, 250);
   const serverTerm = settled.split(/\s+/).reduce((a, w) => (w.length > a.length ? w : a), '');
   const searchable = serverTerm.length >= MIN_CHARS;
-  const found = useProductSearch(searchable ? serverTerm : '', { keepPrevious: true });
+  const found = useProductSearch(searchable ? serverTerm : '', { keepPrevious: true }, inactive ? 'exclude' : 'active');
   const typedEnough = term.split(/\s+/).some((w) => w.length >= MIN_CHARS);
   const rows = React.useMemo(
     () => (typedEnough && searchable && !found.error ? matchProducts(found.data ?? [], term) : []),

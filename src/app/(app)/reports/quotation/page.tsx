@@ -2,7 +2,8 @@
 
 import { ReportView, type ReportValues } from '@/components/shared/report-view';
 import { QUOTATION_STATUS_OPTIONS } from '@/data/options';
-import { useManufacturers, useModels, useQuotationStatuses, useQuotationSummary, useReportRows } from '@/data/db';
+import { useManufacturers, useQuotationStatuses, useQuotationSummary, useReportRows } from '@/data/db';
+import { useBrandModels } from '../use-brand-models';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { kpisOr, useReportAccess } from '../report-access';
@@ -43,7 +44,7 @@ export default function Page() {
   const { data: sum, error: sumError } = useQuotationSummary({ ...filters, q: table.q });
   const { data: STATUSES } = useQuotationStatuses();
   const { data: BRANDS, ...brandsLookup } = useManufacturers('exclude');
-  const { data: MODELS, ...modelsLookup } = useModels('exclude');
+  const { MODELS, modelsLookup, wantModels } = useBrandModels();
   const { rows, total, loading, error, refetch } = useReportRows(report, { ...pageArgs, ...filters });
   const columns = useReportColumns(report);
   const S = sum[0];
@@ -73,6 +74,7 @@ export default function Page() {
           label: 'รุ่น',
           options: (d) => ['ทั้งหมด', ...modelsOfBrand(MODELS, d.brand).map((m) => m.name)],
           lookup: modelsLookup,
+          onWant: wantModels,
         },
         { kind: 'date', key: 'from', label: 'วันที่สร้างใบเสนอราคา (ตั้งแต่)', value: f.from },
         { kind: 'date', key: 'to', label: 'วันที่สร้างใบเสนอราคา (ถึง)', value: f.to },

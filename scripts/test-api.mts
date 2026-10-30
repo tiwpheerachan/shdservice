@@ -70,7 +70,15 @@ const ROUTES = routeFiles()
   .sort((a, b) => a.names.length - b.names.length);
 
 type Who = { email: string } | null;
-type Init = { method?: string; body?: unknown; form?: FormData; headers?: Record<string, string>; as?: Who };
+type Init = {
+  method?: string;
+  body?: unknown;
+  form?: FormData;
+  headers?: Record<string, string>;
+  as?: Who;
+  /** false: a save that changes nothing (no row to log) — the trail check is skipped */
+  audit?: false;
+};
 
 async function call(url: string, init: Init = {}): Promise<{ status: number; body: Record<string, unknown> }> {
   const method = init.method ?? 'GET';
@@ -95,10 +103,79 @@ async function call(url: string, init: Init = {}): Promise<{ status: number; bod
     headers,
     body: init.form ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
   });
+  const before = init.audit === false ? null : await logMarks();
   const res = await handler(req, { params: Promise.resolve(params) });
   const type = res.headers.get('content-type') ?? '';
   const body = type.includes('json') ? ((await res.json()) as Record<string, unknown>) : {};
+  // a missing / wrong trail row is collected, not thrown: the flow goes on, the last test lists every one
+  if (before)
+    await checkTrail(method, pathname, res.status, who, before).catch((e: Error) => trailProblems.push(e.message));
   return { status: res.status, body };
+}
+
+/* ---- the audit trail (ADR 0008 "Phase 2 — audit trail", R1): every change leaves its row ---- */
+const trailProblems: string[] = [];
+type Marks = { a: number; s: number };
+const logMarks = async (): Promise<Marks> =>
+  (
+    await pool.query<Marks>(`SELECT (SELECT coalesce(max(pk), 0) FROM audit_log)::int AS a,
+                                    (SELECT coalesce(max(pk), 0) FROM security_log)::int AS s`)
+  ).rows[0]!;
+type LogRow = {
+  log: 'audit' | 'security';
+  what: string;
+  entity: string | null;
+  email: string | null;
+  role: string | null;
+  request_id: string | null;
+  session_id: string | null;
+  permission: string | null;
+  entity_no: string | null;
+  entity_id: string | null;
+};
+/** bookkeeping, not a change of data: the public /track, the tutorial state, the video upload's first step */
+const UNLOGGED = [/^\/api\/track\//, /^\/api\/me\/tour$/, /^POST \/api\/attachments\/video$/];
+/** a non-GET that answered 2xx wrote audit_log (or security_log: sign-in / out, print, role / permission / status) rows
+ *  naming the caller as at the time, the request and the row; anything refused wrote no audit_log row. An export
+ *  (GET /api/export/…) writes one security_log EXPORT and no audit_log row. */
+async function checkTrail(method: string, path: string, status: number, who: Who, m: Marks) {
+  const exporting = method === 'GET' && path.startsWith('/api/export/') && status === 200;
+  if (method === 'GET' && !exporting) return;
+  if (UNLOGGED.some((r) => r.test(path) || r.test(`${method} ${path}`))) return;
+  const rows = (
+    await pool.query<LogRow>(
+      `SELECT 'audit' AS log, action AS what, entity, actor_email AS email, actor_role AS role, request_id, session_id,
+              permission, entity_no, entity_id::text AS entity_id FROM audit_log WHERE pk > $1
+       UNION ALL
+       SELECT 'security', event || ' ' || result, entity, actor_email, actor_role, request_id, session_id, permission,
+              entity_no, entity_id::text FROM security_log WHERE pk > $2`,
+      [m.a, m.s],
+    )
+  ).rows;
+  const audits = rows.filter((r) => r.log === 'audit');
+  const where = `${method} ${path} → ${status}: ${JSON.stringify(rows)}`;
+  if (exporting) {
+    assert.deepEqual(
+      rows.map((r) => [r.log, r.what]),
+      [['security', 'EXPORT OK']],
+      `export: one EXPORT, no audit_log row — ${where}`,
+    );
+  } else if (status >= 300) {
+    assert.equal(audits.length, 0, `a refused change wrote audit_log — ${where}`);
+    return;
+  } else assert.ok(rows.length > 0, `a change with no audit_log / security_log row — ${where}`);
+  for (const r of rows) {
+    if (who) assert.equal(r.email?.toLowerCase(), who.email.toLowerCase(), `actor_email — ${where}`);
+    assert.ok(r.request_id, `request_id — ${where}`);
+    if (who) assert.ok(r.role && r.session_id, `actor_role / session_id — ${where}`);
+    if (r.log === 'audit') {
+      assert.ok(r.permission, `permission — ${where}`);
+      assert.ok(r.entity_no || r.entity_id, `entity_no / entity_id — ${where}`);
+      // a job / quotation / sale order row always names the record by its uuid too
+      if (['job', 'quotation', 'sale_order'].includes(r.entity ?? '')) assert.ok(r.entity_id, `entity_id — ${where}`);
+    }
+  }
+  assert.equal(new Set(rows.map((r) => r.request_id)).size, 1, `one request — ${where}`);
 }
 
 let passed = 0;
@@ -124,17 +201,7 @@ const expect = (statuses: number[], url: string, init?: Init) =>
 await pool.query('DELETE FROM track_rate; DELETE FROM track_block');
 try {
   console.log('\nData — every resource (and its page)');
-  const PAGED = [
-    'audit_log',
-    'models',
-    'products',
-    'customers',
-    'issued_lines',
-    'movements',
-    'jobs',
-    'quotations',
-    'sale_orders',
-  ];
+  const PAGED = ['models', 'products', 'customers', 'issued_lines', 'movements', 'jobs', 'quotations', 'sale_orders'];
   for (const path of Object.keys((await import('@/server/contract/openapi')).openapi.paths)) {
     if (!path.startsWith('/data/')) continue;
     const name = path.slice('/data/'.length);
@@ -152,7 +219,7 @@ try {
   // a province / district by its uuid (ADR 0008)
   const place = (
     await pool.query<{ c: string; d: string }>(
-      `SELECT c.id::text AS c, d.id::text AS d FROM mt_district d JOIN mt_city c USING (city_id) ORDER BY d.district_id LIMIT 1`,
+      `SELECT c.id::text AS c, d.id::text AS d FROM district d JOIN province c ON c.pk = d.province_pk ORDER BY d.pk LIMIT 1`,
     )
   ).rows[0];
   await test('GET /api/address by uuid → the districts / sub-districts; an old int id → no rows', async () => {
@@ -171,12 +238,121 @@ try {
   const uuidOf = async (sqlText: string) => (await pool.query<{ id: string }>(sqlText)).rows[0]!.id;
   const tdp1 = await uuidOf(`SELECT id::text AS id FROM product WHERE product_code = 'TDP1'`);
   await expect([200], `/api/products/${tdp1}`);
+  await expect([200], `/api/products/${tdp1}/card?offset=50`);
+  await expect([400], `/api/products/${tdp1}/card?offset=-1`);
+  await expect([404], '/api/products/TDP1/card');
+  await test('stock card: page 1 (newest 50) + โหลดเพิ่ม pages = the whole card, same lines / order / running balances', async () => {
+    // 130 movements of one part (receipts and issues, some at the same time — the line pk breaks the tie)
+    await pool.query(`
+      DELETE FROM stock_move_line WHERE product_pk = 9297;
+      DELETE FROM stock_move WHERE stock_move_no LIKE 'TDCARD%';
+      DELETE FROM product_stock WHERE product_pk = 9297 OR pk = 9297; DELETE FROM product WHERE pk = 9297;
+      INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE
+        VALUES (9297, 'TDPCARD', 'TD การ์ดสต๊อก', 'ACTIVE');
+      INSERT INTO stock_move (stock_move_no, stock_move_type_id, create_date, created_by_app_user_pk)
+        SELECT 'TDCARD' || lpad(n::text, 4, '0'), CASE WHEN n % 3 = 0 THEN 5 ELSE 1 END,
+               timestamp '2026-01-01' + (n / 2) * interval '1 hour', 9101
+          FROM generate_series(1, 130) n;
+      INSERT INTO stock_move_line (stock_move_pk, product_pk, item_quantity)
+        SELECT m.pk, 9297, 1 + (m.pk % 4) FROM stock_move m WHERE m.stock_move_no LIKE 'TDCARD%' ORDER BY m.pk;`);
+    const { productStockCard } = await import('@/server/services/stock');
+    const id = await uuidOf(`SELECT id::text AS id FROM product WHERE product_code = 'TDPCARD'`);
+    const first = (await call(`/api/products/${id}`)).body as { card: unknown[]; cardTotal: number };
+    assert.equal(first.cardTotal, 130);
+    assert.equal(first.card.length, 50);
+    const lines = [...first.card];
+    while (lines.length < first.cardTotal) {
+      const more = (await call(`/api/products/${id}/card?offset=${lines.length}`)).body as {
+        card: unknown[];
+        total: number;
+      };
+      assert.equal(more.total, 130);
+      assert.ok(more.card.length > 0, `a page at ${lines.length}`);
+      lines.push(...more.card);
+    }
+    const whole = await productStockCard('TDPCARD');
+    assert.deepEqual(lines, JSON.parse(JSON.stringify(whole)));
+    // the balance rule, unchanged: oldest first from 0, each line's before = the line before's after
+    const card = whole as { before: number; income: number; outcome: number; after: number }[];
+    for (let i = card.length - 1, bal = 0; i >= 0; i--) {
+      const l = card[i]!;
+      assert.equal(l.before, bal, `line ${i} before`);
+      assert.equal(l.after, l.before + l.income - l.outcome, `line ${i} after`);
+      bal = l.after;
+    }
+  });
   await expect([404], '/api/products/TDP1');
   await expect([404], '/api/products/00000000-0000-7000-8000-000000000000');
   await expect([404], '/api/products/NOPE-' + rand);
   // staff filters take a user's uuid (a name still works where the page types one)
-  const tdAdmin = await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9101`);
-  await expect([200], `/api/data/audit_log?paged=1&user=${tdAdmin}`);
+  const tdAdmin = await uuidOf(`SELECT id::text AS id FROM app_user WHERE pk = 9101`);
+  // the System Admin logs (ADR 0008 audit trail): a page each, a non-admin refused
+  await expect([200], `/api/audit?user=${tdAdmin}`);
+  await expect([200], `/api/audit/security?user=${tdAdmin}&event=LOGIN`);
+  await expect([403], '/api/audit', { as: VIEWER });
+  await expect([403], '/api/audit/security', { as: VIEWER });
+  await expect([400], '/api/audit?from=2026-02-30');
+  // the anomalies bell and its list: System Admin only
+  await expect([200], '/api/alerts/anomalies');
+  await expect([200], '/api/alerts/anomalies/list?category=stock_negative');
+  await expect([200], '/api/alerts/anomalies/list?page=2&pageSize=5');
+  await expect([403], '/api/alerts/anomalies', { as: VIEWER });
+  await expect([403], '/api/alerts/anomalies/list?category=job_total', { as: VIEWER });
+  await test('audit log: a job row holds user / master ids, a user row its uuid — the list (and its Excel) answers names, never a pk', async () => {
+    const key = `TDJAUD${rand}`.slice(0, 20);
+    const [u] = (
+      await pool.query<{ name: string; email: string }>(
+        `SELECT btrim(concat_ws(' ', btrim(first_name), btrim(last_name))) AS name, btrim(email_address) AS email FROM app_user WHERE pk = 9101`,
+      )
+    ).rows;
+    await pool.query(
+      `INSERT INTO audit_log (at, actor_name, action, module, entity, entity_key, summary, changes) VALUES
+       (now(), 'qa', 'UPDATE', 'Job Management', 'job', $1, 'มอบหมายงานให้ช่าง #9101', $2),
+       (now(), 'qa', 'LOGIN', 'Auth', 'app_user', $3, 'เข้าสู่ระบบ', NULL)`,
+      [
+        key,
+        JSON.stringify({
+          engineerId: [0, 9101],
+          sendBy: [null, 9101],
+          jobReturnBy: [null, 9101],
+          jobStatusId: [1, 0],
+          quotationStatusId: [1, 3],
+          approveStatusId: [2, 4],
+        }),
+        tdAdmin,
+      ],
+    );
+    const job = (await call(`/api/audit?no=${key}`)).body;
+    const [r] = job.rows as { summary: string; changes: Record<string, unknown[]> }[];
+    assert.deepEqual(r!.changes, {
+      engineerId: [null, u!.name],
+      sendBy: [null, u!.name],
+      jobReturnBy: [null, u!.name],
+      jobStatusId: ['รับงานใหม่', 'ยกเลิก'],
+      quotationStatusId: ['รอเสนอราคา', 'ลูกค้าตกลงซ่อม'],
+      approveStatusId: ['รออนุมัติ', 'อนุมัติแล้ว'],
+    });
+    assert.equal(r!.summary, `มอบหมายงานให้ช่าง ${u!.name}`);
+    const login = (await call(`/api/audit?no=${tdAdmin}&action=LOGIN`)).body;
+    const [l] = login.rows as { key: string }[];
+    assert.equal(l!.key, `${u!.name} · ${u!.email}`);
+  });
+  await test("jobs: customerCode filters by the job's customer (customer_pk), not its text snapshot (that only for a job without one); a row carries the customer's uuid", async () => {
+    await pool.query(`DELETE FROM job WHERE job_no = 'TDJCUS';
+      INSERT INTO job (job_no, job_status_id, record_status, customer_pk, customer_detail, model_pk)
+      VALUES ('TDJCUS', 1, 'ACTIVE', (SELECT pk FROM customer WHERE customer_code = 'TDC001'), 'X9 ข้อความเก่า',
+              (SELECT pk FROM model WHERE model_code = 'TST-M'))`);
+    const tdc1 = await uuidOf(`SELECT id::text AS id FROM customer WHERE customer_code = 'TDC001'`);
+    const rows = (await call('/api/data/jobs?paged=1&pageSize=200&customerCode=TDC001&q=TDJCUS')).body.rows as {
+      no: string;
+      customerId?: string;
+    }[];
+    assert.deepEqual(
+      rows.map((r) => [r.no, r.customerId]),
+      [['TDJCUS', tdc1]],
+    );
+    assert.deepEqual((await call('/api/data/jobs?paged=1&customerCode=X9&q=TDJCUS')).body.rows, []);
+  });
   await expect([200], `/api/data/products?paged=1&creator=${tdAdmin}`);
   await expect([200], `/api/data/report_rows?report=sale_order&createdBy=${tdAdmin}`);
   await expect([200], '/api/export/customers');
@@ -209,8 +385,9 @@ try {
   });
   await expect([404, 503], '/api/files?path=jobs/TDJ0004/attachments/x.mp4&download=1');
   await test('POST /api/attachments to a deleted job → 409, nothing stored', async () => {
-    await pool.query(`DELETE FROM job WHERE job_no = 'TDJDEL';
-      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJDEL', 1, 'DELETED')`);
+    await pool.query(`DELETE FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJDEL');
+      DELETE FROM job_status_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJDEL'); DELETE FROM job WHERE job_no = 'TDJDEL';
+      INSERT INTO job (job_no, job_status_id, record_status, model_pk) VALUES ('TDJDEL', 1, 'DELETED', (SELECT pk FROM model WHERE model_code = 'TST-M'))`);
     const f = form({ jobNo: 'TDJDEL' });
     f.set(
       'file',
@@ -219,7 +396,9 @@ try {
     const r = await call('/api/attachments', { method: 'POST', form: f });
     assert.equal(r.status, 409, JSON.stringify(r.body));
     assert.deepEqual(r.body, { error: 'งานนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้' });
-    const { rows } = await pool.query(`SELECT 1 FROM document_attach WHERE reference_item_code = 'TDJDEL'`);
+    const { rows } = await pool.query(
+      `SELECT 1 FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJDEL')`,
+    );
     assert.equal(rows.length, 0);
   });
   await test('POST /api/attachments with a 10000×10000 PNG → 413 (photos go through optimizeImage)', async () => {
@@ -265,9 +444,10 @@ try {
     method: 'POST',
     body: {
       jobNos: ['TDJ0004'],
-      engineerId: await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9110`),
+      engineerId: await uuidOf(`SELECT id::text AS id FROM app_user WHERE pk = 9110`),
       takeOver: true,
     },
+    audit: false, // test:domain left TDJ0004 with this engineer: nothing changes, nothing to log
   });
   await expect([400], '/api/jobs', { method: 'POST', body: {} });
   await expect([200, 400, 409], J4, { method: 'PATCH', body: { version: -1 } });
@@ -322,7 +502,7 @@ try {
     assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
     assert.equal((await call('/api/me/tour', { method: 'POST', body: { off: true } })).status, 200);
     const { rows } = await pool.query(
-      `SELECT t.seen, t.off FROM app_user_tour t JOIN app_user u USING (user_id) WHERE lower(u.email_address) = lower($1)`,
+      `SELECT t.seen, t.off FROM app_user_tour t JOIN app_user u ON u.pk = t.app_user_pk WHERE lower(u.email_address) = lower($1)`,
       [ADMIN.email],
     );
     assert.deepEqual(rows, [{ seen: ['/jobs/new'], off: true }], 'the path once, off kept');
@@ -340,7 +520,7 @@ try {
   });
   // deleted customers (PDPA) are System Admin's alone: anyone else asking for them gets the live list, no 400
   await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCDEL';
-    INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status)
+    INSERT INTO customer (pk, customer_code, customer_name, phone_number, record_status) OVERRIDING SYSTEM VALUE
       VALUES (9601, 'TDCDEL', 'TD ลูกค้าที่ลบแล้ว', '02-000-0001', 'DELETED')`);
   for (const [who, sees] of [
     [VIEWER, false],
@@ -389,7 +569,7 @@ try {
   if (quotationId) await expect([200], `/api/quotations/${quotationId}`);
   await expect([404], '/api/quotations/NOPE' + rand);
   await expect([404], '/api/quotations/00000000-0000-7000-8000-000000000000');
-  const salesId = await uuidOf(`SELECT id::text AS id FROM app_user WHERE user_id = 9107`);
+  const salesId = await uuidOf(`SELECT id::text AS id FROM app_user WHERE pk = 9107`);
   const shdId = await uuidOf(`SELECT id::text AS id FROM document_profile WHERE code = 'SHD'`);
   let soNo = '';
   let soId = '';
@@ -408,6 +588,7 @@ try {
   await expect([200], '/api/documents/profile', {
     method: 'POST',
     body: { kind: 'sale_order', no: soNo, profileId: shdId },
+    audit: false, // the order is already SHD's: nothing changes, nothing to log
   });
   await expect([200], `/api/sale-orders/${soId}/approve`, {
     method: 'POST',
@@ -572,8 +753,8 @@ try {
   const DOC: Record<string, [string, string]> = {
     products: ['product', 'product_code'],
     jobs: ['job', 'job_no'],
-    quotations: ['quotation_hd', 'quotation_no'],
-    sale_orders: ['sale_out_hd', 'sale_out_hd_no'],
+    quotations: ['quotation', 'quotation_no'],
+    sale_orders: ['sale_order', 'sale_order_no'],
     customers: ['customer', 'customer_code'],
   };
   const del = async (table: string, key: string, as?: Who, status = 'DELETED', remark = 'TD เหตุผล') => {
@@ -588,12 +769,12 @@ try {
     });
   };
   await test('a job with a part waiting for stock / issued and not back → 409, the job stays', async () => {
-    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRDEL';
-      DELETE FROM job_log WHERE job_no = 'TDJRDEL';
+    await pool.query(`DELETE FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRDEL');
+      DELETE FROM job_status_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRDEL');
       DELETE FROM job WHERE job_no = 'TDJRDEL';
-      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJRDEL', 11, 'ACTIVE');
-      INSERT INTO job_order_spare_part_log (job_no, order_status_id, request_qty, grant_qty, return_qty)
-        VALUES ('TDJRDEL', 1, 3, 1, 0)`);
+      INSERT INTO job (job_no, job_status_id, record_status, model_pk) VALUES ('TDJRDEL', 11, 'ACTIVE', (SELECT pk FROM model WHERE model_code = 'TST-M'));
+      INSERT INTO job_part (job_pk, job_part_status_id, request_qty, grant_qty, return_qty)
+        VALUES ((SELECT pk FROM job WHERE job_no = 'TDJRDEL'), 1, 3, 1, 0)`);
     const r = await del('jobs', 'TDJRDEL');
     assert.equal(r.status, 409, JSON.stringify(r.body));
     assert.match(String(r.body.error), /อะไหล่รอเบิก/);
@@ -601,31 +782,34 @@ try {
     assert.equal(rows[0].rs, 'ACTIVE');
     // every part back / cancelled → the delete goes through
     await pool.query(
-      `UPDATE job_order_spare_part_log SET order_status_id = 5, return_qty = 1 WHERE job_no = 'TDJRDEL'`,
+      `UPDATE job_part SET job_part_status_id = 5, return_qty = 1 WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRDEL')`,
     );
     assert.equal((await del('jobs', 'TDJRDEL')).status, 200);
   });
   await test('a part a job is still waiting for → 409 naming the job; the part stays', async () => {
-    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRPART';
-      DELETE FROM job_log WHERE job_no = 'TDJRPART'; DELETE FROM job WHERE job_no = 'TDJRPART';
-      INSERT INTO job (job_no, job_status_id, record_status) VALUES ('TDJRPART', 11, 'ACTIVE');
-      INSERT INTO job_order_spare_part_log (job_no, spare_part_code, order_status_id, request_qty, grant_qty, return_qty)
-        VALUES ('TDJRPART', 'TDP1', 1, 1, 0, 0)`);
+    await pool.query(`DELETE FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRPART');
+      DELETE FROM job_status_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRPART'); DELETE FROM job WHERE job_no = 'TDJRPART';
+      INSERT INTO job (job_no, job_status_id, record_status, model_pk) VALUES ('TDJRPART', 11, 'ACTIVE', (SELECT pk FROM model WHERE model_code = 'TST-M'));
+      INSERT INTO job_part (job_pk, product_pk, job_part_status_id, request_qty, grant_qty, return_qty)
+        VALUES ((SELECT pk FROM job WHERE job_no = 'TDJRPART'), (SELECT pk FROM product WHERE product_code = 'TDP1'), 1, 1, 0, 0)`);
     const r = await del('products', 'TDP1');
     assert.equal(r.status, 409, JSON.stringify(r.body));
     assert.match(String(r.body.error), /TDP1 มีงานรอเบิกอยู่ \(.*J/);
     const { rows } = await pool.query(`SELECT record_status AS rs FROM product WHERE product_code = 'TDP1'`);
     assert.equal(rows[0].rs, 'ACTIVE');
-    await pool.query(`DELETE FROM job_order_spare_part_log WHERE job_no = 'TDJRPART'`);
+    await pool.query(`DELETE FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRPART')`);
   });
   await test("a job's agreed quotation → 409 (the job would point at a deleted document)", async () => {
-    await pool.query(`DELETE FROM job WHERE job_no = 'TDJRQ'; DELETE FROM quotation_hd WHERE quotation_no = 'TDQRDEL';
-      INSERT INTO quotation_hd (quotation_no, record_status) VALUES ('TDQRDEL', 'ACTIVE');
-      INSERT INTO job (job_no, job_status_id, record_status, quotation_no_approved) VALUES ('TDJRQ', 12, 'ACTIVE', 'TDQRDEL')`);
+    await pool.query(`DELETE FROM job_status_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJRQ'); DELETE FROM job WHERE job_no = 'TDJRQ';
+      DELETE FROM quotation WHERE quotation_no = 'TDQRDEL';
+      INSERT INTO quotation (quotation_no, record_status) VALUES ('TDQRDEL', 'ACTIVE');
+      INSERT INTO job (job_no, job_status_id, record_status, model_pk, approved_quotation_pk)
+        VALUES ('TDJRQ', 12, 'ACTIVE', (SELECT pk FROM model WHERE model_code = 'TST-M'),
+                (SELECT pk FROM quotation WHERE quotation_no = 'TDQRDEL'))`);
     const r = await del('quotations', 'TDQRDEL');
     assert.equal(r.status, 409, JSON.stringify(r.body));
     assert.match(String(r.body.error), /TDJRQ/);
-    await pool.query(`UPDATE job SET quotation_no_approved = NULL WHERE job_no = 'TDJRQ'`);
+    await pool.query(`UPDATE job SET approved_quotation_pk = NULL WHERE job_no = 'TDJRQ'`);
     assert.equal((await del('quotations', 'TDQRDEL')).status, 200);
   });
   await test('a quotation / sale order cannot be set INACTIVE → 400 (a document is ACTIVE or DELETED)', async () => {
@@ -633,25 +817,27 @@ try {
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
   await test("someone else's pending sale order: only its creator, an approver or an admin may cancel it", async () => {
-    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL';
-      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+    await pool.query(`DELETE FROM sale_order WHERE sale_order_no = 'TDSORDEL';
+      INSERT INTO sale_order (sale_order_no, approve_status_id, created_by_app_user_pk, record_status)
         VALUES ('TDSORDEL', 2, 9107, 'ACTIVE');
-      DELETE FROM app_config WHERE user_type = 'TD Canceller';
-      INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+      DELETE FROM role_permission WHERE user_type = 'TD Canceller';
+      INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
         VALUES ('TD Canceller', 'Sale Order', true, true, true, true);
-      DELETE FROM app_user WHERE email_address = 'td-canceller@example.invalid';
-      INSERT INTO app_user (username, password, first_name, user_type, is_active, email_address, record_status,
-                            session_version)
-        VALUES ('td-canceller', '', 'TD Canceller', 'TD Canceller', true, 'td-canceller@example.invalid', 'ACTIVE',
-                ${SV})`);
+      -- a fixed pk in test-domain's 9100–9199 (it removes other td-* users), upserted: what it did points at it
+      INSERT INTO app_user (pk, username, first_name, user_type, email_address, record_status, session_version)
+        OVERRIDING SYSTEM VALUE
+        VALUES (9111, 'td-canceller', 'TD Canceller', 'TD Canceller', 'td-canceller@example.invalid', 'ACTIVE', ${SV})
+        ON CONFLICT (pk) DO UPDATE SET username = excluded.username, first_name = excluded.first_name,
+          user_type = excluded.user_type, email_address = excluded.email_address, record_status = 'ACTIVE',
+          session_version = excluded.session_version, last_login = DEFAULT`);
     const r = await del('sale_orders', 'TDSORDEL', { email: 'td-canceller@example.invalid' });
     assert.equal(r.status, 403, JSON.stringify(r.body));
-    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL'`);
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_order WHERE sale_order_no = 'TDSORDEL'`);
     assert.equal(rows[0].rs, 'ACTIVE');
     assert.equal((await del('sale_orders', 'TDSORDEL')).status, 200); // System Admin
     // its creator cancels it with Sale Order edit alone (no delete right — the TD Seller role)
-    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2';
-      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+    await pool.query(`DELETE FROM sale_order WHERE sale_order_no = 'TDSORDEL2';
+      INSERT INTO sale_order (sale_order_no, approve_status_id, created_by_app_user_pk, record_status)
         VALUES ('TDSORDEL2', 1, 9107, 'ACTIVE')`);
     const own = await del('sale_orders', 'TDSORDEL2', { email: 'td-seller@example.invalid' });
     assert.equal(own.status, 200, JSON.stringify(own.body));
@@ -659,12 +845,12 @@ try {
     const again = await del('sale_orders', 'TDSORDEL2', undefined, 'DELETED', 'ทับเหตุผล');
     assert.equal(again.status, 409, JSON.stringify(again.body));
     const { rows: kept } = await pool.query(
-      `SELECT document_cancel_remark AS r, document_cancel_by AS b FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2'`,
+      `SELECT document_cancel_remark AS r, cancelled_by_app_user_pk::int AS b FROM sale_order WHERE sale_order_no = 'TDSORDEL2'`,
     );
     assert.deepEqual(kept[0], { r: 'TD เหตุผล', b: 9107 });
     // the detail carries the reason; the list / export read ยกเลิก, not the last approval step
     const got = await call(
-      `/api/sale-orders/${await uuidOf(`SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL2'`)}`,
+      `/api/sale-orders/${await uuidOf(`SELECT id::text AS id FROM sale_order WHERE sale_order_no = 'TDSORDEL2'`)}`,
     );
     const order = got.body.order as { cancelRemark: string; approve: string };
     assert.deepEqual([order.cancelRemark, order.approve], ['TD เหตุผล', 'ยกเลิก']);
@@ -697,10 +883,13 @@ try {
     assert.deepEqual(await codes('/api/customers/lookup?q=TDCLKD&deleted=all', clerk), [], 'non-admin asking');
   });
   await test('stock receive lists INACTIVE parts (deleted=exclude) — pickers stay ACTIVE; receiving one → 201', async () => {
-    await pool.query(`DELETE FROM product_none_serial WHERE product_id = 9298 OR item_id = 9298; DELETE FROM product WHERE product_id = 9298;
-      INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9298, 'TDPRCV', 'TD ปิดใช้งาน', 'INACTIVE');
-      INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain)
-        VALUES (9298, 9298, 0, 0, 0, 0)`);
+    // the last run's receipt line points at the part (its header stays, empty)
+    await pool.query(`DELETE FROM stock_move_line WHERE product_pk = 9298;
+      DELETE FROM product_stock WHERE product_pk = 9298 OR pk = 9298; DELETE FROM product WHERE pk = 9298;
+      INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE
+        VALUES (9298, 'TDPRCV', 'TD ปิดใช้งาน', 'INACTIVE');
+      INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain)
+        OVERRIDING SYSTEM VALUE VALUES (9298, 9298, 0, 0, 0, 0)`);
     const lite = async (deleted: string) =>
       (await call(`/api/data/products?fields=lite&q=TDPRCV${deleted}`)).body as unknown as {
         sysCode: string;
@@ -719,14 +908,14 @@ try {
     assert.equal(r.status, 201, JSON.stringify(r.body));
   });
   await test('cancelling a sale order needs a reason → 400 under remark, nothing changed', async () => {
-    await pool.query(`DELETE FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL3';
-      INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+    await pool.query(`DELETE FROM sale_order WHERE sale_order_no = 'TDSORDEL3';
+      INSERT INTO sale_order (sale_order_no, approve_status_id, created_by_app_user_pk, record_status)
         VALUES ('TDSORDEL3', 1, 9107, 'ACTIVE')`);
     for (const remark of ['', '   ']) {
       const r = await del('sale_orders', 'TDSORDEL3', undefined, 'DELETED', remark);
       assert.equal(r.status, 400, JSON.stringify(r.body));
     }
-    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = 'TDSORDEL3'`);
+    const { rows } = await pool.query(`SELECT record_status AS rs FROM sale_order WHERE sale_order_no = 'TDSORDEL3'`);
     assert.equal(rows[0].rs, 'ACTIVE');
   });
 
@@ -778,6 +967,10 @@ try {
   await expect([200], '/api/address?level=country');
 
   console.log('\nCoverage');
+  await test('every change left its audit trail (audit_log / security_log rows naming who, the request and the row)', () => {
+    assert.deepEqual(trailProblems, []);
+    return Promise.resolve();
+  });
   await test('every declared operation was called and answered as declared', async () => {
     const reached = new Set([...checked].map((name) => name.split(' ').slice(0, 2).join(' ')));
     const declared = registry.definitions.flatMap((d) =>

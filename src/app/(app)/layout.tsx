@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 /**
  * Authorization gate for the whole app. Runs on every navigation and reads the
  * user's CURRENT user_type/is_active straight from app_user, so an admin's
- * approval takes effect immediately. The user's permission grants (app_config)
+ * approval takes effect immediately. The user's permission grants (role_permission)
  * are handed to the client so the sidebar/buttons can hide what they may not do;
  * the API re-checks every write regardless.
  */
@@ -37,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // the tutorials' "asked already": a nicety — a failed read asks again rather than failing the page
   const [grants, tour] = await Promise.all([
     grantsForUserType(user.userType),
-    tourState(user.userId).catch(() => ({ seen: [], off: false })),
+    tourState(user.pk).catch(() => ({ seen: [], off: false })),
   ]);
 
   return (

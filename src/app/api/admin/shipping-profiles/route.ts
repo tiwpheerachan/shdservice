@@ -15,12 +15,12 @@ export const GET = handle(async (req: NextRequest) => {
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, shippingProfileSave);
-  return NextResponse.json({ row: await saveShippingProfile(body, me.userId) });
+  return NextResponse.json({ row: await saveShippingProfile(body, me.pk) });
 });
 
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const { id } = parseQuery(req, shippingProfileDelete); // not a uuid → 404
-  await deleteShippingProfile(id, me.userId);
+  await deleteShippingProfile(id, me.pk);
   return NextResponse.json({ ok: true });
 });

@@ -209,17 +209,25 @@ const SV = 3;
 await pool.query(`
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 1, 'รับงานใหม่', 1, 'Open', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 1);
-  DELETE FROM app_config WHERE user_type = 'QV Viewer';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  DELETE FROM role_permission WHERE user_type = 'QV Viewer';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('QV Viewer', 'Job Management', false, false, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9881 AND 9883 OR email_address LIKE 'qv-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- fixture users keep their pk (audit_log, append-only, points at them: never deleted) — upserted
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     (9881, 'QV', 'admin', '${ADMIN}', 'System Admin', 'ACTIVE', ${SV}),
     (9882, 'QV', 'viewer', '${VIEWER}', 'QV Viewer', 'ACTIVE', ${SV}),
-    (9883, 'QV', 'admin2', '${ADMIN2}', 'System Admin', 'ACTIVE', ${SV});
-  DELETE FROM document_attach WHERE reference_item_code LIKE 'QV%';
+    (9883, 'QV', 'admin2', '${ADMIN2}', 'System Admin', 'ACTIVE', ${SV})
+    ON CONFLICT (pk) DO UPDATE SET email_address = excluded.email_address, user_type = excluded.user_type,
+      record_status = 'ACTIVE', session_version = excluded.session_version, last_login = DEFAULT;
+  -- children before parents (RESTRICT, drizzle/0006)
+  DELETE FROM job_attachment WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QV%');
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no IN ('QV0001', 'QV0002'));
   DELETE FROM job WHERE job_no IN ('QV0001', 'QV0002');
-  INSERT INTO job (job_no, job_status_id, record_status) VALUES ('QV0001', 1, 'ACTIVE'), ('QV0002', 1, 'DELETED');
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, record_status)
+    SELECT (SELECT pk FROM model WHERE model_code = 'TST-M'), v.no, 1, v.rs FROM (VALUES ('QV0001', 'ACTIVE'), ('QV0002', 'DELETED')) v(no, rs);
 `);
 
 // ---- helpers ----
@@ -268,8 +276,8 @@ const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 1, 
 const attach = async (file: string, recordStatus = 'ACTIVE', name = 'รูปหน้าเครื่อง.jpg') =>
   (
     await pool.query<{ id: string }>(
-      `INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name, system_file_name, record_status)
-       VALUES ('Jobs', 'QV0001', $1, $2, $3) RETURNING id::text AS id`,
+      `INSERT INTO job_attachment (job_pk, original_file_name, system_file_name, record_status)
+       VALUES ((SELECT pk FROM job WHERE job_no = 'QV0001'), $1, $2, $3) RETURNING id::text AS id`,
       [name, file, recordStatus],
     )
   ).rows[0]!.id;
@@ -278,7 +286,7 @@ const open = (p: string, as?: string) =>
 const rows = async (file: string) =>
   (
     await pool.query(
-      `SELECT remark FROM document_attach WHERE reference_item_code = 'QV0001' AND system_file_name = $1`,
+      `SELECT remark FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'QV0001') AND system_file_name = $1`,
       [file],
     )
   ).rows;
@@ -555,12 +563,12 @@ await test('a removed attachment (soft delete), its video thumbnail, a file neve
   stored.set(path(pic), { bytes: MP4, type: 'image/jpeg' });
   const id = await attach(pic);
   assert.equal((await open(path(pic))).status, 307); // now in the picture cache
-  await pool.query(`UPDATE document_attach SET record_status = 'DELETED' WHERE id = $1`, [id]);
+  await pool.query(`UPDATE job_attachment SET record_status = 'DELETED' WHERE id = $1`, [id]);
   assert.deepEqual(await open(path(pic)).then((r) => [r.status, r.body]), [404, { error: 'ไม่พบไฟล์' }]);
   // a video's thumbnail follows the video's row
   const clip = [...r2.keys()].find((p) => r2.has(`${p}.jpg`))!;
   assert.equal((await open(`${clip}.jpg`)).status, 307);
-  await pool.query(`UPDATE document_attach SET record_status = 'DELETED' WHERE system_file_name = $1`, [
+  await pool.query(`UPDATE job_attachment SET record_status = 'DELETED' WHERE system_file_name = $1`, [
     clip.split('/').pop(),
   ]);
   assert.equal((await open(`${clip}.jpg`)).status, 404);

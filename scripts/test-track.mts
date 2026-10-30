@@ -98,7 +98,7 @@ const guard = await import('@/server/track-guard');
 const { TRACK_MSG } = await import('@/lib/track-public');
 const { clientIp } = await import('@/lib/client-ip');
 const { originAuthOk } = await import('@/lib/origin-auth');
-const { jobNoForLink, publicJobByNo, rotateToken, ensureToken, linkStatus, findDoc, docForLink } =
+const { jobNoForLink, publicJobByNo, rotateToken, linkStatus, findDoc, docForLink } =
   await import('@/server/services/tracking');
 const S = await import('@/lib/session');
 const { POST: sessionPOST } = await import('@/app/api/track/session/route');
@@ -407,11 +407,11 @@ try {
     await setLink('1 minute', null);
     const role = (
       await db.execute<{ t: string }>(
-        sql`SELECT DISTINCT trim(user_type) t FROM app_config WHERE user_type IS NOT NULL LIMIT 1`,
+        sql`SELECT DISTINCT trim(user_type) t FROM role_permission WHERE user_type IS NOT NULL LIMIT 1`,
       )
     ).rows[0].t;
-    await db.execute(sql`INSERT INTO app_user (username, password, first_name, last_name, user_type, is_active, record_status, email_address)
-    VALUES (${tempEmail.slice(0, 40)}, '', 'Track', 'Test', ${role}, true, 'ACTIVE', ${tempEmail})`);
+    await db.execute(sql`INSERT INTO app_user (username, first_name, last_name, user_type, record_status, email_address)
+    VALUES (${tempEmail.slice(0, 40)}, 'Track', 'Test', ${role}, 'ACTIVE', ${tempEmail})`);
     const now = Date.now();
     const cookie = `${S.SESSION_COOKIE}=${await S.signSession({ email: tempEmail, name: 't', role, approved: true, exp: now + 6e5, iat: now, sv: 0 })}`;
     const r = await sessionPOST(
@@ -462,36 +462,21 @@ try {
   const sha256hex = (t: string) => createHash('sha256').update(t).digest('hex');
   const linkRow = async (jobNo: string) =>
     (
-      await db.execute<{ raw: string | null; hash: string | null; row: string }>(sql`
-    SELECT track_token AS raw, track_token_hash AS hash, row_to_json(j)::text AS row FROM job j WHERE job_no = ${jobNo}`)
+      await db.execute<{ hash: string | null; row: string }>(sql`
+    SELECT track_token_hash AS hash, row_to_json(j)::text AS row FROM job j WHERE job_no = ${jobNo}`)
     ).rows[0];
   await test('a generated link: the DB holds only its sha256, never the token; lookup works by hash', async () => {
     const r = await linkRow(JOB_B.job_no);
-    assert.equal(r.raw, null);
     assert.equal(r.hash, sha256hex(JOB_B.track_token));
     assert.equal(r.row.includes(JOB_B.track_token), false, 'raw token stored somewhere in the job row');
     assert.equal(await jobNoForLink(JOB_B.track_token), JOB_B.job_no);
     assert.equal(await jobNoForLink(r.hash!.slice(0, 43)), null); // what a DB reader sees is no link
   });
-  await test('first link of a job is returned once; later calls cannot show it again', async () => {
-    const token = await ensureToken('TJ00003'); // seeded without a link
-    assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-    const r = await linkRow('TJ00003');
-    assert.equal(r.raw, null);
-    assert.equal(r.hash, sha256hex(token));
-    assert.equal(await ensureToken('TJ00003'), '');
-    assert.equal(await jobNoForLink(token), 'TJ00003');
-  });
-  await test('deploy overlap: a raw token the OLD code writes is hashed by the trigger and keeps working', async () => {
-    const old = 'oldCodeToken_' + 'x'.repeat(30); // 43 chars
-    await db.execute(sql`UPDATE job SET track_token = ${old}, track_token_at = now() AT TIME ZONE 'Asia/Bangkok',
-    track_opened_at = NULL, track_link_expires_at = NULL WHERE job_no = 'TJ00003'`);
-    assert.equal((await linkRow('TJ00003')).hash, sha256hex(old));
-    assert.equal(await jobNoForLink(old), 'TJ00003');
-    const fresh = (await rotateToken('TJ00003')).token; // new code: raw column emptied, old link dead
-    assert.equal((await linkRow('TJ00003')).raw, null);
-    assert.equal(await jobNoForLink(old), null);
-    assert.equal(await jobNoForLink(fresh), 'TJ00003');
+  await test('the raw-token column is gone (drizzle/0006: NULL in every row since 0033; the app writes the hash)', async () => {
+    const r = await db.execute(
+      sql`SELECT 1 FROM information_schema.columns WHERE table_name = 'job' AND column_name = 'track_token'`,
+    );
+    assert.equal(r.rows.length, 0);
   });
 
   console.log('\nTickets');
@@ -511,7 +496,7 @@ try {
     );
     assert.equal(raw.rows.length, 0);
     const r = await db.execute<{ ttl: number; job_no: string }>(sql`
-    SELECT extract(epoch FROM expires_at - created_at)::int AS ttl, job_no FROM track_ticket WHERE token_hash = ${guard.sha256(ticketA)}`);
+    SELECT extract(epoch FROM t.expires_at - t.created_at)::int AS ttl, j.job_no FROM track_ticket t JOIN job j ON j.pk = t.job_pk WHERE t.token_hash = ${guard.sha256(ticketA)}`);
     assert.equal(r.rows.length, 1);
     assert.equal(Number(r.rows[0].ttl), 180);
     assert.equal(r.rows[0].job_no, JOB_A.job_no);
@@ -646,8 +631,8 @@ try {
     await db.execute<{ phone: string }>(sql`
   SELECT right(regexp_replace(c.phone_number, '\\D', '', 'g'), 10) AS phone FROM customer c
    WHERE c.record_status <> 'DELETED' AND regexp_replace(c.phone_number, '\\D', '', 'g') ~ '^0[689][0-9]{8}$'
-     AND EXISTS (SELECT 1 FROM job j WHERE j.customer_id = c.customer_id AND j.record_status <> 'DELETED')
-   ORDER BY c.customer_id DESC LIMIT 1`)
+     AND EXISTS (SELECT 1 FROM job j WHERE j.customer_pk = c.pk AND j.record_status <> 'DELETED')
+   ORDER BY c.pk DESC LIMIT 1`)
   ).rows[0];
   assert.ok(cust, 'need a customer with a mobile number and a job');
   const PHONE = cust.phone;
@@ -688,7 +673,7 @@ try {
   });
   await test('a field holding two numbers matches each exactly — never a 9-digit window across both', async () => {
     await db.execute(sql`
-      INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES
+      INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES
         (9101, 'TT9101', 'สองเบอร์', '086-234-5678 / 089-876-5432'),
         (9102, 'TT9102', 'สองเบอร์ +66', '+66 86 111 2222, 0863334444'),
         (9103, 'TT9103', 'สองเบอร์ เว้นวรรค', '0864445555 0865556666'),
@@ -712,7 +697,7 @@ try {
       assert.deepEqual(await ids('0644455550'), [], 'nor across a space ("…4555 0865…")');
       assert.deepEqual(await customerIdsForPhone(PHONE), [1], 'the fixture customer still matches');
     } finally {
-      await db.execute(sql`DELETE FROM customer WHERE customer_id BETWEEN 9101 AND 9105`);
+      await db.execute(sql`DELETE FROM customer WHERE pk BETWEEN 9101 AND 9105`);
     }
   });
   await test('invalid number → 400, no SMS', async () => {
@@ -735,7 +720,7 @@ try {
     await new Promise((res) => setTimeout(res, 150)); // the row is written after the answer
     assert.equal(smsLog.length, before);
     const rows = await db.execute<{ ids: number[]; has_code: boolean; token: string | null }>(
-      sql`SELECT customer_ids AS ids, code_hash IS NOT NULL AS has_code, provider_token AS token
+      sql`SELECT customer_pks::int[] AS ids, code_hash IS NOT NULL AS has_code, provider_token AS token
             FROM track_otp WHERE request_hash = ${guard.sha256(r.json.requestId!)}`,
     );
     assert.deepEqual(rows.rows, [{ ids: [], has_code: true, token: null }]);
@@ -756,7 +741,13 @@ try {
       )
     ).rows[0];
     assert.ok(row);
-    assert.ok(!row.j.includes(lastOtp()) && !row.j.includes(PHONE) && !row.j.includes(reqId));
+    assert.ok(!row.j.includes(PHONE) && !row.j.includes(reqId));
+    // the code as a whole digit run in any value — a plain substring test also matched 4 digits inside the row's
+    // uuid / timestamps / hash hex now and then (a flaky test, not a stored code)
+    const runs = Object.values(JSON.parse(row.j) as Record<string, unknown>).flatMap(
+      (v) => String(v ?? '').match(/\d+/g) ?? [],
+    );
+    assert.ok(!runs.includes(lastOtp()), 'the code is not stored');
   });
   await test('resend right after an accepted request → 429 (cooldown), no SMS', async () => {
     // the previous test's request was accepted a moment ago: the sliding 60 s cooldown holds whatever the clock
@@ -1065,7 +1056,7 @@ try {
     assert.ok(nos.length > 0);
     const owners = await db.execute<{ n: number }>(sql`
     SELECT count(*)::int n FROM job j WHERE j.job_no IN ${nos}
-      AND NOT EXISTS (SELECT 1 FROM customer c WHERE c.customer_id = j.customer_id
+      AND NOT EXISTS (SELECT 1 FROM customer c WHERE c.pk = j.customer_pk
         AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') LIKE ${'%' + PHONE.slice(1) + '%'})`);
     assert.equal(Number(owners.rows[0].n), 0, 'a listed job belongs to someone else');
   });
@@ -1085,7 +1076,7 @@ try {
     assert.deepEqual(Object.keys(j).sort(), PUBLIC_KEYS);
     const other = (
       await db.execute<{ no: string }>(sql`
-    SELECT j.job_no no FROM job j JOIN customer c ON c.customer_id = j.customer_id
+    SELECT j.job_no no FROM job j JOIN customer c ON c.pk = j.customer_pk
      WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') NOT LIKE ${'%' + PHONE.slice(1) + '%'} LIMIT 1`)
     ).rows[0].no;
     assert.equal((await get(other)).status, 404);
@@ -1115,9 +1106,10 @@ try {
   await test('which documents: sent quotations only (no draft / cancelled), return note only once closed', async () => {
     const q = (
       await db.execute<{ job: string; no: string; st: number }>(sql`
-    SELECT DISTINCT ON (quotation_status_id) reference_job_no job, quotation_no no, quotation_status_id st FROM quotation_hd
-     WHERE record_status <> 'DELETED' AND quotation_status_id IN (3, 5) AND coalesce(reference_job_no, '') <> ''
-     ORDER BY quotation_status_id, create_date DESC`)
+    SELECT DISTINCT ON (q.quotation_status_id) j.job_no job, q.quotation_no no, q.quotation_status_id st
+      FROM quotation q JOIN job j ON j.pk = q.job_pk
+     WHERE q.record_status <> 'DELETED' AND q.quotation_status_id IN (3, 5)
+     ORDER BY q.quotation_status_id, q.create_date DESC`)
     ).rows;
     const sent = q.find((r) => r.st === 3);
     const cancelled = q.find((r) => r.st === 5);
@@ -1195,8 +1187,8 @@ try {
   await test("OTP: someone else's job / another job's quotation / unknown kind → the same 404", async () => {
     const other = (
       await db.execute<{ no: string; q: string }>(sql`
-    SELECT j.job_no no, q.quotation_no q FROM job j JOIN customer c ON c.customer_id = j.customer_id
-      JOIN quotation_hd q ON q.reference_job_no = j.job_no AND q.quotation_status_id = 3 AND q.record_status <> 'DELETED'
+    SELECT j.job_no no, q.quotation_no q FROM job j JOIN customer c ON c.pk = j.customer_pk
+      JOIN quotation q ON q.job_pk = j.pk AND q.quotation_status_id = 3 AND q.record_status <> 'DELETED'
      WHERE j.record_status <> 'DELETED' AND regexp_replace(coalesce(c.phone_number,''), '\\D', '', 'g') NOT LIKE ${'%' + PHONE.slice(1) + '%'} LIMIT 1`)
     ).rows[0];
     const a = await docReq({ jobNo: other.no, kind: 'job', ref: other.no }, otpIp, { session: otpSession });
@@ -1319,7 +1311,7 @@ try {
     const old = guard.sha256('hk-otp-old');
     const live = guard.sha256('hk-otp-live');
     await db.execute(sql`
-      INSERT INTO track_otp (request_hash, phone_hash, customer_ids, issued_ip, expires_at) VALUES
+      INSERT INTO track_otp (request_hash, phone_hash, customer_pks, issued_ip, expires_at) VALUES
         (${old}, 'hk', '{}', '203.0.113.1', now() - interval '25 hours'),
         (${live}, 'hk', '{}', '203.0.113.1', now() + interval '5 minutes')`);
     await guard.housekeeping();

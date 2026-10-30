@@ -21,7 +21,7 @@ export const GET = handle(async (req: NextRequest) => {
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Customer', 'edit');
   const body = await parseBody(req, addressCreate);
-  return idempotent(req, user.userId, async () =>
-    NextResponse.json({ ok: true, row: await addSubDistrict(body, user.userId) }, { status: 201 }),
+  return idempotent(req, user.pk, async () =>
+    NextResponse.json({ ok: true, row: await addSubDistrict(body, user.pk) }, { status: 201 }),
   );
 });

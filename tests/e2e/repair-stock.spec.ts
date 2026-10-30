@@ -13,9 +13,11 @@ const PRICE = 250;
 
 const lineOf = (no: string) =>
   one(
-    `SELECT spare_part_code AS code, is_special AS pick, is_quotation AS quote, request_qty AS requested,
-            grant_qty AS granted, return_qty AS returned, order_status_id AS status, spare_part_total_price::float AS total
-       FROM job_order_spare_part_log WHERE job_no = $1`,
+    `SELECT p.product_code AS code, l.is_special AS pick, l.is_quotation AS quote, l.request_qty AS requested,
+            l.grant_qty AS granted, l.return_qty AS returned, l.job_part_status_id AS status,
+            l.spare_part_total_price::float AS total
+       FROM job_part l LEFT JOIN product p ON p.pk = l.product_pk
+      WHERE l.job_pk = (SELECT pk FROM job WHERE job_no = $1)`,
     [no],
   );
 const jobCosts = (no: string) =>
@@ -40,10 +42,10 @@ async function save(page: Page, name: string) {
   await page.getByRole('button', { name }).click();
 }
 
-async function pickPerson(page: Page, field: string, name: string) {
-  await page.getByLabel(field).click();
-  await page.getByRole('option', { name, exact: true }).click();
-  await expect(page.getByLabel(field)).toContainText(name);
+/** a job / sale order / return move names its party through the document (ADR 0008 "no redundant data"):
+ *  จ่ายให้ / รับคืนจาก is asked only for จ่ายออกอื่นๆ */
+async function noPersonField(page: Page, field: string) {
+  await expect(page.getByLabel(field)).toHaveCount(0);
 }
 
 test('engineer requests a part, the store issues it, one comes back: stock and job cost follow each step', async ({
@@ -87,7 +89,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   const row = page.getByRole('row', { name: new RegExp(part.code) });
   await expect(row).toContainText('รอเบิก');
   await row.getByLabel(`จำนวนจ่ายออก ${part.code}`).fill('2');
-  await pickPerson(page, 'จ่ายให้', 'E2E Engineer');
+  await noPersonField(page, 'จ่ายให้');
   await save(page, 'บันทึกการจ่ายออก');
   await expect(page.getByText('บันทึกการจ่ายออกแล้ว 2 ชิ้น')).toBeVisible();
 
@@ -95,7 +97,13 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   expect(issued).toEqual([{ no: expect.stringMatching(/^WHO\d+$/), type: 3, code: part.code, qty: 2 }]);
   expect(await stockOf(part.code)).toEqual({ available: 5, used: 2, booking: 0, remain: 3 });
   expect(await lineOf(no)).toMatchObject({ granted: 2, status: 3 }); // จ่ายแล้ว
-  expect(await one('SELECT grant_by FROM job_order_spare_part_log WHERE job_no = $1', [no])).toEqual({
+  expect(
+    await one(
+      `SELECT granted_by_app_user_pk::int AS grant_by FROM job_part
+        WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)`,
+      [no],
+    ),
+  ).toEqual({
     grant_by: stock,
   });
   expect(await jobCosts(no)).toEqual({ status: 10, parts: 500, total: 500 }); // เบิกจ่ายอะไหล่ครบแล้ว
@@ -104,7 +112,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   await pickLines(page, 'รับคืนจากการเบิก', no);
   await expect(row).toContainText('จ่ายแล้ว');
   await row.getByLabel(`จำนวนรับคืน ${part.code}`).fill('1');
-  await pickPerson(page, 'รับคืนจาก', 'E2E Engineer');
+  await noPersonField(page, 'รับคืนจาก');
   await save(page, 'บันทึกการรับคืน');
   await expect(page.getByText('บันทึกการรับคืนแล้ว 1 ชิ้น')).toBeVisible();
 
@@ -131,7 +139,7 @@ test('more than on hand is never issued: the page flags it, a stale screen gets 
   const qty = row.getByLabel(`จำนวนจ่ายออก ${part.code}`);
   await qty.fill('2');
   await expect(row.getByRole('alert')).toHaveText('เกินจำนวนคงเหลือในสต๊อก (มี 1)');
-  await pickPerson(page, 'จ่ายให้', 'คลังสินค้าดี');
+  await noPersonField(page, 'จ่ายให้');
   await save(page, 'บันทึกการจ่ายออก');
   await expect(page.getByText('จำนวนเกิน 1 รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก').first()).toBeVisible();
   expect(issues, 'the page sends nothing').toEqual([]);
@@ -140,8 +148,8 @@ test('more than on hand is never issued: the page flags it, a stale screen gets 
   await qty.fill('1');
   await expect(row.getByRole('alert')).toHaveCount(0);
   await rows(
-    `UPDATE product_none_serial SET quantity_used = quantity_used + 1, quantity_remain = quantity_remain - 1
-      WHERE product_id = (SELECT product_id FROM product WHERE product_code = $1)`,
+    `UPDATE product_stock SET quantity_used = quantity_used + 1, quantity_remain = quantity_remain - 1
+      WHERE product_pk = (SELECT pk FROM product WHERE product_code = $1)`,
     [part.code],
   );
   await save(page, 'บันทึกการจ่ายออก');

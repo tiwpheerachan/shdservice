@@ -2,7 +2,7 @@ import 'server-only';
 import type { z } from 'zod';
 import type { shippingProfileSave } from '@/server/contract/admin';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
-import { db } from '@/db/client';
+import { db, writeTx } from '@/db/client';
 import { shippingProfile } from '@/db/schema';
 import { HttpError } from '@/server/auth';
 import { assertValid } from '@/server/validate';
@@ -110,7 +110,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
     updatedAt: nowThai(),
   };
 
-  const saved = await db.transaction(async (tx) => {
+  const saved = await writeTx(async (tx) => {
     const others = await tx
       .select()
       .from(shippingProfile)
@@ -142,6 +142,7 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
       module: 'Admin',
       entity: 'shipping_profile',
       key: row.id,
+      no: row.code,
       summary: `${before ? 'แก้ไข' : 'เพิ่ม'}โปรไฟล์บริษัทขนส่ง ${row.code} ${row.nameTh}`,
       changes: diff(before ?? null, values),
     });
@@ -153,18 +154,19 @@ export async function saveShippingProfile(i: ShippingProfileInput, byUserId: num
 
 /** soft delete — jobs already shipped keep pointing at the row so old links still work */
 export async function deleteShippingProfile(id: string, byUserId: number): Promise<void> {
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).limit(1);
     if (!before || before.deletedAt) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx
       .update(shippingProfile)
-      .set({ deletedAt: nowThai(), deletedBy: byUserId, updatedAt: nowThai() })
+      .set({ deletedAt: nowThai(), deletedByAppUserPk: byUserId, updatedAt: nowThai() })
       .where(eq(shippingProfile.pk, before.pk));
     await audit(tx, byUserId, {
       action: 'DELETE',
       module: 'Admin',
       entity: 'shipping_profile',
       key: id,
+      no: before.code,
       summary: `ลบโปรไฟล์บริษัทขนส่ง ${before.code} — ${before.nameTh}`,
       changes: { deletedAt: [before.deletedAt, nowThai()] }, // before.deletedAt is null here (checked above)
     });
@@ -174,7 +176,7 @@ export async function deleteShippingProfile(id: string, byUserId: number): Promi
 
 /** returns the logo path it replaced (read under the row lock — the caller removes that file after the commit) */
 export async function setShippingProfileLogo(id: string, logoPath: string, byUserId: number): Promise<string> {
-  const old = await db.transaction(async (tx) => {
+  const old = await writeTx(async (tx) => {
     const [before] = await tx.select().from(shippingProfile).where(eq(shippingProfile.id, id)).for('update');
     if (!before) throw new HttpError(404, 'ไม่พบโปรไฟล์');
     await tx.update(shippingProfile).set({ logoPath, updatedAt: nowThai() }).where(eq(shippingProfile.pk, before.pk));
@@ -183,6 +185,7 @@ export async function setShippingProfileLogo(id: string, logoPath: string, byUse
       module: 'Admin',
       entity: 'shipping_profile',
       key: id,
+      no: before.code,
       summary: `เปลี่ยนโลโก้บริษัทขนส่ง ${before.code}`,
       changes: { logoPath: [before.logoPath, logoPath] },
     });

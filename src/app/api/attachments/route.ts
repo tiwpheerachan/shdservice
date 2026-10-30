@@ -29,7 +29,7 @@ export const POST = handle(async (req: NextRequest) => {
   if (Number(req.headers.get('content-length') ?? 0) > MAX_FILE_BYTES + 1024 * 1024)
     throw new HttpError(413, 'ไฟล์ใหญ่เกิน 10MB');
   // a retried upload (ลองอีกครั้ง after a lost answer) replays the stored answer instead of a second attachment
-  return idempotent(req, user.userId, async () => {
+  return idempotent(req, user.pk, async () => {
     // 400 "expected multipart/form-data" / "ไม่พบไฟล์"; jobNo upper-cased, remark cut at 100
     const { file: sent, jobNo, remark } = await parseForm(req, attachmentAdd);
     // jobNo becomes part of the storage path — a real job (404), not deleted (409): refused before the upload
@@ -48,7 +48,7 @@ export const POST = handle(async (req: NextRequest) => {
     const path = filePath.attachment(no, sys);
     await uploadFile(path, file);
     // the job is checked again under its lock when the row goes in (deleted during the upload → 409): no orphan file
-    const row = await addAttachment(no, file.name.slice(0, 200), sys, remark, user.userId).catch(async (e) => {
+    const row = await addAttachment(no, file.name.slice(0, 200), sys, remark, user.pk).catch(async (e) => {
       await removeFile(path);
       throw e;
     });

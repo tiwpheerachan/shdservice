@@ -1,89 +1,39 @@
 'use client';
 
 import * as React from 'react';
-import { PackagePlus, Save } from 'lucide-react';
+import { PackagePlus, Save, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
-import { FilterBar } from '@/components/shared/filter-bar';
-import { SearchSelect } from '@/components/shared/search-select';
+import { ProductPicker } from '@/components/shared/product-picker';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid } from '@/components/ui/field';
 import { Input, Select, Textarea, NumberInput } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { useProducts, useManufacturers, useCategories } from '@/data/db';
 import { int } from '@/lib/utils';
-import { useFilterDraft } from '@/lib/use-filter-draft';
 import { postJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { addDays, today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
 import { receiveSchema } from '@/lib/validation/stock';
-import type { Product } from '@/data/types';
 import { useTourRestore } from '@/components/tour/tour';
 
-type Row = {
-  sysCode: string;
-  mfgCode: string;
-  name: string;
-  /** TH + EN + CN names — what the name filter searches */
-  names: string;
-  brand: string;
-  category: string;
-  status: string;
-  onhand: number;
-  qty: number;
-};
-
-/** one receipt line per part, quantity 0 */
-function toRows(products: Product[]): Row[] {
-  return products.map((p) => ({
-    sysCode: p.sysCode,
-    mfgCode: p.mfgCode ?? '',
-    name: p.name,
-    names: [p.name, p.nameEn, p.nameCn].filter(Boolean).join(' '),
-    brand: p.brand ?? '',
-    category: p.category ?? '',
-    status: p.status,
-    onhand: p.onhand,
-    qty: 0,
-  }));
-}
+/** a receipt line: a part picked with the server search (never the whole catalog) and its quantity */
+type Row = { sysCode: string; name: string; status: string; onhand: number; qty: number };
 
 export default function ReceivePage() {
   const { push } = useToast();
   const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
   const { name: me } = useAccess();
-  const { data: PRODUCTS, loading, error: productsError, refetch } = useProducts(true, 'exclude'); // Inactive parts are still received (owner rule)
-  const { data: BRANDS, ...brandsLookup } = useManufacturers('exclude'); // filter: INACTIVE brands still own products
-  const { data: CATEGORIES, ...categoriesLookup } = useCategories();
-  // every non-deleted part is a candidate line (qty typed per line); a fresh product list — loaded, or
-  // re-read after a receipt is saved — starts the lines over (adjusted while rendering)
-  const [rows, setRows] = React.useState<Row[]>(() => toRows(PRODUCTS));
-  const [rowsFrom, setRowsFrom] = React.useState(PRODUCTS);
-  if (PRODUCTS !== rowsFrom) {
-    setRowsFrom(PRODUCTS);
-    setRows(toRows(PRODUCTS));
-  }
-  // filter bar narrows which lines are SHOWN; quantities typed into hidden lines are kept
-  // (the save reads `rows`, not the visible subset) and counted in the footer
-  type LineFilter = { code: string; mfgCode: string; name: string; brand: string; category: string };
-  const NO_FILTER: LineFilter = { code: '', mfgCode: '', name: '', brand: '', category: '' };
-  const { draft, setD, filters: filter, apply, reset: resetFilters, narrowed } = useFilterDraft<LineFilter>(NO_FILTER);
-  const has = (v: string, t: string) => !t.trim() || v.toLowerCase().includes(t.trim().toLowerCase());
-  const visible = React.useMemo(
-    () =>
-      rows.filter(
-        (r) =>
-          has(r.sysCode, filter.code) &&
-          has(r.mfgCode, filter.mfgCode) &&
-          has(r.names, filter.name) &&
-          (!filter.brand || r.brand === filter.brand) &&
-          (!filter.category || r.category === filter.category),
-      ),
-    [rows, filter],
-  );
+  const [rows, setRows] = React.useState<Row[]>([]);
+  /** a picked part → a line (once; picked again = its quantity + 1). INACTIVE parts are still received (owner rule) */
+  const addRow = (p: { sysCode: string; name: string; status: string; onhand: number }) =>
+    setRows((s) =>
+      s.some((r) => r.sysCode === p.sysCode)
+        ? s.map((r) => (r.sysCode === p.sysCode ? { ...r, qty: r.qty + 1 } : r))
+        : [...s, { ...p, qty: 1 }],
+    );
   const [po, setPo] = React.useState('');
   const [date, setDate] = React.useState(today); // Thai calendar — identical on the server and in the browser
   const [supplier, setSupplier] = React.useState('');
@@ -103,14 +53,14 @@ export default function ReceivePage() {
       setDate(v.date);
       setSupplier(v.supplier);
       setRemark(v.remark);
-      setRows((s) => s.map((r) => ({ ...r, qty: v.qty[r.sysCode] ?? 0 })));
+      setRows((s) => s.filter((r) => r.sysCode in v.qty).map((r) => ({ ...r, qty: v.qty[r.sysCode] ?? 0 })));
     },
   );
 
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
   useClearOnChange(fe.clear, { lines: typedQty, date }); // typing a quantity / picking a date takes the error away
 
-  // WHI document: inventory_hd/dt + product_none_serial.quantity_available/remain
+  // WHI document: stock_move / stock_move_line + product_stock.quantity_available/remain
   const save = async () => {
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
     const body = { date, poRef: po, supplier, remark, lines };
@@ -126,7 +76,7 @@ export default function ReceivePage() {
       setPo('');
       setSupplier('');
       setRemark('');
-      refetch();
+      setRows([]);
     } catch (e) {
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
@@ -139,7 +89,6 @@ export default function ReceivePage() {
 
   const totalQty = rows.reduce((s, r) => s + r.qty, 0);
   const totalLines = rows.filter((r) => r.qty > 0).length;
-  const hiddenLines = rows.filter((r) => r.qty > 0 && !visible.includes(r)).length;
 
   const columns: Column<Row>[] = [
     {
@@ -194,6 +143,23 @@ export default function ReceivePage() {
           onChange={(n) => setQty(r.sysCode, n)}
           className="h-8 w-24"
         />
+      ),
+    },
+    {
+      key: 'remove',
+      header: '',
+      width: '52px',
+      align: 'center',
+      sortable: false,
+      cell: (r) => (
+        <button
+          type="button"
+          onClick={() => setRows((s) => s.filter((x) => x.sysCode !== r.sysCode))}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
+          aria-label={`ลบ ${r.sysCode}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       ),
     },
   ];
@@ -272,67 +238,40 @@ export default function ReceivePage() {
         </FieldGrid>
       </Section>
 
-      <FilterBar onSearch={apply} onReset={resetFilters}>
-        <Field label="รหัสอะไหล่ (ระบบ)">
-          <Input
-            placeholder="P00012"
-            className="num"
-            value={draft.code}
-            onChange={(e) => setD('code', e.target.value)}
-          />
-        </Field>
-        <Field label="รหัสอะไหล่ (ผู้ผลิต)">
-          <Input
-            placeholder="เลข part"
-            className="num"
-            value={draft.mfgCode}
-            onChange={(e) => setD('mfgCode', e.target.value)}
-          />
-        </Field>
-        <Field label="ชื่ออะไหล่">
-          <Input placeholder="พิมพ์บางส่วนของชื่อ" value={draft.name} onChange={(e) => setD('name', e.target.value)} />
-        </Field>
-        <Field label="ยี่ห้อ (ผู้ผลิต)" lookup={brandsLookup}>
-          <SearchSelect
-            placeholder="ทั้งหมด"
-            emptyLabel="ทั้งหมด"
-            value={draft.brand}
-            onChange={(v) => setD('brand', v)}
-            options={BRANDS.map((b) => ({ value: b.name, label: b.name }))}
-            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
-          />
-        </Field>
-        <Field label="หมวดหมู่" lookup={categoriesLookup}>
-          <SearchSelect
-            placeholder="ทั้งหมด"
-            emptyLabel="ทั้งหมด"
-            value={draft.category}
-            onChange={(v) => setD('category', v)}
-            options={CATEGORIES.map((c) => ({ value: c.name, label: c.name }))}
-            searchPlaceholder="พิมพ์ชื่อหมวดหมู่…"
-          />
-        </Field>
-      </FilterBar>
-
       {fe.errors.lines && (
         <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
           {fe.errors.lines}
         </p>
       )}
       <DataTable
-        narrowed={narrowed}
-        onClearFilters={resetFilters}
+        label="รายการรับเข้า"
         searchable={false}
+        toolbar={
+          <div className="w-96 max-w-full">
+            <ProductPicker
+              id="receive-product"
+              inactive
+              placeholder="ค้นหาอะไหล่ที่รับเข้า (รหัส / ชื่อ / เลข part)…"
+              onPick={(p) =>
+                p?.product &&
+                addRow({
+                  sysCode: p.code,
+                  name: p.name,
+                  // the lite row carries its status (an INACTIVE part is still received — shown as ปิดใช้งาน)
+                  status: (p.product as { status?: string }).status ?? 'Active',
+                  onhand: p.product.onhand,
+                })
+              }
+            />
+          </div>
+        }
         columns={columns}
-        rows={visible}
-        loading={loading}
-        error={productsError}
-        onRetry={refetch}
+        rows={rows}
         rowKey={(r) => r.sysCode}
+        emptyText="ค้นหาอะไหล่ที่ช่องด้านบนเพื่อเพิ่มรายการรับเข้า"
         footerNote={
           <span className="font-medium text-foreground">
-            · รวมรับเข้า {int(totalQty)} ชิ้น ({totalLines} รายการ
-            {hiddenLines ? ` — ${hiddenLines} รายการอยู่นอกตัวกรอง` : ''})
+            · รวมรับเข้า {int(totalQty)} ชิ้น ({totalLines} รายการ)
           </span>
         }
       />

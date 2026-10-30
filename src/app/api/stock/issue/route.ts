@@ -13,8 +13,8 @@ export const dynamic = 'force-dynamic';
 /** ตัดจ่ายอะไหล่ → WHO document (type 3 / 4 / 5); type "return" → WHI รับคืนจากการเบิก (type 2). */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Product Pick Stock', 'add');
-  return idempotent(req, user.userId, async () =>
-    NextResponse.json({ ok: true, ...(await issue(req, user.userId)) }, { status: 201 }),
+  return idempotent(req, user.pk, async () =>
+    NextResponse.json({ ok: true, ...(await issue(req, user.pk)) }, { status: 201 }),
   );
 });
 
@@ -26,9 +26,10 @@ async function issue(req: NextRequest, userId: number) {
     const msg = `จ่ายออกอื่นๆ ต้องเลือกผู้รับ — จ่ายให้ "${STORE_LOCATION_NAME}" (คลังต้นทาง) ไม่ได้`;
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { payTo: msg } });
   }
-  // จ่ายให้ / รับคืนจาก: the pick page's list — the good-stock store or a current staff member
-  if (b.payTo !== STORE_LOCATION_NAME && !(await listStaff()).some((s) => s.name === b.payTo)) {
-    const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือก${b.type === 'return' ? 'ผู้คืน' : 'ผู้รับ'}จากรายการ`;
+  // จ่ายให้ (จ่ายออกอื่นๆ only — a job / sale-order / return movement stores none: its document is the reference):
+  // the pick page's list, a current staff member
+  if (b.type === 'other' && !(await listStaff()).some((s) => s.name === b.payTo)) {
+    const msg = `ไม่พบ "${b.payTo}" ในรายชื่อ — เลือกผู้รับจากรายการ`;
     throw new HttpError(400, 'ข้อมูลไม่ถูกต้อง 1 ช่อง', { fields: { payTo: msg } });
   }
   if (b.type === 'job') {

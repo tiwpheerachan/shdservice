@@ -2,7 +2,7 @@ import 'server-only';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { and, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { trackBlock, trackEvent, trackOtp, trackRate, trackTicket } from '@/db/schema';
+import { job, trackBlock, trackEvent, trackOtp, trackRate, trackTicket } from '@/db/schema';
 import { logError } from '@/lib/log';
 import { ipBucket } from '@/lib/client-ip';
 
@@ -181,7 +181,7 @@ export async function issueTicket(jobNo: string, ip: string, ua: string): Promis
   const raw = newToken();
   await db.insert(trackTicket).values({
     tokenHash: sha256(raw),
-    jobNo,
+    jobPk: sql`(select ${job.pk} from ${job} where ${job.jobNo} = ${jobNo})`, // the caller just found the job
     issuedIp: ip,
     uaHash: sha256(normalizeUa(ua)),
     expiresAt: dbNowPlus(TICKET_TTL_SEC),
@@ -206,7 +206,7 @@ export async function consumeTicket(raw: unknown, ip: string, ua: string): Promi
         eq(trackTicket.uaHash, sha256(normalizeUa(ua))),
       ),
     )
-    .returning({ jobNo: trackTicket.jobNo });
+    .returning({ jobNo: sql<string>`(select ${job.jobNo} from ${job} where ${job.pk} = ${trackTicket.jobPk})` });
   return r?.jobNo ?? null;
 }
 

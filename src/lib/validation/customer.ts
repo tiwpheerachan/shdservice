@@ -52,7 +52,7 @@ export const hasThaiMobile = (v: unknown) =>
   /(?:^|\D)(?:0|\+?66)[689]\d{8}(?:\D|$)/.test(normalizePhone(v).replace(/[\s\-().]/g, ''));
 
 /** each level's own prefixes — a ตำบล named "จ.ป.ร." is not a province prefix */
-const ADDRESS_PREFIXES = [
+export const ADDRESS_PREFIXES = [
   ['แขวง', 'ตำบล', 'ต.'],
   ['เขต', 'อำเภอ', 'กิ่งอำเภอ', 'อ.'],
   ['จังหวัด', 'จ.'],

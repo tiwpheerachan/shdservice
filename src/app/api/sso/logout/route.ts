@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, SEEN_COOKIE, SEEN_TTL_S, SIGNED_OUT_SEEN, verifySession } from '@/lib/session';
 import { appOrigin, isRouterFetch } from '@/lib/sso';
-import { bumpSessionVersion, checked } from '@/server/auth';
+import { bumpSessionVersion, checked, invalidateUserCache } from '@/server/auth';
+import { security } from '@/server/audit';
+import { setRequestSession } from '@/server/request-context';
+import { db } from '@/db/client';
 import { logError } from '@/lib/log';
 
 export const runtime = 'nodejs';
@@ -16,11 +19,16 @@ export const GET = checked(async (request: NextRequest) => {
   const site = request.headers.get('sec-fetch-site');
   if (site && site !== 'same-origin' && site !== 'none') return NextResponse.redirect(new URL('/', appOrigin(request)));
   // server-side sign-out: bump app_user.session_version → this cookie AND every other
-  // device's cookie for this user stop working (a copied cookie is dead too)
+  // device's cookie for this user stop working (a copied cookie is dead too) — with its LOGOUT line, one transaction
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (session) {
+    setRequestSession(session.email, session.iat);
     try {
-      await bumpSessionVersion(session.email);
+      await db.transaction(async (tx) => {
+        const pk = await bumpSessionVersion(session.email, tx);
+        await security(tx, pk, { event: 'LOGOUT', module: 'Auth', detail: { email: session.email } });
+      });
+      invalidateUserCache(session.email);
     } catch (e) {
       logError(e, 'sso logout: session_version bump failed');
     }

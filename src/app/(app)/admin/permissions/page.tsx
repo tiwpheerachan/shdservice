@@ -32,8 +32,8 @@ import { PENDING_ROLE } from '@/lib/access';
 import { masterNameKey } from '@/lib/validation/admin';
 import { useTourRestore } from '@/components/tour/tour';
 
-// บทบาท (user_type) มาจากตาราง app_config — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
-// (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว app_config ชื่อ RIGHTS
+// บทบาท (user_type) มาจากตาราง role_permission — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
+// (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว role_permission ชื่อ RIGHTS
 // เก็บใน can_view
 const MENUS: readonly string[] = PAGE_MODULES;
 const RIGHT_NAMES = Object.keys(RIGHTS) as Right[];
@@ -57,7 +57,7 @@ export default function PermissionsPage() {
   const confirm = useConfirm();
   const { data: perms, loading, refetch } = usePermissions();
   const { data: dbRoles, refetch: refetchRoles } = useRoles();
-  // เพิ่มตำแหน่ง: a new role lives here (an empty grid) until its first ticks are saved — then it is in app_config
+  // เพิ่มตำแหน่ง: a new role lives here (an empty grid) until its first ticks are saved — then it is in role_permission
   const [newRoles, setNewRoles] = React.useState<string[]>([]);
   const ASSIGNABLE_ROLES = dbRoles.length
     ? [...dbRoles, ...newRoles.filter((r) => !dbRoles.includes(r))]
@@ -151,7 +151,7 @@ export default function PermissionsPage() {
         desc: 'มีผลทันทีกับการบันทึกข้อมูล — ผู้ใช้ที่เปิดระบบค้างไว้จะเห็นเมนูและปุ่มตามสิทธิ์ใหม่เมื่อรีเฟรชหน้า (F5)',
       });
       refetch();
-      refetchRoles(); // a new role is in app_config now
+      refetchRoles(); // a new role is in role_permission now
     } catch (e) {
       if (isStale(e)) refetch(); // the role's stored grid, with the other admin's change
       push({
@@ -241,7 +241,7 @@ export default function PermissionsPage() {
     {
       key: 'menu',
       header: 'เมนูงาน',
-      // the menu as the sidebar names it; the app_config key under it (what the old system / the data say)
+      // the menu as the sidebar names it; the role_permission key under it (what the old system / the data say)
       cell: (r) => (
         <span>
           <span className="block font-medium">{MODULE_LABELS[r.menu as keyof typeof MODULE_LABELS] ?? r.menu}</span>

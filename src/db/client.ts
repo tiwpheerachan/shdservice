@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema';
 import { dbSsl } from './ssl';
 import { logError } from '@/lib/log';
+import { requestCtx } from '@/server/request-context';
 
 /**
  * SERVER-ONLY database handle (drizzle over node-postgres).
@@ -65,5 +66,21 @@ export function withStatementTimeout<T>(run: (tx: Tx) => Promise<T>, ms = 15_000
   return db.transaction(async (tx) => {
     await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${Math.trunc(ms)}`));
     return run(tx);
+  });
+}
+
+/**
+ * Every write transaction of a request: db.transaction + R2 — assertActor (src/server/audit.ts) before the work (the
+ * actor's row and grants locked FOR SHARE first) and again after it when the work relied on more (a right checked
+ * mid-way), so a write that never reaches audit() is re-checked too. Outside a request (scripts, the system) = db.transaction.
+ */
+export function writeTx<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
+  if (!requestCtx()?.user) return db.transaction(run);
+  return db.transaction(async (tx) => {
+    const { assertActor } = await import('@/server/audit'); // audit.ts imports this module
+    await assertActor(tx);
+    const out = await run(tx);
+    await assertActor(tx); // a no-op unless the work recorded a need since
+    return out;
   });
 }

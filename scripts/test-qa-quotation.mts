@@ -35,27 +35,37 @@ const CUSTOMER = 'QQT001';
 const JOB = 'J9907101';
 await pool.query(`
   INSERT INTO quotation_status (quotation_status_id, quotation_status_name)
-    SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (2, 'เสนอราคาแล้ว')) v(id, name)
+    SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (2, 'เสนอราคาแล้ว'), (5, 'ยกเลิกใบเสนอราคา')) v(id, name)
      WHERE NOT EXISTS (SELECT 1 FROM quotation_status s WHERE s.quotation_status_id = v.id);
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 2, 'กำลังดำเนินการ', 2, 'Open', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 2);
-  DELETE FROM app_config WHERE user_type IN ('QQT Clerk', 'QQT Boss');
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type IN ('QQT Clerk', 'QQT Boss');
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QQT Clerk', 'Quotation', true, true, false, true),
     ('QQT Boss', 'Quotation', true, true, true, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9971 AND 9979 OR email_address LIKE 'qqt-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- the users stay (audit_log, append-only, points at them): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QQT', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM quotation_dt WHERE quotation_no IN (SELECT quotation_no FROM quotation_hd WHERE customer_code = '${CUSTOMER}');
-  DELETE FROM quotation_hd WHERE customer_code = '${CUSTOMER}';
-  DELETE FROM job_log WHERE job_no LIKE 'J99071%';
+      .join(', ')}
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
+  UPDATE job SET approved_quotation_pk = NULL WHERE job_no LIKE 'J99071%';
+  CREATE TEMP TABLE qqt_q ON COMMIT DROP AS SELECT pk FROM quotation
+   WHERE customer_pk IN (SELECT pk FROM customer WHERE customer_code = '${CUSTOMER}')
+      OR job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'J99071%');
+  DELETE FROM quotation_line WHERE quotation_pk IN (SELECT pk FROM qqt_q);
+  DELETE FROM quotation WHERE pk IN (SELECT pk FROM qqt_q);
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'J99071%');
   DELETE FROM job WHERE job_no LIKE 'J99071%';
-  DELETE FROM customer WHERE customer_id = 9971 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9971, '${CUSTOMER}', 'ลูกค้า QQT', '02-000-0071');
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
-    VALUES ('${JOB}', 2, 9971, '${CUSTOMER} ลูกค้า QQT', 'Model QQT', now(), current_date, '1900-01-01');
+  DELETE FROM customer WHERE pk = 9971 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9971, '${CUSTOMER}', 'ลูกค้า QQT', '02-000-0071');
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (job_no, job_status_id, customer_pk, model_pk, job_create_date, job_reception_date, job_closed_date)
+    VALUES ('${JOB}', 2, 9971, (SELECT pk FROM model WHERE model_code = 'TST-M'), now(), current_date, '1900-01-01');
 `);
 
 const line = (o: Record<string, unknown> = {}) => ({
@@ -77,7 +87,7 @@ const dtOf = async (no: string) =>
   (
     await pool.query<{ d: string; p: string; t: string }>(
       `SELECT unit_price_discount AS d, unit_price_discount_percent AS p, total_price AS t
-         FROM quotation_dt WHERE quotation_no = $1 ORDER BY line_number`,
+         FROM quotation_line WHERE quotation_pk = (SELECT pk FROM quotation WHERE quotation_no = $1) ORDER BY line_number`,
       [no],
     )
   ).rows.map((r) => [Number(r.d), Number(r.p), Number(r.t)]);
@@ -316,7 +326,7 @@ try {
       U.admin.id,
     );
     const b = await saveQuotation(base(), U.admin.id);
-    await pool.query(`UPDATE quotation_hd SET quotation_status_id = 2 WHERE quotation_no = $1`, [b.no]); // เสนอราคาแล้ว
+    await pool.query(`UPDATE quotation SET quotation_status_id = 2 WHERE quotation_no = $1`, [b.no]); // เสนอราคาแล้ว
     // by uuid (ADR 0008), trimmed, any case, each once
     const { slips, skipped } = await pickSlips([` ${b.id.toUpperCase()} `, a.id, b.id]);
     assert.deepEqual(skipped, []);
@@ -342,7 +352,7 @@ try {
   await test('any status prints; deleted / ยกเลิกใบเสนอราคา / unknown are skipped with the reason', async () => {
     const live = await saveQuotation(base(), U.admin.id);
     const off = await saveQuotation(base(), U.admin.id);
-    await pool.query(`UPDATE quotation_hd SET quotation_status_id = 5 WHERE quotation_no = $1`, [off.no]);
+    await pool.query(`UPDATE quotation SET quotation_status_id = 5 WHERE quotation_no = $1`, [off.no]);
     const { slips, skipped } = await pickSlips([
       live.id,
       victim.id,

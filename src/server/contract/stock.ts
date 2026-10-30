@@ -33,6 +33,9 @@ export const StockCardLine = z.object({
   remark: s,
 });
 
+/** the stock card's page (newest first): the product dialog shows this many, "โหลดเพิ่ม" the next */
+export const STOCK_CARD_PAGE = 50;
+
 export const productGet = defineOperation({
   method: 'get',
   path: '/products/{id}',
@@ -47,9 +50,31 @@ export const productGet = defineOperation({
       'The part and its movements.',
       z.object({
         product: Product,
-        card: z.array(StockCardLine),
+        card: z
+          .array(StockCardLine)
+          .meta({ description: `the newest ${STOCK_CARD_PAGE} lines — more: GET /products/{id}/card` }),
+        cardTotal: n.meta({ description: 'how many lines the stock card has' }),
       }),
     ),
+    ...SIGNED_IN,
+    ...notFound('No such part.'),
+  },
+});
+
+export const productCard = defineOperation({
+  method: 'get',
+  path: '/products/{id}/card',
+  tags: ['Products'],
+  summary: "More of a spare part's stock card (the product dialog's โหลดเพิ่ม)",
+  description: `View on any product / stock module, as GET /products/{id}. ${STOCK_CARD_PAGE} lines from \`offset\`, newest first.`,
+  params: byUuid('อะไหล่', "the part's id (product.id)"),
+  query: z.object({
+    offset: z.coerce.number().int().min(0).max(1_000_000).optional().meta({ description: 'lines to skip (default 0)' }),
+  }),
+  invalid: { params: 404, query: 400 },
+  responses: {
+    200: jsonResponse('A page of the stock card.', z.object({ card: z.array(StockCardLine), total: n })),
+    400: errorResponse('`offset` is not a whole number 0–1,000,000.'),
     ...SIGNED_IN,
     ...notFound('No such part.'),
   },
@@ -151,7 +176,7 @@ export const stockMovementLines = defineOperation({
 
 /** services/stock.ts SoPickLine */
 export const SaleOrderPickLine = z.object({
-  dtId: z.uuid().meta({ description: 'the sale_out_dt row' }),
+  dtId: z.uuid().meta({ description: 'the sale_order_line row' }),
   code: s,
   name: s,
   onhand: n,
@@ -162,7 +187,7 @@ export const SaleOrderPickLine = z.object({
 
 /** services/stock.ts ReturnLine */
 export const ReturnableLine = z.object({
-  logId: z.uuid().meta({ description: 'the job_order_spare_part_log row' }),
+  logId: z.uuid().meta({ description: 'the job_part row' }),
   jobNo: s,
   code: s,
   name: s,

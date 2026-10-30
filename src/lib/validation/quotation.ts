@@ -17,7 +17,7 @@ import { isFilled } from './job';
  * Line errors are keyed "lines.<row>.qty" / "lines.<row>.unitPrice" (row = position on screen).
  */
 export const JOB_NO_RE = /^J\d{7}$/;
-/** quotation_dt.item_type values */
+/** quotation_line.item_type values */
 export const LINE_TYPES = ['SparePart', 'Service', 'Delivery'] as const;
 /** the statuses a new quotation may start as */
 export const NEW_QUOTATION_STATUSES = ['รอเสนอราคา', 'เสนอราคาแล้ว'];
@@ -100,7 +100,7 @@ export function quotationSchema(prevJobNo?: string | null) {
 }
 
 /**
- * quotation_hd discount_type + discount_formula ("10%", legacy "200บาท") → the form's discount, kept
+ * quotation discount_type + discount_formula ("10%", legacy "200บาท") → the form's discount, kept
  * as the record has it (unit and base: total / parts / service). None → 0 % on the total.
  */
 export function parseDiscount(type: string, formula: string): { type: string; value: number; unit: '%' | 'บาท' } {
@@ -127,7 +127,7 @@ export function lineAmount(l: { qty: number; unitPrice: number; discount?: numbe
 }
 
 /**
- * Amount rules reverse-engineered from quotation_hd columns — the server stores these and the print
+ * Amount rules reverse-engineered from quotation columns — the server stores these and the print
  * shows the stored values, so the form previews with the same function.
  */
 export function computeTotals(i: {

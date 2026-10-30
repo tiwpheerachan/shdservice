@@ -82,53 +82,81 @@ await pool.query(`
     SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (2, 'เสนอราคาแล้ว'), (3, 'ลูกค้าตกลงซ่อม'), (4, 'ลูกค้าไม่ตกลงซ่อม'),
                           (5, 'ยกเลิกใบเสนอราคา')) v(id, name)
      WHERE NOT EXISTS (SELECT 1 FROM quotation_status s WHERE s.quotation_status_id = v.id);
-  INSERT INTO job_type (job_type_name, is_active) SELECT 'QRS งานซ่อม', true
+  -- code tables a part line / sale order points at (foreign keys, drizzle/0006)
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+    SELECT * FROM (VALUES (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM job_part_status s WHERE s.job_part_status_id = v.id);
+  INSERT INTO approve_status (approve_status_id, approve_name_th)
+    SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ'), (2, 'รออนุมัติ'), (3, 'แก้ไขข้อมูล'), (4, 'อนุมัติแล้ว'), (5, 'ปฏิเสธ')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  INSERT INTO store_location (store_location_id, store_location_name, is_active)
+    SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
+     WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
+  INSERT INTO condition (condition_id, condition_name, is_active)
+    SELECT 1, 'สินค้าใหม่', true WHERE NOT EXISTS (SELECT 1 FROM condition WHERE condition_id = 1);
+  INSERT INTO job_type (job_type_name, record_status) SELECT 'QRS งานซ่อม', 'ACTIVE'
      WHERE NOT EXISTS (SELECT 1 FROM job_type WHERE job_type_name = 'QRS งานซ่อม');
-  INSERT INTO manufacturer (manufacturer_name, is_active) SELECT 'QRS', true
-     WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE manufacturer_name = 'QRS');
-  INSERT INTO model (model_code, model_name, manufacturer_id, is_active)
-    SELECT 'QRS', 'QRS', (SELECT min(manufacturer_id) FROM manufacturer WHERE manufacturer_name = 'QRS'), true
+  INSERT INTO brand (brand_name, record_status) SELECT 'QRS', 'ACTIVE'
+     WHERE NOT EXISTS (SELECT 1 FROM brand WHERE brand_name = 'QRS');
+  INSERT INTO model (model_code, model_name, brand_pk, record_status)
+    SELECT 'QRS', 'QRS', (SELECT min(pk) FROM brand WHERE brand_name = 'QRS'), 'ACTIVE'
      WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'QRS');
-  INSERT INTO symptom (symptom_name, is_active) SELECT 'QRS', true
+  INSERT INTO symptom (symptom_name, record_status) SELECT 'QRS', 'ACTIVE'
      WHERE NOT EXISTS (SELECT 1 FROM symptom WHERE symptom_name = 'QRS');
-  DELETE FROM app_config WHERE user_type = 'QRS Engineer';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  DELETE FROM role_permission WHERE user_type = 'QRS Engineer';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('QRS Engineer', 'Job Take', false, false, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9871 AND 9879 OR email_address LIKE 'qrs-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- the users stay (audit_log, append-only, points at them): upserted at their fixed pk
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     (${ADMIN.id}, 'QRS', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', ${SV}),
-    (${ENG}, 'QRS', 'engineer', 'qrs-eng@example.invalid', 'QRS Engineer', 'ACTIVE', ${SV});
-  DELETE FROM quotation_dt WHERE quotation_no IN (SELECT quotation_no FROM quotation_hd WHERE customer_code LIKE 'QRS%');
-  DELETE FROM quotation_hd WHERE customer_code LIKE 'QRS%';
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code LIKE 'QRS%');
-  DELETE FROM sale_out_hd WHERE customer_code LIKE 'QRS%';
-  DELETE FROM document_attach WHERE reference_item_code LIKE 'QRS%';
-  DELETE FROM job_symptom WHERE job_no IN (SELECT job_no FROM job WHERE customer_id BETWEEN 9871 AND 9879);
-  DELETE FROM job_log WHERE job_no LIKE 'QRS%' OR job_no LIKE 'J998700_' OR job_no IN (SELECT job_no FROM job WHERE customer_id BETWEEN 9871 AND 9879);
-  DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'QRS%';
-  DELETE FROM job WHERE job_no LIKE 'QRS%' OR job_no LIKE 'J998700_' OR customer_id BETWEEN 9871 AND 9879;
-  DELETE FROM customer WHERE customer_id BETWEEN 9871 AND 9879 OR customer_code LIKE 'QRS%';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status)
+    (${ENG}, 'QRS', 'engineer', 'qrs-eng@example.invalid', 'QRS Engineer', 'ACTIVE', ${SV})
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
+  -- children before parents (RESTRICT): everything on the QRS customers / jobs / parts
+  CREATE TEMP TABLE qrs_job ON COMMIT DROP AS SELECT pk FROM job
+   WHERE job_no LIKE 'QRS%' OR job_no LIKE 'J998700_' OR customer_pk IN (SELECT pk FROM customer WHERE customer_code LIKE 'QRS%');
+  CREATE TEMP TABLE qrs_q ON COMMIT DROP AS SELECT pk FROM quotation
+   WHERE job_pk IN (SELECT pk FROM qrs_job) OR customer_pk IN (SELECT pk FROM customer WHERE customer_code LIKE 'QRS%');
+  CREATE TEMP TABLE qrs_so ON COMMIT DROP AS SELECT pk FROM sale_order
+   WHERE customer_pk IN (SELECT pk FROM customer WHERE customer_code LIKE 'QRS%');
+  UPDATE job SET approved_quotation_pk = NULL WHERE approved_quotation_pk IN (SELECT pk FROM qrs_q);
+  DELETE FROM quotation_line WHERE quotation_pk IN (SELECT pk FROM qrs_q);
+  DELETE FROM quotation WHERE pk IN (SELECT pk FROM qrs_q);
+  DELETE FROM stock_move_line WHERE stock_move_pk IN (SELECT pk FROM stock_move
+   WHERE sale_order_pk IN (SELECT pk FROM qrs_so) OR job_pk IN (SELECT pk FROM qrs_job));
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM qrs_so);
+  DELETE FROM stock_move WHERE sale_order_pk IN (SELECT pk FROM qrs_so) OR job_pk IN (SELECT pk FROM qrs_job);
+  DELETE FROM sale_order WHERE pk IN (SELECT pk FROM qrs_so);
+  DELETE FROM job_attachment WHERE job_pk IN (SELECT pk FROM qrs_job);
+  DELETE FROM job_symptom WHERE job_pk IN (SELECT pk FROM qrs_job);
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM qrs_job);
+  DELETE FROM job_part WHERE job_pk IN (SELECT pk FROM qrs_job)
+     OR product_pk IN (SELECT pk FROM product WHERE pk BETWEEN 9871 AND 9879 OR product_code LIKE 'QRSP%');
+  DELETE FROM job WHERE pk IN (SELECT pk FROM qrs_job);
+  DELETE FROM customer WHERE pk BETWEEN 9871 AND 9879 OR customer_code LIKE 'QRS%';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number, record_status) OVERRIDING SYSTEM VALUE
     SELECT 9870 + n, 'QRSC0' || n, 'ลูกค้า QRS ' || n, '02-987-000' || n, 'ACTIVE' FROM generate_series(1, 6) n;
-  DELETE FROM product_none_serial WHERE product_id BETWEEN 9871 AND 9879 OR item_id BETWEEN 9871 AND 9879;
-  DELETE FROM product WHERE product_id BETWEEN 9871 AND 9879 OR product_code LIKE 'QRSP%';
-  INSERT INTO product (product_id, product_code, product_name, record_status)
+  DELETE FROM product_stock WHERE product_pk BETWEEN 9871 AND 9879 OR pk BETWEEN 9871 AND 9879;
+  DELETE FROM product WHERE pk BETWEEN 9871 AND 9879 OR product_code LIKE 'QRSP%';
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE
     SELECT 9870 + n, 'QRSP' || n, 'อะไหล่ QRS ' || n, 'ACTIVE' FROM generate_series(1, 3) n;
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+  OVERRIDING SYSTEM VALUE
     SELECT 9870 + n, 9870 + n, 100, 0, 0, 100, 100.00 FROM generate_series(1, 3) n;
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date,
-                   job_closed_date, record_status, engineer_id, service_cost, spare_part_total_cost, job_total_cost)
-    SELECT 'QRS' || lpad(n::text, 4, '0'), CASE WHEN n = 2 THEN 11 ELSE 2 END, 9871, '${CUST} ลูกค้า QRS 1', 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE',
-           CASE WHEN n = 3 THEN 0 ELSE ${ENG} END, 0, 0, 0
+  INSERT INTO job (job_no, job_status_id, customer_pk, customer_detail, model_pk, product_model_name, job_create_date, job_reception_date,
+                   job_closed_date, record_status, engineer_app_user_pk, service_cost, spare_part_total_cost, job_total_cost)
+    SELECT 'QRS' || lpad(n::text, 4, '0'), CASE WHEN n = 2 THEN 11 ELSE 2 END, 9871, '${CUST} ลูกค้า QRS 1', (SELECT pk FROM model WHERE model_code = 'QRS'), 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE',
+           CASE WHEN n = 3 THEN NULL ELSE ${ENG} END, 0, 0, 0
       FROM generate_series(1, 6) n;
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, record_status)
-    VALUES ('${QJOB}', 2, 9871, 'QRS', 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE'),
-           ('J9987002', 2, 9871, 'QRS', 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE'),
-           ('J9987003', 2, 9871, 'QRS', 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE');
+  INSERT INTO job (job_no, job_status_id, customer_pk, customer_detail, model_pk, product_model_name, job_create_date, job_reception_date, job_closed_date, record_status)
+    SELECT v.no, 2, 9871, 'QRS', (SELECT pk FROM model WHERE model_code = 'QRS'), 'Model QRS', now(), current_date, '1900-01-01', 'ACTIVE'
+      FROM (VALUES ('${QJOB}'), ('J9987002'), ('J9987003')) v(no);
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
     SELECT 0, 'ยกเลิกข้อมูล', 0, 'Cancel', true WHERE NOT EXISTS (SELECT 1 FROM job_status WHERE job_status_id = 0);
-  INSERT INTO document_attach (reference_topic, reference_item_code, original_file_name, system_file_name, remark, is_active, record_status)
-    VALUES ('Jobs', '${J(5)}', 'qrs.pdf', 'qrs.pdf', '', true, 'ACTIVE');
+  INSERT INTO job_attachment (job_pk, original_file_name, system_file_name, remark, record_status)
+    VALUES ((SELECT pk FROM job WHERE job_no = '${J(5)}'), 'qrs.pdf', 'qrs.pdf', '', 'ACTIVE');
 `);
 
 // ---- helpers ----
@@ -196,10 +224,9 @@ const custId = async (code: string) =>
 /** a job's / user's uuid — what the API and records take (ADR 0008) */
 const uuidOf = async (table: 'job' | 'app_user', key: string | number) =>
   (
-    await Q<{ id: string }>(
-      `SELECT id::text AS id FROM ${table} WHERE ${table === 'job' ? 'job_no' : 'user_id'} = $1`,
-      [key],
-    )
+    await Q<{ id: string }>(`SELECT id::text AS id FROM ${table} WHERE ${table === 'job' ? 'job_no' : 'pk'} = $1`, [
+      key,
+    ])
   )[0]!.id;
 const QLINE = { itemType: 'SparePart' as const, code: '', detail: 'QRS', qty: 1, unit: 'หน่วย', unitPrice: 100 };
 const jobInput = (customerCode: string, extra: Record<string, unknown> = {}) => ({
@@ -266,7 +293,15 @@ try {
     await b.query(`SELECT 1 FROM job WHERE job_no = $1 FOR UPDATE`, [J(1)]); // a save of the job in flight
     const p = updateJob(
       J(1),
-      { customerCode: 'QRSC03', jobType: '', dueDate: addDays(today(), 30), warrantyMonth: 0, channel: 'SHOPEE' },
+      {
+        customerCode: 'QRSC03',
+        jobType: '',
+        dueDate: addDays(today(), 30),
+        warrantyMonth: 0,
+        channel: 'SHOPEE',
+        brand: 'QRS', // the job's model and its brand stay filled (job.model_pk NOT NULL: "never worse")
+        modelCode: 'QRS',
+      },
       ADMIN.id,
     ).then(
       () => 200,
@@ -277,15 +312,13 @@ try {
     await b.query('COMMIT');
     await b.end();
     assert.equal(await p, 409);
-    const [j] = await Q<{ c: number }>(`SELECT customer_id c FROM job WHERE job_no = $1`, [J(1)]);
+    const [j] = await Q<{ c: number }>(`SELECT customer_pk::int c FROM job WHERE job_no = $1`, [J(1)]);
     assert.equal(j!.c, 9871);
   });
   await test('POST quotation / sale order ‖ delete its customer: saved before the delete, or refused (409)', async () => {
     const bad: string[] = [];
     // the salesperson by uuid (ADR 0008)
-    const [{ id: salesId }] = await Q<{ id: string }>(`SELECT id::text AS id FROM app_user WHERE user_id = $1`, [
-      ADMIN.id,
-    ]);
+    const [{ id: salesId }] = await Q<{ id: string }>(`SELECT id::text AS id FROM app_user WHERE pk = $1`, [ADMIN.id]);
     for (const [code, save, type] of [
       [
         'QRSC04',
@@ -298,7 +331,7 @@ try {
         () =>
           saveSaleOrder(
             { customerCode: 'QRSC05', salesId, submit: false, lines: [{ code: PART, qty: 1 }] },
-            { userId: ADMIN.id, isAdmin: true },
+            { pk: ADMIN.id, isAdmin: true },
           ),
         'SaleOrder',
       ],
@@ -321,16 +354,16 @@ try {
         e instanceof HttpError ? ((fields = (e.details as { fields?: unknown })?.fields), e.status) : Promise.reject(e),
     );
     await lockWaits(1);
-    await Q(`UPDATE app_user SET record_status = 'INACTIVE' WHERE user_id = $1`, [ENG]); // users.ts' save, committed
+    await Q(`UPDATE app_user SET record_status = 'INACTIVE' WHERE pk = $1`, [ENG]); // users.ts' save, committed
     await b.query('COMMIT');
     await b.end();
     const status = await p;
-    await Q(`UPDATE app_user SET record_status = 'ACTIVE' WHERE user_id = $1`, [ENG]);
+    await Q(`UPDATE app_user SET record_status = 'ACTIVE' WHERE pk = $1`, [ENG]);
     assert.equal(status, 400);
     // not "lacks Job Take": the account itself is closed
     assert.deepEqual(fields, { engineerId: 'บัญชีช่างคนนี้ถูกปิดใช้งานแล้ว — เลือกช่างคนอื่น' });
-    const [j] = await Q<{ e: number }>(`SELECT engineer_id e FROM job WHERE job_no = $1`, [J(3)]);
-    assert.equal(j!.e, 0);
+    const [j] = await Q<{ e: number | null }>(`SELECT engineer_app_user_pk::int e FROM job WHERE job_no = $1`, [J(3)]);
+    assert.equal(j!.e, null);
   });
 
   console.log('\nG16 · a quotation for a job deleted at the same moment');
@@ -342,7 +375,7 @@ try {
       () => saveQuotation({ jobNo: QJOB, customerCode: CUST, contactName: 'QRS', lines: [QLINE] }, ADMIN.id),
       del('jobs', await uuidOf('job', QJOB)),
     );
-    const qs = await Q(`SELECT 1 FROM quotation_hd WHERE reference_job_no = $1`, [QJOB]);
+    const qs = await Q(`SELECT 1 FROM quotation WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)`, [QJOB]);
     assert.ok(r.req === 200 ? !r.delFirst : r.req === 409, `quotation ${r.req}, delete first ${r.delFirst}`);
     assert.equal(qs.length, r.req === 200 ? 1 : 0);
   });
@@ -367,7 +400,7 @@ try {
   console.log('\nG6 · a part request for a product deleted at the same moment');
   await test('repair adds a เบิก line ‖ delete the product: never a waiting request on a deleted product', async () => {
     const b = await blocker();
-    await b.query(`SELECT 1 FROM product_none_serial WHERE product_id = 9872 FOR UPDATE`); // a stock receipt in flight
+    await b.query(`SELECT 1 FROM product_stock WHERE product_pk = 9872 FOR UPDATE`); // a stock receipt in flight
     const r = await race(
       b,
       () =>
@@ -383,9 +416,9 @@ try {
         ),
       del('products', 'QRSP2'),
     );
-    const [p] = await Q<{ rs: string }>(`SELECT record_status rs FROM product WHERE product_id = 9872`);
+    const [p] = await Q<{ rs: string }>(`SELECT record_status rs FROM product WHERE pk = 9872`);
     const waiting = await Q(
-      `SELECT 1 FROM job_order_spare_part_log WHERE job_no = $1 AND spare_part_code = 'QRSP2' AND order_status_id = 1`,
+      `SELECT 1 FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1) AND product_pk = 9872 AND job_part_status_id = 1`,
       [J(2)],
     );
     assert.ok(!(p!.rs === 'DELETED' && waiting.length), `repair ${r.req}, delete ${r.del}, delete first ${r.delFirst}`);
@@ -393,13 +426,14 @@ try {
 
   console.log('\nG4 · an attachment deleted twice at once');
   await test('5 × DELETE /api/attachments/{id} at once → one 200 and one DELETE audit row, the rest 404 "ไฟล์นี้ถูกลบไปแล้ว"', async () => {
-    const [a] = await Q<{ id: string }>(`SELECT id::text id FROM document_attach WHERE reference_item_code = $1`, [
-      J(5),
-    ]);
+    const [a] = await Q<{ id: string }>(
+      `SELECT id::text id FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)`,
+      [J(5)],
+    );
     const id = a!.id;
     const [{ last }] = await Q<{ last: number }>(`SELECT coalesce(max(pk), 0) AS last FROM audit_log`);
     const b = await blocker();
-    await b.query(`SELECT 1 FROM document_attach WHERE id = $1 FOR UPDATE`, [a!.id]);
+    await b.query(`SELECT 1 FROM job_attachment WHERE id = $1 FOR UPDATE`, [a!.id]);
     const rs = Array.from({ length: 5 }, () =>
       route(attachIdRoute.DELETE as never, `/api/attachments/${id}`, { method: 'DELETE', params: { id } }),
     );
@@ -435,11 +469,11 @@ try {
     const r = await p;
     uploadGate = Promise.resolve();
     uploadStarted = () => {};
-    const rows = await Q(`SELECT 1 FROM document_attach WHERE reference_item_code = $1`, [J(6)]);
+    const rows = await Q(`SELECT 1 FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)`, [J(6)]);
     assert.deepEqual([r.status, rows.length, [...stored].filter((s) => s.includes(J(6)))], [409, 0, []]);
   });
 } finally {
-  await pool.query(`UPDATE app_user SET record_status = 'ACTIVE' WHERE user_id = ${ENG}`);
+  await pool.query(`UPDATE app_user SET record_status = 'ACTIVE' WHERE pk = ${ENG}`);
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

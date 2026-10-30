@@ -36,6 +36,7 @@ const {
   filtersFromQuery,
 } = await import('@/server/services/jobs');
 const { receiveSchema } = await import('@/lib/validation/stock');
+const { isSwap } = await import('@/lib/validation/job');
 const { addDays, today } = await import('@/lib/dates');
 const { GET: trackLinkGET } = await import('@/app/api/jobs/[id]/track-link/route');
 const { POST: stockIssuePOST } = await import('@/app/api/stock/issue/route');
@@ -50,13 +51,15 @@ const SV = 3;
 const CUSTOMER = 'QJC001';
 const P = { pricey: 'QJP1', part: 'QJP2', gone: 'QJP3' }; // ราคาขาย 1200 / 100 / 50 (QJP3 deleted)
 const J = (n: number) => `QJJ${String(n).padStart(4, '0')}`;
+/** the fixture jobs' pks — what their logs / part lines / stock documents point at (drizzle/0006) */
+const JOBS = `(SELECT pk FROM job WHERE job_no LIKE 'QJJ%' OR customer_pk = 9851)`;
 
 await pool.query(`
-  INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
     SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
                           (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
                           (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
-     WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
   INSERT INTO store_location (store_location_id, store_location_name, is_active)
     SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
      WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
@@ -70,52 +73,66 @@ await pool.query(`
                           (15, 'อยู่ระหว่างการซ่อม - รับคืนจาก Out-Source แล้ว', 15, 'Pending', true),
                           (20, 'ปิดงาน (Complete)', 20, 'Finished', true)) v(id, name, ord, grp, act)
      WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view)
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+    SELECT * FROM (VALUES (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM job_part_status s WHERE s.job_part_status_id = v.id);
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
     VALUES ('Engineer', 'Job Take', false, false, false, true)
     ON CONFLICT (user_type, module_name) DO UPDATE SET can_view = true;
-  DELETE FROM job_log WHERE job_no LIKE 'QJJ%';
-  DELETE FROM job_send_forward_dt WHERE job_no LIKE 'QJJ%';
-  DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'QJJ%';
-  DELETE FROM job WHERE job_no LIKE 'QJJ%' OR customer_id = 9851;
-  DELETE FROM app_user WHERE user_id BETWEEN 9850 AND 9899 OR email_address LIKE 'qj-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- children before parents (every relation is a RESTRICT foreign key, drizzle/0006)
+  DELETE FROM stock_move_line WHERE product_pk IN (9851, 9852, 9853)
+     OR stock_move_pk IN (SELECT pk FROM stock_move WHERE job_pk IN ${JOBS});
+  DELETE FROM stock_move WHERE job_pk IN ${JOBS};
+  DELETE FROM job_status_log WHERE job_pk IN ${JOBS};
+  DELETE FROM job_outsource WHERE job_pk IN ${JOBS};
+  DELETE FROM job_part WHERE job_pk IN ${JOBS} OR product_pk IN (9851, 9852, 9853);
+  DELETE FROM job WHERE pk IN ${JOBS};
+  -- the users stay (audit_log, append-only, points at them): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QJ', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM customer WHERE customer_id = 9851 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9851, '${CUSTOMER}', 'ลูกค้า QJ เดิม', '02-985-0001');
-  DELETE FROM product_none_serial WHERE product_id IN (9851, 9852, 9853) OR item_id IN (9851, 9852, 9853);
-  DELETE FROM product WHERE product_id IN (9851, 9852, 9853) OR product_code IN ('QJP1', 'QJP2', 'QJP3');
-  INSERT INTO product (product_id, product_code, product_name, record_status) VALUES
+      .join(', ')}
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+      session_version = excluded.session_version, last_login = DEFAULT;
+  DELETE FROM customer WHERE pk = 9851 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9851, '${CUSTOMER}', 'ลูกค้า QJ เดิม', '02-985-0001');
+  DELETE FROM product_stock WHERE product_pk IN (9851, 9852, 9853) OR pk IN (9851, 9852, 9853);
+  DELETE FROM product WHERE pk IN (9851, 9852, 9853) OR product_code IN ('QJP1', 'QJP2', 'QJP3');
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE VALUES
     (9851, 'QJP1', 'อะไหล่ QJ แพง', 'ACTIVE'), (9852, 'QJP2', 'อะไหล่ QJ', 'ACTIVE'), (9853, 'QJP3', 'อะไหล่ QJ ลบแล้ว', 'DELETED');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price) VALUES
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price) OVERRIDING SYSTEM VALUE VALUES
     (9851, 9851, 10, 0, 0, 10, 1200.00), (9852, 9852, 100, 0, 0, 100, 100.00), (9853, 9853, 10, 0, 0, 10, 50.00);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, job_closed_by, job_repaired_date, record_status)
-    SELECT 'QJJ' || lpad(n::text, 4, '0'), s, 9851, '${CUSTOMER} ลูกค้า QJ เดิม 02-985-0001', 'Model QJ', now(), current_date,
-           cd::timestamp, cb, '1900-01-01', rs
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, closed_by_app_user_pk, job_repaired_date, record_status)
+    SELECT (SELECT pk FROM model WHERE model_code = 'TST-M'), 'QJJ' || lpad(n::text, 4, '0'), s, 9851, '${CUSTOMER} ลูกค้า QJ เดิม 02-985-0001', 'Model QJ', now(), current_date,
+           cd::timestamp, nullif(cb, 0), '1900-01-01', rs
       FROM (VALUES (1, 11, '1900-01-01', 0, 'ACTIVE'), (2, 10, '1900-01-01', 0, 'ACTIVE'), (3, 11, '1900-01-01', 0, 'ACTIVE'),
                    (4, 11, '1900-01-01', 0, 'ACTIVE'), (5, 2, '1900-01-01', 0, 'ACTIVE'), (6, 2, '1900-01-01', 0, 'ACTIVE'),
                    (7, 2, '1900-01-01', 0, 'ACTIVE'), (8, 20, '2026-10-01', 9851, 'ACTIVE'), (9, 2, '1900-01-01', 0, 'DELETED'),
                    (10, 2, '1900-01-01', 0, 'ACTIVE'), (11, 20, '2026-10-01 10:00', 9851, 'ACTIVE'), (12, 2, '1900-01-01', 0, 'ACTIVE'),
                    (13, 2, '1900-01-01', 0, 'ACTIVE'), (14, 2, '1900-01-01', 0, 'ACTIVE'), (15, 11, '1900-01-01', 0, 'ACTIVE'),
-                   (16, 5, '1900-01-01', 0, 'ACTIVE')) v(n, s, cd, cb, rs);
+                   (16, 5, '1900-01-01', 0, 'ACTIVE'), (17, 2, '1900-01-01', 0, 'ACTIVE'),
+                   (18, 2, '1900-01-01', 0, 'ACTIVE')) v(n, s, cd, cb, rs);
   -- part requests (เบิก A, priced 100, charged): booked as saveRepair would have booked them
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty,
-                                        spare_part_unit_price, spare_part_total_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-    VALUES ('QJJ0001', 'QJP2', '', 1, true, true, 1, 100, 100, 1, now(), 9851, 0, 0),
-           ('QJJ0002', 'QJP2', '', 1, true, true, 2, 100, 200, 3, now(), 9851, 2, 0),
-           ('QJJ0003', 'QJP2', '', 1, true, true, 3, 100, 300, 1, now(), 9851, 0, 0),
-           ('QJJ0004', 'QJP2', '', 1, true, true, 3, 100, 300, 1, now(), 9851, 0, 0),
-           ('QJJ0015', 'QJP3', '', 1, true, true, 1, 50, 50, 1, now(), 9851, 0, 0);
-  UPDATE product_none_serial SET quantity_booking = 7 WHERE product_id = 9852;
-  UPDATE product_none_serial SET quantity_booking = 1 WHERE product_id = 9853;
+  INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty,
+                                        spare_part_unit_price, spare_part_total_price, job_part_status_id, request_date, requested_by_app_user_pk, grant_qty, return_qty)
+    SELECT j.pk, p.pk, true, true, v.qty, v.price, v.total, v.st, now(), 9851, v.got, 0
+      FROM (VALUES ('QJJ0001', 'QJP2', 1, 100, 100, 1, 0), ('QJJ0002', 'QJP2', 2, 100, 200, 3, 2),
+                   ('QJJ0003', 'QJP2', 3, 100, 300, 1, 0), ('QJJ0004', 'QJP2', 3, 100, 300, 1, 0),
+                   ('QJJ0015', 'QJP3', 1, 50, 50, 1, 0)) v(no, code, qty, price, total, st, got)
+      JOIN job j ON j.job_no = v.no JOIN product p ON p.product_code = v.code;
+  UPDATE product_stock SET quantity_booking = 7 WHERE product_pk = 9852;
+  UPDATE product_stock SET quantity_booking = 1 WHERE product_pk = 9853;
 `);
 // as test-domain: this year's Inventory series past the numbers other suites already used
 for (const t of ['Inventory-In', 'Inventory-Out'] as const) await db.transaction((tx) => nextRunningNo(tx, t));
 await pool.query(`
   UPDATE running_no r SET number = greatest(r.number, coalesce((
-    SELECT max(substring(h.inventory_no FROM length(r.prefix) + 3)::int) FROM inventory_hd h
-     WHERE h.inventory_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
+    SELECT max(substring(h.stock_move_no FROM length(r.prefix) + 3)::int) FROM stock_move h
+     WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
 // ---- helpers ----
@@ -127,28 +144,28 @@ const jobRow = (no: string) =>
     s: number;
     v: number;
     closed: string;
-    closedBy: number;
+    closedBy: number | null;
     repaired: string;
-    rb: number;
+    rb: number | null;
     hash: string | null;
   }>(sql`
     SELECT job_status_id AS s, row_version AS v, to_char(job_closed_date, 'YYYY-MM-DD HH24:MI') AS closed,
-           job_closed_by AS "closedBy", to_char(job_repaired_date, 'YYYY-MM-DD') AS repaired, job_repaired_by AS rb,
+           closed_by_app_user_pk::int AS "closedBy", to_char(job_repaired_date, 'YYYY-MM-DD') AS repaired,
+           repaired_by_app_user_pk::int AS rb,
            track_token_hash AS hash
       FROM job WHERE job_no = ${no}`);
 /** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
-const ADMIN_UUID = (
-  await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.admin.id])
-).rows[0]!.id;
+const ADMIN_UUID = (await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE pk = $1', [U.admin.id]))
+  .rows[0]!.id;
 const line = (no: string) =>
   one<{ id: string; st: number; req: number; got: number; back: number; price: string; total: string }>(sql`
-    SELECT id::text AS id, order_status_id AS st, request_qty AS req, grant_qty AS got, return_qty AS back,
+    SELECT id::text AS id, job_part_status_id AS st, request_qty AS req, grant_qty AS got, return_qty AS back,
            spare_part_unit_price AS price, spare_part_total_price AS total
-      FROM job_order_spare_part_log WHERE job_no = ${no} ORDER BY job_order_log_id DESC LIMIT 1`);
+      FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${no}) ORDER BY pk DESC LIMIT 1`);
 const booking = async (code: string) =>
   (
     await one<{ b: number }>(sql`
-      SELECT s.quantity_booking AS b FROM product_none_serial s JOIN product p ON p.product_id = s.product_id
+      SELECT s.quantity_booking AS b FROM product_stock s JOIN product p ON p.pk = s.product_pk
        WHERE p.product_code = ${code}`)
   ).b;
 /** the error of a rejected call ({ status: 200 } when it resolved); anything but an HttpError is re-thrown */
@@ -219,7 +236,13 @@ try {
     const holder = await pool.connect(); // holds the job row so both saves queue behind it, ours first
     await holder.query('BEGIN');
     await holder.query('SELECT 1 FROM job WHERE job_no = $1 FOR UPDATE', [no]);
-    const edit = { customerCode: CUSTOMER, dueDate: addDays(today(), 30), remark: 'QJ mine', version: v };
+    const edit = {
+      customerCode: CUSTOMER,
+      modelCode: 'TST-M',
+      dueDate: addDays(today(), 30),
+      remark: 'QJ mine',
+      version: v,
+    };
     const mine = updateJob(no, edit, U.admin.id);
     await lockWaiters(1);
     const theirs = pool.query(`UPDATE job SET job_remark = 'QJ theirs' WHERE job_no = $1`, [no]);
@@ -289,6 +312,12 @@ try {
       ['QJ Vendor A'],
     );
   });
+  await test('out-source history: a blank note where none was is no change (null = ""); ส่งโดย is the person, not a pk', async () => {
+    const h = (await getJob(J(5)))!.history.find((r) => r.changes?.sendTo)!;
+    assert.ok(!('sendDetail' in h.changes!), JSON.stringify(h.changes));
+    assert.equal(typeof h.changes!.sendBy![1], 'string');
+    assert.doesNotMatch(String(h.changes!.sendBy![1]), /^#?\d+$/);
+  });
   await test('swap / refund with a stale version → 409 stale; the first save stands', async () => {
     const v = (await jobRow(J(6))).v;
     const status = (await getJob(J(6)))!.status;
@@ -296,6 +325,21 @@ try {
     const r = await err(saveSwapRefund(J(6), { status, newSerial: 'QJSN0002', version: v }, U.admin.id));
     assert.deepEqual([r.status, r.details], [409, { stale: true }]);
     assert.match((await getJob(J(6)))!.swap.detail, /QJSN0001/);
+  });
+  await test('a New S/N saved from the repair page shows on the part list but does not make a swap job', async () => {
+    const status = (await getJob(J(17)))!.status;
+    const saved = await saveRepair(J(17), { status, newSerial: 'SN-X' }, U.engineer.id);
+    assert.match(saved.sparePartReplace, /New S\/N: SN-X/);
+    const j = (await getJob(J(17)))!;
+    assert.equal(j.swap.detail, '');
+    assert.equal(isSwap(j.swap.detail), false);
+  });
+  await test('a swap / refund saved with only a New S/N shows it on the swap page (a swap job)', async () => {
+    const j = (await getJob(J(18)))!;
+    await saveSwapRefund(J(18), { status: j.status, newSerial: 'SN-Y', version: j.version }, U.admin.id);
+    const after = (await getJob(J(18)))!;
+    assert.match(after.swap.detail, /SN-Y/);
+    assert.equal(isSwap(after.swap.detail), true);
   });
 
   console.log("\n5 · the unit price is never the browser's");
@@ -312,14 +356,13 @@ try {
 
   console.log('\n6 · assign refuses closed / deleted / unknown jobs');
   await test('a closed job → 409, a deleted one → 409, an unknown job no → 404; nobody assigned', async () => {
-    const eng = (
-      await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE user_id = $1', [U.engineer.id])
-    ).rows[0]!.id;
+    const eng = (await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE pk = $1', [U.engineer.id]))
+      .rows[0]!.id;
     assert.equal((await err(assignJobs([J(8)], eng, U.admin.id))).status, 409);
     assert.equal((await err(assignJobs([J(9)], eng, U.admin.id))).status, 409);
     assert.equal((await err(assignJobs(['QJJ9999'], eng, U.admin.id))).status, 404);
     const { n } = await one<{ n: number }>(
-      sql`SELECT count(*)::int AS n FROM job WHERE job_no IN (${J(8)}, ${J(9)}) AND engineer_id = ${U.engineer.id}`,
+      sql`SELECT count(*)::int AS n FROM job WHERE job_no IN (${J(8)}, ${J(9)}) AND engineer_app_user_pk = ${U.engineer.id}`,
     );
     assert.equal(n, 0);
   });
@@ -342,7 +385,7 @@ try {
   console.log('\n9 · the job list finds the customer by their CURRENT name / phone');
   await test("after the customer's phone and name change, both find the job (the opening snapshot still does too)", async () => {
     await db.execute(
-      sql`UPDATE customer SET customer_name = 'ลูกค้า QJ ชื่อใหม่', phone_number = '089-985-7777' WHERE customer_id = 9851`,
+      sql`UPDATE customer SET customer_name = 'ลูกค้า QJ ชื่อใหม่', phone_number = '089-985-7777' WHERE pk = 9851`,
     );
     const found = async (q: string, f: Record<string, string> = {}) =>
       (await pageJobs({ page: 1, pageSize: 100, q, f: {} }, filtersFromQuery(f))).rows.some((r) => r.no === J(13));
@@ -354,14 +397,14 @@ try {
   });
 
   console.log('\n10 · reopening a closed job clears its close date');
-  await test('Finished → ซ่อมเสร็จ: job_closed_date back to 1900, closer 0, both in the STATUS history row', async () => {
+  await test('Finished → ซ่อมเสร็จ: job_closed_date back to 1900, no closer, both in the STATUS history row', async () => {
     await saveRepair(J(11), { status: await statusName(5) }, U.admin.id);
     const j = await jobRow(J(11));
-    assert.deepEqual([j.s, j.closed, j.closedBy], [5, '1900-01-01 00:00', 0]);
+    assert.deepEqual([j.s, j.closed, j.closedBy], [5, '1900-01-01 00:00', null]);
     const { c } = await one<{ c: Record<string, unknown> }>(
       sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${J(11)} AND action = 'STATUS' ORDER BY pk DESC LIMIT 1`,
     );
-    assert.deepEqual(c.jobClosedBy, [U.admin.id, 0]);
+    assert.deepEqual(c.jobClosedBy, ['QJ qj-admin', null]); // the closer's name as at the time (audit trail)
     assert.ok(Array.isArray(c.jobClosedDate));
   });
 

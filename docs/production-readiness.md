@@ -121,6 +121,9 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
 - [x] **P1-SEC-5 CSP หน้า staff + API** · S — มีแค่ `/track` · เพิ่ม `PAGE_CSP` (OL `lib/security-headers.ts`) ให้ `/:path((?!api/|track).*)` + `API_CSP` ให้ `/api` · ทดสอบกับ production build
 
   ✅ 2026-10-14: `PAGE_CSP` ทุกหน้ายกเว้น `/track` + `API_CSP` · เช็กแล้ว `/track` มี CSP เดียว
+- [ ] **P1-SEC-6 เก็บ audit_log / security_log นานแค่ไหน** · 👤 **รอเจ้าของระบบตัดสิน** — ตอนนี้เก็บตลอดไป (append-only, ไม่มีงานลบ) · **suggested: audit forever, security_log 1 year (PDPA)** — ถ้าตกลง: งานลบ security_log > 1 ปี ต้องผ่าน trigger ห้าม DELETE ของ drizzle/0006 (role แยก หรือ partition ตามเดือนแล้ว DROP)
+  2026-10-30: ทุกแถวบันทึกผู้กระทำตามที่เป็นในเวลานั้น (ชื่อ / อีเมล / ตำแหน่ง / แผนก) + IP (CF-Connecting-IP หลังผ่าน origin auth) / user agent / session id / request id / สิทธิ์ที่ใช้ · เขียนทุกครั้งตรวจสิทธิ์ปัจจุบันซ้ำใน transaction (`assertActor`, src/server/audit.ts) · cache user 10 วิ / สิทธิ์ 60 วิ เป็นต่อ process (Render 1 instance) — การเขียนไม่ขึ้นกับ cache
+- [ ] **P1-SEC-7 role ฐานข้อมูลแยกสำหรับตาราง log** · 👤 **รอเจ้าของระบบ / infra** — trigger append-only ของ audit_log / security_log กันได้แค่บั๊กของแอป: แอปต่อด้วย role ที่เป็นเจ้าของตาราง ถ้า DATABASE_URL หลุด ผู้ถือ role นั้นปิด trigger แล้วแก้/ลบ log ได้ · **แนะนำ**: role `log_writer` ที่มีแค่ INSERT + SELECT บน 2 ตารางนี้ (ไม่ใช่เจ้าของ, ไม่มี TRIGGER / TRUNCATE) + `LOG_DATABASE_URL` ตัวที่สองบน Render ให้ audit() / security() ใช้ · ต้องย้ายการเขียน log ออกจาก transaction ของข้อมูล (ต่างการเชื่อมต่อกัน) หรือใช้ `SET LOCAL ROLE` ใน transaction เดิม (แอปต้องเป็นสมาชิกของ role) — เลือกตอนตัดสิน
 ### Ops / Observability
 - [x] **P1-OPS-1 `src/lib/log.ts` + scrub PII** · M — 31 `console.*` กระจาย · drizzle error มี `params:` (ชื่อ/เบอร์/ที่อยู่ลูกค้า, track token) → `logError(err, msg, fields, req?)` JSON บรรทัดเดียว, reqId จาก `cf-ray`/`rndr-id`, scrub `\nparams:`, log stack · ใช้ reqId เป็น ref ใน `handle()`
   ✅ 2026-10-14: `src/lib/log.ts` (JSON/บรรทัด, reqId = cf-ray, scrub `params:` + อีเมล) · `handle()` ใช้ reqId เป็นรหัสอ้างอิง + log stack · แทน console.* ทั้งหมดที่มี PII
@@ -396,14 +399,14 @@ API ส่ง/รับแต่ `id` uuid ของแถว (รหัสส�
 
 - [x] **ID-1 สำรวจ** · M — (2026-10-29: inventory โดย agent อ่านอย่างเดียว) — ทุกตาราง: PK เดิม, คอลัมน์ที่อ้างถึง (FK จริง 31 + join ด้วยข้อความ เช่น `job_no`, `sale_out_hd_no`,
   `customer_code`), จุดที่ id ออกนอกฐาน (contract ~50 จุด, URL ของหน้า, export, audit_log.record_id) → ตาราง mapping
-- [ ] **ID-2 migration สร้างตารางใหม่** · L — `uuid_generate_v7()` (จาก OneLink 0027), ทุกตาราง `pk` + `id` หน้าสุด, FK `<table>_pk` /
+- [x] **ID-2 migration สร้างตารางใหม่** · L — (2026-10-30 เสร็จ: `drizzle/0006_bigint_pk.sql` จาก `scripts/gen-0006.mts` — รวม "no redundant data", ชื่อตารางใหม่ 19 ตาราง, audit trail + `security_log`, `legacy_boundary`; ตรวจอิสระ 3 รอบ; ซ้อมบน backup prod 24–25 วินาที WAL ~295 MB ฐานโตสูงสุด ~490 MB) (ออกแบบแล้ว 2026-10-30: [ADR 0008 Phase 2 design](../adr/0008-bigint-pk-uuid7-id.md#phase-2-design-decided-2026-10-30)) `uuid_generate_v7()` (จาก OneLink 0027), ทุกตาราง `pk` + `id` หน้าสุด, FK `<table>_pk` /
   `<บทบาท>_<table>_pk`, backfill uuid ตามวันที่สร้างแถว, ทั้งไฟล์ใน transaction เดียว · ซ้อมกับสำเนา prod ใน dev ก่อน
-- [ ] **ID-3 แอป** · L — (เฟส 1 เสร็จ 2026-10-29: id ภายนอกทุกจุดเป็น uuid, ลิงก์เอกสารใช้ uuid, รหัสสถานะคงเป็นตัวเลข — เหลือส่วน pk/FK ของเฟส 2) drizzle schema, service/route รับ-ส่ง `id` (uuid) แทน int, หน้าเว็บ/URL, export, `seed-export.mts`;
+- [x] **ID-3 แอป** · L — (เฟส 2 เสร็จ 2026-10-30: pk/FK, ข้อมูลใหม่ไม่เก็บซ้ำ, ล็อกตัวเลขข้อมูลเก่า (แก้ได้เฉพาะ System Admin), เช็ก role ซ้ำใน transaction (`writeTx` + lint), audit/security log ระบุตัวตนครบ, แจ้งค่าที่ไม่สมเหตุสมผลในกระดิ่ง) (เฟส 1 เสร็จ 2026-10-29: id ภายนอกทุกจุดเป็น uuid, ลิงก์เอกสารใช้ uuid, รหัสสถานะคงเป็นตัวเลข — เหลือส่วน pk/FK ของเฟส 2) drizzle schema, service/route รับ-ส่ง `id` (uuid) แทน int, หน้าเว็บ/URL, export, `seed-export.mts`;
   แบ่ง agent 4 กลุ่ม: (1) ผู้ใช้/สิทธิ์/พนักงาน + ข้อมูลหลัก + ลูกค้า/ที่อยู่ · (2) งาน (ไฟล์แนบ, โทร, ส่งซ่อมนอก, อะไหล่, มอบหมาย,
   แจ้งเตือนเกินกำหนด, URL/หน้า/พิมพ์งาน) · (3) ใบเสนอราคา + ใบสั่งขาย + โปรไฟล์เอกสาร/ขนส่ง + อัปโหลดโลโก้ + หน้าพิมพ์ ·
   (4) คลัง/สินค้า + รายงาน/export + หน้า audit + records route
-- [ ] **ID-4 เทสต์บังคับกติกา** · S — ทุกตารางมี `pk` + `id`; ไม่มีคำตอบ API ไหนมี `pk` / `*_pk` (แบบ OL `public-ids.test.ts`)
-- [ ] **ID-5 ตรวจครบ** · M — (เฟส 1 ผ่าน 2026-10-29: test:db 22 ชุด, e2e 261, QA เบราว์เซอร์, migration 0005 บนสำเนา prod 7 วินาที — ทำซ้ำหลังเฟส 2) `test:db`, e2e ทุก project, OpenAPI snapshot, QA เบราว์เซอร์ · เลิกใช้ `load_supabase.sh` / `db:dev:load`
+- [x] **ID-4 เทสต์บังคับกติกา** · S — (2026-10-30: test-qa-ids catalog, test-openapi ไม่มี pk, test-drizzle-ids, test-qa-owner-rules, test-qa-audit, test-api ตรวจ audit ทุก operation ที่แก้ข้อมูล) (รายละเอียดใน ADR 0008 Phase 2) ทุกตารางมี `pk` + `id`; ไม่มีคำตอบ API ไหนมี `pk` / `*_pk` (แบบ OL `public-ids.test.ts`)
+- [x] **ID-5 ตรวจครบ** · M — (เฟส 2 ผ่าน 2026-10-30: test:db 26 ชุด 1,003/0 + 5 ชุด all passed, e2e 267/267, QA เบราว์เซอร์ + performance, ซ้อม cutover 2 รอบ — หลัง deploy ต้อง export `seed.sql` ใหม่จาก prod ก่อนใช้ `db:dev:load` / `cutover.sh`) (เฟส 1 ผ่าน 2026-10-29: test:db 22 ชุด, e2e 261, QA เบราว์เซอร์, migration 0005 บนสำเนา prod 7 วินาที — ทำซ้ำหลังเฟส 2) `test:db`, e2e ทุก project, OpenAPI snapshot, QA เบราว์เซอร์ · เลิกใช้ `load_supabase.sh` / `db:dev:load`
 
 ## วิดีโอแนบงาน (2026-10-28 — คลิปอาการเสียจากลูกค้า)
 

@@ -41,15 +41,15 @@ const STAFF = [
 ];
 
 await pool.query(`
-  DELETE FROM app_config WHERE user_type IN ('QRP Report', 'QRP Jobs', 'QRP Stock');
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type IN ('QRP Report', 'QRP Jobs', 'QRP Stock');
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QRP Report', 'Report', false, false, false, true),
     ('QRP Jobs', 'Job Management', false, false, false, true),
     ('QRP Stock', 'Report', false, false, false, true),
     ('QRP Stock', 'Product', false, false, false, true),
     ('QRP Stock', 'Export', false, false, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9941 AND 9949 OR email_address LIKE 'qrp-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  -- the users stay (audit_log, append-only, points at them): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     ${[
       ...STAFF.map(
         (s) => `(${s.id}, 'QRP', '${s.last}', 'qrp-${s.last}@example.invalid', 'QRP Staff', 'ACTIVE', ${SV})`,
@@ -57,38 +57,69 @@ await pool.query(`
       ...Object.values(U).map(
         (u) => `(${u.id}, 'QRP', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`,
       ),
-    ].join(', ')};
-  INSERT INTO job_order_spare_part_status (order_status_id, order_status_name) VALUES
+    ].join(', ')}
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+      session_version = excluded.session_version, last_login = DEFAULT;
+  -- the codes the fixtures carry (foreign keys, drizzle/0006)
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name) VALUES
     (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว') ON CONFLICT DO NOTHING;
+  INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
+    SELECT * FROM (VALUES (1, 'รับงานใหม่', 1, 'Open', true), (5, 'ซ่อมเสร็จ', 5, 'Repaired', true),
+                          (8, 'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)', 51, 'Finished', true)) v(id, name, ord, grp, act)
+     WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
+  INSERT INTO quotation_status (quotation_status_id, quotation_status_name)
+    SELECT * FROM (VALUES (1, 'รอเสนอราคา'), (3, 'ลูกค้าตกลงซ่อม')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM quotation_status s WHERE s.quotation_status_id = v.id);
+  INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+    SELECT * FROM (VALUES (3, 'แก้ไขข้อมูล', 'Reject', true, true), (4, 'อนุมัติแล้ว', 'Approved', false, false)) v(id, th, en, ed, rv)
+     WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id);
+  INSERT INTO store_location (store_location_id, store_location_name, is_active)
+    SELECT 1, 'คลังสินค้าดี', true WHERE NOT EXISTS (SELECT 1 FROM store_location WHERE store_location_id = 1);
 
-  DELETE FROM job_send_forward_dt WHERE job_no LIKE 'QRPJ%';
-  DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'QRPJ%';
-  DELETE FROM quotation_dt WHERE quotation_no LIKE 'QRPQ%';
-  DELETE FROM quotation_hd WHERE quotation_no LIKE 'QRPQ%';
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no LIKE 'QRPSO%';
-  DELETE FROM sale_out_hd WHERE sale_out_hd_no LIKE 'QRPSO%';
+  -- children before parents (every relation is a RESTRICT foreign key, drizzle/0006)
+  DELETE FROM job_outsource WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QRPJ%');
+  DELETE FROM job_part WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QRPJ%')
+     OR product_pk BETWEEN 9941 AND 9943;
+  DELETE FROM quotation_line WHERE quotation_pk IN (SELECT pk FROM quotation WHERE quotation_no LIKE 'QRPQ%');
+  DELETE FROM quotation WHERE quotation_no LIKE 'QRPQ%';
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE sale_order_no LIKE 'QRPSO%');
+  DELETE FROM stock_move WHERE stock_move_no = 'WHO-QRP';
+  DELETE FROM sale_order WHERE sale_order_no LIKE 'QRPSO%';
   DELETE FROM job WHERE job_no LIKE 'QRPJ%';
-  DELETE FROM product_model WHERE product_id BETWEEN 9941 AND 9943;
-  DELETE FROM product_none_serial WHERE product_id BETWEEN 9941 AND 9943;
-  DELETE FROM product WHERE product_id BETWEEN 9941 AND 9943 OR product_code LIKE 'QRPP%';
-  DELETE FROM model WHERE model_id = 9941 OR model_code = 'QRPM1';
-  DELETE FROM customer WHERE customer_id = 9941 OR customer_code = 'QRPC01';
-  DELETE FROM manufacturer WHERE manufacturer_id IN (9941, 9942) OR manufacturer_name IN ('QRP Brand', 'QRP Brand 2');
-  DELETE FROM product_type WHERE product_type_id = 9941 OR product_type_name = 'QRP Type';
-  DELETE FROM job_type WHERE job_type_id = 9941 OR job_type_name = 'QRP งานซ่อม';
+  DELETE FROM product_compatible_model WHERE product_pk BETWEEN 9941 AND 9943;
+  DELETE FROM product_stock WHERE product_pk BETWEEN 9941 AND 9943;
+  DELETE FROM product WHERE pk BETWEEN 9941 AND 9943 OR product_code LIKE 'QRPP%';
+  DELETE FROM model WHERE pk = 9941 OR model_code = 'QRPM1';
+  DELETE FROM customer WHERE pk = 9941 OR customer_code = 'QRPC01';
+  DELETE FROM brand WHERE pk IN (9941, 9942) OR brand_name IN ('QRP Brand', 'QRP Brand 2');
+  DELETE FROM product_type WHERE pk = 9941 OR product_type_name = 'QRP Type';
+  DELETE FROM job_type WHERE pk = 9941 OR job_type_name = 'QRP งานซ่อม';
 
-  INSERT INTO manufacturer (manufacturer_id, manufacturer_name) VALUES (9941, 'QRP Brand'), (9942, 'QRP Brand 2');
-  INSERT INTO product_type (product_type_id, product_type_name) VALUES (9941, 'QRP Type');
-  INSERT INTO job_type (job_type_id, job_type_name) VALUES (9941, 'QRP งานซ่อม');
-  INSERT INTO model (model_id, model_code, model_name, manufacturer_id) VALUES (9941, 'QRPM1', 'QRP Model', 9941);
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number)
+  INSERT INTO brand (pk, brand_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP Brand'), (9942, 'QRP Brand 2');
+  INSERT INTO product_type (pk, product_type_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP Type');
+  INSERT INTO job_type (pk, job_type_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP งานซ่อม');
+  INSERT INTO model (pk, model_code, model_name, brand_pk) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRPM1', 'QRP Model', 9941);
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE
     VALUES (9941, 'QRPC01', 'ลูกค้า QRP', '0811111111');
+  INSERT INTO product (pk, product_code, product_vendor_code, product_name, product_name_en, product_description,
+      brand_pk, for_model_color, record_status) OVERRIDING SYSTEM VALUE
+    VALUES (9941, 'QRPP1', 'QRPV-1', 'อะไหล่ QRP 1', 'QRP part 1', 'desc1', 9941, 'Red', 'ACTIVE'),
+           (9942, 'QRPP2', 'QRPV-2', 'อะไหล่ QRP 2', 'QRP part 2', '', 9941, '', 'ACTIVE'),
+           (9943, 'QRPP3', 'QRPV-3', 'อะไหล่ QRP 3', '', '', 9941, 'Blue', 'INACTIVE');
+  INSERT INTO product_stock (pk, product_pk, capital_price, retail_price,
+      quantity_available, quantity_used, quantity_booking, quantity_remain) OVERRIDING SYSTEM VALUE
+    VALUES (9941, 9941, 50, 100, 10, 3, 1, 6), (9942, 9942, 20, 40, 5, 0, 0, 5), (9943, 9943, 1, 2, 0, 0, 0, 0);
+  INSERT INTO product_compatible_model (product_pk, model_pk) VALUES (9941, 9941);
 
   -- 1: closed (TAT 10), bounce, warranty IN, costs; 2: open, no customer row, no warranty, sent out-source in Oct;
   -- 3: repaired, warranty OUT, IMEI
-  INSERT INTO job (job_no, record_status, customer_id, customer_detail, job_create_date, job_create_by, engineer_id,
-      job_status_id, job_closed_date, job_closed_by, job_return_date, job_repaired_date, product_warranty, is_job_bounce,
-      product_brand_id, product_model_name, product_type_id, job_type_id, job_type_detail, product_symptom_other,
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (job_no, record_status, customer_pk, customer_detail, job_create_date, created_by_app_user_pk, engineer_app_user_pk,
+      job_status_id, job_closed_date, closed_by_app_user_pk, job_return_date, job_repaired_date, product_warranty, is_job_bounce,
+      model_pk, product_model_name, product_type_pk, job_type_pk, job_type_detail, product_symptom_other,
       product_fault, product_equipment, job_remark, job_reception_date, job_reception_tracking_no, job_reference_no,
       product_sale_order_date, product_serial, product_imei_no, spare_part_total_cost, service_cost, service_tool_cost,
       delivery_cost, carton_box_cost, job_total_cost, job_payment_amount, job_payment_type, job_payment_no,
@@ -102,51 +133,57 @@ await pool.query(`
       50, 20, 380, 380, 'โอน', 'PAY1',
       'โอนแล้ว', 'จอ LCD', 'เปลี่ยนจอ', 'ok'),
     ('QRPJ0002', 'ACTIVE', null, 'QRPC99 สมชาย ทดสอบ 0899999999', '2026-09-12 09:00', 9942, null,
-      1, '1900-01-01', 0, '1900-01-01', '1900-01-01', '', false,
-      null, '', null, null, '', '', '', '', '', null, '', '', null, 'QRPSN2', '', 0, 0, 0, 0, 0, 0, 0, '', '', '', '', '', ''),
+      1, '1900-01-01', null, '1900-01-01', '1900-01-01', '', false,
+      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, null, '', '', '', '', '', null, '', '', null, 'QRPSN2', '', 0, 0, 0, 0, 0, 0, 0, '', '', '', '', '', ''),
     ('QRPJ0003', 'ACTIVE', 9941, 'QRPC01 ลูกค้า QRP 0811111111', '2026-10-20 09:00', 9941, null,
-      5, '1900-01-01', 0, '1900-01-01', '2026-10-22 10:00', 'OUT', false,
-      null, '', null, null, '', '', '', '', '', null, '', '', null, '', '35QRP999', 0, 500, 0, 0, 0, 500, 0, '', '', '', '', '', '');
-  INSERT INTO job_send_forward_dt (job_no, send_to_name, send_date, receive_date, send_status)
-    VALUES ('QRPJ0002', 'ร้าน QRP', '2026-10-02 10:00', '2026-10-05 10:00', 'Received');
+      5, '1900-01-01', null, '1900-01-01', '2026-10-22 10:00', 'OUT', false,
+      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, null, '', '', '', '', '', null, '', '', null, '', '35QRP999', 0, 500, 0, 0, 0, 500, 0, '', '', '', '', '', '');
+  INSERT INTO job_outsource (job_pk, send_to_name, send_date, receive_date)
+    SELECT pk, 'ร้าน QRP', '2026-10-02 10:00', '2026-10-05 10:00' FROM job WHERE job_no = 'QRPJ0002';
 
-  INSERT INTO quotation_hd (quotation_no, record_status, customer_code, create_date, reference_job_no,
+  INSERT INTO quotation (quotation_no, record_status, customer_pk, create_date, job_pk,
       quotation_status_id, customer_approve_date, net_amount, remark, quotation_type)
-    VALUES ('QRPQ0001', 'ACTIVE', 'QRPC01', '2026-09-13 10:00', 'QRPJ0001', 3, '2026-09-14 10:00', 1500, 'QRP remark', 'Normal'),
-           ('QRPQ0002', 'ACTIVE', 'QRPC01', '2026-09-15 10:00', 'QRPJ0003', 1, '1900-01-01', 200, '', 'Normal');
-  INSERT INTO quotation_dt (quotation_no, line_number, item_type, item_code, item_detail, quantity, unit, unit_price, total_price)
-    VALUES ('QRPQ0001', 1, 'SparePart', 'QRPP1', 'จอ LCD', 1, 'ชิ้น', 1000, 1000),
-           ('QRPQ0001', 2, 'SparePart', 'QRPP2', 'กาว', 2, 'ชิ้น', 50, 100),
-           ('QRPQ0001', 3, 'Delivery', 'DL', 'ค่าส่ง', 1, 'ครั้ง', 50, 50);
+    SELECT v.no, 'ACTIVE', 9941, v.created::timestamp, j.pk, v.st, v.approved::timestamp, v.net, v.remark, 'Normal'
+      FROM (VALUES ('QRPQ0001', '2026-09-13 10:00', 'QRPJ0001', 3, '2026-09-14 10:00', 1500, 'QRP remark'),
+                   ('QRPQ0002', '2026-09-15 10:00', 'QRPJ0003', 1, '1900-01-01', 200, '')) v(no, created, job, st, approved, net, remark)
+      JOIN job j ON j.job_no = v.job;
+  INSERT INTO quotation_line (quotation_pk, line_number, item_type, item_code, product_pk, item_detail, quantity, unit_price, total_price)
+    SELECT (SELECT pk FROM quotation WHERE quotation_no = 'QRPQ0001'), v.n, v.t, v.code,
+           (SELECT pk FROM product WHERE product_code = v.code), v.detail, v.qty, v.price, v.total
+      FROM (VALUES (1, 'SparePart', 'QRPP1', 'จอ LCD', 1, 'ชิ้น', 1000, 1000),
+                   (2, 'SparePart', 'QRPP2', 'กาว', 2, 'ชิ้น', 50, 100),
+                   (3, 'Delivery', 'DL', 'ค่าส่ง', 1, 'ครั้ง', 50, 50)) v(n, t, code, detail, qty, unit, price, total);
 
-  INSERT INTO product (product_id, product_code, product_vender_code, product_name, product_name_en, product_description,
-      manufacturer_id, for_model_color, record_status)
-    VALUES (9941, 'QRPP1', 'QRPV-1', 'อะไหล่ QRP 1', 'QRP part 1', 'desc1', 9941, 'Red', 'ACTIVE'),
-           (9942, 'QRPP2', 'QRPV-2', 'อะไหล่ QRP 2', 'QRP part 2', '', 9941, '', 'ACTIVE'),
-           (9943, 'QRPP3', 'QRPV-3', 'อะไหล่ QRP 3', '', '', 9941, 'Blue', 'INACTIVE');
-  INSERT INTO product_none_serial (item_id, product_id, store_location_id, capital_price, retail_price,
-      quantity_available, quantity_used, quantity_booking, quantity_remain)
-    VALUES (9941, 9941, 1, 50, 100, 10, 3, 1, 6), (9942, 9942, 1, 20, 40, 5, 0, 0, 5), (9943, 9943, 1, 1, 2, 0, 0, 0, 0);
-  INSERT INTO product_model (product_id, model_code) VALUES (9941, 'QRPM1');
+  INSERT INTO sale_order (sale_order_no, record_status, document_create_date, created_by_app_user_pk, sale_out_by_app_user_pk,
+      customer_pk, customer_name, customer_address, customer_phone_number, total_base_amount, vat_amount, total_amount,
+      net_amount, remark, approve_status_id, approve_date, delivery_tracking_no, delivery_date)
+    VALUES ('QRPSO001', 'ACTIVE', '2026-09-16 10:00', 9941, 9942, 9941, 'ลูกค้า QRP', '1 ถนน QRP', '0811111111',
+            934.58, 65.42, 1000, 1000, 'ส่งด่วน', 4, '2026-09-17 10:00', 'TRK-QRP', '2026-09-18 10:00'),
+           ('QRPSO002', 'ACTIVE', '2026-09-17 10:00', 9942, 9942, 9941, 'ลูกค้า QRP', '', '',
+            0, 0, 0, 0, '', 3, '1900-01-01', '', '1900-01-01');
+  -- its pick slip: the report's reference no. is that move's number (sale_order.reference_no dropped, drizzle/0006)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
+    SELECT 4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true WHERE NOT EXISTS (SELECT 1 FROM stock_move_type WHERE stock_move_type_id = 4);
+  INSERT INTO stock_move (stock_move_no, stock_move_type_id, sale_order_pk, create_date)
+    SELECT 'WHO-QRP', 4, pk, '2026-09-17 10:00' FROM sale_order WHERE sale_order_no = 'QRPSO001';
+  INSERT INTO sale_order_line (sale_order_pk, list_no, product_code, product_pk, sale_out_quantity, sale_out_price, amount)
+    SELECT (SELECT pk FROM sale_order WHERE sale_order_no = 'QRPSO001'), v.n, v.code,
+           (SELECT pk FROM product WHERE product_code = v.code), v.qty, v.price, v.amount
+      FROM (VALUES (1, 'QRPP1', 2, 300, 600), (2, 'QRPP2', 1, 400, 400)) v(n, code, qty, price, amount);
 
-  INSERT INTO sale_out_hd (sale_out_hd_no, record_status, document_create_date, document_create_by, sale_out_by,
-      customer_code, customer_name, customer_address, customer_phone_number, total_base_amount, vat_amount, total_amount,
-      net_amount, remark_hd, approve_status_id, approve_date, reference_no, delivery_tracking_no, delivery_date)
-    VALUES ('QRPSO001', 'ACTIVE', '2026-09-16 10:00', 9941, 9942, 'QRPC01', 'ลูกค้า QRP', '1 ถนน QRP', '0811111111',
-            934.58, 65.42, 1000, 1000, 'ส่งด่วน', 4, '2026-09-17 10:00', 'WHO-QRP', 'TRK-QRP', '2026-09-18 10:00'),
-           ('QRPSO002', 'ACTIVE', '2026-09-17 10:00', 9942, 9942, 'QRPC01', 'ลูกค้า QRP', '', '',
-            0, 0, 0, 0, '', 3, '1900-01-01', '', '', '1900-01-01');
-  INSERT INTO sale_out_dt (sale_out_hd_no, list_no, product_code, sale_out_quantity, sale_out_price, amount_dt)
-    VALUES ('QRPSO001', 1, 'QRPP1', 2, 300, 600), ('QRPSO001', 2, 'QRPP2', 1, 400, 400);
-
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, is_quotation, request_qty, request_date, grant_qty,
-      grant_date, return_qty, return_date, order_status_id)
-    VALUES ('QRPJ0001', 'QRPP1', true, 2, '2026-09-14 10:00', 2, '2026-09-14 11:00', 0, '1900-01-01', 3),
-           ('QRPJ0001', 'QRPP2', false, 1, '2026-09-14 10:05', 1, '2026-09-14 11:05', 1, '2026-09-20 10:00', 2);
+  INSERT INTO job_part (job_pk, product_pk, is_quotation, request_qty, request_date, grant_qty,
+      grant_date, return_qty, return_date, job_part_status_id)
+    SELECT (SELECT pk FROM job WHERE job_no = 'QRPJ0001'), p.pk, v.quote, v.qty, v.req::timestamp, v.qty, v.granted::timestamp,
+           v.back, v.returned::timestamp, v.st
+      FROM (VALUES ('QRPP1', true, 2, '2026-09-14 10:00', '2026-09-14 11:00', 0, '1900-01-01', 3),
+                   ('QRPP2', false, 1, '2026-09-14 10:05', '2026-09-14 11:05', 1, '2026-09-20 10:00', 2))
+           v(code, quote, qty, req, granted, back, returned, st)
+      JOIN product p ON p.product_code = v.code;
   -- 3,001 lines of one job (opened outside the range): the Word / PDF cap (PRINT_MAX 3,000)
-  INSERT INTO job (job_no, record_status, job_create_date, job_status_id) VALUES ('QRPJ0009', 'ACTIVE', '2025-01-01', 1);
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, request_qty, request_date, order_status_id)
-    SELECT 'QRPJ0009', 'QRPP2', 1, '2026-09-01 10:00', 1 FROM generate_series(1, 3001);
+  INSERT INTO job (model_pk, job_no, record_status, job_create_date, job_status_id)
+    VALUES ((SELECT pk FROM model WHERE model_code = 'TST-M'), 'QRPJ0009', 'ACTIVE', '2025-01-01', 1);
+  INSERT INTO job_part (job_pk, product_pk, request_qty, request_date, job_part_status_id)
+    SELECT (SELECT pk FROM job WHERE job_no = 'QRPJ0009'), 9942, 1, '2026-09-01 10:00', 1 FROM generate_series(1, 3001);
 `);
 
 const RANGE = { from: '2026-09-01', to: '2026-10-31' };
@@ -156,7 +193,7 @@ const run = async (report: ReportKey, f: Record<string, string>, cost = false) =
 const col = (rows: Record<string, unknown>[], key = 'no') => rows.map((r) => r[key]);
 /** a fixture user's app_user.id — what the report pages' staff filters send (ADR 0008) */
 const uuidOf = async (userId: number) =>
-  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE user_id = $1', [userId])).rows[0]!.id;
+  (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [userId])).rows[0]!.id;
 
 async function cookieOf(u: { email: string }) {
   const now = Date.now();

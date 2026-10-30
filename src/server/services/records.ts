@@ -1,13 +1,12 @@
 import 'server-only';
 import { invalidate } from '@/server/cache';
-import { and, desc, eq, ne, or, sql } from 'drizzle-orm';
-import { db, type Tx } from '@/db/client';
-import { appUser, customer, job, jobLog, jobOrderSparePartLog, product, quotationHd, saleOutHd } from '@/db/schema';
+import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { db, type Tx, writeTx } from '@/db/client';
+import { appUser, customer, job, jobStatusLog, jobPart, product, quotation, saleOrder } from '@/db/schema';
 import type { Module } from '@/lib/modules';
 import { JS, PART } from '@/lib/status-ids';
 import { HttpError, fullName, invalidateUserCache } from '@/server/auth';
 import { audit, isUuid } from '@/server/audit';
-import { pkOf } from '@/server/ids';
 import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
 import { RS, statusStamp, statusSummary, type RecordStatus } from '@/server/record-status';
@@ -15,7 +14,7 @@ import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from 
 import { productsChanged } from './stock';
 import { AS } from './sale-orders';
 import { DELETED_USER_MSG } from './users';
-import { jobNotFound, logStatus } from './jobs';
+import { AGREED_QUOTATION_STATUSES, agreedQuotationPk, jobNotFound, logStatus } from './jobs';
 
 export type RecordTable =
   | 'users'
@@ -50,13 +49,11 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
 
 /**
  * Set record_status (ACTIVE / INACTIVE / DELETED) on any entity. Nothing is ever
- * hard-deleted. The legacy flag each table used before is mirrored so the old
- * reports still agree:
- *   masters / customers / products / quotations → is_active
- *   users → is_active + deleted
+ * hard-deleted (is_active / app_user.deleted / sale_order.document_status were the same fact and are dropped,
+ * drizzle/0006):
  *   jobs → DELETED also sets job_status 0 "ยกเลิกข้อมูล" (+ job_log), as the old app did; restoring
  *          puts back the last status before that (job_log; none → 1 งานใหม่, as the old app did) + job_log
- *   sale orders → document_status + cancel stamp (an approved one — stock issued — cannot be cancelled)
+ *   sale orders → + cancel stamp (an approved one — stock issued — cannot be cancelled)
  * Restoring a DELETED row is done in SQL only (by decision) — the API still
  * accepts ACTIVE so the existing users-page restore button keeps working.
  * `mayRestore` = the caller holds `del` on the module (customers: is System Admin): taking a row out of DELETED
@@ -80,19 +77,33 @@ export async function setRecordStatus(
     throw new HttpError(400, 'เอกสารปิดใช้งานไม่ได้ — ลบ (ยกเลิก) หรือกู้คืนเท่านั้น');
   // ADR 0008: a part / job / quotation / sale order comes as its uuid — from here on its code / number
   // (what the rest of this function, its messages and its audit line work with)
+  // `pk` = the row's pk (what the part log / job log / job link to since drizzle/0006)
   const DOC = { products: 'อะไหล่', jobs: 'งาน', quotations: 'ใบเสนอราคา', sale_orders: 'ใบสั่งขาย' } as const;
+  let pk = 0;
+  /** the row's uuid when `id` became its number (the audit line carries both) */
+  let rowId: string | null = null;
   if (table in DOC) {
     const what = DOC[table as keyof typeof DOC];
     if (!isUuid(String(id))) throw new HttpError(404, `ไม่พบ${what}`);
     const uid = String(id).trim().toLowerCase();
-    id =
+    const [row] =
       table === 'products'
-        ? await pkOf(product, product.productCode, uid, what)
+        ? await db.select({ pk: product.pk, no: product.productCode }).from(product).where(eq(product.id, uid))
         : table === 'jobs'
-          ? await pkOf(job, job.jobNo, uid, what)
+          ? await db.select({ pk: job.pk, no: job.jobNo }).from(job).where(eq(job.id, uid))
           : table === 'quotations'
-            ? await pkOf(quotationHd, quotationHd.quotationNo, uid, what)
-            : await pkOf(saleOutHd, saleOutHd.saleOutHdNo, uid, what);
+            ? await db
+                .select({ pk: quotation.pk, no: quotation.quotationNo })
+                .from(quotation)
+                .where(eq(quotation.id, uid))
+            : await db
+                .select({ pk: saleOrder.pk, no: saleOrder.saleOrderNo })
+                .from(saleOrder)
+                .where(eq(saleOrder.id, uid));
+    if (!row) throw new HttpError(404, `ไม่พบ${what}`);
+    pk = row.pk;
+    rowId = uid;
+    id = row.no ?? '';
   }
   const stamp = statusStamp(rs, byUserId);
   const ENTITY: Record<string, [string, string]> = {
@@ -100,8 +111,8 @@ export async function setRecordStatus(
     products: ['product', 'Product'],
     customers: ['customer', 'Customer'],
     jobs: ['job', 'Job Management'],
-    quotations: ['quotation_hd', 'Quotation'],
-    sale_orders: ['sale_out_hd', 'Sale Order'],
+    quotations: ['quotation', 'Quotation'],
+    sale_orders: ['sale_order', 'Sale Order'],
   };
   // what the audit page says (not the table name): a sale order is cancelled, the rest deleted / made Active …
   const NOUN: Record<string, string> = {
@@ -114,18 +125,9 @@ export async function setRecordStatus(
   };
   // the record_status before this change (read in the change's transaction) — the audit keeps [old, new], not [null, new]
   const OLD: Partial<Record<RecordTable, (tx: Tx) => Promise<{ rs: string }[]>>> = {
-    products: (tx) =>
-      tx
-        .select({ rs: product.recordStatus })
-        .from(product)
-        .where(eq(product.productCode, String(id)))
-        .for('update'),
+    products: (tx) => tx.select({ rs: product.recordStatus }).from(product).where(eq(product.pk, pk)).for('update'),
     quotations: (tx) =>
-      tx
-        .select({ rs: quotationHd.recordStatus })
-        .from(quotationHd)
-        .where(eq(quotationHd.quotationNo, String(id)))
-        .for('update'),
+      tx.select({ rs: quotation.recordStatus }).from(quotation).where(eq(quotation.pk, pk)).for('update'),
   };
   const oldOf = async (tx: Tx) => (await OLD[table]?.(tx))?.[0]?.rs ?? null;
   const refuseRestore = (old: string | null) => {
@@ -146,6 +148,9 @@ export async function setRecordStatus(
       module: e[1],
       entity: e[0],
       key: id,
+      id: rowId,
+      // a customer's key is its uuid: its code is the number
+      no: rowId ? String(id) : table === 'customers' ? String(label) || null : null,
       summary:
         statusSummary({ noun: NOUN[table] ?? e[0], key: label, old, rs, cancel: table === 'sale_orders' }) +
         (why && ` · ${why}`),
@@ -161,7 +166,7 @@ export async function setRecordStatus(
       return setModelStatus(String(id), rs, byUserId);
     case 'users':
       // `id` = the user's uuid (the route checked it); the audit key stays the uuid, the summary names the person
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         const [cur] = await tx
           .select({ rs: appUser.recordStatus, first: appUser.firstName, last: appUser.lastName, u: appUser.username })
           .from(appUser)
@@ -170,29 +175,31 @@ export async function setRecordStatus(
         if (!cur) throw new HttpError(404, 'ไม่พบผู้ใช้');
         // out of DELETED only through กู้คืน (users.ts setUserDeleted → INACTIVE)
         if (cur.rs === RS.DELETED && rs !== RS.DELETED) throw new HttpError(409, DELETED_USER_MSG);
-        await tx
-          .update(appUser)
-          .set({ ...stamp, deleted: rs === RS.DELETED })
-          .where(eq(appUser.id, String(id)));
+        // ACTIVE → ACTIVE changes nothing: who / when it last changed stays (and nothing is logged)
+        if (cur.rs !== rs)
+          await tx
+            .update(appUser)
+            .set(stamp) // deleted = record_status DELETED (app_user.deleted dropped, drizzle/0006)
+            .where(eq(appUser.id, String(id)));
         await log(tx, cur.rs, '', fullName(cur.first, cur.last) || clean(cur.u));
       });
       invalidateUserCache();
       invalidate('staff');
       return;
     case 'products':
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         const old = await oldOf(tx);
         refuseRestore(old);
         if (rs === RS.DELETED) {
           // a request still waiting for this part could never be issued once it is gone, and its booking stays held
           const waiting = await tx
-            .selectDistinct({ no: jobOrderSparePartLog.jobNo })
-            .from(jobOrderSparePartLog)
-            .innerJoin(job, eq(job.jobNo, jobOrderSparePartLog.jobNo))
+            .selectDistinct({ no: job.jobNo })
+            .from(jobPart)
+            .innerJoin(job, eq(job.pk, jobPart.jobPk))
             .where(
               and(
-                eq(jobOrderSparePartLog.sparePartCode, String(id)),
-                eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
+                eq(jobPart.productPk, pk),
+                eq(jobPart.jobPartStatusId, PART.REQUESTED),
                 ne(job.recordStatus, RS.DELETED),
               ),
             )
@@ -203,21 +210,22 @@ export async function setRecordStatus(
               `อะไหล่ ${id} มีงานรอเบิกอยู่ (${waiting.map((w) => w.no).join(', ')}) — ยกเลิกคำขอเบิกก่อนลบ`,
             );
         }
-        await tx
-          .update(product)
-          .set(
-            rs === RS.DELETED
-              ? { ...stamp, cancelDate: nowThai(), cancelBy: byUserId }
-              : { ...stamp, cancelDate: SENTINEL_TS, cancelBy: -1, cancelRemark: '' },
-          )
-          .where(eq(product.productCode, String(id)));
+        if (old !== rs)
+          await tx
+            .update(product)
+            .set(
+              rs === RS.DELETED
+                ? { ...stamp, cancelDate: nowThai(), cancelledByAppUserPk: byUserId }
+                : { ...stamp, cancelDate: SENTINEL_TS, cancelledByAppUserPk: null, cancelRemark: '' },
+            )
+            .where(eq(product.pk, pk));
         await log(tx, old);
       });
       productsChanged();
       return;
     case 'customers':
       // `id` = the customer's uuid (the route checked it): the audit key; the summary names its code
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         const [cur] = await tx
           .select({ rs: customer.recordStatus, code: customer.customerCode })
           .from(customer)
@@ -225,23 +233,41 @@ export async function setRecordStatus(
           .for('update');
         if (!cur) throw new HttpError(404, 'ไม่พบลูกค้า');
         refuseRestore(cur.rs);
-        await tx
-          .update(customer)
-          .set(stamp)
-          .where(eq(customer.id, String(id)));
+        if (cur.rs !== rs)
+          await tx
+            .update(customer)
+            .set(stamp)
+            .where(eq(customer.id, String(id)));
         await log(tx, cur.rs, '', cur.code ?? '');
       });
       return;
     case 'quotations':
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         const old = await oldOf(tx);
         refuseRestore(old);
         if (rs === RS.DELETED) {
-          // the job's approved quotation: deleting it left the job pointing at a deleted document
+          // the job's approved quotation (agreedQuotationPk): deleting it left the job pointing at a deleted document
           const [held] = await tx
             .select({ no: job.jobNo })
             .from(job)
-            .where(and(eq(job.quotationNoApproved, String(id)), ne(job.recordStatus, RS.DELETED)))
+            .where(
+              and(
+                or(
+                  eq(job.approvedQuotationPk, pk),
+                  inArray(
+                    job.pk,
+                    tx
+                      .select({ j: quotation.jobPk })
+                      .from(quotation)
+                      .where(
+                        and(eq(quotation.pk, pk), inArray(quotation.quotationStatusId, AGREED_QUOTATION_STATUSES)),
+                      ),
+                  ),
+                ),
+                sql`${agreedQuotationPk} = ${pk}`,
+                ne(job.recordStatus, RS.DELETED),
+              ),
+            )
             .limit(1);
           if (held)
             throw new HttpError(
@@ -249,20 +275,17 @@ export async function setRecordStatus(
               `ใบเสนอราคานี้ลูกค้าตกลงแล้ว (งาน ${held.no}) — เปลี่ยนสถานะเป็นลูกค้าไม่ตกลงก่อน แล้วจึงลบ`,
             );
         }
-        await tx
-          .update(quotationHd)
-          .set(stamp)
-          .where(eq(quotationHd.quotationNo, String(id)));
+        if (old !== rs) await tx.update(quotation).set(stamp).where(eq(quotation.pk, pk));
         await log(tx, old, rs === RS.DELETED ? clean(remark) : '');
       });
       return;
     case 'jobs': {
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         // locked like the job workflows (lockJob): a save running now finishes first
         const [cur] = await tx
           .select({ st: job.jobStatusId, rs: job.recordStatus })
           .from(job)
-          .where(eq(job.jobNo, String(id)))
+          .where(eq(job.pk, pk))
           .for('update');
         if (!cur) throw jobNotFound(String(id));
         refuseRestore(cur.rs);
@@ -273,15 +296,16 @@ export async function setRecordStatus(
           // parts still waiting for stock, or issued and not back: deleting would leave the booking held and the
           // stock out against a job no list shows
           const open = await tx
-            .selectDistinct({ code: jobOrderSparePartLog.sparePartCode })
-            .from(jobOrderSparePartLog)
+            .selectDistinct({ code: product.productCode })
+            .from(jobPart)
+            .leftJoin(product, eq(product.pk, jobPart.productPk))
             .where(
               and(
-                eq(jobOrderSparePartLog.jobNo, String(id)),
+                eq(jobPart.jobPk, pk),
                 or(
-                  eq(jobOrderSparePartLog.orderStatusId, PART.REQUESTED),
-                  eq(jobOrderSparePartLog.orderStatusId, PART.RETURN_REQUESTED),
-                  sql`coalesce(${jobOrderSparePartLog.grantQty}, 0) > coalesce(${jobOrderSparePartLog.returnQty}, 0)`,
+                  eq(jobPart.jobPartStatusId, PART.REQUESTED),
+                  eq(jobPart.jobPartStatusId, PART.RETURN_REQUESTED),
+                  sql`coalesce(${jobPart.grantQty}, 0) > coalesce(${jobPart.returnQty}, 0)`,
                 ),
               ),
             );
@@ -295,31 +319,32 @@ export async function setRecordStatus(
         let back: number | null = null;
         if (rs !== RS.DELETED && cur.rs === RS.DELETED && cur.st === JS.CANCELLED) {
           const [prev] = await tx
-            .select({ st: jobLog.jobStatusId })
-            .from(jobLog)
-            .where(and(eq(jobLog.jobNo, String(id)), ne(jobLog.jobStatusId, JS.CANCELLED)))
-            .orderBy(desc(jobLog.jobLogId))
+            .select({ st: jobStatusLog.jobStatusId })
+            .from(jobStatusLog)
+            .where(and(eq(jobStatusLog.jobPk, pk), ne(jobStatusLog.jobStatusId, JS.CANCELLED)))
+            .orderBy(desc(jobStatusLog.pk))
             .limit(1);
           back = prev?.st ?? JS.NEW;
         }
         const st = rs === RS.DELETED ? JS.CANCELLED : back;
-        await tx
-          .update(job)
-          .set({ ...statusStamp(rs, byUserId, false), ...(st !== null ? { jobStatusId: st } : {}) })
-          .where(eq(job.jobNo, String(id)));
-        if (st !== null && st !== cur.st) await logStatus(tx, String(id), st, byUserId);
+        if (st !== null || cur.rs !== rs)
+          await tx
+            .update(job)
+            .set({ ...statusStamp(rs, byUserId), ...(st !== null ? { jobStatusId: st } : {}) })
+            .where(eq(job.pk, pk));
+        if (st !== null && st !== cur.st) await logStatus(tx, pk, st, byUserId);
         await log(tx, cur.rs, rs === RS.DELETED ? clean(remark) : '');
       });
       return;
     }
     case 'sale_orders': {
       const reason = rs === RS.DELETED ? clean(remark) : '';
-      await db.transaction(async (tx) => {
+      await writeTx(async (tx) => {
         // locked: an approval running now finishes first (approveSaleOrder locks the same row)
         const [cur] = await tx
-          .select({ ap: saleOutHd.approveStatusId, rs: saleOutHd.recordStatus, by: saleOutHd.documentCreateBy })
-          .from(saleOutHd)
-          .where(eq(saleOutHd.saleOutHdNo, String(id)))
+          .select({ ap: saleOrder.approveStatusId, rs: saleOrder.recordStatus, by: saleOrder.createdByAppUserPk })
+          .from(saleOrder)
+          .where(eq(saleOrder.pk, pk))
           .for('update');
         if (!cur) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + id);
         refuseRestore(cur.rs);
@@ -343,26 +368,25 @@ export async function setRecordStatus(
         // document_cancel_remark is varchar(100); the API takes 200 (a job's / quotation's reason)
         if (reason.length > 100)
           throw new HttpError(400, 'เหตุผลยาวเกิน 100 ตัวอักษร', { fields: { remark: 'เหตุผลยาวเกิน 100 ตัวอักษร' } });
-        await tx
-          .update(saleOutHd)
-          .set(
-            rs === RS.DELETED
-              ? {
-                  ...statusStamp(rs, byUserId, false),
-                  documentStatus: false,
-                  documentCancelDate: nowThai(),
-                  documentCancelBy: byUserId,
-                  documentCancelRemark: reason,
-                }
-              : {
-                  ...statusStamp(rs, byUserId, false),
-                  documentStatus: true,
-                  documentCancelDate: SENTINEL_TS,
-                  documentCancelBy: -1,
-                  documentCancelRemark: '',
-                },
-          )
-          .where(eq(saleOutHd.saleOutHdNo, String(id)));
+        if (cur.rs !== rs)
+          await tx
+            .update(saleOrder)
+            .set(
+              rs === RS.DELETED
+                ? {
+                    ...statusStamp(rs, byUserId),
+                    documentCancelDate: nowThai(),
+                    cancelledByAppUserPk: byUserId,
+                    documentCancelRemark: reason,
+                  }
+                : {
+                    ...statusStamp(rs, byUserId),
+                    documentCancelDate: SENTINEL_TS,
+                    cancelledByAppUserPk: null,
+                    documentCancelRemark: '',
+                  },
+            )
+            .where(eq(saleOrder.pk, pk));
         await log(tx, cur.rs, reason);
       });
       return;

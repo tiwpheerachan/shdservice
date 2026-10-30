@@ -2,7 +2,11 @@
 // time zone holding Thai wall-clock time and uses sentinels (1900-01-01, -1, 0)
 // for "empty". The UI expects plain strings ("YYYY-MM-DD", "YYYY-MM-DD HH:mm").
 
+import type { SQL } from 'drizzle-orm';
 import { isoDate, isoDateTime } from '@/lib/dates';
+
+/** the value a select field reads (a column's data, or an sql<T> expression's T) — for `type Row = { [K]: … }` */
+export type FieldData<C> = C extends SQL<infer T> ? T : C extends { _: { data: infer D } } ? D : never;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 

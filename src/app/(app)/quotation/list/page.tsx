@@ -140,7 +140,11 @@ export default function QuotationListPage() {
       headerWrap: true,
       width: '150px',
       cell: (r) => (
-        <Link href={`/quotation/edit?id=${r.id}`} className="num font-medium text-primary hover:underline">
+        <Link
+          prefetch={false}
+          href={`/quotation/edit?id=${r.id}`}
+          className="num font-medium text-primary hover:underline"
+        >
           {r.no}
         </Link>
       ),

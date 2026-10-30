@@ -2,6 +2,7 @@
 
 import { Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, LookupError } from '@/components/ui/field';
 import { Input, Textarea, Checkbox, Radio } from '@/components/ui/input';
 import { SearchSelect, withCurrent } from '@/components/shared/search-select';
@@ -175,8 +176,14 @@ export function ProductModelChecklist({
   allBrands: boolean;
   setAllBrands: (fn: (x: boolean) => boolean) => void;
 }) {
-  const { data: MODELS, ...modelsLookup } = useModels();
   const brandOnly = !allBrands && !!form.brand.trim();
+  // the chosen brand's models only; the whole list (~140 KB) only when asked for — แสดงทุกยี่ห้อ, or a search typed
+  // with no brand chosen (view: the brand's list names the ticked ones)
+  const wantAll = !ro && !brandOnly && (allBrands || !!modelQ.trim());
+  const { data: MODELS, ...modelsLookup } = useModels('active', {
+    brand: wantAll ? '' : form.brand,
+    enabled: wantAll || !!form.brand.trim(),
+  });
   const rows = modelRows(MODELS, form.models, { readOnly: ro, brandOnly, brand: form.brand, q: modelQ });
 
   return (
@@ -234,11 +241,13 @@ export function ProductModelChecklist({
           <span className="text-xs text-muted-foreground">
             {ro
               ? 'ยังไม่ได้ระบุรุ่นสินค้า'
-              : MODELS.length === 0
-                ? 'ไม่มีข้อมูลรุ่นสินค้า'
-                : brandOnly
-                  ? `ไม่พบรุ่นของยี่ห้อ ${form.brand}${modelQ.trim() ? ` ที่ตรงกับ "${modelQ.trim()}"` : ''} — ติ๊ก แสดงทุกยี่ห้อ`
-                  : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
+              : !wantAll && !form.brand.trim()
+                ? 'เลือกยี่ห้อ หรือพิมพ์ค้นหารุ่นสินค้า'
+                : MODELS.length === 0
+                  ? 'ไม่มีข้อมูลรุ่นสินค้า'
+                  : brandOnly
+                    ? `ไม่พบรุ่นของยี่ห้อ ${form.brand}${modelQ.trim() ? ` ที่ตรงกับ "${modelQ.trim()}"` : ''} — ติ๊ก แสดงทุกยี่ห้อ`
+                    : `ไม่พบรุ่นที่ตรงกับ "${modelQ.trim()}"`}
           </span>
         )}
       </div>
@@ -320,7 +329,21 @@ export function ProductLegacyNotes({ detail }: { detail: Product | null }) {
 }
 
 /** view-only stock tables: on hand now + the stock card */
-export function ProductStockTables({ p, stockCard }: { p: Product; stockCard: StockCardRow[] }) {
+export function ProductStockTables({
+  p,
+  stockCard,
+  total,
+  onMore,
+  loadingMore = false,
+}: {
+  p: Product;
+  /** newest first — the pages loaded so far */
+  stockCard: StockCardRow[];
+  /** every line the card has (โหลดเพิ่ม shows while fewer are loaded) */
+  total: number;
+  onMore: () => void;
+  loadingMore?: boolean;
+}) {
   // stock on-hand row (single warehouse / condition in the legacy system)
   const onhandRows = [
     {
@@ -418,6 +441,16 @@ export function ProductStockTables({ p, stockCard }: { p: Product; stockCard: St
             </tbody>
           </table>
         </div>
+        {stockCard.length < total && (
+          <div className="mt-2 flex items-center justify-center gap-3 text-xs text-muted-foreground">
+            <span>
+              แสดง {int(stockCard.length)} จาก {int(total)} รายการ
+            </span>
+            <Button size="sm" variant="outline" onClick={onMore} disabled={loadingMore}>
+              {loadingMore ? 'กำลังโหลด…' : 'โหลดเพิ่ม'}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

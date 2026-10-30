@@ -4973,13 +4973,171 @@
                           "ref",
                           "remark"
                         ]
-                      }
+                      },
+                      "description": "the newest 50 lines — more: GET /products/{id}/card"
+                    },
+                    "cardTotal": {
+                      "type": "number",
+                      "description": "how many lines the stock card has"
                     }
                   },
                   "required": [
                     "product",
-                    "card"
+                    "card",
+                    "cardTotal"
                   ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such part.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/{id}/card": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "More of a spare part's stock card (the product dialog's โหลดเพิ่ม)",
+        "description": "View on any product / stock module, as GET /products/{id}. 50 lines from `offset`, newest first.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "the part's id (product.id)"
+            },
+            "required": true,
+            "description": "the part's id (product.id)",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "maximum": 1000000,
+              "description": "lines to skip (default 0)"
+            },
+            "required": false,
+            "description": "lines to skip (default 0)",
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the stock card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "card": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "no": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "before": {
+                            "type": "number"
+                          },
+                          "income": {
+                            "type": "number"
+                          },
+                          "outcome": {
+                            "type": "number"
+                          },
+                          "after": {
+                            "type": "number"
+                          },
+                          "ref": {
+                            "type": "string"
+                          },
+                          "remark": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "no",
+                          "date",
+                          "type",
+                          "before",
+                          "income",
+                          "outcome",
+                          "after",
+                          "ref",
+                          "remark"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "card",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`offset` is not a whole number 0–1,000,000.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -5411,7 +5569,7 @@
                               "dtId": {
                                 "type": "string",
                                 "format": "uuid",
-                                "description": "the sale_out_dt row"
+                                "description": "the sale_order_line row"
                               },
                               "code": {
                                 "type": "string"
@@ -5451,7 +5609,7 @@
                               "logId": {
                                 "type": "string",
                                 "format": "uuid",
-                                "description": "the job_order_spare_part_log row"
+                                "description": "the job_part row"
                               },
                               "jobNo": {
                                 "type": "string"
@@ -5811,6 +5969,346 @@
           },
           "422": {
             "description": "The Idempotency-Key was already used for a different route.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts/anomalies": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "The bell (System Admin): counts of stored values that do not add up + the first 2 of each category",
+        "description": "System Admin only. Report only — nothing is fixed. Checks: quotation / sale order header vs its lines, job parts and total, product stock (negative, vs movements, booking vs open requests), charged lines at price 0, a discount over its amount. The counts are cached 5 minutes.",
+        "responses": {
+          "200": {
+            "description": "Counts by category and a sample.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    },
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "enum": [
+                              "quotation_total",
+                              "sale_order_total",
+                              "job_parts_total",
+                              "job_total",
+                              "stock_negative",
+                              "stock_moves",
+                              "stock_booking",
+                              "zero_price",
+                              "discount_over"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "count"
+                        ]
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "category": {
+                            "type": "string",
+                            "enum": [
+                              "quotation_total",
+                              "sale_order_total",
+                              "job_parts_total",
+                              "job_total",
+                              "stock_negative",
+                              "stock_moves",
+                              "stock_booking",
+                              "zero_price",
+                              "discount_over"
+                            ]
+                          },
+                          "ref": {
+                            "type": "string",
+                            "description": "Document no. / job no. / product code — what is shown"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Thai, with both numbers"
+                          },
+                          "stored": {
+                            "type": "number"
+                          },
+                          "expected": {
+                            "type": "number"
+                          },
+                          "href": {
+                            "type": "string",
+                            "description": "The record's page, by its uuid"
+                          }
+                        },
+                        "required": [
+                          "category",
+                          "ref",
+                          "message",
+                          "stored",
+                          "expected",
+                          "href"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "total",
+                    "categories",
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts/anomalies/list": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "The /admin/anomalies list: one page, optionally one category",
+        "description": "System Admin only. Report only — nothing is fixed. Checks: quotation / sale order header vs its lines, job parts and total, product stock (negative, vs movements, booking vs open requests), charged lines at price 0, a discount over its amount. The counts are cached 5 minutes.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "From 1."
+            },
+            "required": false,
+            "description": "From 1.",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1–100, default 50."
+            },
+            "required": false,
+            "description": "1–100, default 50.",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "quotation_total",
+                "sale_order_total",
+                "job_parts_total",
+                "job_total",
+                "stock_negative",
+                "stock_moves",
+                "stock_booking",
+                "zero_price",
+                "discount_over"
+              ],
+              "description": "Anything else: every category."
+            },
+            "required": false,
+            "description": "Anything else: every category.",
+            "name": "category",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    },
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "enum": [
+                              "quotation_total",
+                              "sale_order_total",
+                              "job_parts_total",
+                              "job_total",
+                              "stock_negative",
+                              "stock_moves",
+                              "stock_booking",
+                              "zero_price",
+                              "discount_over"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "count"
+                        ]
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "category": {
+                            "type": "string",
+                            "enum": [
+                              "quotation_total",
+                              "sale_order_total",
+                              "job_parts_total",
+                              "job_total",
+                              "stock_negative",
+                              "stock_moves",
+                              "stock_booking",
+                              "zero_price",
+                              "discount_over"
+                            ]
+                          },
+                          "ref": {
+                            "type": "string",
+                            "description": "Document no. / job no. / product code — what is shown"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Thai, with both numbers"
+                          },
+                          "stored": {
+                            "type": "number"
+                          },
+                          "expected": {
+                            "type": "number"
+                          },
+                          "href": {
+                            "type": "string",
+                            "description": "The record's page, by its uuid"
+                          }
+                        },
+                        "required": [
+                          "category",
+                          "ref",
+                          "message",
+                          "stored",
+                          "expected",
+                          "href"
+                        ]
+                      }
+                    },
+                    "matched": {
+                      "type": "number",
+                      "description": "Rows of the chosen category (all: = total) — from the cached counts"
+                    },
+                    "page": {
+                      "type": "number"
+                    },
+                    "pageSize": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "total",
+                    "categories",
+                    "rows",
+                    "matched",
+                    "page",
+                    "pageSize"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6339,249 +6837,6 @@
           },
           "415": {
             "description": "Not an allowed file type (checked against the bytes).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/data/audit_log": {
-      "get": {
-        "tags": [
-          "Data"
-        ],
-        "summary": "Audit log (ประวัติการใช้งาน)",
-        "description": "System Admin only.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "1"
-              ],
-              "description": "`1` = answer one page `{ rows, total, page, pageSize }`."
-            },
-            "required": false,
-            "description": "`1` = answer one page `{ rows, total, page, pageSize }`.",
-            "name": "paged",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "From 1."
-            },
-            "required": false,
-            "description": "From 1.",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "1–500, default 25."
-            },
-            "required": false,
-            "description": "1–500, default 25.",
-            "name": "pageSize",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "A column key of the list."
-            },
-            "required": false,
-            "description": "A column key of the list.",
-            "name": "sort",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "asc",
-                "desc"
-              ]
-            },
-            "required": false,
-            "name": "dir",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date"
-            },
-            "required": false,
-            "name": "from",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date"
-            },
-            "required": false,
-            "name": "to",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "a user's id (uuid) = that user's lines; anything else = the name contains"
-            },
-            "required": false,
-            "description": "a user's id (uuid) = that user's lines; anything else = the name contains",
-            "name": "user",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "module",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "entity",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)"
-            },
-            "required": false,
-            "description": "the record's key, exact: J… / Q… / SO… / P…, or a row's uuid (lines before ADR 0008: the old number)",
-            "name": "key",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "action",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Free-text search."
-            },
-            "required": false,
-            "description": "Free-text search.",
-            "name": "q",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}."
-            },
-            "required": false,
-            "description": "Row cap of the unpaged list: at most 1000 (default 200; job_nos 50, or 300 with a mode). More rows: GET /export/{resource}.",
-            "name": "limit",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The list, or one page of it with `paged=1`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "rows": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/AuditRow"
-                          }
-                        },
-                        "total": {
-                          "type": "integer"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "pageSize": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "rows",
-                        "total",
-                        "page",
-                        "pageSize"
-                      ]
-                    },
-                    {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AuditRow"
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12537,7 +12792,7 @@
           "Data"
         ],
         "summary": "Download a list as Excel (.xlsx), with the same filters as GET /data/{resource}",
-        "description": "View on the list's module (users, master data, audit log: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
+        "description": "View on the list's module (users, master data, audit / security log, anomalies: System Admin) + the special right Export. Any other query name is a filter, as on GET /data/{resource}. At most 20,000 rows — a cut file is named `…-partial.xlsx`, says so in its last row and answers `X-Export-Truncated: <rows matched>`. ราคาทุน only with Product Cost.",
         "parameters": [
           {
             "schema": {
@@ -12553,6 +12808,8 @@
                 "movements",
                 "issued_lines",
                 "audit_log",
+                "security_log",
+                "anomalies",
                 "report_open_job",
                 "report_repair_job",
                 "report_close_job",
@@ -13209,7 +13466,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "The permission matrix (app_config), with the role and module lists",
+        "summary": "The permission matrix (role_permission), with the role and module lists",
         "description": "System Admin only.",
         "responses": {
           "200": {
@@ -14221,7 +14478,7 @@
                   "role": {
                     "type": "string",
                     "nullable": true,
-                    "description": "user_type — one of the roles in app_config"
+                    "description": "user_type — one of the roles in role_permission"
                   },
                   "username": {
                     "type": "string",
@@ -14343,6 +14600,468 @@
           },
           "415": {
             "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Audit log (ประวัติการใช้งาน) — one page",
+        "description": "System Admin only. Every data change with the actor, request and changed fields as at the time.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "From 1."
+            },
+            "required": false,
+            "description": "From 1.",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1–500, default 25."
+            },
+            "required": false,
+            "description": "1–500, default 25.",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A column key of the list."
+            },
+            "required": false,
+            "description": "A column key of the list.",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "required": false,
+            "name": "dir",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Free-text search."
+            },
+            "required": false,
+            "description": "Free-text search.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains"
+            },
+            "required": false,
+            "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains",
+            "name": "user",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the role (user_type) at the time, exact"
+            },
+            "required": false,
+            "description": "the role (user_type) at the time, exact",
+            "name": "role",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "business number (J… / Q… / SO… / P… / C…), exact"
+            },
+            "required": false,
+            "description": "business number (J… / Q… / SO… / P… / C…), exact",
+            "name": "no",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the client address contains"
+            },
+            "required": false,
+            "description": "the client address contains",
+            "name": "ip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "exact"
+            },
+            "required": false,
+            "description": "exact",
+            "name": "module",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "table name, exact"
+            },
+            "required": false,
+            "description": "table name, exact",
+            "name": "entity",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "exact (CREATE, UPDATE, …)"
+            },
+            "required": false,
+            "description": "exact (CREATE, UPDATE, …)",
+            "name": "action",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditLogRow"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pageSize": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "rows",
+                    "total",
+                    "page",
+                    "pageSize"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/security": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Security log (sign-in / out, refusals, role / permission / status changes, export / print) — one page",
+        "description": "System Admin only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "From 1."
+            },
+            "required": false,
+            "description": "From 1.",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1–500, default 25."
+            },
+            "required": false,
+            "description": "1–500, default 25.",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A column key of the list."
+            },
+            "required": false,
+            "description": "A column key of the list.",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "required": false,
+            "name": "dir",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Free-text search."
+            },
+            "required": false,
+            "description": "Free-text search.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains"
+            },
+            "required": false,
+            "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains",
+            "name": "user",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the role (user_type) at the time, exact"
+            },
+            "required": false,
+            "description": "the role (user_type) at the time, exact",
+            "name": "role",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "business number (J… / Q… / SO… / P… / C…), exact"
+            },
+            "required": false,
+            "description": "business number (J… / Q… / SO… / P… / C…), exact",
+            "name": "no",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "the client address contains"
+            },
+            "required": false,
+            "description": "the client address contains",
+            "name": "ip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "exact"
+            },
+            "required": false,
+            "description": "exact",
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "OK / DENIED / FAILED"
+            },
+            "required": false,
+            "description": "OK / DENIED / FAILED",
+            "name": "result",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SecurityRow"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pageSize": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "rows",
+                    "total",
+                    "page",
+                    "pageSize"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16832,7 +17551,7 @@
                 "logId": {
                   "type": "string",
                   "format": "uuid",
-                  "description": "the job_order_spare_part_log row"
+                  "description": "the job_part row"
                 },
                 "jobNo": {
                   "type": "string"
@@ -16884,6 +17603,10 @@
                 },
                 "total": {
                   "type": "number"
+                },
+                "figuresLocked": {
+                  "type": "boolean",
+                  "description": "A legacy line (legacy_boundary) and the viewer is not System Admin: its qty / price are read-only — it may still be cancelled / issued / returned."
                 }
               },
               "required": [
@@ -16904,7 +17627,8 @@
                 "requestQtyB",
                 "isQuotationB",
                 "isSpecialB",
-                "total"
+                "total",
+                "figuresLocked"
               ]
             }
           },
@@ -16970,6 +17694,29 @@
           "version": {
             "type": "number",
             "description": "row_version — send it back on save (409 `stale` if it moved)."
+          },
+          "figuresLocked": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "estimateCost",
+                "depositCost",
+                "serviceCost",
+                "toolCost",
+                "deliveryCost",
+                "boxCost",
+                "payment.type",
+                "payment.no",
+                "payment.amount",
+                "payment.detail"
+              ]
+            },
+            "description": "A legacy job (legacy_boundary) and the viewer is not System Admin: the money fields that already hold a value — read-only (empty ones may be filled; totals follow their lines)."
+          },
+          "legacy": {
+            "type": "boolean",
+            "description": "A job from the legacy system (legacy_boundary): its recorded parts cost / net total are never recomputed — a save moves them by what it changed."
           }
         },
         "required": [
@@ -17043,7 +17790,9 @@
           "attachments",
           "logs",
           "history",
-          "version"
+          "version",
+          "figuresLocked",
+          "legacy"
         ]
       },
       "AuditRow": {
@@ -17720,6 +18469,11 @@
             "items": {
               "type": "object",
               "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "the line's id — sent back with an edit to keep (and update) this line"
+                },
                 "lineNumber": {
                   "type": "number"
                 },
@@ -17757,6 +18511,7 @@
                 }
               },
               "required": [
+                "id",
                 "lineNumber",
                 "itemType",
                 "code",
@@ -17815,6 +18570,10 @@
           },
           "version": {
             "type": "number"
+          },
+          "figuresLocked": {
+            "type": "boolean",
+            "description": "came from the legacy system: what it recorded (its lines' qty / price / discount, a service / discount / VAT it holds) is System Admin's alone — changing or deleting it by anyone else → 403; new lines are everyone's"
           }
         },
         "required": [
@@ -17846,7 +18605,8 @@
           "documentProfileId",
           "createdByPhone",
           "createdByEmail",
-          "version"
+          "version",
+          "figuresLocked"
         ]
       },
       "QuotationInput": {
@@ -17923,6 +18683,11 @@
                 },
                 "code": {
                   "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "an existing line's id (from GET): that line is kept / updated; none = a new line; a stored line whose id is not sent is removed"
                 }
               },
               "required": [
@@ -18148,6 +18913,11 @@
             "items": {
               "type": "object",
               "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "the line's id — sent back with an edit to keep (and update) this line"
+                },
                 "listNo": {
                   "type": "number"
                 },
@@ -18181,6 +18951,7 @@
                 }
               },
               "required": [
+                "id",
                 "listNo",
                 "code",
                 "name",
@@ -18237,6 +19008,10 @@
             "type": "string",
             "nullable": true,
             "format": "uuid"
+          },
+          "figuresLocked": {
+            "type": "boolean",
+            "description": "came from the legacy system: what it recorded (its lines' product / qty / price, a fee or payment it holds) is System Admin's alone — changing or deleting it by anyone else → 403; new lines are everyone's"
           }
         },
         "required": [
@@ -18262,7 +19037,8 @@
           "approverRoles",
           "documentProfileId",
           "version",
-          "salesId"
+          "salesId",
+          "figuresLocked"
         ]
       },
       "SaleOrderInput": {
@@ -18313,6 +19089,11 @@
                 "type": {
                   "type": "string",
                   "description": "`SparePart` | `Service`"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "an existing line's id (from GET): that line is kept / updated; none = a new line; a stored line whose id is not sent is removed"
                 }
               },
               "required": [
@@ -18618,7 +19399,7 @@
           "logId": {
             "type": "string",
             "format": "uuid",
-            "description": "the job_order_spare_part_log row"
+            "description": "the job_part row"
           },
           "jobNo": {
             "type": "string"
@@ -19269,6 +20050,10 @@
           "modelDetail": {
             "type": "string"
           },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "deposit": {
             "type": "number"
           },
@@ -19443,6 +20228,250 @@
           "approve",
           "stockDoc",
           "tracking"
+        ]
+      },
+      "AuditLogRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "at": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "CREATE",
+              "UPDATE",
+              "DELETE",
+              "STATUS",
+              "APPROVE",
+              "ASSIGN",
+              "ISSUE",
+              "RECEIVE",
+              "RETURN",
+              "UPLOAD",
+              "LOGIN",
+              "LOGIN_FAILED",
+              "EXPORT"
+            ]
+          },
+          "module": {
+            "type": "string"
+          },
+          "entity": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "nullable": true
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "{ field: [before, after] }"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          },
+          "department": {
+            "type": "string",
+            "nullable": true
+          },
+          "permission": {
+            "type": "string",
+            "nullable": true,
+            "description": "the module / right + action the request used (\"Job Management:edit\")"
+          },
+          "entityId": {
+            "type": "string",
+            "nullable": true,
+            "description": "the row's uuid"
+          },
+          "no": {
+            "type": "string",
+            "nullable": true,
+            "description": "its business number"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true
+          },
+          "userAgent": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true,
+            "description": "identifies the sign-in (never the cookie)"
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "user",
+          "action",
+          "module",
+          "entity",
+          "key",
+          "summary",
+          "changes",
+          "email",
+          "role",
+          "department",
+          "permission",
+          "entityId",
+          "no",
+          "ip",
+          "userAgent",
+          "sessionId",
+          "requestId",
+          "reason"
+        ]
+      },
+      "SecurityRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "at": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "LOGIN",
+              "LOGIN_FAILED",
+              "LOGOUT",
+              "DENIED",
+              "ROLE_CHANGE",
+              "PERMISSION_CHANGE",
+              "USER_STATUS",
+              "EXPORT",
+              "PRINT"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "DENIED",
+              "FAILED"
+            ]
+          },
+          "user": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string",
+            "nullable": true
+          },
+          "entity": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          },
+          "department": {
+            "type": "string",
+            "nullable": true
+          },
+          "permission": {
+            "type": "string",
+            "nullable": true,
+            "description": "the module / right + action the request used (\"Job Management:edit\")"
+          },
+          "entityId": {
+            "type": "string",
+            "nullable": true,
+            "description": "the row's uuid"
+          },
+          "no": {
+            "type": "string",
+            "nullable": true,
+            "description": "its business number"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true
+          },
+          "userAgent": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true,
+            "description": "identifies the sign-in (never the cookie)"
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "detail": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "event",
+          "result",
+          "user",
+          "module",
+          "entity",
+          "email",
+          "role",
+          "department",
+          "permission",
+          "entityId",
+          "no",
+          "ip",
+          "userAgent",
+          "sessionId",
+          "requestId",
+          "detail"
         ]
       },
       "TrackError": {

@@ -34,7 +34,7 @@ function typeTone(type: string): Tone {
 
 export default function InventoryPage() {
   const { push } = useToast();
-  // inventory_hd (20k rows) — server-side paging; filters + table search run on the server
+  // stock_move (20k rows) — server-side paging; filters + table search run on the server
   const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
   const {
     rows: MOVEMENTS,

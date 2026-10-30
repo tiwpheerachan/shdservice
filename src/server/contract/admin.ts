@@ -78,7 +78,7 @@ export const userSave = defineOperation({
         'The values the form loaded (as GET /admin/users shows them): one that no longer matches the stored user → 409 `details.stale`, nothing written.',
     }),
     name: sn,
-    role: sn.meta({ description: 'user_type — one of the roles in app_config' }),
+    role: sn.meta({ description: 'user_type — one of the roles in role_permission' }),
     username: sn,
     phone: sn,
     status: sn,
@@ -98,7 +98,7 @@ export const permissionsGet = defineOperation({
   method: 'get',
   path: '/admin/permissions',
   tags,
-  summary: 'The permission matrix (app_config), with the role and module lists',
+  summary: 'The permission matrix (role_permission), with the role and module lists',
   description: ADMIN,
   responses: {
     200: jsonResponse('Matrix.', z.object({ rows: z.array(Permission), roles: z.array(s), modules: z.array(s) })),

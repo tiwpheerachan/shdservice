@@ -29,8 +29,8 @@ export const POST = handle(async (req: NextRequest) => {
     if (rs !== RS.ACTIVE) refuseSelf(uid, me.id); // never disable / delete your own account
     // ลบ / กู้คืน: users.ts writes the audit line with the person's name ("ลบผู้ใช้ สมชาย ใจดี"); กู้คืน
     // (ACTIVE / deleted:false) brings the account back INACTIVE — access returns only through คืนสิทธิ์
-    if (rs === RS.INACTIVE) await setRecordStatus('users', uid, rs, me.userId);
-    else await setUserDeleted(uid, rs === RS.DELETED, me.userId);
+    if (rs === RS.INACTIVE) await setRecordStatus('users', uid, rs, me.pk);
+    else await setUserDeleted(uid, rs === RS.DELETED, me.pk);
     return NextResponse.json({ ok: true, status: rs === RS.ACTIVE ? RS.INACTIVE : rs });
   }
   const permModule = RECORD_MODULES[table];
@@ -52,7 +52,7 @@ export const POST = handle(async (req: NextRequest) => {
     table,
     byUuid ? id.trim().toLowerCase() : id,
     rs,
-    user.userId,
+    user.pk,
     table === 'customers' ? user.isAdmin : permModule === null || (await can(user, permModule, 'del')),
     table !== 'sale_orders' || user.isAdmin || (await hasRight(user, 'SO Approve')),
     remark,

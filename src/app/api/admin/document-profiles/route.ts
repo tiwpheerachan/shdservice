@@ -16,13 +16,13 @@ export const GET = handle(async (req: NextRequest) => {
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const { id } = parseQuery(req, documentProfileDelete); // not a uuid → 404
-  await deleteDocumentProfile(id, me.userId);
+  await deleteDocumentProfile(id, me.pk);
   return NextResponse.json({ ok: true });
 });
 
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, documentProfileSave);
-  const row = await saveDocumentProfile(body, me.userId);
+  const row = await saveDocumentProfile(body, me.pk);
   return NextResponse.json({ row });
 });

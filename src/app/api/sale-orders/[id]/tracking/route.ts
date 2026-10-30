@@ -13,6 +13,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ id:
   if (!no) throw new HttpError(404, 'ไม่พบใบสั่งขาย');
   const { tracking, version } = await parseBody(req, saleOrderTracking); // as text
   // checked in setTracking against the number stored now (trackingSchema — an unchanged legacy one passes)
-  const order = await setTracking(no, tracking, user.userId, version);
+  const order = await setTracking(no, tracking, user.pk, version);
   return NextResponse.json({ ok: true, order });
 });

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ReturnNoteDoc } from '@/components/print/docs/return-note';
-import { printJobNo } from '../job-no';
+import { logJobPrint, printJobNo } from '../job-no';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 /** staff print view (login required by app/print/layout.tsx) — the customer gets the same sheet via /track/doc */
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const no = await printJobNo((await params).id);
+  const { id } = await params;
+  const no = await printJobNo(id);
   if (!no) notFound();
+  await logJobPrint(id, no, 'ใบส่งคืนสินค้า');
   return <ReturnNoteDoc no={no} />;
 }

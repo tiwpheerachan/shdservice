@@ -5,6 +5,8 @@
  *    is described that has no route (GET /api/data/{resource} is described per resource — those names
  *    are held to src/server/resources.ts);
  *  - public operations are exactly /health, /sso/* and /track/*;
+ *  - no parameter or property anywhere in it (requests, responses, nested) is named `pk` / `*_pk` / `*Pk` (or the
+ *    plural): the bigint `pk` never leaves the backend, the API speaks `id` uuid only (ADR 0008 ID-4 rule 3);
  *  - the document equals tests/fixtures/openapi.snapshot.json, so every change to it shows in review.
  *    After an intended change: npm run test:openapi -- --update
  *
@@ -102,6 +104,54 @@ test('public operations are exactly /health, /sso/* and /track/*', () => {
       .map(([verb]) => `${verb.toUpperCase()} ${path}`),
   );
   assert.deepEqual(wrong, []);
+});
+
+/** where a parameter or property named like a bigint pk sits in the document */
+const PK_NAME = /^pks?$|(_pk|Pk)s?$/;
+function pkNames(node: unknown, at = '#'): string[] {
+  if (Array.isArray(node)) return node.flatMap((v, i) => pkNames(v, `${at}/${i}`));
+  if (!node || typeof node !== 'object') return [];
+  const o = node as Record<string, unknown>;
+  const props = o.properties && typeof o.properties === 'object' ? Object.keys(o.properties) : [];
+  const own = [...props, ...(typeof o.in === 'string' && typeof o.name === 'string' ? [o.name] : [])]
+    .filter((n) => PK_NAME.test(n))
+    .map((n) => `${at}: ${n}`);
+  return [...own, ...Object.entries(o).flatMap(([k, v]) => pkNames(v, `${at}/${k}`))];
+}
+
+test('no parameter or property is named pk / *_pk / *Pk — the API speaks id (uuid) only', () => {
+  assert.deepEqual(pkNames(openapi), []);
+});
+
+test('…and that check finds one injected anywhere (query, body, nested response, component)', () => {
+  type Obj = Record<string, unknown>;
+  /** the first object (depth-first) that `ok` accepts */
+  const first = (n: unknown, ok: (o: Obj) => boolean): Obj | undefined => {
+    if (!n || typeof n !== 'object') return undefined;
+    if (!Array.isArray(n) && ok(n as Obj)) return n as Obj;
+    for (const v of Object.values(n)) {
+      const hit = first(v, ok);
+      if (hit) return hit;
+    }
+  };
+  const json = (schema: unknown) => ({ content: { 'application/json': { schema } } });
+  const inject: ((doc: Obj) => void)[] = [
+    (d) => (first(d, (o) => Array.isArray(o.parameters))!.parameters as unknown[]).push({ in: 'query', name: 'pk' }),
+    (d) => (first(d, (o) => 'requestBody' in o)!.requestBody = json({ properties: { customer_pk: {} } })),
+    (d) => {
+      const responses = first(d, (o) => 'responses' in o)!.responses as Obj;
+      responses['200'] = json({
+        type: 'array',
+        items: { properties: { lines: { items: { properties: { jobPk: {} } } } } },
+      });
+    },
+    (d) => ((first(d, (o) => 'schemas' in o)!.schemas as Obj).Injected = { properties: { createdByAppUserPks: {} } }),
+  ];
+  for (const f of inject) {
+    const doc = JSON.parse(JSON.stringify(openapi)) as Obj;
+    f(doc);
+    assert.equal(pkNames(doc).length, 1, f.toString());
+  }
 });
 
 test('every $ref it uses is defined', () => {

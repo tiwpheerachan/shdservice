@@ -4,7 +4,8 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { appConfig, appUser } from '@/db/schema';
+import { appUser, rolePermission } from '@/db/schema';
+import { guardDenied, need, permissionOf, requestCtx, runInRequest, setRequestUser } from '@/server/request-context';
 import type { z } from 'zod';
 import { verifySession, SESSION_COOKIE, type SessionUser } from '@/lib/session';
 import { summary, validate } from '@/lib/validation';
@@ -28,8 +29,8 @@ import {
 
 /** The signed-in person, resolved against app_user (the single user table). */
 export type CurrentUser = {
-  /** app_user.user_id — server-side only (audit actor, the integer foreign keys until ADR 0008 phase 2) */
-  userId: number;
+  /** app_user.pk — server-side only (audit actor, every `*_app_user_pk` foreign key; ADR 0008 phase 2) */
+  pk: number;
   /** app_user.id — the uuid that leaves the server (the pages' useAccess().userId, os_seen) */
   id: string;
   email: string;
@@ -92,15 +93,18 @@ export function invalidateUserCache(email?: string) {
   else userCache.clear();
 }
 
-/** Sign this user out everywhere: every cookie carrying the old version stops working. */
-export async function bumpSessionVersion(email: string): Promise<void> {
+/** Sign this user out everywhere: every cookie carrying the old version stops working. `w` = the transaction that
+ *  also writes the LOGOUT line (src/app/api/sso/logout); the caller clears the user cache once it committed.
+ *  Answers the user's app_user.pk (null: no such user). */
+export async function bumpSessionVersion(email: string, w: Pick<typeof db, 'update'> = db): Promise<number | null> {
   const e = normEmail(email);
-  if (!e) return;
-  await db
+  if (!e) return null;
+  const [row] = await w
     .update(appUser)
     .set({ sessionVersion: sql`${appUser.sessionVersion} + 1` })
-    .where(sql`lower(trim(${appUser.emailAddress})) = ${e}`);
-  invalidateUserCache(e);
+    .where(sql`lower(trim(${appUser.emailAddress})) = ${e}`)
+    .returning({ pk: appUser.pk });
+  return row?.pk ?? null;
 }
 
 async function cachedAppUser(email: string): Promise<AppUserRow | null> {
@@ -142,7 +146,7 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
   const isActive = row.recordStatus === 'ACTIVE';
   const isAdmin = userType === ADMIN_USER_TYPE;
   return {
-    userId: row.userId,
+    pk: row.pk,
     id: row.id,
     email: session.email,
     name: fullName(row.firstName, row.lastName) || session.name,
@@ -168,7 +172,12 @@ export async function userFromCookies(): Promise<CurrentUser | null> {
 }
 
 /* ------------------------------------------------------------------ *
- * Permissions (app_config) — cached per user_type for 60 s.
+ * Permissions (role_permission) — cached per user_type for 60 s.
+ *
+ * Both caches are per process (single Render instance — a second instance would serve a revoked role / grant up to
+ * the TTL: 10 s user, 60 s grants). Every admin path that changes them invalidates here (services/users.ts
+ * userChanged / permissionsChanged, services/records.ts users). A write is never decided by a cache: audit() →
+ * assertActor() re-reads the actor's row and the grants it used inside the write transaction (R2).
  * ------------------------------------------------------------------ */
 const cache = (g.__shdGrantCache ??= new Map<string, { at: number; grants: GrantMap }>());
 const TTL = 60_000;
@@ -180,14 +189,14 @@ export async function grantsForUserType(userType: string | null): Promise<GrantM
   const at = gen.grant;
   const rows = await db
     .select({
-      module: appConfig.moduleName,
-      add: appConfig.canInsert,
-      edit: appConfig.canEdit,
-      del: appConfig.canDelete,
-      view: appConfig.canView,
+      module: rolePermission.moduleName,
+      add: rolePermission.canInsert,
+      edit: rolePermission.canEdit,
+      del: rolePermission.canDelete,
+      view: rolePermission.canView,
     })
-    .from(appConfig)
-    .where(eq(appConfig.userType, userType));
+    .from(rolePermission)
+    .where(eq(rolePermission.userType, userType));
   const grants: GrantMap = {};
   for (const r of rows) {
     if (!r.module) continue;
@@ -203,30 +212,38 @@ export function invalidateGrantCache() {
   cache.clear();
 }
 
+/** A grant / right that let the request through is recorded (request-context `need`): the write re-checks it. */
 export async function can(user: CurrentUser, module: Module | null, action: Action) {
-  if (user.isAdmin) return true;
-  return checkGrant(false, await grantsForUserType(user.userType), module, action);
+  const ok = user.isAdmin || checkGrant(false, await grantsForUserType(user.userType), module, action);
+  if (ok && module) need(user, { kind: 'grant', modules: [module], action });
+  return ok;
 }
 
-/** Special right (สิทธิ์พิเศษ — app_config row `right`, can_view) of this user's role. */
+/** Special right (สิทธิ์พิเศษ — role_permission row `right`, can_view) of this user's role. */
 export async function hasRight(user: Pick<CurrentUser, 'isAdmin' | 'userType'>, right: Right): Promise<boolean> {
-  return checkRight(user.isAdmin, await grantsForUserType(user.userType), right);
+  const ok = checkRight(user.isAdmin, await grantsForUserType(user.userType), right);
+  if (ok) need(user, { kind: 'right', right });
+  return ok;
 }
 
-/** The same for another user by id (an assignee, who saves a job) — their role as stored in app_user. */
-export async function userHasRight(userId: number, right: Right): Promise<boolean> {
-  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.userId, userId)).limit(1);
+/** The same for a user by app_user.pk (an assignee, who saves a job) — their role as stored in app_user. For the
+ *  request's own user a yes is recorded like hasRight's: the write re-checks it (Job Reopen, Job Take, …). */
+export async function userHasRight(userPk: number, right: Right): Promise<boolean> {
+  const [u] = await db.select({ t: appUser.userType }).from(appUser).where(eq(appUser.pk, userPk)).limit(1);
   const userType = u?.t?.trim() || null;
-  return hasRight({ isAdmin: userType === ADMIN_USER_TYPE, userType }, right);
+  const ok = checkRight(userType === ADMIN_USER_TYPE, await grantsForUserType(userType), right);
+  const self = requestCtx()?.user;
+  if (ok && self?.pk === userPk) need(self, { kind: 'right', right });
+  return ok;
 }
 
 /** The roles ticked for a right (an implicit System Admin hold is not a row) — assignee list, messages. */
 export async function rolesWithRight(right: Right): Promise<string[]> {
   const rows = await db
-    .select({ t: appConfig.userType })
-    .from(appConfig)
-    .where(and(eq(appConfig.moduleName, right), eq(appConfig.canView, true)))
-    .orderBy(appConfig.userType);
+    .select({ t: rolePermission.userType })
+    .from(rolePermission)
+    .where(and(eq(rolePermission.moduleName, right), eq(rolePermission.canView, true)))
+    .orderBy(rolePermission.userType);
   return rows.map((r) => r.t?.trim() ?? '').filter(Boolean);
 }
 
@@ -238,6 +255,7 @@ export async function requireUser(req: NextRequest): Promise<CurrentUser> {
   if (!u) throw new HttpError(401, 'unauthorized');
   if (!u.approved)
     throw new HttpError(403, u.userType && !u.isActive ? 'บัญชีนี้ถูกปิดการใช้งาน' : 'รอการอนุมัติสิทธิ์การใช้งาน');
+  setRequestUser(u);
   return u;
 }
 
@@ -245,9 +263,11 @@ export async function requireCan(req: NextRequest, module: Module | null, action
   const u = await requireUser(req);
   if (!(await can(u, module, action))) {
     // a special right (Report, …) names the right the way the permission screen does
-    if (module && module in RIGHTS) throw new HttpError(403, noRight(module as Right));
     const menu = module && `เมนู "${MODULE_LABELS[module as keyof typeof MODULE_LABELS] ?? module}"`;
-    throw new HttpError(403, `ไม่มีสิทธิ์${ACTION_TH[action]}ใน${menu || 'ส่วนนี้'}`);
+    const msg =
+      module && module in RIGHTS ? noRight(module as Right) : `ไม่มีสิทธิ์${ACTION_TH[action]}ใน${menu || 'ส่วนนี้'}`;
+    guardDenied(u, `${module ?? '-'}:${action}`, msg);
+    throw new HttpError(403, msg);
   }
   return u;
 }
@@ -268,35 +288,54 @@ export const SALE_ORDER_READERS: readonly Module[] = ['Sale Order', 'Product Pic
 
 /** True when the user may view at least one of `modules` (screens that legitimately read the data). */
 export async function canViewAny(user: CurrentUser, modules: readonly Module[]) {
-  if (user.isAdmin) return true;
-  const grants = await grantsForUserType(user.userType);
-  return modules.some((m) => checkGrant(false, grants, m, 'view'));
+  const grants = user.isAdmin ? {} : await grantsForUserType(user.userType);
+  const ok = user.isAdmin || modules.some((m) => checkGrant(false, grants, m, 'view'));
+  if (ok) need(user, { kind: 'grant', modules, action: 'view' });
+  return ok;
 }
 
 /** Read guard: signed in + approved + "view" on any one of `modules`. */
 export async function requireView(req: NextRequest, modules: readonly Module[]): Promise<CurrentUser> {
   const u = await requireUser(req);
-  if (!(await canViewAny(u, modules))) throw new HttpError(403, 'ไม่มีสิทธิ์ดูข้อมูลส่วนนี้');
+  if (!(await canViewAny(u, modules))) {
+    guardDenied(u, permissionOf([{ kind: 'grant', modules, action: 'view' }])!, 'ไม่มีสิทธิ์ดูข้อมูลส่วนนี้');
+    throw new HttpError(403, 'ไม่มีสิทธิ์ดูข้อมูลส่วนนี้');
+  }
   return u;
 }
 
 export async function requireAdmin(req: NextRequest): Promise<CurrentUser> {
   const u = await requireUser(req);
-  if (!u.isAdmin) throw new HttpError(403, 'เฉพาะ System Admin');
+  if (!u.isAdmin) {
+    guardDenied(u, 'System Admin', 'เฉพาะ System Admin');
+    throw new HttpError(403, 'เฉพาะ System Admin');
+  }
+  need(u, { kind: 'admin' });
   return u;
 }
 
 /**
- * Outside production every answer is held to its declaration in src/server/contract (check.ts): a log
+ * Every route runs in its request context (src/server/request-context.ts: ip, user agent, request id, the user and
+ * what the guards let through — audit() / security() / assertActor() read it). A refusal assertActor() made inside
+ * a write is logged here (security_log DENIED), after its transaction rolled back.
+ * Outside production every answer is also held to its declaration in src/server/contract (check.ts): a log
  * line "API contract drift" under `next dev`, a thrown error under API_CONTRACT_STRICT=1 (the tests).
- * Production gets `fn` itself. handle() includes it; routes that answer without handle() wrap themselves.
+ * handle() includes it; routes that answer without handle() wrap themselves.
  */
 export function checked<T extends unknown[]>(fn: (...args: T) => Promise<Response>): (...args: T) => Promise<Response> {
-  if (process.env.NODE_ENV === 'production') return fn;
-  return async (...args) => {
-    const res = await fn(...args);
-    if (args[0] instanceof Request) await (await import('@/server/contract/check')).checkResponse(args[0], res);
-    return res;
+  const check = process.env.NODE_ENV !== 'production';
+  return (...args) => {
+    const req = args[0];
+    if (!(req instanceof Request)) return fn(...args);
+    return runInRequest(req, async () => {
+      try {
+        const res = await fn(...args);
+        if (check) await (await import('@/server/contract/check')).checkResponse(req, res);
+        return res;
+      } finally {
+        if (requestCtx()?.denied) await (await import('@/server/audit')).logDenied();
+      }
+    });
   };
 }
 
@@ -345,7 +384,7 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
       // unexpected error: the details (SQL, stack — parameters scrubbed) stay in the server log;
       // the browser only gets a reference to quote when reporting it (= Cloudflare ray id when present)
       const req = args[0] instanceof Request ? args[0] : undefined;
-      const ref = (req ? requestId(req) : crypto.randomUUID()).slice(0, 16);
+      const ref = (requestCtx()?.requestId ?? (req ? requestId(req) : crypto.randomUUID())).slice(0, 16);
       logError(e, 'unhandled API error', { ref }, req);
       const msg = e instanceof Error ? e.message : String(e);
       const status = /DATABASE_URL/.test(msg) || code === '08006' || code === '57P01' ? 503 : 500;

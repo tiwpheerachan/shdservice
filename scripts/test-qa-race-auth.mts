@@ -46,20 +46,22 @@ const Q = async <T = Record<string, unknown>,>(text: string, params: unknown[] =
   (await pool.query(text, params)).rows as T[];
 
 await pool.query(`
-  DELETE FROM app_config WHERE user_type ILIKE 'RA %';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type ILIKE 'RA %';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('RA Clerk', 'Customer', false, false, false, true),
     ('RA Seller', 'Customer', false, false, false, true),
     ('RA Grants', 'Customer', false, false, false, false);
-  DELETE FROM app_user WHERE user_id BETWEEN 9930 AND 9939 OR email_address LIKE 'ra-%@example.invalid';
-  INSERT INTO app_user (user_id, username, first_name, last_name, phone_no, email_address, user_type, lark_id,
-                        record_status, session_version) VALUES
+  INSERT INTO app_user (pk, username, first_name, last_name, phone_no, email_address, user_type, lark_id,
+                        record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     (9930, 'ra-admin',   'RA',   'admin', null, 'ra-admin@example.invalid',   'System Admin', null,    'ACTIVE', ${SV}),
     (9931, 'ra-sso',     'RA',   'sso',   null, 'ra-sso@example.invalid',     'RA Clerk',     null,    'ACTIVE', ${SV}),
     (9932, 'ra-target',  'RA',   'target',null, 'ra-target@example.invalid',  'RA Clerk',     null,    'ACTIVE', ${SV}),
     (9933, 'ra-cached',  'RA',   'cached',null, 'ra-cached@example.invalid',  'RA Clerk',     null,    'ACTIVE', ${SV}),
     (9934, 'ra-owner',   '',     null,    '  ', 'ra-owner@example.invalid',   null,           'L-old', 'ACTIVE', ${SV}),
-    (9935, 'ra-pending', null,   null,    '081', ' RA-Pending@example.invalid ', '  ',        null,    'ACTIVE', ${SV});
+    (9935, 'ra-pending', null,   null,    '081', ' RA-Pending@example.invalid ', '  ',        null,    'ACTIVE', ${SV})
+    -- fixture users stay (audit_log, append-only, points at them): reset in place
+    ON CONFLICT (pk) DO UPDATE SET (username, first_name, last_name, phone_no, email_address, user_type, lark_id, record_status, session_version, last_login, title, avatar, department)
+      = ROW(excluded.username, excluded.first_name, excluded.last_name, excluded.phone_no, excluded.email_address, excluded.user_type, excluded.lark_id, excluded.record_status, excluded.session_version, NULL, NULL, NULL, NULL);
 `);
 
 let failed = 0;
@@ -144,15 +146,15 @@ function holdNextQuery(re: RegExp) {
 await test("G1 a sign-in while an admin changes the role / name keeps the admin's values (and the session gets the new role)", async () => {
   const b = await blocker();
   await b.query('BEGIN');
-  await b.query('SELECT 1 FROM app_user WHERE user_id = 9931 FOR UPDATE'); // the admin's upsertUser tx, in flight
+  await b.query('SELECT 1 FROM app_user WHERE pk = 9931 FOR UPDATE'); // the admin's upsertUser tx, in flight
   const signIn = login('ra-sso@example.invalid', 'Someone Else');
   assert.ok(await lockWaiters(1), 'the sign-in reached the row lock');
-  await b.query(`UPDATE app_user SET user_type = 'RA Seller', first_name = 'Renamed' WHERE user_id = 9931`);
+  await b.query(`UPDATE app_user SET user_type = 'RA Seller', first_name = 'Renamed' WHERE pk = 9931`);
   await b.query('COMMIT');
   await b.end();
   const session = await signIn;
   const [row] = await Q<{ user_type: string; first_name: string; last_login: string | null }>(
-    `SELECT user_type, first_name, last_login FROM app_user WHERE user_id = 9931`,
+    `SELECT user_type, first_name, last_login FROM app_user WHERE pk = 9931`,
   );
   assert.equal(row?.user_type, 'RA Seller', 'role change kept');
   assert.equal(row?.first_name, 'Renamed', 'name change kept');
@@ -162,7 +164,7 @@ await test("G1 a sign-in while an admin changes the role / name keeps the admin'
 
 await test('G1 provisioning rules: blanks filled from SSO, owner bootstrap, a set value / a profile field not received kept, first login once', async () => {
   const owner = await login('ra-owner@example.invalid', 'Owner Person');
-  const [o] = await Q(`SELECT user_type, first_name, last_name, phone_no, lark_id FROM app_user WHERE user_id = 9934`);
+  const [o] = await Q(`SELECT user_type, first_name, last_name, phone_no, lark_id FROM app_user WHERE pk = 9934`);
   assert.deepEqual(o, {
     user_type: 'System Admin',
     first_name: 'Owner',
@@ -172,7 +174,7 @@ await test('G1 provisioning rules: blanks filled from SSO, owner bootstrap, a se
   });
   assert.equal(owner?.role, 'System Admin');
   const pending = await login('ra-pending@example.invalid', 'Pen Ding');
-  const [p] = await Q(`SELECT user_type, first_name, last_name, phone_no FROM app_user WHERE user_id = 9935`);
+  const [p] = await Q(`SELECT user_type, first_name, last_name, phone_no FROM app_user WHERE pk = 9935`);
   assert.deepEqual(p, { user_type: null, first_name: 'Pen', last_name: 'Ding', phone_no: '081' });
   assert.equal(pending?.approved, false);
   // two tabs finishing the first sign-in at once → one row, both signed in (pending)
@@ -184,10 +186,10 @@ await test('G1 provisioning rules: blanks filled from SSO, owner bootstrap, a se
 
 await test('G12 a grant load that read before a permissions save does not refill the cache after invalidate()', async () => {
   invalidateGrantCache();
-  const held = holdNextQuery(/from "app_config"/i);
+  const held = holdNextQuery(/from "role_permission"/i);
   const load = grantsForUserType('RA Grants'); // reads view=false …
   await held.readDone;
-  await Q(`UPDATE app_config SET can_view = true WHERE user_type = 'RA Grants' AND module_name = 'Customer'`);
+  await Q(`UPDATE role_permission SET can_view = true WHERE user_type = 'RA Grants' AND module_name = 'Customer'`);
   invalidateGrantCache(); // … the save commits and invalidates …
   held.release();
   await load; // … then the old load finishes
@@ -201,7 +203,7 @@ await test('G12 a user lookup that read before an admin edit does not refill the
   const held = holdNextQuery(/from "app_user"/i);
   const load = resolveUser(session); // reads role RA Clerk …
   await held.readDone;
-  await Q(`UPDATE app_user SET user_type = 'RA Seller' WHERE user_id = 9933`);
+  await Q(`UPDATE app_user SET user_type = 'RA Seller' WHERE pk = 9933`);
   invalidateUserCache('ra-cached@example.invalid');
   held.release();
   await load;
@@ -234,9 +236,9 @@ await test('G15 a role deleted while an admin gives it to a user → never a use
   );
   const b = await blocker();
   await b.query('BEGIN');
-  await b.query('SELECT 1 FROM app_user WHERE user_id = 9932 FOR UPDATE'); // another admin's edit of that user
+  await b.query('SELECT 1 FROM app_user WHERE pk = 9932 FOR UPDATE'); // another admin's edit of that user
   // the API takes the user's uuid (ADR 0008)
-  const [{ uid }] = await Q<{ uid: string }>(`SELECT id::text uid FROM app_user WHERE user_id = 9932`);
+  const [{ uid }] = await Q<{ uid: string }>(`SELECT id::text uid FROM app_user WHERE pk = 9932`);
   const give = postUser({ id: uid, role });
   assert.ok(await lockWaiters(1), 'the role change reached the row lock');
   const del = perms('DELETE', undefined, `?role=${encodeURIComponent(role)}`);
@@ -244,12 +246,14 @@ await test('G15 a role deleted while an admin gives it to a user → never a use
   await b.query('COMMIT');
   await b.end();
   const [g, d] = await Promise.all([give, del]);
-  const [{ t }] = await Q<{ t: string }>(`SELECT btrim(user_type) t FROM app_user WHERE user_id = 9932`);
-  const [{ n }] = await Q<{ n: number }>(`SELECT count(*)::int n FROM app_config WHERE btrim(user_type) = $1`, [role]);
+  const [{ t }] = await Q<{ t: string }>(`SELECT btrim(user_type) t FROM app_user WHERE pk = 9932`);
+  const [{ n }] = await Q<{ n: number }>(`SELECT count(*)::int n FROM role_permission WHERE btrim(user_type) = $1`, [
+    role,
+  ]);
   assert.ok(!(t === role && n === 0), `user 9932 on deleted role "${role}" (give ${g}, delete ${d})`);
   assert.deepEqual([g, d], [200, 409], 'the user got the role first, so the delete is refused');
   // and the other order: a role that no longer exists is refused, not stored
-  await Q(`UPDATE app_user SET user_type = 'RA Clerk' WHERE user_id = 9932`);
+  await Q(`UPDATE app_user SET user_type = 'RA Clerk' WHERE pk = 9932`);
   invalidateUserCache();
   assert.equal(await postUser({ id: uid, role: 'RA Never Existed' }), 400);
 });

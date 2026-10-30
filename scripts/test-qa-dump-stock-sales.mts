@@ -26,11 +26,11 @@ const JOB = 'QDSJ0001';
 const SO = 'QDSSO0001';
 
 await pool.query(`
-  INSERT INTO inventory_type (inventory_type_id, inventory_type_name, movement_action_type, movement_action, is_active)
+  INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
     SELECT * FROM (VALUES (1, 'รับเข้า', 'รับเข้า', 1, true), (2, 'รับคืนจากการเบิก', 'รับเข้า', 1, true),
                           (3, 'จ่ายออกตามงานซ่อม', 'จ่ายออก', -1, true), (4, 'จ่ายออกตามใบสั่งขาย', 'จ่ายออก', -1, true),
                           (5, 'จ่ายออกอื่นๆ', 'จ่ายออก', -1, true)) v(id, name, kind, act, on_)
-     WHERE NOT EXISTS (SELECT 1 FROM inventory_type t WHERE t.inventory_type_id = v.id);
+     WHERE NOT EXISTS (SELECT 1 FROM stock_move_type t WHERE t.stock_move_type_id = v.id);
   INSERT INTO store_location (store_location_id, store_location_name, is_active)
     SELECT * FROM (VALUES (1, 'คลังสินค้าดี', true), (2, 'คลังสินค้าเสีย', true)) v(id, name, on_)
      WHERE NOT EXISTS (SELECT 1 FROM store_location s WHERE s.store_location_id = v.id);
@@ -38,50 +38,68 @@ await pool.query(`
     SELECT * FROM (VALUES (10, 'อยู่ระหว่างการซ่อม - เบิกจ่ายอะไหล่ครบแล้ว', 34, 'Pending', true),
                           (11, 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่', 33, 'Pending', true)) v(id, name, ord, grp, act)
      WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
-  DELETE FROM job_log WHERE job_no = '${JOB}';
-  DELETE FROM job_order_spare_part_log WHERE job_no = '${JOB}';
-  DELETE FROM job WHERE job_no = '${JOB}' OR customer_id = 9960;
-  DELETE FROM inventory_dt WHERE item_code = '${PART}';
-  DELETE FROM inventory_hd WHERE reference_document_no = '${JOB}';
-  DELETE FROM sale_out_hd WHERE sale_out_hd_no = '${SO}';
-  DELETE FROM app_user WHERE user_id BETWEEN 9960 AND 9969 OR email_address LIKE 'qa-dump-ss-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status)
-    VALUES (${ADMIN.id}, 'QA', 'qa-dump-ss-admin', '${ADMIN.email}', 'System Admin', 'ACTIVE');
-  DELETE FROM customer WHERE customer_id = 9960 OR customer_code = 'QDSC001';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9960, 'QDSC001', 'ลูกค้า QDS', '02-996-0001');
-  DELETE FROM product_none_serial WHERE product_id = 9960 OR item_id = 9960;
-  DELETE FROM product WHERE product_id = 9960 OR product_code = '${PART}';
-  INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9960, '${PART}', 'อะไหล่ QDS', 'ACTIVE');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9960, 9960, 10, 0, 2, 10, 100.00);
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date,
+  -- code tables the part log / the order point at (foreign keys, drizzle/0006): src/lib/status-ids.ts
+  INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+    SELECT * FROM (VALUES (1, 'เบิก'), (2, 'ขอคืน'), (3, 'จ่ายแล้ว'), (4, 'ยกเลิก'), (5, 'คืนแล้ว')) v(id, name)
+     WHERE NOT EXISTS (SELECT 1 FROM job_part_status s WHERE s.job_part_status_id = v.id);
+  INSERT INTO approve_status (approve_status_id, approve_name_th, approve_name_en, is_can_edit, is_can_revise)
+    SELECT 5, 'ปฏิเสธ', 'Deny', false, false WHERE NOT EXISTS (SELECT 1 FROM approve_status WHERE approve_status_id = 5);
+  -- children before parents (RESTRICT, drizzle/0006): movements, the job's logs, the job, the order
+  DELETE FROM stock_move_line WHERE product_pk = 9960
+     OR stock_move_pk IN (SELECT pk FROM stock_move WHERE job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}'));
+  DELETE FROM stock_move WHERE job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9960);
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9960);
+  DELETE FROM job_part WHERE job_pk IN (SELECT pk FROM job WHERE job_no = '${JOB}' OR customer_pk = 9960)
+     OR product_pk = 9960;
+  DELETE FROM job WHERE job_no = '${JOB}' OR customer_pk = 9960;
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE sale_order_no = '${SO}');
+  DELETE FROM sale_order WHERE sale_order_no = '${SO}';
+  -- the fixture user keeps its pk (audit_log, append-only, points at it: never deleted) — upserted
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status) OVERRIDING SYSTEM VALUE
+    VALUES (${ADMIN.id}, 'QA', 'qa-dump-ss-admin', '${ADMIN.email}', 'System Admin', 'ACTIVE')
+    ON CONFLICT (pk) DO UPDATE SET email_address = excluded.email_address, user_type = excluded.user_type, record_status = 'ACTIVE', last_login = DEFAULT;
+  DELETE FROM customer WHERE pk = 9960 OR customer_code = 'QDSC001';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9960, 'QDSC001', 'ลูกค้า QDS', '02-996-0001');
+  DELETE FROM product_stock WHERE product_pk = 9960 OR pk = 9960;
+  DELETE FROM product WHERE pk = 9960 OR product_code = '${PART}';
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE VALUES (9960, '${PART}', 'อะไหล่ QDS', 'ACTIVE');
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+    OVERRIDING SYSTEM VALUE VALUES (9960, 9960, 10, 0, 2, 10, 100.00);
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date,
                    job_closed_date, job_repaired_date, record_status)
-    VALUES ('${JOB}', 11, 9960, 'QDSC001 ลูกค้า QDS', 'Model QDS', now(), current_date, '1900-01-01', '1900-01-01', 'ACTIVE');
+    VALUES ((SELECT pk FROM model WHERE model_code = 'TST-M'), '${JOB}', 11, 9960, 'QDSC001 ลูกค้า QDS', 'Model QDS', now(), current_date, '1900-01-01', '1900-01-01', 'ACTIVE');
   -- เบิก 2 (charged 100 each), booked as saveRepair would have booked it
-  INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty,
-                                        spare_part_unit_price, spare_part_total_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-    VALUES ('${JOB}', '${PART}', '', 1, true, true, 2, 100, 200, 1, now(), ${ADMIN.id}, 0, 0);
+  INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty,
+                                        spare_part_unit_price, spare_part_total_price, job_part_status_id, request_date,
+                                        requested_by_app_user_pk, grant_qty, return_qty)
+    VALUES ((SELECT pk FROM job WHERE job_no = '${JOB}'), 9960, true, true, 2, 100, 200, 1, now(), ${ADMIN.id}, 0, 0);
   -- a legacy order already denied (as SO2401274): approve status 5, still ACTIVE
-  INSERT INTO sale_out_hd (sale_out_hd_no, approve_status_id, document_create_by, record_status)
+  INSERT INTO sale_order (sale_order_no, approve_status_id, created_by_app_user_pk, record_status)
     VALUES ('${SO}', 5, ${ADMIN.id}, 'ACTIVE');
 `);
 // as test-domain: this year's Inventory series past the numbers other suites already used
 for (const t of ['Inventory-In', 'Inventory-Out'] as const) await db.transaction((tx) => nextRunningNo(tx, t));
 await pool.query(`
   UPDATE running_no r SET number = greatest(r.number, coalesce((
-    SELECT max(substring(h.inventory_no FROM length(r.prefix) + 3)::int) FROM inventory_hd h
-     WHERE h.inventory_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
+    SELECT max(substring(h.stock_move_no FROM length(r.prefix) + 3)::int) FROM stock_move h
+     WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
 const qty = async () =>
   (
     await db.execute<{ available: number; used: number; booking: number; remain: number }>(sql`
       SELECT quantity_available AS available, quantity_used AS used, quantity_booking AS booking, quantity_remain AS remain
-        FROM product_none_serial WHERE product_id = 9960`)
+        FROM product_stock WHERE product_pk = 9960`)
   ).rows[0]!;
 const logId = async () =>
-  (await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM job_order_spare_part_log WHERE job_no = ${JOB}`))
-    .rows[0]!.id;
+  (
+    await db.execute<{ id: string }>(
+      sql`SELECT l.id::text AS id FROM job_part l JOIN job j ON j.pk = l.job_pk WHERE j.job_no = ${JOB}`,
+    )
+  ).rows[0]!.id;
 /** the error of a rejected call ({ status: 200 } when it resolved); anything but an HttpError is re-thrown */
 async function err(p: Promise<unknown>) {
   try {
@@ -131,12 +149,12 @@ try {
   console.log('\n2. a denied sale order is final (legacy SO2401274)');
   await test('cancelling it is a 409 — even for System Admin; it stays ACTIVE', async () => {
     const soId = (
-      await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM sale_out_hd WHERE sale_out_hd_no = ${SO}`)
+      await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM sale_order WHERE sale_order_no = ${SO}`)
     ).rows[0]!.id; // records take the uuid (ADR 0008)
     const r = await err(setRecordStatus('sale_orders', soId, 'DELETED', ADMIN.id, true, true, 'QA'));
     assert.equal(r.status, 409, r.message);
     const [row] = (
-      await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM sale_out_hd WHERE sale_out_hd_no = ${SO}`)
+      await db.execute<{ rs: string }>(sql`SELECT record_status AS rs FROM sale_order WHERE sale_order_no = ${SO}`)
     ).rows;
     assert.equal(row.rs, 'ACTIVE');
   });

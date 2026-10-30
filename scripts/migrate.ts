@@ -11,7 +11,8 @@
  *    that state (journal has rows but app_user.lark_id is missing) and reset the
  *    journal so every migration — all written to be idempotent — runs again.
  *
- *  - `--reset` forces that behaviour. Neither ever runs against production (PROD_REF in the URL).
+ *  - `--reset` forces that behaviour. Neither ever runs against production (PROD_REF in the URL), nor on a database
+ *    drizzle/0006 converted (job.pk exists, ADR 0008 decision 12): that one is wiped (scripts/db-wipe.sql) and migrated.
  *  - `--deploy` (db:migrate:deploy, and db:migrate while Render's dashboard still calls it): Render's pre-deploy
  *    only — from a laptop it is refused and names the two commands that are (ADR 0009).
  *  - `--prod`: run by scripts/db-prod-migrate.mts (db:prod:migrate) after it asked; never with --reset.
@@ -99,6 +100,16 @@ async function main() {
       process.exit(1);
     }
     if (force || (hasEntries && !appColumnsPresent)) {
+      // after drizzle/0006 (ADR 0008 decision 12) the tables are rebuilt: re-running the migrations over them cannot
+      // work — a converted database is rebuilt instead (a legacy reload wipes first, so it never gets here)
+      const { rows: pk } = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'job' AND column_name = 'pk'`,
+      );
+      if (pk[0]?.n !== '0') {
+        console.error('REFUSED: แปลงแล้ว (drizzle/0006): สร้างฐานใหม่ — db-wipe + migrate (scripts/db-wipe.sql)');
+        process.exit(1);
+      }
       if (prod) {
         console.error(`${PROD_RESET} (app_user.lark_id missing but the journal says applied — check why)`);
         process.exit(1);

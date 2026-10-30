@@ -741,10 +741,25 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   );
 
   // the first visit to a page with a tour: ask once (after the page has settled) — unless "ไม่ต้องถามอีก"
+  // After the user's first tap / key on the page, never before: the browser stops picking the LCP element at the
+  // first input, so the card (an overlay — fixed, it never moves the page) can't become it on a slow phone
   React.useEffect(() => {
     if (!tour || off || seen.has(path)) return;
-    const t = setTimeout(() => setOfferPath(path), 800);
-    return () => clearTimeout(t);
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const ready = () => {
+      stop();
+      t = setTimeout(() => setOfferPath(path), 800);
+    };
+    const stop = () => {
+      window.removeEventListener('pointerdown', ready, true);
+      window.removeEventListener('keydown', ready, true);
+    };
+    window.addEventListener('pointerdown', ready, true);
+    window.addEventListener('keydown', ready, true);
+    return () => {
+      stop();
+      clearTimeout(t);
+    };
   }, [tour, off, seen, path]);
 
   const dismiss = (change: { seen?: string; off?: boolean }) => {
@@ -760,7 +775,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
           role="dialog"
           aria-labelledby="tour-offer"
           data-tour-offer
-          className="pointer-events-auto fixed inset-x-4 z-60 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-pop no-print sm:left-auto sm:w-[340px]"
+          className="pointer-events-auto fixed inset-x-4 z-60 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-pop no-print [contain:layout_paint] sm:left-auto sm:w-[340px]"
         >
           <button
             type="button"

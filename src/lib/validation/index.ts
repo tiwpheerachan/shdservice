@@ -168,6 +168,9 @@ export const moneyField = (label: string, max = 1_000_000) =>
       `${label}ต้องเป็นจำนวนเงิน 0–${max.toLocaleString('en-US')} (ทศนิยมไม่เกิน 2 ตำแหน่ง)`,
     );
 
+/** a document from the legacy system: its money / quantity figures are System Admin's alone (server: legacy-lock.ts) */
+export const FIGURES_LOCKED = 'ข้อมูลจากระบบเดิม — ตัวเลขเงิน / จำนวน แก้ไขได้เฉพาะ System Admin';
+
 /** first message per field, in the schema's field order */
 export function toFieldErrors(error: z.ZodError): FieldErrors {
   const out: FieldErrors = {};

@@ -21,13 +21,13 @@ export function useJobCallModal() {
   const [modalUsed, setModalUsed] = React.useState(false);
   if (callFor && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
 
-  // customer_detail = "C12150 ชื่อ เบอร์" → look the customer up by code
+  // the job's customer by its uuid (job.customer is display text: a legacy snapshot "code name phone")
   const openCall = async (job: Job) => {
-    const code = job.customer.split(/\s+/)[0] ?? '';
     let customer: Customer | null = null;
     try {
-      const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
-      customer = d.rows.find((c) => c.code === code) ?? null;
+      if (job.customerId)
+        customer =
+          (await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: job.customerId })}`)).rows[0] ?? null;
     } catch {
       customer = null;
     }

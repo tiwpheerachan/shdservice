@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic';
 /** รับเข้าอะไหล่ → WHI document. */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Product Receive Stock', 'add');
-  return idempotent(req, user.userId, async () => {
+  return idempotent(req, user.pk, async () => {
     const body = await parseBody(req, stockReceive); // receiveSchema
-    const r = await receiveStock(body, user.userId);
+    const r = await receiveStock(body, user.pk);
     return NextResponse.json({ ok: true, ...r }, { status: 201 });
   });
 });

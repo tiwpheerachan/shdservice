@@ -72,7 +72,7 @@ export const AuditRow = z
 
 export const PartRequestLine = z
   .object({
-    logId: u.meta({ description: 'the job_order_spare_part_log row' }),
+    logId: u.meta({ description: 'the job_part row' }),
     jobNo: s,
     code: s,
     name: s,
@@ -174,11 +174,42 @@ export const JobDetail = z
         status: s,
       }),
     ),
-    parts: z.array(PartRequestLine.extend({ total: n })),
+    parts: z.array(
+      PartRequestLine.extend({
+        total: n,
+        figuresLocked: b.meta({
+          description:
+            'A legacy line (legacy_boundary) and the viewer is not System Admin: its qty / price are read-only — it may still be cancelled / issued / returned.',
+        }),
+      }),
+    ),
     attachments: z.array(z.object({ id: u, name: s, file: s, remark: s })),
     logs: z.array(z.object({ statusId: n, status: s, date: s, by: s })),
     history: z.array(AuditRow),
     version: n.meta({ description: 'row_version — send it back on save (409 `stale` if it moved).' }),
+    figuresLocked: z
+      .array(
+        z.enum([
+          'estimateCost',
+          'depositCost',
+          'serviceCost',
+          'toolCost',
+          'deliveryCost',
+          'boxCost',
+          'payment.type',
+          'payment.no',
+          'payment.amount',
+          'payment.detail',
+        ]),
+      )
+      .meta({
+        description:
+          'A legacy job (legacy_boundary) and the viewer is not System Admin: the money fields that already hold a value — read-only (empty ones may be filled; totals follow their lines).',
+      }),
+    legacy: b.meta({
+      description:
+        'A job from the legacy system (legacy_boundary): its recorded parts cost / net total are never recomputed — a save moves them by what it changed.',
+    }),
   })
   .meta({ id: 'JobDetail' });
 
@@ -220,6 +251,8 @@ const jobRow = {
   serviceCost: n.optional(),
   partsCost: n.optional(),
   modelDetail: s.optional(),
+  /** the job's customer (customer.id) — the call-log button looks it up; none on a job without one */
+  customerId: u.optional(),
 };
 /** + deposit / outstanding (services/jobs.ts JobListRow) — the list and its pages (pageJobs: Page<JobListRow>) */
 export const Job = z.object({ ...jobRow, deposit: n, outstanding: n }).meta({ id: 'Job' });
@@ -255,6 +288,7 @@ export const QuotationDetail = z
     job: JobDetail.nullable(),
     lines: z.array(
       z.object({
+        id: u.meta({ description: "the line's id — sent back with an edit to keep (and update) this line" }),
         lineNumber: n,
         itemType: z.enum(['SparePart', 'Service', 'Delivery']),
         code: s,
@@ -282,6 +316,10 @@ export const QuotationDetail = z
     createdByPhone: s,
     createdByEmail: s,
     version: n,
+    figuresLocked: b.meta({
+      description:
+        "came from the legacy system: what it recorded (its lines' qty / price / discount, a service / discount / VAT it holds) is System Admin's alone — changing or deleting it by anyone else → 403; new lines are everyone's",
+    }),
   })
   .meta({ id: 'QuotationDetail' });
 
@@ -325,6 +363,7 @@ export const SaleOrderDetail = z
     cancelRemark: s.meta({ description: 'why it was cancelled (empty unless cancelled)' }),
     lines: z.array(
       z.object({
+        id: u.meta({ description: "the line's id — sent back with an edit to keep (and update) this line" }),
         listNo: n,
         code: s,
         name: s,
@@ -347,6 +386,10 @@ export const SaleOrderDetail = z
     documentProfileId: u,
     version: n,
     salesId: u.nullable(),
+    figuresLocked: b.meta({
+      description:
+        "came from the legacy system: what it recorded (its lines' product / qty / price, a fee or payment it holds) is System Admin's alone — changing or deleting it by anyone else → 403; new lines are everyone's",
+    }),
   })
   .meta({ id: 'SaleOrderDetail' });
 

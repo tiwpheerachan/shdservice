@@ -60,7 +60,9 @@ function CloseForm() {
   const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
   const { can } = useAccess();
   const confirm = useConfirm();
-  const lock = useMoneyLock(); // a closed job: the payment stays as recorded (Job Money After Close may change it)
+  // a closed job: the payment stays as recorded (Job Money After Close may change it); a legacy job's
+  // payment already recorded: System Admin only (an empty one may be filled)
+  const lock = useMoneyLock('payment');
   const [tab, setTab] = React.useState('product');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState<CloseDraft>(EMPTY_CLOSE);

@@ -33,23 +33,27 @@ const U = {
   edit: { id: 9955, email: 'qa-dump-edit@example.invalid', type: 'System Admin', rs: 'ACTIVE' },
 } as const;
 const rand = Math.random().toString(36).slice(2, 7);
+/** a status stamp from long ago by someone else (a fixture user: status_changed_by_app_user_pk has a foreign key) */
+const OLD = { at: '2000-01-01 00:00:00', by: U.active.id };
 
 await pool.query(`
-  DELETE FROM app_user WHERE user_id BETWEEN 9950 AND 9959 OR email_address LIKE 'qa-dump-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, last_login,
-                        status_changed_at, status_changed_by) VALUES
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, last_login,
+                        status_changed_at, status_changed_by_app_user_pk) OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map(
         (u) =>
-          `(${u.id}, 'QA', '${u.email.split('@')[0]}', '${u.email}', ${u.type ? `'${u.type}'` : 'NULL'}, '${u.rs}', NULL, '2000-01-01 00:00:00', 1)`,
+          `(${u.id}, 'QA', '${u.email.split('@')[0]}', '${u.email}', ${u.type ? `'${u.type}'` : 'NULL'}, '${u.rs}', NULL, '${OLD.at}', ${OLD.by})`,
       )
-      .join(',\n    ')};
+      .join(',\n    ')}
+    -- fixture users stay (audit_log, append-only, points at them): reset in place
+    ON CONFLICT (pk) DO UPDATE SET (first_name, last_name, email_address, user_type, record_status, last_login, status_changed_at, status_changed_by_app_user_pk, title, avatar, department)
+      = ROW(excluded.first_name, excluded.last_name, excluded.email_address, excluded.user_type, excluded.record_status, excluded.last_login, excluded.status_changed_at, excluded.status_changed_by_app_user_pk, NULL, NULL, NULL);
 `);
 
 const userRow = async (id: number) =>
   (
     await db.execute<{ last_login: string | null; title: string | null; at: string | null; by: number | null }>(
-      sql`SELECT last_login::text, title, status_changed_at::text AS at, status_changed_by AS by FROM app_user WHERE user_id = ${id}`,
+      sql`SELECT last_login::text, title, status_changed_at::text AS at, status_changed_by_app_user_pk::int AS by FROM app_user WHERE pk = ${id}`,
     )
   ).rows[0]!;
 const signIn = (email: string) =>
@@ -65,15 +69,14 @@ async function stampOf(kind: keyof typeof MASTER, key: string, reset = false) {
   const [t, k] = MASTER[kind].map((x) => sql.raw(x)) as [ReturnType<typeof sql.raw>, ReturnType<typeof sql.raw>];
   if (reset)
     await db.execute(
-      sql`UPDATE ${t} SET status_changed_at = '2000-01-01 00:00:00', status_changed_by = 1 WHERE ${k}::text = ${key}`,
+      sql`UPDATE ${t} SET status_changed_at = ${OLD.at}, status_changed_by_app_user_pk = ${OLD.by} WHERE ${k}::text = ${key}`,
     );
   return (
     await db.execute<{ rs: string; at: string | null; by: number | null }>(
-      sql`SELECT record_status AS rs, status_changed_at::text AS at, status_changed_by AS by FROM ${t} WHERE ${k}::text = ${key}`,
+      sql`SELECT record_status AS rs, status_changed_at::text AS at, status_changed_by_app_user_pk::int AS by FROM ${t} WHERE ${k}::text = ${key}`,
     )
   ).rows[0]!;
 }
-const OLD = { at: '2000-01-01 00:00:00', by: 1 };
 
 let passed = 0;
 const failures: string[] = [];
@@ -145,11 +148,11 @@ try {
 
   console.log('\n4. status_changed_at / _by only on a real status change');
   await test('user: saved with nothing changed → stamp kept; Active → Inactive → stamped', async () => {
-    const [{ id }] = (await db.execute<{ id: string }>(sql`SELECT id::text FROM app_user WHERE user_id = ${U.edit.id}`))
+    const [{ id }] = (await db.execute<{ id: string }>(sql`SELECT id::text FROM app_user WHERE pk = ${U.edit.id}`))
       .rows;
     const base = { id, name: 'QA qa-dump-edit', role: U.edit.type, email: U.edit.email };
     await upsertUser({ ...base, status: 'Active' }, U.admin.id);
-    assert.deepEqual(await userRow(U.edit.id), { last_login: null, title: null, at: '2000-01-01 00:00:00', by: 1 });
+    assert.deepEqual(await userRow(U.edit.id), { last_login: null, title: null, ...OLD });
     await upsertUser({ ...base, status: 'Inactive' }, U.admin.id);
     const row = await userRow(U.edit.id);
     assert.notEqual(row.at, '2000-01-01 00:00:00');

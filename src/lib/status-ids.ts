@@ -48,10 +48,10 @@ export const QS = {
   AGREED_WAIT_PARTS: 9,
 } as const;
 
-/** sale_out_hd.approve_status_id */
+/** sale_order.approve_status_id */
 export const AS = { DRAFT: 1, WAIT: 2, REJECT: 3, APPROVED: 4, DENIED: 5 } as const;
 
-/** inventory_type ids */
+/** stock_move_type ids */
 export const INV = {
   RECEIVE: 1, // รับเข้า
   RETURN_FROM_JOB: 2, // รับคืนจากการเบิก
@@ -60,7 +60,7 @@ export const INV = {
   OUT_OTHER: 5, // จ่ายออกอื่นๆ
 } as const;
 
-/** job_order_spare_part_log.order_status_id */
+/** job_part.job_part_status_id */
 export const PART = { REQUESTED: 1, RETURN_REQUESTED: 2, GRANTED: 3, CANCELLED: 4, RETURNED: 5 } as const;
 
 /** the one store / condition / unit every stock row uses (store_location 1 คลังสินค้าดี, condition 1 สินค้าใหม่) */

@@ -27,6 +27,8 @@ export type ReportFilter =
       options: string[] | ((draft: ReportValues) => string[]);
       value?: string;
       lookup?: Lookup | Lookup[];
+      /** the field is first focused / pressed, with the draft values — a long list loads then, not with the page */
+      onWant?: (draft: ReportValues) => void;
     };
 
 /** values keyed by filter `key` (or label); "ทั้งหมด" (and the old "Select All" / "ALL" labels) → "" */
@@ -229,9 +231,13 @@ export function ReportView<T extends Record<string, unknown>>({
                 (() => {
                   // options are plain strings and can repeat (two staff rows with the same name) — de-duplicate so keys stay unique
                   const opts = Array.from(new Set(optionsOf(f, values)));
+                  const want = f.onWant && (() => f.onWant?.(values));
                   // same rule as the rest of the app: long lists are searchable, 2–5 fixed choices stay a plain select
-                  return opts.length > 5 ? (
-                    <SearchSelect value={v} onChange={set} options={strOptions(opts)} />
+                  // (a field with onWant stays searchable: its list arrives after the first focus)
+                  return opts.length > 5 || want ? (
+                    <div onFocusCapture={want} onPointerDownCapture={want}>
+                      <SearchSelect value={v} onChange={set} options={strOptions(opts)} />
+                    </div>
                   ) : (
                     <Select value={v} onChange={(e) => set(e.target.value)}>
                       {opts.map((o) => (

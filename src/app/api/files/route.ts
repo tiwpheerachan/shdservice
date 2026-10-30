@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { and, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { documentAttach } from '@/db/schema';
+import { jobAttachment, job } from '@/db/schema';
 import {
   canViewAny,
   handle,
@@ -68,14 +68,14 @@ export const GET = handle(async (req: NextRequest) => {
     const [, no = '', f = ''] = att;
     const file = f.replace(/(\.(?:mp4|mov|webm))\.jpg$/i, '$1');
     const [row] = await db
-      .select({ name: documentAttach.originalFileName })
-      .from(documentAttach)
+      .select({ name: jobAttachment.originalFileName })
+      .from(jobAttachment)
+      .innerJoin(job, eq(job.pk, jobAttachment.jobPk))
       .where(
         and(
-          eq(documentAttach.referenceTopic, 'Jobs'),
-          eq(documentAttach.referenceItemCode, no),
-          inArray(documentAttach.systemFileName, [file, filePath.attachment(no, file)]),
-          ne(documentAttach.recordStatus, RS.DELETED),
+          eq(job.jobNo, no),
+          inArray(jobAttachment.systemFileName, [file, filePath.attachment(no, file)]),
+          ne(jobAttachment.recordStatus, RS.DELETED),
         ),
       )
       .limit(1);

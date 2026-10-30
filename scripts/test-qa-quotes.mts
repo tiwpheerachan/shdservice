@@ -46,24 +46,40 @@ async function seed() {
                             (16, 'อยู่ระหว่างการซ่อม - พ้นกำหนดเสนอราคา', 39, 'Pending', true),
                             (20, 'ปิดงาน (Complete)', 20, 'Finished', true)) v(id, name, ord, grp, act)
        WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
-    DELETE FROM app_user WHERE user_id = ${ADMIN.id} OR email_address = '${ADMIN.email}';
-    INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version)
-      VALUES (${ADMIN.id}, 'QQ', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', 1);
-    DELETE FROM quotation_dt WHERE quotation_no IN (SELECT quotation_no FROM quotation_hd WHERE customer_code = '${CUSTOMER}');
-    DELETE FROM quotation_hd WHERE customer_code = '${CUSTOMER}';
-    DELETE FROM job_log WHERE job_no LIKE 'J99031%';
-    DELETE FROM job_order_spare_part_log WHERE job_no LIKE 'J99031%';
+    INSERT INTO job_part_status (job_part_status_id, job_part_status_name)
+      SELECT 1, 'เบิก' WHERE NOT EXISTS (SELECT 1 FROM job_part_status WHERE job_part_status_id = 1);
+    INSERT INTO store_location (store_location_id, store_location_name, is_active)
+      SELECT 1, 'คลังสินค้าดี', true WHERE NOT EXISTS (SELECT 1 FROM store_location WHERE store_location_id = 1);
+    INSERT INTO product (product_code, product_name, record_status)
+      SELECT 'QQP1', 'QQ อะไหล่', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM product WHERE product_code = 'QQP1');
+  INSERT INTO model (model_code, model_name, record_status)
+      SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+    -- the admin row stays (audit_log, append-only, points at it): reset in place
+    INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+      OVERRIDING SYSTEM VALUE VALUES (${ADMIN.id}, 'QQ', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE', 1)
+      ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+        email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+        session_version = excluded.session_version, last_login = DEFAULT;
+    -- job ↔ quotation point at each other (approved_quotation_pk / job_pk): the pointer goes first
+    UPDATE job SET approved_quotation_pk = NULL WHERE job_no LIKE 'J99031%';
+    CREATE TEMP TABLE qq_q ON COMMIT DROP AS SELECT pk FROM quotation
+     WHERE customer_pk IN (SELECT pk FROM customer WHERE customer_code = '${CUSTOMER}')
+        OR job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'J99031%');
+    DELETE FROM quotation_line WHERE quotation_pk IN (SELECT pk FROM qq_q);
+    DELETE FROM quotation WHERE pk IN (SELECT pk FROM qq_q);
+    DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'J99031%');
+    DELETE FROM job_part WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'J99031%');
     DELETE FROM job WHERE job_no LIKE 'J99031%';
-    DELETE FROM customer WHERE customer_id = 9301 OR customer_code = '${CUSTOMER}';
-    INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9301, '${CUSTOMER}', 'ลูกค้า QA ใบเสนอราคา', '02-000-0001');
-    DELETE FROM idempotency_key WHERE user_id = ${ADMIN.id};
+    DELETE FROM customer WHERE pk = 9301 OR customer_code = '${CUSTOMER}';
+    INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9301, '${CUSTOMER}', 'ลูกค้า QA ใบเสนอราคา', '02-000-0001');
+    DELETE FROM idempotency_key WHERE app_user_pk = ${ADMIN.id};
   `);
 }
 /** a job of the fixture customer in `status` */
 async function mkJob(n: number, status = 2) {
   await pool.query(
-    `INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date)
-     VALUES ($1, $2, 9301, '${CUSTOMER} ลูกค้า QA', 'Model QQ', now(), current_date, '1900-01-01')`,
+    `INSERT INTO job (job_no, job_status_id, customer_pk, model_pk, job_create_date, job_reception_date, job_closed_date)
+     VALUES ($1, $2, 9301, (SELECT pk FROM model WHERE model_code = 'TST-M'), now(), current_date, '1900-01-01')`,
     [J(n), status],
   );
   return J(n);
@@ -112,9 +128,15 @@ async function post(body: unknown) {
   const b = (await r.json()) as { details?: { fields?: Record<string, string> }; quotation?: { no: string } };
   return { status: r.status, fields: b.details?.fields ?? {}, body: b };
 }
+/** the job's agreed quotation: the one of its quotations in an agreed status (3 / 6 / 9, ux_quotation_agreed_job) —
+ *  job.approved_quotation_pk is a legacy snapshot, NULL on new rows (ADR 0008 "no redundant data") */
 const pointer = async (jobNo: string) =>
-  (await db.execute<{ p: string | null }>(sql`SELECT quotation_no_approved AS p FROM job WHERE job_no = ${jobNo}`))
-    .rows[0]?.p ?? '';
+  (
+    await db.execute<{ p: string | null }>(
+      sql`SELECT q.quotation_no AS p FROM quotation q JOIN job j ON j.pk = q.job_pk
+           WHERE j.job_no = ${jobNo} AND q.quotation_status_id IN (3, 6, 9) AND q.record_status <> 'DELETED'`,
+    )
+  ).rows[0]?.p ?? '';
 const AGREED = 'ลูกค้าตกลงซ่อม';
 
 let passed = 0;
@@ -230,7 +252,7 @@ try {
     const ok = res.flatMap((r, k) => (r.status === 'fulfilled' ? [[a, b][k]!.no] : []));
     const refused = res.flatMap((r) => (r.status === 'rejected' ? [r.reason as InstanceType<typeof HttpError>] : []));
     assert.equal(ok.length, 1, `exactly one approved: ${JSON.stringify(res.map((r) => r.status))}`);
-    assert.equal(refused[0]?.status, 409);
+    assert.equal(refused[0]?.status, 409, String(refused[0]));
     assert.match(refused[0]!.message, new RegExp(`ตกลงแล้ว.*${ok[0]}`));
     assert.equal(await pointer(j2), ok[0]);
     // the job's status change names the quotation it followed — the one the job points at
@@ -264,17 +286,18 @@ try {
       ],
     );
   });
-  await test('B2 declining an agreed quotation the job does not point at leaves the pointer alone', async () => {
-    // legacy data: a second agreed quotation from before the rule
+  await test('B2 a second agreed quotation on a job cannot even be stored (ux_quotation_agreed_job); the agreed one stays', async () => {
+    // legacy data held none (0 jobs with two, ADR 0008): the database refuses it outright now
     const [{ no }] = (
       await db.execute<{ no: string }>(
-        sql`SELECT quotation_no AS no FROM quotation_hd WHERE reference_job_no = ${j2} AND quotation_status_id = 4`,
+        sql`SELECT quotation_no AS no FROM quotation WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${j2}) AND quotation_status_id = 4`,
       )
     ).rows;
-    await db.execute(sql`UPDATE quotation_hd SET quotation_status_id = 3 WHERE quotation_no = ${no}`);
-    const q = (await getQuotation(no))!;
     const keep = await pointer(j2);
-    await saveQuotation(base(j2, { no, version: q.version, status: 'ยกเลิกใบเสนอราคา' }), ADMIN.id);
+    await assert.rejects(
+      db.execute(sql`UPDATE quotation SET quotation_status_id = 3 WHERE quotation_no = ${no}`),
+      (e: Error & { cause?: { constraint?: string } }) => e.cause?.constraint === 'ux_quotation_agreed_job',
+    );
     assert.equal(await pointer(j2), keep);
   });
 
@@ -294,12 +317,12 @@ try {
   await test('B4 jobParts from before a parts change → 409 "โหลดใหม่"; the current one saves; none = no check', async () => {
     const j = await mkJob(5);
     await pool.query(
-      `INSERT INTO job_order_spare_part_log (job_no, spare_part_code, spare_part_serial_no, stock_id, is_quotation, is_special, request_qty, spare_part_unit_price, order_status_id, request_date, request_by, grant_qty, return_qty)
-       VALUES ($1, 'QQP1', '', 1, true, false, 1, 100, 1, now(), ${ADMIN.id}, 0, 0)`,
+      `INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty, spare_part_unit_price, job_part_status_id, request_date, requested_by_app_user_pk, grant_qty, return_qty)
+       VALUES ((SELECT pk FROM job WHERE job_no = $1), (SELECT pk FROM product WHERE product_code = 'QQP1'), true, false, 1, 100, 1, now(), ${ADMIN.id}, 0, 0)`,
       [j],
     );
     const stale = quotedPartsKey((await getJob(j))!.parts, 'A');
-    await pool.query(`UPDATE job_order_spare_part_log SET request_qty = 2 WHERE job_no = $1`, [j]);
+    await pool.query(`UPDATE job_part SET request_qty = 2 WHERE job_pk = (SELECT pk FROM job WHERE job_no = $1)`, [j]);
     const e = await errorOf(saveQuotation(base(j, { jobParts: stale }), ADMIN.id));
     assert.equal(e.status, 409);
     assert.match(e.message, /รายการอะไหล่ของงานเปลี่ยนแล้ว/);
@@ -315,9 +338,7 @@ try {
   await test('B7 sent 10 days ago: list / export say พ้นกำหนดเสนอราคา, that filter finds it, "เสนอราคาแล้ว" does not; the form keeps the stored status', async () => {
     const j = await mkJob(6);
     const q = await saveQuotation(base(j, { status: 'เสนอราคาแล้ว' }), ADMIN.id);
-    await db.execute(
-      sql`UPDATE quotation_hd SET create_date = now() - interval '10 days' WHERE quotation_no = ${q.no}`,
-    );
+    await db.execute(sql`UPDATE quotation SET create_date = now() - interval '10 days' WHERE quotation_no = ${q.no}`);
     const page = (status: string) =>
       pageQuotations({ page: 1, pageSize: 50, q: '', f: {} }, { status, jobNo: j, deleted: 'exclude' });
     const expired = await page('พ้นกำหนดเสนอราคา');
@@ -362,7 +383,7 @@ try {
     await pool.query(`UPDATE job SET job_status_id = 6 WHERE job_no = $1`, [j]); // ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)
     const e = await errorOf(saveQuotation(base(j, { no: q.no, version: q.version, status: AGREED }), ADMIN.id));
     assert.equal(e.status, 409);
-    const { rows } = await pool.query(`SELECT quotation_no_approved AS a FROM job WHERE job_no = $1`, [j]);
+    const { rows } = await pool.query(`SELECT approved_quotation_pk AS a FROM job WHERE job_no = $1`, [j]);
     assert.ok(!rows[0].a, JSON.stringify(rows[0]));
   });
 } finally {

@@ -55,7 +55,7 @@ const NO_FILTER: AssignFilter = {
 export default function AssignPage() {
   const { push } = useToast();
   const ask = useConfirm();
-  // the signed-in technician receives the jobs (job.engineer_id = app_user.user_id)
+  // the signed-in technician receives the jobs (job.engineer_app_user_pk = app_user.pk)
   const { name: CURRENT_TECH, userId, has, can } = useAccess();
   // open jobs without an engineer / still "งานใหม่" — server-side paging
   const {
@@ -145,7 +145,7 @@ export default function AssignPage() {
     }
   };
 
-  // POST /api/jobs/assign → engineer_id; a "งานใหม่" job also → status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  // POST /api/jobs/assign → engineer_app_user_pk; a "งานใหม่" job also → status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
   const confirm = async () => {
     const list = [...picked];
     if (!list.length) return;

@@ -28,18 +28,23 @@ await pool.query(`
                           (5, 'ซ่อมเสร็จ', 5, 'Repaired', true),
                           (6, 'ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)', 6, 'Repaired', true)) v(id, name, ord, grp, act)
      WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
-  DELETE FROM job_log WHERE job_no LIKE 'QDJ%';
-  DELETE FROM job WHERE job_no LIKE 'QDJ%' OR customer_id = 9961;
-  DELETE FROM app_user WHERE user_id BETWEEN 9960 AND 9969 OR email_address LIKE 'qdj-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status)
-    VALUES (${ADMIN.id}, 'QDJ', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE');
-  DELETE FROM customer WHERE customer_id = 9961 OR customer_code = '${CUSTOMER}';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number) VALUES (9961, '${CUSTOMER}', 'ลูกค้า QDJ', '02-996-0001');
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QDJ%' OR customer_pk = 9961);
+  DELETE FROM job WHERE job_no LIKE 'QDJ%' OR customer_pk = 9961;
+  -- the user stays (audit_log, append-only, points at it): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status) OVERRIDING SYSTEM VALUE
+    VALUES (${ADMIN.id}, 'QDJ', 'admin', '${ADMIN.email}', 'System Admin', 'ACTIVE')
+    ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+      email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status, last_login = DEFAULT;
+  DELETE FROM customer WHERE pk = 9961 OR customer_code = '${CUSTOMER}';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE VALUES (9961, '${CUSTOMER}', 'ลูกค้า QDJ', '02-996-0001');
   -- J2509357-like (parts 1,600 + service 400, VAT 7% → 2,140 paid), J2300041-like (parts 2,200, discount → 2,000),
   -- a declined job (6), an open one (2)
-  INSERT INTO job (job_no, job_status_id, customer_id, customer_detail, engineer_id, job_create_date, job_reception_date,
+  -- job.model_pk is NOT NULL (drizzle/0006): a model every fixture job without its own can point at (never deleted)
+  INSERT INTO model (model_code, model_name, record_status)
+    SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
+  INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, engineer_app_user_pk, job_create_date, job_reception_date,
                    spare_part_total_cost, service_cost, job_total_cost, job_payment_amount, record_status)
-    SELECT 'QDJ' || lpad(n::text, 4, '0'), s, 9961, '${CUSTOMER} ลูกค้า QDJ 02-996-0001', ${ADMIN.id},
+    SELECT (SELECT pk FROM model WHERE model_code = 'TST-M'), 'QDJ' || lpad(n::text, 4, '0'), s, 9961, '${CUSTOMER} ลูกค้า QDJ 02-996-0001', ${ADMIN.id},
            now() - interval '10 days', current_date - 10, parts, service, total, paid, 'ACTIVE'
       FROM (VALUES (1, 5, 1600, 400, 2140, 2140), (2, 5, 2200, 0, 2000, 2000), (3, 6, 0, 0, 0, 0),
                    (4, 2, 0, 300, 300, 0)) v(n, s, parts, service, total, paid);

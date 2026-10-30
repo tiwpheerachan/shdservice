@@ -21,7 +21,8 @@ import { Input, Select } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import type { Product } from '@/data/types';
-import { useProductsPage, useProductStats, useManufacturers, useCategories, useModels } from '@/data/db';
+import { useApi, useProductsPage, useProductStats, useManufacturers, useCategories, useModels } from '@/data/db';
+import { useSearchParams } from 'next/navigation';
 import { baht, int, cn } from '@/lib/utils';
 import { useServerTable } from '@/lib/use-server-table';
 import { postJson, errMsg, exportXlsx } from '@/lib/api';
@@ -93,6 +94,18 @@ export default function ProductsPage() {
   // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
   const [modalUsed, setModalUsed] = React.useState(false);
   if (detail && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
+  // ?id=<product uuid> (an anomaly link) → that product's dialog, once (the swr answer's callback)
+  const linkId = useSearchParams().get('id')?.trim().toLowerCase() ?? '';
+  const linkOpened = React.useRef(false);
+  useApi<{ product: Product }>(linkId ? `/api/products/${encodeURIComponent(linkId)}` : null, {
+    fresh: true,
+    onSuccess: (d) => {
+      if (linkOpened.current) return;
+      linkOpened.current = true;
+      setDetail({ product: d.product, mode: 'view' });
+    },
+    onError: (msg) => push({ kind: 'error', title: 'ไม่พบอะไหล่', desc: msg }),
+  });
 
   // FilterBar (applied on "ค้นหา") + server-side paging (product table 2.5k rows; INACTIVE shown, DELETED hidden)
   const {
@@ -145,7 +158,7 @@ export default function ProductsPage() {
     refetchStats();
   };
 
-  // ยกเลิก = product.is_active = false (+ cancel_date / cancel_by)
+  // ยกเลิก = product.record_status (+ status_changed_at / _by)
   const cancelProduct = async (r: Product) => {
     if (!canDel) return; // the ยกเลิก button only shows with the permission
     const ok = await confirm({

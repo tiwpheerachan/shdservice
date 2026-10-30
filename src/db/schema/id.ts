@@ -1,7 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { uuid } from 'drizzle-orm/pg-core';
+import { bigint, uuid } from 'drizzle-orm/pg-core';
 
-/** every table's external id (ADR 0008, drizzle/0005): uuid v7 minted by the database, unique */
+/** every table's internal key (ADR 0008 phase 2, drizzle/0006): first column, bigint identity ALWAYS — never leaves the server */
+export const pkCol = () => bigint('pk', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity();
+
+/** a relation to another table's `pk` (`<role>_<table>_pk`, FK ON DELETE RESTRICT in drizzle/0006) — TS stays `number` */
+export const pkRef = (name: string) => bigint(name, { mode: 'number' });
+
+/** every table's external id (ADR 0008, drizzle/0005): second column, uuid v7 minted by the database, unique */
 export const uuidId = () =>
   uuid('id')
     .notNull()

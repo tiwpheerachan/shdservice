@@ -19,7 +19,7 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   const no = await jobNoOf((await parseParams(ctx, jobCallAdd)).id);
   const body = await parseBody(req, jobCallAdd); // callLogSchema
-  return idempotent(req, user.userId, async () =>
-    NextResponse.json({ ok: true, rows: await addCallLog(no, body.detail, user.userId) }),
+  return idempotent(req, user.pk, async () =>
+    NextResponse.json({ ok: true, rows: await addCallLog(no, body.detail, user.pk) }),
   );
 });

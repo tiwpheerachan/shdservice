@@ -26,7 +26,7 @@ export default function UsersPage() {
   const isMe = (r: { id: string }) => r.id === myId;
   const [view, setView] = React.useState<'active' | 'deleted'>('active');
   const { data: USERS, loading, refetch } = useUsers(view === 'deleted' ? 'only' : 'exclude');
-  // roles = user_type values from app_config (DB), "รออนุมัติ" = no role yet
+  // roles = user_type values from role_permission (DB), "รออนุมัติ" = no role yet
   const { data: dbRoles } = useRoles();
   // System Admin last: the dropdown keyboard-highlights the first row, and Enter there would grant full admin
   const ROLE_OPTIONS = React.useMemo(

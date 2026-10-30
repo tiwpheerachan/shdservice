@@ -10,6 +10,6 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Job Assign', 'edit');
   const body = await parseBody(req, jobAssign); // assignSchema
-  const n = await assignJobs(body.jobNos, body.engineerId, user.userId, body.takeOver === true);
+  const n = await assignJobs(body.jobNos, body.engineerId, user.pk, body.takeOver === true);
   return NextResponse.json({ ok: true, assigned: n });
 });

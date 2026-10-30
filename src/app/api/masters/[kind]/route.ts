@@ -24,7 +24,7 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
         status: b.status,
         expect: b.expect,
       },
-      me.userId,
+      me.pk,
     );
     return NextResponse.json({ ok: true, row });
   }
@@ -38,13 +38,13 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ kin
         status: b.status,
         expect: b.expect,
       },
-      me.userId,
+      me.pk,
     );
     return NextResponse.json({ ok: true, row });
   }
   const row = await saveModel(
     { code: b.code, name: b.name ?? '', brand: b.brand ?? '', price: b.price, status: b.status, expect: b.expect },
-    me.userId,
+    me.pk,
   );
   return NextResponse.json({ ok: true, row });
 });

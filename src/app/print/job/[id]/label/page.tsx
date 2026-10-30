@@ -4,7 +4,7 @@ import { getJob } from '@/server/services/jobs';
 import { getCustomerByCode, addressNames } from '@/server/services/customers';
 import { ShippingLabel } from '@/components/print/shipping-label';
 import { profileForDocument } from '@/server/services/document-profiles';
-import { printJobNo } from '../job-no';
+import { logJobPrint, printJobNo } from '../job-no';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +15,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 /** ใบปะหน้าพัสดุสำหรับงานซ่อมที่ส่งคืนทางขนส่ง — same A5 sheet as the sale order, keyed by the job's uuid. */
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const no = await printJobNo((await params).id);
+  const { id } = await params;
+  const no = await printJobNo(id);
   if (!no) notFound();
+  await logJobPrint(id, no, 'ใบปะหน้าพัสดุ');
   const j = await getJob(no);
   if (!j) notFound();
   const cust = j.customer?.code ? await getCustomerByCode(j.customer.code) : null;

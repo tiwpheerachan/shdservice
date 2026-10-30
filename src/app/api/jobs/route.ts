@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic';
 /** เปิดงานใหม่ */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Job Management', 'add');
-  return idempotent(req, user.userId, async () => {
+  return idempotent(req, user.pk, async () => {
     const body = await parseBody(req, jobCreate);
-    const job = await createJob(body, user.userId);
+    const job = await createJob(body, user.pk);
     return NextResponse.json({ ok: true, job }, { status: 201 });
   });
 });

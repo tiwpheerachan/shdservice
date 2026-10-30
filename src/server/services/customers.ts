@@ -1,10 +1,10 @@
 import 'server-only';
 import { cached, TTL_STATIC } from '@/server/cache';
-import { and, asc, count, desc, eq, gt, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, or, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { orderBy, likeTerm, offsetOf, totalOf, type Page, type PageQuery } from '@/server/paging';
-import { db } from '@/db/client';
+import { db, writeTx } from '@/db/client';
 import type { Db, Tx } from '@/db/client';
-import { customer, mtCity, mtDistrict, mtSubDistrict, appUser } from '@/db/schema';
+import { customer, province, district, subDistrict, appUser } from '@/db/schema';
 import type { Customer } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
@@ -21,6 +21,7 @@ import {
   phoneDigitVariants,
   taxIdDigits,
   withPrefix,
+  ADDRESS_PREFIXES,
 } from '@/lib/validation/customer';
 import { clean } from '@/lib/validation';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
@@ -44,8 +45,73 @@ const PRICE_GROUP_VALUE: Record<string, string> = Object.fromEntries(
   Object.entries(PRICE_GROUP_LABEL).map(([k, v]) => [v, k]),
 );
 
-/** the uuids of a customer's จังหวัด / อำเภอ / ตำบล (the API's address ids) — null = not picked */
-type Places = { city: string | null; district: string | null; subDistrict: string | null };
+/** the uuids and names of a customer's จังหวัด / อำเภอ / ตำบล (the API's address ids) — null = not picked */
+type Places = {
+  city: string | null;
+  district: string | null;
+  subDistrict: string | null;
+  cityName: string | null;
+  districtName: string | null;
+  subDistrictName: string | null;
+};
+
+/** province.pk (= the legacy city_id) of กรุงเทพมหานคร: แขวง / เขต and no จ. prefix */
+const BANGKOK_CITY_PK = 10;
+
+/**
+ * The one-line address, composed on read (ADR 0008 "no redundant data": customer_address is a legacy snapshot —
+ * new / edited customers do not write it): address lines + ตำบล / อำเภอ / จังหวัด names + postal code, as the
+ * legacy app built it. A row without address lines (a legacy address-only row) reads its stored text.
+ */
+function addressLine(r: Row, places?: Places): string {
+  const bkk = r.provincePk === BANGKOK_CITY_PK;
+  const named = (prefix: string, n: string | null | undefined) => (n ? withPrefix(prefix, n) : '');
+  const line = [
+    str(r.customerAddress1),
+    str(r.customerAddress2),
+    named(bkk ? 'แขวง' : 'ต.', places?.subDistrictName),
+    named(bkk ? 'เขต' : 'อ.', places?.districtName),
+    named(bkk ? '' : 'จ.', places?.cityName),
+    str(r.postalCode),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (str(r.customerAddress1) || str(r.customerAddress2)) return line;
+  return r.customerAddress?.trim() || line;
+}
+
+/** withPrefix() in SQL: `prefix` + the name, unless it already starts with one of its level's prefixes */
+function prefixedSql(name: SQL, prefix: string): SQL {
+  if (!prefix) return name;
+  const own = ADDRESS_PREFIXES.find((f) => f.includes(prefix)) ?? [prefix];
+  const starts = sql.join(
+    own.map((p) => sql`${p + '%'}`),
+    sql`, `,
+  );
+  return sql`case when ${name} like any (array[${starts}]) then ${name} else ${prefix} || ${name} end`;
+}
+const placeSql = (table: 'sub_district' | 'district' | 'province', pk: SQL | AnyColumn) =>
+  sql`(select nullif(btrim(t.name_th), '') from ${sql.raw(table)} t where t.pk = ${pk})`;
+
+/**
+ * addressLine() in SQL, for queries that read many customers at once (the sale report): the same composition and
+ * prefixes — address lines + แขวง / ต., เขต / อ., จ. (none in Bangkok) + postal code, else the legacy stored text.
+ * NULL when there is nothing (addressLine: '').
+ */
+export const customerAddressSql = (() => {
+  const bkk = sql`${customer.provincePk} = ${BANGKOK_CITY_PK}`;
+  const a1 = sql`nullif(btrim(${customer.customerAddress1}), '')`;
+  const a2 = sql`nullif(btrim(${customer.customerAddress2}), '')`;
+  const level = (table: 'sub_district' | 'district' | 'province', pk: AnyColumn, inBkk: string, other: string) =>
+    sql`case when ${bkk} then ${prefixedSql(placeSql(table, pk), inBkk)} else ${prefixedSql(placeSql(table, pk), other)} end`;
+  const line = sql`nullif(concat_ws(' ', ${a1}, ${a2},
+    ${level('sub_district', customer.subDistrictPk, 'แขวง', 'ต.')},
+    ${level('district', customer.districtPk, 'เขต', 'อ.')},
+    ${level('province', customer.provincePk, '', 'จ.')},
+    nullif(btrim(${customer.postalCode}), '')), '')`;
+  return sql<string | null>`case when ${a1} is not null or ${a2} is not null then ${line}
+    else coalesce(nullif(btrim(${customer.customerAddress}), ''), ${line}) end`;
+})();
 
 export function toCustomer(r: Row, createdBy = '', places?: Places): Customer {
   return {
@@ -53,7 +119,7 @@ export function toCustomer(r: Row, createdBy = '', places?: Places): Customer {
     createdBy,
     code: r.customerCode ?? '',
     name: r.customerName ?? '',
-    address: r.customerAddress ?? '',
+    address: addressLine(r, places),
     phone: r.phoneNumber ?? '',
     email: r.email ?? '',
     line: r.lineId ?? '',
@@ -82,7 +148,7 @@ export type CustomerFilters = {
   email?: string;
   taxId?: string;
   type?: string; // Normal | Corporate | Dealer
-  province?: string; // mt_city.id (uuid)
+  province?: string; // province.id (uuid)
   status?: string; // Active | Inactive
 };
 export const customerFiltersFromQuery = (f: Record<string, string>): CustomerFilters => ({
@@ -96,25 +162,25 @@ export const customerFiltersFromQuery = (f: Record<string, string>): CustomerFil
   status: f.status,
 });
 
-/** customer rows with their address uuids (the -1 "not picked" rows join nothing) and who created them */
+/** customer rows with their address uuids (not picked = NULL, joins nothing) and who created them */
 const fromCustomer = (q: Db | Tx = db) =>
   q
     .select({
       c: customer,
-      city: mtCity.id,
-      district: mtDistrict.id,
-      subDistrict: mtSubDistrict.id,
+      city: province.id,
+      district: district.id,
+      subDistrict: subDistrict.id,
+      cityName: province.nameTh,
+      districtName: district.nameTh,
+      subDistrictName: subDistrict.nameTh,
       f: appUser.firstName,
       l: appUser.lastName,
     })
     .from(customer)
-    .leftJoin(mtCity, and(eq(mtCity.cityId, customer.cityId), gt(customer.cityId, 0)))
-    .leftJoin(mtDistrict, and(eq(mtDistrict.districtId, customer.districtId), gt(customer.districtId, 0)))
-    .leftJoin(
-      mtSubDistrict,
-      and(eq(mtSubDistrict.subDistrictId, customer.subDistrictId), gt(customer.subDistrictId, 0)),
-    )
-    .leftJoin(appUser, eq(appUser.userId, customer.createBy));
+    .leftJoin(province, eq(province.pk, customer.provincePk))
+    .leftJoin(district, eq(district.pk, customer.districtPk))
+    .leftJoin(subDistrict, eq(subDistrict.pk, customer.subDistrictPk))
+    .leftJoin(appUser, eq(appUser.pk, customer.createdByAppUserPk));
 type Joined = Awaited<ReturnType<typeof fromCustomer>>[number];
 const joined = (r: Joined, createdBy = '') => toCustomer(r.c, createdBy, r);
 /** the one customer `w` finds (with its address uuids) */
@@ -138,7 +204,7 @@ export async function listCustomers(
   const { q = '', deleted = 'exclude', limit = 500, filters = {} } = opts;
   const rows = await fromCustomer()
     .where(customerWhere(q, deleted, filters))
-    .orderBy(desc(customer.customerId))
+    .orderBy(desc(customer.pk))
     .limit(Math.min(limit, MAX_EXPORT_ROWS));
   return rows.map((r) => joined(r));
 }
@@ -149,7 +215,12 @@ const SORT = {
   phone: customer.phoneNumber,
   email: customer.email,
   status: customer.recordStatus,
-  address: customer.customerAddress,
+  // as addressLine() reads it (without the ต. / อ. / จ. prefixes — the order comes from the address lines first);
+  // the place names come from fromCustomer's joins, which the paged rows query has
+  address: sql`case when btrim(coalesce(${customer.customerAddress1}, '') || coalesce(${customer.customerAddress2}, '')) <> ''
+    then concat_ws(' ', nullif(btrim(${customer.customerAddress1}), ''), nullif(btrim(${customer.customerAddress2}), ''),
+      ${subDistrict.nameTh}, ${district.nameTh}, ${province.nameTh}, nullif(btrim(${customer.postalCode}), ''))
+    else coalesce(btrim(${customer.customerAddress}), '') end`,
 };
 
 /**
@@ -186,7 +257,7 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
         ilike(customer.email, likeTerm(term)),
         ilike(customer.customerCardId, likeTerm(term)),
         // a tax id typed with dashes ("0-1055-56616-06-9"), or a legacy one stored with them
-        // ponytail: no index on the digits of the card id — a seq scan for digit-only terms; an expression index like drizzle/0024 if it shows
+        // gin_customer_card_id_digits (drizzle/0006) indexes this exact expression (cardDigits)
         termDigits.length >= 5 && /^[\d๐-๙\s-]+$/.test(term)
           ? sql`${cardDigits} LIKE ${likeTerm(termDigits)}`
           : undefined,
@@ -206,7 +277,10 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
     byDigits(f.taxId, (d) => sql`${cardDigits} LIKE ${likeTerm(d)}`),
     f.type ? eq(customer.customerType, f.type) : undefined,
     f.province && isUuid(f.province)
-      ? inArray(customer.cityId, db.select({ c: mtCity.cityId }).from(mtCity).where(eq(mtCity.id, f.province.trim())))
+      ? inArray(
+          customer.provincePk,
+          db.select({ c: province.pk }).from(province).where(eq(province.id, f.province.trim())),
+        )
       : undefined,
     f.status === 'Active'
       ? eq(customer.recordStatus, 'ACTIVE')
@@ -228,7 +302,7 @@ export async function pageCustomers(
     db.select({ total: count() }).from(customer).where(w),
     fromCustomer()
       .where(w)
-      .orderBy(...orderBy(p.sort, SORT, [desc(customer.customerId)]))
+      .orderBy(...orderBy(p.sort, SORT, [desc(customer.pk)]))
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
@@ -253,7 +327,7 @@ export function getCustomerByUuid(id: string, deleted: DeletedMode = 'all'): Pro
 /**
  * The customer a document is written for (getCustomerByCode still returns a deleted one — old documents show
  * theirs): one deleted or set Inactive (owner 2026-10-21) gets nothing new (409). `current` = the customer
- * already on the document (its customer_id or code): an edit that keeps it still saves. `key` = customer_id, for the
+ * already on the document (its customer_pk or code): an edit that keeps it still saves. `key` = customer.pk, for the
  * document's FK column (`id` is the uuid the API shows). Read FOR SHARE in the document's
  * write transaction: a delete / Inactive switch (records.ts, FOR UPDATE) running now finishes first, or waits.
  */
@@ -262,72 +336,35 @@ export async function customerForDocument(
   code: string,
   current?: number | string | null,
 ): Promise<(Customer & { key: number }) | null> {
-  const [r] = await tx.select().from(customer).where(eq(customer.customerCode, code)).limit(1).for('share');
-  if (!r) return null;
-  // `key` = customer.customer_id, what the document's customer_id column holds (ADR 0008 phase 1: FKs stay int)
-  const found = { ...toCustomer(r), key: r.customerId };
-  if (current === r.customerId || current === r.customerCode) return found;
+  const [j] = await fromCustomer(tx).where(eq(customer.customerCode, code)).limit(1).for('share', { of: customer });
+  if (!j) return null;
+  const r = j.c;
+  // `key` = customer.pk, what the document's customer_pk column holds (ADR 0008 phase 2)
+  const found = { ...joined(j), key: r.pk };
+  if (current === r.pk || current === r.customerCode) return found;
   if (r.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
   if (r.recordStatus === RS.INACTIVE)
     throw new HttpError(409, 'ลูกค้ารายนี้ปิดใช้งาน (Inactive) — เปิดใช้งานก่อน หรือเลือกรายอื่น');
   return found;
 }
 
-/** by customer.customer_id (the internal key a job holds) */
-export function getCustomerById(id: number): Promise<Customer | null> {
-  return oneCustomer(eq(customer.customerId, id));
+/** by customer.pk (the internal key a job holds) */
+export function getCustomerById(pk: number): Promise<Customer | null> {
+  return oneCustomer(eq(customer.pk, pk));
 }
 
 /** the parsed body of POST /api/customers (customerSave in src/server/contract/sales.ts) */
 export type CustomerInput = z.output<typeof customerSave.body>;
 
-/** mt_city.city_id of กรุงเทพมหานคร: แขวง / เขต and no จ. prefix */
-const BANGKOK_CITY_ID = 10;
-
-/** mt_city / mt_district / mt_sub_district keys of the uuids a save sent; not picked = -1 (as legacy rows hold) */
-type PlaceKeys = { cityId: number; districtId: number; subDistrictId: number };
+/** province / district / sub_district pks of the uuids a save sent; not picked = NULL (FK, drizzle/0006) */
+type PlaceKeys = { provincePk: number | null; districtPk: number | null; subDistrictPk: number | null };
 async function placeKeys(tx: Tx, i: CustomerInput): Promise<PlaceKeys> {
-  const [cityId, districtId, subDistrictId] = await Promise.all([
-    i.cityId ? pkOf(mtCity, mtCity.cityId, i.cityId, 'จังหวัด', tx) : -1,
-    i.districtId ? pkOf(mtDistrict, mtDistrict.districtId, i.districtId, 'เขต / อำเภอ', tx) : -1,
-    i.subDistrictId ? pkOf(mtSubDistrict, mtSubDistrict.subDistrictId, i.subDistrictId, 'แขวง / ตำบล', tx) : -1,
-  ]);
-  return { cityId, districtId, subDistrictId };
-}
-
-/** Build the legacy single-line address from the parts (what the old app did). */
-async function composeAddress(
-  tx: Tx,
-  i: Pick<CustomerInput, 'address1' | 'address2' | 'postalCode'> & PlaceKeys,
-): Promise<string> {
-  const bkk = i.cityId === BANGKOK_CITY_ID;
-  const parts: string[] = [str(i.address1), str(i.address2)];
-  if (i.subDistrictId > 0) {
-    const [sd] = await tx
-      .select({ n: mtSubDistrict.nameTh })
-      .from(mtSubDistrict)
-      .where(eq(mtSubDistrict.subDistrictId, i.subDistrictId));
-    if (sd) parts.push(withPrefix(bkk ? 'แขวง' : 'ต.', sd.n));
-  }
-  if (i.districtId > 0) {
-    const [d] = await tx
-      .select({ n: mtDistrict.nameTh })
-      .from(mtDistrict)
-      .where(eq(mtDistrict.districtId, i.districtId));
-    if (d) parts.push(withPrefix(bkk ? 'เขต' : 'อ.', d.n));
-  }
-  if (i.cityId > 0) {
-    const [c] = await tx.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.cityId, i.cityId));
-    if (c) parts.push(withPrefix(bkk ? '' : 'จ.', c.n));
-  }
-  parts.push(str(i.postalCode));
-  const line = parts.filter(Boolean).join(' ');
-  // customer_address is varchar(200): refused, never cut (a cut drops the province / postal code at the end)
-  if (line.length > 200) {
-    const m = `ที่อยู่รวม (เลขที่ ซอย-ถนน ตำบล อำเภอ จังหวัด รหัสไปรษณีย์) ยาวเกิน 200 ตัวอักษร — ย่อลงอีก ${line.length - 200} ตัว`;
-    throw new HttpError(400, m, { fields: { address1: m } });
-  }
-  return line;
+  // one after another: a transaction is one connection (pg: no second query while one runs)
+  return {
+    provincePk: i.cityId ? await pkOf(province, i.cityId, 'จังหวัด', tx) : null,
+    districtPk: i.districtId ? await pkOf(district, i.districtId, 'เขต / อำเภอ', tx) : null,
+    subDistrictPk: i.subDistrictId ? await pkOf(subDistrict, i.subDistrictId, 'แขวง / ตำบล', tx) : null,
+  };
 }
 
 /** ตำบล / อำเภอ / จังหวัด names for a customer's address uuids (a Customer as getCustomerByCode returns it) —
@@ -337,16 +374,12 @@ export async function addressNames(c: Pick<Customer, 'cityId' | 'districtId' | '
   const sdId = c?.subDistrictId,
     dId = c?.districtId,
     cId = c?.cityId;
-  const [subDistrict, district, province] = await Promise.all([
-    pick(
-      sdId
-        ? db.select({ n: mtSubDistrict.nameTh }).from(mtSubDistrict).where(eq(mtSubDistrict.id, sdId)).limit(1)
-        : null,
-    ),
-    pick(dId ? db.select({ n: mtDistrict.nameTh }).from(mtDistrict).where(eq(mtDistrict.id, dId)).limit(1) : null),
-    pick(cId ? db.select({ n: mtCity.nameTh }).from(mtCity).where(eq(mtCity.id, cId)).limit(1) : null),
+  const [sdName, dName, pName] = await Promise.all([
+    pick(sdId ? db.select({ n: subDistrict.nameTh }).from(subDistrict).where(eq(subDistrict.id, sdId)).limit(1) : null),
+    pick(dId ? db.select({ n: district.nameTh }).from(district).where(eq(district.id, dId)).limit(1) : null),
+    pick(cId ? db.select({ n: province.nameTh }).from(province).where(eq(province.id, cId)).limit(1) : null),
   ]);
-  return { subDistrict, district, province };
+  return { subDistrict: sdName, district: dName, province: pName };
 }
 
 export type CustomerConflict = {
@@ -406,28 +439,27 @@ export async function findCustomerConflicts(
       cond: sql`${cardDigits} = ${taxId}`,
     });
   if (!checks.length) return [];
-  // one query per field, in parallel
-  const found = await Promise.all(
-    checks.map((c) =>
-      q
-        .select({
-          code: customer.customerCode,
-          name: customer.customerName,
-          phone: customer.phoneNumber,
-          email: customer.email,
-          taxId: customer.customerCardId,
-        })
-        .from(customer)
-        .where(
-          and(
-            c.cond,
-            sql`${customer.recordStatus} <> 'DELETED'`,
-            excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
-          ),
-        )
-        .limit(50),
-    ),
-  );
+  const query = (c: (typeof checks)[number]) =>
+    q
+      .select({
+        code: customer.customerCode,
+        name: customer.customerName,
+        phone: customer.phoneNumber,
+        email: customer.email,
+        taxId: customer.customerCardId,
+      })
+      .from(customer)
+      .where(
+        and(
+          c.cond,
+          sql`${customer.recordStatus} <> 'DELETED'`,
+          excludeCode ? sql`${customer.customerCode} <> ${excludeCode}` : undefined,
+        ),
+      )
+      .limit(50);
+  // one query per field, one after another (q may be a transaction: one connection)
+  const found: Awaited<ReturnType<typeof query>>[] = [];
+  for (const c of checks) found.push(await query(c));
   return checks.flatMap((c, k) =>
     found[k]!.filter((r) => !c.keep || c.keep(r))
       .slice(0, 5)
@@ -471,22 +503,19 @@ function columnsOf(i: Omit<CustomerInput, 'cityId' | 'districtId' | 'subDistrict
     isCustomerOnline: i.online !== false,
     customerAddress1: clean(i.address1),
     customerAddress2: clean(i.address2),
-    cityId: place.cityId,
-    districtId: place.districtId,
-    // the postal code is NOT checked against mt_sub_district.postal_code: the master is wrong for many
+    provincePk: place.provincePk,
+    districtPk: place.districtPk,
+    // the postal code is NOT checked against sub_district.postal_code: the master is wrong for many
     // ตำบล (every Mueang Chiang Mai one says 50000; real 50200 / 50300) — the form only hints at a difference
-    subDistrictId: place.subDistrictId,
+    subDistrictPk: place.subDistrictPk,
     postalCode: clean(i.postalCode),
     email: clean(i.email).toLowerCase(),
     lineId: clean(i.line),
     usePriceGroup: PRICE_GROUP_VALUE[clean(i.priceGroup)] ?? (clean(i.priceGroup) || 'Retail'),
   };
 }
-/** the parts customer_address is built from */
-const ADDRESS_PARTS = ['customerAddress1', 'customerAddress2', 'cityId', 'districtId', 'subDistrictId', 'postalCode'];
-
 /** Create/update a customer. New codes come from running "Customer" (C00001). */
-export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<Customer> {
+export async function saveCustomer(i: CustomerInput, byUserPk: number): Promise<Customer> {
   const prev = i.code ? await getCustomerByCode(i.code) : null;
   // same rules as the form (lib/validation/customer); unchanged legacy values still save
   assertValid(customerSchema(prev), i);
@@ -506,7 +535,7 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     taxId: !prev || digits(prev.taxId) !== digits(i.taxId) ? taxId : undefined,
   };
 
-  return db.transaction(async (tx) => {
+  return writeTx(async (tx) => {
     // no unique index (legacy rows hold real duplicates): two saves claiming the same value at once queue on its
     // key, and the second one checks after the first committed — before the row lock below, so never a deadlock
     for (const k of identityKeys(check))
@@ -525,13 +554,6 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
     // cleaned values (customerSchema checked their length against the columns — nothing is cut)
     const place = await placeKeys(tx, i);
     const cols = { ...columnsOf(i, place), phoneNumber: phone };
-    const address = () =>
-      composeAddress(tx, {
-        ...place,
-        postalCode: i.postalCode,
-        address1: cols.customerAddress1,
-        address2: cols.customerAddress2,
-      });
     const status = fromUiStatus(i.status);
     if (i.code) {
       const [before] = await tx.select().from(customer).where(eq(customer.customerCode, i.code)).for('update');
@@ -546,33 +568,29 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       const was: Record<string, unknown> = {
         ...columnsOf(
           { ...shown, address1: shown.address1 || shown.address },
-          {
-            cityId: before.cityId ?? -1,
-            districtId: before.districtId ?? -1,
-            subDistrictId: before.subDistrictId ?? -1,
-          },
+          { provincePk: before.provincePk, districtPk: before.districtPk, subDistrictPk: before.subDistrictPk },
         ),
         phoneNumber: shown.phone,
       };
-      // a stored id the master lacks shows as not picked: sent back not picked, it stays as stored ("never worse")
-      for (const k of ['cityId', 'districtId', 'subDistrictId'] as const)
-        if (!i[k] && !prev?.[k]) cols[k] = before[k] ?? -1;
       const set: Partial<typeof customer.$inferInsert> = Object.fromEntries(
         Object.entries(cols).filter(([k, v]) => v !== was[k]),
       );
-      // the one-line address is re-built only when one of its parts changes (a legacy one stays as typed)
-      if (ADDRESS_PARTS.some((k) => k in set)) set.customerAddress = await address();
-      if (uiStatus(before.recordStatus) !== uiStatus(status)) Object.assign(set, statusStamp(status, byUserId));
-      const saved = () => oneCustomer(eq(customer.customerId, before.customerId), tx) as Promise<Customer>;
+      // customer_address (the legacy one-line text) is not written — it is composed on read (addressLine)
+      if (uiStatus(before.recordStatus) !== uiStatus(status)) Object.assign(set, statusStamp(status, byUserPk));
+      const saved = () => oneCustomer(eq(customer.pk, before.pk), tx) as Promise<Customer>;
       if (!Object.keys(set).length) return saved();
-      await tx.update(customer).set(set).where(eq(customer.customerId, before.customerId));
-      await audit(tx, byUserId, {
+      await tx.update(customer).set(set).where(eq(customer.pk, before.pk));
+      await audit(tx, byUserPk, {
         action: 'UPDATE',
         module: 'Customer',
         entity: 'customer',
         key: before.id,
+        no: before.customerCode,
         summary: `แก้ไขลูกค้า ${name}`,
-        changes: diff(before as Record<string, unknown>, set as Record<string, unknown>),
+        // the address master keys stay out of the log (pk never leaves the server, ADR 0008)
+        changes: diff(before as Record<string, unknown>, set as Record<string, unknown>, {
+          skip: ['provincePk', 'districtPk', 'subDistrictPk'],
+        }),
       });
       return saved();
     }
@@ -581,95 +599,90 @@ export async function saveCustomer(i: CustomerInput, byUserId: number): Promise<
       .insert(customer)
       .values({
         ...cols,
-        customerAddress: await address(),
-        ...statusStamp(status, byUserId),
+        ...statusStamp(status, byUserPk),
         customerCode: code,
         createdDate: nowThai(),
-        createBy: byUserId,
+        createdByAppUserPk: byUserPk,
         faxNumber: '',
       })
       .returning();
     if (!row) throw new Error('customer insert returned no row');
-    await audit(tx, byUserId, {
+    await audit(tx, byUserPk, {
       action: 'CREATE',
       module: 'Customer',
       entity: 'customer',
       key: row.id,
+      no: code,
       summary: `เพิ่มลูกค้า ${code} ${name} · ${phone}`,
     });
-    return (await oneCustomer(eq(customer.customerId, row.customerId), tx))!;
+    return (await oneCustomer(eq(customer.pk, row.pk), tx))!;
   });
 }
 
 /* Address master data for cascading dropdowns */
 export function listProvinces() {
   return cached('provinces', TTL_STATIC, () =>
-    // city_id -1 is the legacy "not chosen" row with an empty name — never a choice
-    db
-      .select({ id: mtCity.id, name: mtCity.nameTh })
-      .from(mtCity)
-      .where(gt(mtCity.cityId, 0))
-      .orderBy(asc(mtCity.nameTh)),
+    // (the legacy "not chosen" row city_id -1 is gone since drizzle/0006 — not picked = NULL)
+    db.select({ id: province.id, name: province.nameTh }).from(province).orderBy(asc(province.nameTh)),
   );
 }
 /** the districts of the province whose uuid is `city` (none → no rows) */
 export async function listDistricts(city?: string) {
   if (!city) return [];
   return db
-    .select({ id: mtDistrict.id, name: mtDistrict.nameTh })
-    .from(mtDistrict)
-    .innerJoin(mtCity, eq(mtCity.cityId, mtDistrict.cityId))
-    .where(eq(mtCity.id, city))
-    .orderBy(asc(mtDistrict.nameTh));
+    .select({ id: district.id, name: district.nameTh })
+    .from(district)
+    .innerJoin(province, eq(province.pk, district.provincePk))
+    .where(eq(province.id, city))
+    .orderBy(asc(district.nameTh));
 }
 /** the sub-districts of the district whose uuid is `district` (none → no rows) */
-export async function listSubDistricts(district?: string) {
-  if (!district) return [];
+export async function listSubDistricts(districtId?: string) {
+  if (!districtId) return [];
   return db
-    .select({ id: mtSubDistrict.id, name: mtSubDistrict.nameTh, postal: mtSubDistrict.postalCode })
-    .from(mtSubDistrict)
-    .innerJoin(mtDistrict, eq(mtDistrict.districtId, mtSubDistrict.districtId))
-    .where(eq(mtDistrict.id, district))
-    .orderBy(asc(mtSubDistrict.nameTh));
+    .select({ id: subDistrict.id, name: subDistrict.nameTh, postal: subDistrict.postalCode })
+    .from(subDistrict)
+    .innerJoin(district, eq(district.pk, subDistrict.districtPk))
+    .where(eq(district.id, districtId))
+    .orderBy(asc(subDistrict.nameTh));
 }
 
 /** "+ เพิ่มชื่อ" (customer form, as the legacy app had it): a แขวง / ตำบล the list lacks, for everyone from then on.
  *  The body was checked by its operation (addressCreate); the same name in that district is refused. */
-export async function addSubDistrict(i: { district: string; name: string; postal: string }, byUserId: number) {
+export async function addSubDistrict(i: { district: string; name: string; postal: string }, byUserPk: number) {
   const name = clean(i.name);
   const postal = clean(i.postal);
-  return db.transaction(async (tx) => {
-    // ponytail: one lock for the table — the legacy ids have no sequence (next = max + 1); adds are rare
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('mt_sub_district', 0))`);
+  return writeTx(async (tx) => {
+    // ponytail: one lock for the table — the same-name check below has no unique index behind it; adds are rare
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('sub_district', 0))`);
     const [d] = await tx
-      .select({ cityId: mtDistrict.cityId, districtId: mtDistrict.districtId })
-      .from(mtDistrict)
-      .where(eq(mtDistrict.id, i.district));
+      .select({ provincePk: district.provincePk, pk: district.pk })
+      .from(district)
+      .where(eq(district.id, i.district));
     if (!d) throw new HttpError(404, 'ไม่พบเขต / อำเภอนี้ กรุณาโหลดหน้าใหม่');
     const [dup] = await tx
-      .select({ id: mtSubDistrict.subDistrictId })
-      .from(mtSubDistrict)
-      .where(and(eq(mtSubDistrict.districtId, d.districtId), sql`btrim(${mtSubDistrict.nameTh}) = ${name}`));
+      .select({ pk: subDistrict.pk })
+      .from(subDistrict)
+      .where(and(eq(subDistrict.districtPk, d.pk), sql`btrim(${subDistrict.nameTh}) = ${name}`));
     if (dup) {
       const message = `มี "${name}" ในเขต / อำเภอนี้แล้ว`;
       throw new HttpError(409, message, { fields: { name: message } });
     }
     const [row] = await tx
-      .insert(mtSubDistrict)
+      .insert(subDistrict)
       .values({
-        subDistrictId: sql`(SELECT coalesce(max(sub_district_id), 0) + 1 FROM mt_sub_district)`,
-        cityId: d.cityId,
-        districtId: d.districtId,
+        provincePk: d.provincePk,
+        districtPk: d.pk,
         nameTh: name,
         nameEn: '',
         postalCode: postal,
       })
-      .returning({ id: mtSubDistrict.id, name: mtSubDistrict.nameTh, postal: mtSubDistrict.postalCode });
-    if (!row) throw new Error('mt_sub_district insert returned no row');
-    await audit(tx, byUserId, {
+      .returning({ id: subDistrict.id, name: subDistrict.nameTh, postal: subDistrict.postalCode });
+    if (!row) throw new Error('sub_district insert returned no row');
+    await audit(tx, byUserPk, {
       action: 'CREATE',
       module: 'Customer',
-      entity: 'mt_sub_district',
+      entity: 'sub_district',
       key: row.id,
       summary: `เพิ่มแขวง / ตำบล ${name} ${postal}`,
       meta: { districtId: i.district },

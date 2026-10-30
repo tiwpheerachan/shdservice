@@ -133,6 +133,7 @@ function TatNum({ n, href, className }: { n: number; href: string; className?: s
   if (!n) return null;
   return (
     <Link
+      prefetch={false}
       href={href}
       className={cn(
         'rounded px-1 -mx-1 underline-offset-4 transition-colors hover:bg-accent hover:underline',
@@ -344,6 +345,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
           </div>
           {canAdd && (
             <Link
+              prefetch={false}
               href="/jobs/new"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
@@ -379,6 +381,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
             ))}
           {DASH_GROUPS.map((g) => (
             <Link
+              prefetch={false}
               key={g.key}
               href={kpiHref(g, range.from, range.to, range.type)}
               className="group bg-card p-5 transition-colors hover:bg-accent/40"
@@ -630,7 +633,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
       <Panel
         title="งานล่าสุด"
         meta={
-          <Link href="/jobs/list" className="font-medium text-primary hover:underline">
+          <Link href="/jobs/list" prefetch={false} className="font-medium text-primary hover:underline">
             ดูทั้งหมด →
           </Link>
         }

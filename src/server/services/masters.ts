@@ -1,8 +1,8 @@
 import 'server-only';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { and, asc, count, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { category, color, jobType, manufacturer, model, productType, symptom } from '@/db/schema';
+import { db, writeTx } from '@/db/client';
+import { brand, category, color, jobType, model, productType, symptom } from '@/db/schema';
 import type { MasterRow, Symptom, Model } from '@/data/types';
 import { HttpError } from '@/server/auth';
 import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
@@ -38,7 +38,7 @@ const status = (rs: string | null) => uiStatus(rs) as MasterRow['status'];
 /** an edit that only switched the status reads as a status change in the audit log — as the status switch writes it */
 function editAudit(changes: AuditChanges | null, noun: string, key: string | number, name: string, summary: string) {
   const rs = changes?.recordStatus;
-  const onlyStatus = !!rs && Object.keys(changes!).every((k) => k === 'recordStatus' || k === 'isActive');
+  const onlyStatus = !!rs && Object.keys(changes!).every((k) => k === 'recordStatus');
   return onlyStatus
     ? {
         action: rs[1] === 'DELETED' ? ('DELETE' as const) : ('STATUS' as const),
@@ -69,7 +69,7 @@ function duplicate(dup: { name: string | null; ref?: string; rs?: string | null 
   return new HttpError(409, msg, { fields: { name: msg } });
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Tx = import('@/db/client').Tx;
 /** One name at a time per list (as masterNameKey sees it): two admins saving "Red" and "red " at the same
  *  instant queue here, and the second one's duplicate check sees the first one's row. */
 const lockName = (tx: Tx, list: string, name: unknown) =>
@@ -86,7 +86,7 @@ function assertLoaded(now: Partial<Record<Loaded, unknown>>, expect?: MasterExpe
 }
 
 /* ------------------------------------------------------------------ *
- * Simple id/name/detail/is_active masters
+ * Simple id/name/detail/status masters
  * ------------------------------------------------------------------ */
 type SimpleKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types';
 
@@ -101,27 +101,27 @@ const KIND_NOUN: Record<SimpleKind, string> = {
 const SIMPLE = {
   categories: {
     table: category,
-    id: category.categoryId,
+    id: category.pk,
     uuid: category.id,
     name: category.categoryName,
     detail: category.categoryDescription,
-    extra: category.shotCode,
+    extra: category.shortCode,
     active: category.recordStatus,
     days: null,
     // drizzle insert/update keys (TS property names, not DB column names)
-    keys: { name: 'categoryName', detail: 'categoryDescription', extra: 'shotCode', active: 'isActive', days: null },
+    keys: { name: 'categoryName', detail: 'categoryDescription', extra: 'shortCode', days: null },
     nameLen: 50,
   },
   manufacturers: {
-    table: manufacturer,
-    id: manufacturer.manufacturerId,
-    uuid: manufacturer.id,
-    name: manufacturer.manufacturerName,
-    detail: manufacturer.logoName,
+    table: brand,
+    id: brand.pk,
+    uuid: brand.id,
+    name: brand.brandName,
+    detail: brand.logoName,
     extra: null,
-    active: manufacturer.recordStatus,
+    active: brand.recordStatus,
     days: null,
-    keys: { name: 'manufacturerName', detail: 'logoName', extra: null, active: 'isActive', days: null },
+    keys: { name: 'brandName', detail: 'logoName', extra: null, days: null },
     nameLen: 50,
   },
   colors: {
@@ -133,12 +133,12 @@ const SIMPLE = {
     extra: null,
     active: color.recordStatus,
     days: null,
-    keys: { name: 'colorName', detail: 'description', extra: null, active: 'isActive', days: null },
+    keys: { name: 'colorName', detail: 'description', extra: null, days: null },
     nameLen: 50,
   },
   job_types: {
     table: jobType,
-    id: jobType.jobTypeId,
+    id: jobType.pk,
     uuid: jobType.id,
     name: jobType.jobTypeName,
     detail: jobType.jobTypeDescription,
@@ -148,7 +148,6 @@ const SIMPLE = {
       name: 'jobTypeName',
       detail: 'jobTypeDescription',
       extra: null,
-      active: 'isActive',
       days: 'defaultDueDays',
     },
     days: jobType.defaultDueDays, // SLA → the real due date of a job nobody picked one for
@@ -156,14 +155,14 @@ const SIMPLE = {
   },
   product_types: {
     table: productType,
-    id: productType.productTypeId,
+    id: productType.pk,
     uuid: productType.id,
     name: productType.productTypeName,
     detail: productType.productTypeDescription,
     extra: null,
     active: productType.recordStatus,
     days: null,
-    keys: { name: 'productTypeName', detail: 'productTypeDescription', extra: null, active: 'isActive', days: null },
+    keys: { name: 'productTypeName', detail: 'productTypeDescription', extra: null, days: null },
     nameLen: 50,
   },
 } as const;
@@ -220,12 +219,12 @@ export async function saveSimple(
   const name = clean(input.name);
   const values: Record<string, unknown> = { [d.keys.name]: name };
   if (d.keys.detail) values[d.keys.detail] = clean(input.detail);
-  // the page has no field for it (categories.shot_code): not sent = keep it
+  // the page has no field for it (categories.short_code): not sent = keep it
   if (d.keys.extra && input.extra !== undefined) values[d.keys.extra] = clean(input.extra).slice(0, 50);
   if (d.keys.days) values[d.keys.days] = Number(input.days);
 
   /** the row's uuid (input.id — checked by the contract): the one edited, or the one inserted */
-  const id = await db.transaction(async (tx) => {
+  const id = await writeTx(async (tx) => {
     await lockName(tx, kind, name);
     const [before] = input.id ? await tx.select().from(d.table).where(eq(d.uuid, input.id)).for('update') : [];
     if (input.id && !before) throw new HttpError(404, `ไม่พบ${KIND_NOUN[kind]}นี้ — โหลดหน้าใหม่`);
@@ -295,14 +294,11 @@ export async function saveSimple(
 /** `id` = the row's uuid (records route checked it) — the audit key; the summary names the row */
 export async function setSimpleStatus(kind: SimpleKind, id: string, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     const [old] = await tx.select({ rs: d.active, name: d.name }).from(d.table).where(eq(d.uuid, id)).for('update');
     if (!old) throw new HttpError(404, `ไม่พบ${KIND_NOUN[kind]}นี้ — โหลดหน้าใหม่`);
     if (old.rs === rs) return; // already so: no stamp, no audit line (as records.ts)
-    await tx
-      .update(d.table)
-      .set({ [d.keys.active]: rs === 'ACTIVE', ...statusStamp(rs, byUserId, false) })
-      .where(eq(d.uuid, id));
+    await tx.update(d.table).set(statusStamp(rs, byUserId)).where(eq(d.uuid, id));
     await audit(tx, byUserId, {
       action: rs === 'DELETED' ? 'DELETE' : 'STATUS',
       module: 'Admin',
@@ -326,7 +322,7 @@ async function loadSymptoms(deleted: DeletedMode): Promise<Symptom[]> {
     .select()
     .from(symptom)
     .where(statusFilter(symptom.recordStatus, deleted))
-    .orderBy(asc(symptom.symptomId));
+    .orderBy(asc(symptom.pk));
   return rows.map((r) => ({
     id: r.id,
     name: r.symptomName ?? '',
@@ -355,7 +351,7 @@ export async function saveSymptom(
     symptomDescription: clean(input.detail),
     symptomGroupName: clean(input.group),
   };
-  const id = await db.transaction(async (tx) => {
+  const id = await writeTx(async (tx) => {
     await lockName(tx, 'symptoms', name);
     const [before] = input.id ? await tx.select().from(symptom).where(eq(symptom.id, input.id)).for('update') : [];
     if (input.id && !before) throw new HttpError(404, 'ไม่พบอาการเสียนี้ — โหลดหน้าใหม่');
@@ -412,7 +408,7 @@ export async function saveSymptom(
 
 /** `id` = the symptom's uuid (records route checked it) */
 export async function setSymptomStatus(id: string, rs: RecordStatus, byUserId: number) {
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     const [old] = await tx
       .select({ rs: symptom.recordStatus, name: symptom.symptomName })
       .from(symptom)
@@ -444,14 +440,14 @@ async function loadModels(deleted: DeletedMode): Promise<Model[]> {
     .select({
       code: model.modelCode,
       name: model.modelName,
-      brand: manufacturer.manufacturerName,
+      brand: brand.brandName,
       price: model.marketPrice,
       updated: model.lastUpdate,
       active: model.recordStatus,
-      id: model.modelId,
+      id: model.pk,
     })
     .from(model)
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+    .leftJoin(brand, eq(brand.pk, model.brandPk))
     .where(statusFilter(model.recordStatus, deleted))
     .orderBy(asc(model.modelCode));
   return rows.map((r) => ({
@@ -477,21 +473,21 @@ export async function saveModel(
 ): Promise<Model> {
   assertValid(modelSchema, input);
   const name = clean(input.name);
-  const brand = await db
-    .select({ id: manufacturer.manufacturerId })
-    .from(manufacturer)
-    .where(sql`btrim(${manufacturer.manufacturerName}, E' \t\r\n') = ${clean(input.brand)}`) // legacy names carry trailing spaces
+  const [found] = await db
+    .select({ id: brand.pk })
+    .from(brand)
+    .where(sql`btrim(${brand.brandName}, E' \t\r\n') = ${clean(input.brand)}`) // legacy names carry trailing spaces
     .limit(1);
-  if (!brand[0]) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + clean(input.brand));
-  const brandId = brand[0].id;
+  if (!found) throw new HttpError(400, 'ไม่พบยี่ห้อ ' + clean(input.brand));
+  const brandId = found.id;
   const values = {
     modelName: name,
-    manufacturerId: brandId,
+    brandPk: brandId,
     marketPrice: money(num(input.price)),
     lastUpdate: nowThai(),
   };
 
-  const code = await db.transaction(async (tx) => {
+  const code = await writeTx(async (tx) => {
     await lockName(tx, `models:${brandId}`, name);
     const [before] = input.code
       ? await tx.select().from(model).where(eq(model.modelCode, input.code)).for('update')
@@ -499,9 +495,9 @@ export async function saveModel(
     if (input.code && !before) throw new HttpError(404, `ไม่พบรุ่นสินค้า ${input.code}`);
     if (before && input.expect) {
       const [was] = await tx
-        .select({ brand: manufacturer.manufacturerName })
-        .from(manufacturer)
-        .where(eq(manufacturer.manufacturerId, before.manufacturerId ?? -1));
+        .select({ brand: brand.brandName })
+        .from(brand)
+        .where(eq(brand.pk, before.brandPk ?? -1));
       assertLoaded(
         {
           name: before.modelName,
@@ -514,13 +510,13 @@ export async function saveModel(
     }
     // one name per brand, ignoring case + spaces (checked here so a duplicate is a 409, not ix_unique_model's 500);
     // a model keeping its own name and brand is not checked
-    if (!before || before.manufacturerId !== brandId || masterNameKey(before.modelName) !== masterNameKey(name)) {
+    if (!before || before.brandPk !== brandId || masterNameKey(before.modelName) !== masterNameKey(name)) {
       const [dup] = await tx
         .select({ code: model.modelCode, name: model.modelName, rs: model.recordStatus })
         .from(model)
         .where(
           and(
-            eq(model.manufacturerId, brandId),
+            eq(model.brandPk, brandId),
             sql`${nameKeyOf(model.modelName)} = ${masterNameKey(name)}`,
             ne(model.recordStatus, RS.DELETED),
             input.code ? sql`${model.modelCode} is distinct from ${input.code}` : undefined,
@@ -532,26 +528,36 @@ export async function saveModel(
     if (input.code) {
       const set = { ...values, ...saveStamp(input.status, before, byUserId) };
       await tx.update(model).set(set).where(eq(model.modelCode, input.code));
-      const changes = diff(before as Record<string, unknown>, set as Record<string, unknown>);
+      // the brand by name, not by its pk (pk never leaves the server, ADR 0008)
+      let changes = diff(before as Record<string, unknown>, set as Record<string, unknown>, {
+        skip: ['brandPk'],
+      });
+      if (before && before.brandPk !== brandId) {
+        const [old] = await tx
+          .select({ name: brand.brandName })
+          .from(brand)
+          .where(eq(brand.pk, before.brandPk ?? -1));
+        changes = { ...changes, brand: [old?.name?.trim() ?? null, clean(input.brand)] };
+      }
       if (changes)
         await audit(tx, byUserId, {
           ...editAudit(changes, 'รุ่นสินค้า', input.code, name, `แก้ไขรุ่นสินค้า ${name}`),
           module: 'Admin',
           entity: 'model',
           key: input.code,
+          no: input.code,
           changes,
         });
       return input.code;
     }
     const c = await nextRunningNo(tx, 'Model');
-    await tx
-      .insert(model)
-      .values({ ...values, ...saveStamp(input.status, undefined, byUserId), modelCode: c, tierId: 0 });
+    await tx.insert(model).values({ ...values, ...saveStamp(input.status, undefined, byUserId), modelCode: c });
     await audit(tx, byUserId, {
       action: 'CREATE',
       module: 'Admin',
       entity: 'model',
       key: c,
+      no: c,
       summary: `เพิ่มรุ่นสินค้า ${name} (${clean(input.brand)})`,
     });
     return c;
@@ -561,7 +567,7 @@ export async function saveModel(
 }
 
 export async function setModelStatus(code: string, rs: RecordStatus, byUserId: number) {
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     const [old] = await tx
       .select({ rs: model.recordStatus })
       .from(model)
@@ -577,6 +583,7 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
       module: 'Admin',
       entity: 'model',
       key: code,
+      no: code,
       summary: statusSummary({ noun: 'รุ่นสินค้า', key: code, old: old?.rs, rs }),
       changes: { recordStatus: [old?.rs ?? null, rs] },
     });
@@ -590,13 +597,13 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
 const MODEL_SORT = {
   code: model.modelCode,
   name: model.modelName,
-  brand: manufacturer.manufacturerName,
+  brand: brand.brandName,
   price: model.marketPrice,
   updated: model.lastUpdate,
   status: model.recordStatus,
 };
 
-/** filter bar of the รุ่นสินค้า page — every field AND-ed; brand = manufacturer name, status = Active | Inactive */
+/** filter bar of the รุ่นสินค้า page — every field AND-ed; brand = brand name, status = Active | Inactive */
 export type ModelFilters = { brand?: string; code?: string; name?: string; status?: string };
 
 export async function pageModels(
@@ -611,10 +618,10 @@ export async function pageModels(
       ? or(
           ilike(model.modelCode, likeTerm(term)),
           ilike(model.modelName, likeTerm(term)),
-          ilike(manufacturer.manufacturerName, likeTerm(term)),
+          ilike(brand.brandName, likeTerm(term)),
         )
       : undefined,
-    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
+    f.brand ? eq(brand.brandName, f.brand) : undefined,
     f.code ? ilike(model.modelCode, likeTerm(f.code.trim())) : undefined,
     f.name ? ilike(model.modelName, likeTerm(f.name.trim())) : undefined,
     f.status === 'Active'
@@ -625,25 +632,21 @@ export async function pageModels(
   );
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
-    db
-      .select({ total: count() })
-      .from(model)
-      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
-      .where(w),
+    db.select({ total: count() }).from(model).leftJoin(brand, eq(brand.pk, model.brandPk)).where(w),
     db
       .select({
         code: model.modelCode,
         name: model.modelName,
-        brand: manufacturer.manufacturerName,
+        brand: brand.brandName,
         price: model.marketPrice,
         updated: model.lastUpdate,
         active: model.recordStatus,
-        id: model.modelId,
+        id: model.pk,
       })
       .from(model)
-      .leftJoin(manufacturer, eq(manufacturer.manufacturerId, model.manufacturerId))
+      .leftJoin(brand, eq(brand.pk, model.brandPk))
       .where(w)
-      .orderBy(...orderByCols(p.sort, MODEL_SORT, [desc(model.modelId)]))
+      .orderBy(...orderByCols(p.sort, MODEL_SORT, [desc(model.pk)]))
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);

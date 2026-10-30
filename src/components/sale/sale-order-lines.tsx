@@ -16,6 +16,8 @@ import { useTourRestore } from '@/components/tour/tour';
 /** a row of the sale order */
 export type SaleOrderLine = {
   id: number;
+  /** a stored line's uuid (sent back with the save: that line is kept / updated); none = a new line */
+  uid?: string;
   code: string;
   name: string;
   qty: number;
@@ -46,6 +48,7 @@ export function SaleOrderLines({
   clear,
   showZero,
   stockNote = false,
+  locked = () => false,
 }: {
   lines: SaleOrderLine[];
   setLines: React.Dispatch<React.SetStateAction<SaleOrderLine[]>>;
@@ -57,6 +60,8 @@ export function SaleOrderLines({
   showZero: boolean;
   /** the stock left per line on a read-only form too (a waiting order: the approver checks it before approving) */
   stockNote?: boolean;
+  /** a legacy order's recorded line: its qty / price are System Admin's alone, and it stays */
+  locked?: (l: SaleOrderLine) => boolean;
 }) {
   const [item, setItem] = React.useState<PickedItem | null>(null); // the part chosen, not added yet
   const [qty, setQty] = React.useState(1);
@@ -140,6 +145,7 @@ export function SaleOrderLines({
                     </td>
                     <td className="px-3 py-2">
                       <NumberInput
+                        disabled={locked(l)}
                         aria-label={`จำนวน ${l.code}`}
                         aria-invalid={!!errors[`lines.${i}.qty`] || undefined}
                         min={1}
@@ -155,6 +161,7 @@ export function SaleOrderLines({
                     </td>
                     <td className="px-3 py-2">
                       <NumberInput
+                        disabled={locked(l)}
                         aria-label={`ราคา ${l.code}`}
                         aria-invalid={!!errors[`lines.${i}.price`] || undefined}
                         step="0.01"
@@ -171,6 +178,7 @@ export function SaleOrderLines({
                     {!readOnly && (
                       <td className="px-3 py-2 text-center">
                         <button
+                          disabled={locked(l)}
                           onClick={() => setLines((s) => s.filter((x) => x.id !== l.id))}
                           className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
                           aria-label="ลบ"

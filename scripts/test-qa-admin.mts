@@ -45,17 +45,20 @@ type Who = (typeof U)[keyof typeof U];
 const rand = Math.random().toString(36).slice(2, 7);
 
 await pool.query(`
-  DELETE FROM app_config WHERE user_type ILIKE 'QA %';
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type ILIKE 'QA %';
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QA Clerk', 'Customer', false, false, false, true),
     ('QA Clerk2', 'Customer', false, false, false, true),
     ('QA Viewer', 'Customer', false, false, false, true),
     ('QA Grid', 'Quotation', false, false, false, false);
-  DELETE FROM app_user WHERE user_id BETWEEN 9400 AND 9499 OR email_address LIKE 'qa-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QA', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(',\n    ')};
+      .join(',\n    ')}
+    -- fixture users stay (audit_log, append-only, points at them): reset in place
+    ON CONFLICT (pk) DO UPDATE SET (first_name, last_name, email_address, user_type, record_status, session_version, last_login, title, avatar, department)
+      = ROW(excluded.first_name, excluded.last_name, excluded.email_address, excluded.user_type, excluded.record_status, excluded.session_version, NULL, NULL, NULL, NULL);
 `);
 
 async function request(path: string, u: Who, init: { method?: string; body?: unknown } = {}) {
@@ -84,7 +87,7 @@ const perms = async (u: Who, method: string, body?: unknown, query = '') => {
 const userRow = async (id: number) =>
   (
     await db.execute<{ role: string; rs: string; first: string }>(
-      sql`SELECT user_type AS role, record_status AS rs, first_name AS first FROM app_user WHERE user_id = ${id}`,
+      sql`SELECT user_type AS role, record_status AS rs, first_name AS first FROM app_user WHERE pk = ${id}`,
     )
   ).rows[0]!;
 /** the row as the users page loaded it (GET /api/admin/users) */
@@ -149,7 +152,7 @@ try {
     Object.fromEntries(
       (
         await db.execute<{ m: string; a: boolean; e: boolean; d: boolean; v: boolean }>(
-          sql`SELECT module_name AS m, can_insert AS a, can_edit AS e, can_delete AS d, can_view AS v FROM app_config WHERE user_type = ${role}`,
+          sql`SELECT module_name AS m, can_insert AS a, can_edit AS e, can_delete AS d, can_view AS v FROM role_permission WHERE user_type = ${role}`,
         )
       ).rows.map((r) => [r.m, { add: r.a, edit: r.e, del: r.d, view: r.v }]),
     );
@@ -166,7 +169,7 @@ try {
     assert.deepEqual([g.Customer?.view, g['Sale Order']?.view, g.Quotation?.view], [true, true, false]);
     const lines = (
       await db.execute<{ u: number; c: Record<string, unknown> }>(
-        sql`SELECT user_id AS u, changes AS c FROM audit_log WHERE entity = 'app_config' AND entity_key = 'QA Grid' ORDER BY pk DESC LIMIT 2`,
+        sql`SELECT actor_pk::int AS u, changes AS c FROM audit_log WHERE entity = 'role_permission' AND entity_key = 'QA Grid' ORDER BY pk DESC LIMIT 2`,
       )
     ).rows;
     assert.deepEqual(
@@ -263,8 +266,8 @@ try {
   await test('a capped export answers X-Export-Truncated: <total>; ?file= names the file', async () => {
     const key = `qa-cap-${rand}`;
     await pool.query(
-      `INSERT INTO audit_log (at, user_id, user_name, action, module, entity, entity_key, summary)
-       SELECT now(), 0, 'qa', 'UPDATE', 'Admin', 'qa_cap', $1, 'qa' FROM generate_series(1, $2)`,
+      `INSERT INTO audit_log (at, actor_name, action, module, entity, entity_key, summary)
+       SELECT now(), 'qa', 'UPDATE', 'Admin', 'qa_cap', $1, 'qa' FROM generate_series(1, $2)`,
       [key, MAX_EXPORT_ROWS + 5],
     );
     const res = await exportRoute.GET(await request(`/api/export/audit_log?key=${key}&file=audit-qa`, U.a), {

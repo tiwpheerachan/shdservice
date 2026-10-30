@@ -32,7 +32,7 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const jobNo = await jobNoOf((await parseParams(ctx, trackLinkNew)).id);
   // the job's first link replaces none — decided under the job row's lock, with the audit line in the same tx
   const { token, status } = await rotateToken(jobNo, (tx, first) =>
-    audit(tx, me.userId, {
+    audit(tx, me.pk, {
       action: 'UPDATE',
       module: 'Job Management',
       entity: 'job',

@@ -33,32 +33,43 @@ const SV = 3;
 const CITY = 9981;
 const DISTRICT = 9981;
 await pool.query(`
-  DELETE FROM app_config WHERE user_type IN ('QPD CS', 'QPD Viewer');
-  INSERT INTO app_config (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+  DELETE FROM role_permission WHERE user_type IN ('QPD CS', 'QPD Viewer');
+  INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
     ('QPD CS', 'Customer', true, true, false, true), ('QPD Viewer', 'Customer', false, false, false, true);
-  DELETE FROM app_user WHERE user_id BETWEEN 9981 AND 9989 OR email_address LIKE 'qpd-%@example.invalid';
-  INSERT INTO app_user (user_id, first_name, last_name, email_address, user_type, record_status, session_version) VALUES
+  INSERT INTO approve_status (approve_status_id, approve_name_th)
+    SELECT 1, 'กำลังดำเนินการจัดทำ' WHERE NOT EXISTS (SELECT 1 FROM approve_status WHERE approve_status_id = 1);
+  -- a sale order line's store / condition codes have foreign keys (drizzle/0006)
+  INSERT INTO store_location (store_location_id, store_location_name, is_active)
+    SELECT 1, 'คลังสินค้าดี', true WHERE NOT EXISTS (SELECT 1 FROM store_location WHERE store_location_id = 1);
+  INSERT INTO condition (condition_id, condition_name, is_active)
+    SELECT 1, 'ใหม่', true WHERE NOT EXISTS (SELECT 1 FROM condition WHERE condition_id = 1);
+  -- the users stay (audit_log, append-only, points at them): reset in place
+  INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version)
+  OVERRIDING SYSTEM VALUE VALUES
     ${Object.values(U)
       .map((u) => `(${u.id}, 'QPD', '${u.email.split('@')[0]}', '${u.email}', '${u.type}', 'ACTIVE', ${SV})`)
-      .join(', ')};
-  DELETE FROM sale_out_dt WHERE sale_out_hd_no IN (SELECT sale_out_hd_no FROM sale_out_hd WHERE customer_code LIKE 'QPD%');
-  DELETE FROM sale_out_hd WHERE customer_code LIKE 'QPD%';
-  DELETE FROM customer WHERE customer_id = 9981 OR customer_code LIKE 'QPD%';
-  INSERT INTO customer (customer_id, customer_code, customer_name, phone_number, record_status)
-    VALUES (9981, 'QPDC001', 'ลูกค้า QPD', '02-998-0001', 'ACTIVE');
-  DELETE FROM product_none_serial WHERE product_id = 9981 OR item_id = 9981;
-  DELETE FROM product WHERE product_id = 9981 OR product_code LIKE 'QPDP%';
-  INSERT INTO product (product_id, product_code, product_name, record_status) VALUES (9981, 'QPDP1', 'อะไหล่ QPD', 'ACTIVE');
-  INSERT INTO product_none_serial (item_id, product_id, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
-    VALUES (9981, 9981, 10, 0, 0, 10, 100.00);
-  DELETE FROM mt_sub_district WHERE district_id = ${DISTRICT} OR city_id = ${CITY};
-  DELETE FROM mt_district WHERE district_id = ${DISTRICT} OR city_id = ${CITY};
-  DELETE FROM mt_city WHERE city_id = ${CITY};
-  INSERT INTO mt_city (city_id, name_en, name_th, region) VALUES (${CITY}, 'QPD', 'จังหวัด QPD', 'QPD');
-  INSERT INTO mt_district (city_id, district_id, name_en, name_th, postal_code)
-    VALUES (${CITY}, ${DISTRICT}, 'QPD', 'อำเภอ QPD', '99810');
-  INSERT INTO mt_sub_district (city_id, district_id, sub_district_id, name_en, name_th, postal_code)
-    SELECT ${CITY}, ${DISTRICT}, coalesce(max(sub_district_id), 0) + 1, 'QPD', 'ตำบลเดิม QPD', '99810' FROM mt_sub_district;
+      .join(', ')}
+  ON CONFLICT (pk) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+    email_address = excluded.email_address, user_type = excluded.user_type, record_status = excluded.record_status,
+    session_version = excluded.session_version, last_login = DEFAULT;
+  DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT h.pk FROM sale_order h JOIN customer c ON c.pk = h.customer_pk WHERE c.customer_code LIKE 'QPD%');
+  DELETE FROM sale_order WHERE customer_pk IN (SELECT pk FROM customer WHERE customer_code LIKE 'QPD%');
+  DELETE FROM customer WHERE pk = 9981 OR customer_code LIKE 'QPD%';
+  INSERT INTO customer (pk, customer_code, customer_name, phone_number, record_status)
+    OVERRIDING SYSTEM VALUE VALUES (9981, 'QPDC001', 'ลูกค้า QPD', '02-998-0001', 'ACTIVE');
+  DELETE FROM product_stock WHERE product_pk = 9981 OR pk = 9981;
+  DELETE FROM product WHERE pk = 9981 OR product_code LIKE 'QPDP%';
+  INSERT INTO product (pk, product_code, product_name, record_status) OVERRIDING SYSTEM VALUE VALUES (9981, 'QPDP1', 'อะไหล่ QPD', 'ACTIVE');
+  INSERT INTO product_stock (pk, product_pk, quantity_available, quantity_used, quantity_booking, quantity_remain, retail_price)
+    OVERRIDING SYSTEM VALUE VALUES (9981, 9981, 10, 0, 0, 10, 100.00);
+  DELETE FROM sub_district WHERE district_pk = ${DISTRICT} OR province_pk = ${CITY};
+  DELETE FROM district WHERE pk = ${DISTRICT} OR province_pk = ${CITY};
+  DELETE FROM province WHERE pk = ${CITY};
+  INSERT INTO province (pk, name_en, name_th, region) OVERRIDING SYSTEM VALUE VALUES (${CITY}, 'QPD', 'จังหวัด QPD', 'QPD');
+  INSERT INTO district (province_pk, pk, name_en, name_th, postal_code)
+    OVERRIDING SYSTEM VALUE VALUES (${CITY}, ${DISTRICT}, 'QPD', 'อำเภอ QPD', '99810');
+  INSERT INTO sub_district (province_pk, district_pk, name_en, name_th, postal_code)
+    VALUES (${CITY}, ${DISTRICT}, 'QPD', 'ตำบลเดิม QPD', '99810');
 `);
 
 async function call(method: 'GET' | 'POST', url: string, u: (typeof U)[keyof typeof U], body?: unknown) {
@@ -85,12 +96,11 @@ async function call(method: 'GET' | 'POST', url: string, u: (typeof U)[keyof typ
   return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> };
 }
 /** the district's uuid — what /api/address takes (ADR 0008) */
-const districtId = (
-  await pool.query<{ id: string }>(`SELECT id::text FROM mt_district WHERE district_id = $1`, [DISTRICT])
-).rows[0]!.id;
-/** the salesperson's uuid — what a sale order takes (ADR 0008) */
-const adminId = (await pool.query<{ id: string }>(`SELECT id::text FROM app_user WHERE user_id = $1`, [U.admin.id]))
+const districtId = (await pool.query<{ id: string }>(`SELECT id::text FROM district WHERE pk = $1`, [DISTRICT]))
   .rows[0]!.id;
+/** the salesperson's uuid — what a sale order takes (ADR 0008) */
+const adminId = (await pool.query<{ id: string }>(`SELECT id::text FROM app_user WHERE pk = $1`, [U.admin.id])).rows[0]!
+  .id;
 const subDistricts = async () =>
   (await call('GET', `/api/address?level=subdistrict&district=${districtId}`, U.admin)).body.rows as {
     id: string;
@@ -112,7 +122,7 @@ async function test(name: string, fn: () => Promise<void>) {
 }
 
 console.log('\nใบสั่งขาย: เก็บเงินปลายทาง (COD)');
-await test('a sale-order choice only — the job close keeps its 3; fits sale_out_hd.payment_type (50)', async () => {
+await test('a sale-order choice only — the job close keeps its 3; fits sale_order.payment_type (50)', async () => {
   assert.ok(PAYMENT_METHODS.includes(COD));
   assert.ok(!JOB_PAYMENT_METHODS.includes(COD));
   assert.ok(COD.length <= 50);
@@ -132,10 +142,10 @@ await test('saved as payment_type "เก็บเงินปลายทาง
       paymentType: COD,
       lines: [{ code: 'QPDP1', qty: 1 }],
     },
-    { userId: U.admin.id, isAdmin: true },
+    { pk: U.admin.id, isAdmin: true },
   );
   const { rows } = await pool.query(
-    `SELECT payment_type, payment_amount, approve_status_id FROM sale_out_hd WHERE sale_out_hd_no = $1`,
+    `SELECT payment_type, payment_amount, approve_status_id FROM sale_order WHERE sale_order_no = $1`,
     [o.no],
   );
   assert.deepEqual(rows[0], { payment_type: COD, payment_amount: null, approve_status_id: 1 });
@@ -155,7 +165,7 @@ await test('Customer edit adds one (cleaned) — 201, in the list for everyone, 
   assert.ok((await subDistricts()).some((s) => s.id === row.id && s.name === 'ตำบลใหม่ QPD'));
   // the audit key = the new row's uuid
   const { rows } = await pool.query(
-    `SELECT action, module FROM audit_log WHERE entity = 'mt_sub_district' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
+    `SELECT action, module FROM audit_log WHERE entity = 'sub_district' AND entity_key = $1 ORDER BY pk DESC LIMIT 1`,
     [row.id],
   );
   assert.deepEqual(rows, [{ action: 'CREATE', module: 'Customer' }]);

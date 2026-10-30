@@ -1,29 +1,47 @@
 import 'server-only';
 import { cached } from '@/server/cache';
-import { and, asc, count, desc, eq, gte, ilike, inArray, lt, lte, ne, not, or, sql } from 'drizzle-orm';
-import type { PgSelect } from 'drizzle-orm/pg-core';
-import { db } from '@/db/client';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  gte,
+  ilike,
+  inArray,
+  lt,
+  lte,
+  ne,
+  not,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { alias, type PgSelect } from 'drizzle-orm/pg-core';
+import { db, writeTx } from '@/db/client';
 import { JS, QS } from '@/lib/status-ids';
 import { QUOTE_VALID_DAYS } from '@/lib/company';
 import { addDays, today } from '@/lib/dates';
 import { quoteExpired } from '@/lib/quote-expiry';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
-import { appUser, customer, job, manufacturer, product, quotationDt, quotationHd, quotationStatus } from '@/db/schema';
-import type { Quotation } from '@/data/types';
+import { appUser, brand, customer, job, model, product, quotation, quotationLine, quotationStatus } from '@/db/schema';
+import type { Customer, Quotation } from '@/data/types';
 import { HttpError, fullName } from '@/server/auth';
 import { assertVersion } from '@/server/http-error';
 import { nextRunningNo } from '@/db/running-no';
 import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
-import { fmtDateTime, money, nowThai, num, str, SENTINEL_TS } from '@/server/mappers/format';
-import { customerForDocument, getCustomerByCode } from './customers';
+import { fmtDateTime, money, nowThai, num, str, type FieldData } from '@/server/mappers/format';
+import { customerForDocument, getCustomerById } from './customers';
 import { issuingProfile, profileIdOf } from './document-profiles';
-import { followQuotation, getJob, jobStatuses } from './jobs';
+import { followQuotation, getJob, jobModelName, jobStatuses } from './jobs';
 import { JOB_CLOSED_STATUSES } from './stock';
 import { RS, statusFilter, statusStamp, type StatusMode } from '@/server/record-status';
-import { computeTotals, lineAmount, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
+import { computeTotals, lineAmount, parseDiscount, quotationSchema, quotedPartsKey } from '@/lib/validation/quotation';
 import { clean, cleanCode, cleanText } from '@/lib/validation';
 import { assertValid } from '@/server/validate';
+import { assertFiguresEditable, isLegacyRow } from '@/server/legacy-lock';
 import { z } from 'zod';
 import type { quotationSave } from '@/server/contract/sales';
 
@@ -31,6 +49,9 @@ import type { quotationSave } from '@/server/contract/sales';
 export { QS };
 const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
 const EXPIRED_NAME = 'พ้นกำหนดเสนอราคา';
+/** the quotation a legacy job names as agreed (job.approved_quotation_pk — legacy snapshot, new rows NULL: the agreed
+ *  quotation of a job is the one with its job_pk in an agreed status, ux_quotation_agreed_job) */
+const approvedHd = alias(quotation, 'approved_hd');
 
 /** UI type labels ↔ legacy quotation_type values */
 const TYPE_LABEL: Record<string, Quotation['type']> = { Normal: 'Type A (Normal)', VIP: 'Type B (VIP)' };
@@ -49,31 +70,31 @@ async function statusIdByName(name: string) {
 }
 
 const listSelect = {
-  id: quotationHd.id,
-  no: quotationHd.quotationNo,
-  date: quotationHd.createDate,
-  type: quotationHd.quotationType,
-  customerCode: quotationHd.customerCode,
+  id: quotation.id,
+  no: quotation.quotationNo,
+  date: quotation.createDate,
+  type: quotation.quotationType,
+  customerCode: customer.customerCode,
   customer: customer.customerName,
-  jobRef: quotationHd.referenceJobNo,
+  jobRef: job.jobNo,
   imei: job.productImeiNo,
-  brand: manufacturer.manufacturerName,
-  modelName: job.productModelName,
-  amount: quotationHd.netAmount,
+  brand: brand.brandName,
+  modelName: jobModelName, // the model's name (product_model_name: legacy rows only) — needs the model join
+  amount: quotation.netAmount,
   status: quotationStatus.quotationStatusName,
-  statusId: quotationHd.quotationStatusId,
-  active: quotationHd.recordStatus,
+  statusId: quotation.quotationStatusId,
+  active: quotation.recordStatus,
   warranty: job.productWarranty,
-  parts: quotationHd.sparePartAmount,
-  service: quotationHd.serviceAmount,
-  discount: quotationHd.discountAmount,
-  vat: quotationHd.vatAmount,
-  approveDate: quotationHd.customerApproveDate,
+  parts: quotation.sparePartAmount,
+  service: quotation.serviceAmount,
+  discount: quotation.discountAmount,
+  vat: quotation.vatAmount,
+  approveDate: quotation.customerApproveDate,
   jobStatusId: job.jobStatusId,
   createBy: appUser.firstName,
   createByLast: appUser.lastName,
 };
-type ListRow = { [K in keyof typeof listSelect]: (typeof listSelect)[K]['_']['data'] | null };
+type ListRow = { [K in keyof typeof listSelect]: FieldData<(typeof listSelect)[K]> | null };
 
 function toQuotation(r: ListRow): Quotation {
   return {
@@ -106,22 +127,24 @@ function toQuotation(r: ListRow): Quotation {
  *  left join on a primary key). */
 export const withQuotationJoins = <T extends PgSelect>(q: T) =>
   q
-    .leftJoin(customer, eq(customer.customerCode, quotationHd.customerCode))
-    .leftJoin(job, eq(job.jobNo, quotationHd.referenceJobNo))
-    .leftJoin(manufacturer, eq(manufacturer.manufacturerId, job.productBrandId))
-    .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotationHd.quotationStatusId))
-    .leftJoin(appUser, eq(appUser.userId, quotationHd.createBy));
+    .leftJoin(customer, eq(customer.pk, quotation.customerPk))
+    .leftJoin(job, eq(job.pk, quotation.jobPk))
+    // the brand is the model's (job.brand_manufacturer_pk was a copy of it, dropped in drizzle/0006)
+    .leftJoin(model, eq(model.pk, job.modelPk))
+    .leftJoin(brand, eq(brand.pk, model.brandPk))
+    .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotation.quotationStatusId))
+    .leftJoin(appUser, eq(appUser.pk, quotation.createdByAppUserPk));
 
-const base = () => withQuotationJoins(db.select(listSelect).from(quotationHd).$dynamic());
+const base = () => withQuotationJoins(db.select(listSelect).from(quotation).$dynamic());
 
 const SORT = {
-  no: quotationHd.quotationNo,
-  date: quotationHd.createDate,
+  no: quotation.quotationNo,
+  date: quotation.createDate,
   customer: customer.customerName,
-  jobRef: quotationHd.referenceJobNo,
-  amount: quotationHd.netAmount,
-  status: quotationHd.quotationStatusId,
-  type: quotationHd.quotationType,
+  jobRef: job.jobNo,
+  amount: quotation.netAmount,
+  status: quotation.quotationStatusId,
+  type: quotation.quotationType,
 };
 
 export type QuotationFilters = {
@@ -162,9 +185,9 @@ const contains = (col: Parameters<typeof ilike>[0], v?: string) =>
 /** quoteExpired (src/lib/quote-expiry.ts) in SQL: sent, and created before the validity window or its job says so */
 const sentExpired = () =>
   and(
-    eq(quotationHd.quotationStatusId, QS.SENT),
+    eq(quotation.quotationStatusId, QS.SENT),
     or(
-      lt(quotationHd.createDate, `${addDays(today(), -QUOTE_VALID_DAYS)} 00:00:00`),
+      lt(quotation.createDate, `${addDays(today(), -QUOTE_VALID_DAYS)} 00:00:00`),
       eq(job.jobStatusId, JS.QUOTE_EXPIRED),
     ),
   );
@@ -175,13 +198,13 @@ export function quotationWhere(q: string, f: QuotationFilters) {
   const from = ymd(f.from),
     to = ymd(f.to);
   return and(
-    statusFilter(quotationHd.recordStatus, f.deleted ?? 'exclude'),
+    statusFilter(quotation.recordStatus, f.deleted ?? 'exclude'),
     term
       ? or(
-          ilike(quotationHd.quotationNo, likeTerm(term)),
-          ilike(quotationHd.referenceJobNo, likeTerm(term)),
+          ilike(quotation.quotationNo, likeTerm(term)),
+          ilike(job.jobNo, likeTerm(term)),
           ilike(customer.customerName, likeTerm(term)),
-          ilike(quotationHd.customerCode, likeTerm(term)),
+          ilike(customer.customerCode, likeTerm(term)),
           ilike(job.productImeiNo, likeTerm(term)),
         )
       : undefined,
@@ -190,23 +213,23 @@ export function quotationWhere(q: string, f: QuotationFilters) {
     !status
       ? undefined
       : status === EXPIRED_NAME
-        ? or(eq(quotationHd.quotationStatusId, QS.EXPIRED), sentExpired())
+        ? or(eq(quotation.quotationStatusId, QS.EXPIRED), sentExpired())
         : and(
             sql`trim(${quotationStatus.quotationStatusName}) = ${status}`,
             status === 'เสนอราคาแล้ว' ? not(sentExpired()!) : undefined,
           ),
-    from ? gte(quotationHd.createDate, `${from} 00:00:00`) : undefined,
-    to ? lte(quotationHd.createDate, `${to} 23:59:59`) : undefined,
-    f.jobNo ? eq(quotationHd.referenceJobNo, f.jobNo) : undefined,
+    from ? gte(quotation.createDate, `${from} 00:00:00`) : undefined,
+    to ? lte(quotation.createDate, `${to} 23:59:59`) : undefined,
+    f.jobNo ? eq(job.jobNo, f.jobNo) : undefined,
     f.type
-      ? eq(quotationHd.quotationType, f.type.includes('VIP') ? 'VIP' : f.type.includes('Normal') ? 'Normal' : f.type)
+      ? eq(quotation.quotationType, f.type.includes('VIP') ? 'VIP' : f.type.includes('Normal') ? 'Normal' : f.type)
       : undefined,
     // ข้อมูลเครื่องมาจากงานที่อ้างถึง (job) — กรองที่ server ให้ครบทุกหน้า ไม่ใช่เฉพาะหน้าที่โหลด
     f.warranty ? eq(job.productWarranty, f.warranty) : undefined,
-    f.brand ? eq(manufacturer.manufacturerName, f.brand) : undefined,
-    contains(quotationHd.quotationNo, f.no),
+    f.brand ? eq(brand.brandName, f.brand) : undefined,
+    contains(quotation.quotationNo, f.no),
     contains(customer.customerName, f.customer),
-    contains(quotationHd.customerCode, f.customerCode),
+    contains(customer.customerCode, f.customerCode),
     contains(job.productImeiNo, f.imei),
   );
 }
@@ -215,10 +238,10 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
   const w = quotationWhere(p.q, f);
   // count + page in parallel: the response takes max(count, rows) instead of their sum
   const [counted, rows] = await Promise.all([
-    withQuotationJoins(db.select({ total: count() }).from(quotationHd).$dynamic()).where(w),
+    withQuotationJoins(db.select({ total: count() }).from(quotation).$dynamic()).where(w),
     base()
       .where(w)
-      .orderBy(...orderBy(p.sort, SORT, [desc(quotationHd.createDate), desc(quotationHd.quotationHdId)]))
+      .orderBy(...orderBy(p.sort, SORT, [desc(quotation.createDate), desc(quotation.pk)]))
       .limit(p.pageSize)
       .offset(offsetOf(p)),
   ]);
@@ -228,12 +251,14 @@ export async function pageQuotations(p: PageQuery, f: QuotationFilters): Promise
 export async function listQuotations(f: QuotationFilters & { q?: string; limit?: number } = {}): Promise<Quotation[]> {
   const rows = await base()
     .where(quotationWhere(f.q ?? '', f))
-    .orderBy(desc(quotationHd.createDate))
+    .orderBy(desc(quotation.createDate))
     .limit(Math.min(f.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toQuotation);
 }
 
 export type QuotationLine = {
+  /** the line's uuid — an edit sends it back to keep this line */
+  id: string;
   lineNumber: number;
   itemType: 'SparePart' | 'Service' | 'Delivery';
   code: string;
@@ -248,7 +273,7 @@ export type QuotationLine = {
 
 export type QuotationDetail = Quotation & {
   contactName: string;
-  customerDetail: Awaited<ReturnType<typeof getCustomerByCode>>;
+  customerDetail: Awaited<ReturnType<typeof getCustomerById>>;
   job: Awaited<ReturnType<typeof getJob>>;
   lines: QuotationLine[];
   remark: string;
@@ -267,23 +292,34 @@ export type QuotationDetail = Quotation & {
   /** contact printed on the document ("ท่านสามารถติดต่อสอบถาม…") = the user who created the quotation */
   createdByPhone: string;
   createdByEmail: string;
-  /** row_version + newest line id (versionOf) — the edit page sends it back with its save */
+  /** row_version (a line change bumps it too) — the edit page sends it back with its save */
   version: number;
+  /** came from the legacy system: its money / quantity figures are System Admin's alone (legacy-lock.ts) */
+  figuresLocked: boolean;
 };
 
-/** row_version + the newest line id: a line-only edit re-inserts the lines (new, higher ids) without moving
- *  row_version (same as sale orders' versionOf). ponytail: lines saved empty drop the id part — a stale
- *  version could only match again if row_version grew by exactly that id. */
-const versionOf = (rowVersion: number, lines: { quotationDtId: number }[]) =>
-  rowVersion + Math.max(0, ...lines.map((l) => l.quotationDtId));
+/**
+ * A quotation's lines with the code each one prints: a product line's is its product's (item_code is NULL on new
+ * product lines — ADR 0008 "no redundant data"; legacy lines keep theirs), a service / delivery line's is its text.
+ */
+const linesOf = (q: Pick<typeof db, 'select'>, quotationPk: SQL | number) =>
+  q
+    .select({
+      ...getTableColumns(quotationLine),
+      code: sql<string | null>`coalesce(${product.productCode}, ${quotationLine.itemCode})`,
+    })
+    .from(quotationLine)
+    .leftJoin(product, eq(product.pk, quotationLine.productPk))
+    .where(eq(quotationLine.quotationPk, quotationPk))
+    .orderBy(asc(quotationLine.lineNumber), asc(quotationLine.pk));
 
 /** the number of the quotation whose uuid is `id` (a link: page, API path, print) — null: none, or not a uuid */
 export async function quotationNoOf(id: string): Promise<string | null> {
   if (!z.uuid().safeParse(id).success) return null;
   const [r] = await db
-    .select({ no: quotationHd.quotationNo })
-    .from(quotationHd)
-    .where(eq(quotationHd.id, id.toLowerCase()))
+    .select({ no: quotation.quotationNo })
+    .from(quotation)
+    .where(eq(quotation.id, id.toLowerCase()))
     .limit(1);
   return r?.no ?? null;
 }
@@ -293,38 +329,50 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   const [[r], dts] = await Promise.all([
     withQuotationJoins(
       db
-        .select({ ...listSelect, hd: quotationHd, creatorPhone: appUser.phoneNo, creatorEmail: appUser.emailAddress })
-        .from(quotationHd)
+        .select({ ...listSelect, hd: quotation, creatorPhone: appUser.phoneNo, creatorEmail: appUser.emailAddress })
+        .from(quotation)
         .$dynamic(),
     )
-      .where(eq(quotationHd.quotationNo, no))
+      .where(eq(quotation.quotationNo, no))
       .limit(1),
-    db
-      .select()
-      .from(quotationDt)
-      .where(eq(quotationDt.quotationNo, no))
-      .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId)),
+    linesOf(db, sql`(SELECT ${quotation.pk} FROM ${quotation} WHERE ${quotation.quotationNo} = ${no})`),
   ]);
   if (!r) return null;
   const { hd } = r;
-  const [cust, jb, profileId] = await Promise.all([
-    hd.customerCode ? getCustomerByCode(hd.customerCode) : null,
-    hd.referenceJobNo ? getJob(hd.referenceJobNo) : null,
-    profileIdOf(hd.documentProfileId),
+  const [live, jb, profileId, figuresLocked] = await Promise.all([
+    hd.customerPk ? getCustomerById(hd.customerPk) : null,
+    r.jobRef ? getJob(r.jobRef) : null,
+    profileIdOf(hd.documentProfilePk),
+    isLegacyRow('quotation', hd.pk),
   ]);
+  // the customer as the quotation prints it — one source: the snapshot taken when the customer agreed (its code /
+  // contact from the customer row, when there is one), else the customer now
+  const cust: Customer | null =
+    hd.customerName != null
+      ? {
+          ...(live ?? { code: r.customerCode ?? '', email: '', line: '', status: 'Active' as const }),
+          name: hd.customerName,
+          address: hd.customerAddress ?? '',
+          taxId: hd.customerTaxId ?? '',
+          phone: hd.customerPhone ?? '',
+        }
+      : live;
   return {
     ...toQuotation(r),
     status: r.status?.trim() ?? '', // the form edits the stored status (the edit page derives "expired" itself)
-    contactName: hd.customerContactName ?? '',
+    // customer_contact_name was dropped in drizzle/0006 (empty on every row) — kept in the response until clients drop it
+    contactName: '',
     customerDetail: cust,
     job: jb,
+    figuresLocked,
     lines: dts.map((d) => ({
+      id: d.id,
       lineNumber: d.lineNumber ?? 0,
       itemType: (d.itemType as QuotationLine['itemType']) ?? 'SparePart',
-      code: d.itemCode ?? '',
+      code: d.code ?? '',
       detail: d.itemDetail ?? '',
       qty: num(d.quantity),
-      unit: d.unit ?? 'หน่วย',
+      unit: 'หน่วย', // quotation_line.unit was 'หน่วย' on every row — dropped in drizzle/0006
       unitPrice: num(d.unitPrice),
       discount: num(d.unitPriceDiscount),
       discountPercent: num(d.unitPriceDiscountPercent),
@@ -344,20 +392,36 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
     documentProfileId: profileId,
     createdByPhone: r.creatorPhone ?? '',
     createdByEmail: r.creatorEmail ?? '',
-    version: versionOf(hd.rowVersion, dts),
+    version: hd.rowVersion,
   };
 }
+
+/** quotation.customer_* — the customer as they were when they agreed (lengths as the columns) */
+const snapshotOf = (c: { name: string; address: string; taxId: string; phone: string }) => ({
+  customerName: c.name.slice(0, 200),
+  customerAddress: c.address.slice(0, 500),
+  customerTaxId: c.taxId.slice(0, 20),
+  customerPhone: c.phone.slice(0, 50),
+});
 
 /** the parsed body of POST /api/quotations (quotationSave in src/server/contract/sales.ts) */
 export type QuotationInput = z.output<typeof quotationSave.body>;
 
-export async function saveQuotation(i: QuotationInput, byUserId: number): Promise<QuotationDetail> {
+/**
+ * `isAdmin`: System Admin — the only one who may change what a quotation from the legacy system already recorded
+ * (owner 2026-10-30, assertFiguresEditable): its lines' qty / price / discount (or delete them) and a service amount /
+ * discount / VAT rate it holds. New lines, an empty figure filled in and the status flow stay everyone's; the totals
+ * are then computed by the same formula from the lines (a recorded line counts with its stored figures). A save that
+ * changes no figure keeps the stored totals (never recomputed).
+ */
+export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin = false): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
   const [before] = i.no
     ? await db
-        .select({ jobNo: quotationHd.referenceJobNo })
-        .from(quotationHd)
-        .where(eq(quotationHd.quotationNo, i.no))
+        .select({ jobNo: job.jobNo })
+        .from(quotation)
+        .leftJoin(job, eq(job.pk, quotation.jobPk))
+        .where(eq(quotation.quotationNo, i.no))
         .limit(1)
     : [];
   assertValid(quotationSchema(i.no ? (before?.jobNo ?? '') : undefined), i);
@@ -371,14 +435,11 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       const { discount, total } = lineAmount({ qty, unitPrice: price, discount: num(l.discount), discountPercent });
       return { ...l, lineNumber: idx + 1, qty, unitPrice: price, discount, discountPercent, total };
     });
-  const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
-  const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
   const service = num(i.serviceAmount);
   const discountType = str(i.discountType) || 'ไม่มีส่วนลด';
   const discountValue = num(i.discountValue);
   const discountUnit: 'บาท' | '%' = i.discountUnit === '%' ? '%' : 'บาท';
   const vatRate = num(i.vatRate);
-  const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
   const statusId = i.status ? await statusIdByName(i.status) : QS.WAIT;
   const type = TYPE_VALUE[str(i.type)] ?? (str(i.type) || 'Normal');
   const dtRows = lines.map((l) => ({
@@ -387,7 +448,6 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     itemCode: str(l.code).slice(0, 50),
     itemDetail: clean(l.detail),
     quantity: String(l.qty),
-    unit: (str(l.unit) || 'หน่วย').slice(0, 10),
     unitPrice: l.unitPrice.toFixed(2),
     unitPriceDiscount: l.discount.toFixed(2),
     totalPrice: l.total.toFixed(2),
@@ -395,17 +455,26 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
   }));
 
   const statusName = (await quotationStatuses()).find((q) => q.id === statusId)?.name ?? '';
-  const no = await db.transaction(async (tx) => {
+  const no = await writeTx(async (tx) => {
     // checked under the locks, in the order quotation → job → customer → product (the running number is last):
     // a delete running now finishes first, or waits for this save
-    const [prev] = i.no
-      ? await tx.select().from(quotationHd).where(eq(quotationHd.quotationNo, i.no)).for('update')
+    // with the job number and customer code it names (the audit and messages show those, not the pks)
+    const [cur] = i.no
+      ? await tx
+          .select({ hd: quotation, jobNo: job.jobNo, customerCode: customer.customerCode })
+          .from(quotation)
+          .leftJoin(job, eq(job.pk, quotation.jobPk))
+          .leftJoin(customer, eq(customer.pk, quotation.customerPk))
+          .where(eq(quotation.quotationNo, i.no))
+          .for('update', { of: quotation })
       : [];
+    const prev = cur?.hd;
     if (i.no && !prev) throw new HttpError(404, 'ไม่พบใบเสนอราคา ' + i.no);
     const [found] = jobNo
       ? await tx
           .select({
-            profileId: job.documentProfileId,
+            pk: job.pk,
+            profileId: job.documentProfilePk,
             statusId: job.jobStatusId,
             recordStatus: job.recordStatus,
           })
@@ -417,7 +486,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     // a quotation is raised for (or moved to) an open job only — not one closed, cancelled or the customer declined
     if (
       found &&
-      jobNo !== cleanCode(prev?.referenceJobNo) &&
+      found.pk !== prev?.jobPk &&
       (found.recordStatus === RS.DELETED || JOB_CLOSED_STATUSES.includes(found.statusId ?? -1))
     )
       throw new HttpError(
@@ -425,25 +494,26 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         // the name looked up after the lock: a row joined in the locking read is the one from before a wait
         `งาน ${jobNo} อยู่ในสถานะ "${(await jobStatuses()).find((s) => s.id === found.statusId)?.name || found.statusId}" (ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อม) — ออกใบเสนอราคาให้งานนี้ไม่ได้`,
       );
-    const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerCode);
+    const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerPk);
     if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
     // a deleted / Inactive product goes on no new line (owner 2026-10-21) — a code the quotation already had keeps it
-    const had = prev
-      ? (await tx.select({ c: quotationDt.itemCode }).from(quotationDt).where(eq(quotationDt.quotationNo, i.no!))).map(
-          (r) => str(r.c),
-        )
-      : [];
+    const old = prev ? await linesOf(tx, prev.pk) : [];
+    const had = old.map((r) => str(r.code));
     const added = lines.map((l) => str(l.code).slice(0, 50)).filter((c) => c && !had.includes(c));
     // every added code locked (not only the off ones: a row being deleted now still reads ACTIVE until it commits)
-    const off = (
-      added.length
-        ? await tx
-            .select({ code: product.productCode, rs: product.recordStatus })
-            .from(product)
-            .where(inArray(product.productCode, added))
-            .for('share')
-        : []
-    ).find((p) => p.rs !== RS.ACTIVE);
+    const prods = added.length
+      ? await tx
+          .select({ pk: product.pk, code: product.productCode, rs: product.recordStatus })
+          .from(product)
+          .where(inArray(product.productCode, added))
+          .for('share')
+      : [];
+    const off = prods.find((p) => p.rs !== RS.ACTIVE);
+    // a line's product_pk: an added code's product; a code the quotation had keeps the product its line named
+    const pkOfCode = new Map<string, number | null>([
+      ...old.map((r) => [str(r.code), r.productPk] as const),
+      ...prods.map((p) => [p.code ?? '', p.pk] as const),
+    ]);
     if (off)
       throw new HttpError(
         409,
@@ -461,9 +531,77 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
     let linesChanged = true;
     let statusChanged = true; // a new quotation, or another status than the stored one
     let wasAgreed = false;
-    const values = {
-      customerCode: cust.code,
-      customerContactName: clean(i.contactName),
+    // each line the form sends ↔ the stored line it is, by the line's own id (none = a new line); a stored line whose
+    // id is not sent is removed. Matched lines are updated IN PLACE (pk / uuid / an unchanged legacy item_code stay):
+    // a legacy line never turns into a new row
+    const used = new Set<number>();
+    const matched = lines.map((l, row) => {
+      if (!l.id) return undefined;
+      const k = old.findIndex((o) => o.id === l.id);
+      if (k < 0 || used.has(k)) {
+        const m = 'รายการนี้ไม่ใช่ของใบเสนอราคานี้ (หรือซ้ำ) — โหลดหน้าใหม่แล้วแก้อีกครั้ง';
+        throw new HttpError(400, m, { fields: { [`lines.${row}.code`]: m } });
+      }
+      used.add(k);
+      return old[k];
+    });
+    // a recorded line the save leaves as it was (product, type, qty, price, discount): it keeps its stored figures — a legacy
+    // rounding stays, and the totals below sum what is recorded
+    const same = (k: number) => {
+      const o = matched[k];
+      const l = lines[k];
+      return (
+        !!o &&
+        !!l &&
+        str(o.code) === str(l.code).slice(0, 50) && // the same product (a swapped product changes the line)
+        (o.itemType ?? 'SparePart') === (l.itemType ?? 'SparePart') &&
+        num(o.quantity) === l.qty &&
+        num(o.unitPrice) === l.unitPrice &&
+        num(o.unitPriceDiscountPercent) === l.discountPercent &&
+        // a % discount's บาท is derived from it (a legacy rounding may differ): only a บาท-only discount compares
+        (!!l.discountPercent || num(o.unitPriceDiscount) === l.discount)
+      );
+    };
+    lines.forEach((l, k) => {
+      if (!same(k)) return;
+      const o = matched[k]!;
+      l.discount = num(o.unitPriceDiscount);
+      l.total = num(o.totalPrice);
+      Object.assign(dtRows[k]!, {
+        quantity: o.quantity,
+        unitPrice: o.unitPrice,
+        unitPriceDiscount: o.unitPriceDiscount,
+        totalPrice: o.totalPrice,
+        unitPriceDiscountPercent: o.unitPriceDiscountPercent,
+      });
+    });
+    const parts = lines.filter((l) => (l.itemType ?? 'SparePart') !== 'Delivery').reduce((s, l) => s + l.total, 0);
+    const delivery = lines.filter((l) => l.itemType === 'Delivery').reduce((s, l) => s + l.total, 0);
+    const t = computeTotals({ parts, service, delivery, discountType, discountValue, discountUnit, vatRate });
+    // the discount as the form reads the stored one (legacy "200บาท" / "10%") — what it sends back unchanged
+    const was = prev && parseDiscount(prev.discountType ?? 'ไม่มีส่วนลด', prev.discountFormula ?? '');
+    const discountChanged =
+      !!was &&
+      (was.value > 0 || discountValue > 0) &&
+      (was.type !== discountType || was.value !== discountValue || was.unit !== discountUnit);
+    const linesSame = old.length === lines.length && lines.every((_, k) => same(k));
+    // a matched line's changed columns, read as the audit diff reads them ("100" = "100.00", trimmed); its code as
+    // printed (the product's on a product line) — an unchanged code keeps the stored item_code / product_pk
+    const lineSets = dtRows.map((r, k) => (matched[k] ? diff({ ...matched[k], itemCode: matched[k].code }, r) : null));
+    // what is already recorded changes: a recorded line (changed / deleted), or a service / discount / VAT it holds
+    if (
+      prev &&
+      (old.some((_, i) => !used.has(i)) ||
+        lines.some((_, k) => matched[k] && !same(k)) ||
+        (num(prev.serviceAmount) !== 0 && num(prev.serviceAmount) !== service) ||
+        (was!.value > 0 && discountChanged) ||
+        ((prev.vatRate ?? 0) !== 0 && prev.vatRate !== vatRate))
+    )
+      await assertFiguresEditable({ isAdmin }, 'quotation', prev.pk);
+    // no figure changed → the stored totals stay as they are
+    const figuresChanged =
+      !prev || !linesSame || num(prev.serviceAmount) !== service || discountChanged || (prev.vatRate ?? 0) !== vatRate;
+    const figures = {
       sparePartAmount: money(parts),
       serviceAmount: money(service),
       sumExcludeAmount: money(t.sumExclude),
@@ -477,82 +615,171 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
       totalAmount: money(t.total),
       roundingAmount: money(t.rounding),
       netAmount: money(t.net),
+    };
+    const values = {
+      customerPk: cust.key,
+      ...(figuresChanged ? figures : {}),
       remark: cleanText(i.remark),
-      referenceJobNo: jobNo,
+      jobPk: found?.pk ?? null,
       quotationStatusId: statusId,
       customerApproveRemark: clean(i.approveRemark),
       quotationType: type,
     };
+    // one agreed quotation per job (ux_quotation_agreed_job — deleted rows count too): checked before the write, under
+    // the job's row lock taken above (found … FOR UPDATE), so two approvals at once queue there and the second gets
+    // this 409 instead of the unique index's error
+    if (AGREED.has(statusId) && found) {
+      const [other] = await tx
+        .select({ no: quotation.quotationNo })
+        .from(quotation)
+        .where(
+          and(
+            eq(quotation.jobPk, found.pk),
+            i.no ? ne(quotation.quotationNo, i.no) : undefined,
+            inArray(quotation.quotationStatusId, [...AGREED]),
+          ),
+        )
+        .limit(1);
+      if (other) throw new HttpError(409, `งานนี้มีใบเสนอราคาที่ลูกค้าตกลงแล้ว (${other.no}) — เปลี่ยนสถานะใบนั้นก่อน`);
+    }
     let no = i.no;
+    let hdPk: number;
     if (no && prev) {
-      const old = await tx
-        .select()
-        .from(quotationDt)
-        .where(eq(quotationDt.quotationNo, no))
-        .orderBy(asc(quotationDt.lineNumber), asc(quotationDt.quotationDtId));
+      hdPk = prev.pk;
       // restored through the records page (Quotation del) — a status change here would stamp it ACTIVE
       if (prev.recordStatus === RS.DELETED) throw new HttpError(409, 'ใบเสนอราคานี้ถูกลบแล้ว แก้ไขไม่ได้');
-      assertVersion(i.version, versionOf(prev.rowVersion, old));
-      // lines are re-written only when they changed (same value read the same way as the audit diff:
-      // "100" = "100.00", trimmed) — an unchanged save keeps the rows, their ids and the version
-      linesChanged = old.length !== dtRows.length || dtRows.some((r, k) => diff(old[k], r) !== null);
+      assertVersion(i.version, prev.rowVersion);
+      linesChanged = used.size !== old.length || lines.some((_, k) => !matched[k] || lineSets[k]);
       statusChanged = prev.quotationStatusId !== statusId;
       wasAgreed = AGREED.has(prev.quotationStatusId ?? 0);
-      // the job points at its agreed quotation (and followed it): moving it would leave both jobs pointing at it
-      if (wasAgreed && clean(prev.referenceJobNo) && cleanCode(prev.referenceJobNo) !== jobNo)
+      // agreed (or its customer snapshot taken): the quotation is that customer's — another one would not match it
+      if ((wasAgreed || prev.customerName != null) && prev.customerPk !== cust.key)
         throw new HttpError(
           409,
-          `ใบเสนอราคานี้ลูกค้าตกลงแล้ว (งาน ${clean(prev.referenceJobNo)}) — ย้ายไปงานอื่นไม่ได้ เปลี่ยนสถานะใบนี้ก่อน`,
+          'ใบเสนอราคานี้ลูกค้าตกลงแล้ว — เปลี่ยนลูกค้าไม่ได้ (ออกใบเสนอราคาใหม่ให้ลูกค้ารายอื่น)',
+          {
+            fields: { customerCode: 'ลูกค้าตกลงแล้ว — เปลี่ยนลูกค้าไม่ได้' },
+          },
+        );
+      // the job points at its agreed quotation (and followed it): moving it would leave both jobs pointing at it
+      if (wasAgreed && prev.jobPk != null && prev.jobPk !== found?.pk)
+        throw new HttpError(
+          409,
+          `ใบเสนอราคานี้ลูกค้าตกลงแล้ว (งาน ${cur?.jobNo ?? ''}) — ย้ายไปงานอื่นไม่ได้ เปลี่ยนสถานะใบนี้ก่อน`,
         );
       const upd = {
         ...values,
+        // the customer as they agreed — written once (the first agreement), never by a later edit; until then every
+        // read takes the customer now (getQuotation)
+        ...(AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) && prev.customerName == null
+          ? snapshotOf(cust)
+          : {}),
         customerApproveDate:
           AGREED.has(statusId) && !AGREED.has(prev.quotationStatusId ?? 0) ? nowThai() : prev.customerApproveDate,
         // ยกเลิกใบเสนอราคา = INACTIVE (still listed with its status); DELETED only via records API. Stamped only when
         // the status moves: a re-save keeps record_status and who/when changed it
         ...(statusChanged ? statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId) : {}),
       };
-      await tx.update(quotationHd).set(upd).where(eq(quotationHd.quotationNo, no));
-      if (linesChanged) await tx.delete(quotationDt).where(eq(quotationDt.quotationNo, no));
-      await audit(tx, byUserId, {
-        action: statusChanged ? 'STATUS' : 'UPDATE',
-        module: 'Quotation',
-        entity: 'quotation_hd',
-        key: no,
-        summary: statusChanged
-          ? `สถานะใบเสนอราคา → ${statusName}`
-          : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
-        changes: diff(prev as Record<string, unknown>, upd as Record<string, unknown>, {
-          skip: ['customerApproveDate'],
-        }),
-      });
+      // only a save that changes something writes (and logs) anything — an unchanged re-save writes nothing
+      const changes = diff(
+        { ...prev, customerCode: cur?.customerCode ?? null, referenceJobNo: cur?.jobNo ?? null },
+        { ...upd, customerCode: cust.code, referenceJobNo: jobNo || null },
+        {
+          skip: [
+            'customerApproveDate',
+            'customerPk',
+            'jobPk',
+            'customerName',
+            'customerAddress',
+            'customerTaxId',
+            'customerPhone',
+          ],
+        },
+      );
+      const headerChanged = !!changes || statusChanged;
+      if (headerChanged) await tx.update(quotation).set(upd).where(eq(quotation.pk, hdPk));
+      if (headerChanged || linesChanged)
+        await audit(tx, byUserId, {
+          action: statusChanged ? 'STATUS' : 'UPDATE',
+          module: 'Quotation',
+          entity: 'quotation',
+          key: no,
+          // the customer's answer (ตกลง / ไม่ตกลง …) with its remark
+          reason: statusChanged ? clean(i.approveRemark) || null : null,
+          summary: statusChanged
+            ? `สถานะใบเสนอราคา → ${statusName}`
+            : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${(figuresChanged ? t.net : num(prev.netAmount)).toFixed(2)} บาท`,
+          // the customer and job as their codes (what the log showed before drizzle/0006), not their pks
+          changes,
+        });
     } else {
       const profile = await issuingProfile(i.documentProfileId ?? jobProfileId);
       no = await nextRunningNo(tx, 'Quotation');
-      await tx.insert(quotationHd).values({
-        ...values,
-        documentProfileId: profile.pk,
-        quotationNo: no,
-        createDate: nowThai(),
-        createBy: byUserId,
-        customerApproveDate: AGREED.has(statusId) ? nowThai() : SENTINEL_TS,
-        ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
-      });
+      const [ins] = await tx
+        .insert(quotation)
+        .values({
+          ...values,
+          ...(AGREED.has(statusId) ? snapshotOf(cust) : {}),
+          documentProfilePk: profile.pk,
+          quotationNo: no,
+          createDate: nowThai(),
+          createdByAppUserPk: byUserId,
+          customerApproveDate: AGREED.has(statusId) ? nowThai() : null, // not agreed yet = NULL (no 1900 sentinel)
+          ...statusStamp(statusId === QS.CANCELLED ? RS.INACTIVE : RS.ACTIVE, byUserId),
+        })
+        .returning({ pk: quotation.pk });
+      hdPk = ins!.pk;
       await audit(tx, byUserId, {
         action: 'CREATE',
         module: 'Quotation',
-        entity: 'quotation_hd',
+        entity: 'quotation',
         key: no,
-        summary: `สร้างใบเสนอราคา · งาน ${values.referenceJobNo || '-'} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
+        summary: `สร้างใบเสนอราคา · งาน ${jobNo || '-'} · ${lines.length} รายการ · ${t.net.toFixed(2)} บาท`,
       });
     }
-    if (linesChanged && dtRows.length)
-      await tx.insert(quotationDt).values(dtRows.map((r) => ({ ...r, quotationNo: no! })));
-    // customer agreed → the job remembers it: one agreed quotation per job, checked under the job's row lock
-    // (taken after the quotation row, as followQuotation does) so two approvals at once queue and the second
-    // sees the first
+    if (linesChanged) {
+      // a removed line goes; a matched one is updated in place, only the columns that changed; a new one is inserted
+      const gone = old.filter((_, i) => !used.has(i)).map((o) => o.pk);
+      if (gone.length) await tx.delete(quotationLine).where(inArray(quotationLine.pk, gone));
+      for (const [k, r] of dtRows.entries()) {
+        const set = lineSets[k];
+        if (!matched[k] || !set) continue;
+        const cols: Record<string, unknown> = Object.fromEntries(
+          Object.keys(set).map((c) => [c, r[c as keyof typeof r]]),
+        );
+        if ('itemCode' in cols) {
+          // another product on this line: its product_pk, and item_code NULL on a product line (as an insert)
+          const productPk = pkOfCode.get(r.itemCode) ?? null;
+          Object.assign(cols, { productPk, itemCode: productPk ? null : r.itemCode });
+        }
+        await tx.update(quotationLine).set(cols).where(eq(quotationLine.pk, matched[k].pk));
+      }
+      const added = dtRows.filter((_, k) => !matched[k]);
+      if (added.length)
+        await tx.insert(quotationLine).values(
+          added.map((r) => {
+            const productPk = pkOfCode.get(r.itemCode) ?? null;
+            // a product line prints its product's code (item_code NULL); a service / delivery line keeps its text
+            return { ...r, itemCode: productPk ? null : r.itemCode, productPk, quotationPk: hdPk };
+          }),
+        );
+      // a line change is an edit of the quotation: its version moves (a stale edit page gets 409) — by exactly one:
+      // set to the loaded version + 1, so a header this save already wrote (its trigger bumped it) is not bumped twice
+      if (prev)
+        await tx
+          .update(quotation)
+          .set({ rowVersion: prev.rowVersion + 1 })
+          .where(eq(quotation.pk, hdPk));
+    }
+    // customer agreed → it is the job's agreed quotation (its status says so: job.approved_quotation_pk is a legacy
+    // snapshot, no longer written). One agreed quotation per job, checked under the job's row lock (taken after the
+    // quotation row, as followQuotation does) so two approvals at once queue and the second sees the first.
+    // The job's history says when its agreed quotation changes; a legacy pointer at this quotation is cleared.
     const pointTo = async (jobNo: string, from: string, to: string) => {
-      await tx.update(job).set({ quotationNoApproved: to }).where(eq(job.jobNo, jobNo));
+      await tx
+        .update(job)
+        .set({ approvedQuotationPk: null })
+        .where(and(eq(job.jobNo, jobNo), eq(job.approvedQuotationPk, hdPk)));
       await audit(tx, byUserId, {
         action: 'UPDATE',
         module: 'Job Management',
@@ -564,45 +791,34 @@ export async function saveQuotation(i: QuotationInput, byUserId: number): Promis
         changes: { quotationNoApproved: [from, to] },
       });
     };
-    if (AGREED.has(statusId) && jobNo) {
+    if (AGREED.has(statusId) && found) {
       const [j] = await tx
-        .select({ approved: job.quotationNoApproved, st: job.jobStatusId, rs: job.recordStatus })
+        .select({ legacy: approvedHd.quotationNo, st: job.jobStatusId, rs: job.recordStatus })
         .from(job)
-        .where(eq(job.jobNo, jobNo))
-        .for('update');
+        .leftJoin(approvedHd, eq(approvedHd.pk, job.approvedQuotationPk))
+        .where(eq(job.pk, found.pk))
+        .for('update', { of: job });
       // agreeing now on a job already closed / cancelled / declined: the quotation would say agreed, the job not
       if (!wasAgreed && j && (j.rs === RS.DELETED || JOB_CLOSED_STATUSES.includes(j.st ?? -1)))
         throw new HttpError(
           409,
           `งาน ${jobNo} ปิดงาน ยกเลิก หรือลูกค้าไม่ตกลงซ่อมไปแล้ว — เปลี่ยนเป็นลูกค้าตกลงซ่อมไม่ได้ (เปิดงานกลับก่อน)`,
         );
-      const [other] = await tx
-        .select({ no: quotationHd.quotationNo })
-        .from(quotationHd)
-        .where(
-          and(
-            eq(quotationHd.referenceJobNo, jobNo),
-            ne(quotationHd.quotationNo, no),
-            inArray(quotationHd.quotationStatusId, [...AGREED]),
-            ne(quotationHd.recordStatus, RS.DELETED),
-          ),
-        )
-        .limit(1);
-      if (other) throw new HttpError(409, `งานนี้มีใบเสนอราคาที่ลูกค้าตกลงแล้ว (${other.no}) — เปลี่ยนสถานะใบนั้นก่อน`);
-      if ((j?.approved ?? '') !== no) await pointTo(jobNo, j?.approved ?? '', no);
+      // the job's agreed quotation before this save: this one (already agreed on this job), else a legacy pointer
+      const was = wasAgreed && prev?.jobPk === found.pk ? no! : (j?.legacy ?? '');
+      if (was !== no) await pointTo(jobNo, was, no!);
     } else if (wasAgreed && !AGREED.has(statusId)) {
-      // no longer agreed (declined / cancelled …) → only a job still naming it as the approved one forgets it
+      // no longer agreed (declined / cancelled …) → its job (and a legacy job still naming it) has no agreed one
       const named = await tx
         .select({ jobNo: job.jobNo })
         .from(job)
-        .where(eq(job.quotationNoApproved, no))
+        .where(or(eq(job.approvedQuotationPk, hdPk), prev?.jobPk != null ? eq(job.pk, prev.jobPk) : undefined))
         .for('update');
       for (const n of named) await pointTo(n.jobNo, no, '');
     }
     // sent / agreed moves the job forward (owner 2026-10-16) — only when the status was set now: an unchanged
     // re-save never touches the job
-    if (statusChanged && values.referenceJobNo)
-      await followQuotation(tx, values.referenceJobNo, no!, statusId, statusName, byUserId);
+    if (statusChanged && jobNo) await followQuotation(tx, jobNo, no!, statusId, statusName, byUserId);
     return no!;
   });
   return (await getQuotation(no))!;

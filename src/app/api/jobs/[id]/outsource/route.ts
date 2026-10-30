@@ -12,6 +12,6 @@ export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ id:
   const body = await parseBody(req, jobOutsource);
   // the page's shared job sections are แก้ไขข้อมูลงาน's (PATCH /api/jobs/{id})
   if (body.job) await requireCan(req, 'Job Management', 'edit');
-  const job = await saveOutsource(no, body, user.userId);
+  const job = await saveOutsource(no, body, user.pk);
   return NextResponse.json({ ok: true, job });
 });

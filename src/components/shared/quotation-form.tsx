@@ -27,6 +27,8 @@ import { type QuotationLine as Line, lineOf, lineTotals } from '@/components/quo
 import { QuotationStatusFields, QuotationSummary } from '@/components/quotation/totals';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
+import { useAccess } from '@/lib/use-access';
+import { FIGURES_LOCKED } from '@/lib/validation';
 
 /** Shape returned by GET /api/quotations/:id (subset the form uses). */
 export type QuotationLoaded = {
@@ -40,7 +42,6 @@ export type QuotationLoaded = {
   /** false = deleted (ยกเลิกใบเสนอราคา from the list) — no save, no print */
   active?: boolean;
   customerCode?: string;
-  contactName: string;
   jobRef: string;
   remark: string;
   serviceAmount?: number;
@@ -48,6 +49,8 @@ export type QuotationLoaded = {
   discountFormula: string;
   vatRate: number;
   lines: {
+    /** the line's uuid */
+    id?: string;
     itemType: string;
     code: string;
     detail: string;
@@ -62,6 +65,8 @@ export type QuotationLoaded = {
   createdBy?: string;
   documentProfileId?: string; // ออกเอกสารในนาม (a profile's uuid)
   version?: number; // row_version — the edit page sends it back with its save
+  /** from the legacy system: its figures are System Admin's alone (the server refuses anyone else's change) */
+  figuresLocked?: boolean;
 };
 
 /** What the page posts to /api/quotations. */
@@ -70,9 +75,10 @@ export type QuotationPayload = {
   documentProfileId?: string;
   type: string;
   customerCode: string;
-  contactName: string;
   jobNo: string;
   lines: {
+    /** a stored line's uuid; none = a new line */
+    id?: string;
     code: string;
     detail: string;
     qty: number;
@@ -129,6 +135,12 @@ export const QuotationForm = React.forwardRef<
 >(function QuotationForm({ mode, quotationNo, initial, jobId }, ref) {
   const { push } = useToast();
   const fe = useFormErrors();
+  const { isAdmin } = useAccess();
+  // a legacy quotation's recorded figures are System Admin's alone (legacy-lock.ts): its loaded lines (ids 2…n+1,
+  // below every added one) and a service / discount / VAT it holds — new lines and the rest stay editable
+  const figuresLocked = !!initial?.figuresLocked && !isAdmin;
+  const loadedLines = initial?.lines.length ?? 0;
+  const lineLocked = (l: Line) => figuresLocked && l.id <= loadedLines + 1;
   // an existing quotation fills the form when it mounts — the edit page remounts the form (key) for
   // every quotation it loads or saves, so this is the one place the form takes `initial`
   const [type, setType] = React.useState<'A' | 'B'>(() =>
@@ -138,6 +150,7 @@ export const QuotationForm = React.forwardRef<
   const [lines, setLines] = React.useState<Line[]>(() =>
     (initial?.lines ?? []).map((l, i) => ({
       id: i + 2,
+      uid: l.id,
       code: l.code,
       name: l.detail,
       qty: l.qty,
@@ -157,7 +170,6 @@ export const QuotationForm = React.forwardRef<
   const [remark, setRemark] = React.useState(initial?.remark ?? '');
   const [status, setStatus] = React.useState(initial?.status || QUOTATION_STATUS_OPTIONS[0]);
   const [customer, setCustomer] = React.useState<Customer | null>(initial?.customerDetail ?? null);
-  const [contact, setContact] = React.useState(initial?.contactName ?? '');
   const [jobRef, setJobRef] = React.useState(initial?.jobRef ?? '');
   const [job, setJob] = React.useState<JobDetail | null>(initial?.job ?? null);
   const date = initial?.date ?? '';
@@ -177,7 +189,6 @@ export const QuotationForm = React.forwardRef<
       remark,
       status,
       customer,
-      contact,
       jobRef,
       job,
       jobParts,
@@ -193,7 +204,6 @@ export const QuotationForm = React.forwardRef<
       setRemark(v.remark);
       setStatus(v.status);
       setCustomer(v.customer);
-      setContact(v.contact);
       setJobRef(v.jobRef);
       setJob(v.job);
       setJobParts(v.jobParts);
@@ -214,7 +224,6 @@ export const QuotationForm = React.forwardRef<
     remark,
     status,
     customer: customer?.code ?? '',
-    contact,
     jobRef,
   };
   const [saved, setSaved] = React.useState(now);
@@ -350,10 +359,10 @@ export const QuotationForm = React.forwardRef<
     documentProfileId: profileId || undefined,
     type: type === 'A' ? 'Type A (Normal)' : 'Type B (VIP)',
     customerCode: customer?.code ?? '',
-    contactName: contact,
     jobNo: jobRef,
     // every row, in screen order (line errors point at the row); the API drops empty rows
     lines: lines.map((l) => ({
+      id: l.uid,
       code: l.code,
       detail: l.name,
       qty: l.qty,
@@ -399,13 +408,7 @@ export const QuotationForm = React.forwardRef<
         profileLocked={profileLock('quotation', { statusId: initial?.statusId })} // the saved status, not the one being edited
       />
 
-      <QuotationCustomerSection
-        customer={customer}
-        setCustomer={setCustomer}
-        contact={contact}
-        setContact={setContact}
-        errors={fe.errors}
-      />
+      <QuotationCustomerSection customer={customer} setCustomer={setCustomer} errors={fe.errors} />
 
       <QuotationInfoSection
         no={quotationNo ?? initial?.no ?? (mode === 'new' ? 'Generate Auto' : '—')}
@@ -424,6 +427,7 @@ export const QuotationForm = React.forwardRef<
       <Section
         title="รายการอะไหล่และบริการ"
         icon={Calculator}
+        description={figuresLocked ? FIGURES_LOCKED : undefined}
         actions={
           <Button size="sm" variant="outline" onClick={add}>
             <Plus className="h-3.5 w-3.5" />
@@ -438,6 +442,7 @@ export const QuotationForm = React.forwardRef<
           errors={fe.errors}
           clear={fe.clear}
           showZero={!!initial}
+          locked={lineLocked}
         />
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
@@ -472,6 +477,11 @@ export const QuotationForm = React.forwardRef<
             errors={fe.errors}
             clear={fe.clear}
             showZero={!!initial}
+            locked={{
+              service: figuresLocked && !!initial?.serviceAmount,
+              discount: figuresLocked && loadedDiscount.value > 0,
+              vat: figuresLocked && !!initial?.vatRate,
+            }}
           />
         </div>
       </Section>

@@ -14,7 +14,7 @@ import { addDays, today } from '@/lib/dates';
  *  - enums for the choices, so a typo cannot fall through (decision "approvee" = reject)
  */
 const qty = z.coerce.number().int('จำนวนต้องเป็นจำนวนเต็ม').min(0, 'จำนวนต้องไม่ติดลบ').max(100_000, 'จำนวนมากเกินไป');
-/** a row's uuid (ADR 0008: job_order_spare_part_log.id / sale_out_dt.id), read lower-cased */
+/** a row's uuid (ADR 0008: job_part.id / sale_order_line.id), read lower-cased */
 const rowId = z.uuid('รหัสอ้างอิงไม่ถูกต้อง').transform((v) => v.toLowerCase());
 const text = (max: number) =>
   z
@@ -44,7 +44,8 @@ export const issueSchema = z
   .looseObject({
     type: z.enum(['job', 'sale', 'other', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
     ref: text(50),
-    // จ่ายให้ / รับคืนจาก: required (inventory_hd.reference_out_to, 50)
+    // จ่ายให้: required for จ่ายออกอื่นๆ only (stock_move.reference_out_to, 50) — a job / sale-order / return
+    // movement's reference is that document (job_pk / sale_order_pk), nothing is stored for it
     payTo: z
       .string()
       .trim()
@@ -57,7 +58,7 @@ export const issueSchema = z
       REPEATED_LINE,
     ),
   })
-  .refine((v) => !!v.payTo, {
+  .refine((v) => v.type !== 'other' || !!v.payTo, {
     path: ['payTo'],
     error: (iss) => ((iss.input as { type?: unknown }).type === 'return' ? 'ต้องเลือก รับคืนจาก' : 'ต้องเลือก จ่ายให้'),
     when: (p) => typeof p.value === 'object' && p.value !== null, // also when another field failed: every error at once
@@ -78,7 +79,7 @@ export const assignSchema = z.looseObject({
 
 export const approveSchema = z.looseObject({
   decision: z.enum(['approve', 'deny', 'reject'], 'การอนุมัติไม่ถูกต้อง'),
-  remark: maxText(100, 'หมายเหตุ '), // sale_out_hd.approve_remark varchar(100)
+  remark: maxText(100, 'หมายเหตุ '), // sale_order.approve_remark varchar(100)
 });
 
 /** เลขพัสดุของใบสั่งขาย — `prev` = the number stored now (an unchanged legacy value passes) */

@@ -3,7 +3,7 @@ import { TOURS } from '../../src/components/tour/tours';
 import { OWNER_EMAIL } from './support/env';
 import { rows, userId } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
-import { card, demoUrl, stepTo, tourOn, walkTour } from './support/tour';
+import { card, demoUrl, stepTo, tourOn, wakeTourOffer, walkTour } from './support/tour';
 
 /**
  * บทสอน — what a new user sees must be right on every page and screen size: the steps in reading order, only
@@ -90,6 +90,7 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
   await signIn(page, OWNER_EMAIL);
   await tourOn();
   await page.goto('/jobs/new');
+  await wakeTourOffer(page);
   await page.getByRole('button', { name: 'ไม่ใช่ตอนนี้' }).click();
   // a real entry made before the tour stays; what is tried during it goes
   await page.getByRole('combobox', { name: 'จุดตำหนิ' }).fill('รอยจริงก่อนบทสอน');
@@ -173,6 +174,7 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
 
   // asked once: not again on the next visit · Esc leaves
   await page.reload();
+  await wakeTourOffer(page); // the offer would show now if it were still asked
   await page.waitForTimeout(1200);
   await expect(page.getByRole('button', { name: 'เริ่มบทสอน' })).toHaveCount(0);
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
@@ -255,14 +257,17 @@ test('"ไม่ต้องถามอีก (ทุกหน้า)": kept fo
   await signIn(page, OWNER_EMAIL);
   await tourOn();
   await page.goto('/jobs/new');
+  await wakeTourOffer(page);
   await page.getByRole('button', { name: 'ไม่ต้องถามอีก (ทุกหน้า)' }).click();
   await expect
     .poll(
-      async () => (await rows('SELECT off FROM app_user_tour WHERE user_id = $1', [await userId(OWNER_EMAIL)]))[0]?.off,
+      async () =>
+        (await rows('SELECT off FROM app_user_tour WHERE app_user_pk = $1', [await userId(OWNER_EMAIL)]))[0]?.off,
     )
     .toBe(true);
   const other = Object.keys(TOURS).find((p) => p !== '/jobs/new') ?? '/jobs/new';
   await page.goto(other);
+  await wakeTourOffer(page); // the offer would show now if it were still asked
   await page.waitForTimeout(1200);
   await expect(page.getByRole('button', { name: 'เริ่มบทสอน' })).toHaveCount(0);
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
