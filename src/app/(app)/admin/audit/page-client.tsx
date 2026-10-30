@@ -38,7 +38,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   RECEIVE: { label: 'รับเข้า', tone: 'success' },
   RETURN: { label: 'รับคืน', tone: 'success' },
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
-  // before drizzle/0006 only — sign-in / export are in ประวัติความปลอดภัย (/admin/security) since
+  // before drizzle/0006 only — sign-in / export / print go to security_log since (database only, not shown here)
   LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
   LOGIN_FAILED: { label: 'เข้าสู่ระบบไม่สำเร็จ', tone: 'danger' },
   EXPORT: { label: 'ส่งออก Excel', tone: 'warning' },
@@ -88,13 +88,6 @@ export default function AuditPage() {
       width: '130px',
       hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ — the user name was squeezed to "perf-…"
       cell: (r) => <span className="num font-medium">{r.no || r.key}</span>,
-    },
-    {
-      key: 'ip',
-      header: 'IP',
-      hideBelow: 'lg',
-      width: '120px',
-      cell: (r) => <span className="num text-xs">{r.ip || '—'}</span>,
     },
     {
       key: 'summary',
@@ -178,9 +171,6 @@ export default function AuditPage() {
             value={draft.entity}
             onChange={(e) => setD('entity', e.target.value.trim())}
           />
-        </Field>
-        <Field label="IP">
-          <Input className="num" value={draft.ip} onChange={(e) => setD('ip', e.target.value.trim())} />
         </Field>
         <Field label="รายละเอียด / ชื่อผู้ใช้">
           <Input

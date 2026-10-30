@@ -10,11 +10,7 @@
 import type { z } from 'zod';
 import type * as Mock from '@/data/types';
 import type { PublicJob as PublicJobType, PublicJobSummary as PublicJobSummaryType } from '@/lib/track-public';
-import type {
-  AuditLogRow as AuditLogRowType,
-  AuditRow as AuditRowType,
-  SecurityRow as SecurityRowType,
-} from '@/server/audit';
+import type { AuditLogRow as AuditLogRowType, AuditRow as AuditRowType } from '@/server/audit';
 import type { Page } from '@/server/paging';
 import type { OverdueAlerts, PendingSaleOrders } from '@/server/services/alerts';
 import type { Anomalies, AnomalyPage } from '@/server/services/anomalies';
@@ -33,7 +29,7 @@ import type {
 } from '@/server/services/stock';
 import type { LinkStatus as LinkStatusType } from '@/server/services/tracking';
 import type { AnomaliesBody, AnomalyPageBody } from '@/server/contract/alerts';
-import type { AuditLogRow, SecurityRow } from '@/server/contract/audit';
+import type { AuditLogRow } from '@/server/contract/audit';
 import type { page } from '@/server/contract/common';
 import type { CallLog } from '@/server/contract/jobs';
 import type { OverdueAlertsBody, PendingSaleOrdersBody } from '@/server/contract/sales';
@@ -114,7 +110,6 @@ export type Checks = [
   Expect<Same<typeof ReturnableLine, ReturnLine>>,
   // the System Admin logs and the anomalies bell / list (ADR 0008 audit trail; services/anomalies.ts)
   Expect<Same<typeof AuditLogRow, AuditLogRowType>>,
-  Expect<Same<typeof SecurityRow, SecurityRowType>>,
   Expect<Same<typeof AnomaliesBody, Anomalies>>,
   Expect<Same<typeof AnomalyPageBody, AnomalyPage>>,
 ];

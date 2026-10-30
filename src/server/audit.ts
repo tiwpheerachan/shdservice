@@ -573,24 +573,19 @@ export type AuditFilters = {
   key?: string;
   /** the business number (or key), exact */
   no?: string;
-  /** the client address contains */
-  ip?: string;
   action?: string;
 };
 
-/** the admin log's row: the identity and request columns too (the job history shows AuditRow only — no ip / email) */
+/** the admin log's row: who as at the time (email, role, department), the record's id / number, the reason. The
+ *  request columns (ip, user agent, session / request id, permission) are written but never leave the server (owner
+ *  2026-10-30: read in the database only). The job history shows AuditRow only. */
 export type AuditLogRow = AuditRow & {
   email: string | null;
   role: string | null;
   department: string | null;
-  permission: string | null;
   entityId: string | null;
   no: string | null;
   reason: string | null;
-  ip: string | null;
-  userAgent: string | null;
-  sessionId: string | null;
-  requestId: string | null;
 };
 
 const toRow = (r: typeof auditLog.$inferSelect): AuditRow => ({
@@ -609,14 +604,9 @@ const toLogRow = (r: typeof auditLog.$inferSelect): AuditLogRow => ({
   email: r.actorEmail,
   role: r.actorRole,
   department: r.actorDepartment,
-  permission: r.permission,
   entityId: r.entityId,
   no: r.entityNo,
   reason: r.reason,
-  ip: r.ip,
-  userAgent: r.userAgent,
-  sessionId: r.sessionId,
-  requestId: r.requestId,
 });
 
 /** a user filter: a uuid = that user (by pk); else the name / email at the time contains */
@@ -646,7 +636,6 @@ function auditWhere(q: string, f: AuditFilters) {
     f.entity ? entityIn(auditLog.entity, f.entity) : undefined,
     f.key ? eq(auditLog.entityKey, f.key) : undefined,
     f.no ? or(eq(auditLog.entityNo, f.no.trim()), eq(auditLog.entityKey, f.no.trim())) : undefined,
-    f.ip ? ilike(sql`host(${auditLog.ip})`, likeTerm(f.ip.trim())) : undefined,
     f.action ? eq(auditLog.action, f.action) : undefined,
   );
 }
@@ -813,7 +802,6 @@ const SORT = {
   at: auditLog.at,
   user: auditLog.actorName,
   role: auditLog.actorRole,
-  ip: auditLog.ip,
   action: auditLog.action,
   module: auditLog.module,
   key: auditLog.entityKey,
@@ -863,117 +851,4 @@ export async function auditModules(): Promise<string[]> {
     .groupBy(auditLog.module)
     .orderBy(sql`count(*) desc`);
   return rows.map((r) => r.m).filter(Boolean);
-}
-
-/* ------------------------------------------------------------------ *
- * security_log (System Admin page)
- * ------------------------------------------------------------------ */
-export type SecurityRow = {
-  id: string;
-  at: string;
-  event: SecurityEvent;
-  result: SecurityResult;
-  user: string;
-  email: string | null;
-  role: string | null;
-  department: string | null;
-  module: string | null;
-  permission: string | null;
-  entity: string | null;
-  entityId: string | null;
-  no: string | null;
-  ip: string | null;
-  userAgent: string | null;
-  sessionId: string | null;
-  requestId: string | null;
-  detail: Record<string, unknown> | null;
-};
-
-export type SecurityFilters = {
-  from?: string;
-  to?: string;
-  user?: string;
-  role?: string;
-  event?: string;
-  result?: string;
-  no?: string;
-  ip?: string;
-};
-
-const toSecurityRow = (r: typeof securityLog.$inferSelect): SecurityRow => ({
-  id: r.id,
-  at: r.at.slice(0, 19).replace('T', ' '),
-  event: r.event as SecurityEvent,
-  result: r.result as SecurityResult,
-  user: r.actorName ?? '',
-  email: r.actorEmail,
-  role: r.actorRole,
-  department: r.actorDepartment,
-  module: r.module,
-  permission: r.permission,
-  entity: r.entity && entityName(r.entity),
-  entityId: r.entityId,
-  no: r.entityNo,
-  ip: r.ip,
-  userAgent: r.userAgent,
-  sessionId: r.sessionId,
-  requestId: r.requestId,
-  detail: (r.detail as Record<string, unknown> | null) ?? null,
-});
-
-function securityWhere(q: string, f: SecurityFilters) {
-  const term = q.trim();
-  return and(
-    term
-      ? or(
-          ilike(securityLog.actorName, likeTerm(term)),
-          ilike(securityLog.actorEmail, likeTerm(term)),
-          ilike(securityLog.entityNo, likeTerm(term)),
-          ilike(sql`${securityLog.detail}::text`, likeTerm(term)),
-        )
-      : undefined,
-    ymd(f.from) ? gte(securityLog.at, `${ymd(f.from)} 00:00:00`) : undefined,
-    ymd(f.to) ? lte(securityLog.at, `${ymd(f.to)} 23:59:59`) : undefined,
-    actorFilter(f.user, { pk: securityLog.actorPk, name: securityLog.actorName, email: securityLog.actorEmail }),
-    f.role ? eq(securityLog.actorRole, f.role) : undefined,
-    f.event ? eq(securityLog.event, f.event) : undefined,
-    f.result ? eq(securityLog.result, f.result) : undefined,
-    f.no ? eq(securityLog.entityNo, f.no.trim()) : undefined,
-    f.ip ? ilike(sql`host(${securityLog.ip})`, likeTerm(f.ip.trim())) : undefined,
-  );
-}
-
-const SECURITY_SORT = {
-  at: securityLog.at,
-  user: securityLog.actorName,
-  role: securityLog.actorRole,
-  event: securityLog.event,
-  result: securityLog.result,
-  ip: securityLog.ip,
-};
-
-export async function pageSecurity(p: PageQuery, f: SecurityFilters): Promise<Page<SecurityRow>> {
-  const w = securityWhere(p.q, f);
-  const [counted, rows] = await Promise.all([
-    db.select({ total: count() }).from(securityLog).where(w),
-    db
-      .select()
-      .from(securityLog)
-      .where(w)
-      .orderBy(...orderByCols(p.sort, SECURITY_SORT, [desc(securityLog.pk)]))
-      .limit(p.pageSize)
-      .offset(offsetOf(p)),
-  ]);
-  return { rows: rows.map(toSecurityRow), total: totalOf(counted), page: p.page, pageSize: p.pageSize };
-}
-
-/** the Excel export's rows (src/server/export.ts) */
-export async function listSecurity(f: SecurityFilters & { q?: string; limit?: number }): Promise<SecurityRow[]> {
-  const rows = await db
-    .select()
-    .from(securityLog)
-    .where(securityWhere(f.q ?? '', f))
-    .orderBy(desc(securityLog.pk))
-    .limit(Math.min(f.limit ?? 1000, MAX_EXPORT_ROWS));
-  return rows.map(toSecurityRow);
 }

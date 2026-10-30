@@ -5,7 +5,6 @@ import { GET as dataGet } from '@/app/api/data/[resource]/route';
 import { GET as jobGet } from '@/app/api/jobs/[id]/route';
 import { GET as quotationGet } from '@/app/api/quotations/[id]/route';
 import { GET as auditGet } from '@/app/api/audit/route';
-import { GET as securityGet } from '@/app/api/audit/security/route';
 import { GET as documentProfilesGet } from '@/app/api/admin/document-profiles/route';
 import { PREFETCH_ID } from '@/data/keys';
 
@@ -29,9 +28,8 @@ const ROUTES: [RegExp, (req: NextRequest, segment: string) => Promise<Response>]
   [/^\/api\/data\/([^/]+)$/, (req, resource) => dataGet(req, { params: Promise.resolve({ resource }) })],
   [/^\/api\/jobs\/([^/]+)$/, (req, id) => jobGet(req, { params: Promise.resolve({ id }) })],
   [/^\/api\/quotations\/([^/]+)$/, (req, id) => quotationGet(req, { params: Promise.resolve({ id }) })],
-  // the admin logs (no path parameter: the group is only what `segment` reads)
+  // the audit log (no path parameter: the group is only what `segment` reads)
   [/^\/api\/(audit)$/, (req) => auditGet(req)],
-  [/^\/api\/audit\/(security)$/, (req) => securityGet(req)],
   [/^\/api\/admin\/(document-profiles)$/, (req) => documentProfilesGet(req)],
 ];
 

@@ -286,11 +286,9 @@ try {
   await expect([404], '/api/products/NOPE-' + rand);
   // staff filters take a user's uuid (a name still works where the page types one)
   const tdAdmin = await uuidOf(`SELECT id::text AS id FROM app_user WHERE pk = 9101`);
-  // the System Admin logs (ADR 0008 audit trail): a page each, a non-admin refused
+  // the System Admin audit log (ADR 0008 audit trail), a non-admin refused; security_log has no web route
   await expect([200], `/api/audit?user=${tdAdmin}`);
-  await expect([200], `/api/audit/security?user=${tdAdmin}&event=LOGIN`);
   await expect([403], '/api/audit', { as: VIEWER });
-  await expect([403], '/api/audit/security', { as: VIEWER });
   await expect([400], '/api/audit?from=2026-02-30');
   // the anomalies bell and its list: System Admin only
   await expect([200], '/api/alerts/anomalies');

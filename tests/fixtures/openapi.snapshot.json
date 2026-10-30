@@ -12808,7 +12808,6 @@
                 "movements",
                 "issued_lines",
                 "audit_log",
-                "security_log",
                 "anomalies",
                 "report_open_job",
                 "report_repair_job",
@@ -14732,16 +14731,6 @@
           {
             "schema": {
               "type": "string",
-              "description": "the client address contains"
-            },
-            "required": false,
-            "description": "the client address contains",
-            "name": "ip",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
               "description": "exact"
             },
             "required": false,
@@ -14782,232 +14771,6 @@
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AuditLogRow"
-                      }
-                    },
-                    "total": {
-                      "type": "integer"
-                    },
-                    "page": {
-                      "type": "integer"
-                    },
-                    "pageSize": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "rows",
-                    "total",
-                    "page",
-                    "pageSize"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/audit/security": {
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Security log (sign-in / out, refusals, role / permission / status changes, export / print) — one page",
-        "description": "System Admin only.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "From 1."
-            },
-            "required": false,
-            "description": "From 1.",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "1–500, default 25."
-            },
-            "required": false,
-            "description": "1–500, default 25.",
-            "name": "pageSize",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "A column key of the list."
-            },
-            "required": false,
-            "description": "A column key of the list.",
-            "name": "sort",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "asc",
-                "desc"
-              ]
-            },
-            "required": false,
-            "name": "dir",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Free-text search."
-            },
-            "required": false,
-            "description": "Free-text search.",
-            "name": "q",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date"
-            },
-            "required": false,
-            "name": "from",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date"
-            },
-            "required": false,
-            "name": "to",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains"
-            },
-            "required": false,
-            "description": "a user's id (uuid) = that user's lines; anything else = the name or email (at the time) contains",
-            "name": "user",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "the role (user_type) at the time, exact"
-            },
-            "required": false,
-            "description": "the role (user_type) at the time, exact",
-            "name": "role",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "business number (J… / Q… / SO… / P… / C…), exact"
-            },
-            "required": false,
-            "description": "business number (J… / Q… / SO… / P… / C…), exact",
-            "name": "no",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "the client address contains"
-            },
-            "required": false,
-            "description": "the client address contains",
-            "name": "ip",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "exact"
-            },
-            "required": false,
-            "description": "exact",
-            "name": "event",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "OK / DENIED / FAILED"
-            },
-            "required": false,
-            "description": "OK / DENIED / FAILED",
-            "name": "result",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "One page.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "rows": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SecurityRow"
                       }
                     },
                     "total": {
@@ -20298,11 +20061,6 @@
             "type": "string",
             "nullable": true
           },
-          "permission": {
-            "type": "string",
-            "nullable": true,
-            "description": "the module / right + action the request used (\"Job Management:edit\")"
-          },
           "entityId": {
             "type": "string",
             "nullable": true,
@@ -20312,23 +20070,6 @@
             "type": "string",
             "nullable": true,
             "description": "its business number"
-          },
-          "ip": {
-            "type": "string",
-            "nullable": true
-          },
-          "userAgent": {
-            "type": "string",
-            "nullable": true
-          },
-          "sessionId": {
-            "type": "string",
-            "nullable": true,
-            "description": "identifies the sign-in (never the cookie)"
-          },
-          "requestId": {
-            "type": "string",
-            "nullable": true
           },
           "reason": {
             "type": "string",
@@ -20348,130 +20089,9 @@
           "email",
           "role",
           "department",
-          "permission",
           "entityId",
           "no",
-          "ip",
-          "userAgent",
-          "sessionId",
-          "requestId",
           "reason"
-        ]
-      },
-      "SecurityRow": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "at": {
-            "type": "string"
-          },
-          "event": {
-            "type": "string",
-            "enum": [
-              "LOGIN",
-              "LOGIN_FAILED",
-              "LOGOUT",
-              "DENIED",
-              "ROLE_CHANGE",
-              "PERMISSION_CHANGE",
-              "USER_STATUS",
-              "EXPORT",
-              "PRINT"
-            ]
-          },
-          "result": {
-            "type": "string",
-            "enum": [
-              "OK",
-              "DENIED",
-              "FAILED"
-            ]
-          },
-          "user": {
-            "type": "string"
-          },
-          "module": {
-            "type": "string",
-            "nullable": true
-          },
-          "entity": {
-            "type": "string",
-            "nullable": true
-          },
-          "email": {
-            "type": "string",
-            "nullable": true
-          },
-          "role": {
-            "type": "string",
-            "nullable": true
-          },
-          "department": {
-            "type": "string",
-            "nullable": true
-          },
-          "permission": {
-            "type": "string",
-            "nullable": true,
-            "description": "the module / right + action the request used (\"Job Management:edit\")"
-          },
-          "entityId": {
-            "type": "string",
-            "nullable": true,
-            "description": "the row's uuid"
-          },
-          "no": {
-            "type": "string",
-            "nullable": true,
-            "description": "its business number"
-          },
-          "ip": {
-            "type": "string",
-            "nullable": true
-          },
-          "userAgent": {
-            "type": "string",
-            "nullable": true
-          },
-          "sessionId": {
-            "type": "string",
-            "nullable": true,
-            "description": "identifies the sign-in (never the cookie)"
-          },
-          "requestId": {
-            "type": "string",
-            "nullable": true
-          },
-          "detail": {
-            "type": "object",
-            "nullable": true,
-            "additionalProperties": {
-              "nullable": true
-            }
-          }
-        },
-        "required": [
-          "id",
-          "at",
-          "event",
-          "result",
-          "user",
-          "module",
-          "entity",
-          "email",
-          "role",
-          "department",
-          "permission",
-          "entityId",
-          "no",
-          "ip",
-          "userAgent",
-          "sessionId",
-          "requestId",
-          "detail"
         ]
       },
       "TrackError": {

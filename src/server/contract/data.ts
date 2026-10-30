@@ -425,7 +425,6 @@ export const exportXlsx = defineOperation({
         'movements',
         'issued_lines',
         'audit_log',
-        'security_log',
         'anomalies',
         ...REPORT_KEYS.map((k) => `report_${k}`),
         'categories',

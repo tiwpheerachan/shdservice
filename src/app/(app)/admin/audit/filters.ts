@@ -10,7 +10,6 @@ export type Filters = {
   entity: string;
   action: string;
   no: string;
-  ip: string;
   q: string;
 };
 export const NO_FILTER: Filters = {
@@ -22,7 +21,6 @@ export const NO_FILTER: Filters = {
   entity: '',
   action: '',
   no: '',
-  ip: '',
   q: '',
 };
 
