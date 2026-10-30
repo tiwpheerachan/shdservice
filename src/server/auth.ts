@@ -5,7 +5,16 @@ import { NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appUser, rolePermission } from '@/db/schema';
-import { guardDenied, need, permissionOf, requestCtx, runInRequest, setRequestUser } from '@/server/request-context';
+import {
+  guardDenied,
+  need,
+  permissionOf,
+  refused,
+  requestCtx,
+  runInRequest,
+  setRequestSession,
+  setRequestUser,
+} from '@/server/request-context';
 import type { z } from 'zod';
 import { verifySession, SESSION_COOKIE, type SessionUser } from '@/lib/session';
 import { summary, validate } from '@/lib/validation';
@@ -216,6 +225,7 @@ export function invalidateGrantCache() {
 export async function can(user: CurrentUser, module: Module | null, action: Action) {
   const ok = user.isAdmin || checkGrant(false, await grantsForUserType(user.userType), module, action);
   if (ok && module) need(user, { kind: 'grant', modules: [module], action });
+  else if (!ok) refused(user, `${module ?? '-'}:${action}`);
   return ok;
 }
 
@@ -223,6 +233,7 @@ export async function can(user: CurrentUser, module: Module | null, action: Acti
 export async function hasRight(user: Pick<CurrentUser, 'isAdmin' | 'userType'>, right: Right): Promise<boolean> {
   const ok = checkRight(user.isAdmin, await grantsForUserType(user.userType), right);
   if (ok) need(user, { kind: 'right', right });
+  else refused(user, right); // SO Approve, Export … — the 403 the caller throws is logged as DENIED (handle)
   return ok;
 }
 
@@ -251,10 +262,26 @@ export async function rolesWithRight(right: Right): Promise<string[]> {
  * Route-handler guards. Throw HttpError; wrap handlers with `handle()`.
  * ------------------------------------------------------------------ */
 export async function requireUser(req: NextRequest): Promise<CurrentUser> {
-  const u = await userFromRequest(req);
-  if (!u) throw new HttpError(401, 'unauthorized');
-  if (!u.approved)
-    throw new HttpError(403, u.userType && !u.isActive ? 'บัญชีนี้ถูกปิดการใช้งาน' : 'รอการอนุมัติสิทธิ์การใช้งาน');
+  const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
+  const u = await resolveUser(session);
+  if (!u) {
+    // a cookie that still verifies but is refused: signed out (session_version moved — another device, or an admin)
+    // or the account's row / email is gone → DENIED, naming the account when it still exists
+    if (session) {
+      const row = await cachedAppUser(session.email).catch(() => null);
+      if (row) {
+        setRequestSession(session.email, session.iat);
+        guardDenied({ pk: row.pk, userType: row.userType?.trim() || null }, 'session', 'บัญชีนี้ออกจากระบบแล้ว');
+      }
+    }
+    throw new HttpError(401, 'unauthorized');
+  }
+  if (!u.approved) {
+    const msg = u.userType && !u.isActive ? 'บัญชีนี้ถูกปิดการใช้งาน' : 'รอการอนุมัติสิทธิ์การใช้งาน';
+    setRequestSession(u.session.email, u.session.iat);
+    guardDenied(u, 'account', msg); // set INACTIVE / role taken away mid-session
+    throw new HttpError(403, msg);
+  }
   setRequestUser(u);
   return u;
 }
@@ -346,6 +373,10 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
       return await fn(...args);
     } catch (e) {
       if (e instanceof HttpError) {
+        // a 403 thrown past the guards (a service's own rule: SO Approve, Export, the creator-only cancel …) — DENIED,
+        // with the right hasRight() / can() last refused, throttled as the guards' own
+        const c = requestCtx();
+        if (e.status === 403 && c?.user && !c.deniedSeen) guardDenied(c.user, c.refused ?? 'refused', e.message);
         return NextResponse.json(
           e.details === undefined ? { error: e.message } : { error: e.message, details: e.details },
           { status: e.status },

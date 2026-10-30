@@ -7,7 +7,8 @@
  * grant row so the change lands exactly between check and write.
  *
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-audit.mts
- * Seeds its own fixtures (users 9650–9654, roles "QAU *", customer QAUC01, emails qau-*@example.invalid), reset at
+ * Seeds its own fixtures (users 9650–9655, roles "QAU *", customer QAUC01, sale order QAUSO01, emails
+ * qau-*@example.invalid), reset at
  * every start. ONLY a local *_test database.
  */
 import assert from 'node:assert/strict';
@@ -40,6 +41,7 @@ const exportRoute = await import('@/app/api/export/[resource]/route');
 const usersRoute = await import('@/app/api/admin/users/route');
 const permsRoute = await import('@/app/api/admin/permissions/route');
 const customersRoute = await import('@/app/api/customers/route');
+const approveRoute = await import('@/app/api/sale-orders/[id]/approve/route');
 
 const SV = 4;
 const U = {
@@ -48,6 +50,7 @@ const U = {
   off: { pk: 9652, email: 'qau-off@example.invalid', role: 'QAU Clerk' },
   target: { pk: 9653, email: 'qau-target@example.invalid', role: 'QAU Clerk' },
   editor: { pk: 9654, email: 'qau-editor@example.invalid', role: 'QAU Editor' },
+  seller: { pk: 9655, email: 'qau-seller@example.invalid', role: 'QAU Seller' },
 } as const;
 type Who = (typeof U)[keyof typeof U];
 const rand = Math.random().toString(36).slice(2, 7);
@@ -60,6 +63,7 @@ async function reset() {
     INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
       ('QAU Clerk', 'Customer', false, false, false, true),
       ('QAU Seller', 'Customer', false, false, false, true),
+      ('QAU Seller', 'Sale Order', true, true, false, true),
       ('QAU Editor', 'Customer', false, true, false, true);
     -- fixture users stay (audit_log / security_log, append-only, point at them): reset in place
     INSERT INTO app_user (pk, username, first_name, last_name, email_address, user_type, record_status, session_version)
@@ -81,6 +85,11 @@ async function reset() {
     INSERT INTO job (job_no, job_status_id, model_pk, job_create_date, job_reception_date, record_status)
       SELECT 'QAUJ01', NULL, (SELECT pk FROM model WHERE model_code = 'TST-M'), now(), current_date, 'ACTIVE'
        WHERE NOT EXISTS (SELECT 1 FROM job WHERE job_no = 'QAUJ01');
+    -- a waiting sale order a QAU Seller (no SO Approve) is refused on (section 5c); kept across runs
+    INSERT INTO sale_order (sale_order_no, approve_status_id, record_status, created_by_app_user_pk, customer_name)
+      SELECT 'QAUSO01', 2, 'ACTIVE', ${U.admin.pk}, 'ลูกค้า QAU'
+       WHERE NOT EXISTS (SELECT 1 FROM sale_order WHERE sale_order_no = 'QAUSO01');
+    UPDATE sale_order SET approve_status_id = 2 WHERE sale_order_no = 'QAUSO01';
     -- the customer the R2 edits aim at (nothing points at it)
     DELETE FROM customer WHERE customer_code = 'QAUC01';
     INSERT INTO customer (customer_code, customer_name, phone_number, record_status)
@@ -405,6 +414,72 @@ try {
     );
     stamped(security[0]!, U.clerk, { permission: true });
     assert.ok(security[0]!.entity_id === id || security[0]!.entity_no === 'QAUJ01', JSON.stringify(security[0]));
+  });
+
+  console.log('\n5c. refusals past the guards are DENIED too: a special right, an account switched off or signed out');
+  await test('POST /api/sale-orders/{id}/approve without SO Approve → 403, one DENIED line (permission SO Approve) naming the order', async () => {
+    const [{ id }] = await Q<{ id: string }>("SELECT id::text FROM sale_order WHERE sale_order_no = 'QAUSO01'");
+    const m = await mark();
+    const res = await approveRoute.POST(
+      await request(`/api/sale-orders/${id}/approve`, { method: 'POST', body: { decision: 'approve' }, as: U.seller }),
+      { params: Promise.resolve({ id }) },
+    );
+    assert.equal(res.status, 403, JSON.stringify(await res.clone().json()));
+    const { audit, security } = await since(m);
+    assert.equal(audit.length, 0);
+    assert.deepEqual(
+      security.map((r) => [r.ev, r.result, r.actor_pk, r.permission, r.entity, r.entity_id]),
+      [['DENIED', 'DENIED', U.seller.pk, 'SO Approve', 'sale_order', id]],
+    );
+    stamped(security[0]!, U.seller);
+    const [{ ap }] = await Q<{ ap: number }>(
+      "SELECT approve_status_id ap FROM sale_order WHERE sale_order_no = 'QAUSO01'",
+    );
+    assert.equal(ap, 2, 'still waiting');
+  });
+  /** the editor's customer save, refused before any write */
+  const editorSave = async () =>
+    customersRoute.POST(
+      await request('/api/customers', {
+        method: 'POST',
+        as: U.editor,
+        body: { code: 'QAUC01', name: `QAU renamed ${rand}`, phone: '02-965-0001' },
+      }),
+    );
+  await test('a save by a user set INACTIVE since their last request → 403, nothing saved, one DENIED line (account)', async () => {
+    await reset();
+    const before = await customerRow();
+    await Q("UPDATE app_user SET record_status = 'INACTIVE' WHERE pk = $1", [U.editor.pk]);
+    invalidateUserCache(U.editor.email);
+    const m = await mark();
+    const res = await editorSave();
+    assert.equal(res.status, 403);
+    assert.equal(((await res.json()) as { error: string }).error, 'บัญชีนี้ถูกปิดการใช้งาน');
+    assert.deepEqual(await customerRow(), before);
+    const { audit, security } = await since(m);
+    assert.equal(audit.length, 0);
+    assert.deepEqual(
+      security.map((r) => [r.ev, r.result, r.actor_pk, r.permission]),
+      [['DENIED', 'DENIED', U.editor.pk, 'account']],
+    );
+    stamped(security[0]!, U.editor);
+  });
+  await test('a save on a session signed out elsewhere (session_version moved) → 401, nothing saved, one DENIED line (session)', async () => {
+    await reset();
+    const before = await customerRow();
+    await Q('UPDATE app_user SET session_version = session_version + 1 WHERE pk = $1', [U.editor.pk]);
+    invalidateUserCache(U.editor.email);
+    const m = await mark();
+    const res = await editorSave();
+    assert.equal(res.status, 401);
+    assert.deepEqual(await customerRow(), before);
+    const { audit, security } = await since(m);
+    assert.equal(audit.length, 0);
+    assert.deepEqual(
+      security.map((r) => [r.ev, r.result, r.actor_pk, r.permission]),
+      [['DENIED', 'DENIED', U.editor.pk, 'session']],
+    );
+    stamped(security[0]!, U.editor);
   });
 
   console.log('\n6. append-only + hashed');

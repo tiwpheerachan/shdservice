@@ -15311,6 +15311,129 @@
         }
       }
     },
+    "/me/denied": {
+      "post": {
+        "tags": [
+          "Sign-in"
+        ],
+        "summary": "Report a page the signed-in user was turned away from (the page guard runs in the browser)",
+        "description": "Any approved user. Re-checked against the role's current grants: a page the role may open logs nothing; one it may not → security_log DENIED (at most once a minute per user and page module).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^\\/",
+                    "example": "/admin/users"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Noted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input: `invalid_json`, or a form rule failed — `error` = \"กรอกข้อมูลไม่ครบ N ช่อง\" and `details.fields` = { field: message }.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 1 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (the CSRF rule: no form posts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/me/tour": {
       "post": {
         "tags": [

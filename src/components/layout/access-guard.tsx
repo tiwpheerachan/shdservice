@@ -34,6 +34,13 @@ export function AccessGuard() {
   // enforces the same grants on every write regardless.
   React.useEffect(() => {
     if (canPath(pathname)) return;
+    // the server logs the refusal (security_log DENIED; it re-checks with its own grants) — best effort
+    void fetch('/api/me/denied', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: pathname.slice(0, 200) }),
+      keepalive: true,
+    }).catch(() => undefined);
     const page = findBreadcrumb(pathname);
     push({
       kind: 'warning',

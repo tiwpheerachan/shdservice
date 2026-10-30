@@ -180,6 +180,14 @@ export const mainSymptomPk = sql<
 export const AGREED_QUOTATION_STATUSES: number[] = [QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS];
 export const agreedQuotationPk = sql<number | null>`coalesce((select q.pk from quotation q where q.job_pk = ${job.pk}
   and q.quotation_status_id in (${sql.raw(AGREED_QUOTATION_STATUSES.join(', '))})), ${job.approvedQuotationPk})`;
+/**
+ * A form's date / timestamp for a timestamp column, or NULL: a new row's "not yet" is NULL (the 1900-01-01 placeholder
+ * stays on legacy rows only — every reader treats both as "no date": isSentinelDate, `> '1901-01-01'`)
+ */
+const tsOrNull = (v: unknown): string | null => {
+  const t = dateOrSentinel(v);
+  return t === SENTINEL_TS ? null : t;
+};
 /** the job's model is called `name` (jobModelName, no join needed) */
 export const jobModelIs = (name: string) =>
   sql`coalesce((select nullif(btrim(m.model_name), '') from model m where m.pk = ${job.modelPk}), ${job.productModelName}) = ${name}`;
@@ -446,7 +454,7 @@ async function setStatus(
           .from(job)
           .where(eq(job.jobNo, jobNo))
       : [];
-  if (reopened) Object.assign(extra, { jobClosedDate: SENTINEL_TS, closedByAppUserPk: null });
+  if (reopened) Object.assign(extra, { jobClosedDate: null, closedByAppUserPk: null });
   await tx
     .update(job)
     .set({ jobStatusId: statusId, ...extra })
@@ -456,7 +464,7 @@ async function setStatus(
   // the stamps this change wrote are in its history row too (people's names, never a pk)
   if (was && reopened)
     Object.assign(entry.changes!, {
-      jobClosedDate: [was.d, SENTINEL_TS],
+      jobClosedDate: [was.d, null],
       jobClosedBy: await userPair(tx, was.by, null),
     });
   if (was && group === REPAIRED_GROUP)
@@ -1868,15 +1876,13 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
         // through their relations — the legacy snapshot columns stay NULL
         documentProfilePk: profile.pk,
         customerPk: cust.key,
-        customerDueDate: dateOrSentinel(i.dueDate),
+        customerDueDate: tsOrNull(i.dueDate),
         dueDateSetByUser: true, // required on a new job — the user picked it
         jobCreateDate: now,
         createdByAppUserPk: byUserId,
         jobTypePk: lk.jobTypeId,
         jobTypeDetail: clean(i.jobTypeDetail),
         jobStatusId: JS.NEW,
-        jobRepairedDate: SENTINEL_TS,
-        jobClosedDate: SENTINEL_TS,
         productImeiNo: cleanCode(i.imei),
         productSerial: cleanSerial(i.serial),
         productTypePk: lk.productTypeId ?? null,
@@ -1902,7 +1908,6 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
         jobPaymentNo: '',
         jobPaymentAmount: '0.00',
         jobPaymentDetail: '',
-        jobReturnDate: SENTINEL_TS,
         returnCustomerType: '',
         returnCustomerTrackingNo: '',
         returnCustomerDetail: '',
@@ -1994,7 +1999,7 @@ async function applyJobEdit(
     // the due date is written (and becomes "picked by a user") only when it was changed: saving
     // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
     ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
-      ? { customerDueDate: dateOrSentinel(i.dueDate), dueDateSetByUser: true }
+      ? { customerDueDate: tsOrNull(i.dueDate), dueDateSetByUser: true }
       : {}),
     ...(lk.jobTypeId ? { jobTypePk: lk.jobTypeId } : {}),
     jobTypeDetail: clean(i.jobTypeDetail),
@@ -2494,9 +2499,7 @@ async function syncPartLines(
       requestDate: nowThai(),
       requestedByAppUserPk: byUserId,
       grantQty: 0,
-      grantDate: SENTINEL_TS,
       returnQty: 0,
-      returnDate: SENTINEL_TS,
     });
     if (values.isSpecial) newRequests = true;
     logPart(null, `+ ${partText(str(p.code), values)}`);
@@ -2706,14 +2709,14 @@ async function writeSendRow(
     await tx
       .update(jobOutsource)
       .set({
-        receiveDate: dateOrSentinel(i.receive.date ?? nowThai()),
+        receiveDate: tsOrNull(i.receive.date) ?? nowThai(),
         receivedByAppUserPk: receiveBy,
         receiveDetail: cleanText(i.receive.detail),
       })
       .where(eq(jobOutsource.pk, open.pk));
     // back from out-source = repaired (the receive form has no "not repaired" outcome): without this
     // the job is closed with job_repaired_date 1900 and drops out of the repair reports
-    const stamped = await stampRepairedIfMissing(tx, jobNo, dateOrSentinel(i.receive.date ?? nowThai()), byUserId);
+    const stamped = await stampRepairedIfMissing(tx, jobNo, tsOrNull(i.receive.date) ?? nowThai(), byUserId);
     return { implied: JS.OUTSOURCE_RECEIVED, stamped };
   } else if (i.send?.to) {
     // the page sends the send block again after the receive (+ the receive block, its note may be edited):
@@ -2732,11 +2735,11 @@ async function writeSendRow(
         .set({
           sendToName: clean(i.send.to),
           sendDetail: cleanText(i.send.detail),
-          sendDate: dateOrSentinel(i.send.date ?? nowThai()),
+          sendDate: tsOrNull(i.send.date) ?? nowThai(),
           sentByAppUserPk: sendBy,
           ...(again && back && i.receive
             ? {
-                receiveDate: dateOrSentinel(i.receive.date),
+                receiveDate: tsOrNull(i.receive.date),
                 receivedByAppUserPk: receiveBy,
                 receiveDetail: cleanText(i.receive.detail),
               }
@@ -2748,9 +2751,8 @@ async function writeSendRow(
         jobPk,
         sendToName: clean(i.send.to),
         sendDetail: cleanText(i.send.detail),
-        sendDate: dateOrSentinel(i.send.date ?? nowThai()),
+        sendDate: tsOrNull(i.send.date) ?? nowThai(),
         sentByAppUserPk: sendBy,
-        receiveDate: SENTINEL_TS,
         receiveDetail: '',
       });
     }
@@ -3059,7 +3061,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
           : {}),
       ...(ret.type || ret.tracking || ret.date
         ? {
-            jobReturnDate: dateOrSentinel(ret.date ?? nowThai()),
+            jobReturnDate: tsOrNull(ret.date) ?? nowThai(),
             returnCustomerType: clean(ret.type).slice(0, 50), // a list value — safety net
             returnCustomerTrackingNo: cleanTracking(ret.tracking),
             returnCustomerDetail: returnNote,

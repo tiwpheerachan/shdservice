@@ -400,7 +400,7 @@ try {
   await test('Finished → ซ่อมเสร็จ: job_closed_date back to 1900, no closer, both in the STATUS history row', async () => {
     await saveRepair(J(11), { status: await statusName(5) }, U.admin.id);
     const j = await jobRow(J(11));
-    assert.deepEqual([j.s, j.closed, j.closedBy], [5, '1900-01-01 00:00', null]);
+    assert.deepEqual([j.s, j.closed, j.closedBy], [5, null, null]);
     const { c } = await one<{ c: Record<string, unknown> }>(
       sql`SELECT changes AS c FROM audit_log WHERE entity = 'job' AND entity_key = ${J(11)} AND action = 'STATUS' ORDER BY pk DESC LIMIT 1`,
     );

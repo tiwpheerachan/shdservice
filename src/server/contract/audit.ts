@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isRealDate } from '@/lib/validation';
-import { RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, page } from './common';
+import { JSON_BODY, Ok, RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResponse, page } from './common';
 import { defineOperation } from './registry';
 import { AuditRow } from './shapes';
 
@@ -60,4 +60,17 @@ export const auditList = defineOperation({
     action: opt('exact (CREATE, UPDATE, …)'),
   }),
   responses: { 200: jsonResponse('One page.', page(AuditLogRow)), ...RESPONSES },
+});
+
+export const mePageDenied = defineOperation({
+  method: 'post',
+  path: '/me/denied',
+  tags: ['Sign-in'],
+  summary: 'Report a page the signed-in user was turned away from (the page guard runs in the browser)',
+  description:
+    "Any approved user. Re-checked against the role's current grants: a page the role may open logs nothing; one it may not → security_log DENIED (at most once a minute per user and page module).",
+  body: z.object({
+    path: s.max(200).regex(/^\//, 'path').meta({ example: '/admin/users' }),
+  }),
+  responses: { 200: jsonResponse('Noted.', Ok), ...SIGNED_IN, ...JSON_BODY, ...RATE_LIMITED },
 });

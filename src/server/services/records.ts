@@ -7,7 +7,7 @@ import type { Module } from '@/lib/modules';
 import { JS, PART } from '@/lib/status-ids';
 import { HttpError, fullName, invalidateUserCache } from '@/server/auth';
 import { audit, isUuid } from '@/server/audit';
-import { nowThai, SENTINEL_TS } from '@/server/mappers/format';
+import { nowThai } from '@/server/mappers/format';
 import { clean } from '@/lib/validation';
 import { RS, statusStamp, statusSummary, type RecordStatus } from '@/server/record-status';
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from './masters';
@@ -216,7 +216,7 @@ export async function setRecordStatus(
             .set(
               rs === RS.DELETED
                 ? { ...stamp, cancelDate: nowThai(), cancelledByAppUserPk: byUserId }
-                : { ...stamp, cancelDate: SENTINEL_TS, cancelledByAppUserPk: null, cancelRemark: '' },
+                : { ...stamp, cancelDate: null, cancelledByAppUserPk: null, cancelRemark: '' },
             )
             .where(eq(product.pk, pk));
         await log(tx, old);
@@ -381,7 +381,7 @@ export async function setRecordStatus(
                   }
                 : {
                     ...statusStamp(rs, byUserId),
-                    documentCancelDate: SENTINEL_TS,
+                    documentCancelDate: null,
                     cancelledByAppUserPk: null,
                     documentCancelRemark: '',
                   },

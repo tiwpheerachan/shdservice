@@ -28,7 +28,9 @@ export type Denied = {
   reason: string;
   permission: string | null;
   role: string | null;
-  at: 'guard' | 'write' | 'legacy';
+  at: 'guard' | 'write' | 'legacy' | 'page';
+  /** who, when the request's user was never set (an inactive / signed-out account) */
+  actorPk?: number;
   entity?: string;
   pk?: number;
   id?: string;
@@ -49,6 +51,10 @@ export type RequestCtx = {
   needs: Need[];
   /** set by assertActor() when it refused; checked() writes the DENIED security_log row once the tx rolled back */
   denied?: Denied;
+  /** a refusal was already considered for the log (written, or left out by the throttle) — handle() adds none */
+  deniedSeen?: boolean;
+  /** the last right / grant hasRight() / can() answered no to — names the permission of a 403 a service throws */
+  refused?: string;
 };
 
 const als = new AsyncLocalStorage<RequestCtx>();
@@ -122,19 +128,33 @@ export function setRequestSession(email: string, iat: number) {
  *  user + permission, so a screen polling what it may not see cannot fill the log.
  *  ponytail: per process (one Render instance) */
 const lastDenied = new Map<string, number>();
-export function guardDenied(user: CurrentUser, permission: string, reason: string) {
+export function guardDenied(
+  user: Pick<CurrentUser, 'pk' | 'userType'>,
+  permission: string,
+  reason: string,
+  at: Denied['at'] = 'guard',
+) {
   const c = als.getStore();
   if (!c) return;
+  c.deniedSeen = true;
   const key = `${user.pk}|${permission}`;
   const now = Date.now();
   if (now - (lastDenied.get(key) ?? 0) < 60_000) return;
   if (lastDenied.size > 10_000) lastDenied.clear();
   lastDenied.set(key, now);
-  c.denied = { reason, permission, role: user.userType, at: 'guard' };
+  c.denied = { reason, permission, role: user.userType, at, actorPk: user.pk };
+}
+
+/** hasRight() / can() said no for the request's own user: a 403 the caller throws next names this permission */
+export function refused(user: unknown, permission: string) {
+  const c = als.getStore();
+  if (c?.user && c.user === user) c.refused = permission;
 }
 
 /** a refusal checked() logs as DENIED once the request ends (the first one of the request) */
 export function markDenied(d: Denied) {
   const c = als.getStore();
-  if (c && !c.denied) c.denied = d;
+  if (!c) return;
+  c.deniedSeen = true;
+  if (!c.denied) c.denied = d;
 }

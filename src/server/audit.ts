@@ -215,6 +215,7 @@ export function assertActor(tx: Tx): Promise<void> {
       if (failed) why = 'สิทธิ์ของบัญชีนี้ถูกเปลี่ยน';
     }
     if (why) {
+      c.deniedSeen = true;
       c.denied = {
         reason: why,
         permission: permissionOf(failed ? [failed] : c.needs),
@@ -485,7 +486,7 @@ export async function logDenied(): Promise<void> {
     // the record: the refusal's own, else the one the URL names (/api/jobs/{id}/…)
     const named = d.entity ? { ...d, entity: d.entity } : recordInPath(c.path);
     const row = named ? await rowOf(db, named.entity, named).catch(() => null) : null;
-    await security(db, c.user?.pk ?? null, {
+    await security(db, d.actorPk ?? c.user?.pk ?? null, {
       event: 'DENIED',
       result: 'DENIED',
       permission: d.permission,

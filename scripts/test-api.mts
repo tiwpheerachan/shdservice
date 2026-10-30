@@ -134,7 +134,7 @@ type LogRow = {
   entity_id: string | null;
 };
 /** bookkeeping, not a change of data: the public /track, the tutorial state, the video upload's first step */
-const UNLOGGED = [/^\/api\/track\//, /^\/api\/me\/tour$/, /^POST \/api\/attachments\/video$/];
+const UNLOGGED = [/^\/api\/track\//, /^\/api\/me\/(tour|denied)$/, /^POST \/api\/attachments\/video$/];
 /** a non-GET that answered 2xx wrote audit_log (or security_log: sign-in / out, print, role / permission / status) rows
  *  naming the caller as at the time, the request and the row; anything refused wrote no audit_log row. An export
  *  (GET /api/export/…) writes one security_log EXPORT and no audit_log row. */
@@ -494,6 +494,21 @@ try {
     assert.ok(Array.isArray(r.body.values));
     const other = await call('/api/jobs/suggestions?field=nope&q=a');
     assert.deepEqual([other.status, other.body.values], [200, []]);
+  });
+  await test('POST /api/me/denied → 200: a page the role may not open is logged (DENIED), one it may is not', async () => {
+    const m = await logMarks();
+    assert.equal(
+      (await call('/api/me/denied', { method: 'POST', body: { path: '/admin/users' }, as: VIEWER })).status,
+      200,
+    );
+    const [{ n }] = (
+      await pool.query<{ n: number }>(
+        `SELECT count(*)::int n FROM security_log WHERE pk > $1 AND event = 'DENIED' AND permission = 'page System Admin'`,
+        [m.s],
+      )
+    ).rows;
+    assert.equal(n, 1);
+    assert.equal((await call('/api/me/denied', { method: 'POST', body: { path: 'admin' } })).status, 400);
   });
   await test('POST /api/me/tour → 200: a page answered, then never ask again (kept per account)', async () => {
     assert.equal((await call('/api/me/tour', { method: 'POST', body: { seen: '/jobs/new' } })).status, 200);
