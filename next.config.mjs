@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Cloudflare compresses at the edge (zstd / brotli / gzip, whatever the browser takes — docs/cloudflare-cdn.md);
+  // gzip from here would be passed through as gzip. Every request comes through Cloudflare (origin auth).
+  compress: false,
   // nothing uses next/image — keep /_next/image (and its SSRF/cache advisories) switched off
   images: { unoptimized: true },
   // the proxy buffers request bodies and SILENTLY truncates past this (default 10mb) —
@@ -43,8 +46,9 @@ const nextConfig = {
       // public/ images (logos, login hero) — Next serves them with max-age=0, so every page
       // re-validated them. Names are NOT content-hashed → not immutable: 1 day fresh, then a
       // week of stale-while-revalidate so a replaced logo shows up within a day. Top-level only.
+      // The same for /manifest.webmanifest (the same bytes for everyone, no login — src/proxy.ts).
       {
-        source: '/:file([^/]+\\.(?:png|jpe?g|svg|ico|webp))',
+        source: '/:file([^/]+\\.(?:png|jpe?g|svg|ico|webp|webmanifest))',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }],
       },
     ];

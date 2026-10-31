@@ -8,7 +8,7 @@ import { safeNext, DEFAULT_AFTER_LOGIN } from '../src/lib/sso.ts';
 import { safePath } from '../src/lib/log.ts';
 import { hostCookie, SESSION_COOKIE } from '../src/lib/session.ts';
 import { NextRequest } from 'next/server';
-import { proxy } from '../src/proxy.ts';
+import { proxy, config as proxyConfig } from '../src/proxy.ts';
 import { BYPASS_COOKIE } from '../src/lib/maintenance.ts';
 import { THEME_SCRIPT } from '../src/lib/theme-script-source.ts';
 
@@ -216,6 +216,33 @@ console.log('\nMaintenance mode (src/proxy.ts → src/lib/maintenance.ts)');
     delete env.MAINTENANCE_MODE;
     delete env.MAINTENANCE_UNTIL;
     delete env.MAINTENANCE_BYPASS_SECRET;
+  }
+}
+
+console.log('\nPublic files and the media CDN in the CSP (src/proxy.ts)');
+{
+  const env = process.env as Record<string, string | undefined>;
+  const req = (path: string) => proxy(new NextRequest(`https://app.example${path}`));
+  try {
+    // the manifest: no login redirect, and the proxy does not even run for it (like public/ images)
+    assert.equal((await req('/manifest.webmanifest')).status, 200);
+    const skip = new RegExp(`^${proxyConfig.matcher[0]!.replace('/(', '(')}$`);
+    assert.ok(!skip.test('manifest.webmanifest') && !skip.test('logo.png'), 'matcher skips public files');
+    assert.ok(skip.test('jobs/manifest.webmanifest') && skip.test('api/files'), 'matcher still guards the rest');
+    const mediaSrc = async () =>
+      /media-src ([^;]*)/.exec((await req('/track/AbC123')).headers.get('content-security-policy') ?? '')?.[1];
+    delete env.MEDIA_BASE_URL;
+    assert.equal(await mediaSrc(), "'self' blob:");
+    env.MEDIA_BASE_URL = 'https://media.example.test/';
+    assert.equal(await mediaSrc(), "'self' blob: https://media.example.test");
+    env.MEDIA_BASE_URL = 'javascript:alert(1)';
+    assert.equal(await mediaSrc(), "'self' blob:");
+    console.log('  ✓ manifest public, media origin in media-src only when it is an https URL');
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ ${(e as Error).message}`);
+  } finally {
+    delete env.MEDIA_BASE_URL;
   }
 }
 

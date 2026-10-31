@@ -30,18 +30,18 @@ import {
 export const config = {
   // /api/health stays reachable for Render's health check (it calls the origin directly).
   // Static files skip the proxy too: /_next/static (hashed build output), /_next/image (off —
-  // images.unoptimized), favicon/robots and top-level images (= public/). Safe for origin auth:
+  // images.unoptimized), favicon/robots, top-level images and the web app manifest (= public/). Safe for origin auth:
   // they are the same public bytes for everyone, carry no data and run no app code, and
   // Cloudflare still fronts them in production. The image pattern is top-level only
   // ([^/]+ before the extension), so /api/files/x.png and every page stay behind the guard.
   matcher: [
-    '/((?!api/health(?:/|$)|_next/static/|_next/image(?:/|$)|favicon\\.ico$|robots\\.txt$|[^/]+\\.(?:png|jpe?g|svg|ico|webp)$).*)',
+    '/((?!api/health(?:/|$)|_next/static/|_next/image(?:/|$)|favicon\\.ico$|robots\\.txt$|[^/]+\\.(?:png|jpe?g|svg|ico|webp|webmanifest)$).*)',
   ],
 };
 
 /** paths the login gate used to skip (the previous matcher); images top-level only, like `matcher` */
 const PUBLIC_PATH =
-  /^\/(?:api(?:\/|$)|_next\/static|_next\/image|login(?:\/|$)|track(?:\/|$)|favicon\.ico$|robots\.txt$|[^/]+\.(?:png|jpe?g|svg|ico|webp)$)/i;
+  /^\/(?:api(?:\/|$)|_next\/static|_next\/image|login(?:\/|$)|track(?:\/|$)|favicon\.ico$|robots\.txt$|[^/]+\.(?:png|jpe?g|svg|ico|webp|webmanifest)$)/i;
 /** public tracking pages (not /api/track — those are JSON and set their own headers) */
 const TRACK_PAGE = /^\/track(?:\/|$)/;
 
@@ -102,13 +102,16 @@ async function withCsp(request: NextRequest, track: boolean): Promise<NextRespon
   const storage = URL.parse(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')?.origin ?? '';
   const r2Account = (process.env.R2_ACCOUNT_ID ?? '').trim();
   const r2 = /^[0-9a-z-]+$/i.test(r2Account) ? `https://${r2Account}.r2.cloudflarestorage.com` : '';
+  // …or through the media Worker's edge cache when MEDIA_BASE_URL is set (storage.ts mediaEnv); thumbnails: img-src https:
+  const mediaUrl = URL.parse((process.env.MEDIA_BASE_URL ?? '').trim());
+  const media = mediaUrl?.protocol === 'https:' ? mediaUrl.origin : '';
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' ${await themeScriptHash()} 'strict-dynamic'${track ? ` ${turnstile}` : ''}${dev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    `media-src 'self' blob: ${[storage, r2].filter(Boolean).join(' ')}`.trim(),
+    `media-src 'self' blob: ${[storage, r2, media].filter(Boolean).join(' ')}`.trim(),
     `connect-src 'self' ${r2}`.trim(),
     ...(track ? [`frame-src ${turnstile}`] : []),
     "object-src 'none'",

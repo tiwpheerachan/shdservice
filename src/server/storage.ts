@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 import { isoDateTime } from '@/lib/dates';
 import { HttpError } from '@/server/http-error';
 import { logError } from '@/lib/log';
+import { mediaUrl } from '../../workers/media/src/media';
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -256,6 +257,16 @@ function r2(path: string) {
   const url = new URL(`https://${r2Env('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com/${r2Env('R2_BUCKET')}/${path}`);
   return { client: r2Client, url };
 }
+/**
+ * MEDIA_BASE_URL + MEDIA_SIGNING_KEY both set: an R2 object is played (not downloaded) through the media Worker —
+ * Cloudflare's edge cache, workers/media, docs/cloudflare-cdn.md — with a link signed here, same lifetime. Unset (dev,
+ * CI, until the Worker is deployed) → the presigned R2 URL, as before.
+ */
+function mediaEnv() {
+  const base = (process.env.MEDIA_BASE_URL ?? '').trim();
+  const key = (process.env.MEDIA_SIGNING_KEY ?? '').trim();
+  return base && key ? { base, key } : null;
+}
 /** a presigned R2 URL (the query carries the signature and `X-Amz-Expires`) */
 const r2Presign = async (client: AwsClient, url: URL, init: RequestInit) =>
   (await client.sign(url, { ...init, aws: { signQuery: true, allHeaders: true } })).url;
@@ -365,6 +376,8 @@ export async function signedUrl(
   download: boolean | string = false,
 ): Promise<string | null> {
   if (onR2(path)) {
+    const media = !download && mediaEnv();
+    if (media) return mediaUrl(media.base, media.key, path, seconds);
     const { client, url } = r2(path);
     url.searchParams.set('X-Amz-Expires', String(seconds));
     if (download) {

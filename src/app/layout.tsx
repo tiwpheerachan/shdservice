@@ -25,6 +25,7 @@ export const metadata: Metadata = {
   description: 'ระบบบริหารงานบริการและงานซ่อม — OneService by SHD Technology',
   // internal staff system: nothing here is meant for search engines
   robots: { index: false, follow: false },
+  manifest: '/manifest.webmanifest', // public/ — no login, cached a day (next.config.mjs)
 };
 
 export const viewport: Viewport = {

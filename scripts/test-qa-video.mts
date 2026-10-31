@@ -14,6 +14,7 @@ import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { AwsV4Signer } from 'aws4fetch';
 import { TEST_DATABASE_URL, assertLocal } from '../tests/db-url.mts';
+import { mediaSigOk } from '../workers/media/src/media.ts';
 
 const MP4 = new Uint8Array([0, 0, 0, 0x20, ...new TextEncoder().encode('ftypisom'), 0, 0, 2, 0, 0, 0, 0]);
 if (process.argv[2] === 'client') {
@@ -519,6 +520,57 @@ await test('an R2 video: a presigned GET for 15 minutes (download=1 → attachme
     (await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(file)}`, { as: VIEWER })).status,
     307,
   );
+});
+await test('MEDIA_BASE_URL + MEDIA_SIGNING_KEY: R2 plays through the media Worker (its signature), nothing else', async () => {
+  const MEDIA = 'https://media.qv.test';
+  const KEY = 'qv-media-signing-key-0123456789abcdef';
+  const verify = (location: string) => {
+    const u = new URL(location);
+    return mediaSigOk(
+      KEY,
+      decodeURIComponent(u.pathname.slice(1)),
+      u.searchParams.get('exp'),
+      u.searchParams.get('sig'),
+    );
+  };
+  const file = [...r2.keys()].find((p) => r2.has(`${p}.jpg`))!;
+  const fresh = `v20261031090000${'cd'.repeat(10)}.webm`; // a thumbnail not yet in the day-long cache
+  const freshId = await attach(fresh, 'ACTIVE', 'คลิปใหม่.webm');
+  stored.set(path('legacy-clip.mp4'), { bytes: MP4, type: 'video/mp4' });
+  for (const only of [{ MEDIA_BASE_URL: MEDIA }, { MEDIA_SIGNING_KEY: KEY }]) {
+    Object.assign(process.env, only); // one alone → as before
+    const r = await open(file);
+    assert.ok(r.location.startsWith(`${R2_OBJECTS}${file}?`), r.location);
+    delete process.env.MEDIA_BASE_URL;
+    delete process.env.MEDIA_SIGNING_KEY;
+  }
+  Object.assign(process.env, { MEDIA_BASE_URL: `${MEDIA}/`, MEDIA_SIGNING_KEY: KEY });
+  try {
+    r2Calls.length = 0;
+    const play = await open(file);
+    const thumb = await open(path(`${fresh}.jpg`));
+    const viaId = await call(attachmentRoute.GET as never, `/api/attachments/${freshId}`, { params: { id: freshId } });
+    for (const [r, f, ttl] of [
+      [play, file, 900],
+      [thumb, path(`${fresh}.jpg`), 86400],
+      [viaId, path(fresh), 900],
+    ] as const) {
+      const u = new URL(r.location);
+      assert.equal(r.status, 307);
+      assert.equal(u.origin + decodeURIComponent(u.pathname), `${MEDIA}/${f}`);
+      assert.ok(await verify(r.location), r.location);
+      assert.ok(Math.abs(Number(u.searchParams.get('exp')) - Date.now() / 1000 - ttl) < 5);
+    }
+    assert.equal(play.cache, 'private, max-age=840');
+    assert.deepEqual(r2Calls, []); // nothing asked of R2 to sign a media link
+    // a download keeps the presigned R2 URL (it names the file); Supabase files are untouched
+    const down = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(file)}&download=1`);
+    assert.ok(down.location.startsWith(`${R2_OBJECTS}${file}?`), down.location);
+    assert.ok((await open(path('legacy-clip.mp4'))).location.startsWith(`${api}/object/sign/${BUCKET}/`));
+  } finally {
+    delete process.env.MEDIA_BASE_URL;
+    delete process.env.MEDIA_SIGNING_KEY;
+  }
 });
 await test('a legacy .mp4 (and an older name without the v) still opens from Supabase, 15 minutes', async () => {
   await attach('20261001090000abcdef0123456789abcd.mp4', 'ACTIVE', 'a&b #1.mp4');

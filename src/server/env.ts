@@ -43,6 +43,13 @@ export function envProblems(): { required: string[]; optional: string[] } {
   const r2 = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'].filter((k) => !has(k));
   if (r2.length)
     optional.push(`${r2.join(' / ')} missing — no video attachments (Cloudflare R2; the video API answers 503)`);
+  // the media Worker (workers/media, docs/cloudflare-cdn.md): both or neither — one alone = videos from R2 directly
+  if (has('MEDIA_BASE_URL') !== has('MEDIA_SIGNING_KEY'))
+    optional.push('only one of MEDIA_BASE_URL / MEDIA_SIGNING_KEY set — videos skip the media CDN (presigned R2)');
+  if (has('MEDIA_BASE_URL') && !/^https:\/\/[^/]+\/?$/.test((env.MEDIA_BASE_URL ?? '').trim()))
+    optional.push('MEDIA_BASE_URL must be an https origin only (no path) — the CSP will not allow its videos');
+  if (has('MEDIA_SIGNING_KEY') && (env.MEDIA_SIGNING_KEY ?? '').trim().length < 32)
+    optional.push('MEDIA_SIGNING_KEY shorter than 32 characters — use openssl rand -hex 32');
   want('CENTRAL_API_KEY', 'no directory profile / staff search');
   want('TURNSTILE_SECRET_KEY', 'public tracking closed');
   want('NEXT_PUBLIC_TURNSTILE_SITE_KEY', 'public tracking closed');
