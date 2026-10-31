@@ -1,0 +1,197 @@
+# Every pull request and every push to yuu (the branch Render deploys): the checks
+# on a clean machine. Nothing here deploys. Render waits for this run only when its
+# dashboard has Auto-Deploy = "After CI Checks Pass" (render.yaml is not synced).
+#
+# The database is a throwaway postgres:17 (same as tests/docker-compose.yml). CI has
+# no secrets and needs none: the tests refuse anything but a local database, and the
+# startup env check only runs in `next start`, not in the build. (Modelled on OneLink.)
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [yuu]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: oneservice_test
+          LANG: en_US.utf8
+          POSTGRES_INITDB_ARGS: --locale=en_US.UTF-8 --encoding=UTF8
+          TZ: Asia/Bangkok
+        ports:
+          - 55442:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d oneservice_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      TZ: Asia/Bangkok
+      TEST_DATABASE_URL: postgresql://postgres:test@127.0.0.1:55442/oneservice_test
+      NEXT_TELEMETRY_DISABLED: '1'
+      PUPPETEER_SKIP_DOWNLOAD: 'true' # @hrefcl/apidoc (npm run docs:api) depends on puppeteer; no browser is needed
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # then wipe (scripts/db-wipe.sql, `-- --reset`) and migrate again from nothing: a database drizzle/0006
+      # converted is rebuilt, never re-migrated in place (ADR 0008 decision 12) — and the wipe must leave nothing behind
+      - name: Migrations (empty database, then wipe and migrate again)
+        run: npm run db:test:prepare && npm run db:test:prepare -- --reset
+
+      - name: Database tests
+        run: npm run test:db
+
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=moderate
+
+      # Last and slowest. Pointed at the CI database so nothing can reach a real one.
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+  # Browser tests (playwright.config.ts): a production build in chromium against a throwaway
+  # postgres:17 and a fake SSO — every spec on a desktop, a phone (Pixel 7) and a tablet (iPad
+  # gen 7) viewport; all three are chromium (no WebKit: see the config). One job per viewport, side
+  # by side, each with its own database: the whole run (the บทสอน walk of every page included) is
+  # ~20 min on one runner. Its own job so `check` stays fast. No env file is read and a non-local
+  # database is refused (tests/e2e/support/env.ts). (Modelled on OneLink.)
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, phone, tablet]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: oneservice_test
+          LANG: en_US.utf8
+          POSTGRES_INITDB_ARGS: --locale=en_US.UTF-8 --encoding=UTF8
+          TZ: Asia/Bangkok
+        ports:
+          - 55442:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d oneservice_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      TZ: Asia/Bangkok
+      TEST_DATABASE_URL: postgresql://postgres:test@127.0.0.1:55442/oneservice_test
+      NEXT_TELEMETRY_DISABLED: '1'
+      PUPPETEER_SKIP_DOWNLOAD: 'true' # @hrefcl/apidoc (npm run docs:api) depends on puppeteer; no browser is needed
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Migrations
+        run: npm run db:test:prepare
+
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # browsers come from the cache; their system libraries are not cached and install every time
+      - name: Install chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E
+        run: npm run e2e -- --project=${{ matrix.project }}
+
+      # traces hold the (fake-SSO, test-only) session cookies — kept 7 days
+      - name: Upload report and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # gitleaks over every commit. The pinned release binary is checked against its
+  # published SHA-256 (gitleaks-action needs a paid licence for org repos).
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        env:
+          VERSION: 8.30.1
+          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSLo gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+
+      - name: Gitleaks
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --no-banner --ignore-gitleaks-allow -v .'

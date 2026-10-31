@@ -1,22 +1,148 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* screen only: printing from dark mode prints the light palette (dark text on white paper) */
+@custom-variant dark {
+  @media screen {
+    &:where(.dark, .dark *) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-soft: hsl(var(--primary-soft));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-soft: hsl(var(--success-soft));
+  --color-warning: hsl(var(--warning));
+  --color-warning-soft: hsl(var(--warning-soft));
+  --color-danger: hsl(var(--danger));
+  --color-danger-soft: hsl(var(--danger-soft));
+  --color-info: hsl(var(--info));
+  --color-info-soft: hsl(var(--info-soft));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-muted: hsl(var(--sidebar-muted));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+
+  /* shadcn token names mapped onto the app palette (raw shadcn components in
+     components/shadcn use these; the app kit in components/ui uses the names above) */
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--card-foreground));
+  --color-secondary: hsl(var(--muted));
+  --color-secondary-foreground: hsl(var(--foreground));
+  --color-destructive: hsl(var(--danger));
+  --color-destructive-foreground: #fff;
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: var(--font-noto-thai), 'Noto Sans Thai', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-pop: 0 10px 30px -10px rgb(0 0 0 / 0.25);
+
+  --animate-fade-in: fade-in 0.18s ease-out;
+  --animate-slide-up: slide-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-scale-in: scale-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+@utility surface {
+  @apply bg-card text-card-foreground border border-border rounded-lg shadow-card;
+}
+
+@utility table-scroll {
+  @apply overflow-x-auto rounded-lg;
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* SHD brand gradient (logo blue → green) — buttons run it left→right with [--brand-angle:90deg] */
+@utility bg-brand {
+  background: linear-gradient(var(--brand-angle, 135deg), #43a6f8, #55d5a1);
+}
+
+/* the same gradient (hues kept, lightness lowered) under WHITE TEXT: ≥ 5.5:1 at every point, ≥ 4.5:1 at
+   hover:opacity-90 (bg-brand: 1.8–2.6:1). Decoration without text keeps bg-brand. Revert: bg-brand's stops */
+@utility bg-brand-ink {
+  background: linear-gradient(var(--brand-angle, 135deg), #076abc, #1d7652);
+}
+
+@utility no-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 
 @layer base {
   :root {
-    --font-sans: "Noto Sans Thai", "Inter", ui-sans-serif, system-ui, -apple-system,
-      "Segoe UI", sans-serif;
-    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --radius: 0.625rem;
+
+    /* heights of the sticky bars — the topbar and the scroll-padding below read them */
+    --topbar-h: 3.5rem;
+    --actions-h: 4rem;
 
     --background: 210 25% 97%;
     --foreground: 222 47% 12%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 12%;
+    --popover: 0 0% 100%; /* = card; dark lifts it off the card it opens over */
     --muted: 210 24% 95%;
-    --muted-foreground: 215 16% 45%;
+    --muted-foreground: 215 16% 42%; /* 5.0:1 on muted, 5.7:1 on card */
     --border: 214 22% 89%;
-    --input: 214 22% 86%;
+    --input: 215 14% 56%; /* control borders ≥ 3:1 (WCAG 1.4.11) on card / background / muted */
     --ring: 221 83% 53%;
 
     --primary: 221 83% 51%;
@@ -25,55 +151,62 @@
     --accent: 210 24% 94%;
     --accent-foreground: 222 47% 12%;
 
-    --success: 152 58% 34%;
+    /* text on its -soft background ≥ 4.5:1 (and white on the solid colour) */
+    --success: 152 58% 28%;
     --success-soft: 150 60% 94%;
-    --warning: 33 92% 40%;
+    --warning: 33 92% 31%;
     --warning-soft: 40 95% 93%;
     --danger: 0 72% 47%;
     --danger-soft: 0 90% 96%;
-    --info: 199 89% 40%;
+    --info: 199 89% 31%;
     --info-soft: 199 90% 94%;
 
     /* light-mode sidebar: clean, elevated white panel that matches the theme */
     --sidebar: 0 0% 100%;
     --sidebar-foreground: 222 40% 20%;
-    --sidebar-muted: 215 16% 48%;
+    --sidebar-muted: 215 16% 42%; /* 5.7:1 on the sidebar (48% was 3.9:1 for the menu counts) */
     --sidebar-accent: 214 32% 95%;
     --sidebar-border: 214 22% 90%;
   }
 
-  .dark {
-    --background: 222 40% 8%;
-    --foreground: 210 25% 94%;
-    --card: 222 34% 11%;
-    --card-foreground: 210 25% 94%;
-    --muted: 220 26% 16%;
-    --muted-foreground: 215 18% 62%;
-    --border: 218 24% 20%;
-    --input: 218 24% 26%;
-    --ring: 217 91% 60%;
+  /* screen only — print keeps the light palette above (paper is white, backgrounds are not printed) */
+  @media screen {
+    .dark {
+      color-scheme: dark; /* native controls: radios, date pickers, select menus, scrollbars */
+      --background: 222 40% 8%;
+      --foreground: 210 25% 94%;
+      --card: 222 34% 11%;
+      --card-foreground: 210 25% 94%;
+      --popover: 222 32% 14%;
+      --muted: 220 26% 16%;
+      --muted-foreground: 215 18% 62%;
+      --border: 218 24% 24%; /* card edges / row dividers visible on the dark surfaces */
+      --input: 218 14% 46%; /* ≥ 3:1 on card / background / muted */
+      --ring: 213 94% 68%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 8%;
-    --primary-soft: 220 45% 18%;
-    --accent: 220 26% 17%;
-    --accent-foreground: 210 25% 94%;
+      /* lighter than light mode's: text-primary on primary-soft 5.9:1 (solid buttons carry dark text) */
+      --primary: 213 94% 68%;
+      --primary-foreground: 222 47% 8%;
+      --primary-soft: 220 45% 18%;
+      --accent: 220 26% 17%;
+      --accent-foreground: 210 25% 94%;
 
-    --success: 152 55% 50%;
-    --success-soft: 152 40% 15%;
-    --warning: 38 92% 58%;
-    --warning-soft: 36 45% 16%;
-    --danger: 0 78% 63%;
-    --danger-soft: 0 45% 17%;
-    --info: 199 90% 58%;
-    --info-soft: 199 45% 16%;
+      --success: 152 55% 50%;
+      --success-soft: 152 40% 15%;
+      --warning: 38 92% 58%;
+      --warning-soft: 36 45% 16%;
+      --danger: 0 85% 70%; /* on danger-soft 5.5:1; solid danger/success carry dark text (white fails) */
+      --danger-soft: 0 45% 17%;
+      --info: 199 90% 58%;
+      --info-soft: 199 45% 16%;
 
-    /* dark-mode sidebar: slightly elevated panel, distinct from the app bg */
-    --sidebar: 222 34% 11%;
-    --sidebar-foreground: 213 28% 88%;
-    --sidebar-muted: 215 16% 58%;
-    --sidebar-accent: 220 26% 17%;
-    --sidebar-border: 218 24% 18%;
+      /* dark-mode sidebar: slightly elevated panel, distinct from the app bg */
+      --sidebar: 222 34% 11%;
+      --sidebar-foreground: 213 28% 88%;
+      --sidebar-muted: 215 16% 58%;
+      --sidebar-accent: 220 26% 17%;
+      --sidebar-border: 218 24% 22%;
+    }
   }
 
   * {
@@ -82,6 +215,12 @@
 
   html {
     -webkit-text-size-adjust: 100%;
+  }
+
+  /* Tailwind v4 preflight resets buttons to cursor:default — keep v3's pointer */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
   }
 
   body {
@@ -108,6 +247,16 @@
     scrollbar-gutter: stable;
   }
 
+  /* whatever the browser scrolls into view (Tab, a click, find-in-page, #anchor, scrollIntoView)
+     stops clear of the sticky topbar, and of the sticky save bar on pages that have one */
+  html {
+    scroll-padding-top: calc(var(--topbar-h) + 0.75rem);
+  }
+  /* a save bar that is on screen — not one inside a hidden block (RecordGate before a record loads) */
+  html:has([data-sticky-actions]:not([hidden] *)) {
+    scroll-padding-bottom: calc(var(--actions-h) + 0.75rem);
+  }
+
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -126,41 +275,96 @@
     background-clip: content-box;
   }
 
-  input[type="date"]::-webkit-calendar-picker-indicator,
-  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-  input[type="time"]::-webkit-calendar-picker-indicator {
-    filter: invert(var(--cal-invert, 0));
-    opacity: 0.6;
+  input[type='date']::-webkit-calendar-picker-indicator,
+  input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  input[type='time']::-webkit-calendar-picker-indicator {
+    opacity: 0.6; /* dark: color-scheme draws it light */
     cursor: pointer;
   }
-  .dark {
-    --cal-invert: 1;
-  }
 }
 
-@layer components {
-  .surface {
-    @apply bg-card text-card-foreground border border-border rounded-lg shadow-card;
-  }
-  .table-scroll {
-    @apply overflow-x-auto rounded-lg;
-  }
-  .num {
-    font-variant-numeric: tabular-nums;
-  }
+/* A field that failed validation (Field sets aria-invalid on its control) — red in every form.
+   Unlayered on purpose: it must beat the border / ring utilities on the controls. */
+:is(input, select, textarea, [role='combobox'])[aria-invalid='true'] {
+  border-color: hsl(var(--danger));
+}
+:is(input, select, textarea, [role='combobox'])[aria-invalid='true']:focus,
+:is(input, select, textarea, [role='combobox'])[aria-invalid='true']:focus-visible {
+  border-color: hsl(var(--danger));
+  box-shadow: 0 0 0 2px hsl(var(--danger) / 0.2);
 }
 
-@layer utilities {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+/* Toasts (bottom-right) sit above the sticky save bar on the pages that have one, so a toast never
+   covers "บันทึก" (sonner sets these offsets inline → !important). Scrolled to the end, the bar rests
+   above main's bottom padding and the footer (~4.5rem, more when the footer wraps on a phone), so
+   clear that too — a toast under the cursor on "บันทึก" also paused its own timer (hover) for good. */
+html:has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-position='bottom'] {
+  --offset-bottom: calc(var(--actions-h) + 5.5rem) !important;
+  --mobile-offset-bottom: calc(var(--actions-h) + 6.5rem) !important;
 }
 
+/* บทสอน (components/tour): a highlighted field's dropdown opens above the dimmed page and the card (z-71) */
+html[data-tour] [data-radix-popper-content-wrapper],
+html[data-tour] [data-slot='popover-content'] {
+  z-index: 72 !important;
+}
+/* a confirmation the page asks during a tour (มอบให้คนใหม่แทน?) is answered above it */
+html[data-tour] div:has(> [role='alertdialog']) {
+  z-index: 72 !important;
+}
+/* the first-visit offer: bottom-right (a phone: a sheet across the bottom), above the sticky save bar when the
+   page has one — the same clearance as the toasts (the bar rests higher, above the footer, scrolled to the end) */
+[data-tour-offer] {
+  bottom: 1rem;
+}
+html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
+  bottom: calc(var(--actions-h) + 5.5rem);
+}
+@media (width < 40rem) {
+  html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
+    bottom: calc(var(--actions-h) + 6.5rem);
+  }
+}
+/* a toast while the offer is up (a save on that page) goes above it, never over it */
+html:has([data-tour-offer]) [data-sonner-toaster][data-y-position='bottom'] {
+  --offset-bottom: 11rem !important;
+  --mobile-offset-bottom: 13rem !important;
+}
+html:has([data-tour-offer]):has([data-sticky-actions]:not([hidden] *)) [data-sonner-toaster][data-y-position='bottom'] {
+  --offset-bottom: calc(var(--actions-h) + 15.5rem) !important;
+  --mobile-offset-bottom: calc(var(--actions-h) + 18.5rem) !important;
+}
+/* the note after a tour is skipped (top centre): below the topbar, its ? button in view */
+[data-sonner-toaster][data-y-position='top'] {
+  --offset-top: calc(var(--topbar-h) + 0.5rem) !important;
+  --mobile-offset-top: calc(var(--topbar-h) + 0.5rem) !important;
+}
+/* a link inside a field the step lets you try leaves the page: not followed, and shown so (a step that only
+   points at links shows them as they are) */
+html[data-tour='try'] [data-tour-target] a {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* a report on paper: every column (the screen hides some by the table's width — paper is not a phone), the
+   whole width of the sheet (landscape: ReportView's @page), nothing cut by the screen's sideways scroll box */
 @media print {
+  .report-print :is(th, td).hidden {
+    display: table-cell !important;
+  }
+  .report-print .table-scroll {
+    overflow: visible !important;
+  }
+  .report-print table {
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 9pt;
+  }
+  .report-print :is(th, td) {
+    min-width: 0 !important;
+    width: auto !important;
+    padding: 4px 6px !important;
+  }
   .no-print {
     display: none !important;
   }
@@ -171,14 +375,28 @@
 
 /* ---- auth pages (login / pending) entrance animations ---- */
 @keyframes fadeSlideIn {
-  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
 }
 @keyframes slideRightIn {
-  to { opacity: 1; filter: blur(0); transform: translateX(0); }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
 }
 .animate-element {
   opacity: 0;
   filter: blur(4px);
+  transform: translateY(14px);
+  animation: fadeSlideIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+/* the logo + h1: moved only, never invisible — every element starting at opacity 0 meant a phone
+   (hero hidden below md) painted nothing contentful until the animations ran (no FCP) */
+.animate-rise {
   transform: translateY(14px);
   animation: fadeSlideIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
@@ -188,15 +406,32 @@
   transform: translateX(28px);
   animation: slideRightIn 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
-.animate-delay-100 { animation-delay: 0.10s; }
-.animate-delay-200 { animation-delay: 0.20s; }
-.animate-delay-300 { animation-delay: 0.30s; }
-.animate-delay-400 { animation-delay: 0.40s; }
-.animate-delay-500 { animation-delay: 0.55s; }
-.animate-delay-600 { animation-delay: 0.70s; }
+.animate-delay-100 {
+  animation-delay: 0.1s;
+}
+.animate-delay-200 {
+  animation-delay: 0.2s;
+}
+.animate-delay-300 {
+  animation-delay: 0.3s;
+}
+.animate-delay-400 {
+  animation-delay: 0.4s;
+}
+.animate-delay-500 {
+  animation-delay: 0.55s;
+}
+.animate-delay-600 {
+  animation-delay: 0.7s;
+}
 @media (prefers-reduced-motion: reduce) {
-  .animate-element, .animate-slide-right {
-    animation: none; opacity: 1; filter: none; transform: none;
+  .animate-element,
+  .animate-rise,
+  .animate-slide-right {
+    animation: none;
+    opacity: 1;
+    filter: none;
+    transform: none;
   }
 }
 
@@ -210,16 +445,16 @@
   --muted: 0 0% 95%;
   --muted-foreground: 220 12% 42%;
   --border: 0 0% 89%;
-  --input: 0 0% 86%;
+  --input: 0 0% 55%;
   --ring: 221 83% 53%;
   --primary: 221 83% 51%;
   --primary-foreground: 0 0% 100%;
   --primary-soft: 221 90% 96%;
   --accent: 0 0% 94%;
   --accent-foreground: 222 47% 12%;
-  --success: 152 58% 34%;
+  --success: 152 58% 28%;
   --success-soft: 150 55% 92%;
-  --warning: 33 92% 40%;
+  --warning: 33 92% 31%;
   --warning-soft: 40 95% 92%;
   --danger: 0 72% 47%;
   --danger-soft: 0 90% 96%;
@@ -227,4 +462,52 @@
   color: hsl(var(--foreground));
   /* plain white, exact shade of the poster background — no grid, no glow */
   background: #fefefe;
+}
+
+/* ---- print views (/print/*) — A4 documents ---- */
+.print-page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 14mm 14mm 16mm;
+  background: #fff;
+  color: #000;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.15);
+}
+.print-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.print-page th,
+.print-page td {
+  border: 1px solid #a3a3a3;
+  padding: 4px 6px;
+  vertical-align: top;
+}
+.print-page th {
+  background: #f5f5f5;
+  font-weight: 600;
+  text-align: left;
+}
+/* real page margins: with margin 0 (and the sheet's padding standing in for it) a 2nd page started at
+   the paper's very top edge */
+@page {
+  size: A4;
+  margin: 10mm;
+}
+@media print {
+  .print-root {
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  .print-page {
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+    width: auto;
+    min-height: auto;
+  }
+  .print-page .break-inside-avoid {
+    break-inside: avoid;
+  }
 }

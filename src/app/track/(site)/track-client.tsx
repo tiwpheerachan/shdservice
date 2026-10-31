@@ -1,0 +1,359 @@
+'use client';
+
+import * as React from 'react';
+import { Clock, Loader2, Search, ShieldCheck, Timer } from 'lucide-react';
+import { LINK_RULE_TEXT, TRACK_MSG, type PublicJob } from '@/lib/track-public';
+import { focusOnMount, PublicJobView } from './public-job-view';
+import { TrackOtp } from './track-otp';
+import { Countdown, ExpiryWarning, useSessionClock } from './session-clock';
+import { call } from './use-track-session';
+
+/**
+ * Browser side of customer tracking. Both entry points start behind the same gate:
+ *
+ *   gate (Cloudflare checkbox, widget mode Managed) — nothing else on the page until it passes
+ *
+ *   link  /track/<token>: token → POST /api/track/session → { ticket } → POST /api/track/data → PublicJob
+ *   form  /track:         phone → SMS OTP → the customer's jobs (TrackOtp, /api/track/otp/*, /api/track/me*)
+ *
+ * Every Turnstile token is single-use (Siteverify burns it). The gate's token pays for the
+ * first captcha-protected call if it is still fresh; later ones come from a background,
+ * execute-only widget (`interaction-only`: a checkbox only if Cloudflare asks for a click).
+ * Tickets and the customer session live only in memory — refresh / come back = the gate again.
+ */
+type TurnstileApi = {
+  render: (el: HTMLElement, opts: Record<string, unknown>) => string;
+  reset: (id?: string) => void;
+  remove: (id?: string) => void;
+  execute: (idOrEl: string | HTMLElement) => void;
+};
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
+/** reuse a gate token only while it is comfortably inside its 5-minute life */
+const TOKEN_FRESH_MS = 4 * 60_000;
+/** api.js not there after this → stop waiting and say so */
+const TS_LOAD_MS = 15_000;
+
+type Props = { mode: 'link'; linkToken: string } | { mode: 'form'; otpAvailable: boolean; devOtpLog: boolean };
+type Phase = 'gate' | 'ready' | 'done' | 'expired';
+
+const post = async (path: string, body: Record<string, string>) =>
+  (
+    await call<{ ticket?: string; job?: PublicJob; expiresAt?: string; url?: string }>(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  ).d;
+
+/** one Turnstile widget bound to a container while it is mounted */
+function useTurnstile(
+  el: React.RefObject<HTMLDivElement | null>,
+  active: boolean,
+  ready: boolean,
+  opts: () => Record<string, unknown>,
+) {
+  const id = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!active || !ready || !SITE_KEY || !window.turnstile || !el.current || id.current) return;
+    id.current = window.turnstile.render(el.current, { sitekey: SITE_KEY, action: 'track', language: 'th', ...opts() });
+    return () => {
+      if (id.current && window.turnstile) window.turnstile.remove(id.current);
+      id.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ready]);
+  return id;
+}
+
+/**
+ * One box that already holds the first screen (≈ the viewport under the header) in every phase, so
+ * gate → loading → job never moves the footer (it starts below the fold): no layout shift.
+ */
+export function TrackClient(props: Props) {
+  return (
+    <div className="min-h-[calc(100svh-6.5rem)]">
+      <TrackBody {...props} />
+    </div>
+  );
+}
+
+function TrackBody(props: Props) {
+  // api.js is in the server HTML (async, layout.tsx) — it may run before or after hydration, so the first
+  // render always says "not ready" (server and browser agree) and this picks it up once it is there
+  const [tsReady, setTsReady] = React.useState(false);
+  const [error, setError] = React.useState('');
+  React.useEffect(() => {
+    if (tsReady) return;
+    const giveUp = Date.now() + TS_LOAD_MS;
+    const t = setInterval(() => {
+      if (window.turnstile) setTsReady(true);
+      else if (Date.now() > giveUp) {
+        clearInterval(t);
+        setError(TRACK_MSG.unavailable); // blocked / offline: a refresh is the way back
+      }
+    }, 50);
+    return () => clearInterval(t);
+  }, [tsReady]);
+  const [phase, setPhase] = React.useState<Phase>('gate');
+  const [verifying, setVerifying] = React.useState(false);
+  /** the gate's widget is up — off after a failed link call until ลองอีกครั้ง, or it would pass and post again on its own */
+  const [armed, setArmed] = React.useState(true);
+  const [job, setJob] = React.useState<PublicJob | null>(null);
+  const [linkExpiresAt, setLinkExpiresAt] = React.useState(0);
+
+  const gateEl = React.useRef<HTMLDivElement>(null);
+  const bgEl = React.useRef<HTMLDivElement>(null);
+  /** the gate's token, kept for the first protected call only */
+  const gateToken = React.useRef<{ t: string; at: number } | null>(null);
+  /** a caller waiting for a background token */
+  const waiter = React.useRef<((t: string | null) => void) | null>(null);
+
+  const linkToken = props.mode === 'link' ? props.linkToken : '';
+  const runLink = React.useCallback(
+    async (turnstileToken: string) => {
+      setError('');
+      try {
+        const s = await post('/api/track/session', { linkToken, turnstileToken });
+        // the link itself is expired / used up → hint + the lookup page, not the captcha again
+        if (s.reason === 'link') {
+          setPhase('expired');
+          return;
+        }
+        if (!s.ok || !s.ticket) throw new Error(s.error ?? TRACK_MSG.sessionFail);
+        if (s.expiresAt) setLinkExpiresAt(Date.parse(s.expiresAt));
+        // the ticket exists only inside `s` for this one call — it is single-use, spent either way
+        const d = await post('/api/track/data', { ticket: s.ticket });
+        if (!d.ok || !d.job) throw new Error(d.error ?? TRACK_MSG.ticketFail);
+        setJob(d.job);
+        setPhase('done');
+      } catch (e) {
+        setError(e instanceof Error && e.message ? e.message : TRACK_MSG.network);
+        setArmed(false);
+        setPhase('gate');
+      }
+    },
+    [linkToken],
+  );
+
+  // the link ran out (timer / keepalive / a refused document) — stable, so LinkResult's expiry timer
+  // is armed once per expiry time
+  const expireLink = React.useCallback(() => {
+    setJob(null);
+    setPhase('expired');
+  }, []);
+
+  // latest-callback ref: refreshed after every commit (never written during render), read only
+  // by the Turnstile callback below — which the widget keeps from its first render
+  const onGatePass = React.useRef<(t: string) => void>(() => {});
+  React.useLayoutEffect(() => {
+    onGatePass.current = (t: string) => {
+      setError('');
+      setPhase('ready');
+      if (props.mode === 'link') void runLink(t);
+      else gateToken.current = { t, at: Date.now() };
+    };
+  });
+
+  // 1. the gate: a visible checkbox — nothing else on the page until it passes
+  useTurnstile(gateEl, phase === 'gate' && armed, tsReady, () => ({
+    appearance: 'always',
+    callback: (t: string) => onGatePass.current(t),
+    'error-callback': () => setError(TRACK_MSG.unavailable),
+  }));
+
+  // 2. form mode, after the gate: a background widget that runs only when asked (execute)
+  const bgWidget = useTurnstile(bgEl, props.mode === 'form' && phase === 'ready', tsReady, () => ({
+    appearance: 'interaction-only',
+    execution: 'execute',
+    callback: (t: string) => {
+      setVerifying(false);
+      waiter.current?.(t);
+      waiter.current = null;
+    },
+    'error-callback': () => {
+      setVerifying(false);
+      waiter.current?.(null);
+      waiter.current = null;
+    },
+  }));
+
+  /** a fresh single-use token: the gate's while < 4 min old, otherwise a background check */
+  const getToken = React.useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        const g = gateToken.current;
+        gateToken.current = null;
+        if (g && Date.now() - g.at < TOKEN_FRESH_MS) return resolve(g.t);
+        if (!window.turnstile || !bgWidget.current) return resolve(null);
+        waiter.current?.(null);
+        waiter.current = resolve;
+        setVerifying(true);
+        window.turnstile.reset(bgWidget.current);
+        window.turnstile.execute(bgWidget.current);
+      }),
+    [bgWidget],
+  );
+
+  if (!SITE_KEY) {
+    // no site key in this build → fail closed, never show anything without the check
+    return <Notice text={TRACK_MSG.unavailable} />;
+  }
+  if (props.mode === 'form' && !props.otpAvailable) {
+    return <Notice text={TRACK_MSG.otpUnavailable} />;
+  }
+
+  if (phase === 'gate') {
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center">
+        <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-primary" />
+        <h1 className="text-base font-semibold">ยืนยันก่อนใช้งาน</h1>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          เพื่อปกป้องข้อมูลงานซ่อมของคุณ กรุณายืนยันว่าคุณไม่ใช่โปรแกรมอัตโนมัติ
+        </p>
+        <div className="mt-5 flex min-h-[65px] justify-center">
+          <div ref={gateEl} />
+          {!armed ? (
+            <button
+              ref={focusOnMount}
+              type="button"
+              onClick={() => {
+                setError('');
+                setArmed(true);
+              }}
+              className="inline-flex h-11 items-center self-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              ลองอีกครั้ง
+            </button>
+          ) : (
+            !tsReady &&
+            !error && (
+              <p className="inline-flex items-center gap-2 self-center text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลด…
+              </p>
+            )
+          )}
+        </div>
+        {error && (
+          <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (phase === 'expired') {
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center">
+        <Clock className="mx-auto mb-3 h-9 w-9 text-warning" />
+        {/* focused on arrival: a link that ran out while on screen is announced, not just swapped */}
+        <h1 ref={focusOnMount} tabIndex={-1} className="text-base font-semibold outline-hidden">
+          {TRACK_MSG.linkExpired}
+        </h1>
+        <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+          {LINK_RULE_TEXT} — ขอลิงก์ใหม่จากศูนย์บริการ หรือตรวจสอบด้วยเบอร์มือถือ (รับรหัส OTP ทาง SMS)
+        </p>
+        {/* a full page load on purpose: fresh CSP nonce and a clean gate — nothing of the expired link stays in memory */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a
+          href="/track"
+          className="mt-4 inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Search className="h-4 w-4" /> ตรวจสอบด้วยเบอร์มือถือ
+        </a>
+      </div>
+    );
+  }
+
+  if (props.mode === 'link') {
+    if (phase === 'done' && job)
+      return (
+        <LinkResult
+          job={job}
+          linkToken={linkToken}
+          expiresAt={linkExpiresAt}
+          onExpiresAt={setLinkExpiresAt}
+          onExpired={expireLink}
+        />
+      );
+    return (
+      <div className="surface mx-auto max-w-md p-6 text-center">
+        <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลดข้อมูล…
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <TrackOtp getToken={getToken} verifying={verifying} devOtpLog={props.devOtpLog} />
+      {/* background re-check: empty unless Cloudflare asks for a click */}
+      <div ref={bgEl} className="flex justify-center empty:hidden" />
+    </div>
+  );
+}
+
+/**
+ * The job shown from a link, with the link's countdown — kept alive while in use (session-clock.tsx,
+ * server cap: 60 min from the first open). At zero the data is taken off the screen.
+ */
+
+function LinkResult({
+  job,
+  linkToken,
+  expiresAt,
+  onExpiresAt,
+  onExpired,
+}: {
+  job: PublicJob;
+  linkToken: string;
+  expiresAt: number;
+  onExpiresAt: (ms: number) => void;
+  onExpired: () => void;
+}) {
+  const keepalive = () => {
+    void post('/api/track/link/keepalive', { linkToken }).then((d) => {
+      if (d.reason === 'link') onExpired();
+      else if (d.expiresAt) onExpiresAt(Date.parse(d.expiresAt));
+    });
+  };
+  useSessionClock(expiresAt, onExpired, keepalive);
+
+  // documents: the link itself authorises them (the server ignores any job no from here)
+  const openDoc = React.useCallback(
+    async (d: { kind: string; ref: string }) => {
+      const r = await post('/api/track/doc', { linkToken, kind: d.kind, ref: d.ref });
+      if (r.reason === 'link') onExpired();
+      return { url: r.ok ? r.url : undefined, error: r.error };
+    },
+    [linkToken, onExpired],
+  );
+
+  return (
+    <div className="space-y-3">
+      {expiresAt > 0 && (
+        <p className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted-foreground">
+          <Timer className="h-3.5 w-3.5" /> ลิงก์นี้เหลือเวลา <Countdown to={expiresAt} />
+          <span className="hidden sm:inline">· ต่อเวลาอัตโนมัติเมื่อใช้งานอยู่ (สูงสุด 60 นาที)</span>
+        </p>
+      )}
+      <ExpiryWarning to={expiresAt} onExtend={keepalive} />
+      <PublicJobView j={job} onOpenDoc={openDoc} />
+    </div>
+  );
+}
+
+function Notice({ text }: { text: string }) {
+  return (
+    <div className="surface mx-auto max-w-md p-6 text-center text-sm text-muted-foreground">
+      <ShieldCheck className="mx-auto mb-3 h-9 w-9 text-muted-foreground/60" />
+      {text}
+    </div>
+  );
+}

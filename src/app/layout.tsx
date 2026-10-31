@@ -1,43 +1,51 @@
-import type { Metadata, Viewport } from "next";
-import "./globals.css";
-import { ThemeScript } from "@/components/layout/theme-script";
-import { ToastProvider } from "@/components/ui/toast";
+import type { Metadata, Viewport } from 'next';
+import { connection } from 'next/server';
+import { Noto_Sans_Thai } from 'next/font/google';
+import './globals.css';
+import { ThemeScript } from '@/components/layout/theme-script';
+import { ToastProvider } from '@/components/ui/toast';
+import { ConfirmProvider } from '@/components/ui/confirm';
+
+// next/font self-hosts at build time: no request to fonts.googleapis.com, no render-blocking stylesheet.
+// Noto Sans Thai only: it carries Latin too and comes first in --font-sans, so a second (Latin)
+// font would never draw a glyph. No `weight`: it is a variable font, one file per subset covers 400–700 (all four are used: font-medium/semibold/bold, <th>).
+const notoThai = Noto_Sans_Thai({
+  subsets: ['thai', 'latin'],
+  variable: '--font-noto-thai',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: {
-    default: "OneService",
-    template: "%s · OneService",
+    default: 'OneService',
+    template: '%s · OneService',
   },
-  description: "ระบบบริหารงานบริการและงานซ่อม — OneService by SHD Technology",
+  description: 'ระบบบริหารงานบริการและงานซ่อม — OneService by SHD Technology',
+  // internal staff system: nothing here is meant for search engines
+  robots: { index: false, follow: false },
+  manifest: '/manifest.webmanifest', // public/ — no login, cached a day (next.config.mjs)
 };
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width: 'device-width',
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f3f6f9" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
+    { media: '(prefers-color-scheme: light)', color: '#f3f6f9' },
+    { media: '(prefers-color-scheme: dark)', color: '#0c111d' }, // = --background in dark
   ],
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection(); // every page per request: the CSP nonce (src/proxy.ts) is stamped at render
   return (
-    <html lang="th" suppressHydrationWarning>
+    <html lang="th" className={notoThai.variable} suppressHydrationWarning>
       <head>
         <ThemeScript />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
       </head>
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ToastProvider>
       </body>
     </html>
   );

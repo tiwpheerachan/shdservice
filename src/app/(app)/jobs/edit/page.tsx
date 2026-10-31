@@ -1,8 +1,14 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Search } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
+import * as React from 'react';
+import { Wrench } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { JobSearch } from '@/components/shared/job-search';
+import { JobHistorySection } from '@/components/shared/job-history';
+import { Section } from '@/components/shared/section';
+import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/input';
+import { QuoteLink } from '@/components/jobs/quote-link';
 import {
   CustomerSection,
   JobOpenSection,
@@ -10,20 +16,53 @@ import {
   OtherInfoSection,
   AttachmentSection,
   FormActions,
-} from "@/components/shared/job-form";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+  VIEW_ONLY,
+  JobScreen,
+  useJobForm,
+  fromJob,
+  toJobInput,
+} from '@/components/shared/job-form';
+import { useToast } from '@/components/ui/toast';
+import { RecordGate } from '@/components/shared/record-gate';
+import { useJob, type JobDetail } from '@/lib/use-job';
+import { RecordKey } from '@/lib/use-record';
+import { jobIdParam } from '@/data/keys';
+import { PrintButton } from '@/components/shared/print-button';
+import { TrackLink } from '@/components/shared/track-link';
+import { patchJson, errMsg } from '@/lib/api';
+import { useAccess } from '@/lib/use-access';
+import { profileLock } from '@/lib/profile-lock';
 
-export default function EditJobPage() {
+function EditJobForm() {
   const { push } = useToast();
-  const [q, setQ] = React.useState("");
-  const [jobNo, setJobNo] = React.useState<string>("");
+  const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
+  const { s, reset, validate, report, fromApi } = useJobForm();
+  const [saving, setSaving] = React.useState(false);
+  const { can } = useAccess();
 
-  const go = () => {
-    const v = q.trim() || "JOB2604460";
-    setJobNo(v);
-    push({ kind: "success", title: "เรียกข้อมูลงานสำเร็จ", desc: v });
+  function prefill(job: JobDetail) {
+    reset(fromJob(job));
+  }
+
+  const go = (v: string) => find(v);
+
+  // status is not sent: it moves through the workflow screens, and a stale value must never roll back a newer one
+  const save = async () => {
+    if (!job) return;
+    if (report(validate())) return; // a required field that had a value must keep one
+    setSaving(true);
+    try {
+      const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${job.id}`, {
+        ...toJobInput(s),
+        status: undefined,
+      });
+      setJob(d.job);
+      push({ kind: 'success', title: 'บันทึกการแก้ไขงานแล้ว', desc: d.job.no });
+    } catch (e) {
+      if (!fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -33,40 +72,92 @@ export default function EditJobPage() {
         description="ข้อมูลงานบริการ » แก้ไขข้อมูลงาน — ระบุหมายเลขงานเพื่อเรียกข้อมูลมาแก้ไข"
         actions={
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="edit-job-no"
-              className="whitespace-nowrap text-xs font-medium text-muted-foreground"
-            >
+            <label htmlFor="edit-job-no" className="whitespace-nowrap text-xs font-medium text-muted-foreground">
               ระบุ หมายเลขงาน
             </label>
-            <div className="relative">
-              <Input
-                id="edit-job-no"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="JOB2604460"
-                className="num h-9 w-44 pr-8"
-              />
-              <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <Button size="md" onClick={go}>
-              GO
-            </Button>
+            <JobSearch id="edit-job-no" value={jobNo} scope="all" onPick={go} />
           </div>
         }
       />
 
-      <CustomerSection />
-      <JobOpenSection jobNo={jobNo || undefined} status="อยู่ระหว่างดำเนินการ" />
-      <ProductSection />
-      <OtherInfoSection />
-      <AttachmentSection />
+      <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="edit-job-no">
+        <CustomerSection />
+        <JobOpenSection jobNo={job?.no} status={job?.status ?? 'อยู่ระหว่างดำเนินการ'} />
+        <ProductSection variant="open" />
+        <OtherInfoSection />
+        {/* read-only: the repair (บันทึกงานซ่อม) and the close (ปิดงาน) as saved there */}
+        {job && (job.repairedBy || job.closedBy || job.sparePartReplace || job.repairedDate || job.closedDate) && (
+          <Section title="การซ่อม / ปิดงาน" icon={Wrench}>
+            <FieldGrid>
+              <Field label="ซ่อมเสร็จโดย">
+                <ReadOnly>{job.repairedBy}</ReadOnly>
+              </Field>
+              <Field label="วันที่ซ่อมเสร็จ">
+                <ReadOnly>
+                  <span className="num">{job.repairedDate}</span>
+                </ReadOnly>
+              </Field>
+              <Field label="ปิดงานโดย">
+                <ReadOnly>{job.closedBy}</ReadOnly>
+              </Field>
+              <Field label="วันที่ปิดงาน">
+                <ReadOnly>
+                  <span className="num">{job.closedDate}</span>
+                </ReadOnly>
+              </Field>
+              <Field label="อะไหล่ที่เปลี่ยน / New S/N" wide>
+                <Textarea rows={2} readOnly value={job.sparePartReplace} />
+              </Field>
+            </FieldGrid>
+          </Section>
+        )}
+        <AttachmentSection jobNo={job?.no} files={job?.attachments} />
+        {job && <TrackLink jobId={job.id} />}
+        <JobHistorySection job={job} />
 
-      <FormActions
-        saveLabel="บันทึกการแก้ไข"
-        onSave={() => push({ kind: "success", title: "บันทึกการแก้ไขงานแล้ว" })}
-      />
+        <FormActions
+          saveLabel="บันทึกการแก้ไข"
+          onSave={save}
+          saving={saving}
+          cancelHref="/jobs/list"
+          denied={can('Job Management', 'edit') ? undefined : VIEW_ONLY}
+          extra={
+            <>
+              <QuoteLink jobId={job?.id} />
+              <PrintButton
+                label="พิมพ์ใบรับงาน"
+                kind="job"
+                locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
+                no={job?.no ?? ''}
+                profileId={job?.documentProfileId}
+                href={`/print/job/${job?.id ?? ''}`}
+                disabled={!job}
+              />
+              {/* a closed job is no longer on the close screen's list: its return note is printed from here */}
+              {job?.statusGroup === 'Finished' && (
+                <PrintButton
+                  label="พิมพ์ใบส่งคืน"
+                  kind="job"
+                  locked={profileLock('job', { closed: job?.statusGroup === 'Finished' })}
+                  no={job.no}
+                  profileId={job.documentProfileId}
+                  href={`/print/job/${job.id}/return`}
+                />
+              )}
+            </>
+          }
+        />
+      </RecordGate>
     </>
+  );
+}
+
+export default function EditJobPage() {
+  return (
+    <JobScreen>
+      <RecordKey of={jobIdParam}>
+        <EditJobForm />
+      </RecordKey>
+    </JobScreen>
   );
 }

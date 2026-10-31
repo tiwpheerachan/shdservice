@@ -1,38 +1,114 @@
+# NOT synced to the Render service — the Render DASHBOARD is authoritative (checked 2026-10-14:
+# env vars and settings here were never applied). Keep this file as the documented intent and
+# mirror every change by hand in the dashboard (Settings + Environment).
 services:
   - type: web
     name: shdservice
     runtime: node
     region: singapore
-    plan: free
-    branch: main
+    plan: starter
+    branch: yuu
+    # deploy only commits whose GitHub Actions run (.github/workflows/ci.yml) passed
+    autoDeployTrigger: checksPass
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm start
+    buildCommand: npm ci --include=dev && npm run build
+    # migrations run only AFTER a successful build (a failed build leaves the schema untouched),
+    # just before the new version takes traffic. db:migrate is idempotent (scripts/migrate.ts).
+    preDeployCommand: npm run db:migrate:deploy
+    # start Next directly (not through npm) so SIGTERM on deploy reaches it and in-flight work drains;
+    # the heap cap (512 MB Starter) is here, not in NODE_OPTIONS: env vars reach the build too, and
+    # `next build` runs out of memory under 400 MB
+    startCommand: node --max-old-space-size=400 node_modules/next/dist/bin/next start -H 0.0.0.0
+    # a deploy that boots but can't answer is not switched in. /api/health always answers 200
+    # (verdict in the body) so a Supabase blip never makes Render cycle the only instance.
+    healthCheckPath: /api/health
     envVars:
+      # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
       - key: NODE_VERSION
-        value: "20"
+        value: '24'
+      # @hrefcl/apidoc (the /api-docs build in `npm run build`) depends on puppeteer; no browser is needed
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: 'true'
       - key: NEXT_PUBLIC_SUPABASE_URL
-        value: https://izypdfhjbqctbopxhrqq.supabase.co
+        value: https://bnntpshuoyzkzckepjse.supabase.co
       # publishable key is client-safe (it is sent to the browser anyway)
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-        value: sb_publishable_dAvafH_VnmK7OrlY1cWQEg_iO5M0NxB
+        value: sb_publishable_YUeHSX2d14JbsY1vt33N4A_4reG3RrT
       # SSO client id is public
       - key: SSO_CLIENT_ID
-        value: cli_168eb7414da1a2e2
+        value: cli_6e53e9248bcff7fb
       # SECRETS — set the real values in the Render dashboard (never committed to git)
       - key: CENTRAL_API_KEY
         sync: false
       - key: SSO_CLIENT_SECRET
         sync: false
-      # Supabase secret key — server-only, used to write users/master data (bypasses RLS)
+      # Postgres connection for drizzle (Supabase *Session pooler*, port 5432) — set in the dashboard
+      - key: DATABASE_URL
+        sync: false
+      # Supabase secret key — server-only, used for Storage (attachments / slips)
       - key: SUPABASE_SECRET_KEY
         sync: false
-      # Session-cookie signing: the app signs with the STABLE CENTRAL_API_KEY, so
-      # SESSION_SECRET is optional. Do NOT use generateValue here — it can rotate
-      # on deploys and invalidate every active session. Leave unset, or set one
-      # fixed value in the dashboard (sync:false) if you want a dedicated secret.
+      # REQUIRED — session-cookie signing key, used for nothing else (openssl rand -hex 32,
+      # at least 32 chars). Missing in production = nobody can sign in (fail closed).
+      # Set ONE fixed value in the dashboard; never generateValue (it can rotate on deploy),
+      # and changing it signs every user out.
       - key: SESSION_SECRET
         sync: false
       # emails that are always System Admin (comma-separated) — optional bootstrap
       - key: OWNER_EMAILS
+        sync: false
+      # ── public tracking (/track) — see drizzle/0014 and app/api/track/* ──
+      # public base URL (the Cloudflare subdomain) — links sent to customers + Turnstile hostname check
+      - key: APP_BASE_URL
+        sync: false
+      # Cloudflare Turnstile. The site key is baked in at BUILD time → after changing it:
+      # Manual Deploy → "Clear build cache & deploy". Missing keys = tracking closed (fail-closed).
+      - key: NEXT_PUBLIC_TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      # same value as the Cloudflare Transform Rule "X-Origin-Auth" (openssl rand -hex 32)
+      - key: ORIGIN_AUTH_SECRET
+        sync: false
+      # off | log | enforce — production runs enforce: the dashboard has no ORIGIN_AUTH_MODE, so the
+      # code's production default applies (checked 2026-10-14: users via Cloudflare are fine)
+      - key: ORIGIN_AUTH_MODE
+        value: enforce
+      # central single-logout check at session renewal (src/app/api/sso/refresh): off | log | enforce.
+      # log = ask SSO and log the answer, sign nobody out; switch to enforce once the log shows
+      # "sso central session active" for real users
+      - key: SSO_SESSION_CHECK
+        value: log
+      # HMAC key for IPs / links in the security log + rate-limit keys (openssl rand -hex 32)
+      - key: TRACK_LOG_SECRET
+        sync: false
+      # ── /track phone + SMS OTP (src/server/sms.ts) ──
+      # ThaiBulkSMS OTP service: key / secret of the app in OTP Manager (the app sets the code
+      # length — 4 digits (OTP_LENGTH in src/lib/track-public.ts) — the 5-minute expiry, the sender and the SMS text). Without both keys the
+      # /track page says the OTP service is not open yet — the dev "log" provider is refused in production.
+      - key: THAIBULKSMS_OTP_KEY
+        sync: false
+      - key: THAIBULKSMS_OTP_SECRET
+        sync: false
+      - key: NEXT_TELEMETRY_DISABLED
+        value: '1'
+      # process clock in Thai time — local Date getters (file names, logs) match the DB session TZ
+      - key: TZ
+        value: Asia/Bangkok
+      # env check (src/server/env.ts) on the first request after start: with 1, missing REQUIRED
+      # config exits the process → the health check fails → Render keeps the old version (pre-deploy
+      # migrations have run by then). Optional features only warn. Log line "env check …" lists them.
+      - key: ENV_STRICT
+        value: '1'
+      # ── maintenance mode (src/lib/maintenance.ts, ops/cutover.md) — leave unset normally ──
+      # 1 = every page and /api/* answers 503 "ระบบปิดปรับปรุง" (/api/health keeps answering, + maintenance: true).
+      # Render applies an env change only on the next deploy / restart ("Save and deploy").
+      - key: MAINTENANCE_MODE
+        sync: false
+      # optional text on the page, e.g. "21 ต.ค. 18:00"
+      - key: MAINTENANCE_UNTIL
+        sync: false
+      # optional, >= 16 chars (openssl rand -hex 16): https://<host>/?maintenance_bypass=<secret> lets that
+      # browser into the real app for 12 h. Change it after each use (it passes through URL logs once).
+      - key: MAINTENANCE_BYPASS_SECRET
         sync: false

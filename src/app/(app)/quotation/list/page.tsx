@@ -1,106 +1,231 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { Plus, Download, Printer } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { FilterBar } from "@/components/shared/filter-bar";
-import { RowActions } from "@/components/shared/row-actions";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Field } from "@/components/ui/field";
-import { Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { WARRANTY_OPTIONS, type Quotation } from "@/data/mock";
-import { useQuotations, useManufacturers } from "@/data/db";
-import { baht } from "@/lib/utils";
+import * as React from 'react';
+import Link from 'next/link';
+import { ClipboardList, Plus, Printer } from 'lucide-react';
+import { PageHeader } from '@/components/shared/page-header';
+import { FilterBar } from '@/components/shared/filter-bar';
+import { SearchSelect, strOptions } from '@/components/shared/search-select';
+import { RowActions } from '@/components/shared/row-actions';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Checkbox, Input, Select, Textarea } from '@/components/ui/input';
+import { Modal } from '@/components/ui/modal';
+import { useToast } from '@/components/ui/toast';
+import { WARRANTY_OPTIONS, QUOTATION_STATUS_OPTIONS } from '@/data/options';
+import type { Quotation } from '@/data/types';
+import { useQuotationsPage, useManufacturers, useQuotationStatuses } from '@/data/db';
+import { baht } from '@/lib/utils';
+import { useServerTable } from '@/lib/use-server-table';
+import { useAccess } from '@/lib/use-access';
+import { errMsg, exportXlsx, postJson } from '@/lib/api';
+import { cleanCode } from '@/lib/validation';
+import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
+import { ExportButton } from '@/components/shared/export-button';
+import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
 
-const TONE: Record<string, "info" | "warning" | "success" | "danger" | "neutral"> = {
-  "รอเสนอราคา": "warning",
-  "เสนอราคาแล้ว": "info",
-  "ลูกค้าอนุมัติ": "success",
-  "ลูกค้าไม่อนุมัติ": "danger",
-  "ยกเลิก": "neutral",
+type Filters = {
+  no: string;
+  type: string;
+  customer: string;
+  customerCode: string;
+  jobNo: string;
+  imei: string;
+  warranty: string;
+  brand: string;
+  from: string;
+  to: string;
+  status: string;
+};
+const NO_FILTER: Filters = {
+  no: '',
+  type: '',
+  customer: '',
+  customerCode: '',
+  jobNo: '',
+  imei: '',
+  warranty: '',
+  brand: '',
+  from: '',
+  to: '',
+  status: '',
 };
 
 export default function QuotationListPage() {
+  const { add: canAdd, edit: canEdit, del: canDel } = useAccess().forPath('/quotation/list');
   const { push } = useToast();
-  const { data: QUOTATIONS, loading } = useQuotations();
-  const { data: MANUFACTURERS } = useManufacturers();
+  const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
+  // every status in quotation_status (the fixed list is only the fallback while it loads)
+  const { data: STATUSES } = useQuotationStatuses();
+  const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
+  // each box its own condition (ANDed); the list, the export and the report KPI read them alike (quotationFiltersFromQuery)
+  const query = { ...filters, jobNo: cleanCode(filters.jobNo) };
+  const {
+    rows: PAGE,
+    total: totalRows,
+    loading,
+    error: loadError,
+    refetch: retryLoad,
+  } = useQuotationsPage({ ...pageArgs, ...query });
+  const QUOTATIONS = PAGE;
+
+  // ยกเลิกใบเสนอราคา (legacy ลบ) = soft delete through the records API: `del` on Quotation and a reason; the
+  // quotation leaves this list (deleted excluded), its edit page and print refuse it
+  const [cancelling, setCancelling] = React.useState<Quotation | null>(null);
+  const [reason, setReason] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const cancelQuotation = async () => {
+    if (!cancelling) return;
+    setBusy(true);
+    try {
+      await postJson('/api/admin/records', {
+        table: 'quotations',
+        id: cancelling.id,
+        status: 'DELETED',
+        remark: reason.trim(),
+      });
+      push({ kind: 'success', title: 'ยกเลิกใบเสนอราคาแล้ว', desc: cancelling.no });
+      setCancelling(null);
+      setReason('');
+      retryLoad();
+    } catch (e) {
+      push({ kind: 'error', title: 'ยกเลิกไม่สำเร็จ', desc: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ticked quotations (their uuids) → พิมพ์ใบเบิกสินค้า (one page each, /print/pick-slip; the print skips a deleted / ยกเลิก one)
+  const [picked, setPicked] = React.useState<Set<string>>(() => new Set());
+  const allPicked = QUOTATIONS.length > 0 && QUOTATIONS.every((r) => picked.has(r.id));
+  const pick = (ids: string[], on: boolean) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      for (const id of ids)
+        if (on) n.add(id);
+        else n.delete(id);
+      return n;
+    });
 
   const columns: Column<Quotation>[] = [
     {
-      key: "no",
-      header: "หมายเลขใบเสนอราคา",
-      width: "150px",
+      key: 'select',
+      header: (
+        <Checkbox
+          aria-label="เลือกทุกใบในหน้านี้"
+          checked={allPicked}
+          onChange={(e) =>
+            pick(
+              QUOTATIONS.map((r) => r.id),
+              e.target.checked,
+            )
+          }
+        />
+      ),
+      width: '40px',
+      sortable: false,
       cell: (r) => (
-        <Link href="/quotation/edit" className="num font-medium text-primary hover:underline">
+        <Checkbox
+          aria-label={`เลือก ${r.no}`}
+          checked={picked.has(r.id)}
+          onChange={(e) => pick([r.id], e.target.checked)}
+        />
+      ),
+    },
+    {
+      key: 'no',
+      header: 'หมายเลขใบเสนอราคา',
+      headerWrap: true,
+      width: '150px',
+      cell: (r) => (
+        <Link
+          prefetch={false}
+          href={`/quotation/edit?id=${r.id}`}
+          className="num font-medium text-primary hover:underline"
+        >
           {r.no}
         </Link>
       ),
     },
     {
-      key: "date",
-      header: "วันที่",
-      width: "110px",
-      cell: (r) => <span className="num text-xs">{r.date}</span>,
+      key: 'date',
+      header: 'วันที่',
+      width: '110px',
+      cell: (r) => <DateTimeCell value={r.date} />,
     },
     {
-      key: "type",
-      header: "ประเภท",
-      width: "130px",
-      hideBelow: "lg",
+      key: 'type',
+      header: 'ประเภท',
+      width: '130px',
+      hideBelow: 'xl',
+      cell: (r) => <Badge tone={r.type.includes('VIP') ? 'primary' : 'neutral'}>{r.type}</Badge>,
+    },
+    {
+      key: 'customer',
+      header: 'ลูกค้า',
+      minWidth: COL_MIN_WIDTH.customer,
       cell: (r) => (
-        <Badge tone={r.type.includes("VIP") ? "primary" : "neutral"}>{r.type}</Badge>
+        <span className="line-clamp-1 max-w-[220px]" title={r.customer}>
+          {r.customer}
+        </span>
       ),
     },
     {
-      key: "customer",
-      header: "ลูกค้า",
-      cell: (r) => <span className="line-clamp-1 max-w-[220px]">{r.customer}</span>,
-    },
-    {
-      key: "jobRef",
-      header: "อ้างถึงงานซ่อม",
-      width: "130px",
+      key: 'jobRef',
+      header: 'อ้างถึงงานซ่อม',
+      headerWrap: true,
+      width: '130px',
+      hideBelow: 'lg', // beside the sidebar at 1024–1279 it pushed สถานะ / Action off the table
       cell: (r) => <span className="num text-xs">{r.jobRef}</span>,
     },
     {
-      key: "imei",
-      header: "IMEI No.",
-      hideBelow: "xl",
+      key: 'imei',
+      header: 'IMEI No.',
+      headerWrap: true,
+      hideBelow: 'xl',
       cell: (r) => <span className="num text-xs">{r.imei}</span>,
     },
-    { key: "brandModel", header: "ยี่ห้อ, รุ่น", hideBelow: "md" },
+    brandModelColumn(),
     {
-      key: "amount",
-      header: "จำนวนเงิน",
-      align: "right",
-      width: "120px",
+      key: 'amount',
+      header: 'จำนวนเงิน',
+      align: 'right',
+      width: '120px',
       value: (r) => r.amount,
       cell: (r) => <span className="font-medium">{baht(r.amount)}</span>,
     },
     {
-      key: "status",
-      header: "สถานะ",
-      width: "140px",
+      key: 'approveDate',
+      header: 'วันที่ตอบรับ',
+      headerWrap: true,
+      hideBelow: 'xl',
+      width: '130px',
+      cell: (r) => <DateTimeCell value={r.approveDate} />,
+    },
+    {
+      key: 'status',
+      header: 'สถานะ',
+      width: '140px',
+      // the server's status: sent but past its validity already reads พ้นกำหนดเสนอราคา (src/lib/quote-expiry.ts)
       cell: (r) => (
-        <Badge tone={TONE[r.status] ?? "neutral"} dot>
+        <Badge tone={TONE[r.status] ?? 'neutral'} dot>
           {r.status}
         </Badge>
       ),
     },
     {
-      key: "action",
-      header: "Action",
-      width: "110px",
-      align: "center",
+      key: 'action',
+      header: 'จัดการ',
+      width: '110px',
+      align: 'center',
       sortable: false,
       cell: (r) => (
         <RowActions
-          onView={() => push({ kind: "info", title: r.no, desc: r.customer })}
-          onEdit={() => push({ kind: "info", title: "แก้ไขใบเสนอราคา", desc: r.no })}
+          viewHref={`/quotation/edit?id=${r.id}`}
+          editHref={canEdit ? `/quotation/edit?id=${r.id}` : undefined}
+          onCancel={canDel ? () => setCancelling(r) : undefined}
         />
       ),
     },
@@ -119,85 +244,124 @@ export default function QuotationListPage() {
               <Printer className="h-3.5 w-3.5" />
               พิมพ์
             </Button>
-            <Button variant="outline" size="sm">
-              <Download className="h-3.5 w-3.5" />
-              ส่งออก Excel
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={picked.size === 0}
+              onClick={() => window.open(`/print/pick-slip?ids=${[...picked].join(',')}`, '_blank')}
+            >
+              <ClipboardList className="h-3.5 w-3.5" />
+              พิมพ์ใบเบิกสินค้า ({picked.size} ใบ)
             </Button>
-            <Link href="/quotation/new">
-              <Button size="sm">
-                <Plus className="h-3.5 w-3.5" />
-                สร้างใบเสนอราคา
-              </Button>
-            </Link>
+            <ExportButton run={() => exportXlsx('quotations', { ...query, q: table.q })} />
+            {canAdd && (
+              <Link href="/quotation/new">
+                <Button size="sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  สร้างใบเสนอราคา
+                </Button>
+              </Link>
+            )}
           </>
         }
       />
 
-      <FilterBar onSearch={() => push({ kind: "info", title: "กรองข้อมูลแล้ว" })} defaultOpen={false}>
+      <FilterBar onSearch={apply} onReset={reset}>
         <Field label="หมายเลขใบเสนอราคา">
-          <Input className="num" placeholder="QT2601200" />
+          <Input className="num" placeholder="Q2600462" value={draft.no} onChange={(e) => setD('no', e.target.value)} />
         </Field>
         <Field label="ประเภท">
-          <Select>
-            <option>ALL</option>
+          <Select value={draft.type} onChange={(e) => setD('type', e.target.value)}>
+            <option value="">ทั้งหมด</option>
             <option>Type A (Normal)</option>
             <option>Type B (VIP)</option>
           </Select>
         </Field>
         <Field label="ชื่อ-สกุลลูกค้า">
-          <Input />
+          <Input value={draft.customer} onChange={(e) => setD('customer', e.target.value)} />
         </Field>
         <Field label="รหัสลูกค้า">
-          <Input className="num" />
+          <Input className="num" value={draft.customerCode} onChange={(e) => setD('customerCode', e.target.value)} />
         </Field>
         <Field label="หมายเลขงานซ่อม">
-          <Input className="num" />
+          <Input className="num" value={draft.jobNo} onChange={(e) => setD('jobNo', e.target.value)} />
         </Field>
         <Field label="IMEI No.">
-          <Input className="num" />
+          <Input className="num" value={draft.imei} onChange={(e) => setD('imei', e.target.value)} />
         </Field>
         <Field label="Warranty">
-          <Select>
-            <option>- - Select All - -</option>
+          <Select value={draft.warranty} onChange={(e) => setD('warranty', e.target.value)}>
+            <option value="">ทั้งหมด</option>
             {WARRANTY_OPTIONS.map((w) => (
               <option key={w}>{w}</option>
             ))}
           </Select>
         </Field>
-        <Field label="ยี่ห้อ">
-          <Select>
-            <option>- - Select All - -</option>
-            {MANUFACTURERS.map((m) => (
-              <option key={m.id}>{m.name}</option>
-            ))}
-          </Select>
+        <Field label="ยี่ห้อ" lookup={brandsLookup}>
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.brand}
+            onChange={(v) => setD('brand', v)}
+            options={MANUFACTURERS.map((m) => ({ value: m.name, label: m.name }))}
+            searchPlaceholder="พิมพ์ชื่อยี่ห้อ…"
+          />
         </Field>
         <Field label="วันที่สร้าง (ตั้งแต่)">
-          <Input type="date" defaultValue="2026-08-05" />
+          <Input type="date" value={draft.from} onChange={(e) => setD('from', e.target.value)} />
         </Field>
         <Field label="วันที่สร้าง (ถึง)">
-          <Input type="date" defaultValue="2026-09-04" />
+          <Input type="date" value={draft.to} onChange={(e) => setD('to', e.target.value)} />
         </Field>
         <Field label="สถานะใบเสนอราคา">
-          <Select>
-            <option>- - Select ALL - -</option>
-            {Object.keys(TONE).map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            placeholder="ทั้งหมด"
+            emptyLabel="ทั้งหมด"
+            value={draft.status}
+            onChange={(v) => setD('status', v)}
+            options={strOptions(STATUSES.length ? STATUSES.map((x) => x.name) : QUOTATION_STATUS_OPTIONS)}
+          />
         </Field>
       </FilterBar>
 
       <DataTable
+        narrowed={narrowed}
+        onClearFilters={reset}
+        searchable={false}
         columns={columns}
         rows={QUOTATIONS}
         loading={loading}
+        error={loadError}
+        onRetry={retryLoad}
         rowKey={(r) => r.no}
-        searchPlaceholder="ค้นหาเลขที่ใบเสนอราคา / ลูกค้า / งานซ่อม…"
         footerNote={
-          <span className="font-medium text-foreground">· มูลค่ารวม {baht(total)} ฿</span>
+          <span className="font-medium text-foreground">
+            · มูลค่ารวม (หน้านี้) {baht(total)} ฿{picked.size > 0 && ` · เลือกไว้ ${picked.size} ใบ`}
+          </span>
         }
+        server={{ ...server, total: totalRows }}
       />
+      <Modal
+        open={!!cancelling}
+        onClose={() => setCancelling(null)}
+        title={`ยกเลิกใบเสนอราคา ${cancelling?.no ?? ''}`}
+        description="ใบนี้จะหายจากรายการ แก้ไขหรือพิมพ์ไม่ได้อีก — เหตุผลบันทึกไว้ในประวัติการแก้ไข"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCancelling(null)}>
+              ไม่ยกเลิก
+            </Button>
+            <Button variant="danger" size="sm" disabled={busy || !reason.trim()} onClick={cancelQuotation}>
+              ยกเลิกใบเสนอราคา
+            </Button>
+          </>
+        }
+      >
+        <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร`}>
+          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Modal>
     </>
   );
 }

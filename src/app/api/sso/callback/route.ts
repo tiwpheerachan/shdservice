@@ -1,36 +1,32 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { SSO, STATE_COOKIE, DEFAULT_AFTER_LOGIN, appOrigin } from "@/lib/sso";
+import { NextResponse, type NextRequest } from 'next/server';
+import { DEFAULT_AFTER_LOGIN, SSO, STATE_COOKIE, STATE_SEP, appOrigin, safeNext } from '@/lib/sso';
 import {
   signSession,
+  verifySession,
+  SEEN_COOKIE,
   SESSION_COOKIE,
   SESSION_TTL_MS,
   type SessionUser,
-} from "@/lib/session";
-import { lookupByEmail } from "@/lib/directory";
-import {
-  supabaseAdmin,
-  findUserIdByEmail,
-  upsertUserRow,
-  dedupeUsersByEmail,
-} from "@/lib/supabase-admin";
-import { PENDING_ROLE, ADMIN_ROLE, isOwner, isApproved } from "@/lib/access";
+} from '@/lib/session';
+import { lookupByEmail } from '@/lib/directory';
+import { provisionFailure, provisionSsoUser, signInAuditLine } from '@/server/services/users';
+import { audit, security } from '@/server/audit';
+import { db } from '@/db/client';
+import { setRequestSession } from '@/server/request-context';
+import { rateLimit, rateLimitKey } from '@/server/rate-limit';
+import { PENDING_ROLE, isApproved } from '@/lib/access';
+import { log, logError, scrubText } from '@/lib/log';
+import { checked, parseQuery } from '@/server/auth';
+import { ssoCallback } from '@/server/contract/misc';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const str = (v: unknown) => (typeof v === "string" ? v : "");
-
-function nowStamp() {
-  // "YYYY-MM-DD HH:mm" — matches the lastLogin format used elsewhere
-  return new Date().toISOString().slice(0, 16).replace("T", " ");
-}
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 /**
- * Auto-provision the signed-in employee into the `users` table and return their
- * effective { role, status }. New users start as PENDING_ROLE (no access until an
- * admin assigns a real role); existing users keep their role/status. Owner emails
- * are always forced to System Admin. Best-effort: never blocks login if the DB or
- * secret key is unavailable (returns the owner/pending default in that case).
+ * Provisions the signed-in employee into app_user: new users start pending (user_type NULL), owner emails are System Admin.
+ * A failure returns the sign-in error code and NO cookie — a session always needs its app_user row, never a role baked into the cookie.
  */
 async function provision(opts: {
   email: string;
@@ -40,87 +36,140 @@ async function provision(opts: {
   phone: string;
   avatar: string;
   title: string;
-}): Promise<{ role: string; status: string }> {
-  const owner = isOwner(opts.email);
+}): Promise<
+  | {
+      role: string;
+      status: string;
+      recordStatus: string | null;
+      pk: number;
+      id: string;
+      sessionVersion: number;
+      created: boolean;
+    }
+  | 'user_conflict'
+  | 'db_unavailable'
+> {
   try {
-    const existingId = await findUserIdByEmail(opts.email);
-    let role = PENDING_ROLE;
-    let status = "Active";
-    if (existingId) {
-      const { data } = await supabaseAdmin()
-        .from("users")
-        .select("role, status")
-        .eq("id", existingId)
-        .maybeSingle();
-      role = (data?.role as string) ?? PENDING_ROLE;
-      status = (data?.status as string) ?? "Active";
-    }
-    // owners are always admins — force it (and persist it)
-    if (owner) {
-      role = ADMIN_ROLE;
-      status = "Active";
-    }
-    const id = existingId ?? `U-${crypto.randomUUID().slice(0, 8)}`;
-    await upsertUserRow({
-      id,
-      code: opts.larkId,
-      name: opts.name,
-      username: opts.email.split("@")[0],
-      role,
-      branch: opts.department,
-      email: opts.email,
-      phone: opts.phone,
-      status,
-      lastLogin: nowStamp(),
-      avatar: opts.avatar,
-      title: opts.title,
-    });
-    await dedupeUsersByEmail(opts.email, id);
-    return { role, status };
-  } catch {
-    // DB unavailable — owners still get in; everyone else waits for approval
-    return owner
-      ? { role: ADMIN_ROLE, status: "Active" }
-      : { role: PENDING_ROLE, status: "Active" };
+    const r = await provisionSsoUser(opts);
+    return {
+      role: r.userType ?? PENDING_ROLE,
+      status: r.isActive ? 'Active' : 'Inactive',
+      recordStatus: r.recordStatus,
+      pk: r.pk,
+      id: r.id,
+      sessionVersion: r.sessionVersion,
+      // services/users.ts answers `created` once it has it (a first sign-in → the CREATE line)
+      created: 'created' in r && r.created === true,
+    };
+  } catch (e) {
+    const { reason, constraint } = provisionFailure(e);
+    logError(e, `sso provision failed (${reason})`, constraint ? { constraint } : {});
+    return reason;
   }
 }
 
+/** {email: "string(24)", user: {sub: "string(35)", …}} — the structure of a value, none of its content */
+function shapeOf(v: unknown, depth = 0): unknown {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return `array(${v.length})`;
+  if (typeof v === 'object') {
+    if (depth >= 2) return `object(${Object.keys(v as object).length} keys)`;
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shapeOf(x, depth + 1)]));
+  }
+  return typeof v === 'string' ? `string(${v.length})` : typeof v;
+}
+
+/**
+ * A refused sign-in that got past the state check → security_log LOGIN_FAILED (best effort: the person still gets the
+ * error page). Anyone can call this route and the log is append-only, so rows are bounded: one per client (IP bucket,
+ * rate-limit.ts) per minute; the refusals in between are counted into the next row of that client (detail.count = this
+ * one + those not written). The SSO's own refusal of a code (verify_4xx: junk anyone can send) also shares a cap of
+ * FAIL_ROWS_PER_MIN rows in all — so a flood of those never crowds out a real account's failure (no_email, user_conflict …).
+ * ponytail: counters per process (one Render instance); a client never seen again leaves its last count unwritten.
+ */
+const FAIL_ROWS_PER_MIN = 30;
+const failWindow = { at: 0, rows: 0 };
+const unwritten = new Map<string, number>();
+
+async function failLogged(request: NextRequest, reason: string, email?: string) {
+  const who = await rateLimitKey(request);
+  const now = Date.now();
+  if (now - failWindow.at >= 60_000) Object.assign(failWindow, { at: now, rows: 0 });
+  const anonymous = reason.startsWith('verify_');
+  const slot =
+    (!anonymous || failWindow.rows < FAIL_ROWS_PER_MIN) &&
+    (await rateLimit(request, 'sso-fail-log', 1).then(
+      () => true,
+      () => false,
+    ));
+  if (!slot) {
+    if (unwritten.has(who) || unwritten.size < 10_000) unwritten.set(who, (unwritten.get(who) ?? 0) + 1);
+    return fail(request, reason);
+  }
+  if (anonymous) failWindow.rows++;
+  const count = 1 + (unwritten.get(who) ?? 0);
+  unwritten.delete(who);
+  await security(db, null, {
+    event: 'LOGIN_FAILED',
+    result: 'FAILED',
+    module: 'Auth',
+    detail: { reason, count, ...(email && { email }) },
+  }).catch((e) => logError(e, 'security_log LOGIN_FAILED write failed'));
+  return fail(request, reason);
+}
+
 function fail(request: NextRequest, reason: string) {
-  const to = new URL("/login", appOrigin(request));
-  to.searchParams.set("error", reason);
+  const to = new URL('/login', appOrigin(request));
+  to.searchParams.set('error', reason);
   return NextResponse.redirect(to);
 }
 
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  const cookieState = request.cookies.get(STATE_COOKIE)?.value;
+export const GET = checked(async (request: NextRequest) => {
+  const { code, state } = parseQuery(request, ssoCallback);
+  const cookieStates = (request.cookies.get(STATE_COOKIE)?.value ?? '').split(STATE_SEP).filter(Boolean);
+  const nextFromState = safeNext(state?.split('|')[1]);
 
-  if (!code) return fail(request, "missing_code");
-  if (!state || !cookieState || state !== cookieState)
-    return fail(request, "state_mismatch");
+  // Reloading the callback URL (or a second tab finishing after the first) must
+  // not throw the user out: if this browser already holds a valid session, go on.
+  const existing = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  const continueIfSignedIn = () =>
+    existing ? NextResponse.redirect(new URL(nextFromState, appOrigin(request))) : null;
+
+  if (!code) return continueIfSignedIn() ?? fail(request, 'missing_code');
+  if (!state || !cookieStates.includes(state)) return continueIfSignedIn() ?? fail(request, 'state_mismatch');
 
   const clientSecret = process.env.SSO_CLIENT_SECRET;
-  if (!clientSecret) return fail(request, "server_not_configured");
+  if (!clientSecret) return fail(request, 'server_not_configured');
 
   let identity: Record<string, unknown>;
   try {
     // verify authenticates the app with client_id + client_secret (in the body)
     const res = await fetch(SSO.verifyUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code,
         client_id: SSO.clientId,
         client_secret: clientSecret,
       }),
-      cache: "no-store",
+      cache: 'no-store',
+      // a hung SSO must not hold the callback (and a connection) open; no retry — the code is one-time
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return fail(request, `verify_${res.status}`);
+    if (!res.ok) {
+      // surface the SSO's reason in the server log (Render → Logs) without leaking secrets
+      const body = await res.text().catch(() => '');
+      // the central service names the account in its 403 text ("account x@… is inactive") — scrubbed
+      log.warn('sso verify failed', { status: res.status, client: SSO.clientId, body: scrubText(body.slice(0, 300)) });
+      // a code that was already exchanged (page reload) while a session exists → just continue
+      return continueIfSignedIn() ?? (await failLogged(request, `verify_${res.status}`));
+    }
     identity = await res.json();
+    // SSO_DEBUG=shape (or 1): field names, types and sizes of what /sso/verify answered — never a value
+    if (process.env.SSO_DEBUG === 'shape' || process.env.SSO_DEBUG === '1')
+      log.info('sso verify shape', { shape: shapeOf(identity) });
   } catch {
-    return fail(request, "verify_unreachable");
+    return fail(request, 'verify_unreachable');
   }
 
   // central may nest the user under `user` / `profile` / `data`
@@ -130,48 +179,94 @@ export async function GET(request: NextRequest) {
     (identity.data as Record<string, unknown>) ??
     identity;
 
-  const email = str(u.email);
-  if (!email) return fail(request, "no_email");
+  // top-level email first (what /sso/verify documents and OneLink reads); a nested
+  // `user`/`profile` object can exist without one (e.g. phone-only Lark accounts)
+  const email = str(identity.email).trim() || str(u.email).trim();
+  if (!email) {
+    logError('no email in verify response', 'sso callback refused', {
+      topKeys: Object.keys(identity),
+      userKeys: Object.keys(u ?? {}),
+    });
+    return failLogged(request, 'no_email');
+  }
 
-  // Enrich with the full directory profile (department, title, phone, avatar).
   const prof = await lookupByEmail(email);
 
-  const name =
-    str(u.name) || str(u.en_name) || prof?.name || email.split("@")[0];
-  const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || "";
+  const name = str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split('@')[0] ?? email);
+  const avatar = str(u.avatar_url) || str(u.avatar) || prof?.avatar || '';
 
-  // Auto-provision into the users table and get the effective role/status.
-  const { role, status } = await provision({
+  const provisioned = await provision({
     email,
     name,
-    larkId: prof?.id ?? "",
-    department: prof?.department ?? "",
-    phone: prof?.phone ?? "",
+    larkId: prof?.id ?? '',
+    department: prof?.department ?? '',
+    phone: prof?.phone ?? '',
     avatar,
-    title: prof?.title ?? "",
+    title: prof?.title ?? '',
   });
+  if (typeof provisioned === 'string') return failLogged(request, provisioned, email);
+  const { role, status, recordStatus, pk, id, sessionVersion, created } = provisioned;
+
+  // security_log LOGIN (or LOGIN_FAILED for a refused Inactive / deleted account) and, for a first sign-in, the
+  // CREATE line of the new pending user — one transaction; no line, no session (ip / agent / session id: the request
+  // context). ponytail: provisionSsoUser writes in its own statement until it takes a tx (services/users.ts).
+  const iat = Date.now();
+  setRequestSession(email, iat);
+  try {
+    await db.transaction(async (tx) => {
+      if (created)
+        await audit(tx, pk, {
+          action: 'CREATE',
+          module: 'Auth',
+          entity: 'app_user',
+          key: id,
+          summary: `ผู้ใช้ใหม่จาก SSO ${email} · ${role}`,
+          // an owner email starts as System Admin: that role grant is a ROLE_CHANGE in security_log too
+          changes: { emailAddress: [null, email], ...(role !== PENDING_ROLE && { userType: [null, role] }) },
+        });
+      await audit(tx, pk, {
+        ...signInAuditLine(email, role, recordStatus),
+        module: 'Auth',
+        entity: 'app_user',
+        key: id,
+      });
+    });
+  } catch (e) {
+    logError(e, 'sso sign-in log failed');
+    return fail(request, 'db_unavailable');
+  }
 
   const user: SessionUser = {
     email,
     name,
     avatar,
-    sid: str(identity.sid) || str(identity.session_id) || str(u.union_id),
+    // for the central-session check in /api/sso/refresh (sub is permanent; iat = that session)
+    sub: str(identity.sub) || str(u.sub) || undefined,
+    ssoIat: typeof identity.iat === 'number' ? identity.iat : typeof u.iat === 'number' ? u.iat : null,
+    chk: Date.now(),
     role,
     approved: isApproved(role, status),
-    exp: Date.now() + SESSION_TTL_MS,
+    exp: iat + SESSION_TTL_MS,
+    iat,
+    sv: sessionVersion,
   };
 
-  const next = state.split("|")[1] || DEFAULT_AFTER_LOGIN;
+  // os_seen = who last used this browser (set by /api/sso/me; '0' after ออกจากระบบ): a `next` left by
+  // someone else's session — or made after a sign-out (a reload, a 401 in another tab) — is dropped, so a
+  // shared PC never opens the previous person's page. No os_seen at all (a browser that never signed in
+  // here, e.g. a link opened on a new PC) keeps it: nobody used this browser before.
+  const seen = request.cookies.get(SEEN_COOKIE)?.value;
+  const next = seen === undefined || seen === id ? nextFromState : DEFAULT_AFTER_LOGIN;
   const res = NextResponse.redirect(new URL(next, appOrigin(request)));
   // set ONLY the session cookie here — a single Set-Cookie on the redirect,
   // so proxies (Render) can't drop it while folding multiple Set-Cookie headers.
   // os_state has Max-Age=600 and expires on its own.
   res.cookies.set(SESSION_COOKIE, await signSession(user), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
   return res;
-}
+});

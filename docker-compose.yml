@@ -1,0 +1,40 @@
+# Local Postgres for DEVELOPMENT — the database `npm run dev` uses (same layout as OneLink).
+#
+#   npm run db:dev:up     start it (data is kept in a named volume)
+#   npm run db:dev:load   wipe the legacy tables and reload them from ../setupdata/out + migrate
+#   npm run db:dev:down   stop it; the data stays
+#
+# Three databases, never mixed up:
+#
+#   development   this file                   127.0.0.1:55435   kept between runs
+#   test          tests/docker-compose.yml    127.0.0.1:55442   wiped every run
+#   production    Supabase (bnntps…)          .env              Render migrates it on deploy
+#
+# postgres:17 on Debian with Supabase's locale + Bangkok time. The password is a
+# loopback-only default, not a secret. Override any of these in the shell environment.
+name: shd-oneservice-dev
+
+services:
+  db:
+    image: postgres:17
+    container_name: shd_oneservice_db_dev
+    environment:
+      POSTGRES_USER: ${DEV_DB_USER:-root}
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-dev_pass}
+      POSTGRES_DB: ${DEV_DB_NAME:-shd_oneservice_dev_db}
+      LANG: en_US.utf8
+      POSTGRES_INITDB_ARGS: '--locale=en_US.UTF-8 --encoding=UTF8'
+      TZ: Asia/Bangkok
+    command: ['postgres', '-c', 'timezone=Asia/Bangkok', '-c', 'log_timezone=Asia/Bangkok']
+    ports:
+      # Loopback only.
+      - '127.0.0.1:${DEV_DB_PORT:-55435}:5432'
+    volumes:
+      - devdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DEV_DB_USER:-root} -d ${DEV_DB_NAME:-shd_oneservice_dev_db}']
+      interval: 1s
+      retries: 30
+
+volumes:
+  devdata:

@@ -1,0 +1,19 @@
+import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { JobReceiptDoc } from '@/components/print/docs/job-receipt';
+import { logJobPrint, printJobNo } from './job-no';
+
+export const dynamic = 'force-dynamic';
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  return { title: `ใบรับงาน ${(await printJobNo((await params).id)) ?? ''}`.trim() };
+}
+
+/** staff print view (login required by app/print/layout.tsx) — the customer gets the same sheet via /track/doc */
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const no = await printJobNo(id);
+  if (!no) notFound();
+  await logJobPrint(id, no, 'ใบรับงาน');
+  return <JobReceiptDoc no={no} />;
+}
