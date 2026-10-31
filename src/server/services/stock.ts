@@ -66,9 +66,6 @@ const UNSPECIFIED_CATEGORY_ID = 1;
 /** ใกล้หมด = 1..LOW_STOCK on hand (the products filter and the stock KPI) */
 const LOW_STOCK = 3;
 
-/* ------------------------------------------------------------------ *
- * Products
- * ------------------------------------------------------------------ */
 const productSelect = {
   id: product.id,
   productId: product.pk,
@@ -98,8 +95,8 @@ const productSelect = {
   onhandItemId: productStock.pk,
   stockRemark: productStock.remark,
   cancelRemark: product.cancelRemark,
-  // ยกเลิก (not Active): when / who = the status change (new rows write only status_changed_*); legacy rows
-  // without one keep their cancel_date / cancelled_by (ADR 0008 "no redundant data")
+  // ยกเลิก (not Active): when / who = the status change (new rows write only status_changed_*); legacy rows without one
+  // keep their cancel_date / cancelled_by
   cancelDate: sql<
     string | null
   >`case when ${product.recordStatus} <> 'ACTIVE' and ${product.statusChangedAt} is not null then ${product.statusChangedAt} else ${product.cancelDate} end`,
@@ -138,7 +135,7 @@ function toProduct(r: ProductRow, creator?: string, canceller?: string): Product
     issued: r.used ?? 0,
     reserved: r.booking ?? 0,
     ubRepairOnly: !!r.ubOnly,
-    serialControl: false, // product.is_serial_control was false on every row — dropped in drizzle/0006
+    serialControl: false, // no serial control (legacy never used it)
     forModelColor: r.forModelColor ?? '',
     createdDate: fmtDateTime(r.createDate),
     createdBy: creator ?? '',
@@ -205,10 +202,9 @@ const modelsOf = async (x: Tx | typeof db, productPk: number) =>
     .filter(Boolean);
 
 /**
- * Optimistic lock of the product form (assertVersion). product has no row_version column (drizzle/0026)
- * and the prices live in product_stock, whose counters every stock movement moves — so the version
- * is a hash of exactly what the form edits: a receipt / issue never makes an open form stale, another
- * save of the form always does, a save that changes nothing keeps it.
+ * Optimistic lock of the product form (assertVersion). product has no row_version and the prices live in
+ * product_stock, whose counters every movement moves — so the version is a hash of exactly what the form edits: a
+ * receipt / issue never makes an open form stale, another save of the form always does.
  */
 function productVersion(r: ProductRow, models: string[]): number {
   const edited = [
@@ -249,7 +245,6 @@ export async function getProduct(code: string): Promise<(Product & { models: str
   };
 }
 
-/** the parsed body of POST /api/products (productSave in src/server/contract/stock.ts) */
 export type ProductInput = z.output<typeof productSave.body>;
 
 export async function saveProduct(i: ProductInput, byUserId: number): Promise<Product> {
@@ -438,11 +433,8 @@ export async function saveProduct(i: ProductInput, byUserId: number): Promise<Pr
   return (await getProduct(code))!;
 }
 
-/* ------------------------------------------------------------------ *
- * Quantities — the one place that touches product_stock counters.
- *   available = cumulative received (returns from a job included, as legacy), used = cumulative issued,
- *   booking   = requested-not-yet-granted, remain = available - used
- * ------------------------------------------------------------------ */
+// Quantities — the one place that touches product_stock counters. available = cumulative received (job returns
+// included, as legacy), used = cumulative issued, booking = requested-not-yet-granted, remain = available - used.
 type QtyDelta = { available?: number; used?: number; booking?: number };
 type StockRow = typeof productStock.$inferSelect;
 
@@ -581,7 +573,7 @@ async function lockStock(tx: Tx, productIds: number[]) {
  *  has COMMITTED — dropped earlier, a request in between would cache the old numbers again. */
 export const productsChanged = () => invalidate('master:products:lite');
 
-/** `jobPk` / `saleOrderPk` / `poNo` = what the movement is for (stock_move.reference_document_no before 0006) */
+/** `jobPk` / `saleOrderPk` / `poNo` = what the movement is for */
 async function insertMovement(
   tx: Tx,
   h: {
@@ -608,8 +600,8 @@ async function insertMovement(
       jobPk: h.jobPk ?? null,
       saleOrderPk: h.saleOrderPk ?? null,
       poNo: cleanCode(h.poNo).slice(0, 50),
-      // a job / sale-order movement's reference IS that document (job_pk / sale_order_pk): NULL here (ADR 0008); จ่ายออกอื่นๆ /
-      // a receipt keep the typed name. The forms' schemas keep it within the column
+      // a job / sale-order movement's reference IS that document (job_pk / sale_order_pk): NULL here; จ่ายออกอื่นๆ / a
+      // receipt keep the typed name. The forms' schemas keep it within the column
       referenceOutTo: h.jobPk != null || h.saleOrderPk != null ? null : clean(h.outTo).slice(0, 50),
       remark: clean(h.remark).slice(0, 100),
       createDate: h.date ? `${h.date} ${nowThai().slice(11)}` : nowThai(),
@@ -712,9 +704,7 @@ export async function issueOther(
   );
 }
 
-/* ---- job spare-part requests (ใบเบิก) ---- */
 export type PartRequestLine = {
-  /** job_part.id (uuid) */
   logId: string;
   jobNo: string;
   code: string;
@@ -811,8 +801,8 @@ export async function listPartRequests(jobNo: string, onlyPending = false): Prom
   });
 }
 
-/** job.spare_part_total_cost = the job's charged part lines (cancelled ones and เสนอ-only lines excluded —
- *  only parts ticked เบิก are charged, owner 2026-10-15; same rule as partCharge in validation/job.ts) */
+/** job.spare_part_total_cost = the job's charged part lines: only parts ticked เบิก, not cancelled (same rule as
+ *  partCharge in validation/job.ts) */
 export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
   const [sum] = await tx
     .select({ s: sql<string>`coalesce(sum(${jobPart.sparePartTotalPrice}),0)` })
@@ -822,7 +812,7 @@ export async function partsTotalOf(tx: Tx, jobNo: string): Promise<number> {
 }
 
 /** job_status ids of a closed or cancelled job: ยกเลิกข้อมูล · ยกเลิกซ่อม · ปิดงาน (7 / 8 / 20 / 21 / 23 / 24) ·
- *  ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out (owner 2026-10-15) */
+ *  ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน) — no fault found → no parts go out */
 export const JOB_CLOSED_STATUSES: number[] = [
   JS.CANCELLED,
   JS.REPAIR_CANCELLED,
@@ -942,7 +932,7 @@ export async function issueForJob(
     const allGranted = (pending?.n ?? 0) === 0;
     // jobs.ts imports this module — loaded when called, not at import (no import cycle)
     const moved = allGranted && (await (await import('./jobs')).followParts(tx, i.jobNo, byUserId));
-    // a partial issue writes no job column: the version moves anyway, a repair page opened before is stale (0036)
+    // a partial issue writes no job column: the version moves anyway, so a repair page opened before is stale
     if (!moved)
       await tx
         .update(job)
@@ -952,7 +942,6 @@ export async function issueForJob(
   }).finally(productsChanged);
 }
 
-/* ---- job lists for the pick page reference dropdown ---- */
 /** Open jobs (not closed / cancelled) that still have parts waiting to be issued, newest request first. */
 export async function jobsWithPendingParts(limit = 300): Promise<string[]> {
   const rows = await db
@@ -986,7 +975,6 @@ export async function jobsWithReturnableParts(limit = 300): Promise<string[]> {
   return rows.map((r) => r.jobNo ?? '').filter(Boolean);
 }
 
-/* ---- return from job (รับคืนจากการเบิก, inventory_type 2) ---- */
 /** a line stock may take parts back from: issued (จ่ายแล้ว / ขอคืน) or partly issued (still รอเบิก for the rest) —
  *  with issued pieces not yet back */
 const RETURNABLE: number[] = [PART.GRANTED, PART.RETURN_REQUESTED, PART.REQUESTED];
@@ -995,7 +983,6 @@ const returnableLine = and(
   sql`coalesce(${jobPart.grantQty},0) > coalesce(${jobPart.returnQty},0)`,
 );
 export type ReturnLine = {
-  /** job_part.id (uuid) */
   logId: string;
   jobNo: string;
   code: string;
@@ -1125,8 +1112,8 @@ export async function returnFromJob(
       : [];
     if (j && st?.group?.trim() !== 'Finished') {
       if (await isLegacyRow('job', j.pk)) {
-        // a legacy job's recorded totals may hold VAT / a discount or have no lines behind them (owner 2026-10-30:
-        // never recomputed): they move by what this return changed in the charged lines (as jobs.ts withTotal)
+        // a legacy job's recorded totals may hold VAT / a discount or have no lines behind them (never recomputed): they
+        // move by what this return changed in the charged lines (as jobs.ts withTotal)
         if (partsDelta !== 0)
           costs = {
             sparePartTotalCost: money(num(j.sparePartTotalCost) + partsDelta),
@@ -1138,7 +1125,7 @@ export async function returnFromJob(
         costs = { sparePartTotalCost: money(parts), jobTotalCost: money(parts + rest) };
       }
     }
-    // the version moves even when the costs stay (one UPDATE: +1 either way, 0036) — a repair page opened before is stale
+    // the version moves even when the costs stay (one UPDATE, +1 either way) — a repair page opened before is stale
     if (j)
       await tx
         .update(job)
@@ -1156,10 +1143,8 @@ export async function returnFromJob(
   }).finally(productsChanged);
 }
 
-/* ---- sale order picking ---- */
 /** `pickNo`: the WHO that already issued the line ('' = still to issue) */
 export type SoPickLine = {
-  /** sale_order_line.id (uuid) */
   dtId: string;
   code: string;
   name: string;
@@ -1169,9 +1154,9 @@ export type SoPickLine = {
   pickNo: string;
 };
 
-/** a product line (a service line has no product_pk — product_type was dropped in drizzle/0006) */
+/** a product line (a service line has no product_pk) */
 const soGoodsLine = isNotNull(saleOrderLine.productPk);
-/** a product line no WHO has issued yet (legacy '' became NULL in drizzle/0006) */
+/** a product line no WHO has issued yet */
 const soLineToPick = and(soGoodsLine, isNull(saleOrderLine.pickStockMovePk));
 
 /** จ่ายออกตามใบสั่งขาย's list: approved orders with a product line still to issue. Approving an order
@@ -1193,7 +1178,7 @@ export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]
   const rows = await db
     .select({
       dtId: saleOrderLine.id,
-      // the product's code (product_code is NULL on a new product line — ADR 0008 "no redundant data")
+      // the product's code (product_code is NULL on a new product line)
       code: sql<string | null>`coalesce(${product.productCode}, ${saleOrderLine.productCode})`,
       name: product.productName,
       onhand: productStock.quantityRemain,
@@ -1303,9 +1288,6 @@ export async function issueForSaleOrder(
   return tx ? run(tx) : writeTx(run).finally(productsChanged);
 }
 
-/* ------------------------------------------------------------------ *
- * Movements (ประวัติการเคลื่อนไหว) — stock_move + summarised lines
- * ------------------------------------------------------------------ */
 /**
  * Word search like the product picker's: every typed word ("P02556 ฝาหลัง") must match the document no /
  * reference (`docs`) or a line's part code or Thai / English / Chinese name — the words in any order.
@@ -1327,8 +1309,7 @@ const movementSearch = (text: string, docs: boolean) =>
       ),
   );
 
-/** what the movement is for — the job or sale order no., or a receipt's PO no. (inventory_hd.reference_document_no
- *  before drizzle/0006) */
+/** what the movement is for — the job or sale order no., or a receipt's PO no. */
 const refNo = sql<string | null>`coalesce(
   (select j.job_no from job j where j.pk = ${stockMove.jobPk}),
   (select s.sale_order_no from sale_order s where s.pk = ${stockMove.saleOrderPk}),
@@ -1386,7 +1367,6 @@ export async function listMovements(opts: MovementFilters & { limit?: number } =
   });
 }
 
-/** Stock card for one product (product-detail modal). */
 /** a movement line's signed qty on the stock card: a type that adds (+) / takes (−); an unknown type counts as in */
 const cardSigned = sql`case when coalesce(${stockMoveType.movementAction}, 1) > 0 then ${stockMoveLine.itemQuantity}
   when coalesce(${stockMoveType.movementAction}, 1) < 0 then -${stockMoveLine.itemQuantity} else 0 end`;
@@ -1470,7 +1450,7 @@ export async function movementLines(no: string) {
     code: r.code ?? '',
     name: r.name ?? '',
     qty: num(r.qty),
-    unit: ITEM_UNIT, // stock_move_line.item_unit was 'Pcs.' on every row — dropped in drizzle/0006
+    unit: ITEM_UNIT, // 'Pcs.' on every legacy row; no column
     supplier: (r.supplier ?? '').match(/Supplier:\s*([^·]+)/)?.[1]?.trim() ?? '',
     ref: r.ref ?? '',
   }));
@@ -1485,10 +1465,6 @@ export async function listIssuedLines(opts: IssuedFilters & { limit?: number } =
     .limit(Math.min(opts.limit ?? 5000, MAX_EXPORT_ROWS));
   return rows.map(toIssued);
 }
-
-/* ------------------------------------------------------------------ *
- * Paged products (รายการอะไหล่ / รายงานคงเหลือ) + lite list for dropdowns
- * ------------------------------------------------------------------ */
 
 /** other products that already carry this vendor code — a warning on save, not a block (legacy has pairs) */
 export async function productsWithMfgCode(mfgCode: string, exceptSysCode: string): Promise<string[]> {
@@ -1695,9 +1671,6 @@ async function loadProductsLite(term: string, mode: 'active' | 'exclude'): Promi
   }));
 }
 
-/* ------------------------------------------------------------------ *
- * Paged movements (ประวัติสต๊อก) and issued lines (รายงานเบิกจ่าย)
- * ------------------------------------------------------------------ */
 export type MovementFilters = {
   q?: string;
   from?: string;

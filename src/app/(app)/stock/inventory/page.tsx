@@ -34,7 +34,6 @@ function typeTone(type: string): Tone {
 
 export default function InventoryPage() {
   const { push } = useToast();
-  // stock_move (20k rows) — server-side paging; filters + table search run on the server
   const { draft, setD, filters, apply, reset, narrowed, table, pageArgs, server } = useServerTable(NO_FILTER);
   const {
     rows: MOVEMENTS,
@@ -69,7 +68,7 @@ export default function InventoryPage() {
       key: 'no',
       header: '#',
       width: '52px',
-      hideBelow: 'sm', // phones: document no. (+ type / ref / date under it) + View
+      hideBelow: 'sm',
       align: 'center',
       sortable: false,
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
@@ -212,7 +211,6 @@ export default function InventoryPage() {
         server={{ ...server, total }}
       />
 
-      {/* document line-items modal */}
       <Modal
         open={!!viewDoc}
         onClose={() => setViewDoc(null)}

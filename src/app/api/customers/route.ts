@@ -7,7 +7,6 @@ import { saveCustomer } from '@/server/services/customers';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** Create (add) or update (edit) a customer. */
 export const POST = handle(async (req: NextRequest) => {
   // before the permission check: add or edit depends on `code`
   const body = await parseBody(req, customerSave);

@@ -30,9 +30,7 @@ const DEFAULTS: Record<RunningType, { prefix: string; yearly: boolean; len: numb
 };
 
 /**
- * Job / Quotation / SaleOrder rows carry company_id = 1 in the legacy table
- * (normalised in 0007, re-asserted in 0010).
- */
+/** Job / Quotation / SaleOrder rows carry company_id = 1 in the legacy table. */
 const COMPANY_ROWS: ReadonlySet<RunningType> = new Set(['Job', 'Quotation', 'SaleOrder']);
 
 export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> {
@@ -131,7 +129,7 @@ export async function nextRunningNo(tx: Tx, type: RunningType): Promise<string> 
   const yy =
     Number(row.lengthYear) === 2 ? String(row.pyear).slice(-2) : Number(row.lengthYear) === 4 ? String(row.pyear) : '';
   // a counter behind the table (a reload, a row keyed in by hand) skips the numbers already taken: the number is
-  // UNIQUE (drizzle/0006), and a refused insert rolls the counter back with it, so it would never get past them
+  // UNIQUE, and a refused insert rolls the counter back with it, so it would never get past them
   const [table, column] = ISSUED_IN[type];
   let next = Number(row.number);
   let no: string;

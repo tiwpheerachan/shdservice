@@ -1,5 +1,5 @@
 /**
- * npm run test:db-guard — the database you migrate is said out loud (ADR 0009): db:migrate / db:migrate:deploy
+ * npm run test:db-guard — the database you migrate is said out loud: db:migrate / db:migrate:deploy
  * only on Render, db:prod:migrate only at the production project (session pooler), never --reset with --prod, and no
  * journal reset at all (forced or the automatic re-run) when the URL is the production project.
  * No database is touched: every refusal happens before a connection.

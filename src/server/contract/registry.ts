@@ -2,29 +2,18 @@ import { OpenAPIRegistry, type RouteConfig } from '@asteasolutions/zod-to-openap
 import type { z } from 'zod';
 
 /**
- * Every operation of /api, declared once: what it takes and what it answers (zod), the same
- * declaration the OpenAPI document (./openapi.ts), /api-docs and the response check (./check.ts)
- * are built from. Declarations live in src/server/contract/<family>.ts — a route.ts may export only
- * its verbs and segment config.
+ * Every operation of /api, declared once: the OpenAPI document, /api-docs and the response check are built from it,
+ * and routes parse their input ONLY with these schemas (scripts/test-routes-input.mts), so a documented field is one
+ * the route reads. Declarations live in <family>.ts — a route.ts may export only its verbs and segment config.
  *
- * What an operation takes is also what its route parses with: params, query, headers, body and form
- * are read ONLY through parseParams / parseQuery / parseHeaders / parseBody / parseForm
- * (src/server/auth.ts) with these schemas — scripts/test-routes-input.mts fails a route that reads
- * input by hand. So a field in the document is a field the route reads, with the type it checks.
- *
- * A body that a service then checks against the stored record (customerSchema(prev), jobSchema(keep,
- * check), …) is declared as the rule set's static part — its own field schemas, with the fields that
- * depend on the stored record at their bare type — and the service runs the whole rule set.
- *
- * No 'server-only' import: scripts/build-api-docs.ts and the tests load this with plain tsx.
- * Nothing a client component imports may import it.
+ * No 'server-only' import: scripts/build-api-docs.ts and the tests load this with plain tsx. Nothing a client
+ * component imports may import it.
  */
 
 export const registry = new OpenAPIRegistry();
 
 type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
-/** The parts of a request an operation declares. */
 export type Part = 'params' | 'query' | 'headers' | 'body' | 'form';
 
 /**
@@ -47,7 +36,6 @@ export interface Operation {
   query?: z.ZodObject;
   /** request headers the operation reads (Idempotency-Key, x-track-session) */
   headers?: z.ZodObject;
-  /** a JSON body */
   body?: z.ZodType;
   /** a multipart/form-data body (parseForm) */
   form?: z.ZodObject;

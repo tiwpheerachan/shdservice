@@ -34,27 +34,19 @@ import { REFUND_DETAIL, refundDateOf } from '@/lib/validation/job';
 import { newToken, sha256, TOKEN_SHAPE } from '@/server/track-guard';
 
 /**
- * Public customer tracking — the ONLY code path that serves job data without a
- * login, so everything here is deliberately narrow. Two ways in (see app/api/track/*):
+ * Public customer tracking — the ONLY code path that serves job data without a login, so everything here is
+ * deliberately narrow. Two ways in (app/api/track/*): the staff-sent /track/<linkToken> → Turnstile → one-time ticket →
+ * publicJobByNo; or /track → Turnstile → SMS OTP (track-otp.ts) → customer session → listJobsForCustomers /
+ * publicJobForCustomers. No function returns job data for a client-chosen job number without an authorisation the
+ * server issued (a consumed ticket bound to one job, or a session bound to that customer's ids).
  *
- *   /track/<linkToken> (staff-sent link) → Turnstile → /api/track/session
- *     → jobNoForLink (this file) → one-time ticket → /api/track/data → publicJobByNo
- *   /track (the customer's own lookup) → Turnstile → mobile number → SMS OTP
- *     (server/track-otp.ts) → customer session → listJobsForCustomers / publicJobForCustomers
- *
- * Nothing here is reachable before the captcha, and no function returns job data for a
- * client-chosen job number without an authorisation the server issued: a consumed ticket
- * (bound to one job) or a customer session (bound to that customer's ids).
- *
- *  - link tokens are 32 random bytes (base64url); job numbers are sequential and never a key
- *  - only sha256(token) is stored (drizzle/0025): a DB leak yields no working link, and a
- *    link can be shown only once — to the staff member who just generated it
- *  - a link lives 1 day unopened, 15 minutes after the first customer open (drizzle/0016)
- *  - only the fields in `PublicJob` ever leave this module: no price, no phone, no
- *    address, no full IMEI/serial, no technician, no internal remarks
+ *  - link tokens are 32 random bytes; job numbers are sequential and never a key
+ *  - only sha256(token) is stored: a DB leak yields no working link, and a link is shown only once
+ *  - only the fields in `PublicJob` ever leave this module: no price, no phone, no address, no full IMEI/serial,
+ *    no technician, no internal remarks
  */
 
-/** a link nobody has opened yet lives this long from issue (drizzle/0016) */
+/** a link nobody has opened yet lives this long from issue */
 const LINK_UNOPENED_HOURS = 24;
 /** after the first customer open, the link lives this much longer */
 const LINK_OPEN_MINUTES = 15;
@@ -168,10 +160,9 @@ const deviceRefOf = (r: { serial: string | null; imei: string | null }) =>
   [r.serial, r.imei].map((v) => (v ?? '').trim()).find((v) => v.length > 4 && /\d/.test(v)) ?? '';
 
 /**
- * A document opened from /track (app/track/doc): the customer's own details in full — name, phone, address,
- * serial, IMEI, order no. — so the copy can be used to confirm the job (2026-10-28); what the customer copy
- * never had stays off: staff names (technician / opener / closer / quoted by) and staff notes. The status in
- * the words /track uses. Staff print views never call this.
+ * A document opened from /track: the customer's own details in full (name, phone, address, serial, IMEI, order no.)
+ * so the copy can confirm the job; what the customer copy never had stays off: staff names and staff notes. The
+ * status in the words /track uses. Staff print views never call this.
  */
 export function jobForCustomer(j: JobDetail): JobDetail {
   return {
@@ -213,10 +204,6 @@ export function quotationForCustomer(q: QuotationDetail): QuotationDetail {
 /** what the DB holds for a link (drizzle/0025) — same digest as the migration's backfill */
 export const tokenHash = (token: string) => sha256(token).toString('hex');
 
-/* ------------------------------------------------------------------ *
- * Lookup
- * ------------------------------------------------------------------ */
-
 function base(where: SQL | undefined) {
   return db
     .select({
@@ -253,10 +240,6 @@ function base(where: SQL | undefined) {
 }
 
 type Row = Awaited<ReturnType<typeof base>>[number];
-
-/* ------------------------------------------------------------------ *
- * Documents (the sheet itself: app/track/doc/[ticket], one-time ticket from /api/track/doc)
- * ------------------------------------------------------------------ */
 
 /**
  * The documents of one job, in timeline order:
@@ -330,13 +313,10 @@ export async function findDoc(jobNo: string, kind: unknown, ref: unknown): Promi
 }
 
 /**
- * Document links (drizzle/0019, drizzle/0028): the URL /track/doc/<ticket>
- * works for DOC_LINK_MINUTES, any number of times and from any browser, but only while the
- * tracking session (phone + OTP) or the /track/<token> link that asked for it is still live.
- * LINE's in-app browser loads the page, then "open in Safari" loads it again from another
- * browser (and often another IP): a short-lived, single-use, IP + User-Agent bound ticket
- * fails exactly there. 256 random bits, only sha256 stored — unguessable, never permanent.
- * track_doc_ticket.ua_hash holds sha256(session token | link token): the authorisation it is bound to.
+ * Document links: /track/doc/<ticket> works for DOC_LINK_MINUTES, any number of times and from any browser, but only
+ * while the tracking session or /track/<token> link that asked for it is still live. LINE's in-app browser loads the
+ * page, then "open in Safari" loads it again from another browser and IP — a single-use, IP / UA bound ticket fails
+ * exactly there. 256 random bits, only sha256 stored. track_doc_ticket.ua_hash holds sha256(session | link token).
  */
 export const DOC_LINK_MINUTES = 10;
 
@@ -349,7 +329,7 @@ export async function issueDocLink(
   const raw = newToken();
   await db.insert(trackDocTicket).values({
     tokenHash: sha256(raw),
-    // the job and (a quotation) the document, by pk (ADR 0008 decision 11) — d came from findDoc, both exist;
+    // the job and (a quotation) the document, by pk — d came from findDoc, both exist;
     // a quotation's ref is its number trimmed (docsFor), matched the same way and only among the job's own
     jobPk: sql`(select ${job.pk} from ${job} where ${job.jobNo} = ${d.jobNo})`,
     kind: d.kind,
@@ -425,8 +405,8 @@ async function toPublic(row: Row): Promise<PublicJob> {
   const step = stepOf(row.statusId ?? -1, row.group?.trim() ?? '');
   if (step && !seen.has(step)) seen.set(step, '');
 
-  // courier of the return leg: its profile (drizzle/0013); a job closed before that typed the name — the profile
-  // it is a name of (src/lib/shipper.ts), else just the tracking number
+  // courier of the return leg: its profile; an older job typed the name — the profile it is a name of
+  // (src/lib/shipper.ts), else just the tracking number
   const trackingNo = (row.trackingNo ?? '').trim();
   const profiles = await listShippingProfiles(false);
   const courierOf = (p: ShippingProfile | null, no: string) =>
@@ -501,9 +481,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Resolve → job number (called only AFTER Turnstile passed)
- * ------------------------------------------------------------------ */
+// Resolve → job number: called only AFTER Turnstile passed.
 
 /** /track/<linkToken> → job number, or null (bad shape / unknown / deleted / expired — never say which) */
 export async function jobNoForLink(token: string): Promise<string | null> {
@@ -610,9 +588,7 @@ export async function linkStatus(jobNo: string, ex: Tx | typeof db = db): Promis
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Serialize (called only with the job number bound to a consumed ticket)
- * ------------------------------------------------------------------ */
+// Serialize: called only with the job number bound to a consumed ticket.
 
 /** the job may have been deleted / expired since the ticket was issued — checked again here */
 export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
@@ -624,10 +600,6 @@ export async function publicJobByNo(jobNo: string): Promise<PublicJob | null> {
     return toPublic(row);
   });
 }
-
-/* ------------------------------------------------------------------ *
- * Customer session (phone + OTP, see server/track-otp.ts)
- * ------------------------------------------------------------------ */
 
 /** how far back "ประวัติ" goes (finished + cancelled jobs) */
 const HISTORY_YEARS = 2;

@@ -10,14 +10,7 @@ import { trackData } from '@/server/contract/track';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/track/data { ticket } → PublicJob
- *
- * The ticket is the ONLY input: any job_no / jobId / linkToken in the body is
- * ignored — the job is whatever the server bound to the ticket. The ticket is
- * consumed atomically (one DELETE … RETURNING), so it works once, for 3 minutes,
- * from the IP + browser it was issued to. Every failure reads the same.
- */
+/** the ticket is the ONLY input (any job_no / jobId / linkToken in the body is ignored); consumed atomically — once, 3 minutes, the issuing IP + browser. Every failure reads the same. */
 const FAIL_LIMIT = 5; // invalid tickets per IP …
 const FAIL_WINDOW = 10 * 60; // … per 10 minutes → blocked 15 minutes
 

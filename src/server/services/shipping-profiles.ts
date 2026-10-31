@@ -13,13 +13,11 @@ import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { nowThai } from '@/server/mappers/format';
 
 /**
- * "โปรไฟล์บริษัทขนส่ง" (drizzle/0013) — the courier a repaired device is shipped
- * back with. Used by the customer tracking page to show a logo and a link into
- * the courier's own tracking site; `trackUrl` holds {no} where the tracking
- * number goes, and is editable because carriers change their URLs.
+ * "โปรไฟล์บริษัทขนส่ง" — the courier a repaired device is shipped back with; /track shows its logo and a link into the
+ * courier's own tracking site. `trackUrl` holds {no} where the tracking number goes (editable: carriers change URLs).
  */
 export type ShippingProfile = {
-  /** the row's uuid (ADR 0008) — job.return_shipper_id stores its `pk` */
+  /** the row's uuid — job.return_shipper_id stores its `pk` */
   id: string;
   code: string;
   nameTh: string;
@@ -90,7 +88,6 @@ const aliasList = (v: unknown) =>
     ),
   ].join(', ');
 
-/** the parsed body of the save route (shippingProfileSave in src/server/contract/admin.ts) */
 export type ShippingProfileInput = z.output<typeof shippingProfileSave.body>;
 
 export async function saveShippingProfile(i: ShippingProfileInput, byUserId: number): Promise<ShippingProfile> {

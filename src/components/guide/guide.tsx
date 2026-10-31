@@ -7,13 +7,6 @@ import { useAccess } from '@/lib/use-access';
 import { Input } from '@/components/ui/input';
 import { GUIDE, type TopicGroup } from './content';
 
-/**
- * คู่มือการใช้งาน — หัวข้อซ้าย (ติดขอบบนขณะเลื่อน) / การ์ดเนื้อหาขวา
- * · หัวข้อที่กำลังอ่านถูกไฮไลต์ตามตำแหน่งเลื่อน (IntersectionObserver)
- * · ช่องค้นหากรองตามชื่อหัวข้อ / ชื่อกลุ่ม
- * · กลุ่มที่ติด adminOnly แสดงเฉพาะ System Admin · ติด right แสดงเมื่อมีสิทธิ์พิเศษนั้น
- * · จอเล็ก: หัวข้อกลายเป็น dropdown กระโดดไปหัวข้อ
- */
 export function Guide() {
   const { isAdmin, has } = useAccess();
   const [q, setQ] = React.useState('');
@@ -79,9 +72,7 @@ export function Guide() {
 
   return (
     <div className="grid gap-5 md:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
-      {/* ---- topic list ---- */}
       <aside aria-label="หัวข้อคู่มือ" className="md:sticky md:top-[4.75rem] md:self-start">
-        {/* one tall card, like the topbar height away from the viewport bottom — the topic list scrolls inside it */}
         <div className="surface flex flex-col p-3 md:h-[calc(100vh-6rem)]">
           <div className="flex items-center gap-2 px-1 pb-2">
             <BookOpen className="h-4 w-4 text-primary" />
@@ -108,7 +99,6 @@ export function Guide() {
             )}
           </div>
 
-          {/* small screens: jump list */}
           <select
             className="mb-1 h-9 w-full rounded-md border border-input bg-background px-2 text-base md:hidden"
             value={active}
@@ -170,7 +160,6 @@ export function Guide() {
         </div>
       </aside>
 
-      {/* ---- content ---- */}
       <div className="min-w-0 space-y-8">
         {groups.map((g) => (
           <section key={g.id} aria-labelledby={`guide-group-${g.id}`}>
@@ -189,7 +178,7 @@ export function Guide() {
                     </span>
                     <h3 className="text-base font-semibold tracking-tight sm:text-lg">{t.title}</h3>
                   </div>
-                  {/* 80ch: a reading width on wide screens (190+ characters a line at 1728px); 1280px stays as it was */}
+                  {/* 80ch: a reading width on wide screens (190+ characters a line at 1728px) */}
                   <div className="max-w-[80ch] space-y-3">{t.body}</div>
                 </article>
               ))}

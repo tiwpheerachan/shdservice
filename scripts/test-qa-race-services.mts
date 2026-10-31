@@ -1,8 +1,8 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-race-services.mts
- * Race audit 2026-10-21, check-then-act: a check that ran before its write's transaction let a delete commit in
- * between (G13 job / quotation / sale order on a deleted customer, job given to a deactivated engineer; G16
- * quotation on a deleted job; G6 request for a deleted product; G4 an attachment deleted twice; #10 an attachment
+ * Check-then-act races: a check that ran before its write's transaction let a delete commit in
+ * between (job / quotation / sale order on a deleted customer, job given to a deactivated engineer;
+ * quotation on a deleted job; request for a deleted product; an attachment deleted twice; an attachment
  * stored on a job deleted during the upload). A second DB session ("blocker") pins the request between its check
  * and its write — the window a concurrent user's commit falls into in production.
  * Its own fixtures (ids 987x, codes QRS*, users qrs-*), reset at every start.
@@ -22,7 +22,7 @@ Object.assign(process.env, {
   SUPABASE_SECRET_KEY: 'qrs-fake-key',
 });
 
-// ---- fake storage: a Set of paths; an upload waits for `uploadGate` (the window a delete falls into) ----
+// fake storage: a Set of paths; an upload waits for `uploadGate` (the window a delete falls into)
 const stored = new Set<string>();
 let uploadGate: Promise<void> = Promise.resolve();
 let uploadStarted: () => void = () => {};
@@ -58,7 +58,6 @@ const { addDays, today } = await import('@/lib/dates');
 const attachRoute = await import('@/app/api/attachments/route');
 const attachIdRoute = await import('@/app/api/attachments/[id]/route');
 
-// ---- fixtures ----
 const ADMIN = { id: 9871, email: 'qrs-admin@example.invalid' };
 const ENG = 9872; // role QRS Engineer (Job Take)
 const SV = 3;
@@ -159,7 +158,6 @@ await pool.query(`
     VALUES ((SELECT pk FROM job WHERE job_no = '${J(5)}'), 'qrs.pdf', 'qrs.pdf', '', 'ACTIVE');
 `);
 
-// ---- helpers ----
 const Q = async <T = Record<string, unknown>,>(text: string, params: unknown[] = []) =>
   (await pool.query(text, params)).rows as T[];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -218,10 +216,10 @@ async function race(b: pg.Client, req: () => Promise<unknown>, del: () => Promis
 }
 const del = (table: 'customers' | 'jobs' | 'products', id: string) => () =>
   setRecordStatus(table, id, 'DELETED', ADMIN.id);
-/** a customer's uuid — what /api/admin/records (setRecordStatus) takes for one (ADR 0008) */
+/** a customer's uuid — what /api/admin/records (setRecordStatus) takes for one */
 const custId = async (code: string) =>
   (await Q<{ id: string }>(`SELECT id::text AS id FROM customer WHERE customer_code = $1`, [code]))[0]!.id;
-/** a job's / user's uuid — what the API and records take (ADR 0008) */
+/** a job's / user's uuid — what the API and records take */
 const uuidOf = async (table: 'job' | 'app_user', key: string | number) =>
   (
     await Q<{ id: string }>(`SELECT id::text AS id FROM ${table} WHERE ${table === 'job' ? 'job_no' : 'pk'} = $1`, [
@@ -317,7 +315,6 @@ try {
   });
   await test('POST quotation / sale order ‖ delete its customer: saved before the delete, or refused (409)', async () => {
     const bad: string[] = [];
-    // the salesperson by uuid (ADR 0008)
     const [{ id: salesId }] = await Q<{ id: string }>(`SELECT id::text AS id FROM app_user WHERE pk = $1`, [ADMIN.id]);
     for (const [code, save, type] of [
       [

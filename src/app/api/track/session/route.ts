@@ -11,13 +11,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/track/session { linkToken, turnstileToken } — the staff-sent link
- * (/track/<token>): Turnstile → resolve the job → one-time ticket.
- * (The /track page itself uses phone + OTP: /api/track/otp/*.)
- *
- * Order matters: rate limits BEFORE Siteverify (a flood must not become a flood
- * of Cloudflare calls), and the database is touched for the job only AFTER the
- * captcha passed.
+ * The staff-sent link: Turnstile → resolve the job → one-time ticket. Rate limits come BEFORE Siteverify (a flood
+ * must not become a flood of Cloudflare calls), and the DB is touched for the job only AFTER the captcha passed.
  */
 export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);

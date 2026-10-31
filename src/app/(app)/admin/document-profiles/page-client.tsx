@@ -61,11 +61,7 @@ const EMPTY: FormValues = {
   purpose: 'document',
 };
 
-/**
- * โปรไฟล์ผู้ออกเอกสาร ("ออกเอกสารในนาม") — company/brand printed on quotations,
- * shipping labels, intake slips and return notes (letterhead only — document numbers are one
- * series for every profile). System Admin only (route is under /admin).
- */
+/** letterhead only — document numbers are one series for every profile */
 export default function DocumentProfilesPage() {
   const { push } = useToast();
   const confirm = useConfirm();
@@ -85,7 +81,6 @@ export default function DocumentProfilesPage() {
     [pendingUrl],
   );
 
-  // the list: read through swr (one request, cached); after a save `load()` re-reads it
   const { data, loading, mutate } = useApi<{ rows: Profile[] }>('/api/admin/document-profiles', {
     fresh: true,
     onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', desc: msg }),
@@ -93,9 +88,9 @@ export default function DocumentProfilesPage() {
   const rows = data?.rows ?? [];
   const load = () => mutate();
 
-  const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
+  const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
-  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
+  useTourRestore(() => form, setForm);
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
@@ -109,7 +104,7 @@ export default function DocumentProfilesPage() {
     if (fe.report(fe.run(documentProfileSchema, form))) return;
     setSaving(true);
     try {
-      // `expect`: the profile as the form loaded it — another admin's save since → 409 stale, not overwritten
+      // `expect`: another admin's save since load → 409 stale, not overwritten
       const d = await postJson<{ row: Profile }>('/api/admin/document-profiles', {
         ...form,
         id: editing?.id,
@@ -117,7 +112,6 @@ export default function DocumentProfilesPage() {
       });
       let row = d.row;
       if (pendingLogo) {
-        // new profile: the logo chosen before saving goes up now that there is an id
         try {
           await uploadFile('profile-logo', row.id, pendingLogo);
           setPendingLogo(null);
@@ -147,7 +141,6 @@ export default function DocumentProfilesPage() {
   const onLogo = async (file: File | undefined) => {
     if (!file) return;
     if (!editing) {
-      // creating: keep the file, show a preview, upload after save
       setPendingLogo(file);
       if (fileRef.current) fileRef.current.value = '';
       return;
@@ -228,7 +221,7 @@ export default function DocumentProfilesPage() {
       key: 'isActive',
       header: 'สถานะ',
       width: '150px',
-      hideBelow: 'sm', // phones: code + company + action (Active / ค่าเริ่มต้น are in the edit dialog)
+      hideBelow: 'sm',
       cell: (r) => (
         <div className="flex gap-1">
           <Badge tone={r.isActive ? 'success' : 'neutral'} dot>

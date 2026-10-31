@@ -57,7 +57,7 @@ const MONEY_USERS: [string, string][] = [
   [SELLER_EMAIL, 'E2E Seller'],
   [MANAGER_EMAIL, 'E2E Manager'],
 ];
-/** the tables the seeds or the specs insert into (identity column `pk`, drizzle/0006) */
+/** the tables the seeds or the specs insert into (identity column `pk`) */
 const SEQUENCES = [
   'app_user',
   'role_permission',

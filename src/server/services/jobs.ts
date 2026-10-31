@@ -133,9 +133,6 @@ import type {
 import { clean, cleanCode, cleanText, summary, type FieldErrors } from '@/lib/validation';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
-/* ------------------------------------------------------------------ *
- * Status constants (job_status.job_status_id) — verified against the dump
- * ------------------------------------------------------------------ */
 export { JS };
 
 const REPAIRED_GROUP = JOB_GROUP.REPAIRED;
@@ -161,19 +158,16 @@ const opener = alias(appUser, 'opener');
 const slaDays = sql`coalesce((${db.select({ d: jobType.defaultDueDays }).from(jobType).where(eq(jobType.pk, job.jobTypePk))}), 7)`;
 
 /**
- * The job's REAL due date (a date): the one a user picked in this app, else opened + its job type's
- * SLA. The legacy system writes "opened + 1 day" on every job — not an estimate (real repairs take
- * 3–30 days), see drizzle/0020_due_date_sla.sql. One definition for the overdue filter, the bell,
- * the job screens and the customer's /track page.
+ * The job's REAL due date: the one a user picked, else opened + its job type's SLA (legacy writes "opened + 1 day" on
+ * every job — not an estimate). One definition for the overdue filter, the bell, the job screens and /track.
  */
 export const effectiveDue = sql`(case when ${job.dueDateSetByUser} and ${job.customerDueDate} > '1901-01-01' then ${job.customerDueDate}::date else ${job.jobCreateDate}::date + ${slaDays} end)`;
 /** effectiveDue as "YYYY-MM-DD" (a raw date column would come back as a JS Date) */
 export const effectiveDueText = sql<string>`to_char(${effectiveDue}, 'YYYY-MM-DD')`;
 
 /*
- * No redundant data (ADR 0008 phase 2): what a relation gives is read through it — the legacy snapshot columns
- * (customer_detail, product_model_name, job_reception_shipper, reported_symptom_pk, approved_quotation_pk) stay
- * for the legacy rows only (new rows NULL), so every reader is coalesce(relation, legacy snapshot).
+ * The legacy snapshot columns (customer_detail, product_model_name, job_reception_shipper, reported_symptom_pk,
+ * approved_quotation_pk) are NULL on new rows: every reader is coalesce(relation, legacy snapshot).
  */
 /** the job's model name — needs `model` joined on job.model_pk */
 export const jobModelName = sql<
@@ -210,9 +204,6 @@ export const receptionShipperName = sql<
   string | null
 >`coalesce((select sp.name_th from shipping_profile sp where sp.pk = ${job.receptionShippingProfilePk}), ${job.jobReceptionShipper})`;
 
-/* ------------------------------------------------------------------ *
- * Status helpers (cached name ↔ id)
- * ------------------------------------------------------------------ */
 export function jobStatuses() {
   return cached('jobstatus:all', 300_000, async () => {
     const rows = await db.select().from(jobStatus).orderBy(asc(jobStatus.displayOrder), asc(jobStatus.jobStatusId));
@@ -314,10 +305,8 @@ async function adminOf(userPk: number | undefined): Promise<{ isAdmin: boolean }
 }
 
 /**
- * Owner rule 2026-10-30 (legacy-lock.ts): on a legacy job only what is ALREADY RECORDED is System Admin's — a money
- * field holding a value (non-zero / non-empty). An empty one may be filled (the payment at the close), and the totals
- * the formula adds up from the lines / costs (spare_part_total_cost, job_total_cost) follow as always.
- * The job's money fields, by JobDetail key (what figuresLocked names).
+ * On a legacy job only what is ALREADY RECORDED is System Admin's (legacy-lock.ts): a money field holding a value. An
+ * empty one may be filled, and the formula totals follow as always. By JobDetail key (what figuresLocked names).
  */
 const RECORDED_MONEY = {
   estimateCost: 'estimateCost',
@@ -341,7 +330,7 @@ async function assertJobFigures(byUserId: number, row: JobRow, toWrite: Partial<
   if (recordedMoney(row).some((k) => k in toWrite)) await assertFiguresEditable(await adminOf(byUserId), 'job', row.pk);
 }
 
-/** a job_outsource trip still out: no receive date yet (send_status, dropped in drizzle/0006, said the same) */
+/** a job_outsource trip still out: no receive date yet */
 const notBack = sql`coalesce(${jobOutsource.receiveDate}, '1900-01-01') < '1901-01-01'`;
 /** an out-source send not yet recorded as received (saveOutsource's open row) */
 const outsourceOpen = (jobPk: number) => and(eq(jobOutsource.jobPk, jobPk), notBack);
@@ -447,8 +436,8 @@ async function setStatus(
     extra.repairedByAppUserPk = byUserId;
   }
   if (group === FINISHED_GROUP) {
-    // a job sent out-source must come back before it is closed (owner decision). Only on the way
-    // INTO Finished: an already-closed legacy job (7 → 8, adding the tracking no.) is not blocked.
+    // a job sent out-source must come back before it is closed. Only on the way INTO Finished: an already-closed
+    // legacy job (7 → 8, adding the tracking no.) is not blocked.
     const closing = fromGroup !== FINISHED_GROUP;
     const [out] = closing
       ? await tx.select({ id: jobOutsource.pk }).from(jobOutsource).where(outsourceOpen(jobPk)).limit(1)
@@ -520,9 +509,6 @@ export async function followQuotation(
   return setStatus(tx, j, target, byUserId, current, `ตามใบเสนอราคา ${quotationNo} : ${quotationStatus}`);
 }
 
-/* ------------------------------------------------------------------ *
- * List (server-side paging)
- * ------------------------------------------------------------------ */
 /** the customer as they are NOW ("code name phone", as customer_detail is built) — the opening snapshot without one */
 const customerText = sql<string>`coalesce(nullif(btrim(concat_ws(' ', btrim(${customer.customerCode}), btrim(${customer.customerName}), btrim(${customer.phoneNumber}))), ''), ${job.customerDetail})`;
 
@@ -695,7 +681,7 @@ export type JobFilters = {
   dateBy?: 'create' | 'reception' | 'repaired' | 'closed';
   symptom?: string; // symptom name (engineer's or customer's)
   returnType?: string;
-  /* ---- job-list filter bar (each one is AND-ed; text ones are partial matches) ---- */
+  // job-list filter bar: AND-ed; text ones are partial matches
   no?: string; // เลขที่งาน
   ref?: string; // เลขคำสั่งซื้อ (job_reference_no)
   brand?: string; // ยี่ห้อ — brand name
@@ -728,13 +714,9 @@ const dayEnd = (by: JobFilters['dateBy'], d: string) => (by === 'reception' ? d 
 const thaiToday = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
 
 /**
- * Open job = its status is not in a closed group (Finished / Cancel).
- *
- * Written as `job_status_id = ANY(ARRAY(subquery))` on purpose: Postgres runs the subquery once,
- * then reads only the open jobs through ix_job_status — the cost follows the open work (~2k jobs),
- * not the history (48k and growing). Filtering on job_status_group through the join instead makes
- * it scan every job (~105 ms vs ~6 ms). The status list stays live (no app cache).
- * Works with or without job_status joined.
+ * Open job = status not in a closed group. Written as `job_status_id = ANY(ARRAY(subquery))` on purpose: the subquery
+ * runs once, then only open jobs are read through ix_job_status (~6 ms); filtering job_status_group through the join
+ * scans every job (~105 ms). Works with or without job_status joined.
  */
 const isOpenJob = sql`${job.jobStatusId} = ANY(ARRAY(${db
   .select({ id: jobStatus.jobStatusId })
@@ -837,7 +819,7 @@ export function jobWhere(q: string, f: JobFilters) {
     f.returnType ? eq(job.returnCustomerType, f.returnType) : undefined,
     closedFrom ? gte(job.jobClosedDate, `${closedFrom} 00:00:00`) : undefined,
     closedTo ? lte(job.jobClosedDate, `${closedTo} 23:59:59`) : undefined,
-    // by the relation; a job without one (a legacy orphan, drizzle/0006) only has its "code name phone" snapshot
+    // by the relation; a job without one (a legacy orphan) only has its "code name phone" snapshot
     f.customerCode
       ? or(
           inArray(
@@ -851,7 +833,6 @@ export function jobWhere(q: string, f: JobFilters) {
     f.closable
       ? or(eq(jobStatus.jobStatusGroup, JOB_GROUP.REPAIRED), inArray(job.jobStatusId, CLOSABLE_IDS))
       : undefined,
-    // ---- job-list filter bar ----
     f.no ? ilike(job.jobNo, likeTerm(f.no.trim())) : undefined,
     f.ref ? ilike(job.jobReferenceNo, likeTerm(f.ref.trim())) : undefined,
     // brand/model are matched without adding joins to the count query
@@ -999,11 +980,8 @@ async function loadJobStats() {
   return { total, fresh, done, progress: total - fresh - done - declined };
 }
 
-/* ------------------------------------------------------------------ *
- * Detail
- * ------------------------------------------------------------------ */
 export type JobDetail = {
-  /** job.id (uuid) — every link and API path of the job (ADR 0008); `no` is what people read */
+  /** job.id (uuid) — every link and API path of the job; `no` is what people read */
   id: string;
   no: string;
   /** ออกเอกสารในนาม — document_profile.id (NULL in legacy rows = SHD) */
@@ -1110,7 +1088,7 @@ export type JobDetail = {
   logs: { statusId: number; status: string; date: string; by: string }[];
   /** audit_log entries for this job (newest first) — ประวัติการแก้ไข */
   history: AuditRow[];
-  /** job.row_version (drizzle/0026) — the edit form sends it back with its save */
+  /** job.row_version — the edit form sends it back with its save */
   version: number;
   /** a legacy job (legacy_boundary), viewer not System Admin: its money fields that hold a value — read-only */
   figuresLocked: FigureKey[];
@@ -1118,7 +1096,7 @@ export type JobDetail = {
   legacy: boolean;
 };
 
-/** the job's relation properties (drizzle/0006) → the key the job history has always used for them */
+/** the job's relation properties → the key the job history has always used for them */
 const LEGACY_KEY: Record<string, string> = {
   customerPk: 'customerId',
   jobTypePk: 'jobTypeId',
@@ -1132,7 +1110,7 @@ const LEGACY_KEY: Record<string, string> = {
   engineerAppUserPk: 'engineerId',
   repairedByAppUserPk: 'jobRepairedBy',
   createdByAppUserPk: 'jobCreateBy',
-  // the new S/N (drizzle/0006) under the label it always had: อะไหล่ที่เปลี่ยน / New S/N
+  // the new S/N under the label it always had: อะไหล่ที่เปลี่ยน / New S/N
   newSerialNo: 'sparePartReplace',
 };
 /** one name of a master row / person, by its pk (what audit_log stores instead of the pk) */
@@ -1162,7 +1140,7 @@ const NAMED: Record<string, (tx: Tx) => (pk: number) => Promise<string | null>> 
     ]),
   ),
 };
-/** relation values → names, at write time: audit_log never stores a pk (ADR 0008) */
+/** relation values → names, at write time: audit_log never stores a pk */
 async function named(tx: Tx, changes: AuditChanges | null): Promise<AuditChanges | null> {
   if (!changes) return null;
   const out: AuditChanges = {};
@@ -1344,7 +1322,7 @@ function toJobDetail(
     modelCode: r.modelCode ?? '',
     modelName: r.modelName ?? '',
     modelDetail: j.productModelDetail ?? '',
-    color: '', // job.product_color dropped (drizzle/0006: empty on every row) — the field stays for the API
+    color: '', // no column behind it — the field stays for the API
     receptionDate: fmtDate(j.jobReceptionDate),
     receptionTrackingNo: j.jobReceptionTrackingNo ?? '',
     receptionShipper: r.receptionShipper ?? '',
@@ -1396,7 +1374,7 @@ function toJobDetail(
     swap: { detail: swapDetailShown(j), docNo: j.swapRefundDocumentNo ?? '' },
     quotationNo: r.quotationNo ?? '',
     isBounce: !!j.isJobBounce,
-    gspnNo: '', // job.job_reference_no_gspn dropped (drizzle/0006: empty on every row) — the field stays for the API
+    gspnNo: '', // no column behind it — the field stays for the API
     outsource: fwd.map((x) => ({
       id: x.f.id,
       sendTo: x.f.sendToName ?? '',
@@ -1440,10 +1418,6 @@ export async function getJob(jobNo: string, viewerPk?: number): Promise<JobDetai
   return toJobDetail(r, await jobDetailRelated(jobNo, r.j), await adminOf(viewerPk));
 }
 
-/* ------------------------------------------------------------------ *
- * Create / update (เปิดงานใหม่ / แก้ไขข้อมูลงาน)
- * ------------------------------------------------------------------ */
-/** the parsed body of POST /api/jobs and PATCH /api/jobs/{no} (jobCreate / jobUpdate in src/server/contract/jobs.ts) */
 export type JobInput = z.output<typeof jobCreate.body>;
 
 /**
@@ -1572,7 +1546,7 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
   if (unknown.length) fields.symptoms = `ไม่พบอาการเสีย "${unknown.join('", "')}" ในรายการ`;
   if (newShipper && !sp) fields.receptionShipper = 'บริษัทขนส่งต้องเลือกจากโปรไฟล์บริษัทขนส่ง';
   if (Object.keys(fields).length) throw new HttpError(400, summary(fields), { fields });
-  // the brand is the model's (job.brand_manufacturer_pk dropped, drizzle/0006): the name is only checked
+  // the brand is the model's (job has no brand column): the name is only checked
   return {
     jobTypeId: jt?.id,
     productTypeId: pt?.id,
@@ -1591,7 +1565,7 @@ function costFields(i: JobInput) {
   return { service, tool, delivery, box };
 }
 
-/** the money a closed job keeps (owner 2026-10-15) → the name its 409 gives */
+/** the money a closed job keeps → the name its 409 gives */
 const MONEY_COLS = {
   estimateCost: 'ค่าประเมินงานซ่อม',
   depositCost: 'ค่ามัดจำงานซ่อม',
@@ -1636,7 +1610,6 @@ function keepMoney<T extends Partial<JobRow>>(row: JobRow, values: T): T {
 }
 
 const JOB_COLS = getTableColumns(job);
-/** how a code-like column is cleaned on the way in — any other text column: clean() / cleanText() */
 /** เลขที่เอกสาร Swap / Refund — "0" / "00" (legacy) = none */
 const docNoOf = (v: unknown) => (/^0{1,2}$/.test(cleanCode(v)) ? '' : cleanCode(v));
 
@@ -1658,7 +1631,7 @@ function sameAsStored(k: keyof JobRow, was: unknown, now: unknown): boolean {
   switch (JOB_COLS[k]?.columnType) {
     case 'PgNumeric':
     case 'PgInteger':
-    case 'PgBigInt53': // the *_pk relations (drizzle/0006): null = none
+    case 'PgBigInt53': // the *_pk relations: null = none
       return num(was as string) === num(now as string); // 0 = null = "none"
     case 'PgBoolean':
       return !!was === !!now;
@@ -1694,9 +1667,8 @@ function changedOnly<T extends Partial<JobRow>>(row: JobRow, values: T): Partial
 
 const COST_COLS = ['sparePartTotalCost', 'serviceCost', 'serviceToolCost', 'deliveryCost', 'cartonBoxCost'] as const;
 /**
- * job_total_cost follows its parts only when one of them changes. A new job: the sum of its parts (as always). A legacy
- * job (`legacy`): its recorded total is never recomputed (owner rule 2026-10-30 — it may hold VAT / a discount) — it
- * moves by exactly what the changed parts moved.
+ * job_total_cost follows its parts only when one of them changes. A new job: the sum of its parts. A legacy job: its
+ * recorded total is never recomputed (it may hold VAT / a discount) — it moves by exactly what the changed parts moved.
  */
 function withTotal<T extends Partial<JobRow>>(row: JobRow, w: T, legacy: boolean): T {
   if (!COST_COLS.some((k) => k in w)) return w;
@@ -1752,7 +1724,7 @@ async function assertPageStatus(
   if (msg) throw new HttpError(400, msg, { fields: { status: msg } });
 }
 
-/** a job someone else already has: not taken silently (owner 2026-10-15) — the page asks, then sends takeOver */
+/** a job someone else already has: not taken silently — the page asks, then sends takeOver */
 async function takeOverError(rows: { no: string; eng: number }[]) {
   const users = await db
     .select({ id: appUser.pk, f: appUser.firstName, l: appUser.lastName })
@@ -1895,8 +1867,8 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
       .insert(job)
       .values({
         jobNo: no,
-        // no redundant data (ADR 0008 phase 2): the customer, model, brand, courier, symptoms and parts are read
-        // through their relations — the legacy snapshot columns stay NULL
+        // no redundant data: the customer, model, brand, courier, symptoms and parts are read through their relations —
+        // the legacy snapshot columns stay NULL
         documentProfilePk: profile.pk,
         customerPk: cust.key,
         customerDueDate: tsOrNull(i.dueDate),
@@ -2096,9 +2068,6 @@ async function applyJobEdit(
   return (await tx.select().from(job).where(eq(job.jobNo, jobNo)))[0]!;
 }
 
-/* ------------------------------------------------------------------ *
- * Assign (จนท.รับมอบหมายงาน)
- * ------------------------------------------------------------------ */
 /** `engineer` = app_user.id (uuid) of who takes the jobs */
 export async function assignJobs(
   jobNos: string[],
@@ -2168,10 +2137,6 @@ export async function assignJobs(
   return n;
 }
 
-/* ------------------------------------------------------------------ *
- * Repair (บันทึกงานซ่อม) — details, costs, spare-part requests, status
- * ------------------------------------------------------------------ */
-/** the parsed body of POST /api/jobs/{no}/repair (jobRepair in src/server/contract/jobs.ts) */
 export type RepairInput = z.output<typeof jobRepair.body>;
 
 /**
@@ -2211,8 +2176,8 @@ export function partsReplaceShown(j: Pick<JobRow, 'sparePartReplace' | 'newSeria
  */
 function swapDetailShown(j: JobRow): string {
   const stored = j.swapRefundDetail ?? '';
-  // empty = not a swap / refund job (isSwap, as before 0006 — a New S/N from บันทึกซ่อม never makes one); no
-  // new_serial_no written = the stored text as it is
+  // empty = not a swap / refund job (isSwap — a New S/N from บันทึกซ่อม never makes one); no new_serial_no written =
+  // the stored text as it is
   if (!stored.trim() || j.newSerialNo === null) return stored;
   const sw = parseSwap(stored);
   const o: Record<string, string> = Object.keys(sw).length ? sw : { รายละเอียด: clean(stored) };
@@ -2292,7 +2257,7 @@ const PART_FIGURES = [
   'requestQtyB',
   'sparePartTotalPriceB',
 ] as const satisfies (keyof PartRow)[];
-/** owner rule 2026-10-30: a legacy part line whose figures change → System Admin only */
+/** a legacy part line whose figures change → System Admin only */
 async function assertPartFigures(byUserId: number, e: PartRow, v: Partial<PartRow>) {
   if (PART_FIGURES.some((k) => k in v && num(e[k]) !== num(v[k])))
     await assertFiguresEditable(await adminOf(byUserId), 'job_part', e.pk);
@@ -2322,7 +2287,7 @@ function issuedLine(e: PartRow, i?: number, more = false) {
     i,
   );
 }
-/** a deleted or Inactive (owner 2026-10-21) part: no new line, no bigger request */
+/** a deleted or Inactive part: no new line, no bigger request */
 function assertPartOn(p: { deleted: boolean; inactive: boolean } | undefined, code: string | null, i: number) {
   if (p?.deleted || p?.inactive)
     throw partConflict(
@@ -2332,15 +2297,13 @@ function assertPartOn(p: { deleted: boolean; inactive: boolean } | undefined, co
 }
 
 /**
- * Column mapping inferred from the dump: request_qty / is_quotation / is_special
- * (+ the *_b twins) — is_quotation = "เสนอ" (in the quotation), is_special = "เบิก"
- * (requested from stock; booking += qty until the store issues it). The job is charged for a line
- * only when both are ticked (partCharge).
+ * Column mapping (from the legacy data): is_quotation = "เสนอ" (in the quotation), is_special = "เบิก" (requested from
+ * stock; booking += qty until the store issues it), + the *_b twins. The job is charged for a line only when both are
+ * ticked (partCharge).
  *
- * บันทึกงานซ่อม's part lines (job_order_spare_part_log), under the job lock: a line gone from the page is cancelled
- * while still pending, an existing one re-booked / rewritten when it changed, a new one inserted (+ booking when
- * เบิก). `partsTotal` = what the lines add to the job; `partsChanged` = a line was added / changed / removed
- * (only then is the parts total recomputed — M2); `newRequests` = a new เบิก line for stock.
+ * Under the job lock: a line gone from the page is cancelled while still pending, an existing one re-booked /
+ * rewritten when it changed, a new one inserted (+ booking when เบิก). `partsChanged` = a line was added / changed /
+ * removed (only then is the parts total recomputed); `newRequests` = a new เบิก line for stock.
  */
 async function syncPartLines(
   tx: Tx,
@@ -2573,9 +2536,8 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
           newRequests: false,
           partsLog: [[], []] as [string[], string[]],
         };
-    // no line changed: the stored total stays (a legacy job's parts cost may have no part rows behind it)
-    // a legacy job's recorded parts cost is never recomputed (owner rule 2026-10-30: it may have no job_part rows
-    // behind it) — it moves by what this save's lines changed; a new job sums its lines as always
+    // a legacy job's recorded parts cost is never recomputed (it may have no job_part rows behind it) — it moves by what
+    // this save's lines changed; a new job sums its lines as always
     const legacy = await isLegacyRow('job', j.pk);
     const partsTotal = !parts.partsChanged
       ? num(j.sparePartTotalCost)
@@ -2583,7 +2545,6 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
         ? num(j.sparePartTotalCost) + parts.partsDelta
         : parts.partsTotal;
 
-    // ---- job fields ----
     const takes = j.engineerAppUserPk == null && meTakes;
     const changed = withTotal(j, changedOnly(j, repairValues(j, i, { es, takes, partsTotal, byUserId })), legacy);
     const toWrite = locked ? keepMoney(j, changed) : changed;
@@ -2608,7 +2569,6 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
       });
     if (takes) await auditAssign(tx, byUserId, jobNo, 0, byUserId, 'Job Repair');
 
-    // ---- status ----
     const target = repairStatus(status, newStatus, parts.newRequests, takes);
     if (target !== undefined) await setStatus(tx, j, target, byUserId, status);
     else if (parts.partsChanged) await followParts(tx, jobNo, byUserId);
@@ -2618,11 +2578,10 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
 }
 
 /**
- * The parts-driven statuses follow the job's part lines after they changed (บันทึกซ่อม with no status picked, stock's
- * issueForJob — in their transaction, the job row locked): every request issued → เริ่มเบิก / รออะไหล่ → เบิกจ่าย
- * อะไหล่ครบแล้ว; a request still waiting → เบิกจ่ายอะไหล่ครบแล้ว → เริ่มเบิกอะไหล่. Any other status stays.
+ * The parts-driven statuses follow the job's part lines after they changed (in the caller's transaction, job row
+ * locked): every request issued → เริ่มเบิก / รออะไหล่ → เบิกจ่ายอะไหล่ครบแล้ว; a request still waiting → back to
+ * เริ่มเบิกอะไหล่. Any other status stays. true = the status moved (row and version written).
  */
-/** true = the job's status moved (its row, and so its version, was written) */
 export async function followParts(tx: Tx, jobNo: string, byUserId: number): Promise<boolean> {
   const [cur] = await tx
     .select({ pk: job.pk, jobNo: job.jobNo, status: job.jobStatusId })
@@ -2651,13 +2610,7 @@ export async function followParts(tx: Tx, jobNo: string, byUserId: number): Prom
   return false;
 }
 
-/* ------------------------------------------------------------------ *
- * Outsource (บันทึกงานส่งซ่อมต่อ)
- * ------------------------------------------------------------------ */
-/**
- * The parsed body of POST /api/jobs/{no}/outsource (jobOutsource in src/server/contract/jobs.ts).
- * `by` = app_user id of ส่งโดย / รับโดย; left out → the user saving.
- */
+/** `by` = app_user id of ส่งโดย / รับโดย; left out → the user saving. */
 export type OutsourceInput = z.output<typeof jobOutsourceOp.body>;
 
 type SendRow = typeof jobOutsource.$inferSelect;
@@ -2728,7 +2681,7 @@ async function writeSendRow(
 ): Promise<{ implied?: number; stamped?: AuditChanges | null }> {
   const { back, sendBy, receiveBy, byUserId } = o;
   if (i.receive && open) {
-    // received = a receive date (send_status dropped in drizzle/0006)
+    // received = a receive date (no status column)
     await tx
       .update(jobOutsource)
       .set({
@@ -2885,13 +2838,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   return savedJob(jobNo, v, byUserId);
 }
 
-/* ------------------------------------------------------------------ *
- * Swap / Refund
- * ------------------------------------------------------------------ */
-/**
- * The parsed body of POST /api/jobs/{no}/swap-refund (jobSwapRefund in src/server/contract/jobs.ts).
- * `inspection` = ผลการตรวจสอบ → engineer_repair_detail.
- */
+/** `inspection` = ผลการตรวจสอบ → engineer_repair_detail. */
 export type SwapRefundInput = z.output<typeof jobSwapRefund.body>;
 
 export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId: number): Promise<JobDetail> {
@@ -2923,10 +2870,9 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     i.refundDate ? `วันที่คืนเงิน: ${str(i.refundDate)}` : '',
     i.detail ? `รายละเอียด: ${clean(i.detail)}` : '',
   ].filter(Boolean);
-  // job.swap_refund_detail is the Swap / Refund page's own record, written as before 0006 — its New S/N line and a
-  // refund's amount / method / reference included: a stored detail is what makes a job a swap / refund one (isSwap),
-  // and the payment fields a later close may overwrite. job.new_serial_no is the serial as it stands now
-  // (swapDetailShown shows it over the line)
+  // job.swap_refund_detail is the Swap / Refund page's own record (its New S/N line and a refund's amount / method /
+  // reference included): a stored detail is what makes a job a swap / refund one (isSwap). job.new_serial_no is the
+  // serial as it stands now (swapDetailShown shows it over the line)
   const paid = num(i.refundAmount) > 0;
   const edit = i.job ? await prepJobEdit(jobNo, i.job) : undefined;
   const v = await writeTx(async (tx) => {
@@ -2943,9 +2889,8 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
     );
     // what the page showed sent back unchanged keeps the stored text (a legacy "เปลี่ยน" is not reformatted)
     const same = swapShown(swapDetailShown(before)) === swapShown(lines.join('\n'));
-    // only a real change of the New S/N the page showed (the swap detail's) writes job.new_serial_no: another value, or
-    // the shown one cleared. '' sent for a job showing none = no value (one only บันทึกซ่อม wrote stays, as before 0006);
-    // left out (Refund) = unchanged
+    // only a real change of the New S/N the page showed writes job.new_serial_no: another value, or the shown one cleared.
+    // '' sent for a job showing none = no value (one only บันทึกซ่อม wrote stays); left out (Refund) = unchanged
     const shownSerial = parseSwap(swapDetailShown(before))['New S/N'] ?? '';
     const serialNew = i.newSerial !== undefined && newSerial !== shownSerial;
     const swapValues = {
@@ -2985,13 +2930,7 @@ export async function saveSwapRefund(jobNo: string, i: SwapRefundInput, byUserId
   return savedJob(jobNo, v, byUserId);
 }
 
-/* ------------------------------------------------------------------ *
- * Close (ปิดงาน-ส่งคืนสินค้า)
- * ------------------------------------------------------------------ */
-/**
- * The parsed body of POST /api/jobs/{no}/close (jobClose in src/server/contract/jobs.ts). `refund` = the deposit
- * given back (it is more than the total): stored as a negative payment, "คืนมัดจำ <date>".
- */
+/** `refund` = the deposit given back (it is more than the total): stored as a negative payment, "คืนมัดจำ <date>". */
 export type CloseInput = z.output<typeof jobClose.body>;
 
 const RETURN_COLS = [
@@ -3054,7 +2993,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     // Serial เครื่องใหม่ (a swap job): job.new_serial_no — only a changed one is written, sent empty = removed;
     // left out (not a swap job) = unchanged
     const newSerial = cleanSerial(i.newSerial);
-    // โปรไฟล์บริษัทขนส่ง (drizzle/0013) — drives the logo + tracking link on /track
+    // โปรไฟล์บริษัทขนส่ง — drives the logo + tracking link on /track
     const shipperPk = ret.shipperId ? await pkOf(shippingProfile, ret.shipperId, 'โปรไฟล์บริษัทขนส่ง', tx) : null;
     const [shipper] = shipperPk
       ? await tx.select({ name: shippingProfile.nameTh }).from(shippingProfile).where(eq(shippingProfile.pk, shipperPk))
@@ -3098,7 +3037,7 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
     const toWrite = (await moneyLocked(status, byUserId)) ? keepMoney(before, changed) : changed;
     await assertJobFigures(byUserId, before, toWrite);
     if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
-    // paying less than due is allowed (owner 2026-10-15) — the close page confirms it, the log says it
+    // paying less than due is allowed — the close page confirms it, the log says it
     const after = { ...before, ...toWrite };
     const { outstanding } = jobBalance(num(after.jobTotalCost), num(after.depositCost), num(after.jobPaymentAmount));
     const changes = await jobDiff(tx, before as Record<string, unknown>, toWrite as Record<string, unknown>);
@@ -3119,9 +3058,6 @@ export async function closeJob(jobNo: string, i: CloseInput, byUserId: number): 
   return savedJob(jobNo, v, byUserId);
 }
 
-/* ------------------------------------------------------------------ *
- * Attachments (document_attach) — files live in Supabase Storage
- * ------------------------------------------------------------------ */
 /**
  * The job a file is about to be stored for (its number becomes part of the storage path): there (404) and not
  * deleted (409, lockJob's rule) — checked before the upload, so a refused one stores nothing. addAttachment
@@ -3210,9 +3146,6 @@ export async function removeAttachment(id: string, byUserId = 0) {
   });
 }
 
-/* ------------------------------------------------------------------ *
- * Dashboard — computed live from job / job_log
- * ------------------------------------------------------------------ */
 /** `type` = job type NAME (same convention as the job list filter) */
 export type DashRange = { from?: string; to?: string; type?: string };
 
@@ -3385,9 +3318,6 @@ async function computeDashboard(from: string, to: string, type = '') {
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Form suggestions — the values the data already uses, most common first
- * ------------------------------------------------------------------ */
 /** Distinct outsource vendors seen in the data (for the dropdown). */
 export function listOutsourceVendors(): Promise<string[]> {
   return cached('jobs:vendors', 5 * TTL_MASTER, loadOutsourceVendors);
@@ -3469,9 +3399,6 @@ export async function jobSuggestions(field: SuggestedField | undefined, q = '', 
   return (t ? all.filter((v) => v.toLowerCase().includes(t)) : all).slice(0, limit);
 }
 
-/* ------------------------------------------------------------------ *
- * Symptom picker data — usage counts (job.reported_symptom_pk ∪ job_symptom)
- * ------------------------------------------------------------------ */
 /** a job_symptom row that is not the job's main symptom (none = NULL: every row counts) */
 const notTheMain = sql`${jobSymptom.symptomPk} is distinct from ${job.reportedSymptomPk}`;
 
@@ -3529,9 +3456,6 @@ export async function modelSymptoms(modelCode: string, limit = 5) {
   return rows.map((x) => ({ id: x.id, name: (x.name ?? '').trim(), count: Number(x.n) }));
 }
 
-/* ------------------------------------------------------------------ *
- * Call log (job_call_log)
- * ------------------------------------------------------------------ */
 export async function listCallLogs(jobNo: string) {
   const rows = await db
     .select({

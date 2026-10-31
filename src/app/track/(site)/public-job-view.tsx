@@ -181,7 +181,6 @@ export function PublicJobView({ j, onOpenDoc }: { j: PublicJob; onOpenDoc?: DocO
           </ol>
           {docNote && <div className="-mt-2 mb-3">{docNote}</div>}
 
-          {/* the parcels — courier logo + a link into the courier's own tracking page */}
           {j.inbound && (
             <Parcel
               title="พัสดุที่ส่งมาที่ศูนย์"

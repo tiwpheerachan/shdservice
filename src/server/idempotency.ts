@@ -7,13 +7,9 @@ import { parseHeaders } from '@/server/auth';
 import { IDEMPOTENCY } from '@/server/contract/common';
 
 /**
- * Idempotency-Key on create POSTs (drizzle/0026 idempotency_key; per app_user_pk since 0006). The client sends one
- * key per logical submit (src/lib/api.ts postJson); the same key from the same user (`userPk` = app_user.pk) on the
- * same route runs `fn` once and every repeat (double-click, network resend, retry after a timeout) gets the stored
- * answer back instead of a second document. A repeat that arrives while the first is still running
- * → 409 — it never runs in parallel. Only a 2xx answer is stored: a refused request (400 / 409 …)
- * created nothing, so its key is released and the same submit may be sent again.
- * No header → `fn` just runs.
+ * Idempotency-Key on create POSTs: the same key from the same user on the same route runs `fn` once and every repeat
+ * gets the stored answer instead of a second document. A repeat while the first still runs → 409. Only a 2xx answer
+ * is stored: a refused request created nothing, so its key is released. No header → `fn` just runs.
  */
 let lastPurge = 0;
 

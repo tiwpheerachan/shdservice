@@ -23,7 +23,6 @@ export type RepairDetail = {
   status: string;
 };
 
-/** ข้อมูลการเปิดงานซ่อม — the loaded job's number / open date / type / current status, read-only */
 export function RepairJobInfoSection({ job }: { job: JobDetail | null }) {
   return (
     <Section title="ข้อมูลการเปิดงานซ่อม" icon={Wrench}>
@@ -60,7 +59,6 @@ export function RepairJobInfoSection({ job }: { job: JobDetail | null }) {
   );
 }
 
-/** รายละเอียดการซ่อม — symptom found, how it was repaired, remark, new S/N and the new status */
 export function RepairDetailSection({
   job,
   detail,

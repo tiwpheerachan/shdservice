@@ -12,11 +12,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/track/otp/request { phone, turnstileToken } → { requestId, masked, expiresIn, resendIn }
- *
- * Same answer for every well-formed number — a customer's or not — so the endpoint cannot
- * be used to find out who is a customer. Per IP: 5/min, 20/hour; per number: 1/min, 3/hour
- * (server/track-otp.ts). The captcha comes first; SMS go out only to customer numbers.
+ * Same answer for every well-formed number, a customer's or not, so it cannot reveal who is a customer.
+ * Limits: per IP 5/min, 20/hour; per number 1/min, 3/hour (server/track-otp.ts). Captcha first; SMS only to customer numbers.
  */
 export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);

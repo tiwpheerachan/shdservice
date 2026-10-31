@@ -23,7 +23,7 @@ const TONE: Record<string, string> = {
   pending: 'bg-warning',
   repaired: 'bg-info',
   finished: 'bg-success',
-  cancel: 'bg-danger', // the Cancel badges' tone (jobTone)
+  cancel: 'bg-danger',
   total: 'bg-primary',
 };
 
@@ -37,7 +37,6 @@ const TONE_BG: Record<Tone, string> = {
   info: 'bg-info',
 };
 
-/** a panel's failed read — same look as DataTable's error row */
 function LoadFailed({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div role="alert" className="px-5 py-10 text-center">
@@ -53,7 +52,7 @@ function LoadFailed({ error, onRetry }: { error: string; onRetry: () => void }) 
 }
 
 /** first load: placeholder rows that keep a table's height (each as tall as a data row: py-2.5 + a 20px line) */
-const TAT_SKELETON_ROWS = 25; // every job status but 0 (24) + Total
+const TAT_SKELETON_ROWS = 25;
 
 /* the TAT row's colour bar, by job_status_group — the legacy table's red / yellow / green */
 const TAT_GROUP_BG: Record<string, string> = {
@@ -74,7 +73,6 @@ function SkeletonRows({ rows, cols }: { rows: number; cols: number }) {
   ));
 }
 
-/* ---- section shell: flat card, hairline header ---- */
 function Panel({
   title,
   meta,
@@ -100,9 +98,7 @@ function Panel({
 }
 
 const TH_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-/* TAT deep links → job list: the status (none for the Total row) + the TAT bucket (none for the Total column) in
-   the dashboard's range + type — the list filters by the same TAT days (jobs.ts tatDays), so it opens exactly
-   the number that was clicked. */
+/* TAT links filter the list by the same TAT days (jobs.ts tatDays), so it opens exactly the number clicked */
 function tatHref(
   range: { from: string; to: string; type: string },
   status?: { id?: number; name: string },
@@ -151,17 +147,14 @@ const thai = (iso: string) => {
 };
 
 export default function DashboardPage({ initial }: { initial: { from: string; to: string; type: string } }) {
-  const canAdd = useAccess().can('Job Management', 'add'); // เปิดงานใหม่ only for a role that may
-  // date range (default: last 30 days) — every panel follows it; both empty = ทั้งหมด
+  const canAdd = useAccess().can('Job Management', 'add');
   // the URL first: Back from a TAT / KPI link shows the router's cached page (its first props) under the URL the
   // effect below wrote — read the URL itself, then the server's range
   const url = useSearchParams();
   const fromUrl = (k: 'from' | 'to' | 'type', or: string) => url.get(k) ?? or;
   const [from, setFrom] = React.useState(() => fromUrl('from', initial.from));
   const [to, setTo] = React.useState(() => fromUrl('to', initial.to));
-  // job type (name, same as the job list filter) — "" = every type; applies to every panel
   const [type, setType] = React.useState(() => fromUrl('type', initial.type));
-  // a บทสอน leaves the filters as it found them
   useTourRestore(
     () => ({ from, to, type }),
     (v) => {
@@ -171,8 +164,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
     },
   );
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
-  // a date being typed (year 0002 → 0020 → 0202 → 2026) is not a range yet: only an empty box or a whole date
-  // (year 2000 on) is asked for — a partial year was a 400 per keystroke
+  // only an empty box or a whole date (year 2000 on) is asked for — not a 400 per keystroke while the year is typed
   const whole = (d: string) => !d || (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= '2000-01-01');
   // a reversed pair finds nothing: say so (as FilterBar does) and keep showing the last range that made sense
   const reversed = whole(from) && whole(to) && !!from && !!to && from > to;
@@ -220,7 +212,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
               ? 'month'
               : '';
 
-  // one request for every panel
   const { data: dashData, loading: dashLoading, error: dashError, refetch: retryDash } = useDashboard(range);
   const DASH = dashError ? null : dashData; // no stale range's numbers under an error
   const dashFirstLoad = dashLoading && !DASH;
@@ -228,7 +219,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
   const TAT_ROWS = DASH?.tat ?? [];
   const MONTHLY = DASH?.monthly ?? [];
   const TOP_SYMPTOMS = DASH?.topSymptoms ?? [];
-  const { data: JOBS, loading: jobsLoading, error: jobsError, refetch: retryJobs } = useJobs({ limit: 6, ...range }); // latest 6 in range for the "งานล่าสุด" list
+  const { data: JOBS, loading: jobsLoading, error: jobsError, refetch: retryJobs } = useJobs({ limit: 6, ...range });
   const granularity = DASH?.granularity ?? 'month';
   const rangeText =
     (!range.from && !range.to ? 'ทั้งหมด' : `${thai(range.from) || 'เริ่มต้น'} – ${thai(range.to) || 'วันนี้'}`) +
@@ -256,7 +247,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
     label: TAT_BUCKET_LABEL[k],
   }));
 
-  /* monthly line chart geometry */
   const W = 640,
     H = 190,
     padL = 8,
@@ -274,7 +264,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
 
   return (
     <div className="space-y-6">
-      {/* header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Service Operations</p>
@@ -292,9 +281,8 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
             />
             <LookupError error={jobTypesLookup.error} onRetry={jobTypesLookup.refetch} />
           </div>
-          {/* date range: two inputs + presets that just fill them in (empty = ทั้งหมด) */}
-          {/* a full-width row below sm: two 150px inputs overflowed a 320px screen (WCAG 1.4.10); w-0: Chromium's
-              date box will not shrink below its ~170px content width, a 0 width + flex-1 lets it */}
+          {/* presets just fill the two inputs; both empty = ทั้งหมด */}
+          {/* below sm a full-width row: two 150px inputs overflowed a 320px screen (WCAG 1.4.10); w-0 + flex-1: Chromium's date box won't shrink below its ~170px content width otherwise */}
           <div className="flex w-full items-center gap-1.5 sm:w-auto">
             <Input
               type="date"
@@ -356,8 +344,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
         </div>
       </div>
 
-      {/* KPI band — hairline-separated cells, no gradient fills. Its scope said out loud: the bell counts every
-          open job now, so the numbers differ on purpose */}
+      {/* the bell counts every open job, so these numbers differ on purpose */}
       <section className="space-y-2" aria-label="สรุปงานที่เปิดในช่วงวันที่เลือก">
         <p className="text-xs text-muted-foreground">งานที่เปิดในช่วงวันที่เลือก ({rangeText})</p>
         {dashError && (
@@ -409,7 +396,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
         </div>
       </section>
 
-      {/* TAT matrix — the legacy table: every job status (but ยกเลิกข้อมูล), its jobs by days to the return */}
+      {/* the legacy TAT table: every job status but ยกเลิกข้อมูล, its jobs by days to the return */}
       <Panel
         title="TAT — จำนวนงานตามสถานะ"
         meta={<span>งานที่เปิดในช่วง {rangeText} · กดตัวเลขเพื่อเปิดรายการงานชุดนั้น</span>}
@@ -507,7 +494,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* monthly line chart */}
         <Panel
           title={granularity === 'day' ? 'แนวโน้มงานเปิด / ปิด รายวัน' : 'แนวโน้มงานเปิด / ปิด รายเดือน'}
           className="lg:col-span-2"
@@ -603,7 +589,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
           </div>
         </Panel>
 
-        {/* top symptoms */}
         <Panel title="อาการเสียที่พบบ่อย" meta={<span>Top {TOP_SYMPTOMS.length}</span>}>
           <ol className="space-y-3.5">
             {TOP_SYMPTOMS.map((s, i) => (
@@ -629,7 +614,6 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
         </Panel>
       </div>
 
-      {/* recent jobs */}
       <Panel
         title="งานล่าสุด"
         meta={

@@ -4,7 +4,6 @@ import { prefetch, searchOf, type SearchParams } from '@/server/prefetch';
 import { fromQuery, toParams } from './filters';
 import JobListPage from './page-client';
 
-/** the list as its URL asks for it (page, filters) + the counts, in the HTML */
 export default async function Page({ searchParams }: { searchParams: SearchParams }) {
   const init = fromQuery(searchOf(await searchParams));
   const table = { ...FIRST_PAGE, page: init.page, pageSize: init.pageSize, sort: init.sort };

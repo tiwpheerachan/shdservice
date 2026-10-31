@@ -8,13 +8,9 @@ import type { Action, Right } from '@/lib/modules';
 import type { CurrentUser } from '@/server/auth';
 
 /**
- * Who is asking, captured once per API request (checked() / handle() in src/server/auth.ts run every route in it).
- * audit() / security() (src/server/audit.ts) stamp every log row from it, and assertActor() re-checks at write time
- * what the request relied on (R2: a role removed / reduced / deactivated mid-action cannot complete it).
- *
- * IP: clientIp() (src/lib/client-ip.ts) — CF-Connecting-IP, trusted only once the request proved it came through
- * Cloudflare (X-Origin-Auth); Render's X-Forwarded-For is client-controlled behind Cloudflare and only read while the
- * origin check is off (local dev) / `log`. Unknown (0.0.0.0) is stored as NULL, never a made-up address.
+ * Who is asking, captured once per API request (checked() / handle() run every route in it): audit() / security()
+ * stamp log rows from it and assertActor() re-checks at write time what the request relied on. IP: clientIp() —
+ * CF-Connecting-IP, trusted only once the request proved it came through Cloudflare; unknown is stored as NULL.
  */
 export type Need =
   | { kind: 'admin' }

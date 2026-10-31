@@ -193,7 +193,7 @@ export async function proxy(request: NextRequest) {
   // No cookie → our own /login page, ALWAYS. Never bounce an anonymous visitor
   // straight through to the central SSO (and on to Google): an onrender.com URL
   // that auto-forwards to a Google sign-in is exactly what phishing kits do, and
-  // Google Web Risk flagged the site for it (2026-09-18). The user clicks the
+  // Google Web Risk flagged the site for it. The user clicks the
   // button on /login; only that click starts the SSO flow.
   // A browser that HAD a session (os_seen = a user id) gets an "expired" note; not after ออกจากระบบ ('0').
   const expired = !!seenUserId(request.cookies.get(SEEN_COOKIE)?.value);

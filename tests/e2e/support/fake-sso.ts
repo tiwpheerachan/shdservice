@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 /**
- * A stand-in for the central SSO, for the e2e tests only (OneLink's fake, with OneService's calls).
+ * A stand-in for the central SSO, for the e2e tests only.
  * A sign-in runs through the app's real code: /api/sso/login → here → /api/sso/callback, which
  * trades the code at /sso/verify with its client secret and seals its own session cookie.
  *

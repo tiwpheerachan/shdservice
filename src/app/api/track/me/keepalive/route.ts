@@ -9,10 +9,7 @@ import { trackMeKeepalive } from '@/server/contract/track';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/track/me/keepalive — the page calls this while the customer is actually using it:
- * keeps ≥ 5 minutes on the clock, never past 60 minutes from sign-in.
- */
+/** keeps ≥ 5 minutes on the clock, never past 60 minutes from sign-in */
 export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   // a DB error reads as "limited" / "signed out" (logged), never a 500 to the page

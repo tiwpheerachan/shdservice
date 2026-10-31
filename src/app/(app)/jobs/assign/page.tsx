@@ -24,7 +24,7 @@ import { useServerTable } from '@/lib/use-server-table';
 import { NOT_ENGINEER } from '@/lib/validation/job';
 import { brandModelColumn, COL_MIN_WIDTH } from '@/components/shared/table-columns';
 
-// filter bar — subset of the job-list filters (no status/engineer: everything here is new & unassigned)
+// no status / engineer filter: everything here is new & unassigned
 type AssignFilter = {
   no: string;
   ref: string;
@@ -57,7 +57,6 @@ export default function AssignPage() {
   const ask = useConfirm();
   // the signed-in technician receives the jobs (job.engineer_app_user_pk = app_user.pk)
   const { name: CURRENT_TECH, userId, has, can } = useAccess();
-  // open jobs without an engineer / still "งานใหม่" — server-side paging
   const {
     draft,
     setDraft,
@@ -98,7 +97,6 @@ export default function AssignPage() {
 
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [removed, setRemoved] = React.useState<Set<string>>(new Set());
-  // a บทสอน leaves the filter bar and the ticks as it found them
   useTourRestore(
     () => ({ draft, picked: [...picked] }),
     (v) => {
@@ -145,7 +143,7 @@ export default function AssignPage() {
     }
   };
 
-  // POST /api/jobs/assign → engineer_app_user_pk; a "งานใหม่" job also → status 2 "อยู่ระหว่างดำเนินการ" (+ job_log)
+  // a "งานใหม่" job also moves to status 2 (+ job_log)
   const confirm = async () => {
     const list = [...picked];
     if (!list.length) return;
@@ -325,7 +323,6 @@ export default function AssignPage() {
         </Field>
       </FilterBar>
 
-      {/* smart selection toolbar — sticks under the topbar like a navbar */}
       <div className="surface sticky top-(--topbar-h) z-20 flex flex-wrap items-center justify-between gap-3 p-3 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-medium">

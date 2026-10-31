@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-dump-admin.mts — admin regressions from the QA on the legacy data dump (2026-10-28): master audit
+ * scripts/test-qa-dump-admin.mts — admin regressions on the legacy data dump: master audit
  * lines in Thai, Thai module / permission labels on the audit page, a refused sign-in leaves last_login alone, a user /
  * master save that keeps the status keeps status_changed_at / _by, a refused sign-in is audited as refused (never as a
  * System Admin login), a master saved with nothing changed writes no audit line.

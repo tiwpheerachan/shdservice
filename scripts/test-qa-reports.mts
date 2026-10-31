@@ -191,7 +191,7 @@ const page = (f: Record<string, string>, pageSize = 50) => ({ page: 1, pageSize,
 const run = async (report: ReportKey, f: Record<string, string>, cost = false) =>
   (await reportPage(report, page(f), cost)).rows;
 const col = (rows: Record<string, unknown>[], key = 'no') => rows.map((r) => r[key]);
-/** a fixture user's app_user.id — what the report pages' staff filters send (ADR 0008) */
+/** a fixture user's app_user.id — what the report pages' staff filters send */
 const uuidOf = async (userId: number) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [userId])).rows[0]!.id;
 
@@ -281,7 +281,7 @@ await test('งานซ่อมซ้ำ, ค่าใช้จ่าย ม�
   assert.deepEqual(col(await run('open_job', { ...J, customerCode: 'QRPC99' })), ['QRPJ0002']);
 });
 await test('พนง.เปิดงาน / ช่าง, ยี่ห้อ / รุ่น, ประเภทงาน + งานย่อย, สถานะ / กลุ่มสถานะ', async () => {
-  // staff filters carry the user's uuid (ADR 0008 — report-specs.ts jobReportQuery)
+  // staff filters carry the user's uuid (report-specs.ts jobReportQuery)
   assert.deepEqual(col(await run('open_job', { ...J, createdBy: await uuidOf(9942) })), ['QRPJ0002']);
   assert.deepEqual(col(await run('open_job', { ...J, engineer: await uuidOf(9942) })), ['QRPJ0001']);
   assert.deepEqual(col(await run('open_job', { ...J, brand: 'QRP Brand', model: 'QRP Model' })), ['QRPJ0001']);

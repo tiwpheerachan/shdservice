@@ -46,7 +46,6 @@ export function Sidebar({
 
   const toggle = (id: string) => setOpen((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  /* ---------- collapsed hover flyout ---------- */
   const [flyout, setFlyout] = React.useState<Flyout | null>(null);
   const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -115,7 +114,6 @@ export function Sidebar({
           mobileOpen ? 'translate-x-0' : 'invisible -translate-x-full lg:visible lg:translate-x-0',
         )}
       >
-        {/* brand */}
         <div
           className={cn(
             'flex h-(--topbar-h) shrink-0 items-center gap-2 border-b border-sidebar-border',
@@ -146,7 +144,6 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* nav */}
         <nav aria-label="เมนูหลัก" className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
           {NAV.map((g) => {
             const isOpen = open.includes(g.id) && !collapsed;
@@ -273,7 +270,7 @@ export function Sidebar({
         </div>
       </aside>
 
-      {/* collapsed hover flyout — escapes the sidebar via fixed positioning */}
+      {/* fixed positioning: the collapsed flyout escapes the sidebar */}
       {collapsed && flyout && flyoutGroup && (
         <div
           role="menu"

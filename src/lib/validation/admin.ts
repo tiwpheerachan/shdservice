@@ -112,7 +112,7 @@ export function userSchema(prev?: { username?: string | null; phone?: string | n
   });
 }
 
-/** รหัสอะไหล่ (ผู้ผลิต) — decided by the owner 2026-10-15: one code, A-Z 0-9 . _ / - only, upper-case;
+/** รหัสอะไหล่ (ผู้ผลิต): one code, A-Z 0-9 . _ / - only, upper-case;
  *  no Thai, spaces or commas (no lists, no notes), never a "CANCEL_" leftover; "-" means none */
 export const MFG_CODE_RE = /^(?!CANCEL_)[A-Z0-9][A-Z0-9._/-]{0,49}$/;
 export const MFG_CODE_MSG = 'รหัสผู้ผลิต: ใช้ได้เฉพาะ A-Z 0-9 . _ / - (ไม่มีภาษาไทย ช่องว่าง หรือหลายรหัส)';

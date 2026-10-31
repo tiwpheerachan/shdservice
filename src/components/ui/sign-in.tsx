@@ -1,10 +1,6 @@
 import * as React from 'react';
 
-/**
- * Split auth layout — form/content on the left, brand hero on the right.
- * Adapted for OneService: SSO-only (no email/password), brand colours, and a
- * graceful gradient behind the hero image so it never looks broken.
- */
+/** SSO-only; a gradient sits behind the hero image so a missing image never looks broken. */
 export function AuthSplit({
   children,
   heroImageSrc,

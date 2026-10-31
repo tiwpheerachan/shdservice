@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-customers.mts — customer bugs found by the multi-user QA (2026-10): two simultaneous saves
+ * scripts/test-qa-customers.mts — customer rules: two simultaneous saves
  * claiming the same phone / tax id / email, deleted customers through /api/customers/lookup, Thai digits and
  * junk in the phone / tax-id filters, a dashed tax id in the quick search, the one-line address cut at 200.
  *
@@ -242,7 +242,7 @@ try {
     assert.equal((await rowsWith(`SELECT 1 FROM customer WHERE customer_name = $1`, [name])).length, 0);
   });
   await test('two full address lines (100 + 100) → saved whole; no one-line copy stored (customer_address)', async () => {
-    // the one-line customer_address is a legacy snapshot (drizzle/0006): a new row never writes it, so its 200 is no limit
+    // the one-line customer_address is a legacy snapshot: a new row never writes it, so its 200 is no limit
     const name = `QC-CUST two lines ${rnd(6)}`;
     const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(100), address2: 'ข'.repeat(100) });
     assert.equal(r.status, 201, JSON.stringify(r.body));

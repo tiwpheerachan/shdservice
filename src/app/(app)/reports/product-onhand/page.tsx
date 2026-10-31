@@ -20,7 +20,7 @@ export default function Page() {
   const { MODELS, modelsLookup, wantModels } = useBrandModels();
   const { filters: f, setFilters: setF, table, pageArgs, server } = useServerTable<ReportValues>({});
   const modelLabel = (m: { code: string; name: string }) => `${m.name} · ${m.code}`;
-  // filters + KPIs on the server, table paged; ACTIVE parts unless สถานะ says otherwise
+  // ACTIVE parts unless สถานะ says otherwise
   const filters = {
     sysCode: f.sysCode,
     mfgCode: f.mfgCode,

@@ -26,16 +26,16 @@ export async function one<T = Record<string, unknown>>(text: string, params: unk
 /** the user's DB key (app_user.pk — what *_app_user_pk columns hold), as a number (pg answers bigint as text) */
 export const userId = async (email: string) =>
   (await one<{ id: number }>('SELECT pk::int AS id FROM app_user WHERE email_address = $1', [email])).id;
-/** the user's external id (uuid) — what the API takes and answers (ADR 0008); userId above is the DB key */
+/** the user's external id (uuid) — what the API takes and answers; userId above is the DB key */
 export const userUuid = async (email: string) =>
   (await one<{ id: string }>('SELECT id::text AS id FROM app_user WHERE email_address = $1', [email])).id;
 
-/** the job's external id (uuid) — its link (/jobs/edit?id=, /api/jobs/<uuid>, ADR 0008); the number is what's shown */
+/** the job's external id (uuid) — its link (/jobs/edit?id=, /api/jobs/<uuid>); the number is what's shown */
 export const jobUuid = async (no: string) =>
   (await one<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no])).id;
 
 /** J97 + 5 digits: J + 7 digits like a real job no. (the pick page's rule), a series the app never issues (J + yy).
- *  Stock documents / part logs point at the job by job_pk (drizzle/0006), so they go with it (test:track's
+ *  Stock documents / part logs point at the job by job_pk, so they go with it (test:track's
  *  TRUNCATE … CASCADE): the numbers on job are all that is used. */
 export async function newJobNo(): Promise<string> {
   const r = await one<{ no: string }>(

@@ -62,8 +62,7 @@ export function ProductDetailModal({
   const ro = mode === 'view';
   const code = product?.sysCode ?? '';
 
-  // full detail + stock card from the DB (product / product_none_serial / inventory_*)
-  // by the part's uuid (ADR 0008) — the code stays what the dialog shows and saves by
+  // by the part's uuid (ADR 0008); the code stays what the dialog shows and saves by
   const detailKey = open && mode !== 'add' && product?.id ? `/api/products/${product.id}` : null;
   const loaded = useApi<{ product: Detail; card: Card[]; cardTotal: number }>(detailKey, {
     fresh: true,
@@ -132,7 +131,7 @@ export function ProductDetailModal({
     setAllBrands(false);
     if (mode === 'add' || !code) {
       setImage('');
-      // ยี่ห้อ starts empty: defaulting to the first one (70mai) saved parts under the wrong brand
+      // ยี่ห้อ starts empty: a default of the first one (70mai) would save parts under the wrong brand
       setForm({ ...EMPTY_FORM, category: CATEGORIES[0]?.name ?? '' });
     }
   }
@@ -178,7 +177,7 @@ export function ProductDetailModal({
     } catch (e) {
       if (isStale(e) && detailKey)
         // saved by someone else since this form opened: "โหลดใหม่" re-reads this product into the open dialog
-        // (a page reload lost the list's search and filters)
+        // (a page reload would lose the list's search and filters)
         push({
           kind: 'error',
           title: errMsg(e),
@@ -258,7 +257,6 @@ export function ProductDetailModal({
 
         {mode !== 'add' && <ProductLegacyNotes detail={detail} />}
 
-        {/* view-only stock tables */}
         {mode === 'view' && (
           <ProductStockTables
             p={p}

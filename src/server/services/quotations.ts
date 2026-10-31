@@ -45,7 +45,6 @@ import { assertFiguresEditable, isLegacyRow } from '@/server/legacy-lock';
 import { z } from 'zod';
 import type { quotationSave } from '@/server/contract/sales';
 
-/** quotation_status ids (from the dump) */
 export { QS };
 const AGREED = new Set<number>([QS.AGREED, QS.AGREED_WAIT_PAY, QS.AGREED_WAIT_PARTS]);
 const EXPIRED_NAME = 'พ้นกำหนดเสนอราคา';
@@ -129,7 +128,7 @@ export const withQuotationJoins = <T extends PgSelect>(q: T) =>
   q
     .leftJoin(customer, eq(customer.pk, quotation.customerPk))
     .leftJoin(job, eq(job.pk, quotation.jobPk))
-    // the brand is the model's (job.brand_manufacturer_pk was a copy of it, dropped in drizzle/0006)
+    // the brand is the model's (job has no brand column)
     .leftJoin(model, eq(model.pk, job.modelPk))
     .leftJoin(brand, eq(brand.pk, model.brandPk))
     .leftJoin(quotationStatus, eq(quotationStatus.quotationStatusId, quotation.quotationStatusId))
@@ -300,7 +299,7 @@ export type QuotationDetail = Quotation & {
 
 /**
  * A quotation's lines with the code each one prints: a product line's is its product's (item_code is NULL on new
- * product lines — ADR 0008 "no redundant data"; legacy lines keep theirs), a service / delivery line's is its text.
+ * product lines; legacy lines keep theirs), a service / delivery line's is its text.
  */
 const linesOf = (q: Pick<typeof db, 'select'>, quotationPk: SQL | number) =>
   q
@@ -360,7 +359,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   return {
     ...toQuotation(r),
     status: r.status?.trim() ?? '', // the form edits the stored status (the edit page derives "expired" itself)
-    // customer_contact_name was dropped in drizzle/0006 (empty on every row) — kept in the response until clients drop it
+    // no column behind it — kept in the response until clients drop it
     contactName: '',
     customerDetail: cust,
     job: jb,
@@ -372,7 +371,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
       code: d.code ?? '',
       detail: d.itemDetail ?? '',
       qty: num(d.quantity),
-      unit: 'หน่วย', // quotation_line.unit was 'หน่วย' on every row — dropped in drizzle/0006
+      unit: 'หน่วย', // no column: 'หน่วย' on every legacy row
       unitPrice: num(d.unitPrice),
       discount: num(d.unitPriceDiscount),
       discountPercent: num(d.unitPriceDiscountPercent),
@@ -404,15 +403,12 @@ const snapshotOf = (c: { name: string; address: string; taxId: string; phone: st
   customerPhone: c.phone.slice(0, 50),
 });
 
-/** the parsed body of POST /api/quotations (quotationSave in src/server/contract/sales.ts) */
 export type QuotationInput = z.output<typeof quotationSave.body>;
 
 /**
- * `isAdmin`: System Admin — the only one who may change what a quotation from the legacy system already recorded
- * (owner 2026-10-30, assertFiguresEditable): its lines' qty / price / discount (or delete them) and a service amount /
- * discount / VAT rate it holds. New lines, an empty figure filled in and the status flow stay everyone's; the totals
- * are then computed by the same formula from the lines (a recorded line counts with its stored figures). A save that
- * changes no figure keeps the stored totals (never recomputed).
+ * `isAdmin`: System Admin — the only one who may change what a legacy quotation already recorded (assertFiguresEditable):
+ * its lines' qty / price / discount and a service amount / discount / VAT it holds. New lines, an empty figure filled in
+ * and the status flow stay everyone's. A save that changes no figure keeps the stored totals (never recomputed).
  */
 export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin = false): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
@@ -496,7 +492,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
       );
     const cust = await customerForDocument(tx, str(i.customerCode), prev?.customerPk);
     if (!cust) throw new HttpError(400, 'ต้องเลือกลูกค้า', { fields: { customerCode: 'ไม่พบลูกค้ารายนี้' } });
-    // a deleted / Inactive product goes on no new line (owner 2026-10-21) — a code the quotation already had keeps it
+    // a deleted / Inactive product goes on no new line — a code the quotation already had keeps it
     const old = prev ? await linesOf(tx, prev.pk) : [];
     const had = old.map((r) => str(r.code));
     const added = lines.map((l) => str(l.code).slice(0, 50)).filter((c) => c && !had.includes(c));
@@ -709,8 +705,8 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
           summary: statusChanged
             ? `สถานะใบเสนอราคา → ${statusName}`
             : `แก้ไขใบเสนอราคา · ${lines.length} รายการ · ${(figuresChanged ? t.net : num(prev.netAmount)).toFixed(2)} บาท`,
-          // the customer and job as their codes (what the log showed before drizzle/0006), not their pks; the lines
-          // before → after as sale orders log them ("P00291 x1 @100", a service line by its text)
+          // the customer and job as their codes, not their pks; the lines before → after as sale orders log them
+          // ("P00291 x1 @100", a service line by its text)
           changes: linesChanged
             ? {
                 ...changes,
@@ -780,10 +776,9 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
           .set({ rowVersion: prev.rowVersion + 1 })
           .where(eq(quotation.pk, hdPk));
     }
-    // customer agreed → it is the job's agreed quotation (its status says so: job.approved_quotation_pk is a legacy
-    // snapshot, no longer written). One agreed quotation per job, checked under the job's row lock (taken after the
-    // quotation row, as followQuotation does) so two approvals at once queue and the second sees the first.
-    // The job's history says when its agreed quotation changes; a legacy pointer at this quotation is cleared.
+    // customer agreed → it is the job's agreed quotation (by its status; job.approved_quotation_pk is a legacy snapshot,
+    // not written). One per job, checked under the job's row lock (taken after the quotation row, as followQuotation
+    // does) so two approvals at once queue. A legacy pointer at this quotation is cleared.
     const pointTo = async (jobNo: string, from: string, to: string) => {
       await tx
         .update(job)
@@ -825,8 +820,7 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
         .for('update');
       for (const n of named) await pointTo(n.jobNo, no, '');
     }
-    // sent / agreed moves the job forward (owner 2026-10-16) — only when the status was set now: an unchanged
-    // re-save never touches the job
+    // sent / agreed moves the job forward — only when the status was set now: an unchanged re-save never touches the job
     if (statusChanged && jobNo) await followQuotation(tx, jobNo, no!, statusId, statusName, byUserId);
     return no!;
   });
@@ -837,11 +831,9 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
 export const PICK_SLIP_MAX = 50;
 
 /**
- * ใบเบิกสินค้า (pick slip, legacy "พิมพ์ใบเบิกสินค้า" on the ticked quotations): one per quotation (`ids`: their
- * uuids), in the order asked — its spare-part lines only (service / delivery lines are not picked from stock), their
- * qty and amount; the totals box prints the quotation's stored amounts. Any status prints except a deleted or
- * ยกเลิกใบเสนอราคา one (owner 2026-10-29): those, unknown ids and any past PICK_SLIP_MAX come back in `skipped` with
- * the reason (`no`: the number, or the id asked when none is known).
+ * ใบเบิกสินค้า: one per quotation (`ids`: their uuids), in the order asked — spare-part lines only (service / delivery
+ * are not picked from stock); the totals box prints the quotation's stored amounts. Deleted / ยกเลิกใบเสนอราคา ones,
+ * unknown ids and any past PICK_SLIP_MAX come back in `skipped` with the reason (`no`: the number, or the id asked).
  */
 export async function pickSlips(ids: string[]) {
   const wanted = [...new Set(ids.map((n) => n.trim().toLowerCase()).filter(Boolean))];

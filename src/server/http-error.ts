@@ -15,9 +15,8 @@ export class HttpError extends Error {
 export const BAD_INPUT = 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่';
 
 /**
- * Optimistic locking (drizzle/0026 row_version): `sent` is the version the edit form loaded,
- * `current` the row's version read under FOR UPDATE. Another save in between → 409, nothing
- * written. A request without a version (older client / script) is last-write-wins.
+ * Optimistic locking: `sent` is the row_version the edit form loaded, `current` the row's version read under FOR
+ * UPDATE. Another save in between → 409, nothing written. A request without a version is last-write-wins.
  */
 export function assertVersion(sent: unknown, current: number) {
   if (sent === undefined || sent === null || sent === '') return;

@@ -6,13 +6,9 @@ import { setDocumentProfile, DOC_MODULE } from '@/server/services/document-profi
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * POST { kind: "job" | "quotation" | "sale_order", no, profileId }
- * Change "ออกเอกสารในนาม" of an existing document (edit screen / print button).
- * Needs `edit` on the document's module; the number never changes; audited.
- */
+/** change "ออกเอกสารในนาม" of an existing document: needs `edit` on its module, the number never changes, audited */
 export const POST = handle(async (req: NextRequest) => {
-  // 400 "kind required" / "no required" / "profileId required" — before the permission check, which needs `kind`
+  // before the permission check, which needs `kind`
   const { kind, no, profileId } = await parseBody(req, documentProfileSet);
   const me = await requireCan(req, DOC_MODULE[kind], 'edit');
   const profile = await setDocumentProfile(kind, no, profileId, me.pk, me.isAdmin);

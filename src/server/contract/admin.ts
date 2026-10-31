@@ -27,7 +27,7 @@ const tags = ['Admin'];
 const ADMIN = 'System Admin only.';
 const sn = s.nullish();
 
-/** ?id= of a profile DELETE: its uuid — anything else (an old int id) → 404 ไม่พบโปรไฟล์, as an unknown one */
+/** ?id= of a profile DELETE: its uuid — anything else → 404 ไม่พบโปรไฟล์, as an unknown one */
 const profileById = byUuid('โปรไฟล์', 'profile id');
 
 /** a row's uuid on a save: set = edit that row (no such row → 404); left out / null / "" = a new one */

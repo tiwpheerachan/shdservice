@@ -1,7 +1,7 @@
 import { TEST_DATABASE_URL, assertLocal } from '../../db-url.mjs';
 
 /**
- * Everything the e2e server is started with (modelled on OneLink's tests/e2e/support/env.ts).
+ * Everything the e2e server is started with.
  *
  * `.env` holds PRODUCTION, and `next build` / `next start` read it unless told not to:
  *   __NEXT_PROCESSED_ENV=true  @next/env treats the environment as loaded and reads no env file

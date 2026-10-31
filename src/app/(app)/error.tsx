@@ -3,11 +3,7 @@
 import Link from 'next/link';
 import { TriangleAlert } from 'lucide-react';
 
-/**
- * A page of the staff app threw while rendering (DB blip, a bug). Keeps the app
- * shell, says so in Thai, and offers a retry. The digest matches the server log
- * line, so staff can quote it.
- */
+/** the digest matches the server log line, so staff can quote it */
 export default function AppError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   return (
     <div className="grid min-h-[60vh] place-items-center p-6">

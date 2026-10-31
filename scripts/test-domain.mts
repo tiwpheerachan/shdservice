@@ -67,7 +67,6 @@ const { POST: stockReceivePOST } = await import('@/app/api/stock/receive/route')
 const { POST: customerPOST } = await import('@/app/api/customers/route');
 const { saveQuotation } = await import('@/server/services/quotations');
 
-// ---- fixtures ----
 const U = {
   admin: { id: 9101, email: 'td-admin@example.invalid', type: 'System Admin', status: 'ACTIVE' },
   clerk: { id: 9102, email: 'td-clerk@example.invalid', type: 'TD Job Clerk', status: 'ACTIVE' },
@@ -81,7 +80,7 @@ const U = {
   engineer: { id: 9110, email: 'td-engineer@example.invalid', type: 'Engineer', status: 'ACTIVE' }, // takes jobs (R4)
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
-/** a fixture user's app_user.id — the uuid the API, the pages and os_seen carry (ADR 0008) */
+/** a fixture user's app_user.id — the uuid the API, the pages and os_seen carry */
 const uuidOf = async (u: TestUser) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [u.id])).rows[0]!.id;
 /** SHD's document profile uuid (ออกเอกสารในนาม) */
@@ -92,7 +91,7 @@ const userUuid = async (userPk: number) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [userPk])).rows[0]!.id;
 const SV = 3; // every fixture user's session_version — a cookie must carry exactly this
 const P = { a: { id: 9201, code: 'TDP1' }, b: { id: 9202, code: 'TDP2' }, c: { id: 9203, code: 'TDP3' } };
-/** a part's / document's uuid by its code / number — GET /api/products/{id} and /api/admin/records take it (ADR 0008) */
+/** a part's / document's uuid by its code / number — GET /api/products/{id} and /api/admin/records take it */
 const uuidBy = async (table: 'product' | 'job' | 'quotation' | 'sale_order', key: string) => {
   const col = { product: 'product_code', job: 'job_no', quotation: 'quotation_no', sale_order: 'sale_order_no' }[table];
   return (await pool.query<{ id: string }>(`SELECT id::text FROM ${table} WHERE ${col} = $1`, [key])).rows[0]!.id;
@@ -107,13 +106,13 @@ const JOB_BILL = 'TDJ0006'; // deposit + returned parts (amount due, parts cost)
 const JOB_OUT = 'TDJ0007'; // out-source send → close refused → receive → close
 const JOB_NOREPAIR = 'TDJ0008'; // closed with job_repaired_date still 1900
 const JOB_OUT_CLOSED = 'TDJ0009'; // legacy: already closed with an open send row
-/** a job's pk by its number, for raw-SQL fixtures: child rows point at job.pk, not job_no (ADR 0008 phase 2) */
+/** a job's pk by its number, for raw-SQL fixtures: child rows point at job.pk, not job_no */
 const jobPk = (no: string) => `(SELECT pk FROM job WHERE job_no = '${no}')`;
 /** job.model_pk is NOT NULL (drizzle/0006): the fixture jobs' model (seed — never deleted) */
 const TST_MODEL = "(SELECT pk FROM model WHERE model_code = 'TST-M')";
 /**
  * SQL deleting the jobs / quotations / sale orders / stock movements the given SELECTs (of pk) name, with every row
- * pointing at them, children first — every foreign key is RESTRICT (ADR 0008 phase 2): a job's quotations, stock
+ * pointing at them, children first — every foreign key is RESTRICT: a job's quotations, stock
  * movements, logs, calls, out-source sends, symptoms, attachments and tracking tickets go with it.
  */
 const TD_CUSTOMERS = "SELECT pk FROM customer WHERE customer_code LIKE 'TDC%'";
@@ -294,7 +293,6 @@ async function seed() {
      WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 }
 
-// ---- helpers ----
 type Qty = { available: number; used: number; booking: number; remain: number };
 async function qty(code: string): Promise<Qty> {
   const r = await db.execute<Qty>(sql`
@@ -614,7 +612,7 @@ try {
     assert.equal(draft.status, 201, JSON.stringify(draft.body));
     const r = await setProfile((draft.body.order as { no: string }).no);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    // waiting for approval: its creator's alone, as its save — an approver may not re-letterhead it (QA 2026-10-27)
+    // waiting for approval: its creator's alone, as its save — an approver may not re-letterhead it
     const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
     const waiting = await json(
       await soPOST(
@@ -894,7 +892,7 @@ try {
     assert.equal(await statusOf(updateJob(JOB_EDIT, { ...jobEdit, remark: 'TD stale', version: v }, U.admin.id)), 409);
     const [j] = (await db.execute<{ r: string }>(sql`SELECT job_remark AS r FROM job WHERE job_no = ${JOB_EDIT}`)).rows;
     assert.equal(j.r, 'TD first');
-    // no version (older client / script) → last write wins as before
+    // no version (older client / script) → last write wins
     await updateJob(JOB_EDIT, { ...jobEdit, remark: 'TD unversioned' }, U.admin.id);
   });
   await test('sale order: stale version → 409 with { stale }, lines unchanged; current version / no version → 200', async () => {
@@ -1527,7 +1525,7 @@ try {
       )
     ).rows[0]?.c;
   await test('record status (customer), master (color), user delete, sale-order tracking no.', async () => {
-    // customers / masters / users go by their uuid, which the audit line keeps as its key (ADR 0008)
+    // customers / masters / users go by their uuid, which the audit line keeps as its key
     const cust = (
       await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = $1`, [CUSTOMER])
     ).rows[0]!.id;
@@ -1757,7 +1755,7 @@ try {
       const r = await fieldsOf(updateJob(JOB_LEGACY, await asLoaded(JOB_LEGACY), U.admin.id));
       assert.equal(r.status, 200, JSON.stringify(r.fields ?? r));
       const j = await row(JOB_LEGACY);
-      // R5 "never worse": a value equal to the stored one once cleaned keeps the stored text (no re-cleaning)
+      // "never worse": a value equal to the stored one once cleaned keeps the stored text (no re-cleaning)
       assert.deepEqual([j.so, j.serial, j.tracking], ['so 12', 'SN เสียหาย', 'ไรเดอร์มาส่ง'], 'kept as stored');
     });
     await test('J: changing them to new junk → 400 under each field, nothing saved', async () => {
@@ -1941,7 +1939,7 @@ try {
     await test('J: master names unique ignoring case and spaces → 409 under name; a row keeping its name saves', async () => {
       const first = await saveSimple('colors', { name: 'TD J Navy Blue' }, U.admin.id);
       const dup = await fieldsOf(saveSimple('colors', { name: ' td j  navyblue ' }, U.admin.id));
-      // R3: the line under the name is the whole message — it names the row that has the name
+      // the line under the name is the whole message — it names the row that has the name
       assert.deepEqual([dup.status, dup.fields], [409, { name: dup.message }]);
       assert.match(dup.message ?? '', /^มีชื่อนี้อยู่แล้ว: "TD J Navy Blue"/);
       assert.equal(
@@ -2245,7 +2243,7 @@ try {
       // the reverse: no parcel no. stored → 8 refused from the close screen and from the others
       const close = await fieldsOf(closeJob('TDJ0207', { status: await statusName(8), return: input }, U.admin.id));
       assert.deepEqual([close.status, Object.keys(close.fields ?? {})], [400, ['return.tracking']]);
-      // R5: the repair page cannot close a job at all (only ปิดงาน closes)
+      // the repair page cannot close a job at all (only ปิดงาน closes)
       const repair = await fieldsOf(saveRepair('TDJ0207', { status: await statusName(8) }, U.admin.id));
       assert.deepEqual([repair.status, repair.fields], [400, { status: STATUS_CLOSE_ONLY }]);
       assert.equal((await jobRow('TDJ0207')).s, 5);
@@ -2312,7 +2310,7 @@ try {
       const receive = { from: send.to, date: '2026-10-12' };
       await saveOutsource('TDJ0291', { receive, status: await current('TDJ0291') }, U.admin.id);
       assert.equal((await jobRow('TDJ0291')).s, 15, 'back');
-      // 15 picked while sending: the device is not back — refused, nothing written (QA 2026-10-27)
+      // 15 picked while sending: the device is not back — refused, nothing written
       const { RECEIVED_NEEDS_RECEIVE } = await import('@/lib/validation/job');
       await assert.rejects(saveOutsource('TDJ0292', { send, status: await statusName(15) }, U.admin.id), (e: Error) =>
         e.message.includes(RECEIVED_NEEDS_RECEIVE),
@@ -2612,7 +2610,7 @@ try {
       const corp = await add({ name: 'TD R2 บริษัท จำกัด', phone: landline, type: 'Corporate' });
       assert.equal(corp.status, 201, JSON.stringify(corp.body));
       const code = (corp.body.row as { code: string }).code;
-      // the edit that used to save "086-417-29530611474570" (a 20-digit run)
+      // must not save as "086-417-29530611474570" (a 20-digit run)
       const bad = await add({ code, name: 'TD R2 บริษัท จำกัด', phone: '086-417-29530611474570', type: 'Corporate' });
       assert.equal(bad.status, 400);
       assert.ok((bad.body.details as { fields: { phone?: string } }).fields.phone);
@@ -2815,11 +2813,11 @@ try {
           a: 'UPDATE',
           s: 'เปลี่ยนสิทธิ์ผู้ใช้ TD td-pending: TD Job Clerk → TD Seller',
         });
-        await save('TD Seller', 'Active'); // R3: saved with nothing changed → no audit line
+        await save('TD Seller', 'Active'); // saved with nothing changed → no audit line
         assert.equal((await last()).s, 'เปลี่ยนสิทธิ์ผู้ใช้ TD td-pending: TD Job Clerk → TD Seller');
         await setUserDeleted(id, true, U.admin.id);
         assert.deepEqual(await last(), { a: 'DELETE', s: 'ลบผู้ใช้ TD td-pending' });
-        await setUserDeleted(id, false, U.admin.id); // R3: restored INACTIVE
+        await setUserDeleted(id, false, U.admin.id); // restored INACTIVE
         assert.deepEqual(await last(), { a: 'STATUS', s: 'กู้คืนผู้ใช้ TD td-pending (ยังปิดการใช้งาน)' });
       } finally {
         await db.execute(
@@ -2926,7 +2924,7 @@ try {
       assert.deepEqual(
         trail.rows.map((r) => ({ ...r })),
         [
-          // the people as at the time, by name — never a pk (ADR 0008 audit trail)
+          // the people as at the time, by name — never a pk
           {
             action: 'ASSIGN',
             changes: { engineerId: [`TD ${U.admin.email.split('@')[0]}`, `TD ${U.engineer.email.split('@')[0]}`] },
@@ -3124,7 +3122,7 @@ try {
             { params: Promise.resolve({ id: await uuidBy('sale_order', no) }) },
           ),
         );
-      // R4: self-approval is checked on an approver (Manager) — CS may not approve at all
+      // self-approval is checked on an approver (Manager) — CS may not approve at all
       assert.deepEqual([(await approve(U.manager, noOf(await so(U.manager, U.admin.id)))).body.error], [SELF_APPROVE]);
       const forManager = noOf(await so(U.admin, U.manager.id));
       const r = await approve(U.manager, forManager);
@@ -3140,7 +3138,7 @@ try {
           SELECT * FROM (VALUES (1, 'กำลังดำเนินการจัดทำ'), (2, 'รออนุมัติ'), (3, 'แก้ไขข้อมูล'), (4, 'อนุมัติแล้ว'), (5, 'ปฏิเสธ')) v(id, name)
            WHERE NOT EXISTS (SELECT 1 FROM approve_status s WHERE s.approve_status_id = v.id)`);
       const waiting = (await getSaleOrder(noOf(await so(U.admin, U.admin.id))))!;
-      // the roles ticked SO Approve (R6; seeded: Manager), not the Sale Order edit grant (TD Seller has it);
+      // the roles ticked SO Approve (seeded: Manager), not the Sale Order edit grant (TD Seller has it);
       // System Admin always may — not listed
       assert.deepEqual(waiting.approverRoles, ['Manager']);
       const draft = (await getSaleOrder(noOf(await so(U.admin, U.admin.id, { submit: false }))))!;
@@ -3236,7 +3234,7 @@ try {
       await db.execute(sql`INSERT INTO brand (brand_name, record_status) VALUES ('TD Trail Brand R3', 'INACTIVE')`);
       const b = await fieldsOf(saveSimple('manufacturers', { name: 'td trail brand  r3' }, U.admin.id));
       assert.equal(b.status, 409);
-      // no รหัส for a simple list (ADR 0008: its id is a uuid nobody reads) — models keep their code
+      // no รหัส for a simple list (its id is a uuid nobody reads) — models keep their code
       assert.equal(b.message, `มีชื่อนี้อยู่แล้ว: "TD Trail Brand R3" (Inactive)`);
       assert.deepEqual(b.fields, { name: b.message });
       const color = await saveSimple('colors', { name: 'TD J R3 Teal' }, U.admin.id); // 'TD J%' rows are reset above
@@ -3252,7 +3250,7 @@ try {
       const row = async () =>
         (
           await db.execute<{ rs: string }>(
-            sql`SELECT record_status AS rs FROM app_user WHERE id = ${id}`, // is_active / deleted: record_status (0006)
+            sql`SELECT record_status AS rs FROM app_user WHERE id = ${id}`, // is_active / deleted: record_status
           )
         ).rows[0];
       await setUserDeleted(id, true, U.admin.id);
@@ -3306,7 +3304,7 @@ try {
                      job_payment_type = 'เงินสด', job_payment_amount = 500 WHERE job_no = 'TDJ0405';`);
     await test('R3 jobs: a closed job re-saved with its own status stays closed; an open status → 409 (not System Admin); admin may', async () => {
       const [s20, s5] = [await statusName(20), await statusName(5)];
-      // what /jobs/repair now sends for a closed job: its current status, unchanged
+      // what /jobs/repair sends for a closed job: its current status, unchanged
       const same = await fieldsOf(saveRepair('TDJ0401', { status: s20, repairDetail: 'TD R3 note' }, U.clerk.id));
       assert.equal(same.status, 200, JSON.stringify(same));
       assert.deepEqual([(await jobRow('TDJ0401')).s, await logRows('TDJ0401')], [20, []]);
@@ -3442,7 +3440,7 @@ try {
       assert.equal(await statusOfSO(draft), 1, 'kept');
       assert.equal((await save(U.seller, true, draft)).status, 200, 'the creator');
       assert.equal(await statusOfSO(draft), 2);
-      // R5 owner decision: a waiting order is edited only by its creator (System Admin may)
+      // a waiting order is edited only by its creator (System Admin may)
       const waiting = await save(U.manager, false, draft);
       assert.deepEqual(
         [waiting.status, waiting.body.error],
@@ -3525,7 +3523,7 @@ try {
     });
 
     await test('R4 jobs: only an Engineer / Head Engineer takes a job (400 under engineerId; the current one re-saved passes); history: who gave it to whom', async () => {
-      // the มอบหมายงานนี้ให้ picker = the staff list filtered by Job Take (Engineer has it: 0030)
+      // the มอบหมายงานนี้ให้ picker = the staff list filtered by Job Take (Engineer has it)
       const offered = (await listStaff()).filter((u) => u.takesJobs).map((u) => u.id);
       assert.ok(
         offered.includes(await uuidOf(U.engineer)) && !offered.includes(await uuidOf(U.clerk)),
@@ -3799,7 +3797,7 @@ try {
       await wb.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = wb.worksheets[0]!;
       const head = (ws.getRow(1).values as unknown[]).slice(1);
-      // no ID column (ADR 0008): the rows are told apart by e-mail
+      // no ID column: the rows are told apart by e-mail
       const emails = new Set<string>();
       ws.eachRow((r, n) => {
         const v = (r.values as unknown[]).slice(1);
@@ -3991,7 +3989,7 @@ try {
     const dtOf = async (no: string) =>
       (
         await db.execute<{ id: number; code: string; q: number; p: string; retail: string; type: string; ln: number }>(
-          // a product line's code is read through product_pk (new lines store none, 0006); 'Service' ⇔ no product
+          // a product line's code is read through product_pk (new lines store none); 'Service' ⇔ no product
           sql`SELECT d.pk::int AS id, coalesce(d.product_code, p.product_code) AS code, d.sale_out_quantity AS q,
                      d.sale_out_price AS p, d.retail_price AS retail,
                      CASE WHEN d.product_pk IS NULL THEN 'Service' ELSE 'SparePart' END AS type, d.list_no AS ln
@@ -4225,7 +4223,7 @@ try {
       ).rows;
       assert.equal(n, 0, 'no audit row');
       // the user picks another customer: the old snapshot goes with the old customer (the next one is taken at
-      // approval, 0006 rule b), the log names the customer by code; the order reads the new one's phone (leading 0)
+      // approval), the log names the customer by code; the order reads the new one's phone (leading 0)
       const moved = await post(U.admin, { ...form, customerCode: 'TDC501' });
       assert.equal(moved.status, 200, JSON.stringify(moved.body));
       const changes = (await lastChanges('sale_order', no))!;
@@ -4252,7 +4250,7 @@ try {
       const upload = async (no: string) => {
         const fd = new FormData();
         fd.set('kind', 'sale-order-slip');
-        fd.set('id', await uuidBy('sale_order', no)); // the order's uuid (ADR 0008)
+        fd.set('id', await uuidBy('sale_order', no));
         fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
         const req = new NextRequest('https://svc.example.test/api/upload', {
           method: 'POST',
@@ -4468,7 +4466,7 @@ try {
       };
       assert.equal(closePaymentEdited({ ...loaded }, loaded, false), false, 'untouched → no payment block');
       assert.equal(closePaymentEdited({ ...loaded, payType: 'เงินสด' }, loaded, false), true, 'edited → sent');
-      // what the page used to send ({ type, amount: '' }): the refund is not replaced by "0.00"
+      // a page sending { type, amount: '' }: the refund is not replaced by "0.00"
       const pay = { type: 'โอนเงินเข้าบัญชี', amount: '' };
       const r = await fieldsOf(
         closeJob('TDJ0601', { status: await statusName(20), payment: pay, return: back }, U.admin.id),
@@ -4534,7 +4532,7 @@ try {
         400,
         { status: STATUS_DELETE_ONLY },
       ]);
-      // Swap: 17 / 18 only, Refund: 17 / 19 only (owner 2026-10-28) — ซ่อมเสร็จ / 19 on a swap, 18 on a refund refused
+      // Swap: 17 / 18 only, Refund: 17 / 19 only — ซ่อมเสร็จ / 19 on a swap, 18 on a refund refused
       const [s17, s18, s19] = [await statusName(17), await statusName(18), await statusName(19)];
       const refund = { refundAmount: 100, refundMethod: 'เงินสด' };
       for (const [body, why] of [
@@ -4783,7 +4781,7 @@ try {
       await updateJob('TDJ0610', { ...input, engineerId: '' }, U.admin.id);
       const cleared = await rowsSince(id);
       assert.deepEqual(cleared[0], { action: 'ASSIGN', summary: 'TD td-admin ยกเลิกผู้รับงาน TD td-engineer' });
-      // R6: nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (its own STATUS row)
+      // nobody on an อยู่ระหว่างดำเนินการ job any more → back to งานใหม่ (its own STATUS row)
       assert.deepEqual(
         cleared.map((r) => r.action),
         ['ASSIGN', 'STATUS'],
@@ -4977,7 +4975,7 @@ try {
     const { saveProduct, getProduct } = await import('@/server/services/stock');
     const { WAITING_CREATOR_ONLY } = await import('@/lib/validation/sale-order');
     const { POST: uploadPOST } = await import('@/app/api/upload/route');
-    // audit_log is append-only (drizzle/0006): rows of earlier runs stay — only the ones after `since` count
+    // audit_log is append-only: rows of earlier runs stay — only the ones after `since` count
     const lastAuditId = async () =>
       Number((await db.execute<{ m: number }>(sql`SELECT coalesce(max(pk), 0) AS m FROM audit_log`)).rows[0]!.m);
     const auditOf = async (entity: string, key: string, since: number) =>
@@ -5034,7 +5032,7 @@ try {
         [r.line_id, r.customer_address, r.status_changed_at, r.row_version],
         ['td-r6', 'ห้อง 101 ( คอนโด ),  แขวงบางนาใต้ เขตบางนา จ.กรุงเทพมหานคร 10260', null, 1],
       );
-      // the audit key = the customer's uuid (ADR 0008)
+      // the audit key = the customer's uuid
       assert.deepEqual(await auditOf('customer', String(r.id), since), [{ lineId: ['', 'td-r6'] }]);
     });
 
@@ -5096,7 +5094,7 @@ try {
       const upload = async (u: TestUser, no: string) => {
         const fd = new FormData();
         fd.set('kind', 'sale-order-slip');
-        fd.set('id', await uuidBy('sale_order', no)); // the order's uuid (ADR 0008)
+        fd.set('id', await uuidBy('sale_order', no));
         fd.set('file', new File([new Uint8Array(png)], 'slip.png', { type: 'image/png' }));
         const req = new NextRequest('https://svc.example.test/api/upload', {
           method: 'POST',
@@ -5433,7 +5431,6 @@ try {
       for (const r of rights) assert.ok(!RIGHTS[r].includes(' / ') && RIGHTS[r].length <= 30, `short name: ${r}`);
     });
   }
-  // ── Round 7: persona R6 — users page could not clear an optional field ──
   {
     const { upsertUser } = await import('@/server/services/users');
     await test('R7 admin users: clearing phone / Lark ID / department saves them empty; leaving them out keeps them', async () => {
@@ -5470,7 +5467,6 @@ try {
       assert.ok(!(await nos({ no: o.no, customer: 'TD-NOBODY-XYZ' })).length, 'a wrong name is not dropped');
     });
   }
-  // ── Round 8: sales, customers, products, stock history ──
   {
     const { pageMovements } = await import('@/server/services/stock');
     await test('R8 stock history: a code and a name typed together ("P02556 ฝาหลัง") find the document, every word must match', async () => {
@@ -5490,7 +5486,6 @@ try {
       assert.ok(!(await docs('', { code: `${P.a.code} TD-NO-SUCH-WORD` })).includes(no), 'filter: every word');
     });
   }
-  // ── Round 8: shared UI, admin, /track, API docs ──
   {
     const { upsertUser } = await import('@/server/services/users');
     const { PENDING_ROLE } = await import('@/lib/access');
@@ -5509,7 +5504,7 @@ try {
 
     await test('R8 date filters: an impossible date (2026-02-30) is a 400 under its name, not a dropped filter', async () => {
       const { GET: auditGET } = await import('@/app/api/audit/route');
-      // the audit log is its own API now (GET /api/audit), the rest /api/data/<resource>
+      // the audit log has its own API (GET /api/audit), the rest /api/data/<resource>
       const get = async (resource: string, query: string) =>
         json(
           resource === 'audit_log'
@@ -5603,7 +5598,6 @@ try {
       assert.ok(sent.docs.some((d) => d.kind === 'quotation' && d.ref === 'TDQ0881'));
     });
 
-    // ── Round 8: wrap-up ──
     await test('R8 search: a typed "%" or "_" is matched literally, not as a LIKE wildcard', async () => {
       const { listJobs } = await import('@/server/services/jobs');
       const { listCustomers } = await import('@/server/services/customers');
@@ -5735,7 +5729,6 @@ try {
               sql`SELECT record_status AS rs FROM customer WHERE customer_code = ${code}`,
             )
           ).rows[0]?.rs;
-        // a customer goes by its uuid (ADR 0008)
         const idOf = async (code: string) =>
           (await pool.query<{ id: string }>(`SELECT id::text FROM customer WHERE customer_code = $1`, [code])).rows[0]!
             .id;
@@ -5746,7 +5739,7 @@ try {
         assert.equal(await rsOf('TDC951'), 'DELETED');
         assert.equal((await records(U.viewer, { table: 'customers', id: c952, status: 'INACTIVE' })).status, 200);
         assert.equal((await records(U.viewer, { table: 'customers', id: c952, status: 'ACTIVE' })).status, 200);
-        // TD Job Clerk holds Customer del — still not enough (owner 2026-10-21: the dialog says ผู้ดูแลระบบ)
+        // TD Job Clerk holds Customer del — still not enough (the dialog says ผู้ดูแลระบบ)
         assert.equal((await records(U.clerk, { table: 'customers', id: c951, status: 'ACTIVE' })).status, 403);
         assert.equal(await rsOf('TDC951'), 'DELETED');
         assert.equal((await records(U.admin, { table: 'customers', id: c951, status: 'ACTIVE' })).status, 200);
@@ -6325,7 +6318,7 @@ try {
 
     await test('QA 3a: Swap — a New S/N cleared leaves both swap_refund_detail and spare_part_replace (the part list stays)', async () => {
       const swap = { status: s17, swapDate: '2026-10-28' };
-      // what the pages read (the stored text + job.new_serial_no, 0006); the part list itself is never rewritten
+      // what the pages read (the stored text + job.new_serial_no); the part list itself is never rewritten
       await saveSwapRefund('TDJQ03', { ...swap, newSerial: 'CLR0001' }, U.admin.id);
       assert.deepEqual(
         [(await shown('TDJQ03')).sw, (await shown('TDJQ03')).spr, (await stored('TDJQ03')).sn],
@@ -6502,7 +6495,7 @@ try {
       assert.equal((await cancel(U.admin, 'ก'.repeat(201))).status, 400, '201 characters');
       assert.deepEqual(await jobRow(), { rs: 'ACTIVE', st: 2 }, 'nothing changed');
 
-      // del alone (not System Admin) is enough — the owner's rule
+      // del alone (not System Admin) is enough
       await pool.query(
         `UPDATE role_permission SET can_delete = true WHERE user_type = 'TD Job Clerk' AND module_name = 'Job Management'`,
       );

@@ -27,10 +27,7 @@ import {
 
 type Kpi = Parameters<typeof kpisOr>[1][number];
 
-/**
- * รายงานการเปิดงาน / การซ่อม / การปิดงาน: the legacy filters (each AND-ed), the KPIs over the whole range, and the
- * legacy row-level table — the same query for the screen, Excel, Word and PDF.
- */
+/** the same query feeds the screen, Excel, Word and PDF */
 export function JobReport({
   report,
   title,
@@ -46,13 +43,12 @@ export function JobReport({
   report: ReportKey;
   title: string;
   description: string;
-  /** the opening filters (date range …) */
   start: ReportValues;
   /** the date the range applies to: label → dateBy (one entry = no picker) */
   dates: Record<string, string>;
   /** sent with every query (e.g. close: statusGroup=Finished) */
   fixed?: Record<string, string>;
-  /** the report's own filters beyond the legacy ones (kept from the earlier screen) — each key sent as chosen */
+  /** the report's own filters beyond the legacy ones — each key sent as chosen */
   extra?: ReportFilter[];
   /** only this group's statuses in the status filter (close: Finished), no group entries */
   statusGroup?: string;

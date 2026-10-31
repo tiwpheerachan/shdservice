@@ -35,9 +35,7 @@ function NewJobForm() {
   // to the customer right away (the job is trackable from the moment it exists)
   const [opened, setOpened] = React.useState<{ id: string; no: string } | null>(null);
 
-  // POST /api/jobs → job (running J), job_log(1), job_symptom, customer link
   const save = async () => {
-    // every required field at once, under each field (the API checks the same rules)
     if (report(validate())) return;
     setSaving(true);
     try {

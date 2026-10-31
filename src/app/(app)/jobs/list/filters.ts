@@ -1,10 +1,7 @@
-/**
- * The job list's filters and how they read from / go to a URL — pure (no React), so the server page
- * (page.tsx, which renders the first page into the HTML) and the browser (use-job-list-url) agree.
- */
+/** pure (no React), so the server page and the browser (use-job-list-url) read the URL alike */
 import { PAGE_SIZES } from '@/data/keys';
 
-/** Filter bar — every field is AND-ed on the server (see JobFilters in services/jobs.ts). */
+/** every field is AND-ed on the server (JobFilters in services/jobs.ts) */
 export type Filters = {
   no: string;
   ref: string;
@@ -26,8 +23,7 @@ export type Filters = {
   within30: boolean;
   cost: '' | 'yes' | 'no';
   status: string;
-  /* status is chosen BY ID (list from job_status in the DB — the TAT link sends the id too); `status` keeps
-     the name for display only. `open` (not Finished/Cancel) is set only by a dashboard TAT link. */
+  /* status is chosen BY ID (the TAT link sends the id too); `status` is the name for display only. `open` (not Finished/Cancel) comes only from a dashboard TAT link. */
   statusId: string;
   open: boolean;
   /** Pending | Repaired | Finished | Cancel — set only by a dashboard KPI card (counts by status group) */
@@ -96,7 +92,6 @@ export const toParams = (f: Filters) => ({
 
 export type TatSource = { bucket: string; status: string; type: string };
 
-/** a list URL's query → filters, table state and the dashboard card a deep link came from */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function fromQuery(p: Pick<URLSearchParams, 'get'>) {

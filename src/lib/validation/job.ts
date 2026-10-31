@@ -4,14 +4,13 @@ import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
 import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
 import { rightLabel } from '@/lib/modules';
 import { JOB_GROUP, JS } from '@/lib/status-ids';
-// only used inside the factories below (sale-order.ts imports isFilled from here — no top-level use, no cycle problem)
+// only used inside the factories below, so sale-order.ts importing isFilled from here has no cycle problem
 
 /**
  * Job form rules (เปิดงาน / แก้ไขงาน / บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) —
  * the payload is the API's JobInput (keys from toJobInput in components/shared/job-form.tsx).
  *
- *  - new job: every field marked * on the form is required — Serial No. is never one (owner 2026-10-29: typed, or a
- *    tick, when known; checked only when typed)
+ *  - new job: every field marked * on the form is required — Serial No. is never one (checked only when typed)
  *  - existing job ("never worse"): a required field that already has a value must keep one; a field
  *    that was empty before may stay empty, so old jobs (e.g. swap jobs without a serial) can still
  *    move through the workflow — the form shows them as "ข้อมูลไม่ครบ"
@@ -123,7 +122,7 @@ export const JOB_COLUMN_LABEL: Record<string, string> = {
 
 const text = z.string().optional();
 const date = z.union([z.literal(''), isoDateString()]).optional();
-// the message names the field: the toast lists messages without their field ("ต้องไม่ติดลบ" alone said nothing)
+// the message names the field: the toast lists messages without their field
 const numberLike = (field: string) =>
   z
     .union([z.number(), z.string()])
@@ -140,7 +139,7 @@ const wholeLike = (field: string) =>
 /** field types — everything optional here; what is required is decided per mode below */
 const jobInputShape = z.object({
   customerCode: text,
-  documentProfileId: z.uuid({ error: 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน' }).optional(), // document_profile.id
+  documentProfileId: z.uuid({ error: 'โปรไฟล์ผู้ออกเอกสารที่เลือกไม่พร้อมใช้งาน' }).optional(),
   jobType: text,
   jobTypeDetail: maxText(50, 'งานย่อย '),
   isBounce: z.boolean().optional(),
@@ -206,13 +205,10 @@ export function isRequiredFilled(key: JobRequiredKey, v: unknown): boolean {
   return !(LEGACY_PLACEHOLDER_KEYS.has(key) && LEGACY_PLACEHOLDERS.has(String(v).trim()));
 }
 
-/* ---- identifier formats (checked on cleanCode(); services store the cleaned value) ---- */
+// identifiers are checked on cleanCode(); services store the cleaned value
 const SO_RE = /^(?!0+$)[A-Z0-9][A-Z0-9/._-]{3,49}$/;
 const SO_MSG = 'Sale Order No. ใช้ได้เฉพาะ A-Z 0-9 / . _ - (4–50 ตัว)';
-/**
- * Sale Order No. of a marketplace has one shape (prod, jobs opened 2025 on: 97.6% / 99.1% / 98.3% already
- * like this) — checked when the SO or the channel is changed, so an older job keeps the number it has
- */
+/** a marketplace's Sale Order No. has one shape — checked only when the SO or channel changes, so an older job keeps its number */
 export const SO_BY_CHANNEL: Record<string, { re: RegExp; msg: string; example: string }> = {
   SHOPEE: {
     re: /^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])[A-Z0-9]{8}$/,
@@ -256,7 +252,7 @@ export type JobCheck = {
   today?: string;
 };
 
-/** walk-in (ช่องทาง หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty (owner 2026-10-15) */
+/** walk-in (ช่องทาง หน้าร้าน): no sale order — SO no. / SO date / expire date may stay empty */
 export const WALK_IN_CHANNEL = 'หน้าร้าน';
 const WALK_IN_OPTIONAL = new Set<JobRequiredKey>(['so', 'saleOrderDate', 'expireDate']);
 /** is this field required for a job sold through `channel`? */
@@ -323,10 +319,6 @@ export function jobSchema(mustKeep: readonly JobRequiredKey[] = JOB_REQUIRED_KEY
     });
 }
 
-/* ------------------------------------------------------------------ *
- * Workflow screens — their own action payloads (the * fields on each screen)
- * ------------------------------------------------------------------ */
-
 const req = (msg: string) => z.string({ error: msg }).trim().min(1, msg);
 
 /** ส่งโดย / รับโดย: an app_user id (uuid; left out → the server uses the person saving) */
@@ -345,7 +337,7 @@ const partOption = z
 /**
  * What a part line adds to the job's money (spare_part_total_cost → job_total_cost → the close amount,
  * the return note, the export): only a line ticked เบิก (taken from stock) AND เสนอ (charged) — a เสนอ-only
- * line is in the quotation, not in the bill (owner 2026-10-15). The repair page and saveRepair share it.
+ * line is in the quotation, not in the bill. The repair page and saveRepair share it.
  */
 export const partCharge = (o: { pick?: boolean; quote?: boolean; qty: number }, price: number) =>
   o.pick && o.quote ? o.qty * price : 0;
@@ -435,7 +427,7 @@ export const STATUS_CLOSE_ONLY = 'เปลี่ยนเป็นสถาน�
 export const STATUS_DELETE_ONLY = 'ยกเลิกข้อมูลงานได้เฉพาะ System Admin (ลบงาน) เท่านั้น';
 /** บันทึกงานซ่อม: REPAIR_STATUS_OPTIONS only (saveRepair, by id) */
 export const REPAIR_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า บันทึกงานซ่อม';
-/** Swap / Refund's list by mode (owner 2026-10-28): job_status 17 + 18 (Swap) / 17 + 19 (Refund) — saveSwapRefund
+/** Swap / Refund's list by mode: job_status 17 + 18 (Swap) / 17 + 19 (Refund) — saveSwapRefund
  *  takes these ids (SWAP_STATUS_IDS); the job's own status re-saved unchanged still passes */
 export const SWAP_STATUS_OPTIONS = {
   swap: ['อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว', 'อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว'],
@@ -594,7 +586,7 @@ export function closeSchema(
     .looseObject({
       status: req('โปรดระบุสถานะงาน'),
       repairDetail: maxNote(200, 'วิธีการซ่อม '),
-      // Serial เครื่องใหม่ of a swap job: never required, checked only when typed (owner 2026-10-28)
+      // Serial เครื่องใหม่ of a swap job: never required, checked only when typed
       newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG, prev.newSerial),
       payment: z
         .looseObject(
@@ -667,7 +659,7 @@ export function jobAmountDue(total: number, deposit: number): number {
 }
 
 /**
- * The money at close (owner 2026-10-15), from stored values only: `due` = total − deposit (≥ 0),
+ * The money at close, from stored values only: `due` = total − deposit (≥ 0),
  * `refund` = the deposit to give back when it is more than the total (an unrepaired job),
  * `outstanding` = ค้างชำระ, what is still unpaid after `paid` (a refund stored as a negative payment
  * counts as nothing paid).

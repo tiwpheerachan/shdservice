@@ -1,9 +1,4 @@
-/**
- * Shared TypeScript types of the domain records the screens and services exchange.
- * All DATA comes from the legacy database (src/server/services/*); the core fields of each type are what
- * the screens render, the optional ones the extra DB-backed values the forms need for editing.
- * Every row id is the row's uuid `id` (ADR 0008, string); status codes (statusId, approveId) stay numbers.
- */
+/** every row id is the row's uuid `id` (string); status codes (statusId, approveId) stay numbers */
 
 export type Status = 'Active' | 'Inactive' | 'Cancel';
 
@@ -61,7 +56,6 @@ export type Product = {
   onhand: number;
   price: number;
   status: Status;
-  // DB-backed extras (product + product_stock)
   id?: string;
   nameEn?: string;
   nameCn?: string;
@@ -72,7 +66,7 @@ export type Product = {
   issued?: number;
   reserved?: number;
   ubRepairOnly?: boolean;
-  /** product.is_serial_control (dropped in drizzle/0006) — always False */
+  /** always False (column dropped) */
   serialControl?: boolean;
   forModelColor?: string;
   createdDate?: string;
@@ -94,7 +88,6 @@ export type Movement = {
   from: string;
   to: string;
   remark: string;
-  // DB-backed extras (stock_move / stock_move_line)
   qty?: number;
   items?: string;
 };
@@ -108,7 +101,6 @@ export type Customer = {
   line: string;
   taxId: string;
   status: Status;
-  // DB-backed extras (customer table)
   id?: string;
   type?: string;
   online?: boolean;
@@ -137,7 +129,6 @@ export type Job = {
   status: string;
   imei: string;
   amount: number;
-  // DB-backed extras (job table)
   statusId?: number;
   statusGroup?: string;
   isBounce?: boolean; // job.is_job_bounce — งานเด้ง (สินค้ากลับมาซ่อมซ้ำ)
@@ -178,7 +169,6 @@ export type Quotation = {
   brandModel: string;
   amount: number;
   status: string;
-  // DB-backed extras (quotation)
   statusId?: number;
   customerCode?: string;
   warranty?: string;
@@ -201,7 +191,6 @@ export type SaleOrder = {
   approve: string;
   stockDoc: string;
   tracking: string;
-  // DB-backed extras (sale_order)
   approveId?: number;
   customerCode?: string;
   paymentType?: string;
@@ -212,8 +201,6 @@ export type SaleOrder = {
   deliveryDate?: string;
   remark?: string;
 };
-
-/* ---------- Dashboard aggregate rows ---------- */
 
 export type StatTone = 'primary' | 'warning' | 'info' | 'success' | 'danger';
 

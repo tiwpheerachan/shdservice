@@ -62,10 +62,9 @@ export default function JobListPage() {
   const { add: canAdd, edit: canEdit, del: canDel } = access.forPath('/jobs/list');
   const { data: STAFF, ...staffLookup } = useStaff();
   const { data: statRows, loading: statsLoading, refetch: refetchStats } = useJobStats();
-  // filters + table state, kept in the URL; tat / kpi = the dashboard card a deep link came from
   const { init, draft, setDraft, setD, filters, narrowed, table, pageArgs, server, tat, kpi, clearAll, onSearch } =
     useJobListUrl();
-  useTourRestore(() => draft, setDraft); // a บทสอน leaves the filter bar as it found it
+  useTourRestore(() => draft, setDraft);
   const {
     rows: JOBS,
     total,

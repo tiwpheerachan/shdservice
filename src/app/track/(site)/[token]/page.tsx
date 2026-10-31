@@ -7,12 +7,8 @@ import { TrackClient } from '../track-client';
 export const dynamic = 'force-dynamic';
 
 /**
- * /track/<linkToken> — the page SHELL only.
- *
- * The token is NOT looked up here: a valid, unknown, expired or deleted token all
- * get the same page (no enumeration, nothing to learn before the captcha). The job
- * is resolved by /api/track/session after Turnstile, and its data comes from
- * /api/track/data with a one-time ticket. Security headers + CSP nonce: src/proxy.ts (Turnstile's script: layout.tsx).
+ * Page shell only: the token is NOT looked up here — valid, unknown, expired or deleted all get the same page (no
+ * enumeration before the captcha). /api/track/session resolves it after Turnstile; data via /api/track/data.
  */
 export default async function Page({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

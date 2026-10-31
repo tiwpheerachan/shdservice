@@ -123,7 +123,7 @@ function SaleOrderList() {
       width: '110px',
       align: 'center',
       sortable: false,
-      hideBelow: 'sm', // the order number is the same link
+      hideBelow: 'sm',
       cell: (r) => (
         <RowActions
           viewHref={`/sale/orders/edit?id=${r.id}`}

@@ -35,23 +35,20 @@ import { profileLock } from '@/lib/profile-lock';
 
 function EditJobForm() {
   const { push } = useToast();
-  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s, reset, validate, report, fromApi } = useJobForm();
   const [saving, setSaving] = React.useState(false);
   const { can } = useAccess();
 
-  // prefill the form whenever a job is loaded (from ?id=, the search bar or a save)
   function prefill(job: JobDetail) {
     reset(fromJob(job));
   }
 
   const go = (v: string) => find(v);
 
-  // PATCH /api/jobs/:id — updates the job row. Status is display-only here (it moves through the
-  // workflow screens), so it is not sent: a stale value must never roll back a newer status.
+  // status is not sent: it moves through the workflow screens, and a stale value must never roll back a newer one
   const save = async () => {
-    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    if (!job) return;
     if (report(validate())) return; // a required field that had a value must keep one
     setSaving(true);
     try {

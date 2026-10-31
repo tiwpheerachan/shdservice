@@ -6,11 +6,7 @@ import { Slot } from 'radix-ui';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/**
- * App button (shadcn-style cva variants, app palette). The variant/size names and
- * every class are the ones the app has always used — only the plumbing is shadcn.
- * `components/shadcn/button.tsx` is the untouched upstream copy for new work.
- */
+/** `components/shadcn/button.tsx` is the untouched upstream copy for new work. */
 export const buttonVariants = cva(
   [
     'inline-flex items-center justify-center whitespace-nowrap font-medium',
@@ -62,8 +58,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size }), className)}
         {...props}
       >
-        {/* asChild: Slot takes exactly ONE element — a `false` spinner slot beside it made Slot throw
-            ("Slot failed to slot onto its children") and took the whole page down */}
+        {/* asChild: Slot takes exactly ONE element — a `false` spinner beside it makes Slot throw and takes the page down */}
         {asChild ? (
           children
         ) : (

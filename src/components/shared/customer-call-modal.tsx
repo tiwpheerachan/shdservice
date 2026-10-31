@@ -75,7 +75,6 @@ export function CustomerCallModal({
 }) {
   const jobNo = job?.no;
   const { push } = useToast();
-  // job history of this customer (server-filtered by customer code)
   const { data: JOBS } = useJobs(
     customer?.code ? { customerCode: customer.code, limit: 200, includeCancelled: 1 } : { limit: 0 },
   );
@@ -151,7 +150,6 @@ export function CustomerCallModal({
         <p className="py-8 text-center text-sm text-muted-foreground">ไม่พบข้อมูลลูกค้าสำหรับงานนี้</p>
       ) : (
         <div className="space-y-5">
-          {/* identity header */}
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-linear-to-br from-primary/8 to-info/8 p-3">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-linear-to-br from-primary to-info text-base font-semibold uppercase text-primary-foreground shadow-xs">
               {initials(customer.name) || <User className="h-5 w-5" />}
@@ -181,7 +179,6 @@ export function CustomerCallModal({
             </div>
           </div>
 
-          {/* details grid */}
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <InfoRow icon={Phone} label="เบอร์โทรศัพท์" value={customer.phone} mono />
             <InfoRow icon={IdCard} label="เลขบัตร / ผู้เสียภาษี" value={customer.taxId} mono />
@@ -192,7 +189,6 @@ export function CustomerCallModal({
             </div>
           </div>
 
-          {/* tabs: history + call log */}
           <Tabs
             value={tab}
             onChange={setTab}
@@ -204,7 +200,6 @@ export function CustomerCallModal({
           >
             {tab === 'history' ? (
               <div className="space-y-3">
-                {/* history summary */}
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                     <p className="text-2xs text-muted-foreground">จำนวนงานทั้งหมด</p>

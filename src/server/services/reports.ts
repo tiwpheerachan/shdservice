@@ -57,11 +57,7 @@ import {
   type SaleOrderFilters,
 } from './sale-orders';
 
-/**
- * KPI tiles for the report screens — computed in one query over the SAME
- * filters the paged table uses, so the numbers cover the whole range even
- * though the table only shows a page.
- */
+// KPI tiles for the report screens: one query over the SAME filters as the paged table, so they cover the whole range.
 const eng = alias(appUser, 'eng');
 /** a closed job's TAT as the dashboard / Excel / the report's TAT column count it (jobs.ts tatDays): opening → the
  *  return, else the close — calendar days */
@@ -175,10 +171,8 @@ export async function saleOrderReportSummary(f: SaleOrderFilters, q = '', raw: R
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Row-level report tables (the legacy reports' columns: src/app/(app)/reports/report-specs.ts) — the screen's
- * page and the Excel / Word / PDF exports read the same reportPage, under the same filters as the KPIs above.
- * ------------------------------------------------------------------ */
+// Row-level report tables (columns: src/app/(app)/reports/report-specs.ts): the screen and the exports read the same
+// reportPage, under the same filters as the KPIs above.
 type Raw = Record<string, string>;
 type Q = { rows: Record<string, unknown>[]; total: number };
 
@@ -345,7 +339,7 @@ const qHead = {
   jobStatusId: job.jobStatusId,
   jobRef: job.jobNo,
   customerCode: customer.customerCode,
-  // the snapshot taken when the customer agreed (drizzle/0006), else the customer as they are now
+  // the snapshot taken when the customer agreed, else the customer as they are now
   customerName: sql<string | null>`coalesce(${quotation.customerName}, ${customer.customerName})`,
 };
 const qHeadOut = <T extends { [K in keyof typeof qHead]: unknown }>(r: T) => ({
@@ -399,7 +393,7 @@ async function quotationLineRows(p: PageQuery, limit: number, offset: number): P
           itemCode: sql<string | null>`coalesce(${product.productCode}, ${quotationLine.itemCode})`,
           itemDetail: quotationLine.itemDetail,
           qty: quotationLine.quantity,
-          unit: sql<string>`'หน่วย'`, // quotation_line.unit dropped (drizzle/0006): 'หน่วย' on every line
+          unit: sql<string>`'หน่วย'`, // no column: 'หน่วย' on every line
           unitPrice: quotationLine.unitPrice,
           totalPrice: quotationLine.totalPrice,
           jobRefNo: job.jobReferenceNo,
@@ -418,7 +412,7 @@ async function quotationLineRows(p: PageQuery, limit: number, offset: number): P
 
 /** สร้างโดย = who keyed the order in (document_create_by) — saleOrderWhere's `sales` is the seller */
 const saleExtra = (f: Raw) =>
-  isUuid(f.createdBy ?? '') // the user's uuid (ADR 0008); anything else = no filter, as before
+  isUuid(f.createdBy ?? '') // the user's uuid; anything else = no filter
     ? inArray(
         saleOrder.createdByAppUserPk,
         db.select({ id: appUser.pk }).from(appUser).where(eq(appUser.id, f.createdBy!.trim().toLowerCase())),
@@ -646,7 +640,7 @@ async function onhandRows(p: PageQuery, limit: number, offset: number, cost: boo
         .from(product)
         .$dynamic(),
     )
-      // the one store every stock row is in (product_stock.store_location_id dropped, drizzle/0006)
+      // the one store every stock row is in
       .leftJoin(storeLocation, eq(storeLocation.storeLocationId, STORE_LOCATION_ID))
       .where(w)
       .orderBy(asc(product.productCode))

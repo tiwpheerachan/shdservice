@@ -10,14 +10,9 @@ import { useAccess } from '@/lib/use-access';
 import { DOC_MODULE, type DocumentKind } from '@/lib/profile-lock';
 
 /**
- * "ออกเอกสารในนาม" — which company/brand a job, quotation or sale order is
- * printed under (letterhead only; the document number is never affected).
- *  - new document: just form state, saved with the document
- *  - existing document (`doc` given): changing it saves immediately through
- *    POST /api/documents/profile (audited), so the print pages pick it up — and
- *    the hint says so. Fixed (disabled, the reason as hint) without edit on the
- *    document's module, or once it is approved / closed (`locked`, profileLock;
- *    the server refuses the same with 409 — a 409 met here locks it too)
+ * Letterhead only (the document number is never affected). With `doc`, a change saves at once through
+ * POST /api/documents/profile (audited). Fixed without edit on the document's module or once approved / closed
+ * (`locked`); a 409 from the server locks it too.
  */
 export function ProfileSelect({
   value,

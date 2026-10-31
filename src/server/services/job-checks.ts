@@ -10,14 +10,12 @@ import { cleanSerial } from '@/lib/validation/job';
 import { jobModelName } from './jobs';
 
 /**
- * Warnings while a job is typed in (never a refusal): the Serial No. already on another job, the Sale Order
- * No. on another customer's job, a Serial that looks like another brand's (or unlike any of this brand's),
- * a shop that sells another brand. The patterns come from the jobs themselves (prod 2026-10: a serial's
- * first 2 characters + its shape name the brand for 77% of jobs, 99.7% of them the brand chosen).
+ * Warnings while a job is typed in (never a refusal): the Serial No. already on another job, the Sale Order No. on
+ * another customer's job, a Serial that looks like another brand's, a shop that sells another brand. The patterns
+ * come from the jobs themselves (a serial's first 2 characters + its shape name the brand for most jobs).
  */
 
 /** brands of one family share serials and shops (MOVA / TROUVER are Dreame's, Soundcore / eufy Anker's …) */
-// read from the jobs (prod 2026-10), confirmed by the owner 2026-10-27 — a family column on brand could come later
 const FAMILIES = [
   ['dreame', 'mova', 'trouver'],
   ['xiaomi', 'redmi', 'mijia'],
@@ -62,7 +60,7 @@ async function loadStats(): Promise<Stats> {
   const rows = await db
     .select({ s: job.productSerial, shop: job.productSaleOutShopName, b: brand.brandName })
     .from(job)
-    // the brand is the model's (job.brand_manufacturer_pk dropped, drizzle/0006)
+    // the brand is the model's (job has no brand column)
     .innerJoin(model, eq(model.pk, job.modelPk))
     .innerJoin(brand, eq(brand.pk, model.brandPk))
     .where(ne(job.recordStatus, RS.DELETED));

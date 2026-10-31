@@ -22,11 +22,9 @@ import { PART } from '@/lib/status-ids';
 import { offsetOf, type PageQuery } from '@/server/paging';
 
 /**
- * ค่าที่ไม่สมเหตุสมผล — System Admin's section of the bell (+ /admin/anomalies): stored money / quantity
- * that does not add up by the app's OWN formulas. Report only: nothing here (or anywhere) rewrites a stored
- * value (owner rule). Each check is one query over a table of ≤ ~50k rows (job is the biggest, ~25 ms
- * on the legacy dump). They are ONE UNION ALL: the counts + the bell sample are cached 5 min (a few KB);
- * a list page is LIMIT/OFFSET in SQL, run live (~100 ms, admin only) — the full list is never held or sent.
+ * ค่าที่ไม่สมเหตุสมผล — System Admin's section of the bell (+ /admin/anomalies): stored money / quantity that does not
+ * add up by the app's OWN formulas. Report only: nothing here (or anywhere) rewrites a stored value. All checks are
+ * ONE UNION ALL: counts + the bell sample cached 5 min; a list page is LIMIT/OFFSET in SQL, run live.
  *
  * The formulas are the ones the code writes with — nothing invented:
  *  - quotation: spare_part_amount = Σ non-Delivery line total_price; sum_exclude_amount = Σ every line
@@ -116,8 +114,8 @@ const booked = sql`(select ${jobPart.productPk} as ppk, sum(coalesce(${jobPart.r
   group by ${jobPart.productPk})`;
 const remain = sql`coalesce(${productStock.quantityRemain}, 0)`;
 const stockFrom = sql`from ${productStock} join ${product} on ${product.pk} = ${productStock.productPk}`;
-/** a line's code as printed: its product's (item_code / product_code are NULL on new product lines — ADR 0008), else
- *  the legacy / service text (a quotation line without one: its detail) */
+/** a line's code as printed: its product's (item_code / product_code are NULL on new lines), else the legacy /
+ *  service text (a quotation line without one: its detail) */
 const productCodeOf = (pk: AnyPgColumn) =>
   sql`(select ${product.productCode} from ${product} where ${product.pk} = ${pk})`;
 const qLineCode = sql`coalesce(${productCodeOf(quotationLine.productPk)}, nullif(${quotationLine.itemCode}, ''), ${quotationLine.itemDetail})`;

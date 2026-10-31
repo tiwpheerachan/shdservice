@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-admin.mts — admin + reports regressions from the multi-user QA (2026-10-21): two admins on
+ * scripts/test-qa-admin.mts — admin + reports regressions: two admins on
  * the same user / role / master row, duplicate master names saved at the same instant, the permissions API,
  * the export cap signal, the 403 wording and the audit time.
  *

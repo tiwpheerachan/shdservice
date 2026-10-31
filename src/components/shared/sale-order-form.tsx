@@ -39,9 +39,7 @@ export const SO_TONE: Record<string, 'warning' | 'success' | 'danger' | 'info'> 
   กำลังดำเนินการจัดทำ: 'info',
 };
 
-/** GET /api/sale-orders/:id (subset the form uses) */
 export type SaleOrderLoaded = {
-  /** the order's uuid — its links (edit page, print, API, slip upload) */
   id: string;
   no: string;
   date: string;
@@ -86,7 +84,6 @@ export type SaleOrderLoaded = {
     /** the customer's status now — an Inactive one gets the picker's notice */
     status?: string;
   };
-  /** why it was cancelled */
   cancelRemark?: string;
   lines: { id?: string; code: string; name: string; type: 'SparePart' | 'Service'; qty: number; price: number }[];
 };
@@ -235,7 +232,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
         push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
       } catch (e) {
         push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
-        return false; // the file input lets go of the name
+        return false;
       }
     };
     // the order's own date, or (a new order) when the screen opened — Thai time, browser only
@@ -262,7 +259,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
     // the server refuses more than the total — shown as soon as a line change makes it so
     const overpaid = payAmount !== '' && Number(payAmount) > Math.round(net * 100) / 100;
 
-    // a value that changes takes its error away
     const { clear } = fe;
     React.useEffect(() => clear('customerCode'), [customer, clear]);
     React.useEffect(() => clear('salesId'), [salesId, clear]);

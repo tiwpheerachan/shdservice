@@ -13,7 +13,6 @@ import { lineOf, type QuotationLine } from './line-totals';
  *  service_cost has no SVD0001 row — 60 is what legacy quotations (Q2500825, Q2600532) and jobs' ค่าขนส่ง charge */
 const DELIVERY_EXTRA: ExtraItem[] = [{ code: 'SVD0001', name: 'ค่าขนส่ง', price: 60 }];
 
-/** the quotation's line table: a part / ค่าขนส่ง per row, its detail, qty, unit price and discount (% or บาท) */
 export function QuotationLineTable({
   lines,
   setLines,

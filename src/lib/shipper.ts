@@ -1,7 +1,7 @@
 /**
  * Which โปรไฟล์บริษัทขนส่ง a courier name typed in the legacy system means — "THAIPOST", "ไปรษณีย์", "EMS",
  * "t" → ไปรษณีย์ไทย. Compared on the profile's code, both names and its `aliases` (comma separated, set on the
- * admin page; drizzle/0001), ignoring case, spaces, punctuation and Thai tone / vowel marks typed twice or
+ * admin page), ignoring case, spaces, punctuation and Thai tone / vowel marks typed twice or
  * wrong ("ไปรษณ๊ย์", "่j&t"). Shared by the server (/track, print) and the job form's courier dropdown.
  */
 export type ShipperNames = { code: string; nameTh: string; nameEn: string; aliases: string };

@@ -12,17 +12,14 @@ export const dynamic = 'force-dynamic';
 
 const str = (v: string | null | undefined) => v?.trim() ?? '';
 
-/** List system users (people who signed in via SSO). Admin only. */
+/** people who signed in via SSO. Admin only. */
 export const GET = handle(async (req: NextRequest) => {
   await requireAdmin(req);
   const deleted = parseStatusMode(parseQuery(req, usersList).deleted);
   return NextResponse.json({ rows: await listSystemUsers(deleted) });
 });
 
-/**
- * Create or update a system user (app_user). Callers pick a real employee from
- * the Lark directory and assign a role (= legacy user_type). Admin only.
- */
+/** role = legacy user_type. Admin only. */
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
   const body = await parseBody(req, userSave);

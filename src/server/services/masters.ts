@@ -85,9 +85,6 @@ function assertLoaded(now: Partial<Record<Loaded, unknown>>, expect?: MasterExpe
     throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้รายการนี้ — โหลดหน้าใหม่แล้วแก้อีกครั้ง', { stale: true });
 }
 
-/* ------------------------------------------------------------------ *
- * Simple id/name/detail/status masters
- * ------------------------------------------------------------------ */
 type SimpleKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types';
 
 /** what the audit page calls each master table */
@@ -290,7 +287,6 @@ export async function saveSimple(
   return created;
 }
 
-/** ACTIVE ↔ INACTIVE toggle or DELETED (soft delete). */
 /** `id` = the row's uuid (records route checked it) — the audit key; the summary names the row */
 export async function setSimpleStatus(kind: SimpleKind, id: string, rs: RecordStatus, byUserId: number) {
   const d = SIMPLE[kind];
@@ -311,9 +307,6 @@ export async function setSimpleStatus(kind: SimpleKind, id: string, rs: RecordSt
   invalidate(`master:${kind}:`);
 }
 
-/* ------------------------------------------------------------------ *
- * Symptoms (+ group)
- * ------------------------------------------------------------------ */
 export function listSymptoms(deleted: DeletedMode = 'exclude'): Promise<Symptom[]> {
   return cached(`master:symptoms:${deleted}`, TTL_MASTER, () => loadSymptoms(deleted));
 }
@@ -429,9 +422,7 @@ export async function setSymptomStatus(id: string, rs: RecordStatus, byUserId: n
   invalidate('master:symptoms:');
 }
 
-/* ------------------------------------------------------------------ *
- * Models (code from running "Model" = MD00001)
- * ------------------------------------------------------------------ */
+// Models: code from running "Model" (MD00001)
 export function listModels(deleted: DeletedMode = 'exclude'): Promise<Model[]> {
   return cached(`master:models:${deleted}`, TTL_MASTER, () => loadModels(deleted));
 }
@@ -528,7 +519,7 @@ export async function saveModel(
     if (input.code) {
       const set = { ...values, ...saveStamp(input.status, before, byUserId) };
       await tx.update(model).set(set).where(eq(model.modelCode, input.code));
-      // the brand by name, not by its pk (pk never leaves the server, ADR 0008)
+      // the brand by name, not by its pk (pk never leaves the server)
       let changes = diff(before as Record<string, unknown>, set as Record<string, unknown>, {
         skip: ['brandPk'],
       });
@@ -591,9 +582,6 @@ export async function setModelStatus(code: string, rs: RecordStatus, byUserId: n
   invalidate('master:models:');
 }
 
-/* ------------------------------------------------------------------ *
- * Paged models (รุ่นสินค้า — 1.1k rows)
- * ------------------------------------------------------------------ */
 const MODEL_SORT = {
   code: model.modelCode,
   name: model.modelName,

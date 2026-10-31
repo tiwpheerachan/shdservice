@@ -23,7 +23,6 @@ type RowProps = {
   dup: number | null;
 };
 
-/** การใช้อะไหล่ และการเสนอราคา — the part lines of บันทึกงานซ่อม, quotation แบบ A (Normal) / B (VIP) */
 export function RepairPartsSection({
   lines,
   setLines,
@@ -55,7 +54,6 @@ export function RepairPartsSection({
   };
   const dupRow = lines.findIndex((l) => l.id === dup);
   const dupLine = lines[dupRow];
-  // part-line rule errors ("parts.<row>.a.qty" …) — listed under the table by row number
   const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
   const rows = { lines, lock, act, upd, remove, dup };
 

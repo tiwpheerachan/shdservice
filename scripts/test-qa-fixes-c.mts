@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-fixes-c.mts
- * QA findings 2026-10-29 (reports, sale orders, audit, /track documents, ops): the close-job KPIs count what the table
+ * Reports, sale orders, audit, /track documents, ops: the close-job KPIs count what the table
  * shows (net payments, the dashboard's TAT), a denied sale order's audit line is no APPROVE, the unpaged product list
  * needs a product right and keeps to its limit, the /track customer copy carries no staff notes, merge_legacy_users()
  * is its owner's alone. (The return note's courier line is a server component importing client parts — not rendered

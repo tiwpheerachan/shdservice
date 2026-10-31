@@ -16,9 +16,7 @@ import { mediaUrl } from '../../workers/media/src/media';
  *   jobs/{jobNo}/slip/{file}          job.job_payment_slip_file_name    (full path)
  *   sale-orders/{soNo}/slip/{file}    sale_out_hd.slip_file_name        (full path)
  *   products/{code}/{file}            product.pictrue_file_name         (file name only, 50 chars)
- * Legacy product images and job attachments (the old server's FileUpload folder)
- * were copied into the same layout; rows whose file was missing on the old server
- * just show their file name.
+ * Legacy rows whose file was missing on the old server just show their file name.
  * Video attachments are the exception: Cloudflare R2 (onR2 below), same paths.
  */
 export const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'oneservice';
@@ -28,7 +26,7 @@ export const filePath = {
   jobSlip: (jobNo: string, file: string) => `jobs/${jobNo}/slip/${file}`,
   saleOrderSlip: (soNo: string, file: string) => `sale-orders/${soNo}/slip/${file}`,
   productImage: (code: string, file: string) => `products/${code}/${file}`,
-  // the profile's uuid (ADR 0008); logos stored before it keep their profiles/{int}/ path
+  // the profile's uuid; logos stored before keep their profiles/{int}/ path
   profileLogo: (id: string, file: string) => `profiles/${id}/${file}`,
   shipperLogo: (id: string, file: string) => `shippers/${id}/${file}`,
 };
@@ -42,10 +40,9 @@ export const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', '
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 /**
- * Video job attachments (a customer's clip of the fault): converted in the browser (src/lib/video.ts) and PUT
- * straight to Cloudflare R2 with a presigned URL — never through this server — then checked by
- * checkStoredVideo. Kept forever for now; a retention rule (e.g. delete N days after the job closes) may come
- * (R2 moves them to Infrequent Access after 30 days — a lifecycle rule set in Cloudflare).
+ * Video job attachments: converted in the browser (src/lib/video.ts) and PUT straight to Cloudflare R2 with a presigned
+ * URL — never through this server — then checked by checkStoredVideo. Kept forever (R2 moves them to Infrequent Access
+ * after 30 days by a Cloudflare lifecycle rule).
  */
 export const VIDEO_TYPES: ReadonlySet<string> = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
 export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
@@ -64,7 +61,7 @@ const EXT: Record<string, string> = {
 /** a logo may also be an SVG (logos only — never a photo / slip: sharp would rasterise it) */
 export const LOGO_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
 
-/** first bytes of each accepted type (OneLink lib/api/validate.ts) */
+/** first bytes of each accepted type */
 const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
 const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
   'image/png': (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
@@ -145,15 +142,10 @@ export const MAX_IMAGE_PIXELS = 40_000_000;
 export class ImageTooLargeError extends Error {}
 
 /**
- * Shrink an uploaded photo before it goes to the bucket: apply EXIF rotation,
- * cap the longest edge at IMAGE_MAX_EDGE, re-encode at quality 82. jpg/webp
- * keep their format. A PNG WITHOUT transparency is a photo saved in the wrong
- * container (lossless PNG barely shrinks it) — it comes back as JPEG with a
- * .jpg name; a PNG with transparency (logo, graphic) stays PNG. The stored
- * file name is generated from the returned name, so nothing legacy is renamed.
- * Anything that is not a raster image, or that would not get smaller and carries no EXIF, is
- * returned untouched (EXIF — GPS, camera serial — is always stripped by re-encoding); a decode failure falls back to the original file rather
- * than rejecting the upload.
+ * Shrink an uploaded photo before it goes to the bucket: EXIF rotation, longest edge ≤ IMAGE_MAX_EDGE, quality 82.
+ * A PNG WITHOUT transparency is a photo in the wrong container — it comes back as JPEG with a .jpg name; one with
+ * transparency stays PNG. Re-encoding always strips EXIF (GPS, camera serial). Not a raster image, or no smaller and no
+ * EXIF → returned untouched; a decode failure falls back to the original file rather than rejecting the upload.
  */
 export async function optimizeImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
@@ -258,9 +250,8 @@ function r2(path: string) {
   return { client: r2Client, url };
 }
 /**
- * MEDIA_BASE_URL + MEDIA_SIGNING_KEY both set: an R2 object is played (not downloaded) through the media Worker —
- * Cloudflare's edge cache, workers/media, docs/cloudflare-cdn.md — with a link signed here, same lifetime. Unset (dev,
- * CI, until the Worker is deployed) → the presigned R2 URL, as before.
+ * MEDIA_BASE_URL + MEDIA_SIGNING_KEY both set: an R2 object is played through the media Worker (Cloudflare's edge
+ * cache, workers/media, docs/cloudflare-cdn.md) with a link signed here, same lifetime. Unset → the presigned R2 URL.
  */
 function mediaEnv() {
   const base = (process.env.MEDIA_BASE_URL ?? '').trim();

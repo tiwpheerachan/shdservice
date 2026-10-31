@@ -12,7 +12,7 @@
 ## Decision
 
 - `npm run db:dev:migrate` — Docker dev DB (เดิม)
-- `npm run db:prod:migrate` — `scripts/db-prod-migrate.mts`: อ่าน `.env` ต้องเป็นโปรเจกต์ prod (`bnntps…`), ใช้ session pooler 5432,
+- `npm run db:prod:migrate` — `scripts/db-prod-migrate.mts`: อ่าน `.env.prod.local` (2026-10-31: เดิม `.env` — Next.js โหลดเข้า dev ด้วย จึงย้ายชื่อ) ต้องเป็นโปรเจกต์ prod (`bnntps…`), ใช้ session pooler 5432,
   แสดง host + migration ที่ยังไม่ได้รัน (อ่านอย่างเดียว) แล้ว **ให้พิมพ์ project ref** ก่อนรัน · ไม่ใช่ terminal = ไม่รัน · ไม่มี `--reset`
 - `npm run db:migrate:deploy` — Render pre-deploy เท่านั้น (`--deploy` ต้องมี `RENDER`) · `db:migrate` เดิมทำแบบเดียวกัน
   (Render dashboard ยังเรียกชื่อเดิมจนกว่าจะแก้เป็น `db:migrate:deploy`) — จากเครื่องถูกปฏิเสธพร้อมบอกสองคำสั่งข้างบน

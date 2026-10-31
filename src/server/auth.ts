@@ -38,7 +38,7 @@ import {
 
 /** The signed-in person, resolved against app_user (the single user table). */
 export type CurrentUser = {
-  /** app_user.pk — server-side only (audit actor, every `*_app_user_pk` foreign key; ADR 0008 phase 2) */
+  /** app_user.pk — server-side only (audit actor, every *_app_user_pk foreign key) */
   pk: number;
   /** app_user.id — the uuid that leaves the server (the pages' useAccess().userId, os_seen) */
   id: string;
@@ -78,12 +78,8 @@ export async function findAppUserByEmail(email: string, q: Pick<typeof db, 'sele
   return rows[0] ?? null;
 }
 
-/* ------------------------------------------------------------------ *
- * app_user lookup — cached 10 s per email. A screen fires 10–20 API calls
- * on load that all resolve the same row. Admin edits (approve / role / delete) call
- * invalidateUserCache() so they still take effect immediately; the TTL only
- * bounds what a direct SQL edit can lag by.
- * ------------------------------------------------------------------ */
+// app_user rows cached 10 s per email (a screen fires 10–20 calls on load); admin edits call invalidateUserCache(),
+// the TTL only bounds what a direct SQL edit can lag by.
 type AppUserRow = NonNullable<Awaited<ReturnType<typeof findAppUserByEmail>>>;
 // on globalThis so an admin write (which clears it) is seen by pages too — see src/server/cache.ts
 const g = globalThis as typeof globalThis & {
@@ -130,12 +126,8 @@ async function cachedAppUser(email: string): Promise<AppUserRow | null> {
 }
 
 /**
- * Resolve a verified session cookie payload to the current user.
- *
- * Fail closed: the cookie only says WHO signed in — role, status and the session
- * version always come from app_user. No row (email changed / row removed) → null;
- * the SSO callback creates the row BEFORE it issues a cookie, so a legitimate
- * session always has one. DB unreachable → 503, never "trust the cookie".
+ * Fail closed: the cookie only says WHO signed in — role, status and session version always come from app_user.
+ * No row → null (the SSO callback creates it before issuing a cookie). DB unreachable → 503, never trust the cookie.
  */
 export async function resolveUser(session: SessionUser | null): Promise<CurrentUser | null> {
   if (!session) return null;
@@ -169,25 +161,17 @@ export async function resolveUser(session: SessionUser | null): Promise<CurrentU
   };
 }
 
-/** Current user from a route handler's request. */
 export async function userFromRequest(req: NextRequest): Promise<CurrentUser | null> {
   return resolveUser(await verifySession(req.cookies.get(SESSION_COOKIE)?.value));
 }
 
-/** Current user inside server components / layouts. */
 export async function userFromCookies(): Promise<CurrentUser | null> {
   const store = await cookies();
   return resolveUser(await verifySession(store.get(SESSION_COOKIE)?.value));
 }
 
-/* ------------------------------------------------------------------ *
- * Permissions (role_permission) — cached per user_type for 60 s.
- *
- * Both caches are per process (single Render instance — a second instance would serve a revoked role / grant up to
- * the TTL: 10 s user, 60 s grants). Every admin path that changes them invalidates here (services/users.ts
- * userChanged / permissionsChanged, services/records.ts users). A write is never decided by a cache: audit() →
- * assertActor() re-reads the actor's row and the grants it used inside the write transaction (R2).
- * ------------------------------------------------------------------ */
+// Grants cached per user_type for 60 s, per process (a second instance would serve a revoked grant up to the TTL).
+// Admin paths that change them invalidate here; a write is never decided by a cache: assertActor() re-reads in the tx.
 const cache = (g.__shdGrantCache ??= new Map<string, { at: number; grants: GrantMap }>());
 const TTL = 60_000;
 
@@ -258,9 +242,6 @@ export async function rolesWithRight(right: Right): Promise<string[]> {
   return rows.map((r) => r.t?.trim() ?? '').filter(Boolean);
 }
 
-/* ------------------------------------------------------------------ *
- * Route-handler guards. Throw HttpError; wrap handlers with `handle()`.
- * ------------------------------------------------------------------ */
 export async function requireUser(req: NextRequest): Promise<CurrentUser> {
   const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   const u = await resolveUser(session);
@@ -342,12 +323,9 @@ export async function requireAdmin(req: NextRequest): Promise<CurrentUser> {
 }
 
 /**
- * Every route runs in its request context (src/server/request-context.ts: ip, user agent, request id, the user and
- * what the guards let through — audit() / security() / assertActor() read it). A refusal assertActor() made inside
- * a write is logged here (security_log DENIED), after its transaction rolled back.
- * Outside production every answer is also held to its declaration in src/server/contract (check.ts): a log
- * line "API contract drift" under `next dev`, a thrown error under API_CONTRACT_STRICT=1 (the tests).
- * handle() includes it; routes that answer without handle() wrap themselves.
+ * Runs the route in its request context (audit() / security() / assertActor() read it) and logs a refusal
+ * assertActor() made inside a write, after its transaction rolled back. Outside production every answer is checked
+ * against src/server/contract (logged under dev, thrown under API_CONTRACT_STRICT=1). handle() includes it.
  */
 export function checked<T extends unknown[]>(fn: (...args: T) => Promise<Response>): (...args: T) => Promise<Response> {
   const check = process.env.NODE_ENV !== 'production';
@@ -385,7 +363,7 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
       // Postgres errors the user can act on (drizzle wraps the pg error in .cause)
       const code = pgCode(e);
       if (code === '23505') return NextResponse.json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' }, { status: 409 });
-      // FK / CHECK (drizzle/0031): the services check first, so reaching the DB rule is worth a log line
+      // FK / CHECK: the services check first, so reaching the DB rule is worth a log line
       if (code === '23503' || code === '23514') {
         logError(e, 'db constraint refused a write', { code }, args[0] instanceof Request ? args[0] : undefined);
         return NextResponse.json(
@@ -427,9 +405,8 @@ export function handle<T extends unknown[]>(fn: (...args: T) => Promise<Response
 const MAX_JSON_BYTES = 1_000_000;
 
 /**
- * Parse a JSON body or 400 — routes read a body with parseBody (below), which calls this. Content-Type must be application/json: a cross-site
- * <form> or text/plain fetch (no CORS preflight) can't produce it, so it closes
- * the CSRF path that SameSite=Lax leaves to same-site sibling hosts.
+ * Parse a JSON body or 400. Content-Type must be application/json: a cross-site <form> or text/plain fetch can't
+ * produce it, closing the CSRF path SameSite=Lax leaves to same-site sibling hosts.
  */
 export async function readJson<T = Record<string, unknown>>(req: NextRequest): Promise<T> {
   if (!/^application\/json\b/i.test(req.headers.get('content-type') ?? ''))
@@ -444,14 +421,8 @@ export async function readJson<T = Record<string, unknown>>(req: NextRequest): P
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Reading a request — ONLY through these, with the schemas its operation declares in
- * src/server/contract (scripts/test-routes-input.mts fails a route that reads input by hand).
- * A part that fails is refused as the operation's `invalid` says: by default the form rules'
- * 400 "กรอกข้อมูลไม่ครบ N ช่อง" + details.fields (assertValid); or a status with the first problem's
- * own message. Call them where the route always read that part: a check's place decides which of
- * 401 / 403 / 400 / 404 a caller sees first.
- * ------------------------------------------------------------------ */
+// Read request input ONLY through these, with the operation's schemas (scripts/test-routes-input.mts enforces it).
+// Call them where the route always read that part: a check's place decides which of 401 / 403 / 400 / 404 comes first.
 type Declares<K extends Part, S> = { [P in K]: S } & { invalid?: Invalid };
 
 function parsePart<S extends z.ZodType>(op: { invalid?: Invalid }, part: Part, schema: S, value: unknown): z.output<S> {

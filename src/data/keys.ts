@@ -1,15 +1,9 @@
-/**
- * The URLs the data hooks read — which are also their swr cache keys. Pure (no React, no 'use client'):
- * the hooks (src/data/db.ts, src/lib/use-record.ts) and the server pages that render a page's first data
- * into the HTML (src/server/prefetch.ts) build them here, so a server-made key is byte-identical to the
- * one the hook asks for. A key that differs is never wrong data — the hook just fetches it itself.
- */
+/** the data hooks' URLs = their swr keys, pure so the server prefetch builds byte-identical keys (a mismatch only means the hook fetches itself) */
 
 import type { DeletedMode } from './queries';
 
 export type Params = Record<string, string | number | boolean | undefined | null>;
 
-/** Build a query string, skipping empty values. */
 export function qs(params: Params): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -31,7 +25,6 @@ export const pagedKey = (table: string, params: Params, deleted: DeletedMode = '
 /** the page sizes a server-paged table offers (legacy lists: 50 / 75 / 100) */
 export const PAGE_SIZES = [10, 25, 50, 75, 100];
 
-/** a server-paged table's state (DataTable's ServerTableState) */
 type TableState = { page: number; pageSize: number; q: string; sort: { key: string; dir: 'asc' | 'desc' } | null };
 /** where useServerTable starts when the page passes nothing */
 export const FIRST_PAGE: TableState = { page: 1, pageSize: 25, q: '', sort: null };

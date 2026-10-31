@@ -11,11 +11,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Change a record's record_status: ACTIVE / INACTIVE / DELETED (soft delete —
- * nothing is ever removed). Accepts `status`, or the older `deleted` boolean.
- * Permission: DELETED needs `del` on the table's module (users / masters: admin);
- * ACTIVE ↔ INACTIVE needs `edit`; out of DELETED (กู้คืน) needs `del` as well (customers: System Admin only). A missing id / unknown
- * table is a 400 before the permission check.
+ * Soft delete only. DELETED and กู้คืน need `del` on the table's module (customers: System Admin only), ACTIVE ↔ INACTIVE `edit`;
+ * a missing id / unknown table is a 400 before the permission check. The `deleted` boolean is the older form of `status`.
  */
 export const POST = handle(async (req: NextRequest) => {
   const { table, id, status, deleted, remark } = await parseBody(req, recordStatus);

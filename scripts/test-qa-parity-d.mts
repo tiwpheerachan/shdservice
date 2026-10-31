@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-parity-d.mts
- * Legacy parity (2026-10-29): a sale order paid "เก็บเงินปลายทาง (COD)" (sale orders only — not the job close), the
+ * Legacy parity: a sale order paid "เก็บเงินปลายทาง (COD)" (sale orders only — not the job close), the
  * customer form's "+ เพิ่มชื่อ" แขวง / ตำบล (POST /api/address), and 75 rows a page. Its own fixtures (ids 998x,
  * codes QPD*, users qpd-*), reset at every start.
  */
@@ -95,10 +95,10 @@ async function call(method: 'GET' | 'POST', url: string, u: (typeof U)[keyof typ
           } as never);
   return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> };
 }
-/** the district's uuid — what /api/address takes (ADR 0008) */
+/** the district's uuid — what /api/address takes */
 const districtId = (await pool.query<{ id: string }>(`SELECT id::text FROM district WHERE pk = $1`, [DISTRICT]))
   .rows[0]!.id;
-/** the salesperson's uuid — what a sale order takes (ADR 0008) */
+/** the salesperson's uuid — what a sale order takes */
 const adminId = (await pool.query<{ id: string }>(`SELECT id::text FROM app_user WHERE pk = $1`, [U.admin.id])).rows[0]!
   .id;
 const subDistricts = async () =>

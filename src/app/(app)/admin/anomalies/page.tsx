@@ -1,6 +1,6 @@
 import AnomaliesPage from './page-client';
 
-/** System Admin only (the /admin prefix, lib/modules ADMIN_ONLY_PREFIXES; the API checks too). ?category= from the bell */
+/** System Admin only via the /admin prefix (lib/modules ADMIN_ONLY_PREFIXES); the API checks too */
 export default async function Page({
   searchParams,
 }: {

@@ -12,7 +12,7 @@ import { clientIp, ipBucket } from '@/lib/client-ip';
  */
 const buckets = new Map<string, number[]>();
 let lastSweep = 0;
-/** a ceiling, so the limiter cannot itself become the leak (OneLink lib/redirect/rate-limit.ts) */
+/** a ceiling, so the limiter cannot itself become the leak */
 export const MAX_BUCKETS = 20_000;
 
 function sweep(now: number, force = false) {

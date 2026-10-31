@@ -18,10 +18,7 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * multipart/form-data: file, jobNo, remark → stores the file in Supabase Storage
- * under jobs/{jobNo}/{system_file_name} and inserts a document_attach row.
- */
+/** stores under jobs/{jobNo}/{system_file_name} + a document_attach row */
 export const POST = handle(async (req: NextRequest) => {
   // cheap checks first (same order as /api/upload): who, how often, how big — before buffering
   const user = await requireCan(req, 'Job Management', 'edit');
@@ -30,7 +27,6 @@ export const POST = handle(async (req: NextRequest) => {
     throw new HttpError(413, 'ไฟล์ใหญ่เกิน 10MB');
   // a retried upload (ลองอีกครั้ง after a lost answer) replays the stored answer instead of a second attachment
   return idempotent(req, user.pk, async () => {
-    // 400 "expected multipart/form-data" / "ไม่พบไฟล์"; jobNo upper-cased, remark cut at 100
     const { file: sent, jobNo, remark } = await parseForm(req, attachmentAdd);
     // jobNo becomes part of the storage path — a real job (404), not deleted (409): refused before the upload
     const no = await attachableJob(jobNo);

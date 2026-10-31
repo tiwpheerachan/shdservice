@@ -1,8 +1,8 @@
 /**
- * scripts/test-qa-race-routes.mts — route races from the race audit (2026-10-21): a create sent 5× with one
- * Idempotency-Key (products G2, call log G3), the single export slot freed by the export before it (G7), uploads
- * that orphaned the file they replaced (G8), two track links issued at once (G11), two default document profiles /
- * a default deleted / a deleted profile assigned (G5), two admins saving the same profile form (G10).
+ * scripts/test-qa-race-routes.mts — route races: a create sent 5× with one
+ * Idempotency-Key (products, call log), the single export slot freed by the export before it, uploads
+ * that orphaned the file they replaced, two track links issued at once, two default document profiles /
+ * a default deleted / a deleted profile assigned, two admins saving the same profile form.
  * Requests run concurrently (Promise.all); where the order matters a second DB session (`blocker()`) pins one
  * request between its check and its write, so each race is deterministic, not a timing lottery.
  *
@@ -27,7 +27,7 @@ Object.assign(process.env, {
   DB_POOL_MAX: '20',
 });
 
-/* ---- fake storage: a Set of paths, every upload takes 100 ms (two at once overlap) ---- */
+/* fake storage: a Set of paths, every upload takes 100 ms (two at once overlap) */
 const stored = new Set<string>();
 const { BUCKET } = await import('@/server/storage');
 const objects = `${STORAGE}/storage/v1/object/${BUCKET}`;
@@ -68,7 +68,7 @@ const J = (n: number) => `QRR${String(n).padStart(4, '0')}`;
 const PART = 'QRRP1';
 const Q = async <T = Record<string, unknown>,>(text: string, params: unknown[] = []) =>
   (await pool.query(text, params)).rows as T[];
-/** a job's uuid — its API path (ADR 0008) */
+/** a job's uuid — its API path */
 const jobIdOf = async (no: string) =>
   (await Q<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no]))[0]!.id;
 
@@ -105,7 +105,6 @@ await pool.query(`
   UPDATE document_profile SET is_default = true, is_active = true, deleted_at = NULL WHERE pk = 1;
 `);
 
-// ---- helpers ----
 type Ctx = { params: Promise<Record<string, string>> };
 type Handler = (req: NextRequest, ctx: Ctx) => Promise<Response>;
 type Init = { method?: string; body?: unknown; form?: FormData; headers?: Record<string, string>; as?: string };
@@ -266,7 +265,7 @@ try {
 
   console.log('\n3 · two uploads replacing the same picture at once leave no orphan (G8)');
   {
-    // profiles by their uuid (ADR 0008) — a new logo goes under profiles/{uuid}/
+    // profiles by their uuid — a new logo goes under profiles/{uuid}/
     const [{ id: shipperId }] = await Q<{ id: string }>(
       `INSERT INTO shipping_profile (code, name_th, name_en, track_url, sort_order) VALUES ('QRRSHIP', 'ขนส่ง QRR', '', '', 99) RETURNING id::text AS id`,
     );

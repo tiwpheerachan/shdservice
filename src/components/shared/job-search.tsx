@@ -12,11 +12,7 @@ import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
 
-/**
- * Which jobs the dropdown offers — each job screen narrows the list to what it
- * can act on. Typing a full job no (J2612164) always loads that job regardless
- * of scope.
- */
+/** Each job screen narrows the dropdown to what it can act on; typing a full job no always loads that job. */
 export type JobSearchScope = 'all' | 'unassigned' | 'open' | 'closable';
 
 const SCOPE: Record<JobSearchScope, { params: Record<string, string | number>; hint: string }> = {
@@ -37,7 +33,6 @@ export function JobSearch({
   className,
 }: {
   id?: string;
-  /** currently loaded job no — shown in the trigger */
   value?: string;
   /** called with the chosen job's id + its no (a listed row), or the full job no typed (one outside the list; `no`
    *  left out) — useJob's find takes either */
@@ -58,9 +53,7 @@ export function JobSearch({
   }
   const { params, hint } = SCOPE[scope];
 
-  // debounced server search — same matcher as the job list (job no / customer code·name·phone /
-  // reference no / IMEI / serial / model), newest first, max 10 rows; swr keeps the last answer on
-  // screen while the next one loads and never lets an older answer win
+  // same matcher as the job list, newest first, max 10; swr keeps the last answer on screen and never lets an older one win
   const typed = q.trim();
   const settled = useDebouncedValue(typed, 300);
   const searchable = settled.length >= SEARCH_MIN_CHARS;

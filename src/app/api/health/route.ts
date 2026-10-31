@@ -22,15 +22,9 @@ const infoColumns = pgSchema('information_schema').table('columns', {
 const migrations = pgSchema('drizzle').table('__drizzle_migrations', { hash: varchar('hash') });
 
 /**
- * Deployment health check — no secrets, no personal data. Tells whether the
- * server can reach Postgres, whether the app migrations were applied, and how
- * many app_user rows exist (so a "stuck on /pending" can be diagnosed).
- *
- * Always HTTP 200, with the verdict in the body ({"ok":false}): Render's health check
- * restarts an instance that fails, and restarting the web service does not fix
- * Supabase — it only turns a degraded site into no site (OneLink, same reason).
- * An uptime monitor asserts on the body instead. MAINTENANCE_MODE=1 adds `maintenance: true` (the proxy, which
- * answers every other path 503 then, never sees this one).
+ * No secrets, no personal data. Always HTTP 200 with the verdict in the body: Render restarts an instance that fails,
+ * which never fixes Supabase — it only turns a degraded site into no site. Uptime monitors assert on the body.
+ * MAINTENANCE_MODE=1 adds `maintenance: true` (the proxy 503s every other path, never this one).
  */
 export const GET = checked(async (request: NextRequest) => {
   // anonymous callers (uptime checks) get only up/down — config and counts are for System Admin

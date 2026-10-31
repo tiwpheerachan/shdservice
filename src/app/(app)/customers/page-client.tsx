@@ -49,10 +49,8 @@ function CustomersPageInner() {
   const confirm = useConfirm();
   const canJobs = access.canPath('/jobs/list'); // ประวัติงานซ่อม opens the job list (Manager has no job view)
 
-  // server-side paging / search over the customer table (43k rows)
   const { draft, setD, filters: filter, apply, reset, narrowed, pageArgs, server } = useServerTable(NO_FILTER);
   const { data: PROVINCES, ...provincesLookup } = useProvinces();
-  // แสดงรายการที่ลบ (System Admin): the deleted customers instead of the live list; กู้คืน puts one back
   const [showDeleted, setShowDeleted] = React.useState(false);
   const deletedView = access.isAdmin && showDeleted;
   const {
@@ -145,14 +143,14 @@ function CustomersPageInner() {
     } catch (e) {
       // 409 = phone / email / tax id already belongs to another customer (server refuses)
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
-      // the notice + the field's own error say it — no toast (it sat on the dialog's บันทึกข้อมูล button)
+      // the notice + the field's error say it — a toast would cover บันทึกข้อมูล
       if (details?.conflicts?.length) {
         setConflicts(details.conflicts);
         fe.setErrors(apiFieldErrors(e) ?? {});
         focusFirstInvalid();
       } else if (isStale(e) && editing) {
-        refetch(); // the list's row is the stored one again — reopening the dialog shows it
-        // "โหลดใหม่" reads this customer into the open dialog (a page reload lost the dialog and the filters)
+        refetch();
+        // "โหลดใหม่" reads this customer into the open dialog — a page reload would lose the dialog and the filters
         push({
           id: STALE_TOAST,
           kind: 'error',
@@ -232,7 +230,7 @@ function CustomersPageInner() {
       key: 'code',
       header: 'รหัสลูกค้า',
       width: '120px',
-      hideBelow: 'sm', // phones: name (+ code / phone / status under it) + action
+      hideBelow: 'sm',
       cell: (r) => <span className="num font-medium">{r.code}</span>,
     },
     {

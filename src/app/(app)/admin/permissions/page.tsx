@@ -32,9 +32,7 @@ import { PENDING_ROLE } from '@/lib/access';
 import { masterNameKey } from '@/lib/validation/admin';
 import { useTourRestore } from '@/components/tour/tour';
 
-// บทบาท (user_type) มาจากตาราง role_permission — ค่า fallback ใช้เฉพาะระหว่างโหลด. เมนูงาน = โมดูลที่มีหน้าในระบบนี้
-// (แถวของโมดูลระบบเดิมที่ไม่มีหน้า เช่น Booking ไม่แสดงและไม่ถูกแตะ); สิทธิ์พิเศษ = แถว role_permission ชื่อ RIGHTS
-// เก็บใน can_view
+// เมนูงาน = โมดูลที่มีหน้าในระบบนี้: แถวของโมดูลระบบเดิมที่ไม่มีหน้า (เช่น Booking) ไม่แสดงและไม่ถูกแตะ; สิทธิ์พิเศษ = แถว role_permission ชื่อ RIGHTS (เก็บใน can_view)
 const MENUS: readonly string[] = PAGE_MODULES;
 const RIGHT_NAMES = Object.keys(RIGHTS) as Right[];
 const FALLBACK_ROLES = ROLES.filter((r) => r !== PENDING_ROLE);
@@ -42,7 +40,6 @@ const FALLBACK_ROLES = ROLES.filter((r) => r !== PENDING_ROLE);
 type Key = string; // `${role}::${menu}`
 const keyOf = (role: string, menu: string): Key => `${role}::${menu}`;
 
-/** the editable grid from the DB rows: role::menu → the four grants */
 function buildMap(perms: Permission[]): Record<Key, Cell> {
   const m: Record<Key, Cell> = {};
   for (const p of perms) m[keyOf(p.role, p.menu)] = { add: !!p.add, edit: !!p.edit, del: !!p.del, view: !!p.view };
@@ -63,22 +60,17 @@ export default function PermissionsPage() {
     ? [...dbRoles, ...newRoles.filter((r) => !dbRoles.includes(r))]
     : FALLBACK_ROLES;
   const firstRole = ASSIGNABLE_ROLES[0] ?? ROLES[0]; // FALLBACK_ROLES is never empty
-  // the editable grant grid, rebuilt from the DB rows whenever they change (loaded / after a save)
-  // — adjusted while rendering, not in an effect pass
   const [map, setMap] = React.useState<Record<Key, Cell>>(() => buildMap(perms));
   const [mapFrom, setMapFrom] = React.useState(perms);
   if (perms !== mapFrom) {
     setMapFrom(perms);
     setMap(buildMap(perms));
   }
-  // the roles come from the server after the first render: a pick that is not one of them falls back
-  // to the first (derived — nothing to align)
+  // roles arrive after the first render: a pick not among them falls back to the first
   const inRoles = (r: string) => !dbRoles.length || ASSIGNABLE_ROLES.includes(r);
   const [pickedRole, setRole] = React.useState<string>(firstRole);
   const role = inRoles(pickedRole) ? pickedRole : (dbRoles[0] ?? pickedRole); // not in roles ⇒ dbRoles is non-empty
-  // filter bar: ประเภทผู้ใช้งาน picks the role being edited (at once — the table never shows another
-  // role than the one picked); เมนูงาน narrows the rows shown (on ค้นหา) — edits live in `map` for
-  // every menu, so hidden rows are still saved
+  // edits live in `map` for every menu, so rows hidden by the เมนูงาน filter are still saved
   const [menuFilter, setMenuFilter] = React.useState('');
   const [draftPick, setDraft] = React.useState({ role: firstRole, menu: '' });
   const draft = inRoles(draftPick.role) ? draftPick : { ...draftPick, role: dbRoles[0] ?? draftPick.role };
@@ -98,7 +90,7 @@ export default function PermissionsPage() {
     const now = cellOf(role, menu);
     return FIELDS.some((f) => now[f] !== !!saved?.[f]);
   });
-  useUnsavedChanges(dirty); // a sidebar link / closing the tab asks first, as on every form
+  useUnsavedChanges(dirty);
   const pickRole = async (v: string) => {
     if (v !== role && dirty) {
       const ok = await confirm({
@@ -108,7 +100,7 @@ export default function PermissionsPage() {
         confirmLabel: 'ทิ้งการแก้ไข',
         cancelLabel: 'อยู่ต่อ',
       });
-      if (!ok) return setDraft((d) => ({ ...d, role })); // the dropdown goes back to the role being edited
+      if (!ok) return setDraft((d) => ({ ...d, role }));
       setMap(savedMap);
     }
     setDraft((d) => ({ ...d, role: v }));
@@ -122,7 +114,6 @@ export default function PermissionsPage() {
       return { ...s, [k]: { ...cur, [field]: !cur[field] } };
     });
 
-  // rows for the selected role — every menu (so anything can be granted), narrowed by the เมนูงาน filter
   const viewRows: Permission[] = MENUS.filter((menu) => !menuFilter || menu === menuFilter).map((menu) => {
     const c = cellOf(role, menu);
     return { id: keyOf(role, menu), role, menu, ...c };
@@ -142,7 +133,7 @@ export default function PermissionsPage() {
     }
     setSaving(true);
     try {
-      await postJson('/api/admin/permissions', { items }); // 401 → refresh + retry → /login (api.ts)
+      await postJson('/api/admin/permissions', { items });
       // the API checks the new grants on the very next request (cache dropped on save); menus and
       // buttons of someone already signed in follow on their next page load (the grants ride the layout)
       push({
@@ -151,9 +142,9 @@ export default function PermissionsPage() {
         desc: 'มีผลทันทีกับการบันทึกข้อมูล — ผู้ใช้ที่เปิดระบบค้างไว้จะเห็นเมนูและปุ่มตามสิทธิ์ใหม่เมื่อรีเฟรชหน้า (F5)',
       });
       refetch();
-      refetchRoles(); // a new role is in role_permission now
+      refetchRoles();
     } catch (e) {
-      if (isStale(e)) refetch(); // the role's stored grid, with the other admin's change
+      if (isStale(e)) refetch();
       push({
         kind: 'error',
         title: 'บันทึกไม่สำเร็จ',
@@ -164,10 +155,9 @@ export default function PermissionsPage() {
     }
   };
 
-  const [adding, setAdding] = React.useState<string | null>(null); // the เพิ่มตำแหน่ง dialog's name
+  const [adding, setAdding] = React.useState<string | null>(null);
   const addName = adding?.trim() ?? '';
-  // a บทสอน puts back what was tried in เพิ่มตำแหน่ง — Enter there adds the role and picks it (addRole). Only the
-  // typed name, not whether the dialog is open ('' vs null): the tour opens and closes that itself
+  // tour restore: only the typed name — the tour opens and closes the dialog itself
   useTourRestore(
     () => ({ adding: adding || null, newRoles, pickedRole, draftPick }),
     (v) => {
@@ -202,7 +192,7 @@ export default function PermissionsPage() {
       if (dbRoles.includes(role)) await del(`/api/admin/permissions?role=${encodeURIComponent(role)}`);
       setNewRoles((r) => r.filter((x) => x !== role));
       push({ kind: 'success', title: `ลบตำแหน่ง ${role} แล้ว` });
-      setMap(savedMap); // nothing of the removed role stays ticked
+      setMap(savedMap);
       setDraft((d) => ({ ...d, role: firstRole }));
       setRole(firstRole);
       refetch();
@@ -216,7 +206,7 @@ export default function PermissionsPage() {
     key: field,
     header,
     align: 'center',
-    width: '64px', // four tick columns + the menu name fit a phone
+    width: '64px',
     sortable: false,
     cell: (r) => (
       <Checkbox

@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-inactive.mts
- * Owner decisions (2026-10-21): an INACTIVE customer / product goes on no new document (a document already on it
+ * An INACTIVE customer / product goes on no new document (a document already on it
  * keeps it); a partial issue / a return from a job moves the job's version, so a repair page opened before is stale.
  * Same harness as scripts/test-qa-jobs.mts; its own fixtures (ids 945x, codes QI*, users qi-*), reset at every start.
  */
@@ -21,14 +21,13 @@ const { saveQuotation } = await import('@/server/services/quotations');
 const { saveSaleOrder } = await import('@/server/services/sale-orders');
 const { addDays, today } = await import('@/lib/dates');
 
-// ---- fixtures ----
 const ADMIN = { id: 9451, email: 'qi-admin@example.invalid' };
 const by = { pk: ADMIN.id, isAdmin: true };
 const C = { on: 'QIC001', off: 'QIC002' }; // QIC002 INACTIVE
 const P = { on: 'QIP1', off: 'QIP2' }; // QIP2 INACTIVE
 const J = (n: number) => `QIJ${String(n).padStart(4, '0')}`;
 const QJOB = 'J9904501'; // a quotation's job no is J + 7 digits
-/** the fixture jobs' / customers' pks — what their logs, part lines, documents point at (drizzle/0006) */
+/** the fixture jobs' / customers' pks — what their logs, part lines, documents point at */
 const JOBS = `(SELECT pk FROM job WHERE job_no LIKE 'QIJ%' OR job_no = 'J9904501' OR customer_pk IN (9451, 9452))`;
 const QUOTES = `(SELECT pk FROM quotation WHERE customer_pk IN (9451, 9452) OR job_pk IN ${JOBS})`;
 const OFF_CUSTOMER = 'ลูกค้ารายนี้ปิดใช้งาน (Inactive) — เปิดใช้งานก่อน หรือเลือกรายอื่น';
@@ -121,15 +120,14 @@ await pool.query(`
      WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
-// ---- helpers ----
-/** the admin's app_user.id — what a salesperson pick sends (ADR 0008) */
+/** the admin's app_user.id — what a salesperson pick sends */
 const adminUuid = (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [ADMIN.id])).rows[0]!
   .id;
 const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(q)).rows[0]!;
 const line = (no: string) =>
   one<{
     id: string;
-  }> // the request line's uuid (ADR 0008) — what the pick / repair pages send
+  }> // the request line's uuid — what the pick / repair pages send
   (
     sql`SELECT id::text AS id FROM job_part WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${no}) ORDER BY pk DESC LIMIT 1`,
   );

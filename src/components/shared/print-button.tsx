@@ -12,11 +12,8 @@ import { DOC_MODULE, type DocumentKind } from '@/lib/profile-lock';
 import { useAccess } from '@/lib/use-access';
 
 /**
- * "พิมพ์…" button that also lets the user pick which company/brand the document
- * is printed under. Picking a different brand saves it on the document first
- * (POST /api/documents/profile — audited), then opens the print page, so a
- * reprint later comes out the same. With a single active profile it is a plain
- * print button.
+ * Picking a different brand saves it on the document first (POST /api/documents/profile — audited), so a reprint
+ * later comes out the same. With a single active profile it is a plain print button.
  */
 export function PrintButton({
   label,

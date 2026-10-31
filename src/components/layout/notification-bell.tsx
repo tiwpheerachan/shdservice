@@ -14,27 +14,16 @@ import { useAccess } from '@/lib/use-access';
 const POLL_MS = 5 * 60_000;
 
 /**
- * Topbar bell, three sections:
- *  - System Admin: ค่าที่ไม่สมเหตุสมผล — stored money / quantities that do not add up
- *    (GET /api/alerts/anomalies, checked at most every 5 min; report only). Not in the badge: legacy rows keep
- *    it in the hundreds, which would hide the actionable counts
- *  - approvers (SO Approve + Sale Order edit, as approving needs): sale orders waiting for
- *    approval, minus their own (GET /api/alerts/sale-orders-pending)
- *  - open jobs past their customer due date, each with who is responsible
- *    (GET /api/alerts/overdue — who takes jobs sees their own, everyone else all of them)
- * The badge sums the last two. A quiet background poll (every 5 min, only while the tab is visible): a failed
- * answer just hides that count. A role with neither section (the APIs' 403) gets no bell at all.
+ * System Admin's anomalies are not in the badge: legacy rows keep that count in the hundreds, hiding the actionable
+ * ones. A failed answer hides that count; a role with neither other section (the APIs' 403) gets no bell at all.
  */
 export function NotificationBell() {
   const { can, has, jobLink, isAdmin } = useAccess();
   const allowed = can('Job Management', 'view');
   const approver = has('SO Approve') && can('Sale Order', 'edit');
-  // quiet background poll through swr: every 5 min, paused while the tab is hidden, once more
-  // when a tab comes back after that long; a failed answer keeps the last one on screen
+  // paused while the tab is hidden; a failed answer keeps the last one on screen
   const poll = { quiet: true, refreshInterval: POLL_MS, revalidateOnFocus: true };
-  // first read a few seconds after the page has finished loading — its JS and its own data go first on a
-  // slow phone (requestIdleCallback fired during the network wait) — or at once when
-  // the bell is opened
+  // first read once the page has finished loading (its own JS and data go first on a slow phone), or at once when opened
   const [idle, setIdle] = React.useState(false);
   React.useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;

@@ -6,16 +6,14 @@ import { HttpError } from '@/server/http-error';
 import { markDenied, requestCtx } from '@/server/request-context';
 
 /**
- * Owner rule 2026-10-30: the money / quantity figures of a row that came from the legacy system (pk <= its table's
- * legacy_boundary.max_pk, written by drizzle/0006) are never changed by anyone but System Admin — never recomputed.
- * The boundary never changes after a load, so it is read once an hour.
+ * Money / quantity figures of a row from the legacy system (pk <= legacy_boundary.max_pk) are never changed by anyone
+ * but System Admin, never recomputed. The boundary never changes after a load, so it is read once an hour.
  */
 const boundaries = () =>
   cached('legacy_boundary', TTL_STATIC, async () =>
     Object.fromEntries((await db.select().from(legacyBoundary)).map((b) => [b.tableName, b.maxPk])),
   );
 
-/** the row came from the legacy system */
 export async function isLegacyRow(table: string, pk: number): Promise<boolean> {
   const max = (await boundaries())[table];
   return max !== undefined && pk <= max;

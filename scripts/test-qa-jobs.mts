@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-jobs.mts
- * Jobs + stock regressions found by multi-user QA (2026-10-21): a stale repair page rolling the status back
+ * Jobs + stock regressions: a stale repair page rolling the status back
  * after a stock issue, issued part lines silently left as they were, the partly issued dead end, out-source /
  * swap last-write-wins, the browser's unit price, assigning / closing jobs in any state, search on the
  * customer as they were, reopen keeping the close date, deleted products moving, the track link issued by a GET.
@@ -16,7 +16,7 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 Object.assign(process.env, { SESSION_SECRET: 'unit-test-session-secret-0123456789abcdef', DB_POOL_MAX: '25' });
 
 const { db, pool } = await import('@/db/client');
-/** a job's uuid — its API path (ADR 0008) */
+/** a job's uuid — its API path */
 const jobIdOf = async (no: string) =>
   (await pool.query<{ id: string }>('SELECT id::text AS id FROM job WHERE job_no = $1', [no])).rows[0]!.id;
 const { HttpError } = await import('@/server/auth');
@@ -41,7 +41,6 @@ const { addDays, today } = await import('@/lib/dates');
 const { GET: trackLinkGET } = await import('@/app/api/jobs/[id]/track-link/route');
 const { POST: stockIssuePOST } = await import('@/app/api/stock/issue/route');
 
-// ---- fixtures ----
 const U = {
   admin: { id: 9851, email: 'qj-admin@example.invalid', type: 'System Admin' },
   engineer: { id: 9852, email: 'qj-engineer@example.invalid', type: 'Engineer' },
@@ -51,7 +50,7 @@ const SV = 3;
 const CUSTOMER = 'QJC001';
 const P = { pricey: 'QJP1', part: 'QJP2', gone: 'QJP3' }; // ราคาขาย 1200 / 100 / 50 (QJP3 deleted)
 const J = (n: number) => `QJJ${String(n).padStart(4, '0')}`;
-/** the fixture jobs' pks — what their logs / part lines / stock documents point at (drizzle/0006) */
+/** the fixture jobs' pks — what their logs / part lines / stock documents point at */
 const JOBS = `(SELECT pk FROM job WHERE job_no LIKE 'QJJ%' OR customer_pk = 9851)`;
 
 await pool.query(`
@@ -135,7 +134,6 @@ await pool.query(`
      WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type IN ('Inventory-In', 'Inventory-Out') AND r.length_year = 2`);
 
-// ---- helpers ----
 const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(q)).rows[0]!;
 const statusName = async (id: number) =>
   (await one<{ n: string }>(sql`SELECT job_status_name AS n FROM job_status WHERE job_status_id = ${id}`)).n;
@@ -154,7 +152,7 @@ const jobRow = (no: string) =>
            repaired_by_app_user_pk::int AS rb,
            track_token_hash AS hash
       FROM job WHERE job_no = ${no}`);
-/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
+/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid */
 const ADMIN_UUID = (await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE pk = $1', [U.admin.id]))
   .rows[0]!.id;
 const line = (no: string) =>

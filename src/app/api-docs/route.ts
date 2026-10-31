@@ -9,12 +9,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api-docs: the APIDoc page built by `npm run docs:api` (src/server/contract → .apidoc/index.html),
- * for any approved user — the same people who can call the API (OneLink: anyone with any access).
- * No session cookie → proxy.ts sends the browser to /login first.
- *
- * Its inline scripts get a per-response nonce (next.config.mjs leaves this path's CSP to us). Try it
- * calls this host (the build's placeholder origin is swapped in) with the viewer's own session.
+ * For any approved user — the same people who can call the API. Its inline scripts get a per-response nonce
+ * (next.config.mjs leaves this path's CSP to us); Try it calls this host with the viewer's own session.
  */
 
 let built: string | null = null;

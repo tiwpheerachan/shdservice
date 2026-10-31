@@ -3,7 +3,6 @@ import { quotationKey, recordNo } from '@/data/keys';
 import { packPrefetched, prefetchRaw, searchOf, type SearchParams } from '@/server/prefetch';
 import EditQuotationPage from './page-client';
 
-/** the quotation from ?id= (its uuid) in the HTML (the page's useRecord) */
 export default async function Page({ searchParams }: { searchParams: SearchParams }) {
   const id = recordNo(searchOf(await searchParams).get('id') ?? ''); // as useRecord reads `initial`
   const key = id ? quotationKey(id) : '';

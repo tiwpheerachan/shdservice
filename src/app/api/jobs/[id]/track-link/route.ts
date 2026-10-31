@@ -12,9 +12,8 @@ export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
- * GET — the link's lifetime state, read-only: opening a job page never issues a link (nor writes an audit row).
- * Only a hash of a link is stored (drizzle/0025), so an existing one can never be shown again — staff issue one
- * with POST (the first one too) to get a copyable link. `url` stays in the answer for older clients: always "".
+ * GET is read-only: opening a job page never issues a link (nor writes an audit row). Only a hash is stored, so an
+ * existing link can never be shown again — staff POST for a copyable one. `url` is always "" (kept for older clients).
  */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   await requireCan(req, 'Job Management', 'view');

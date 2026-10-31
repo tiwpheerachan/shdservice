@@ -11,15 +11,9 @@ import { daysOverdue, effectiveDue, effectiveDueText, jobModelName, overdueWhere
 import { AS } from './sale-orders';
 
 /**
- * Notification bell (topbar): jobs past their customer due date that are still open
- * (Pending + Repaired-not-returned), with who is responsible.
- *
- *  - who takes jobs (Job Take) sees the jobs assigned to them, unless also Overdue All (a head engineer);
- *    every other role sees all of them
- *  - responsible = the assigned engineer; none yet → "ยังไม่มอบหมายช่าง" + who opened the job
- *  - same condition as the job list's `overdue=1` filter (jobs.ts overdueWhere), so
- *    "ดูทั้งหมด" lands on exactly these jobs; it reads only open jobs through ix_job_status
- *    (~6 ms per query), so the cost does not grow with the job history
+ * Notification bell: open jobs past their customer due date, with who is responsible. Who takes jobs (Job Take) sees
+ * only their own unless also Overdue All. Same condition as the job list's `overdue=1` (jobs.ts overdueWhere), so
+ * "ดูทั้งหมด" lands on exactly these jobs.
  */
 export type OverdueItem = {
   /** job.id — the link; `no` is what is shown */
@@ -100,7 +94,7 @@ async function load(me: Pick<CurrentUser, 'pk' | 'id'> | null): Promise<OverdueA
       })
       .from(job)
       .innerJoin(jobStatus, eq(jobStatus.jobStatusId, job.jobStatusId))
-      // the brand is the model's (job.brand_manufacturer_pk went in drizzle/0006)
+      // the brand is the model's (job has no brand column)
       .leftJoin(model, eq(model.pk, job.modelPk))
       .leftJoin(brand, eq(brand.pk, model.brandPk))
       .leftJoin(customer, eq(customer.pk, job.customerPk))

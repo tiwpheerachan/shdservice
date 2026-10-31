@@ -18,11 +18,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
 };
 
-/**
- * ประวัติการแก้ไขของงาน — audit_log rows for this job (who / when / what changed), then its status
- * history (job_log — also the legacy system's, from before the audit log), shown to anyone allowed
- * to open the job. Collapsed by default, latest first.
- */
+/** audit_log rows, then the status history (job_log, which also holds the legacy system's from before the audit log) */
 export function JobHistorySection({ job }: { job: JobDetail | null }) {
   const [open, setOpen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);

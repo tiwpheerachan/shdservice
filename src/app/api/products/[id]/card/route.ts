@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 /** The next page of a part's stock card (the product dialog's โหลดเพิ่ม), by the part's uuid. */
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
   await requireView(req, PRODUCT_MODULES);
-  const { id } = await parseParams(ctx, productCard); // not a uuid → 404 ไม่พบอะไหล่
+  const { id } = await parseParams(ctx, productCard);
   const { offset = 0 } = parseQuery(req, productCard);
   const code = (await rowByUuid(product, id, 'อะไหล่')).productCode ?? '';
   const [card, total] = await Promise.all([

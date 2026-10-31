@@ -7,7 +7,7 @@ import { logError } from '@/lib/log';
 import { ipBucket } from '@/lib/client-ip';
 
 /**
- * Security plumbing for the public tracking flow (drizzle/0014):
+ * Security plumbing for the public tracking flow:
  *
  *   linkToken → Turnstile → one-time ticket → PublicJob
  *
@@ -24,10 +24,6 @@ const TICKET_TTL_SEC = 180;
 /** the database clock — every expiry is compared in Postgres, never against the app server's clock */
 export const dbNow = sql`now()`;
 export const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${seconds})`;
-
-/* ------------------------------------------------------------------ *
- * hashing
- * ------------------------------------------------------------------ */
 
 export const sha256 = (v: string | Buffer) => createHash('sha256').update(v).digest();
 
@@ -54,10 +50,6 @@ export const normalizeUa = (ua: string | null | undefined) => (ua ?? '').trim().
 export const newToken = () => randomBytes(32).toString('base64url');
 /** the shape of one — anything else is refused before a query */
 export const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
-
-/* ------------------------------------------------------------------ *
- * rate limits + blocks
- * ------------------------------------------------------------------ */
 
 /**
  * Fixed-window counter. Returns true while `key` is within `limit` hits for the
@@ -115,10 +107,6 @@ export async function block(key: string, minutes: number): Promise<void> {
     .onConflictDoUpdate({ target: trackBlock.key, set: { blockedUntil: until } });
 }
 
-/* ------------------------------------------------------------------ *
- * Turnstile (fail closed)
- * ------------------------------------------------------------------ */
-
 /**
  * Cloudflare's documented test secrets — 1x…AA always passes, 2x…AA always fails, 3x…AA "token
  * already spent" (e.g. 1x0000000000000000000000000000000AA: 31 zeros). Accepted outside production only.
@@ -170,10 +158,6 @@ export async function verifyTurnstile(
   return 'ok';
 }
 
-/* ------------------------------------------------------------------ *
- * one-time tickets
- * ------------------------------------------------------------------ */
-
 /** issue a 3-minute, single-use ticket bound to one job + IP + User-Agent */
 export async function issueTicket(jobNo: string, ip: string, ua: string): Promise<string> {
   // expired rows go on every issue (indexed on expires_at — cheap at this volume)
@@ -209,10 +193,6 @@ export async function consumeTicket(raw: unknown, ip: string, ua: string): Promi
     .returning({ jobNo: sql<string>`(select ${job.jobNo} from ${job} where ${job.pk} = ${trackTicket.jobPk})` });
   return r?.jobNo ?? null;
 }
-
-/* ------------------------------------------------------------------ *
- * security events (30 days)
- * ------------------------------------------------------------------ */
 
 export type TrackEvent =
   | 'track_page_open'

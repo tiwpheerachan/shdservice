@@ -2,10 +2,6 @@ import type { DocumentProfile } from '@/server/services/document-profiles';
 import { AutoPrint } from './auto-print';
 import { Email } from '@/components/shared/email';
 
-/**
- * A4 document shell shared by every print view: company header, title box,
- * body, and a print button bar that is hidden when printing.
- */
 export function PrintFrame({
   title,
   docNo,

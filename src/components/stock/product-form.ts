@@ -1,6 +1,5 @@
 import type { Product } from '@/data/types';
 
-/** the product dialog's editable fields (what POST /api/products takes, as typed) */
 export type ProductForm = {
   mfgCode: string;
   name: string;
@@ -33,7 +32,6 @@ export const EMPTY_PRODUCT_FORM: ProductForm = {
   models: [],
 };
 
-/** the form filled from a loaded product */
 export const productFormOf = (p: Product & { models?: string[] }): ProductForm => ({
   mfgCode: p.mfgCode,
   name: p.name,

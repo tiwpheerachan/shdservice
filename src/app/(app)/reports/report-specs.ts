@@ -1,7 +1,5 @@
 /**
- * The legacy reports' row-level columns, in the legacy order — one list for the screen table, the Excel / Word /
- * PDF exports (src/server/export.ts) and the server query (src/server/services/reports.ts reportPage). Pure: no
- * React, no server-only, so the client pages and the server both import it.
+ * One column list for the screen table, the exports (server/export.ts) and the server query (reports.ts reportPage) — pure, so client and server both import it.
  * `m` = money (2 decimals, right), `n` = a count (right); `cost` = ราคาทุน, only with the right Product Cost.
  */
 export type ReportCol = { key: string; header: string; width?: number; money?: boolean; num?: boolean; cost?: boolean };
@@ -237,7 +235,6 @@ export const REPORT_SPECS = {
 export type ReportKey = keyof typeof REPORT_SPECS;
 export const REPORT_KEYS = Object.keys(REPORT_SPECS) as ReportKey[];
 export const isReportKey = (v: unknown): v is ReportKey => typeof v === 'string' && Object.hasOwn(REPORT_SPECS, v);
-/** a report row as GET /api/data/report_rows answers it — read by column key */
 export type ReportRow = Record<string, string | number>;
 
 /** the legacy status filter's group entries → statusGroup (kpiGroup) */
@@ -248,8 +245,7 @@ export const JOB_STATUS_GROUPS: Record<string, string> = {
 };
 export const JOB_WARRANTY: Record<string, string> = { ยังไม่ได้ระบุ: 'NONE', IN: 'IN', OUT: 'OUT' };
 
-/** the job reports' filters as the legacy screen has them, as their query (src/server/services/jobs.ts filtersFromQuery
- *  + reports.ts jobReportWhere) — pure, so open-job's server render builds the same first keys */
+/** the legacy screen's job filters as their query (jobs.ts filtersFromQuery + reports.ts jobReportWhere) — pure, so open-job's server render builds the same first keys */
 export function jobReportQuery(
   f: Record<string, string | undefined>,
   // staff: the user's uuid (ADR 0008); status: the job status code

@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 /** Lines to issue/return for a reference document: ?type=job|sale|return&ref=J26…/SO26… */
 export const GET = handle(async (req: NextRequest) => {
   await requireView(req, ['Product Pick Stock']);
-  const { ref, type } = parseQuery(req, stockPickLines); // 400 "ref required" / "type must be job, sale or return"
+  const { ref, type } = parseQuery(req, stockPickLines);
   if (type === 'job') {
     await assertJobOpenForIssue(ref); // a closed / cancelled job has nothing left to issue
     return NextResponse.json({ rows: await listPartRequests(ref, true) });

@@ -2,7 +2,7 @@
  * npm run db:test:prepare — make the throwaway test database look like a fresh Supabase
  * project, then apply every migration. Refuses anything that isn't a local database.
  * `npm run db:test:prepare -- --reset` empties it first (scripts/db-wipe.sql) and migrates from scratch —
- * the migrations cannot re-run over the tables drizzle/0006 rebuilt (ADR 0008 decision 12). CI runs
+ * the migrations cannot re-run over the tables drizzle/0006 rebuilt. CI runs
  * prepare → wipe → prepare.
  *   TEST_DATABASE_URL (default postgresql://postgres:test@127.0.0.1:55442/oneservice_test)
  */

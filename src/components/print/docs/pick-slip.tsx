@@ -7,9 +7,8 @@ import { pickSlipProfile, profileForDocument } from '@/server/services/document-
 const ROWS = 13;
 
 /**
- * ใบเบิกสินค้า — laid out as the legacy slip (owner's sample 2026-10-29): A4 landscape, one quotation per page.
- * Header = the pick slip profile (IPA, document_profile.purpose = 'pick_slip'), else the quotation's own issuer.
- * Lines and totals: pickSlips (src/server/services/quotations.ts). A skipped quotation is named on screen only.
+ * Laid out as the legacy slip: A4 landscape, one quotation per page. Header = the pick slip profile
+ * (document_profile.purpose = 'pick_slip'), else the quotation's own issuer. A skipped quotation is named on screen only.
  */
 export async function PickSlipDoc({ ids }: { ids: string[] }) {
   const [{ slips, skipped }, header] = await Promise.all([pickSlips(ids), pickSlipProfile()]);

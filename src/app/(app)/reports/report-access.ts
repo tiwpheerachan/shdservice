@@ -6,12 +6,7 @@ import { MODULE_LABELS, type Module } from '@/lib/modules';
 /** the job screens — a job list is readable from any one of them (READ_ACCESS.jobs in src/server/resources.ts) */
 export const JOB_SCREENS: readonly Module[] = ['Job Management', 'Job Assign', 'Job Repair', 'Job Closing'];
 
-/**
- * A report's KPIs need only the special right Report; its table reads the module's own list (view on any of
- * `read`) and its Excel the export's module (view on `exportModule`, plus Export). Without them the table says
- * which menu to ask for and the Excel button is hidden — not a load error, not a 403 on click. Who may see what
- * is unchanged: the API decides the same.
- */
+/** KPIs need only the special right Report; the table needs the module's view (any of `read`), Excel the export module's view + Export — a missing one shows a hint, never a load error or a 403 on click */
 export function useReportAccess(read: readonly Module[] | null, exportModule: Module) {
   const { can } = useAccess();
   const canTable = !read?.length || read.some((m) => can(m, 'view'));

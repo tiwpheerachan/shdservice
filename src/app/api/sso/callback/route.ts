@@ -25,12 +25,8 @@ export const dynamic = 'force-dynamic';
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 /**
- * Auto-provision the signed-in employee into `app_user` (the single user table)
- * and return their effective role/status. New users start pending (user_type
- * NULL) until an admin assigns a role; owner emails are always System Admin.
- * A failure returns the sign-in error code — user_conflict (a unique clash on app_user: an admin must
- * look, retrying will not help) or db_unavailable — and NO cookie is issued (a session always needs its
- * app_user row — the server never trusts a role baked into the cookie).
+ * Provisions the signed-in employee into app_user: new users start pending (user_type NULL), owner emails are System Admin.
+ * A failure returns the sign-in error code and NO cookie — a session always needs its app_user row, never a role baked into the cookie.
  */
 async function provision(opts: {
   email: string;
@@ -169,8 +165,7 @@ export const GET = checked(async (request: NextRequest) => {
       return continueIfSignedIn() ?? (await failLogged(request, `verify_${res.status}`));
     }
     identity = await res.json();
-    // SSO_DEBUG=shape (or 1): what /sso/verify answered — field names, types and sizes,
-    // never a value (safe in production for one sign-in; needed before keying users on `sub`)
+    // SSO_DEBUG=shape (or 1): field names, types and sizes of what /sso/verify answered — never a value
     if (process.env.SSO_DEBUG === 'shape' || process.env.SSO_DEBUG === '1')
       log.info('sso verify shape', { shape: shapeOf(identity) });
   } catch {
@@ -195,7 +190,6 @@ export const GET = checked(async (request: NextRequest) => {
     return failLogged(request, 'no_email');
   }
 
-  // Enrich with the full directory profile (department, title, phone, avatar).
   const prof = await lookupByEmail(email);
 
   const name = str(identity.name) || str(u.name) || str(u.en_name) || prof?.name || (email.split('@')[0] ?? email);

@@ -14,11 +14,7 @@ export const dynamic = 'force-dynamic';
 const THUMB_TYPES: ReadonlySet<string> = new Set(['image/jpeg']);
 const MAX_THUMB_BYTES = 1024 * 1024;
 
-/**
- * multipart/form-data: jobNo, file (the name POST /api/attachments/video issued), name, remark, thumb? → checks
- * the video the browser uploaded to storage (checkStoredVideo: there, ≤ 200 MB, really MP4 / MOV / WebM), stores
- * the thumbnail next to it ({file}.jpg) and inserts the document_attach row. Refused → the upload is removed.
- */
+/** checks the video the browser uploaded (checkStoredVideo: there, ≤ 200 MB, really MP4 / MOV / WebM), stores its thumbnail ({file}.jpg) and the document_attach row; refused → the upload is removed */
 export const POST = handle(async (req: NextRequest) => {
   const user = await requireCan(req, 'Job Management', 'edit');
   await rateLimit(req, 'upload', 30);

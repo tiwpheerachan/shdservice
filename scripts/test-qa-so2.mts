@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-so2.mts
- * Sale-order owner decisions (2026-10-21): cancel with a reason (who may), cancelled orders findable in the
+ * Sale-order rules: cancel with a reason (who may), cancelled orders findable in the
  * list, a slip (+ amount) added after the approval when the order has none, the salesperson a role that sells.
  * Same harness as scripts/test-qa-so.mts; its own fixtures (ids 980x, codes Q2*, users q2-*), reset at every
  * start. Storage is a fake Supabase Storage behind globalThis.fetch.
@@ -48,7 +48,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response('', { status: 404 });
 }) as typeof fetch;
 
-// ---- fixtures ----
 const U = {
   admin: { id: 9801, email: 'q2-admin@example.invalid', type: 'System Admin' },
   seller: { id: 9802, email: 'q2-seller@example.invalid', type: 'Q2 Seller' }, // Sale Order V/A/E/D
@@ -114,7 +113,6 @@ await pool.query(`
      WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type = 'Inventory-Out' AND r.length_year = 2`);
 
-// ---- helpers ----
 async function cookieFor(u: TestUser) {
   const now = Date.now();
   return `${SESSION_COOKIE}=${await signSession({ email: u.email, name: u.email, exp: now + 10 * 60_000, iat: now, sv: SV })}`;
@@ -133,7 +131,7 @@ const post = async (path: string, u: TestUser, body: unknown) =>
 type Order = { no: string; version: number; slip: string; paymentAmount: number; cancelled: boolean };
 type Res = { status: number; body: Record<string, unknown> & { error?: string; order?: Order } };
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
-/** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
+/** an order's / a user's uuid — what the API takes; an unknown number → a uuid of no order */
 const soIdOf = async (no: string) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM sale_order WHERE sale_order_no = $1', [no])).rows[0]?.id ??
   '00000000-0000-7000-8000-000000000000';
@@ -283,7 +281,7 @@ try {
   console.log('\nQA sale orders 2 — salesperson (พนักงานขาย)');
   await test('the staff list marks who sells: Sale Order add or System Admin', async () => {
     const staff = new Map((await listStaff()).map((s) => [s.id, s.sells]));
-    // the staff list carries each user's uuid (ADR 0008)
+    // the staff list carries each user's uuid
     const uuidOf = async (u: { id: number }) =>
       (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [u.id])).rows[0]!.id;
     const got = [];

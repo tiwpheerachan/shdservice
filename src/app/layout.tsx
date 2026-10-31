@@ -6,9 +6,7 @@ import { ThemeScript } from '@/components/layout/theme-script';
 import { ToastProvider } from '@/components/ui/toast';
 import { ConfirmProvider } from '@/components/ui/confirm';
 
-// Self-hosted at build time (next/font): no request to fonts.googleapis.com on
-// every page load and no render-blocking external stylesheet. Exposed as CSS
-// variables that globals.css folds into --font-sans.
+// next/font self-hosts at build time: no request to fonts.googleapis.com, no render-blocking stylesheet.
 // Noto Sans Thai only: it carries Latin too and comes first in --font-sans, so a second (Latin)
 // font would never draw a glyph. No `weight`: it is a variable font, one file per subset covers 400–700 (all four are used: font-medium/semibold/bold, <th>).
 const notoThai = Noto_Sans_Thai({

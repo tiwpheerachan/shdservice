@@ -13,14 +13,9 @@ import { logError } from '@/lib/log';
 export const dynamic = 'force-dynamic';
 
 /**
- * /track/doc/<ticket> — one customer document, opened from the tracking page (POST /api/track/doc).
- *
- * The ticket is the only input: it names one document of one job and works for 10 minutes while
- * the tracking session / link that asked for it is live — from any browser, so LINE's in-app
- * browser → Safari still opens it (services/tracking.ts docForLink). The document is checked again
- * here (a quotation cancelled / a job deleted since → refused) and shown as the customer's copy: the
- * customer's details in full, no staff names / notes (`forCustomer`).
- * The proxy (src/proxy.ts) gives this path the /track headers (no-store, noindex, no-referrer, CSP).
+ * The ticket is the only input: one document of one job, 10 minutes, while the session / link that asked for it is live —
+ * from any browser, so LINE's in-app browser → Safari still opens it. The document is re-checked here and shown as the
+ * customer's copy (`forCustomer`: no staff names / notes).
  */
 const FAIL_LIMIT = 5; // invalid tickets per IP per 10 minutes → blocked 15 minutes (as /api/track/data)
 // the link may be young: tapping "ออก" on the tracking page ends the session it lives on, too

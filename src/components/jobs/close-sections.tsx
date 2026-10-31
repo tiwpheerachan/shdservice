@@ -23,7 +23,6 @@ import {
 } from '@/lib/validation/job';
 import type { CloseDraft } from './close-money';
 
-/** ข้อมูลการเปิดงาน — the loaded job's number / open date / type / current status, read-only */
 export function CloseJobInfoSection({ job }: { job: JobDetail | null }) {
   return (
     <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>
@@ -57,7 +56,6 @@ export function CloseJobInfoSection({ job }: { job: JobDetail | null }) {
   );
 }
 
-/** รายละเอียดการดำเนินงาน — what was found and done, read-only */
 export function CloseWorkSection({ job }: { job: JobDetail | null }) {
   const { s: form } = useJobForm();
   return (
@@ -82,7 +80,6 @@ export function CloseWorkSection({ job }: { job: JobDetail | null }) {
   );
 }
 
-/** ข้อมูลการปิดงาน - ส่งคืนสินค้า — how / when it goes back, courier, parcel no and the closing status */
 export function CloseReturnSection({
   job,
   d,
@@ -177,7 +174,7 @@ export function CloseReturnSection({
             onFix={(v) => upd({ tracking: v })}
           />
         </Field>
-        {/* a swap job: the new device's serial may be entered / corrected here — optional (owner 2026-10-28) */}
+        {/* a swap job: the new device's serial may be entered / corrected here — optional */}
         {job && isSwap(job.swap.detail) && (
           <Field label="Serial เครื่องใหม่" error={errors.newSerial} hint="พิมพ์ในใบส่งคืนสินค้า (New S/N)">
             <CodeInput

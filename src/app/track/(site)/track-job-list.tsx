@@ -23,7 +23,6 @@ function matches(r: PublicJobSummary, f: Filters) {
   return true;
 }
 
-/** the customer's jobs: กำลังดำเนินการ / ประวัติ tabs, filters, rows (open one → onOpen), pages */
 export function JobList({
   tab,
   setTab,

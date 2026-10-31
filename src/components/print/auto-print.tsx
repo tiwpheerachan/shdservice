@@ -7,9 +7,8 @@ import { Printer, X } from 'lucide-react';
 const SHEET_PX = 820;
 
 /**
- * Print toolbar (hidden on paper) + auto-open the print dialog once fonts are ready.
- * On a phone the 210 mm sheet is scaled down to the screen (screen only — the print stays A4 / A5).
- * `paper`: the sheet the page's @page sets (the shipping label: A5 แนวนอน), named in the toolbar.
+ * Opens the print dialog once fonts are ready; on a phone the sheet is scaled to the screen (the print stays A4 / A5).
+ * `paper`: the sheet the page's @page sets, named in the toolbar.
  */
 export function AutoPrint({ paper = 'A4' }: { paper?: string }) {
   React.useEffect(() => {

@@ -7,14 +7,9 @@ import { Button } from './button';
 import { cn } from '@/lib/utils';
 
 /**
- * App-wide confirmation dialog — a promise-based drop-in for `window.confirm`:
- *
+ * Promise-based drop-in for `window.confirm`:
  *   const confirm = useConfirm();
- *   if (!(await confirm({ title: "ลบผู้ใช้?", description: "…", tone: "danger" }))) return;
- *
- * One instance is mounted by <ConfirmProvider> in the root layout, so every page
- * gets the same look (Radix Dialog, role=alertdialog: focus trap, Esc = cancel; opens on the confirm
- * button — on Cancel when tone is danger).
+ *   if (!(await confirm({ title: "ลบผู้ใช้?", tone: "danger" }))) return;
  */
 export type ConfirmOptions = {
   title: string;

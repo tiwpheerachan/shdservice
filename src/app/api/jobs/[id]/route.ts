@@ -8,7 +8,6 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** Job detail for every job screen. */
 export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireView(req, [...JOB_MODULES, 'Quotation']);
   const no = await jobNoOf((await parseParams(ctx, jobGet)).id);

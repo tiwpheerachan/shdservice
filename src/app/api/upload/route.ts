@@ -41,10 +41,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * multipart/form-data: kind, id, file → stores the file in bucket `oneservice`
- * and writes the reference into the legacy column:
+ * Writes the stored file's reference into the legacy column:
  *   product-image    → product.picture_file_name      (products/{code}/{file}; column keeps the file name)
- *   sale-order-slip  → sale_order.slip_file_name      (full path; + payment_amount when `paymentAmount` is sent; id = the order's uuid)
+ *   sale-order-slip  → sale_order.slip_file_name      (full path; + payment_amount when `paymentAmount` is sent)
  *   job-slip         → job.job_payment_slip_file_name (full path)
  * Replacing a file removes the previous object — except a closed job's slip, kept as evidence.
  */
@@ -55,8 +54,7 @@ export const POST = handle(async (req: NextRequest) => {
   const declared = Number(req.headers.get('content-length') ?? 0);
   if (declared > MAX_FILE_BYTES + 1024 * 1024) throw new HttpError(413, 'ไฟล์ใหญ่เกิน 10MB');
 
-  // 400 "expected multipart/form-data" / "file required" / "id required"; id upper-cased; an unknown kind
-  // reads as none — refused below ("unknown kind"), after the file checks
+  // an unknown kind is refused below, after the file checks
   const { kind, id, file, paymentAmount } = await parseForm(req, upload);
   // images only for pictures; logos may also be SVG; slips may also be PDF. Checked against the bytes BEFORE sharp
   // sees them.
@@ -94,7 +92,6 @@ export const POST = handle(async (req: NextRequest) => {
   const sys = systemFileName(body.type); // after optimizeImage: a photo-PNG may now be a JPEG
   switch (kind) {
     case 'profile-logo': {
-      // ออกเอกสารในนาม — logo printed on quotations / labels / return notes (System Admin)
       const pid = uuidOr404(id, 'โปรไฟล์');
       await rowByUuid(documentProfile, pid, 'โปรไฟล์'); // before storing anything
       const path = filePath.profileLogo(pid, sys);
@@ -103,7 +100,6 @@ export const POST = handle(async (req: NextRequest) => {
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'shipper-logo': {
-      // โลโก้บริษัทขนส่ง — printed on the public tracking page (System Admin)
       const sid = uuidOr404(id, 'โปรไฟล์ขนส่ง');
       await rowByUuid(shippingProfile, sid, 'โปรไฟล์ขนส่ง'); // before storing anything
       const path = filePath.shipperLogo(sid, sys);
@@ -137,7 +133,7 @@ export const POST = handle(async (req: NextRequest) => {
       return NextResponse.json({ ok: true, path, file: sys });
     }
     case 'sale-order-slip': {
-      const no = await saleOrderNoOf(id); // the order's uuid → its SO number (the row's key, the slip's folder)
+      const no = await saleOrderNoOf(id);
       if (!no) throw new HttpError(404, 'ไม่พบใบสั่งขาย');
       const cols = {
         old: saleOrder.slipFileName,

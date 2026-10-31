@@ -15,7 +15,6 @@ import { type Balance, type CloseDraft, costRows, LEGACY_ADJUST_LABEL, netOf } f
 
 type Draft = { d: CloseDraft; upd: (p: Partial<CloseDraft>) => void; errors: FieldErrors; lock?: string };
 
-/** รายละเอียดการรับชำระเงิน — the job's costs, then the payment (or the deposit refund) of the close */
 export function ClosePaymentSection({
   job,
   bal,
@@ -25,12 +24,10 @@ export function ClosePaymentSection({
 }: Draft & {
   job: JobDetail | null;
   bal: Balance;
-  /** สลิปชำระเงิน already uploaded (its file path) */
   slip: string;
   onPickSlip: Parameters<typeof FileInput>[0]['onFile'];
 }) {
-  // money already given back (a swap/refund job stores it as a negative payment): shown as it is, no payment inputs
-  // — the hidden fields stay as loaded, so a save sends no payment and the refund is kept
+  // a refund already given (stored as a negative payment): shown read-only, so a save leaves it as it is
   const gaveBack = job && job.payment.amount < 0 ? job.payment : null;
   const refunded = gaveBack && bal.refund === 0 ? gaveBack : null;
   // how it went back: "เงินสด, 2026-10-01" (the date is in the detail: "คืนมัดจำ <date>")

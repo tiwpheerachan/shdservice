@@ -1,23 +1,18 @@
 /**
  * npm run db:migrate
  *
- * Applies ./drizzle/*.sql in journal order using drizzle's migrator against
- * DATABASE_URL. Extra behaviour for this project:
+ * Applies ./drizzle/*.sql in journal order using drizzle's migrator against DATABASE_URL. Extra behaviour:
  *
- *  - The legacy tables are (re)loaded from a SQL Server dump by
- *    setupdata/load_supabase.sh, which DROPs and re-creates them. After such a
- *    reload drizzle's journal (drizzle.__drizzle_migrations) still says every
- *    migration was applied, while the app columns are gone again. We detect
- *    that state (journal has rows but app_user.lark_id is missing) and reset the
- *    journal so every migration — all written to be idempotent — runs again.
- *
- *  - `--reset` forces that behaviour. Neither ever runs against production (PROD_REF in the URL), nor on a database
- *    drizzle/0006 converted (job.pk exists, ADR 0008 decision 12): that one is wiped (scripts/db-wipe.sql) and migrated.
+ *  - setupdata/load_supabase.sh DROPs and re-creates the legacy tables, while drizzle's journal
+ *    (drizzle.__drizzle_migrations) still says every migration was applied. We detect that state (journal has
+ *    rows but app_user.lark_id is missing) and reset the journal so every migration — all idempotent — runs again.
+ *  - `--reset` forces that. Neither ever runs against production (PROD_REF in the URL), nor on a database
+ *    drizzle/0006 converted (job.pk exists): that one is wiped (scripts/db-wipe.sql) and migrated.
  *  - `--deploy` (db:migrate:deploy, and db:migrate while Render's dashboard still calls it): Render's pre-deploy
- *    only — from a laptop it is refused and names the two commands that are (ADR 0009).
- *  - `--prod`: run by scripts/db-prod-migrate.mts (db:prod:migrate) after it asked; never with --reset.
+ *    only — from a laptop it is refused.
+ *  - `--prod`: run by scripts/db-prod-migrate.mts after it asked; never with --reset.
  */
-import 'dotenv/config';
+// no env file is loaded: every caller names its database, so nothing falls back to a production .env
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -46,7 +41,9 @@ async function main() {
   }
   const url = process.env.DATABASE_URL;
   if (!url) {
-    console.error('DATABASE_URL is not set (use the Supabase *Session pooler*, port 5432).');
+    console.error(
+      'DATABASE_URL is not set — name the database: npm run db:dev:migrate (local) · npm run db:prod:migrate (production, reads .env.prod.local).',
+    );
     process.exit(1);
   }
   const pool = new Pool({
@@ -100,8 +97,8 @@ async function main() {
       process.exit(1);
     }
     if (force || (hasEntries && !appColumnsPresent)) {
-      // after drizzle/0006 (ADR 0008 decision 12) the tables are rebuilt: re-running the migrations over them cannot
-      // work — a converted database is rebuilt instead (a legacy reload wipes first, so it never gets here)
+      // a 0006-converted database cannot re-run the migrations — it is rebuilt instead
+      // (a legacy reload wipes first, so it never gets here)
       const { rows: pk } = await pool.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM information_schema.columns
           WHERE table_schema = 'public' AND table_name = 'job' AND column_name = 'pk'`,

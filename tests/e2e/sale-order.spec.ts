@@ -24,7 +24,7 @@ const orderState = (no: string) =>
     [no],
   );
 
-/** the order's uuid — its link (ADR 0008); the number is what's shown and what the rows reference */
+/** the order's uuid — its link; the number is what's shown and what the rows reference */
 const soId = async (no: string) =>
   (await one<{ id: string }>('SELECT id::text AS id FROM sale_order WHERE sale_order_no = $1', [no])).id;
 

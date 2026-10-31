@@ -18,19 +18,12 @@ import { WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { profileLock, type DocumentKind } from '@/lib/profile-lock';
 
 /**
- * "ออกเอกสารในนาม" — the company/brand whose letterhead (logo, name, address,
- * tax id, bank account) a job, quotation or sale order is printed with
- * (drizzle/0007, revised 0010). SHD (code 'SHD', shdProfileId) is the built-in
- * fallback; documents with a NULL profile id are SHD.
- *
- * Document NUMBERS are NOT brand-specific: J / Q / SO + year + one running
- * series for the whole company, exactly like the legacy app. The profile can be
- * changed on a document (edit screen, or from the print button) until it is
- * approved / closed (profileLock) and the change is audited. The prefix_* columns are legacy of the first design and
- * always hold J / Q / SO.
+ * "ออกเอกสารในนาม" — the company/brand whose letterhead a job, quotation or sale order is printed with. SHD is the
+ * built-in fallback; a NULL profile id is SHD. Document NUMBERS are NOT brand-specific (one J / Q / SO series, as
+ * legacy); prefix_* columns always hold J / Q / SO. The profile can change until the document is approved / closed.
  */
 export type DocumentProfile = {
-  /** the row's uuid (ADR 0008) — document rows store its `pk` (issuingProfile, profileIdOf) */
+  /** the row's uuid — document rows store its `pk` (issuingProfile, profileIdOf) */
   id: string;
   code: string;
   nameTh: string;
@@ -54,7 +47,7 @@ export type DocumentProfile = {
   isActive: boolean;
   isDeleted: boolean;
   sortOrder: number;
-  /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = only the header of ใบเบิกสินค้า (drizzle/0004) */
+  /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = only the header of ใบเบิกสินค้า */
   purpose: ProfilePurpose;
 };
 export const PROFILE_PURPOSES = ['document', 'pick_slip'] as const;
@@ -270,7 +263,6 @@ export async function deleteDocumentProfile(id: string, byUserId: number): Promi
   invalidate('docprofiles:');
 }
 
-/** the parsed body of the save route (documentProfileSave in src/server/contract/admin.ts) */
 export type DocumentProfileInput = z.output<typeof documentProfileSave.body>;
 
 /** document-type prefixes are system-wide (see db/running-no.ts) — stored on the row only because the columns are NOT NULL */
@@ -391,11 +383,8 @@ export async function setDocumentProfileLogo(id: string, logoPath: string, byUse
   return old;
 }
 
-/* ------------------------------------------------------------------ *
- * Change "ออกเอกสารในนาม" of an existing document — until it is approved / closed
- * (profileLock: 409); the number never changes (numbers are not brand-specific).
- * Audited under the document's own module so it shows in the job's history.
- * ------------------------------------------------------------------ */
+// Change "ออกเอกสารในนาม" of an existing document until it is approved / closed (409); the number never changes.
+// Audited under the document's own module so it shows in its history.
 export type { DocumentKind };
 export { DOC_MODULE } from '@/lib/profile-lock';
 const DOC = {

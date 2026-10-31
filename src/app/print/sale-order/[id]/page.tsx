@@ -12,7 +12,6 @@ import { runInPage } from '@/server/request-context';
 
 export const dynamic = 'force-dynamic';
 
-/** the tab / window title names the document (root template: "… · OneService") */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   return { title: `ใบสั่งขาย ${(await saleOrderNoOf((await params).id)) ?? ''}`.trim() };
 }

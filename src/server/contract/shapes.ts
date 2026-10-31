@@ -10,7 +10,7 @@ import { UiStatus } from './common';
 const s = z.string();
 const n = z.number();
 const b = z.boolean();
-/** a row's id (ADR 0008): its uuid — every row id the API sends; status codes (job_status_id …) stay numbers */
+/** a row's id: its uuid — every row id the API sends; status codes (job_status_id …) stay numbers */
 const u = z.uuid();
 
 export const Customer = z

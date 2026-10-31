@@ -3,8 +3,6 @@ import { GATE_ERROR, gateError } from './workflow';
 
 /** บทสอน — see tours.ts for the target syntax and the rules every tour follows */
 
-/* ---------- shared by the list screens (รายการงาน / รับมอบหมายงาน) ---------- */
-
 /** FilterBar folded (phones start folded): its fields are inert, so their steps drop out and this one says
  *  how to open it. Text / date boxes in a FilterBar search on Enter: their steps are look-only */
 const folded: Step = {

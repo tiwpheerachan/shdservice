@@ -12,14 +12,8 @@ const WARN_SECONDS = 5 * 60;
 const AUTO_REFRESH_EVERY_MS = 5 * 60 * 1000; // activity-based renewal, at most every 5 min (TTL is 30 min)
 
 /**
- * Idle-timeout countdown (30 min): reads the cookie's expiry from /api/sso/me (useMe — shared with
- * the topbar and AccessGuard, re-read every minute, so it shows the server's real expiry). The ONLY
- * thing that extends the session is this component: /api/sso/refresh on the button, and
- * automatically on user activity (typing included) at most every 5 minutes — never past 12 h from sign-in.
- * No activity for 30 min → the session ends on the server; AccessGuard then sends the user to /login, or
- * keeps a page with typed data and asks to sign in again in a new tab.
- * The last 5 minutes also open an alert dialog on every screen size (the chip is sm+ and only colour):
- * it takes focus, so a screen-reader user hears it before being signed out (WCAG 2.2.1).
+ * The ONLY thing that extends the session: the button, and user activity at most every 5 min (never past 12 h from
+ * sign-in). The last 5 minutes open an alert dialog that takes focus, so screen-reader users hear it (WCAG 2.2.1).
  */
 export function SessionTimer() {
   const { exp, refresh: reloadMe } = useMe();
@@ -47,14 +41,11 @@ export function SessionTimer() {
     return () => clearInterval(id);
   }, []);
 
-  // renew on activity, throttled
   React.useEffect(() => {
     const onActivity = () => {
       if (Date.now() - lastRefresh.current > AUTO_REFRESH_EVERY_MS) void refresh();
     };
-    // only what a person does: typing (input covers dictation / autofill / paste), clicks, wheel, touch. Not
-    // `scroll` — the page scrolls by itself (a list re-rendering, scroll anchoring) and would keep a tab nobody
-    // touches signed in. A hidden tab gets none of these, so it is never renewed. /refresh caps at 12 h anyway.
+    // only what a person does; not `scroll`: the page scrolls by itself and would keep an untouched tab signed in
     const events = ['click', 'keydown', 'input', 'wheel', 'pointerdown', 'touchstart'] as const;
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onActivity));

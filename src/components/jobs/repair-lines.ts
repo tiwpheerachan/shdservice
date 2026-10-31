@@ -9,10 +9,9 @@ const NO_REPAIR = ['ยกเลิกซ่อม (ลูกค้าไม่�
 /** a line not ticked เบิก: priced in the quotation only, stock is not asked for it */
 const QUOTE_ONLY = 'เสนอ (ยังไม่เบิก)';
 
-/** a spare-part line of บันทึกงานซ่อม (job_order_spare_part_log) */
 export type Line = {
   id: number;
-  logId?: string; // existing job_order_spare_part_log row (its id)
+  logId?: string;
   code: string;
   name: string;
   price: number;
@@ -34,7 +33,6 @@ export type Line = {
 
 export const chargeOf = (l: Line) => partCharge({ pick: l.aPick, quote: l.aQuote, qty: l.aQty }, l.price);
 
-/** a line's เบิก / เสนอ / Qty of quotation แบบ A (Normal) or B (VIP) */
 export const planOf = (l: Line, k: 'a' | 'b') =>
   k === 'a' ? { pick: l.aPick, quote: l.aQuote, qty: l.aQty } : { pick: l.bPick, quote: l.bQuote, qty: l.bQty };
 
@@ -57,10 +55,9 @@ export const quoteTotal = (lines: Line[], k: 'a' | 'b') =>
 export const chargedTotal = (lines: Line[]) => lines.reduce((s, l) => s + (l.locked ? (l.total ?? 0) : chargeOf(l)), 0);
 
 /**
- * A legacy job's parts cost after this save, as saveRepair computes it: its recorded cost is never recomputed (it may
- * have no lines behind it) — it moves by what the lines added / changed / removed here add up to (chargeOf, the same
- * formula); a line kept as loaded moves nothing. A line counts only as the job's parts cost counts it: ticked เบิก
- * (stock.ts partsTotalOf) — a quote-only line's stored total was never in it.
+ * A legacy job's parts cost after this save, as saveRepair computes it: the recorded cost is never recomputed (it may
+ * have no lines behind it); it moves by what the lines added / changed / removed here sum to (chargeOf). Only lines
+ * ticked เบิก count (stock.ts partsTotalOf): a quote-only line's total was never in it.
  */
 export function legacyPartsTotal(lines: Line[], loaded: Line[], stored: number) {
   const same = (a: Line, b: Line) =>

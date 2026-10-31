@@ -31,13 +31,10 @@ export const isoDateString = (msg = 'รูปแบบวันที่ไม�
     .regex(/^\d{4}-\d{2}-\d{2}$/, msg)
     .refine(isRealDate, 'วันที่ไม่ถูกต้อง (ไม่มีวันนี้ในปฏิทิน)');
 
-/* ------------------------------------------------------------------ *
- * Text hygiene — shared by every form (browser) and every service (server write path).
- * The legacy data is full of invisible characters, non-breaking spaces, a Thai mark typed
- * before an English word ("ฺBlack"), and Greek/Cyrillic look-alikes in tracking numbers
- * ("ED006390635ΤΗ") — all of which look right and never match a search. Services must
- * WRITE clean()/cleanCode() values: assertValid only checks, it does not transform the input.
- * ------------------------------------------------------------------ */
+// Text hygiene for every form and every service: the legacy data is full of invisible characters, non-breaking
+// spaces, a Thai mark before an English word ("ฺBlack") and Greek/Cyrillic look-alikes in tracking numbers
+// ("ED006390635ΤΗ") that look right and never match a search. Services must WRITE clean()/cleanCode() values:
+// assertValid only checks, it does not transform the input.
 const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g;
 const LEADING_THAI_MARK = /^[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]+/;
 
@@ -100,7 +97,7 @@ const ON_THAI = new Map<string, string>(
   [...TH_KEYS].flatMap((t, i) => (THAI.test(t) ? [[t, US_KEYS[i]!] as const] : [])),
 );
 for (let d = 0; d <= 9; d++) ON_THAI.set(String.fromCharCode(0x0e50 + d), String(d));
-/** on the Thai layout the number row's 2 and 3 keys type "/" and "-": an IMEI 35… comes out as "-ถ…" (QA 2026-10-27) */
+/** on the Thai layout the number row's 2 and 3 keys type "/" and "-": an IMEI 35… comes out as "-ถ…" */
 const MARK_KEYS = new Map([
   ['/', '2'],
   ['-', '3'],

@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-owner-rules.mts — the owner's data rules of 2026-10-30 (ADR 0008 phase 2, "no redundant data"),
+ * scripts/test-qa-owner-rules.mts — data rules ("no redundant data"),
  * through the real services:
  *   (a) a NEW job / quotation / sale order / customer / stock move stores no copy of what a relation gives — and every
  *       read still shows the same text through the join

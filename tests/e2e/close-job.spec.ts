@@ -52,7 +52,7 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
   await expect(amount).toHaveValue(''); // nothing paid yet: an untouched box is no payment
   await page.getByLabel('วิธีการชำระเงิน').selectOption('เงินโอน');
   await expect(amount).toHaveValue('600.00'); // choosing the method fills in total − deposit (shown as money)
-  // a click on the amount selects it: what is typed replaces it, never appended to it (QA 2026-10-27: 250 → 250250)
+  // a click on the amount selects it: what is typed replaces it, never appended to it (250 → 250250)
   await amount.click();
   await page.keyboard.type('600');
   await expect(amount).toHaveValue('600');

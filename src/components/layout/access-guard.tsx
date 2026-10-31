@@ -12,12 +12,8 @@ import { useMe, ME_KEY } from '@/lib/use-me';
 import { landingPath } from '@/app/landing';
 
 /**
- * Client-side authorization watchdog. The server layout only re-checks approval
- * on a full page load, so during client-side (SPA) navigation a user whose access
- * was just revoked could keep clicking around. This re-checks the DB-backed
- * session + approval on every route change and every minute — WITHOUT renewing the
- * session; if the user is no longer approved they are sent to /pending, and if
- * their session died they are sent to /login.
+ * The server layout re-checks approval only on a full page load, so this re-checks session + approval on every route
+ * change and every minute (without renewing the session): a revoked user cannot keep navigating client-side.
  */
 export function AccessGuard() {
   const pathname = usePathname();
@@ -25,13 +21,9 @@ export function AccessGuard() {
   const { canPath, isAdmin, role, grants, email } = useAccess();
   const { push } = useToast();
 
-  // Page-level permission (app_config `view`; a create page also needs `add`): a user who types a URL
-  // they may not open is sent to their landing page — and told why, not silently. The landing page is
-  // picked HERE from the same (client) grants: "/" picks it from the DB's grants, and after an admin
-  // changes this role mid-session the two disagree → "/" would send the user to a page this guard denies →
-  // back to "/" forever. A target the client grants also deny (only the guide) → full reload, fresh grants.
-  // (AppShell does not render that page, so it fires no API call first.) The API
-  // enforces the same grants on every write regardless.
+  // Page-level permission (app_config `view`; a create page also needs `add`). The landing page is picked here from the
+  // same client grants: "/" picks from the DB's, and after a mid-session role change the two disagree → redirect loop.
+  // A target the client grants also deny → full reload for fresh grants. The API enforces grants on every write anyway.
   React.useEffect(() => {
     if (canPath(pathname)) return;
     // the server logs the refusal (security_log DENIED; it re-checks with its own grants) — best effort

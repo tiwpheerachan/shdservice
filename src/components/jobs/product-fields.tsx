@@ -26,14 +26,9 @@ import {
   type JobRequiredKey,
 } from '@/lib/validation/job';
 
-/**
- * The fields of ProductSection (job-form), one component each so its layouts read as a list.
- * They get the job form as `f` (useJobForm()) instead of reading the context themselves — job-form
- * imports this file, so importing its hook back would make a cycle.
- */
+// Fields get the form as `f` instead of calling useJobForm(): job-form imports this file, so that would be a cycle.
 type Form = Pick<ReturnType<typeof useJobForm>, 's' | 'set' | 'patch' | 'errors' | 'loaded'>;
 type P = { f: Form };
-/** `c`: what GET /api/jobs/checks warns about (useJobChecks — เปิดงานใหม่ / แก้ไขงาน only) */
 type Checked = P & { c?: JobChecks | null };
 
 /** changed from the job as loaded — only those get a warning (an edit does not nag about untouched values) */

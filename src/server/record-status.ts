@@ -3,12 +3,8 @@ import type { PgColumn } from 'drizzle-orm/pg-core';
 import { nowThai } from '@/server/mappers/format';
 
 /**
- * One soft-delete convention for the whole app (drizzle/0003_record_status.sql):
- *   ACTIVE   — normal
- *   INACTIVE — kept in lists and pickers with an "Inactive" badge (a picked one shows a warning)
- *   DELETED  — hidden everywhere; restore is done in SQL only (by decision)
- * record_status is the only flag: the legacy is_active / document_status / app_user.deleted mirrors were
- * dropped in drizzle/0006 (ADR 0008 "no redundant data").
+ * One soft-delete convention for the whole app: ACTIVE; INACTIVE — kept in lists and pickers with an "Inactive" badge;
+ * DELETED — hidden everywhere, restored in SQL only. record_status is the only flag.
  */
 export const RS = { ACTIVE: 'ACTIVE', INACTIVE: 'INACTIVE', DELETED: 'DELETED' } as const;
 export type RecordStatus = (typeof RS)[keyof typeof RS];
@@ -31,7 +27,6 @@ export function statusSummary(o: {
   return `${what} → ${o.rs === RS.ACTIVE ? 'Active' : o.rs === RS.INACTIVE ? 'Inactive' : o.rs}`;
 }
 
-/** How a list should treat statuses. */
 export type StatusMode = 'active' | 'exclude' | 'only' | 'all';
 
 export function parseStatusMode(v: string | null | undefined, fallback: StatusMode = 'exclude'): StatusMode {
@@ -65,6 +60,6 @@ export function statusStamp(status: RecordStatus, byUserPk: number) {
   return {
     recordStatus: status,
     statusChangedAt: nowThai(),
-    statusChangedByAppUserPk: byUserPk > 0 ? byUserPk : null, // FK to app_user.pk (drizzle/0006): no actor = NULL
+    statusChangedByAppUserPk: byUserPk > 0 ? byUserPk : null, // no actor = NULL (FK)
   };
 }

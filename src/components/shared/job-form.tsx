@@ -73,11 +73,6 @@ import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
 
-/* ------------------------------------------------------------------ *
- * Shared form state. Every section reads/writes this through context, and
- * the page posts `toJobInput(state)` to the API. `fromJob(detail)` prefills
- * from a loaded job (แก้ไข / บันทึกซ่อม / ปิดงาน …).
- * ------------------------------------------------------------------ */
 export type JobFormState = {
   customer: Customer | null;
   jobNo: string;
@@ -88,7 +83,7 @@ export type JobFormState = {
   statusGroup: string;
   jobType: string;
   jobTypeDetail: string;
-  isBounce: boolean; // งานเด้ง (job.is_job_bounce)
+  isBounce: boolean; // งานเด้ง
   documentProfileId: string; // ออกเอกสารในนาม — document_profile.id ('' = default)
   so: string;
   channel: string;
@@ -194,7 +189,6 @@ export const EMPTY_JOB_FORM: JobFormState = {
   legacy: false,
 };
 
-/** Prefill the form from a job loaded through /api/jobs/:id */
 export function fromJob(j: JobDetail): JobFormState {
   return {
     ...EMPTY_JOB_FORM,
@@ -261,7 +255,6 @@ export function fromJob(j: JobDetail): JobFormState {
   };
 }
 
-/** Body for POST /api/jobs and PATCH /api/jobs/:id */
 export function toJobInput(s: JobFormState) {
   return {
     customerCode: s.customer?.code ?? '',
@@ -307,9 +300,8 @@ export function toJobInput(s: JobFormState) {
 }
 
 /**
- * The job screens (บันทึกซ่อม / Out-Source / Swap-Refund / ปิดงาน) also show the editable product / other-info /
- * cost sections: sent as the action's `job` — one request, so they save (or are refused) together with the action.
- * Left out (not failed) when the user lacks "Job Management" edit.
+ * The job screens also send the editable product / other-info / cost sections as the action's `job`: one request, so
+ * they save (or are refused) together with the action. Left out when the user lacks "Job Management" edit.
  */
 export function commonSections(s: JobFormState, allowed: boolean) {
   return allowed ? { ...toJobInput(s), status: undefined, version: undefined } : undefined;
@@ -323,14 +315,9 @@ type Ctx = {
   adopt: (p: Partial<JobFormState>) => void;
   /** a job loaded / saved (or an empty form) — also what "unsaved edits" is measured against */
   reset: (next?: JobFormState) => void;
-  /** the form as last loaded / saved */
   loaded: JobFormState;
-  /** field errors by JobInput key (shown under the fields) */
   errors: FieldErrors;
-  /**
-   * Check the form before saving (src/lib/validation/job.ts): a new job needs every required field;
-   * a loaded job must keep the ones it already had. Shows the errors; returns them ({} = OK).
-   */
+  /** a new job needs every required field; a loaded job must keep the ones it had. Shows the errors; {} = OK */
   validate: () => FieldErrors;
   /** toast + focus the first bad field (also for errors a page adds of its own) */
   report: (e: FieldErrors, title?: string) => boolean;
@@ -340,13 +327,11 @@ type Ctx = {
   incomplete: JobRequiredKey[] | null;
 };
 
-/** JobFormState key → the JobInput key its error is reported under */
 const errorKey = (k: keyof JobFormState): string => (k === 'customer' ? 'customerCode' : k);
 
 const FormCtx = React.createContext<Ctx | null>(null);
 
-/** a job screen's page: the form state + the Suspense useJob's useSearchParams needs.
- *  `initial`: the form built from the job that came with the page (fromJob), so the server HTML is the filled form */
+/** `initial`: built from the job that came with the page, so the server HTML is the filled form */
 export function JobScreen({ initial, children }: { initial?: JobFormState; children: React.ReactNode }) {
   return (
     <JobFormProvider initial={initial}>
@@ -475,8 +460,6 @@ export function useMoneyLockOf(): (key?: MoneyKey) => string | undefined {
 }
 export const useMoneyLock = (key?: MoneyKey) => useMoneyLockOf()(key);
 
-/* ---------------- lookup bar ---------------- */
-
 export function JobLookupBar({
   label = 'ระบุ หมายเลขงาน',
   placeholder = 'J2612164',
@@ -527,8 +510,6 @@ export function JobLookupBar({
   );
 }
 
-/* ---------------- customer ---------------- */
-
 export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
   const { s, set, errors } = useJobForm();
   const c = s.customer;
@@ -556,7 +537,7 @@ export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-/** เปิดงานใหม่ / แก้ไขข้อมูลงาน — status is shown only; it changes through the workflow screens (บันทึกซ่อม / ปิดงาน …). */
+/** status is shown only: it changes through the workflow screens */
 export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: string }) {
   const { s, set, adopt, errors } = useJobForm();
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
@@ -631,8 +612,6 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
   );
 }
 
-/* ---------------- product info ---------------- */
-
 /** a symptom picker's lists (by usage, else the plain list; the model's common ones on top) — read once the
  *  picker is first focused / pressed, not with the page: the chosen symptoms show from the form meanwhile */
 export function useSymptomLists(modelCode: string) {
@@ -660,9 +639,7 @@ export function useSymptomLists(modelCode: string) {
   };
 }
 
-/** อาการเสียหลัก (มาตรฐาน) — searchable multi-select bound to the form's symptoms (first = main);
- *  ordered by real usage, with the chosen model's common symptoms on top. Used by ProductSection
- *  and the Out-Source "รายละเอียดการซ่อม" tab. */
+/** อาการเสียหลัก: the form's symptoms (first = main), ordered by usage with the chosen model's common ones on top */
 export function MainSymptomField() {
   const { s, set, errors } = useJobForm();
   // the model's name below: the brand's list ModelField reads anyway (no brand → its code)
@@ -818,8 +795,6 @@ export function ProductSection({
     </Section>
   );
 }
-
-/* ---------------- cost summary ---------------- */
 
 const COST_FIELDS = [
   { key: 'serviceCost', label: 'ค่าบริการการซ่อม' },
@@ -982,8 +957,6 @@ export function CostSummary({
     </Section>
   );
 }
-
-/* ---------------- other info ---------------- */
 
 export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
   const { s, set, patch, errors, loaded } = useJobForm();

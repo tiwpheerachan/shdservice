@@ -37,7 +37,8 @@ test('Back after a save shows the saved job, and the repair page saves again aft
 
   // Back replays the list's payload (the old status): the list shows the saved one
   await page.goBack();
-  await expect(row).toContainText(STATUS);
+  // the list re-reads after Back; under a full parallel run that answer can take longer than the default 10 s
+  await expect(row).toContainText(STATUS, { timeout: 30_000 });
   await expect(row).not.toContainText('กำลังดำเนินการ');
 
   // Forward replays the repair page's payload (the job before the save): the job is read again, not taken

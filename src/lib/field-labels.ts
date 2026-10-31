@@ -41,7 +41,7 @@ export const FIELD_LABEL: Record<string, string> = {
   jobTypeName: 'ชื่อประเภทงาน',
   jobTypeDescription: 'รายละเอียด',
   defaultDueDays: 'SLA (วัน)',
-  manufacturerName: 'ชื่อยี่ห้อ', // legacy log rows (before drizzle/0006)
+  manufacturerName: 'ชื่อยี่ห้อ', // legacy log rows
   brandName: 'ชื่อยี่ห้อ',
   shortCode: 'รหัสย่อ',
   productTypeName: 'ชื่อประเภทสินค้า',
@@ -80,7 +80,7 @@ export const FIELD_LABEL: Record<string, string> = {
   capitalPrice: 'ราคาทุน',
   retailPrice: 'ราคาขายปลีก',
   wholesalePrice: 'ราคาขายส่ง',
-  productVenderCode: 'รหัสผู้ผลิต', // legacy log rows (before drizzle/0006)
+  productVenderCode: 'รหัสผู้ผลิต', // legacy log rows
   productVendorCode: 'รหัสผู้ผลิต',
   // ใบเสนอราคา / ใบสั่งขาย
   quotationStatusId: 'สถานะใบเสนอราคา',
@@ -118,12 +118,12 @@ export const FIELD_LABEL: Record<string, string> = {
   quotationNoApproved: 'ใบเสนอราคาที่ลูกค้าตกลง',
   // อะไหล่ / รุ่น / ออกเอกสารในนาม / ขนส่ง
   productName: 'ชื่อสินค้า',
-  pictrueFileName: 'รูปสินค้า', // legacy log rows (before drizzle/0006)
+  pictrueFileName: 'รูปสินค้า', // legacy log rows
   pictureFileName: 'รูปสินค้า',
   modelName: 'ชื่อรุ่น',
   logoPath: 'โลโก้',
   aliases: 'ชื่ออื่นที่ใช้เรียก',
-  // งานซ่อม (drizzle/0006 and after)
+  // งานซ่อม
   jobNo: 'เลขที่งาน',
   parts: 'อะไหล่',
   jobRepairedDate: 'วันที่ซ่อมเสร็จ',

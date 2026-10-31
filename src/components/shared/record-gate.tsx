@@ -14,22 +14,10 @@ const KEEP = '[data-sticky-actions], [role="tab"], [data-readonly-keep]';
 const NO_READONLY = ['checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'image', 'color', 'range'];
 
 /**
- * The edit / workflow screens that start with "ระบุหมายเลข…": until a record is loaded the form and
- * its save bar are hidden and one of these shows instead —
- *  - nothing loaded yet → a card that points at the search box (its button focuses / opens it)
- *  - loading → a skeleton in the form's place
- *  - lookup failed → the error, with a button to search again
- *
- * The form stays mounted (only hidden) so its state and effects behave exactly as when visible.
- *
- * A role without `edit` on the page's module (lib/modules: the route → module) sees the record
- * read-only: every input / select / textarea / button inside is locked (the page's own controls,
- * the pickers, + / ลบ rows), except the save bar (ยกเลิก, พิมพ์), tabs and `data-readonly-keep`.
- * Done on the DOM, not per component, so no form can forget a control; the observer re-locks rows
- * added later and a `disabled` React turns back off. The API refuses the write regardless.
- *
- * `loading` with a record on screen (it is being read again — โหลดใหม่ after a 409): the whole form, the
- * save button included, is disabled until the fresh record replaces it.
+ * Until a record is loaded the form (kept mounted, only hidden) and its save bar give way to a prompt / skeleton /
+ * error. A role without `edit` on the page's module sees the record read-only: locked on the DOM, not per component,
+ * so no form can forget a control; the observer re-locks rows added later. The API refuses the write regardless.
+ * `loading` with a record on screen (re-read after a 409) disables the whole form until the fresh record arrives.
  */
 export function RecordGate({
   ready,
@@ -39,7 +27,6 @@ export function RecordGate({
   searchId,
   children,
 }: {
-  /** a record is loaded — show the form */
   ready: boolean;
   loading?: boolean;
   error?: string | null;

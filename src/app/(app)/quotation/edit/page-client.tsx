@@ -24,7 +24,7 @@ function EditQuotation() {
   const confirm = useConfirm();
   const { can } = useAccess();
   const sp = useSearchParams();
-  const initialId = sp.get('id') ?? ''; // the quotation's uuid (ADR 0008)
+  const initialId = sp.get('id') ?? '';
   const form = React.useRef<QuotationFormHandle>(null);
   // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
   // once, when it mounts, so a new record always starts from a clean form
@@ -44,7 +44,7 @@ function EditQuotation() {
     onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => {
       push({ kind: 'success', title: 'เรียกข้อมูลใบเสนอราคาสำเร็จ', desc: d.no });
-      window.history.replaceState(null, '', `?id=${d.id}`); // a refresh keeps this one
+      window.history.replaceState(null, '', `?id=${d.id}`);
     },
     onMissing: (_, message) => push({ kind: 'error', title: 'ไม่พบใบเสนอราคา', desc: message }),
   });
@@ -70,7 +70,7 @@ function EditQuotation() {
 
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
+    if (!p || !no) return;
     if (!form.current?.validate()) return;
     // the customer answers an expired quotation: only on purpose (the old price may no longer hold)
     if (

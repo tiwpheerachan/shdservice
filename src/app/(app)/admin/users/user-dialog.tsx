@@ -56,8 +56,7 @@ export const toForm = (r: User): UserForm => ({
   avatar: r.avatar ?? '',
 });
 
-// a 401 refreshes the session and retries once, then goes to /login (api.ts) — a valid write is
-// never silently lost to an expiring cookie; field errors come back as ApiError details
+// a 401 refreshes and retries once (api.ts), so a valid write is never lost to an expiring cookie
 export const postUser = (body: Record<string, unknown>) => postJson<{ created?: boolean }>('/api/admin/users', body);
 
 /** the add / edit dialog's state: open it with openAdd / openEdit, render it with <UserDialog {...dialog} /> */
@@ -70,7 +69,7 @@ export function useUserDialog(refetch: () => void) {
 
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
-  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
+  useTourRestore(() => form, setForm);
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // the user being edited as loaded: an unchanged legacy username / phone still saves; name / email / role /
@@ -95,7 +94,6 @@ export function useUserDialog(refetch: () => void) {
     setOpen(true);
   };
 
-  // เลือกพนักงานจาก Lark directory → เติมข้อมูลอัตโนมัติ
   const pickPerson = (p: Person | null) => {
     if (!p) return;
     setForm((f) => ({
@@ -110,7 +108,7 @@ export function useUserDialog(refetch: () => void) {
   };
 
   const save = async () => {
-    if (fe.report(fe.run(userSchema(prev), form))) return; // the API checks the same
+    if (fe.report(fe.run(userSchema(prev), form))) return;
     setSaving(true);
     try {
       const data = await postUser({

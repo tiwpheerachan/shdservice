@@ -38,7 +38,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
 
   const partsTotal = q.lines.reduce((s, l) => s + l.total, 0);
   const hasDiscount = (q.discountAmount ?? 0) > 0;
-  // a line discount (legacy ส่วนลด % / บาท) gets its own column — none, the sheet is as before
+  // a line discount (legacy ส่วนลด % / บาท) gets its own column only when a line has one
   const lineDiscount = q.lines.some((l) => l.discount > 0);
   // ติดต่อสอบถาม… = the issuing company (document profile); nothing set → the line is left out
   // the address only after hydration — never in the server HTML (src/lib/obscure.ts)
@@ -54,7 +54,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         )}
       </>
     ) : null;
-  // the job's engineer — not the quotation's creator (a CS clerk printed as ช่าง); none assigned → —
+  // the job's engineer — not the quotation's creator, who may be a CS clerk; none assigned → —
   const engineer = forCustomer ? '' : j?.engineer?.trim() || '—';
   const model = j ? [j.brand, j.modelName].filter(Boolean).join(' ') : q.brandModel;
   // label the number by what it is (q.imei = the job's IMEI when there is no job detail)
@@ -95,7 +95,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         @media print { .qt { padding: 0 2mm 2mm; min-height: 276mm; } }
       `}</style>
 
-      {/* ── company header ── */}
       <header className="flex items-start gap-3">
         <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
@@ -127,7 +126,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         </p>
       )}
 
-      {/* ── customer / job boxes ── */}
       <table className="grid-b mt-1.5">
         <tbody>
           <tr>
@@ -211,7 +209,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         here in at price, items and terms stated.
       </p>
 
-      {/* ── items ── */}
       <div className="items-wrap mt-1">
         <table className="items">
           <thead>
@@ -281,7 +278,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         </table>
       </div>
 
-      {/* ── bank details + totals ── */}
       <table className="sum">
         <tbody>
           <tr>
@@ -335,7 +331,6 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         </p>
       )}
 
-      {/* ── signatures ── */}
       <table className="grid-b mt-1.5">
         <tbody>
           <tr>

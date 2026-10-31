@@ -11,7 +11,7 @@
  *   สิทธิ์ตามบทบาท                      role_permission as set on the permissions page (a role only the dump has stays)
  *   สถานะบทสอน                         who has seen / turned off the tutorials
  *
- * keys (ADR 0008): every row has `pk` (bigint identity, what relations point at) and `id` (uuid, what the API shows).
+ * keys: every row has `pk` (bigint identity, what relations point at) and `id` (uuid, what the API shows).
  *   The source must be at drizzle/0006 or later (it has `pk`), and so must the target (the seed is applied after
  *   db:migrate). A legacy row the dump brings back has the same pk and id at every load already (pk = the legacy
  *   key, id = the migration's uuid_v7_stable): a legacy user matched by e-mail, a (role, menu) both sides have and a
@@ -19,17 +19,20 @@
  *   pk when that is free (OVERRIDING SYSTEM VALUE). Profiles are made by the migration (now() time, so a new id at
  *   every load) → the source's id replaces it, by pk (document) or code (courier).
  *
- *   SEED_FROM=<postgres url> npm run db:seed:export [-- <out file>]
+ *   npm run db:seed:export [-- <out file>]                          production: DATABASE_URL in .env.prod.local
+ *   SEED_FROM=<postgres url> npm run db:seed:export [-- <out file>] any other database (a local copy, a scratch DB)
  *
  * Reads only: one READ ONLY transaction (the pooler drops startup options, so it is set per transaction). Never reads
- * .env — the source is named on purpose.
+ * .env (`next dev` loads that one) — production comes from .env.prod.local, checked to be the production project.
  */
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Client } from 'pg';
 import { dbSsl } from '../src/db/ssl';
+import { PROD_ENV_FILE, prodUrl } from './db-prod-migrate.mts';
 
-const url = process.env.SEED_FROM;
-if (!url) throw new Error('set SEED_FROM to the database the seed is taken from');
+const url =
+  process.env.SEED_FROM || (existsSync(PROD_ENV_FILE) ? prodUrl(readFileSync(PROD_ENV_FILE, 'utf8')) : undefined);
+if (!url) throw new Error(`no source: set SEED_FROM, or put production's DATABASE_URL in ${PROD_ENV_FILE}`);
 const out = process.argv[2] ?? '../setupdata/seed.sql';
 
 const db = new Client({ connectionString: url, ssl: dbSsl(url) });

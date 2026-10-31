@@ -6,7 +6,7 @@
  *    are held to src/server/resources.ts);
  *  - public operations are exactly /health, /sso/* and /track/*;
  *  - no parameter or property anywhere in it (requests, responses, nested) is named `pk` / `*_pk` / `*Pk` (or the
- *    plural): the bigint `pk` never leaves the backend, the API speaks `id` uuid only (ADR 0008 ID-4 rule 3);
+ *    plural): the bigint `pk` never leaves the backend, the API speaks `id` uuid only;
  *  - the document equals tests/fixtures/openapi.snapshot.json, so every change to it shows in review.
  *    After an intended change: npm run test:openapi -- --update
  *

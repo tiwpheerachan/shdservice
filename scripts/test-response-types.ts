@@ -108,7 +108,7 @@ export type Checks = [
   Expect<Same<typeof MovementLine, Row<typeof movementLines>>>,
   Expect<Same<typeof SaleOrderPickLine, SoPickLine>>,
   Expect<Same<typeof ReturnableLine, ReturnLine>>,
-  // the System Admin logs and the anomalies bell / list (ADR 0008 audit trail; services/anomalies.ts)
+  // the System Admin logs and the anomalies bell / list (services/anomalies.ts)
   Expect<Same<typeof AuditLogRow, AuditLogRowType>>,
   Expect<Same<typeof AnomaliesBody, Anomalies>>,
   Expect<Same<typeof AnomalyPageBody, AnomalyPage>>,

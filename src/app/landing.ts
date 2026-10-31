@@ -12,9 +12,8 @@ import { ALL_LINKS } from '@/lib/nav';
 export const DASHBOARD = '/jobs/dashboard';
 
 /**
- * Where "/" sends a signed-in, approved user (page.tsx): an approver (SO Approve) who may open the sale order list →
- * the orders waiting for their approval (owner decision 2026-10-15; System Admin keeps the dashboard),
- * else the dashboard when the role may open it, else the first menu page it may open (menu order),
+ * Where "/" sends a signed-in, approved user: an approver (SO Approve) who may open the sale order list → the orders
+ * waiting for approval (System Admin keeps the dashboard), else the dashboard, else the first menu page it may open,
  * else the guide — never a "ไม่มีสิทธิ์เข้าหน้า …" toast.
  */
 export function landingPath(user: { isAdmin: boolean; userType: string | null }, grants: GrantMap): string {

@@ -4,10 +4,8 @@ import { daysAgo, today } from '@/lib/dates';
 import { prefetch } from '@/server/prefetch';
 import DashboardPage from './page-client';
 
-/** the dashboard and the latest jobs for its opening range in the HTML */
 export default async function Page({ searchParams }: { searchParams: Promise<Record<string, string | string[]>> }) {
-  // the range in the URL (written by DashboardPage, so Back from a TAT / KPI link returns to it); none = the last
-  // 30 days, every type — Thai calendar on both sides (lib/dates). ?from=&to= (both empty) = ทั้งหมด
+  // none = the last 30 days, every type (Thai calendar, lib/dates); ?from=&to= both empty = ทั้งหมด
   const q = await searchParams;
   const day = (k: string) => {
     const v = q[k];

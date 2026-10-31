@@ -128,7 +128,7 @@ async function moveBoundary(table: string, max: string) {
   }
 }
 
-/* ---- one adapter per document kind: create, read, save, the stored line rows ---- */
+/* one adapter per document kind: create, read, save, the stored line rows */
 type Line = { id?: string; code: string; qty: number; detail?: string };
 type Kind = {
   name: string;

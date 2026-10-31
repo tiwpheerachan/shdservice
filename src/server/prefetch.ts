@@ -10,20 +10,11 @@ import { PREFETCH_ID, PREFETCH_PACKED } from '@/data/keys';
 import { pack } from '@/lib/obscure';
 
 /**
- * A page's first data, read while the server renders it, so it arrives in the HTML instead of after
- * hydration (the client hooks would only ask once the JS has run — seconds on a slow phone).
- *
- * Not a second way to read data: each URL is answered by its OWN route handler, called in-process with
- * the browser's request headers (session cookie included) — the same sign-in, permission, input and
- * contract checks, the same rate limit, the same JSON. Whatever the API would refuse this user is
- * refused here too and simply left out; the page's hook then asks for it itself and shows the usual
- * answer (refusal, error).
- *
- * Give it the hooks' own keys (src/data/keys.ts); hand the result to <Prefetched> (src/data/db.ts).
- * All calls run in parallel; after `timeoutMs` the page renders with what has answered so far, so a slow
- * database never holds the HTML back for long (a late answer is dropped — its hook fetches it).
- * The result also carries a fresh id under PREFETCH_ID: back/forward replays this payload, and the id
- * tells <Prefetched> it has seeded these (by then older) answers already.
+ * A page's first data, read while the server renders it so it arrives in the HTML instead of after hydration.
+ * Not a second way to read data: each URL is answered by its OWN route handler, called in-process with the browser's
+ * headers — same sign-in, permission and contract checks, same rate limit; a refusal is left out for the hook to
+ * fetch itself. After `timeoutMs` the page renders with what has answered. PREFETCH_ID tells <Prefetched> a
+ * back/forward replay was already seeded.
  */
 const ROUTES: [RegExp, (req: NextRequest, segment: string) => Promise<Response>][] = [
   [/^\/api\/data\/([^/]+)$/, (req, resource) => dataGet(req, { params: Promise.resolve({ resource }) })],

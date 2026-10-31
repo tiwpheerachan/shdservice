@@ -1,6 +1,6 @@
 /**
- * ADR 0008 phase 2 (ID-4 rule 2), no DB: every drizzle pgTable starts with `pk` (bigint identity ALWAYS, the
- * primary key) then `id` (uuid). `tsx scripts/test-drizzle-ids.mts` — S8 may fold it into test-schemas.mts.
+ * No DB: every drizzle pgTable starts with `pk` (bigint identity ALWAYS, the primary key) then `id` (uuid).
+ * `tsx scripts/test-drizzle-ids.mts`
  */
 import assert from 'node:assert/strict';
 import { is } from 'drizzle-orm';

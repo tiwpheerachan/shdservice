@@ -25,7 +25,7 @@ import { logError } from '@/lib/log';
 import { ipBucket } from '@/lib/client-ip';
 
 /**
- * /track by phone number + SMS OTP (drizzle/0017).
+ * /track by phone number + SMS OTP.
  *
  *   phone → OTP (4 digits — OTP_LENGTH, 5 min, 5 tries) → customer session → that customer's jobs
  *
@@ -46,7 +46,7 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SEC = 60;
 const OTP_PER_PHONE_HOUR = 3;
 /**
- * A 4-digit code (owner decision: stays 4 digits): the hourly cap alone allows 15 guesses/h = 360/day per
+ * A 4-digit code: the hourly cap alone allows 15 guesses/h = 360/day per
  * target → daily caps + a lock after a few misses. Counted per number+IP first, so someone who knows a
  * customer's number cannot lock THAT customer out from their own IP; the per-number ceiling is higher and
  * only bites a guesser spread over many IPs (≤ 10 guesses/day = 0.1% per day).
@@ -62,10 +62,6 @@ const OTP_SMS_PER_DAY = 500;
 const SESSION_START_MIN = 15;
 const SESSION_EXTEND_MIN = 5;
 const SESSION_MAX_MIN = 60;
-
-/* ------------------------------------------------------------------ *
- * phone numbers
- * ------------------------------------------------------------------ */
 
 /** "081-234-5678" / "+66812345678" / "66 81 234 5678" / "812345678" → "0812345678"; null if not a Thai mobile */
 export function normalizePhone(input: unknown): string | null {
@@ -113,10 +109,6 @@ export async function customerIdsForPhone(phone10: string): Promise<number[]> {
     .limit(50);
   return rows.filter((x) => phonesIn(x.phone ?? '').has(phone10)).map((x) => Number(x.id));
 }
-
-/* ------------------------------------------------------------------ *
- * OTP
- * ------------------------------------------------------------------ */
 
 const codeHash = (requestId: string, code: string) =>
   createHmac('sha256', sha256(`otp:${requestId}`))
@@ -307,10 +299,6 @@ export async function verifyOtp(
   if (!s) throw new Error('track_session insert returned no row');
   return { token, expiresAt: s.expiresAt.toISOString() };
 }
-
-/* ------------------------------------------------------------------ *
- * customer session
- * ------------------------------------------------------------------ */
 
 export type CustomerSession = { customerIds: number[]; expiresAt: string; maxExpiresAt: string };
 

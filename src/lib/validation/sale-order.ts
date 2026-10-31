@@ -15,7 +15,7 @@ export const SELF_APPROVE_SALES = 'คุณเป็นพนักงานข
 export const NOT_APPROVER = noRight('SO Approve');
 /** only who keyed the order in (document_create_by) sends it for approval (System Admin may) */
 export const SUBMIT_CREATOR_ONLY = 'ส่งขออนุมัติได้เฉพาะผู้สร้างใบสั่งขาย';
-/** a waiting (2) order: only its creator (or System Admin) edits it (owner decision) — the page is read-only for others */
+/** a waiting (2) order: only its creator (or System Admin) edits it — the page is read-only for others */
 export const WAITING_CREATOR_ONLY =
   'ใบสั่งขายที่รออนุมัติแก้ได้เฉพาะผู้สร้าง — ถ้าต้องแก้ ให้ผู้อนุมัติกด ส่งกลับแก้ไข';
 export const SO_CANCELLED = 'ใบสั่งขายนี้ถูกยกเลิกแล้ว';

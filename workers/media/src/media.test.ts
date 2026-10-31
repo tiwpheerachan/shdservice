@@ -79,7 +79,7 @@ test('parseRange (RFC 9110)', () => {
   assert.equal(parseRange('bytes=0-', 0), 'unsatisfiable');
 });
 
-// ---- the Worker with an in-memory R2 bucket and edge cache ----
+// the Worker with an in-memory R2 bucket and edge cache
 const BYTES = new Uint8Array(1000).map((_, i) => i % 251);
 const reads: string[] = [];
 const env: Env = {

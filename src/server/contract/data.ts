@@ -32,7 +32,7 @@ import {
 
 const s = z.string();
 const n = z.number();
-/** a row's id (ADR 0008) — the status lists (job_statuses, quotation_statuses) keep their numeric codes */
+/** a row's id — the status lists (job_statuses, quotation_statuses) keep their numeric codes */
 const u = z.uuid();
 const tags = ['Data'];
 const q = s.optional().meta({ description: 'Free-text search.' });

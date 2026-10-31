@@ -5,7 +5,7 @@
  * column on `job` never reaches the public API unless it is added here on purpose.
  *
  * Never here: prices / costs, phone, address, email, internal notes, technician,
- * customer id, any token. The customer's name and the serial / IMEI are shown in full (2026-10-28).
+ * customer id, any token. The customer's name and the serial / IMEI are shown in full.
  *
  * Documents (`docs`) are only a list of WHAT exists. The sheet itself (full name, address,
  * prices) is served one at a time by app/track/doc/[ticket] against a one-time ticket from

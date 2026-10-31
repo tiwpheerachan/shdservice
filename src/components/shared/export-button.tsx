@@ -9,11 +9,8 @@ import { useAccess } from '@/lib/use-access';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 
 /**
- * The "ส่งออก Excel" button of every list / report: `run` is the download (exportXlsx(...)).
- * Busy while the file is built (up to 20k rows takes a few seconds), and a refusal — too many
- * exports a minute, no permission, a server error — is a toast; the page stays as it is. A file cut at
- * the 20,000-row cap is a warning toast with the full count.
- * Hidden for a role without the special right Export (the API refuses it too).
+ * A refusal (rate limit, no permission, server error) is a toast; a file cut at the 20,000-row cap is a warning with
+ * the full count. Hidden without the Export right (the API refuses it too).
  */
 export function ExportButton({
   run,

@@ -23,7 +23,7 @@ const FIXED = 'เปลี่ยนออกเอกสารในนาม�
 /**
  * Why "ออกเอกสารในนาม" of a saved document can no longer change ('' = it can): a sale order approved / denied /
  * cancelled, a quotation in a final status (QUOTE_FINAL) or deleted, a closed job (status group Finished) — what
- * the customer got stays as printed (owner 2026-10-27). POST /api/documents/profile refuses with this text (409);
+ * the customer got stays as printed. POST /api/documents/profile refuses with this text (409);
  * the screens disable the choice with it.
  */
 export function profileLock(

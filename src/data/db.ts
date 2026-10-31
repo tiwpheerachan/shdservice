@@ -26,18 +26,10 @@ import type {
 
 export type { Order, DeletedMode, Params };
 
-/* ------------------------------------------------------------------ *
- * React hooks over the app's read API (/api/data/<resource>); data comes from
- * the legacy tables through drizzle on the server.
- *
- * Caching (swr): every hook is keyed by its full URL, so components asking for
- * the same list share one request and one copy of the data. A key that is
- * already cached renders immediately and is only re-fetched when it is older
- * than `ttl` (master lookups: 5 min, everything else: 30 s), when the page
- * calls `refetch()`, or after ANY successful write through `api()` — which
- * marks every cached list stale so the next screen shows fresh rows without
- * a manual reload. No refresh on tab focus (by decision).
- * ------------------------------------------------------------------ */
+/*
+ * swr keyed by the full URL, so the same list is one request and one copy. A cached key re-fetches only past its
+ * `ttl` (masters 5 min, else 30 s), on `refetch()`, or after ANY successful write through `api()`. No refresh on tab focus.
+ */
 
 export type TableState<T> = {
   data: T[];
@@ -46,7 +38,6 @@ export type TableState<T> = {
   refetch: () => void;
 };
 
-/** how long a cached list is served without re-fetching */
 export const TTL_MASTER = 5 * 60_000;
 export const TTL_DEFAULT = 30_000;
 
@@ -74,15 +65,8 @@ export function invalidateLists() {
 onApiWrite(invalidateLists);
 
 /**
- * A page's first answers, read on the server while it rendered (src/server/prefetch.ts, keyed by the
- * URLs in ./keys): the first render shows them through swr's `fallback` (so they are in the HTML), then
- * they are kept as reads that just finished — cached with their age, so no hook fetches them again on
- * mount and the usual ttl / refetch / invalidateLists rules apply from there. A key that is missing
- * (refused, failed, too slow) is simply fetched by its hook.
- *
- * Back/forward remounts the page with the SAME payload — answers older than what the cache got since
- * (a save, a re-read). A set whose id (PREFETCH_ID) was seeded before is such a replay: it seeds nothing
- * and offers no fallback, so the cache and its ttl rules decide, as on any client-side visit.
+ * Seeds swr with a page's server-read answers (server/prefetch.ts) as reads that just finished, so no hook refetches on mount.
+ * Back/forward replays the SAME payload, older than the cache: a set whose PREFETCH_ID was seeded before seeds nothing.
  */
 const seeded = new Set<unknown>();
 export function Prefetched({
@@ -163,7 +147,6 @@ export function useTable<T>(
   return { data: rows, loading: isLoading, error: error ? errMsg(error) : null, refetch };
 }
 
-/* ---- server-side paging (big tables) ---- */
 export type PageState<T> = {
   rows: T[];
   total: number;
@@ -200,10 +183,6 @@ export function usePagedTable<T>(table: string, params: PageParams, deleted: Del
     refetch,
   };
 }
-
-/* ------------------------------------------------------------------ *
- * Named hooks — one per resource, with the display order used by the UI.
- * ------------------------------------------------------------------ */
 
 export const useUsers = (deleted: DeletedMode = 'exclude') =>
   useTable<User>('users', undefined, deleted, {}, TTL_MASTER); // server order: pending → active (name) → inactive
@@ -283,7 +262,6 @@ export function useDashboard(range: DashRange = {}) {
   return { data: data[0] ?? null, loading, error, refetch };
 }
 
-/* ---- lookups ---- */
 export type Staff = { id: string; name: string; userType: string; takesJobs: boolean; sells: boolean };
 /** `usedAs` (report filters): also the people who left but are still on jobs / sale orders */
 export const useStaff = (usedAs?: 'engineer' | 'sales') =>
@@ -299,7 +277,6 @@ export const useJobStatuses = () =>
     {},
     TTL_MASTER,
   );
-/** quotation_status (id, name) — status dropdowns / filters */
 export const useQuotationStatuses = () =>
   useTable<{ id: number; name: string }>('quotation_statuses', undefined, 'exclude', {}, TTL_MASTER);
 export const useVendors = () => useTable<string>('vendors', undefined, 'exclude', {}, TTL_MASTER);
@@ -358,7 +335,6 @@ export type IssuedStats = { lines: number; qty: number; value: number; todayPric
 export const useIssuedStats = (params: Params = {}) =>
   useTable<IssuedStats>('issued_stats', undefined, 'exclude', params);
 
-/* ---- report KPI summaries (same filters as the paged tables) ---- */
 export type JobSummary = {
   total: number;
   fresh: number;

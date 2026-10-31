@@ -8,7 +8,7 @@ import { listShippingProfiles } from '@/server/services/shipping-profiles';
 import { shipperFor } from '@/lib/shipper';
 import { code128 } from '@/lib/code128';
 
-/** ใบรับงานซ่อม — printed when a job is opened; the customer keeps a copy. `forCustomer` = opened from /track: no staff names / notes. */
+/** `forCustomer` = opened from /track: no staff names / notes. */
 export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getJob(no);
   if (!found) notFound();

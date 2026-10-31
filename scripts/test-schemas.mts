@@ -94,7 +94,7 @@ test('an empty job reports all 11 required fields at once, in form order (Serial
 });
 test('blank strings, spaces and empty symptom lists count as empty', () => {
   const e = errorsOf(jobSchema(), { ...fullJob, so: '   ', serial: '', symptoms: [''] });
-  assert.deepEqual(Object.keys(e).sort(), ['so', 'symptoms']); // an empty Serial No. is fine (owner 2026-10-29)
+  assert.deepEqual(Object.keys(e).sort(), ['so', 'symptoms']); // an empty Serial No. is fine
 });
 test('warranty months 0 is a value (not empty); negative / text is rejected', () => {
   assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, warrantyMonth: 0 }), {});
@@ -361,7 +361,7 @@ test('numbers: qty > 0 per row, no negatives, discount and VAT ≤ 100', () => {
 console.log('\nSale order');
 const so = {
   customerCode: 'C00001',
-  salesId: '0190c0de-0000-7000-8000-000000000007', // a user's uuid (ADR 0008)
+  salesId: '0190c0de-0000-7000-8000-000000000007',
   lines: [{ code: 'P00001', qty: 1, price: 100 }],
   paymentAmount: '',
   fee: 0,
@@ -479,7 +479,7 @@ test('receive / issue need 1–500 lines; issue type is one of four', () => {
     }),
     true,
   );
-  // logId / dtId = the row's uuid (ADR 0008): the old number is refused
+  // logId / dtId = the row's uuid: the old number is refused
   assert.equal(
     ok(issueSchema, { type: 'job', ref: 'J2600001', payTo: 'ช่าง A', lines: [{ logId: 5, qty: 1 }] }),
     false,
@@ -497,7 +497,7 @@ test('receive: date required and a real day (the page prefills today)', () => {
 test('issue: จ่ายให้ required for "other" only (job / SO / return name it through the document), trimmed, max 50 — reported with other errors', () => {
   const lines = [{ code: 'P1', qty: 1 }];
   assert.equal(errorsOf(issueSchema, { type: 'other', lines }).payTo, 'ต้องเลือก จ่ายให้');
-  // ADR 0008 "no redundant data": the job / sale order is the reference (stock_move.reference_out_to is '' for them)
+  // the job / sale order is the reference (stock_move.reference_out_to is '' for them)
   for (const type of ['job', 'sale', 'return'])
     assert.equal(errorsOf(issueSchema, { type, payTo: '  ', lines }).payTo, undefined, type);
   assert.equal(errorsOf(issueSchema, { type: 'other', payTo: null, lines }).payTo, 'ต้องเลือก จ่ายให้');
@@ -514,7 +514,7 @@ test('SO decision is approve | deny | reject — a typo is refused, not treated 
 test('assign needs jobs + an engineer id; call log needs text', () => {
   const U = '0190f3c2-7a4e-7b1c-8d2e-3f4a5b6c7d8e';
   assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: U }), true);
-  assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: '12' }), false); // a user's uuid (ADR 0008)
+  assert.equal(ok(assignSchema, { jobNos: ['J2600001'], engineerId: '12' }), false);
   assert.equal(ok(assignSchema, { jobNos: [], engineerId: U }), false);
   assert.equal(ok(assignSchema, { jobNos: ['J1'], engineerId: 0 }), false);
   assert.equal(ok(callLogSchema, { detail: '   ' }), false);
@@ -574,7 +574,7 @@ const svgChecks: [string, string, boolean][] = [
   ],
   ['an entity (billion laughs)', '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "x">]><svg>&a;</svg>', false],
   ['HTML declared as SVG', '<html><body>hi</body></html>', false],
-  // QA 2026-10-27: an entity-encoded javascript: written into href by an animation element
+  // an entity-encoded javascript: written into href by an animation element
   [
     'javascript: as &#106; set by <set>',
     '<svg xmlns="http://www.w3.org/2000/svg"><a href="#x"><set attributeName="href" to="&#106;avascript:alert(1)"/><rect/></a></svg>',

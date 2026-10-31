@@ -41,11 +41,7 @@ export async function call<T>(path: string, init: RequestInit & { session?: stri
 
 const EMPTY_CODE: string[] = Array(OTP_LENGTH).fill('');
 
-/**
- * Everything /track's OTP flow keeps: the step, the phone / OTP request, the session token (a ref — memory
- * only, sent as `x-track-session`), its clock + keepalive, the customer's job lists (+ the list view's
- * tab / page / filters, kept across opening a job and coming back) and the open job.
- */
+/** everything /track's OTP flow keeps; the session token is a ref — memory only, sent as `x-track-session` */
 export function useTrackSession(getToken: () => Promise<string | null>) {
   const [step, setStep] = React.useState<Step>('phone');
   const [phone, setPhone] = React.useState('');
@@ -83,7 +79,6 @@ export function useTrackSession(getToken: () => Promise<string | null>) {
     setStep('phone');
   }, []);
 
-  /* ---------- clock, activity, keepalive (session-clock.tsx) ---------- */
   /** also the ต่อเวลา button of the last 2 minutes (ExpiryWarning) */
   const extend = () => {
     if (!session.current) return;
@@ -102,7 +97,6 @@ export function useTrackSession(getToken: () => Promise<string | null>) {
     extend,
   );
 
-  /* ---------- actions ---------- */
   const requestCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setBusy(true);

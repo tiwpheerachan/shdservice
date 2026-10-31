@@ -1,11 +1,10 @@
 /**
  * TEST_DATABASE_URL=… NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-ids.mts
- * ADR 0008 id rules on the live catalog. Phase 1 (drizzle/0005): every public table has `id uuid NOT NULL DEFAULT
- * uuid_generate_v7()` with a unique index; uuid_v7_stable gives the same id for the same (time, seed). Phase 2
- * (drizzle/0006, "เทสต์บังคับกติกา (ID-4)" rule 1): `pk bigint` identity ALWAYS first and the PK, `id` second, every
- * `*_pk` a RESTRICT foreign key to `<table>.pk`, no column 0006 dropped, legacy_orphan_ref as designed. Each rule
- * also proves it catches a break (DDL in a transaction rolled back). Fixtures: approve_status 9973, removed at the end.
- * (0005 can no longer be re-run on the converted tables, so its reload checks are gone.)
+ * Id rules on the live catalog: every public table has `id uuid NOT NULL DEFAULT uuid_generate_v7()` with a unique
+ * index; uuid_v7_stable gives the same id for the same (time, seed); `pk bigint` identity ALWAYS first and the PK,
+ * `id` second, every `*_pk` a RESTRICT foreign key to `<table>.pk`, no column 0006 dropped, legacy_orphan_ref as
+ * designed. Each rule also proves it catches a break (DDL in a transaction rolled back). Fixtures: approve_status
+ * 9973, removed at the end.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

@@ -9,10 +9,6 @@ import { useAccess } from '@/lib/use-access';
 import { useLeave } from '@/lib/use-unsaved-changes';
 import { cn } from '@/lib/utils';
 
-/**
- * ⌘K menu search — cmdk (fuzzy matching, keyboard navigation, aria listbox)
- * inside a Radix Dialog (focus trap, Esc, scroll lock).
- */
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const leave = useLeave(); // asks first when a form on this page has unsaved edits
   const { canLink } = useAccess();

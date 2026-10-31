@@ -46,7 +46,7 @@ export const GET = checked(async (request: NextRequest) => {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 600, // 10 min to complete login
+    maxAge: 600,
   });
   return res;
 });

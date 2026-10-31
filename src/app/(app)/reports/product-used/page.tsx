@@ -19,7 +19,7 @@ import { useServerTable } from '@/lib/use-server-table';
 import { reportExport, useReportColumns } from '../report-table';
 import type { ReportRow } from '../report-specs';
 
-/** แบบเบิกจ่ายสุทธิ: inventory_dt lines of WHO documents minus รับคืนจากการเบิก (the earlier screen) */
+/** แบบเบิกจ่ายสุทธิ: inventory_dt lines of WHO documents minus รับคืนจากการเบิก */
 const netColumns: Column<IssuedLine>[] = [
   { key: 'doc', header: 'Document No.', width: '130px', cell: (r) => <span className="num font-medium">{r.doc}</span> },
   { key: 'date', header: 'วันที่', width: '140px', cell: (r) => <span className="num text-xs">{r.date}</span> },
@@ -59,7 +59,7 @@ type Common = Omit<
   q: string;
 };
 
-/** แบบอ้างอิงงานซ่อม: the job part log — each mode its own component, so only the shown one is read */
+/** each mode its own component, so only the shown one is read */
 function LogReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Common & { f: ReportValues }) {
   const filters = { from: f.from, to: f.to, code: f.code, name: f.name, jobNo: f.jobNo, status: f.status };
   const { rows, total, loading, error, refetch } = useReportRows('product_used', { ...pageArgs, ...filters });

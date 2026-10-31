@@ -1,9 +1,8 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-atomic.mts
- * Real-use QA (2026-10-21): บันทึกซ่อม / ปิดงาน / Out-Source / Swap-Refund saved the shared job sections with a
- * PATCH first, so a refused action still saved them (J2612264: service cost 0→250 while the part change was
- * refused). Now the action takes them as `job`, in its own transaction. Also: the parts-driven statuses (11 ⇄ 10)
- * follow the part lines, part / tracking-link wording, the job list showing the customer as they are now.
+ * บันทึกซ่อม / ปิดงาน / Out-Source / Swap-Refund take the shared job sections as `job`, in the action's own
+ * transaction, so a refused action saves none of them. Also: the parts-driven statuses (11 ⇄ 10) follow the part
+ * lines, part / tracking-link wording, the job list showing the customer as they are now.
  * Same harness as scripts/test-qa-jobs.mts; its own fixtures (ids 986x, codes QAT*, users qat-*), reset at every start.
  */
 import assert from 'node:assert/strict';
@@ -24,7 +23,6 @@ const { addDays, today } = await import('@/lib/dates');
 const { POST: repairPOST } = await import('@/app/api/jobs/[id]/repair/route');
 const { POST: trackLinkPOST } = await import('@/app/api/jobs/[id]/track-link/route');
 
-// ---- fixtures ----
 const U = {
   admin: { id: 9861, email: 'qat-admin@example.invalid', type: 'System Admin' },
   repairer: { id: 9862, email: 'qat-repairer@example.invalid', type: 'QAT Repairer' }, // Job Repair edit only
@@ -112,7 +110,6 @@ await pool.query(`
     VALUES ((SELECT pk FROM job WHERE job_no = '${J(5)}'), 'QAT Vendor', '', current_date, 9861, '1900-01-01', '');
 `);
 
-// ---- helpers ----
 const one = async <T,>(q: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(q)).rows[0]!;
 const statusName = async (id: number) =>
   (await one<{ n: string }>(sql`SELECT job_status_name AS n FROM job_status WHERE job_status_id = ${id}`)).n;
@@ -132,7 +129,7 @@ const jobRow = (no: string) =>
 const audits = async (no: string) =>
   (await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM audit_log WHERE entity = 'job' AND entity_key = ${no}`))
     .n;
-/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid (ADR 0008) */
+/** td-admin's app_user.id — ส่งโดย / รับโดย take a user's uuid */
 const ADMIN_UUID = (await pool.query<{ id: string }>('SELECT id::text AS id FROM app_user WHERE pk = $1', [U.admin.id]))
   .rows[0]!.id;
 const line = (no: string) =>
@@ -160,7 +157,7 @@ const partLine = (qty: number, logId?: string) => ({
 /** the page's shared job sections (commonSections): service cost 250 + a remark */
 const common = (remark: string) => ({
   customerCode: CUSTOMER,
-  modelCode: 'TST-M', // every job has its model now (job.model_pk NOT NULL) — "never worse" keeps it required
+  modelCode: 'TST-M', // job.model_pk is NOT NULL — "never worse" keeps it required
   dueDate: addDays(today(), 30),
   remark,
   serviceCost: 250,
@@ -274,7 +271,7 @@ try {
   });
   await test('Swap to a status the Swap page does not offer (400, in the transaction) → swap + job sections not saved', async () => {
     const no = J(7);
-    // the New S/N goes to job.new_serial_no now (never appended to a text that could overflow): the refusal after
+    // the New S/N goes to job.new_serial_no (never appended to a text that could overflow): the refusal after
     // the job sections is the status check — ซ่อมเสร็จ is not on the Swap page (17 / 18 only)
     const repaired = await statusName(5);
     const r = await nothingSaved(
@@ -290,8 +287,8 @@ try {
     await bothSaved(no, (version) =>
       saveSwapRefund(no, { status, newSerial: 'QATSN8', job: common(`QAT ${no}`), version }, U.admin.id),
     );
-    // job.new_serial_no = the serial now; swap_refund_detail = the swap page's own record of that swap (what makes the
-    // job a swap job, as before drizzle/0006 — a New S/N from บันทึกซ่อม never does)
+    // job.new_serial_no = the serial; swap_refund_detail = the swap page's own record of that swap (what makes the
+    // job a swap job — a New S/N from บันทึกซ่อม never does)
     const row = await jobRow(no);
     assert.equal(row.sn, 'QATSN8');
     assert.match(row.swap ?? '', /QATSN8/);

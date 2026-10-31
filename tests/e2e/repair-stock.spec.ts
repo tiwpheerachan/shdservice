@@ -42,7 +42,7 @@ async function save(page: Page, name: string) {
   await page.getByRole('button', { name }).click();
 }
 
-/** a job / sale order / return move names its party through the document (ADR 0008 "no redundant data"):
+/** a job / sale order / return move names its party through the document:
  *  จ่ายให้ / รับคืนจาก is asked only for จ่ายออกอื่นๆ */
 async function noPersonField(page: Page, field: string) {
   await expect(page.getByLabel(field)).toHaveCount(0);
@@ -55,7 +55,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   const no = await newJob({ status: 2 }); // กำลังดำเนินการ, no costs yet
   const stock = await userId(STOCK_EMAIL);
 
-  // ---- บันทึกงานซ่อม: request 2 (แบบ A: เบิก + เสนอ) ----
+  // บันทึกงานซ่อม: request 2 (แบบ A: เบิก + เสนอ)
   await signIn(page, ENGINEER_EMAIL);
   await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
   await expect(page.getByRole('heading', { name: 'บันทึกงานซ่อม' })).toBeVisible();
@@ -83,7 +83,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   expect(await jobCosts(no)).toEqual({ status: 11, parts: 500, total: 500 }); // เริ่มเบิกอะไหล่
   expect(await movementsOf(no)).toEqual([]);
 
-  // ---- ตัดจ่ายอะไหล่: จ่ายออกตามงานซ่อม 2 ----
+  // ตัดจ่ายอะไหล่: จ่ายออกตามงานซ่อม 2
   await switchUser(page, STOCK_EMAIL);
   await pickLines(page, 'จ่ายออกตามงานซ่อม', no);
   const row = page.getByRole('row', { name: new RegExp(part.code) });
@@ -108,7 +108,7 @@ test('engineer requests a part, the store issues it, one comes back: stock and j
   });
   expect(await jobCosts(no)).toEqual({ status: 10, parts: 500, total: 500 }); // เบิกจ่ายอะไหล่ครบแล้ว
 
-  // ---- รับคืนจากการเบิก 1 ----
+  // รับคืนจากการเบิก 1
   await pickLines(page, 'รับคืนจากการเบิก', no);
   await expect(row).toContainText('จ่ายแล้ว');
   await row.getByLabel(`จำนวนรับคืน ${part.code}`).fill('1');

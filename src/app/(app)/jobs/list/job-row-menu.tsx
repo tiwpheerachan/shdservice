@@ -18,14 +18,11 @@ import { JS, JOB_GROUP } from '@/lib/status-ids';
 const ITEM =
   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent';
 
-/**
- * The row's "…" menu, as the legacy list's row buttons: print the receipt, บันทึกการทำงาน, ปิดงาน-ส่งคืนสินค้า,
- * print the return note (closed jobs), ยกเลิกงาน — each only when the user may and the job's status allows it.
- */
+/** the legacy list's row buttons, each only when the user may and the job's status allows it */
 export function JobRowMenu({ job, onCancel }: { job: Job; onCancel?: (job: Job) => void }) {
   const { canLink } = useAccess();
   const [open, setOpen] = React.useState(false);
-  const id = job.id; // links use the job's uuid (ADR 0008)
+  const id = job.id;
   const group = job.statusGroup ?? '';
   const live = job.statusId !== JS.CANCELLED && group !== JOB_GROUP.CANCEL;
   const items: { label: string; icon: React.ElementType; href: string }[] = [

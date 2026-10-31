@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-dump-stock-sales.mts — stock / sales regressions from the QA on the legacy data dump (2026-10-28):
+ * scripts/test-qa-dump-stock-sales.mts — stock / sales regressions on the legacy data dump:
  * a return from a job counts in like legacy (quantity_available += qty, quantity_used kept — all 76 legacy parts with
  * returns hold that rule), an issue still moves used / booking only, a denied sale order (legacy SO2401274) is final.
  *
@@ -150,7 +150,7 @@ try {
   await test('cancelling it is a 409 — even for System Admin; it stays ACTIVE', async () => {
     const soId = (
       await db.execute<{ id: string }>(sql`SELECT id::text AS id FROM sale_order WHERE sale_order_no = ${SO}`)
-    ).rows[0]!.id; // records take the uuid (ADR 0008)
+    ).rows[0]!.id;
     const r = await err(setRecordStatus('sale_orders', soId, 'DELETED', ADMIN.id, true, true, 'QA'));
     assert.equal(r.status, 409, r.message);
     const [row] = (

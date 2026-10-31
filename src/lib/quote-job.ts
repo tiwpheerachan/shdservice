@@ -1,16 +1,16 @@
 import { JS, QS } from '@/lib/status-ids';
 
 /**
- * A quotation saved as sent / agreed moves its job forward, never back (owner 2026-10-16). The one copy of the
+ * A quotation saved as sent / agreed moves its job forward, never back. The one copy of the
  * rule: followQuotation (src/server/services/jobs.ts) applies it, the quotation page says when it won't.
  */
 /** [quotation_status id, its name, the job_status id it moves the job to]; any other status leaves the job alone
  *  (declined / cancelled / expired / waiting) */
 const MOVES: [number, string, number][] = [
-  [QS.SENT, 'เสนอราคาแล้ว', JS.QUOTED], // → เสนอราคาแล้ว
-  [QS.AGREED, 'ลูกค้าตกลงซ่อม', JS.CUSTOMER_AGREED], // → ลูกค้าตกลงซ่อม
+  [QS.SENT, 'เสนอราคาแล้ว', JS.QUOTED],
+  [QS.AGREED, 'ลูกค้าตกลงซ่อม', JS.CUSTOMER_AGREED],
   [QS.AGREED_WAIT_PAY, 'ลูกค้าตกลงซ่อม รอชำระเงิน', JS.CUSTOMER_AGREED],
-  [QS.AGREED_WAIT_PARTS, 'ลูกค้าตกลงซ่อม รออะไหล่', JS.WAIT_PARTS], // → รออะไหล่
+  [QS.AGREED_WAIT_PARTS, 'ลูกค้าตกลงซ่อม รออะไหล่', JS.WAIT_PARTS],
 ];
 /** quotation status name → job_status id (the page has the name) */
 export const QUOTE_MOVES: Partial<Record<string, number>> = Object.fromEntries(MOVES.map(([, name, to]) => [name, to]));

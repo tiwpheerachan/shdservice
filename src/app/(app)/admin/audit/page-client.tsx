@@ -19,15 +19,14 @@ import { fieldLabel, fieldValue } from '@/lib/field-labels';
 import { moduleLabel } from '@/lib/modules';
 import { ExportButton } from '@/components/shared/export-button';
 import { WithEmails } from '@/components/shared/email';
-/** entities come by their drizzle/0006 names — the server maps rows written under the old ones (audit.ts LEGACY_ENTITY) */
+/** the server maps rows written under pre-0006 entity names (audit.ts LEGACY_ENTITY) */
 const isSaleOrder = (entity: string) => entity === 'sale_order';
-/** the server already reads an old sale-order deny / send-back (logged APPROVE) as STATUS (audit.ts readable) */
+/** the server reads a legacy sale-order deny / send-back (logged APPROVE) as STATUS */
 const actionOf = (r: Pick<AuditRow, 'action'>) => r.action;
-/** a sale order is cancelled, not deleted (its DELETE is the cancel: the summary says "ยกเลิกใบสั่งขาย") */
+/** a sale order's DELETE is its cancel */
 const actionLabel = (r: Pick<AuditRow, 'action' | 'entity' | 'changes'>) =>
   r.action === 'DELETE' && isSaleOrder(r.entity) ? 'ยกเลิก' : (ACTION[actionOf(r)]?.label ?? r.action);
 
-// action → badge tone / Thai label
 const ACTION: Record<string, { label: string; tone: Tone }> = {
   CREATE: { label: 'เพิ่ม', tone: 'success' },
   UPDATE: { label: 'แก้ไข', tone: 'info' },
@@ -39,7 +38,7 @@ const ACTION: Record<string, { label: string; tone: Tone }> = {
   RECEIVE: { label: 'รับเข้า', tone: 'success' },
   RETURN: { label: 'รับคืน', tone: 'success' },
   UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
-  // before drizzle/0006 only — sign-in / export / print go to security_log since (database only, not shown here)
+  // legacy rows only — sign-in / export / print are logged to security_log, not shown here
   LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
   LOGIN_FAILED: { label: 'เข้าสู่ระบบไม่สำเร็จ', tone: 'danger' },
   EXPORT: { label: 'ส่งออก Excel', tone: 'warning' },
@@ -87,7 +86,7 @@ export default function AuditPage() {
       key: 'key',
       header: 'เลขที่ / รหัส',
       width: '130px',
-      hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ — the user name was squeezed to "perf-…"
+      hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ only, or the user name gets squeezed
       cell: (r) => (
         <span className="num font-medium">
           <WithEmails text={r.no || r.key} />
@@ -113,7 +112,6 @@ export default function AuditPage() {
       width: '110px',
       align: 'center',
       cell: (r) => (
-        // data-changes: the tour opens a row that has changed fields (every row opens its identity details)
         <Button variant="ghost" size="sm" data-changes={r.changes ? '' : undefined} onClick={() => setDetail(r)}>
           {r.changes ? `${Object.keys(r.changes).length} ฟิลด์` : 'ดู'}
         </Button>

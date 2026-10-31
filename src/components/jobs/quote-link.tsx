@@ -5,7 +5,6 @@ import { FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAccess } from '@/lib/use-access';
 
-/** "สร้างใบเสนอราคา" for this job — the quotation form pre-fills from ?job=<the job's uuid>; only for roles that may add quotations */
 export function QuoteLink({ jobId }: { jobId?: string }) {
   const { canLink } = useAccess();
   const href = '/quotation/new';

@@ -15,7 +15,7 @@ export const GET = handle(async (req: NextRequest) => {
 /** DELETE ?id= — soft delete (see deleteDocumentProfile for the rules). */
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const { id } = parseQuery(req, documentProfileDelete); // not a uuid → 404
+  const { id } = parseQuery(req, documentProfileDelete);
   await deleteDocumentProfile(id, me.pk);
   return NextResponse.json({ ok: true });
 });

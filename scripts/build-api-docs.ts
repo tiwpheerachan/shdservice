@@ -1,25 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- walks the generated OpenAPI JSON and APIDoc's own data, both untyped */
 /**
- * Builds the API docs page (APIDoc v5) into .apidoc/index.html, which the app
- * serves at /api-docs to approved users (src/app/api-docs/route.ts). Modelled on OneLink's.
+ * Builds the API docs page (APIDoc v5) into .apidoc/index.html, served at /api-docs (src/app/api-docs/route.ts).
  *
  *   npm run docs:api
  *
- * The endpoints are not written twice. src/server/contract/openapi.ts generates the
- * description of every route from the zod contract (src/server/contract/) — and
- * scripts/test-openapi.mts holds it to the routes that exist — so this turns that spec
- * into APIDoc's `@api` comments (in .apidoc/src, never committed) and APIDoc builds the
- * page from those. What is written by hand is only what a spec cannot say: the guides in
- * docs/api/guides, in Thai and English.
+ * Endpoints are not written twice: the OpenAPI spec generated from the zod contract (src/server/contract/openapi.ts)
+ * is turned into APIDoc `@api` comments in .apidoc/src (never committed). Only the guides (docs/api/guides) are
+ * hand-written.
  *
- * Each endpoint is emitted once per language with the same, English, text: the
- * page's language switch changes the guides and the page's own words, and an
- * endpoint without a block in the language being read would vanish from it.
+ * Each endpoint is emitted once per language with the same English text: an endpoint without a block in the
+ * language being read would vanish from the page.
  *
- * Try it calls the deployment serving the page: the build writes a placeholder
- * origin, which the route swaps for the request's own on every response.
- * "endpoints" (not "api") as the input category: APIDoc's built-in "api"
- * category leaves out the @apiLang parser, which the two languages need.
+ * Try it: the build writes a placeholder origin, which the route swaps for the request's own.
+ * Input category "endpoints", not "api": APIDoc's built-in "api" category leaves out the @apiLang parser.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,8 +25,6 @@ const out = path.join(root, '.apidoc');
 const src = path.join(out, 'src');
 const LANGS = ['en', 'th'] as const;
 const PREFIX = '/api';
-
-/* ------------------------------------------------------------------ spec -- */
 
 type Schema = Record<string, any>;
 type Operation = Record<string, any>;
@@ -180,8 +171,6 @@ function sample(schema: Schema | undefined, depth = 0, seen: string[] = [], send
   }
 }
 
-/* --------------------------------------------------------------- comments -- */
-
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 /**
  * One tag (or one line of an example) as comment lines: nothing that ends the
@@ -245,7 +234,6 @@ function fieldLine(tag: string, group: string, field: Field): string {
   return `@${tag}${group ? ` (${group})` : ''} ${field.type} ${field.required ? name : `[${name}]`} ${field.description}`.trimEnd();
 }
 
-/** One endpoint, in one language, as an APIDoc comment. */
 function comment(
   route: string,
   method: string,
@@ -262,7 +250,6 @@ function comment(
   const access = securityOf(operation);
   lines.push(`@apiPermission ${access}`);
 
-  // The description, then what the status codes alone cannot carry.
   const notes: string[] = [];
   if (operation.description) notes.push(operation.description);
   if (access === 'public') notes.push('**Public:** no session needed.');
@@ -334,8 +321,6 @@ function comment(
 
   return [`// ${order}`, '/**', ...lines.flatMap((line) => block(line)), ' */', ''].join('\n');
 }
-
-/* ------------------------------------------------------------------ build -- */
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(src, { recursive: true });
@@ -602,7 +587,6 @@ const FIXES: [anchor: string, replacement: string, count?: number][] = [
   ['fallbackLocale:"es"', 'fallbackLocale:"en"'],
   [LANG_NAMES, '{th:"ไทย",en:"English"}', 2],
   ['renderList(["es","en","zh","pt","fr","de","ja"]', 'renderList(["th","en"]'],
-  // the content language follows the header's choice, at start and on every change
   ['gr=localStorage.getItem("apicat_language")', 'gr=i18n.global.locale.value'],
   ['console.log("Changing language to:",vr),rr.value=vr,', 'rr.value=vr,useDocsStore().setLanguage(vr),'],
   ['changeLang=nr=>{locale.value=nr,', 'changeLang=nr=>{locale.value=nr,useDocsStore().setLanguage(nr),'],
@@ -613,7 +597,7 @@ const FIXES: [anchor: string, replacement: string, count?: number][] = [
   ['await fetch("/data/home.md")', '{ok:!1}'],
   [
     '<link rel="icon" type="image/svg+xml" href="/favicon.svg">\n  <link rel="alternate icon" href="/favicon.ico">',
-    // no logo (owner's decision); an empty icon also stops the browser's /favicon.ico request
+    // an empty icon also stops the browser's /favicon.ico request
     '<link rel="icon" href="data:,">',
   ],
   ['<html lang="es">', '<html lang="th">'],

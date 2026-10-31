@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 /** Product detail + the newest page of its stock card (product-detail modal), by the part's uuid. */
 export const GET = handle(async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
   const user = await requireView(req, PRODUCT_MODULES);
-  const { id } = await parseParams(ctx, productGet); // not a uuid → 404 ไม่พบอะไหล่
+  const { id } = await parseParams(ctx, productGet);
   const code = (await rowByUuid(product, id, 'อะไหล่')).productCode ?? '';
   const found = await getProduct(code);
   if (!found) throw new HttpError(404, 'ไม่พบอะไหล่');

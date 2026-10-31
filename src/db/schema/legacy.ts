@@ -1,15 +1,13 @@
 // Drizzle schema for the legacy SHDElectronicServiceDB tables (converted to
 // PostgreSQL by setupdata/convert.py) and the tables this app added.
-// Column names are the DB's snake_case names; property names are camelCase.
 // The DB is the source of truth — do not "fix" legacy types here.
 //
-// ADR 0008 phase 2 (drizzle/0006 recreated every table): column 1 = `pk` (bigint identity ALWAYS — the
-// internal key, never in the API), column 2 = `id` (uuid v7 — the external id), then the table's columns in
-// their previous order. Relations are `<role>_<table>_pk` → `<table>.pk` (FK ON DELETE RESTRICT); a value
-// that pointed at no row is NULL here and kept in `legacy_orphan_ref`. Code tables (job_status, …, and
-// record_status.code) stay the FK target of their code column. Constraints / indexes are owned by the
+// ADR 0008: column 1 = `pk` (bigint identity ALWAYS — the internal key, never in the API), column 2 = `id`
+// (uuid v7 — the external id). Relations are `<role>_<table>_pk` → `<table>.pk` (FK ON DELETE RESTRICT); a
+// legacy value that pointed at no row is NULL here and kept in `legacy_orphan_ref`. Code tables (job_status, …,
+// and record_status.code) stay the FK target of their code column. Constraints / indexes are owned by the
 // migration; the ones declared here are the ones code reads (upsert targets) or that document a rule.
-// Old → new property names: adr/0008-phase2-renames.md.
+// Legacy → current property names: adr/0008-phase2-renames.md.
 import {
   pgTable,
   integer,
@@ -104,7 +102,7 @@ export const product = pgTable(
     cancelledByAppUserPk: pkRef('cancelled_by_app_user_pk'),
     isUbRepairOnly: boolean('is_ub_repair_only'),
     forModelColor: varchar('for_model_color', { length: 50 }),
-    // --- soft-delete status added by this app (record_status.code) ---
+    // soft-delete status (record_status.code)
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
     statusChangedByAppUserPk: pkRef('status_changed_by_app_user_pk'),
@@ -173,7 +171,7 @@ export const productSerial = pgTable('product_serial', {
   cancelledByAppUserPk: pkRef('cancelled_by_app_user_pk'),
 });
 
-// the -1 "not given" rows are gone (ADR 0008 decision 6) — a customer without an address = NULL *_pk
+// a customer without an address has NULL *_pk — there is no -1 "not given" row (ADR 0008 decision 6)
 export const province = pgTable('province', {
   pk: pkCol(),
   id: uuidId(),
@@ -215,7 +213,7 @@ export const customer = pgTable(
     provincePk: pkRef('province_pk'),
     districtPk: pkRef('district_pk'),
     subDistrictPk: pkRef('sub_district_pk'),
-    // --- soft-delete status added by this app (record_status.code) ---
+    // soft-delete status (record_status.code)
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
     statusChangedByAppUserPk: pkRef('status_changed_by_app_user_pk'),
@@ -323,7 +321,7 @@ export const condition = pgTable(
 export const jobAttachment = pgTable('job_attachment', {
   pk: pkCol(),
   id: uuidId(),
-  // was reference_item_code (+ reference_topic, dropped): every attachment belongs to a job
+  // every attachment belongs to a job
   jobPk: pkRef('job_pk').notNull(),
   originalFileName: varchar('original_file_name', { length: 50 }),
   systemFileName: varchar('system_file_name', { length: 50 }),
@@ -411,13 +409,12 @@ export const job = pgTable(
     swapRefundDocumentNo: varchar('swap_refund_document_no', { length: 100 }),
     isJobBounce: boolean('is_job_bounce'),
     productSaleOutShopName: varchar('product_sale_out_shop_name', { length: 100 }),
-    // --- soft-delete status added by this app (record_status.code) ---
+    // soft-delete status (record_status.code)
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
     statusChangedByAppUserPk: pkRef('status_changed_by_app_user_pk'),
     // issuing profile; NULL = SHD
     documentProfilePk: pkRef('document_profile_pk'),
-    // legacy raw link token — never written (only the hash below is); existing values emptied
     trackTokenAt: timestamp('track_token_at', { mode: 'string' }),
     // courier used for the return leg; NULL on legacy jobs
     returnShippingProfilePk: pkRef('return_shipping_profile_pk'),
@@ -484,10 +481,8 @@ export const jobPart = pgTable(
     pk: pkCol(),
     id: uuidId(),
     jobPk: pkRef('job_pk').notNull(),
-    // was spare_part_code
     productPk: pkRef('product_pk'),
     sparePartUnitPrice: numeric('spare_part_unit_price', { precision: 18, scale: 2 }),
-    // store_location.store_location_id (code table)
     isQuotation: boolean('is_quotation'),
     isSpecial: boolean('is_special'),
     requestQty: integer('request_qty'),
@@ -602,7 +597,7 @@ export const jobType = pgTable(
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
     statusChangedByAppUserPk: pkRef('status_changed_by_app_user_pk'),
-    // --- target turnaround in days, added by this app ---
+    // target turnaround in days
     defaultDueDays: integer('default_due_days').notNull().default(7),
   },
   (table) => [uniqueIndex('ix_job_type_name').on(table.jobTypeName)],
@@ -631,7 +626,6 @@ export const model = pgTable(
     modelName: varchar('model_name', { length: 50 }),
     marketPrice: numeric('market_price', { precision: 18, scale: 2 }),
     brandPk: pkRef('brand_pk'),
-    // the app used to write 0 for "no tier" → NULL
     lastUpdate: timestamp('last_update', { mode: 'string' }),
     recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
     statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
@@ -639,7 +633,7 @@ export const model = pgTable(
   },
   (table) => [
     uniqueIndex('ux_model_model_code').on(table.modelCode),
-    // (name, brand, active): active = record_status 'ACTIVE' (is_active is gone, drizzle/0006)
+    // (name, brand, active): active = record_status 'ACTIVE'
     uniqueIndex('ix_unique_model').on(table.modelName, table.brandPk, sql`(record_status = 'ACTIVE')`),
   ],
 );
@@ -730,7 +724,6 @@ export const quotation = pgTable(
     roundingAmount: numeric('rounding_amount', { precision: 19, scale: 4 }),
     netAmount: numeric('net_amount', { precision: 19, scale: 4 }),
     remark: text(),
-    // was reference_job_no
     jobPk: pkRef('job_pk'),
     quotationStatusId: integer('quotation_status_id'),
     customerApproveDate: timestamp('customer_approve_date', { mode: 'string' }),
@@ -937,7 +930,7 @@ export const appUser = pgTable('app_user', {
   userType: varchar('user_type', { length: 50 }),
   phoneNo: varchar('phone_no', { length: 50 }),
   emailAddress: varchar('email_address', { length: 100 }),
-  // --- columns added by this app — SSO profile ---
+  // SSO profile
   larkId: varchar('lark_id', { length: 50 }),
   department: varchar({ length: 100 }),
   title: varchar({ length: 100 }),
@@ -950,7 +943,6 @@ export const appUser = pgTable('app_user', {
   sessionVersion: integer('session_version').notNull().default(0),
 });
 
-// --- tables added by this app ---
 export const jobSymptom = pgTable(
   'job_symptom',
   {
@@ -976,11 +968,10 @@ export const recordStatus = pgTable(
   (t) => [uniqueIndex('ux_record_status_code').on(t.code)],
 );
 
-/** Application audit trail — append-only, one row per write. */
 /**
- * What staff changed — the actor as at the time of the action (drizzle/0006, owner 2026-10-30). Append-only
- * (trigger); row_hash = sha256 of the row, set by a trigger on insert (no chain). Rows older than 0006 have NULL
- * where they never recorded a value (actor_email … request_id). Retention: forever for now — owner to decide.
+ * What staff changed — the actor as at the time of the action. Append-only (trigger); row_hash = sha256 of the
+ * row, set by a trigger on insert (no chain). Rows older than drizzle/0006 have NULL where they never recorded a
+ * value (actor_email … request_id).
  */
 export const auditLog = pgTable(
   'audit_log',
@@ -988,7 +979,7 @@ export const auditLog = pgTable(
     pk: pkCol(),
     id: uuidId(),
     at: timestamp('at', { mode: 'string' }).notNull(),
-    // NULL = the system / anonymous (was user_id 0)
+    // NULL = the system / anonymous
     actorPk: pkRef('actor_pk'),
     actorName: varchar('actor_name', { length: 100 }).notNull().default(''),
     actorEmail: varchar('actor_email', { length: 100 }),
@@ -1001,7 +992,6 @@ export const auditLog = pgTable(
     permission: text('permission'),
     entity: varchar('entity', { length: 50 }).notNull(),
     entityKey: varchar('entity_key', { length: 100 }).notNull().default(''),
-    /** the row's external id (uuid) */
     entityId: uuid('entity_id'),
     /** its business number (J…, SO…, Q…, C…) */
     entityNo: text('entity_no'),
@@ -1028,9 +1018,9 @@ export const auditLog = pgTable(
 );
 
 /**
- * Security events (drizzle/0006): sign-in / failed sign-in / sign-out, refusals, role / permission / user status
- * changes, exports, prints — actor as at the time. Append-only, row_hash by trigger. LOGIN rows written before 0006
- * stay in audit_log. Retention: forever for now — owner to decide (suggested 1 year under PDPA).
+ * Security events: sign-in / failed sign-in / sign-out, refusals, role / permission / user status changes,
+ * exports, prints — actor as at the time. Append-only, row_hash by trigger. LOGIN rows older than drizzle/0006
+ * are in audit_log.
  */
 export const securityLog = pgTable(
   'security_log',
@@ -1067,7 +1057,7 @@ export const securityLog = pgTable(
   ],
 );
 
-// --- document_profile — "ออกเอกสารในนาม" ---
+// "ออกเอกสารในนาม" — the company a document is issued as
 export const documentProfile = pgTable(
   'document_profile',
   {
@@ -1098,10 +1088,10 @@ export const documentProfile = pgTable(
     // soft delete: hidden from lists/dropdowns, still printable for old documents
     deletedAt: timestamp('deleted_at', { mode: 'string' }),
     deletedByAppUserPk: pkRef('deleted_by_app_user_pk'),
-    /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = the header of ใบเบิกสินค้า only (drizzle/0004) */
+    /** 'document' = an issuer (ออกเอกสารในนาม) · 'pick_slip' = the header of ใบเบิกสินค้า only */
     purpose: varchar('purpose', { length: 20 }).notNull().default('document'),
   },
-  // a deleted profile frees its code (drizzle/0011): unique among live rows only
+  // a deleted profile frees its code: unique among live rows only
   (t) => [
     uniqueIndex('ux_document_profile_code_live')
       .on(t.code)
@@ -1130,7 +1120,7 @@ export const shippingProfile = pgTable(
     /** other names of the courier (legacy free text), comma separated — src/lib/shipper.ts */
     aliases: varchar('aliases', { length: 500 }).notNull().default(''),
   },
-  // a deleted profile frees its code (drizzle/0011): unique among live rows only
+  // a deleted profile frees its code: unique among live rows only
   (t) => [
     uniqueIndex('ux_shipping_profile_code_live')
       .on(t.code)
@@ -1139,8 +1129,8 @@ export const shippingProfile = pgTable(
 );
 
 /**
- * A relation value that pointed at no row (ADR 0008 decision 4): the FK went NULL, the old value is kept here,
- * one row per (table, row, column). Written once by drizzle/0006; no FK (row_pk is any table's pk).
+ * A legacy relation value that pointed at no row (ADR 0008 decision 4): the FK went NULL, the old value is kept
+ * here, one row per (table, row, column). No FK (row_pk is any table's pk).
  */
 export const legacyOrphanRef = pgTable(
   'legacy_orphan_ref',
@@ -1149,7 +1139,7 @@ export const legacyOrphanRef = pgTable(
     id: uuidId(),
     tableName: varchar('table_name', { length: 63 }).notNull(),
     rowPk: pkRef('row_pk').notNull(),
-    /** the column's name before drizzle/0006 */
+    /** the legacy column name */
     columnName: varchar('column_name', { length: 63 }).notNull(),
     legacyValue: text('legacy_value').notNull(),
   },
@@ -1157,8 +1147,8 @@ export const legacyOrphanRef = pgTable(
 );
 
 /**
- * drizzle/0006: the highest pk each table had when the legacy data was converted (table_name = the new table name).
- * A row with pk <= maxPk came from the legacy system — its money / quantity fields are locked (owner 2026-10-30).
+ * The highest pk each table had when the legacy data was converted (table_name = the current table name).
+ * A row with pk <= maxPk came from the legacy system — its money / quantity fields are locked.
  */
 export const legacyBoundary = pgTable(
   'legacy_boundary',

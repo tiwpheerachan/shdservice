@@ -19,7 +19,7 @@ import { seed } from '../tests/seed.mts';
 assertLocal(TEST_DATABASE_URL);
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 
-// ---- test environment (read at call time by the modules below) ----
+// test environment (read at call time by the modules below)
 const ORIGIN_SECRET = 'test-origin-secret-' + Math.random().toString(36).slice(2);
 Object.assign(process.env, {
   ORIGIN_AUTH_MODE: 'enforce',
@@ -174,7 +174,6 @@ async function me(session: string, ip: string, ua = UA) {
   };
 }
 
-// ---- helpers ----
 let ipSeq = 10;
 const nextIp = () => `203.0.113.${ipSeq++}`;
 const usedIps: string[] = [];
@@ -226,7 +225,7 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
-// the two seeded open jobs, with fresh links (links live 1 day unopened / 15 min after opening, drizzle/0016)
+// the two seeded open jobs, with fresh links (links live 1 day unopened / 15 min after opening)
 const pick = await db.execute<{ job_no: string }>(sql`
   SELECT j.job_no FROM job j JOIN job_status s ON s.job_status_id = j.job_status_id
    WHERE j.record_status <> 'DELETED' AND s.job_status_group NOT IN ('Finished','Cancel')
@@ -867,7 +866,7 @@ try {
     }
   });
 
-  // ---- ThaiBulkSMS OTP service (production): it makes, sends and checks the code ----
+  // ThaiBulkSMS OTP service (production): it makes, sends and checks the code
   const setProviderMode = (on: boolean) =>
     Object.assign(
       process.env,
@@ -1349,7 +1348,7 @@ try {
     );
     for (const r of [declared, chunked])
       assert.deepEqual([r.status, await r.json()], [413, { ok: false, error: TRACK_MSG.tooLarge }]);
-    // a small body still reads as before (a bad ticket → 401)
+    // a small body still reads (a bad ticket → 401)
     const small = await dataPOST(req('/api/track/data', { ticket: 'nope' }, nextIp()));
     assert.equal(small.status, 401);
   });

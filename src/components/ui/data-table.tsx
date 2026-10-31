@@ -39,12 +39,7 @@ export type Column<T> = {
   hideBelow?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 };
 
-/**
- * Server mode: when `server` is given the table stops filtering / sorting /
- * slicing `rows` itself. `rows` is the current page from the API, `total` the
- * full count, and every change of page / page size / search text / sort is
- * reported through `onChange` so the caller can refetch. Visuals are identical.
- */
+/** Server mode: the table stops filtering / sorting / slicing `rows` and reports every change through `onChange`. */
 export type ServerTableState = {
   page: number;
   pageSize: number;
@@ -147,9 +142,7 @@ export function DataTable<T extends Record<string, unknown>>({
     return typeof v === 'number' ? v : v == null ? '' : String(v);
   }, []);
 
-  // server mode: debounce the search box, then let the caller refetch. A term
-  // shorter than SEARCH_MIN_CHARS is never sent — the box shows a hint and the
-  // table keeps the unfiltered list.
+  // server mode: debounce the search, then let the caller refetch; a term shorter than SEARCH_MIN_CHARS is never sent
   const tooShort = !!server && q.trim().length > 0 && q.trim().length < SEARCH_MIN_CHARS;
   const [dq, setDq] = React.useState('');
   React.useEffect(() => {

@@ -54,10 +54,9 @@ import { profileLock } from '@/lib/profile-lock';
 function CloseForm() {
   const { push } = useToast();
   const { data: SHIPPERS, ...shippersLookup } = useShippers();
-  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset } = useJobForm();
-  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? ''));
   const { can } = useAccess();
   const confirm = useConfirm();
   // a closed job: the payment stays as recorded (Job Money After Close may change it); a legacy job's
@@ -75,7 +74,7 @@ function CloseForm() {
   // (the slip is not: an upload is saved to the job right away)
   const [saved, setSaved] = React.useState<typeof d | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
-  useTourRestore(() => d, setD); // a บทสอน leaves the payment / return fields as it found them
+  useTourRestore(() => d, setD);
   // สลิปชำระเงิน → bucket oneservice/jobs/{no}/slip/… (path เก็บใน job.job_payment_slip_file_name)
   const onPickSlip = async (f: File | undefined) => {
     if (!f || !job) return;
@@ -85,7 +84,7 @@ function CloseForm() {
       push({ kind: 'success', title: 'อัปโหลดสลิปแล้ว', desc: f.name });
     } catch (e) {
       push({ kind: 'error', title: 'อัปโหลดสลิปไม่สำเร็จ', desc: errMsg(e) });
-      return false; // the file input lets go of the name
+      return false;
     }
   };
 
@@ -112,9 +111,8 @@ function CloseForm() {
 
   const go = (v: string) => find(v);
 
-  // POST /api/jobs/:id/close → payment + return fields, job_closed_date/by, status + job_log
   const save = async () => {
-    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    if (!job) return;
     const p = job.payment;
     // deposit more than the total: a refund instead of a payment — asked while none is recorded, sent when edited
     const refundOn = bal.refund > 0 && !lock;
@@ -139,7 +137,7 @@ function CloseForm() {
         shipperId: d.shipperId || undefined,
       },
       status: d.status,
-      newSerial: isSwap(job.swap.detail) ? d.newSerial : undefined, // Serial เครื่องใหม่: a swap job only
+      newSerial: isSwap(job.swap.detail) ? d.newSerial : undefined,
     };
     const canEdit = can('Job Management', 'edit');
     // the receipt / parcel no as loaded: an unchanged legacy value still passes
@@ -150,7 +148,7 @@ function CloseForm() {
       refund: { max: bal.refund, required: refundNeeded },
     };
     if (!act.check(closeSchema(prev), body, canEdit)) {
-      if ((paid && !d.payType) || body.refund || refundNeeded) setTab('payment'); // asked on the payment tab
+      if ((paid && !d.payType) || body.refund || refundNeeded) setTab('payment');
       return;
     }
     if (partsWait) return push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: partsWait });

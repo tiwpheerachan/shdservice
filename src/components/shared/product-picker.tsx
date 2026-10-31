@@ -20,11 +20,7 @@ export type ExtraItem = { code: string; name: string; price?: number };
 /** What `onPick` hands back — `product` is set for stock items, absent for extras. */
 export type PickedItem = { code: string; name: string; price?: number; product?: PickableProduct };
 
-/**
- * Part picker: searches ACTIVE products on the server as you type (debounced, never the whole catalog) and
- * ranks the answer here — every typed word must appear (code / part no / TH·EN·CN name / brand / category).
- * The server narrows by the longest word; the last answer stays on screen while the next one loads.
- */
+/** Searches ACTIVE products on the server as you type (never the whole catalog); every typed word must match. */
 export function ProductPicker({
   value,
   onPick,
@@ -40,7 +36,6 @@ export function ProductPicker({
 }: {
   /** selected sysCode (or an extra's code); empty = nothing chosen */
   value?: string;
-  /** `null` when cleared */
   onPick: (item: PickedItem | null) => void;
   extras?: ExtraItem[];
   /** name shown for `value` when it was not picked here (a line already on the document — its stored name) */
@@ -51,7 +46,7 @@ export function ProductPicker({
   align?: 'start' | 'end';
   clearable?: boolean;
   id?: string;
-  /** INACTIVE parts too (stock receive — the owner rule: they still arrive); default ACTIVE only */
+  /** INACTIVE parts too (stock receive: they still arrive); default ACTIVE only */
   inactive?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);

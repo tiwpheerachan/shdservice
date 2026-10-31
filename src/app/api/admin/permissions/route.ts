@@ -16,7 +16,6 @@ export const GET = handle(async (req: NextRequest) => {
 /** Upsert role_permission rows by (user_type, module_name). Admin only. */
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  // role / menu trimmed, the flags true or "true" (permissionsSave); not a list → 400 "no items"; an unknown menu → 400
   const items = (await parseBody(req, permissionsSave)).items.filter((r) => r.role && r.menu);
   if (items.length === 0) throw new HttpError(400, 'no items');
   const saved = await savePermissions(items, me.pk);

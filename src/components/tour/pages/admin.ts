@@ -34,10 +34,7 @@ const saveStep = (button: string, body: string): Step => ({
 /** steps inside the dialog that `open` (a button on the page) shows */
 const inDialog = (open: string, steps: Step[]): Step[] => steps.map((s) => ({ ...s, dialog: { open } }));
 
-/* ------------------------------------------------------------------ *
- * ข้อมูลหลัก — หมวดหมู่ / ยี่ห้อ / สี / ประเภทงาน / ประเภทเครื่อง / อาการเสีย (MasterTable) and รุ่นสินค้า
- * (its own page, the same shape): one factory, the differences as parameters
- * ------------------------------------------------------------------ */
+/** ข้อมูลหลัก (the MasterTable lists) and รุ่นสินค้า (its own page, the same shape): one factory, the differences as parameters */
 type MasterPage = {
   /** the page heading */
   title: string;
@@ -217,8 +214,6 @@ const MASTERS: Record<string, Tour> = {
     ],
   }),
 };
-
-/* ------------------------------------------------------------------ */
 
 const USERS: Tour = {
   title: 'ผู้ใช้ระบบ',

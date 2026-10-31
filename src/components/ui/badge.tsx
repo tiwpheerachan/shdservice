@@ -4,7 +4,6 @@ import { JOB_GROUP } from '@/lib/status-ids';
 
 export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
-/** App badge — `tone` variants in the app palette (shadcn-style cva). */
 export const badgeVariants = cva(
   'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap',
   {

@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-dump-jobs.mts — job regressions from the QA on the legacy data dump (2026-10-28): a legacy total
+ * scripts/test-qa-dump-jobs.mts — job regressions on the legacy data dump: a legacy total
  * that is not the sum of its costs (VAT / a discount folded in) is the net the close page shows, and stays until a
  * cost changes; the job list chips add up to the total (ยกเลิกซ่อม (6) has its own: Cancel, as the dashboard KPI).
  *

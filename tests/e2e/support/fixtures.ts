@@ -24,7 +24,7 @@ export async function signIn(page: Page, email: string, loginUrl = '/login'): Pr
 /**
  * Another person at the same browser: the session cookie goes, then a fresh SSO sign-in. The page is left
  * first: an app page whose cookie went sees its next /me poll fail and sends itself to /login?expired=1 —
- * that navigation aborts the sign-in's own (net::ERR_ABORTED, CI 2026-10-27).
+ * that navigation aborts the sign-in's own (net::ERR_ABORTED).
  */
 export async function switchUser(page: Page, email: string): Promise<void> {
   await page.goto('about:blank');

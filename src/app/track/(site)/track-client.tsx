@@ -113,7 +113,6 @@ function TrackBody(props: Props) {
   /** a caller waiting for a background token */
   const waiter = React.useRef<((t: string | null) => void) | null>(null);
 
-  /* ---------- link mode: session → ticket → data ---------- */
   const linkToken = props.mode === 'link' ? props.linkToken : '';
   const runLink = React.useCallback(
     async (turnstileToken: string) => {
@@ -208,7 +207,6 @@ function TrackBody(props: Props) {
     return <Notice text={TRACK_MSG.otpUnavailable} />;
   }
 
-  /* ---------- 1. gate ---------- */
   if (phase === 'gate') {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
@@ -249,7 +247,6 @@ function TrackBody(props: Props) {
     );
   }
 
-  /* ---------- link expired / used up ---------- */
   if (phase === 'expired') {
     return (
       <div className="surface mx-auto max-w-md p-6 text-center">
@@ -273,7 +270,6 @@ function TrackBody(props: Props) {
     );
   }
 
-  /* ---------- link: result / loading ---------- */
   if (props.mode === 'link') {
     if (phase === 'done' && job)
       return (
@@ -294,7 +290,6 @@ function TrackBody(props: Props) {
     );
   }
 
-  /* ---------- form: phone + OTP ---------- */
   return (
     <div className="space-y-3">
       <TrackOtp getToken={getToken} verifying={verifying} devOtpLog={props.devOtpLog} />

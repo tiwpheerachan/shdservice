@@ -1,5 +1,4 @@
-/** the customer list's filter bar (applied on ค้นหา) — every field is AND-ed on the server; same params feed the
- *  Excel export. Pure: shared by the page and its server render (page.tsx). */
+/** every field is AND-ed on the server; same params feed the Excel export. Pure: shared with the server render. */
 export type CustomerFilter = {
   code: string;
   name: string;

@@ -35,12 +35,8 @@ import { defaultDocumentProfile } from '@/server/services/document-profiles';
 import { REPORT_KEYS, REPORT_SPECS, isReportKey, type ReportCol } from '@/app/(app)/reports/report-specs';
 
 /**
- * Excel export (.xlsx via exceljs) of a list under the SAME filters the screen
- * uses — the URL query is the one the page's hooks send to /api/data/<resource>.
- * Runs on the server, capped at MAX_ROWS so a runaway range cannot exhaust memory
- * (the rows are loaded in memory on a 512 MB instance; the file itself is streamed). Every list function caps
- * at the same 20k, so a capped file is detectable — and it says so: a note row at
- * the end and "-partial" in the file name, never a silently short file.
+ * Excel export of a list under the SAME filters the screen uses. Capped at MAX_ROWS (rows are held in memory on a
+ * 512 MB instance); a capped file says so — a note row and "-partial" in its name, never a silently short file.
  */
 /** whole days between two dates, by their date parts (as the close-job report's TAT) */
 const calendarDays = (from: string, to: string) =>
@@ -53,7 +49,7 @@ type Col = ReportCol;
 /** a row of any list: read by column key, so every list function's own type fits without a cast */
 type Row = object;
 
-// no ID column (ADR 0008): the row's uuid tells a reader nothing — the pages no longer show it either
+// no ID column: the row's uuid tells a reader nothing
 const MASTER_COLS: Col[] = [
   { key: 'name', header: 'ชื่อ', width: 40 },
   { key: 'detail', header: 'รายละเอียด', width: 40 },
@@ -447,9 +443,8 @@ let slot: object | null = null;
 
 /**
  * `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data).
- * The workbook is streamed (exceljs WorkbookWriter, inline strings): 20k rows × 24 Thai columns run in a ~90 MB
- * heap, rows included, where the in-memory Workbook ran out of 400 MB. The slot is freed once the file is
- * written or the client goes away.
+ * Streamed (WorkbookWriter, inline strings): the in-memory Workbook ran out of 400 MB at 20k rows. The slot is freed
+ * once the file is written or the client goes away.
  */
 export async function exportXlsx(
   req: NextRequest,

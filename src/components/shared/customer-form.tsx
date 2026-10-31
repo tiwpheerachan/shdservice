@@ -17,11 +17,7 @@ import { useToast } from '@/components/ui/toast';
 import { isIndividual } from '@/lib/validation/customer';
 import { Email } from '@/components/shared/email';
 
-/**
- * Customer form shared by the ข้อมูลลูกค้า page (modal) and CustomerSelect
- * (inline "ลูกค้าใหม่" on job / quotation / sale order). One source of truth for
- * the fields, the cascading address lists and the payload shape (/api/customers).
- */
+/** Shared by the customers page and CustomerSelect's inline "ลูกค้าใหม่": one source for fields, address lists and payload. */
 export type Opt = { id: string; name: string; postal?: string };
 
 export type CustomerFormValues = {

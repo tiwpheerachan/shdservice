@@ -1,6 +1,4 @@
-// Server-side getters used by the admin master pages (server components).
-// They call the drizzle-backed services directly (no HTTP round-trip). A DB error throws on purpose:
-// the page shows (app)/error.tsx instead of an empty list an admin might "fill in" again.
+// A DB error throws on purpose: the page shows (app)/error.tsx instead of an empty list an admin might "fill in" again.
 
 import type { MasterRow, Symptom } from './types';
 

@@ -42,10 +42,9 @@ import { useTourRestore } from '@/components/tour/tour';
 
 function SwapRefundForm() {
   const { push } = useToast();
-  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, set } = useJobForm();
-  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? ''));
   const { can } = useAccess();
   // a closed job: the refund stays as recorded (Job Money After Close may change it); a legacy job's
   // payment already recorded: System Admin only (an empty one may be filled)
@@ -73,7 +72,6 @@ function SwapRefundForm() {
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState<{ mode: string; d: typeof d } | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify({ mode, d }) !== JSON.stringify(saved));
-  // a บทสอน leaves Swap / Refund and its fields as it found them
   useTourRestore(
     () => ({ mode, d }),
     (v) => {
@@ -115,9 +113,8 @@ function SwapRefundForm() {
   const newSerialSeen =
     useJobChecks(asSerial(d.newSerial), asSerial(saved?.d.newSerial ?? ''), mode === 'swap')?.serial.jobs ?? [];
 
-  // POST /api/jobs/:id/swap-refund → swap_refund_detail / document_no / payment (refund) + status + job_log
   const save = async () => {
-    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    if (!job) return;
     const body =
       mode === 'swap'
         ? {

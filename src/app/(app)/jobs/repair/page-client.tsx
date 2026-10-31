@@ -94,7 +94,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     },
   });
   const { s: form, reset } = useJobForm();
-  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? ''));
   const { can } = useAccess();
   // a closed job: part lines / prices stay as they are (Job Money After Close may change them) — new lines may
   // always be added (a legacy line's own qty / price: figuresLocked on the line)
@@ -106,7 +106,6 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   const [saving, setSaving] = React.useState(false);
   const idRef = React.useRef(saved?.lines.length ?? 0);
   useUnsavedChanges(!!saved && JSON.stringify({ detail, lines }) !== JSON.stringify(saved));
-  // a บทสอน leaves the part lines and repair details as it found them
   useTourRestore(
     () => ({ detail, lines }),
     (v) => {
@@ -115,7 +114,6 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     },
   );
 
-  // prefill form, repair details and spare-part requests from the loaded job
   function prefill(job: JobDetail) {
     reset(fromJob(job));
     const next = repairStateOf(job, idRef.current);
@@ -127,9 +125,8 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
 
   const go = (v: string) => find(v);
 
-  // POST /api/jobs/:id/repair → job fields, costs, job_order_spare_part_log (+ booking), status + job_log
   const save = async () => {
-    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    if (!job) return;
     const body = {
       ...detail,
       status: detail.status || undefined,

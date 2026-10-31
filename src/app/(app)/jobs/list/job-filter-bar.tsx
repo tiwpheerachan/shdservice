@@ -37,7 +37,6 @@ export function JobFilterBar({
     brand: draft.brand,
     enabled: !!draft.brand || !!draft.model || modelsWanted,
   });
-  // models narrow to the chosen brand (1,171 models in total)
   const MODEL_OPTIONS = React.useMemo(() => modelNameOptions(MODELS, draft.brand), [MODELS, draft.brand]);
   const BRAND_OPTIONS = React.useMemo(() => BRANDS.map((b) => ({ value: b.name, label: b.name })), [BRANDS]);
   const JOB_TYPE_OPTIONS = React.useMemo(() => JOB_TYPES.map((j) => ({ value: j.name, label: j.name })), [JOB_TYPES]);
@@ -46,7 +45,6 @@ export function JobFilterBar({
     [STAFF],
   );
   const all = { placeholder: 'ทั้งหมด', emptyLabel: 'ทั้งหมด' };
-  // every status in the DB, in workflow order
   const { data: JOB_STATUSES, ...statusesLookup } = useJobStatuses();
   const STATUS_OPTIONS = React.useMemo(
     () =>

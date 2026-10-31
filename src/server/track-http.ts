@@ -5,7 +5,7 @@ import { clientIp } from '@/lib/client-ip';
 import { TRACK_MSG } from '@/lib/track-public';
 import { hit, ipKeyOf } from './track-guard';
 
-/** every tracking response: never cached anywhere (spec §P, §AE) */
+/** every tracking response: never cached anywhere */
 const NO_STORE = { 'Cache-Control': 'no-store', Pragma: 'no-cache' };
 
 export function trackJson(body: Record<string, unknown>, status = 200, extra: Record<string, string> = {}) {

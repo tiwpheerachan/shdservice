@@ -5,11 +5,9 @@ import { useServerInsertedHTML } from 'next/navigation';
 import { THEME_SCRIPT } from '@/lib/theme-script-source';
 
 /**
- * The theme bootstrap goes into the server HTML only (useServerInsertedHTML — Next's hook for
- * render-time <head> content), never through React on the client. Rendered as an element, a 404
- * from a print view (error shell, then the whole document is client-rendered) made React create the
- * <script> on the client: "Encountered a script tag while rendering React component" — and it would
- * not run there anyway. Same text, so the /track CSP hash (src/proxy.ts) still matches.
+ * Server HTML only (useServerInsertedHTML), never rendered by React on the client: a client-rendered 404 shell made
+ * React create the <script> ("Encountered a script tag…") and it would not run there anyway. Keep the text as is:
+ * the /track CSP hash (src/proxy.ts) matches it.
  */
 export function ThemeScript() {
   const sent = React.useRef(false);

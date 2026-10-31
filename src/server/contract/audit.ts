@@ -4,8 +4,7 @@ import { JSON_BODY, Ok, RATE_LIMITED, SIGNED_IN, choice, errorResponse, jsonResp
 import { defineOperation } from './registry';
 import { AuditRow } from './shapes';
 
-/** GET /api/audit — the System Admin audit log (src/server/audit.ts pageAudit). security_log is never shown on the web
- *  (owner): written by the app, read in the database only. */
+/** GET /api/audit — the System Admin audit log. security_log is never shown on the web: read in the database only. */
 
 const s = z.string();
 const ns = s.nullable();

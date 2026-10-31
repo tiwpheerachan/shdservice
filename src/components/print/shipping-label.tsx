@@ -2,11 +2,7 @@ import { AutoPrint } from './auto-print';
 import { withPrefix } from '@/lib/validation/customer';
 import type { DocumentProfile } from '@/server/services/document-profiles';
 
-/**
- * ใบปะหน้าพัสดุ A5 แนวนอน — the legacy "พิมพ์ใบสั่งขาย" sheet
- * (setupdata/sales_order/SO2600769_165248.pdf), reused for jobs returned by courier.
- * Framed sheet: SHD logomark, doc no top-right, sender block, "กรุณานำส่ง" + recipient.
- */
+/** A5 landscape, as the legacy "พิมพ์ใบสั่งขาย" sheet; reused for jobs returned by courier. */
 export function ShippingLabel({
   profile,
   docNo,

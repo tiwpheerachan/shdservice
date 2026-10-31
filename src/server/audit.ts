@@ -28,18 +28,9 @@ import { orderBy as orderByCols, likeTerm, offsetOf, totalOf, ymd, type Page, ty
 import { permissionOf, requestCtx, type Need } from '@/server/request-context';
 
 /**
- * Audit trail — every write the app performs records WHO did WHAT to WHICH record, with the changed fields.
- * Call `audit(tx, userPk, …)` (app_user.pk; null / 0 = the system) inside the same transaction as the data change so
- * log and data can never disagree. Each row carries the actor AS AT THE TIME (name, email, role, department read in
- * that transaction) and the request (ip, user agent, session id, request id, the permission used —
- * src/server/request-context.ts); `row_hash` is set by the database (drizzle/0006 trigger), never here.
- *
- * Inside a transaction for the request's own user, audit() first runs assertActor(): the write completes only if the
- * user's CURRENT role still allows what the request relied on (R2).
- *
- * Sign-in / export / print and changes of a role, a permission or a user's status are security events: they (also)
- * go to security_log — LOGIN / LOGIN_FAILED / EXPORT / PRINT only there; app_user role / status and role_permission
- * changes to both (the data change in audit_log, the event in security_log).
+ * Audit trail: call audit() inside the same transaction as the data change so log and data can never disagree.
+ * `row_hash` is set by the database trigger, never here. In the request user's own transaction audit() first runs
+ * assertActor(). Sign-in / export / print go to security_log only; role / permission / status changes go to both.
  */
 export type AuditAction =
   | 'CREATE'
@@ -52,7 +43,7 @@ export type AuditAction =
   | 'RECEIVE'
   | 'RETURN'
   | 'UPLOAD'
-  /** security_log only — rows before drizzle/0006 stay in audit_log */
+  /** security_log only (older rows remain in audit_log) */
   | 'LOGIN'
   /** a refused sign-in (Inactive / deleted account) — summary says why; security_log only */
   | 'LOGIN_FAILED'
@@ -69,7 +60,7 @@ export type AuditEntry = {
   module: string;
   /** table name */
   entity: string;
-  /** business key: J2612088, Q2600462, P00012 — or the row's uuid for a row without one (a user, a customer …; rows before ADR 0008 hold the old int) */
+  /** business key (J2612088, Q2600462, P00012), or the row's uuid for a row without one; old rows hold an int */
   key: string | number;
   /** short human-readable line for the log list */
   summary: string;
@@ -100,9 +91,6 @@ export async function actorName(userPk: number | null, w: Writer = db): Promise<
   return name;
 }
 
-/* ------------------------------------------------------------------ *
- * The actor as at the time + R2
- * ------------------------------------------------------------------ */
 type Actor = {
   pk: number;
   name: string;
@@ -158,13 +146,11 @@ function readActor(w: Writer, pk: number, lock: boolean): Promise<Actor | null> 
 const asserted = new WeakMap<object, { n: number; p: Promise<void> }>();
 
 /**
- * R2 — inside the write transaction, the request's user must STILL hold what the request relied on: their app_user
- * row (active, approved, same session version) and the role_permission rows of every grant / right the guards let
- * through (request-context `needs`), read FOR SHARE so an admin's change to them waits for this write to finish (or
- * this write sees it). Anything gone → 403 and the transaction rolls back; checked() logs the refusal (DENIED) after.
- * Called by audit(); a transaction that changes users / permissions calls it FIRST (lock order: the actor's row before
- * the target's — two admins editing each other otherwise deadlock). writeTx (src/db/client.ts) calls it before and
- * after the work. Once per transaction and set of needs. Outside a request: no-op.
+ * Inside the write transaction the request's user must STILL hold what the request relied on (active row, same
+ * session version, every role_permission the guards used), read FOR SHARE so a concurrent admin change waits.
+ * Anything gone → 403 and rollback. A transaction that changes users / permissions calls it FIRST (the actor's row
+ * before the target's), else two admins editing each other deadlock. Once per transaction and set of needs; outside a
+ * request: no-op.
  */
 export function assertActor(tx: Tx): Promise<void> {
   const c = requestCtx();
@@ -234,7 +220,7 @@ function stamp(actor: Actor | null, self: boolean) {
   const c = requestCtx();
   return {
     at: nowThai(),
-    actorPk: actor?.pk ?? null, // a pk with no row (never in practice: users are soft-deleted) = the system
+    actorPk: actor?.pk ?? null,
     actorEmail: actor?.email?.slice(0, 100) ?? null,
     actorRole: actor?.role?.slice(0, 50) ?? null,
     actorDepartment: actor?.department?.slice(0, 100) ?? null,
@@ -245,8 +231,7 @@ function stamp(actor: Actor | null, self: boolean) {
   };
 }
 
-/** audit_log.entity written before drizzle/0006 renamed the tables (adr/0008-phase2-renames.md) → today's name.
- *  0006 rewrote the copied rows; this keeps any row it missed readable and findable under the new name. */
+/** audit_log.entity under the pre-rename table names → today's name, so old rows stay readable and findable */
 const LEGACY_ENTITY: Record<string, string> = {
   app_config: 'role_permission',
   document_attach: 'job_attachment',
@@ -269,7 +254,7 @@ const LEGACY_ENTITY: Record<string, string> = {
   sale_out_hd: 'sale_order',
 };
 const entityName = (e: string) => (Object.hasOwn(LEGACY_ENTITY, e) ? LEGACY_ENTITY[e]! : e);
-/** an entity filter: today's name and the names it had before 0006 (either may be typed) */
+/** an entity filter: today's name and its old names (either may be typed) */
 const entityIn = (col: Column, e: string) => {
   const name = entityName(e.trim());
   return inArray(col, [name, ...Object.keys(LEGACY_ENTITY).filter((k) => LEGACY_ENTITY[k] === name)]);
@@ -312,7 +297,7 @@ async function rowOf(
 }
 
 const keyId = (key: string) => (isUuid(key) ? key.toLowerCase() : null);
-/** a key that is no uuid and no bare pre-ADR-0008 int is the record's number / code / name (J…, TDJRDEL, a role) */
+/** a key that is no uuid and no bare int is the record's number / code / name (J…, TDJRDEL, a role) */
 const keyNo = (key: string) => (key.trim() && !isUuid(key) && !/^\d+$/.test(key.trim()) ? key.trim() : null);
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
@@ -348,12 +333,11 @@ function eventsOf(e: AuditEntry): { event: SecurityEvent; result: SecurityResult
   return out;
 }
 
-/** One entry, or several (a bulk action) written in a single INSERT. */
 export async function audit(w: Writer, userPk: number | null, entries: AuditEntry | AuditEntry[]): Promise<void> {
   const list = Array.isArray(entries) ? entries : [entries];
   if (!list.length) return;
   const c = requestCtx();
-  const pk = userPk && userPk > 0 ? userPk : null; // the system = NULL (FK, drizzle/0006)
+  const pk = userPk && userPk > 0 ? userPk : null; // the system = NULL (FK)
   const self = !!pk && c?.user?.pk === pk;
   if (self && w !== db) await assertActor(w as Tx);
   const actor = pk ? await readActor(w, pk, false) : null;
@@ -428,9 +412,8 @@ export type SecurityEntry = {
 };
 
 /**
- * A security_log row (sign-in / out, refusals, role / permission / status changes, export / print). `actorPk` = who
- * (null: nobody known — a refused sign-in before any account). In the transaction of the change it records when there
- * is one (logout: with the session_version bump); a refusal is written on its own (`db`) after the refused work rolled back.
+ * `actorPk` null = nobody known (a refused sign-in). Write it in the change's transaction; a refusal is written on its
+ * own (`db`) after the refused work rolled back.
  */
 export async function security(w: Writer, actorPk: number | null, e: SecurityEntry): Promise<void> {
   const c = requestCtx();
@@ -502,7 +485,7 @@ export async function logDenied(): Promise<void> {
   }
 }
 
-/** a row's uuid (ADR 0008) — a filter holding one means "this row", anything else is a name / text */
+/** a row's uuid — a filter holding one means "this row", anything else is a name / text */
 export const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
 
 const norm = (v: unknown): unknown => {
@@ -544,11 +527,7 @@ export function diff(
   return Object.keys(out).length ? out : null;
 }
 
-/* ------------------------------------------------------------------ *
- * Reading (admin page + per-record history)
- * ------------------------------------------------------------------ */
 export type AuditRow = {
-  /** audit_log.id (uuid) */
   id: string;
   at: string;
   user: string;
@@ -577,9 +556,8 @@ export type AuditFilters = {
   action?: string;
 };
 
-/** the admin log's row: who as at the time (email, role, department), the record's id / number, the reason. The
- *  request columns (ip, user agent, session / request id, permission) are written but never leave the server (owner
- *  2026-10-30: read in the database only). The job history shows AuditRow only. */
+/** the admin log's row. The request columns (ip, user agent, session / request id, permission) are written but never
+ *  leave the server. */
 export type AuditLogRow = AuditRow & {
   email: string | null;
   role: string | null;
@@ -659,7 +637,7 @@ const symptomNames = (ids: number[]) =>
   db.select({ id: symptom.pk, name: symptom.symptomName }).from(symptom).where(inArray(symptom.pk, ids));
 /** audit fields holding a master row's id → its name: the cached master lists; model / shipper / customer by id */
 const ID_NAMES: Record<string, (ids: number[]) => Promise<{ id: string | number; name: string | null }[]>> = {
-  // by the integer keys the audit rows hold (the master lists answer uuids — ADR 0008)
+  // by the integer keys the audit rows hold (the master lists answer uuids)
   jobTypeId: (ids) =>
     db.select({ id: jobType.pk, name: jobType.jobTypeName }).from(jobType).where(inArray(jobType.pk, ids)),
   productTypeId: (ids) =>
@@ -686,9 +664,8 @@ const ID_NAMES: Record<string, (ids: number[]) => Promise<{ id: string | number;
       .where(inArray(customer.pk, ids)),
 };
 
-/** rows as people read them — no pk leaves the server (ADR 0008): a job row's user / master ids → names, status ids →
- *  status names (also in older "มอบหมายงานให้ช่าง #116" lines); a user row's key (its uuid, or the old int) → the
- *  person. An id not found stays as it is. The job history and the audit log page / Excel all read through here. */
+/** rows as people read them — no pk leaves the server: user / master ids → names, status ids → status names (also in
+ *  old "มอบหมายงานให้ช่าง #116" summaries); a user row's key → the person. An id not found stays as it is. */
 async function readable<T extends AuditRow>(rows: T[]): Promise<T[]> {
   const ids = new Set<number>();
   const userIds = new Set<string>();
@@ -702,7 +679,7 @@ async function readable<T extends AuditRow>(rows: T[]): Promise<T[]> {
     for (const k of Object.keys(r.changes ?? {})) if (Object.hasOwn(STATUS_NAMES, k)) statusKeys.add(k);
     if (r.entity !== 'job') continue;
     for (const [k, pair] of Object.entries(r.changes ?? {})) {
-      // only a JSON number is an id (rows before drizzle/0006); a string — a name / code, even all digits — is kept
+      // only a JSON number is an id (old rows); a string — a name / code, even all digits — is kept
       for (const v of pair.filter((x): x is number => typeof x === 'number' && x > 0))
         if (USER_KEYS.has(k)) ids.add(v);
         else if (Object.hasOwn(ID_NAMES, k)) masterIds.set(k, (masterIds.get(k) ?? new Set<number>()).add(v));
@@ -738,8 +715,7 @@ async function readable<T extends AuditRow>(rows: T[]): Promise<T[]> {
       ),
     ),
   );
-  /** a user field: a JSON number is a pk (rows before drizzle/0006) → the person; anything else (newer rows store the
-   *  name) as it is. Never a pk: one with no row (or no name) reads "—" */
+  /** a user field: a JSON number is a pk (old rows) → the person; anything else as it is. A pk with no row reads "—" */
   const person = (v: unknown) => {
     if (v === null || v === undefined || v === '') return null;
     if (typeof v !== 'number') return v;
@@ -759,7 +735,7 @@ async function readable<T extends AuditRow>(rows: T[]): Promise<T[]> {
     r.changes && Object.keys(r.changes).some((k) => statusKeys.has(k))
       ? {
           ...r,
-          // a sale order denied / sent back before 2026-10-29 was logged APPROVE (the log is read-only): it was a status
+          // old sale order deny / send-back lines were logged APPROVE (the log is read-only): show them as STATUS
           action:
             r.action === 'APPROVE' &&
             r.entity === 'sale_order' &&
@@ -779,7 +755,7 @@ async function readable<T extends AuditRow>(rows: T[]): Promise<T[]> {
     if (r.entity === 'app_user') {
       const u = users.find((x) => x.id === r.key || String(x.pk) === r.key);
       const who = u && [fullName(u.f, u.l), u.e?.trim()].filter(Boolean).join(' · ');
-      // a pre-ADR-0008 key is the user's pk: never shown — the person, or "—"
+      // an old int key is the user's pk: never shown — the person, or "—"
       return who ? { ...r, key: who } : /^\d+$/.test(r.key) ? { ...r, key: '—' } : r;
     }
     if (r.entity !== 'job') return r;

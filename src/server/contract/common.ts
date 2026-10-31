@@ -55,10 +55,8 @@ export const jsonResponse = (description: string, schema: z.ZodType) => ({
   content: { 'application/json': { schema } },
 });
 
-/** `{ ok: true }` — what most writes answer with nothing else to say. */
 export const Ok = z.object({ ok: z.literal(true) });
 
-/** A redirect, no body. */
 export const redirect = (description: string) => ({
   description,
   headers: { Location: { schema: { type: 'string' as const }, description: 'Where to go.' } },
@@ -129,9 +127,8 @@ export const page = <T extends z.ZodType>(row: T) =>
 export const byNo = (description: string) => z.object({ no: z.string().meta({ description }) });
 
 /**
- * A row's id (ADR 0008): its uuid, read lower-cased. Anything else → `message` — under the field in the
- * default 400 (`details.fields`), or with `invalid: { part: status }` that status and this message.
- * Resolve it to the row with src/server/ids.ts.
+ * A row's id: its uuid, read lower-cased. Anything else → `message` — under the field in the default 400
+ * (`details.fields`), or with `invalid: { part: status }` that status and this message. Resolve it with src/server/ids.ts.
  */
 export const uuid = (message = 'รหัสอ้างอิงไม่ถูกต้อง') => z.uuid({ error: message }).transform((v) => v.toLowerCase());
 

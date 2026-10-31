@@ -114,7 +114,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         @media print { .qt { padding: 0 2mm 2mm; min-height: 276mm; } }
       `}</style>
 
-      {/* ── company header ── */}
       <header className="flex items-start gap-3">
         <img src={co.logoUrl} alt={co.code} className="h-[38px] w-auto shrink-0" />
         <div className="leading-[1.3]">
@@ -137,7 +136,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         <span className="text-[10.5px]">Page : 1 / 1</span>
       </div>
 
-      {/* ── customer / job boxes ── */}
       <table className="grid-b mt-1.5">
         <tbody>
           <tr>
@@ -228,7 +226,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </tbody>
       </table>
 
-      {/* ── repair result ── */}
       <table className="grid-b res mt-1.5">
         <tbody>
           <tr>
@@ -249,7 +246,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </tbody>
       </table>
 
-      {/* ── parts ── */}
       <div className="items-wrap mt-1.5">
         <table className="items">
           <thead>
@@ -318,7 +314,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </table>
       </div>
 
-      {/* ── return / payment + totals ── */}
       <table className="sum">
         <tbody>
           <tr>
@@ -427,7 +422,6 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </tbody>
       </table>
 
-      {/* ── signatures ── */}
       <table className="grid-b mt-1.5">
         <tbody>
           <tr>

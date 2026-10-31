@@ -107,12 +107,7 @@ export function FileInput({
   );
 }
 
-/**
- * Numeric input tuned for easy data entry:
- * - shows an empty field (with a "0.00" placeholder) instead of a literal 0,
- *   so you can type straight away without deleting the leading zero
- * - selects the whole value on focus, so an existing number is overwritten by typing
- */
+/** Shows '' (placeholder "0.00") instead of a literal 0 and selects the value on focus, so typing overwrites it. */
 export function NumberInput({
   value,
   onChange,
@@ -187,11 +182,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
 );
 Select.displayName = 'Select';
 
-/**
- * Checkbox — Radix/shadcn underneath (keyboard, indeterminate, aria-checked),
- * but keeps the native-input props the app uses: `checked`, `defaultChecked`,
- * `onChange(e)` (e.target.checked), `disabled`, `name`, `aria-label`.
- */
+/** Radix underneath, but keeps the native-input props the app uses (`checked`, `onChange(e)` with e.target.checked …). */
 export function Checkbox({
   className,
   checked,

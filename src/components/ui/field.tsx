@@ -4,21 +4,10 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * Field = label + one control (+ hint / error). The label is tied to the control automatically:
- * Field makes an id (React.useId) and the FIRST form control mounted inside it (Input, Select,
- * Textarea, NumberInput, SearchSelect and the pickers — via useFieldControl) takes it, together
- * with aria-describedby (hint / error) and aria-invalid. So clicking the label focuses the control,
- * and screen readers announce "ประเภทงานหลัก, combobox" instead of an unnamed box.
- * A control that already has its own `id` keeps it and the label follows it.
- *
- * Controls register in a layout effect (never by writing during render — a render React throws
- * away must not leave the label pointing at nothing); the owner is settled before the browser paints.
- *
- * The label never points at nothing (WAI-ARIA APG):
- *  - a labelable control (input / select / textarea / button) owns it → <label for>
- *  - a read-only value (<ReadOnly>) owns it → no `for`; the value is named by aria-labelledby
- *  - `group` (radios / checkboxes that carry their own labels) → the wrapper is a named
- *    radiogroup / group (aria-labelledby), each option keeps its own label
+ * The label is tied to the FIRST form control mounted inside (via useFieldControl), with aria-describedby / aria-invalid;
+ * a control with its own `id` keeps it. Controls register in a layout effect, never during render: a render React
+ * throws away must not leave the label pointing at nothing. A read-only value is named by aria-labelledby; `group`
+ * makes the wrapper a named radiogroup / group.
  */
 type FieldCtx = {
   id: string;
@@ -224,7 +213,7 @@ export function ReadOnly({ children }: { children: React.ReactNode }) {
       {...field}
       role="textbox"
       aria-readonly="true"
-      className="flex min-h-9 items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-sm text-foreground" // a longer note wraps inside it
+      className="flex min-h-9 items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-sm text-foreground"
     >
       {children || <span className="text-muted-foreground">—</span>}
     </div>

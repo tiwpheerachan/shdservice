@@ -1,14 +1,6 @@
 import { Skeleton } from '@/components/ui/skeleton';
 
-/**
- * Shown by the App Router while the (app) layout resolves the session on a
- * navigation — a generic page outline (header, KPI row, table) so the shell
- * does not sit empty and the content does not jump in.
- *
- * At least the viewport's content height (100dvh less the top bar): the footer stays below the fold
- * while it shows. Shorter, the footer would jump down when the page replaced it — React holds a streamed
- * boundary's reveal ~300 ms after its fallback painted, so that is a visible layout shift (CLS).
- */
+/** at least the viewport's content height: shorter, the footer jumps down when the page replaces it (React holds the reveal ~300 ms) — a visible CLS */
 export default function AppLoading() {
   return (
     <div className="min-h-[calc(100dvh-var(--topbar-h))] space-y-5" aria-busy aria-label="กำลังโหลด">

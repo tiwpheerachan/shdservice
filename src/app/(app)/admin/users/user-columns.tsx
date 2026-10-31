@@ -8,7 +8,6 @@ import type { User } from '@/data/types';
 import { PENDING_ROLE } from '@/lib/access';
 import { Email } from '@/components/shared/email';
 
-/** the role chip — a pending sign-up (no role yet) shows as a warning */
 function RoleBadge({ role }: { role: string }) {
   return role === PENDING_ROLE ? (
     <Badge tone="warning" dot>
@@ -59,7 +58,7 @@ export function userColumns({
       width: '52px',
       align: 'center',
       sortable: false,
-      hideBelow: 'sm', // phones: name + role + action
+      hideBelow: 'sm',
       cell: (_r, i) => <span className="num text-muted-foreground">{i + 1}</span>,
     },
     {

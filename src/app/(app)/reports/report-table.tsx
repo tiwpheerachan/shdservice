@@ -37,11 +37,7 @@ export function useReportColumns(report: ReportKey): Column<ReportRow>[] {
   );
 }
 
-/**
- * The app's own font (Noto Sans Thai, self-hosted by next/font from /_next/static/media) for the print tab: this
- * page's @font-face rules with their urls made absolute — the tab is written from our origin (CSP font-src 'self'),
- * but a rule copied as written would resolve its relative url against the page, not its stylesheet.
- */
+/** this page's @font-face rules with absolute urls for the print tab: a rule copied as written resolves its relative url against the page, not its stylesheet */
 function appFontFaces(): string {
   const out: string[] = [];
   for (const sheet of Array.from(document.styleSheets)) {
@@ -65,11 +61,7 @@ function appFontFaces(): string {
   return out.join('\n');
 }
 
-/**
- * ReportView's onExport: Excel / Word from /api/export/<resource> (a report: `report_<key>`; same filters), PDF = its
- * print view written into a new tab and printed (the browser saves it as PDF). Word / PDF stop at 3,000 rows and
- * say so on the page itself.
- */
+/** PDF = the print view written into a new tab and printed; Word / PDF stop at 3,000 rows and say so on the page */
 export function reportExport(resource: string, params: Params, file: string) {
   return async (format: 'xlsx' | 'doc' | 'pdf', cond: string) => {
     if (format === 'xlsx') return exportXlsx(resource, { ...params, file });

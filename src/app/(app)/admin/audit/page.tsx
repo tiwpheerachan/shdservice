@@ -4,7 +4,7 @@ import { prefetch } from '@/server/prefetch';
 import { NO_FILTER, PAGE_SIZE, listKey } from './filters';
 import AuditPage from './page-client';
 
-/** page 1 of the audit log in the HTML: the table never grows in after the first paint (CLS) */
+/** page 1 in the HTML so the table never grows in after first paint (CLS) */
 export default async function Page() {
   const fallback = await prefetch([listKey({ ...pageArgsOf({ ...FIRST_PAGE, pageSize: PAGE_SIZE }), ...NO_FILTER })]);
   return (

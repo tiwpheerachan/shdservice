@@ -4,7 +4,7 @@ import { ApiError, api, postJson, xhrSend } from '@/lib/api';
 /**
  * Video job attachments (a customer's clip of the fault), made ready in the browser BEFORE anything is uploaded,
  * with mediabunny (WebCodecs) — imported only once a video is picked: ≤ 3 minutes; re-encoded to MP4 H.264 + AAC
- * inside 1920×1080, ≤ 30 fps, at a constant quality (owner 2026-10-28: as small as 1080p allows — a 3-minute clip of a
+ * inside 1920×1080, ≤ 30 fps, at a constant quality (as small as 1080p allows — a 3-minute clip of a
  * device on a desk is ~35–60 MB, never over ~115 MB), so it plays in every browser; plus a small JPEG of
  * the frame ~1 s in (the list's thumbnail). A browser that cannot convert it (no WebCodecs, no H.264 / AAC
  * encoder, a codec it cannot decode) sends the original if it is within the cap — it may not play everywhere.

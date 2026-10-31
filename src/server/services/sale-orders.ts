@@ -45,7 +45,6 @@ import { z } from 'zod';
 import type { saleOrderSave } from '@/server/contract/sales';
 import { staffOrKeep } from './users';
 
-/** approve_status ids */
 export { AS };
 
 // พนักงานขาย = sale_out_by (document_create_by = who keyed the order in)
@@ -53,8 +52,7 @@ const seller = alias(appUser, 'creator');
 const approver = alias(appUser, 'approver');
 /** the stock document a line was picked on (sale_order_line.pick_stock_move_pk) */
 const pickDoc = alias(stockMove, 'pick_doc');
-/** the order's ใบเบิก: the WHO (type 4) issued for it (sale_order.reference_no before drizzle/0006 — dropped, it was
- *  that movement's number) */
+/** the order's ใบเบิก: the WHO (type 4) issued for it */
 export const stockDoc = sql<
   string | null
 >`(select m.stock_move_no from stock_move m where m.sale_order_pk = ${saleOrder.pk}
@@ -279,8 +277,8 @@ export type SaleOrderDetail = SaleOrder & {
   figuresLocked: boolean;
 };
 
-/** a line's description: its product's name, else its remark (a service line = no product_pk — product_type was
- *  dropped in drizzle/0006); legacy service lines (SV0001) have neither */
+/** a line's description: its product's name, else its remark (a service line = no product_pk); legacy service lines
+ *  (SV0001) have neither */
 const lineName = (
   productName: string | null,
   d: { remark: string | null; productPk: number | null; productCode: string | null },
@@ -288,7 +286,7 @@ const lineName = (
 
 /**
  * An order's lines with the code each one prints: a product line's is its product's (product_code is NULL on new
- * product lines — ADR 0008 "no redundant data"; legacy lines keep theirs), a service line's is its text.
+ * product lines; legacy lines keep theirs), a service line's is its text.
  */
 const linesOf = (x: Tx, hdPk: number) =>
   x
@@ -407,9 +405,8 @@ const NO_SNAPSHOT = {
 };
 
 /**
- * The parsed body of POST /api/sale-orders (saleOrderSave in src/server/contract/sales.ts). `slip` is ignored: the
- * slip path is written only by /api/upload (a client-sent path could point at any file); `submit` true → รออนุมัติ,
- * false → กำลังดำเนินการจัดทำ (an edit by anyone but the creator keeps the status).
+ * `slip` is ignored: the slip path is written only by /api/upload (a client-sent path could point at any file);
+ * `submit` true → รออนุมัติ, false → กำลังดำเนินการจัดทำ (an edit by anyone but the creator keeps the status).
  */
 export type SaleOrderInput = z.output<typeof saleOrderSave.body>;
 
@@ -577,8 +574,8 @@ export async function saveSaleOrder(
     // the edit form sends neither fee nor tracking: left out → the order keeps its own
     const fee = i.fee !== undefined ? num(i.fee) : num(prev?.feeAmount);
     const net = Math.round((totalBase + fee) * 100) / 100;
-    // ยอดชำระ: only what the user typed (no default type / amount), never more than the order total —
-    // an edit that lowers the lines must lower the payment too (SO2600768 kept 3,900 on a 1,300 order)
+    // ยอดชำระ: only what the user typed (no default type / amount), never more than the order total — an edit that
+    // lowers the lines must lower the payment too
     const paid =
       i.paymentAmount !== undefined && i.paymentAmount !== null && i.paymentAmount !== '' ? num(i.paymentAmount) : null;
     // the money / qty figures change (a line added, changed or deleted, the fee or the payment): only then are the
@@ -589,8 +586,8 @@ export async function saveSaleOrder(
       rows.some((r) => r.figures) ||
       fee !== num(prev.feeAmount) ||
       (paid ?? 0) !== num(prev.paymentAmount); // none = 0 (the form sends "0" for a legacy order's NULL)
-    // what a legacy order already recorded is System Admin's alone (owner 2026-10-30): a recorded line's product / qty
-    // / price (or deleting it), a fee or a payment it holds — new lines and a first payment stay everyone's
+    // what a legacy order already recorded is System Admin's alone: a recorded line's product / qty / price (or deleting
+    // it), a fee or a payment it holds — new lines and a first payment stay everyone's
     if (
       prev &&
       (old.some((_, i) => !used.has(i)) ||
@@ -631,8 +628,8 @@ export async function saveSaleOrder(
       assertVersion(i.version, prev.rowVersion);
       // only the creator sends it for approval (else an approver submits someone's draft and approves it)
       const own = by.isAdmin || prev.createdByAppUserPk === byUserId;
-      // … and only the creator edits it while it waits: an approver could change it (the salesperson, a
-      // price) and approve what the creator never sent (owner decision)
+      // … and only the creator edits it while it waits: an approver could change it (the salesperson, a price) and
+      // approve what the creator never sent
       if (!own && prev.approveStatusId === AS.WAIT) throw new HttpError(403, WAITING_CREATOR_ONLY);
       if (!own && approveId === AS.WAIT && prev.approveStatusId !== AS.WAIT)
         throw new HttpError(403, SUBMIT_CREATOR_ONLY);
@@ -656,7 +653,7 @@ export async function saveSaleOrder(
           .where(eq(saleOrder.pk, prev.pk));
       // a legacy snapshot dropped with the old customer: the customer's code below says what changed
       for (const k of Object.keys(NO_SNAPSHOT)) delete changes[k];
-      // the log names the customer by its code and the salesperson by name — never a pk (ADR 0008)
+      // the log names the customer by its code and the salesperson by name — never a pk
       if (changes.customerPk) {
         delete changes.customerPk;
         changes.customerCode = [cur?.customerCode ?? null, cust.code];
@@ -739,10 +736,9 @@ export { SELF_APPROVE, SELF_APPROVE_SALES, NOT_APPROVER, SUBMIT_CREATOR_ONLY };
 export const REASON_REQUIRED = 'ต้องระบุเหตุผล';
 
 /**
- * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy
- * data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล just stamp the decision (with a required reason).
- * Only a role with the special right SO Approve decides (System Admin always), only a waiting (2) order, not its creator or
- * salesperson (owner decisions 2026-10-15; System Admin may).
+ * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล
+ * just stamp the decision (with a required reason). Only SO Approve (System Admin always) decides, only a waiting (2)
+ * order, never its creator or salesperson (System Admin may).
  */
 export async function approveSaleOrder(
   no: string,

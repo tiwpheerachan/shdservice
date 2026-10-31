@@ -6,18 +6,15 @@ import { Input } from '@/components/ui/input';
 import { cleanCode, typedOnThai } from '@/lib/validation';
 
 /**
- * An input for a number with a fixed shape (Serial, Sale Order, IMEI, parcel, document no.): Thai typed into it
- * that reads as a well-formed value on the US keyboard (the keyboard was left on Thai — prod 2026-10: 140
- * serials) is offered as that value, one tap to take it.
+ * Thai typed with the keyboard left on Thai that reads as a valid value on the US layout is offered as that value,
+ * one tap to take it.
  */
 export function CodeInput({
   accepts,
   onFix,
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement> & {
-  /** is this a well-formed value for the field */
   accepts: (v: string) => boolean;
-  /** take the suggested value */
   onFix: (v: string) => void;
 }) {
   // all typed on Thai ("/" "-" = the 2 / 3 keys) first, else with the marks kept — the one the field takes

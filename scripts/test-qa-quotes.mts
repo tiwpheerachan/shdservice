@@ -1,5 +1,5 @@
 /**
- * scripts/test-qa-quotes.mts — quotation bugs found by the multi-user QA round (2026-10-21): line discounts
+ * scripts/test-qa-quotes.mts — quotation bugs: line discounts
  * and line fields the API took as anything, the job's "agreed quotation" pointer under two approvals / a
  * move, a quotation built from a stale copy of the job's parts, half-cent rounding, expired quotations in
  * the list / filter / export, and what a new quotation may start as.
@@ -129,7 +129,7 @@ async function post(body: unknown) {
   return { status: r.status, fields: b.details?.fields ?? {}, body: b };
 }
 /** the job's agreed quotation: the one of its quotations in an agreed status (3 / 6 / 9, ux_quotation_agreed_job) —
- *  job.approved_quotation_pk is a legacy snapshot, NULL on new rows (ADR 0008 "no redundant data") */
+ *  job.approved_quotation_pk is a legacy snapshot, NULL on new rows */
 const pointer = async (jobNo: string) =>
   (
     await db.execute<{ p: string | null }>(
@@ -187,7 +187,7 @@ try {
     ]);
     for (const m of Object.values(r.fields)) assert.match(m, /[ก-๙]/, m);
   });
-  // a per-line discount is legacy's ส่วนลด (บาท / %) since 2026-10-29 — its math: scripts/test-qa-quotation.mts
+  // a per-line discount is legacy's ส่วนลด (บาท / %) — its math: scripts/test-qa-quotation.mts
   await test('B1 a per-line discount (บาท or %) saves and lowers the net; 0 saves as before', async () => {
     for (const [extra, net] of [
       [{ discount: 30 }, 70],
@@ -287,7 +287,7 @@ try {
     );
   });
   await test('B2 a second agreed quotation on a job cannot even be stored (ux_quotation_agreed_job); the agreed one stays', async () => {
-    // legacy data held none (0 jobs with two, ADR 0008): the database refuses it outright now
+    // legacy data held none (0 jobs with two): the database refuses it outright
     const [{ no }] = (
       await db.execute<{ no: string }>(
         sql`SELECT quotation_no AS no FROM quotation WHERE job_pk = (SELECT pk FROM job WHERE job_no = ${j2}) AND quotation_status_id = 4`,

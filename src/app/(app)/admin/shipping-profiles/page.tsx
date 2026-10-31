@@ -19,7 +19,7 @@ import { useTourRestore } from '@/components/tour/tour';
 import { shippingProfileSchema } from '@/lib/validation/admin';
 import { cn } from '@/lib/utils';
 
-/** โปรไฟล์บริษัทขนส่ง — logo + tracking URL shown to customers on /track */
+/** logo + tracking URL shown to customers on /track */
 type Profile = {
   id: string;
   code: string;
@@ -53,7 +53,6 @@ export default function ShippingProfilesPage() {
     [pendingUrl],
   );
 
-  // the list: read through swr (one request, cached); after a save `load()` re-reads it
   const { data, loading, mutate } = useApi<{ rows: Profile[] }>('/api/admin/shipping-profiles', {
     fresh: true,
     onError: (msg) => push({ kind: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', desc: msg }),
@@ -61,9 +60,9 @@ export default function ShippingProfilesPage() {
   const rows = data?.rows ?? [];
   const load = () => mutate();
 
-  const fe = useFormErrors(); // errors under code / name (the API checks the same schema)
+  const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
-  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
+  useTourRestore(() => form, setForm);
   const set = <K extends keyof FormValues>(k: K, v: FormValues[K]) => setForm((f) => ({ ...f, [k]: v }));
   const openForm = (p: Profile | null) => {
     setEditing(p);
@@ -77,7 +76,7 @@ export default function ShippingProfilesPage() {
     if (fe.report(fe.run(shippingProfileSchema, form))) return;
     setSaving(true);
     try {
-      // `expect`: the profile as the form loaded it — another admin's save since → 409 stale, not overwritten
+      // `expect`: another admin's save since load → 409 stale, not overwritten
       const d = await postJson<{ row: Profile }>('/api/admin/shipping-profiles', {
         ...form,
         id: editing?.id,

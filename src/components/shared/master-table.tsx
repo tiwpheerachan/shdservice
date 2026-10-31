@@ -140,7 +140,7 @@ export function MasterTable({ config }: { config: MasterConfig }) {
         desc: `${config.title} — ${d.row.name}`,
       });
     } catch (e) {
-      if (isStale(e)) router.refresh(); // the list as stored now
+      if (isStale(e)) router.refresh();
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);

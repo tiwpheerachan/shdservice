@@ -9,7 +9,6 @@ import { NO_FILTER, fromQuery, type Filters, type TatSource } from './filters';
 
 export { toParams, type Filters, type TatSource } from './filters';
 
-/** dashboard TAT buckets (keys match the dashboard's TatKey) */
 export const TAT_BUCKET: Record<string, string> = { ...TAT_BUCKET_LABEL, total: 'ทุกช่วงวัน' };
 
 /**
@@ -31,24 +30,17 @@ function toQuery(f: Filters, t: ServerTableState, tat: TatSource | null, kpi: st
   return p.toString();
 }
 
-/**
- * The job list's filters + table state kept in the URL (toQuery / fromQuery), and the dashboard TAT / KPI source
- * a deep link came from. `onSearch` is the filter bar's ค้นหา, `clearAll` its ล้างค่า (and the chips' ✕).
- */
+/** `onSearch` is the filter bar's ค้นหา, `clearAll` its ล้างค่า (and the chips' ✕) */
 export function useJobListUrl() {
-  // the URL holds the list (toQuery): read on load and on EVERY change of it, not only on mount — a link to
-  // this page from this page (the bell in the topbar, back / forward) changes the query string without
-  // remounting. A link starts from a clean filter set, so e.g. one engineer from the bell never lingers.
+  // read on load and on EVERY query change, not only on mount: a link to this page from this page (the bell, back / forward) doesn't remount.
+  // A link starts from a clean filter set, so e.g. one engineer from the bell never lingers.
   const search = useSearchParams().toString();
   const [init] = React.useState(() => fromQuery(new URLSearchParams(search)));
-  // FilterBar (applied on ค้นหา) + table state → one server query per change
   const { draft, setDraft, setD, filters, setFilters, reset, narrowed, table, pageArgs, server } = useServerTable(
     NO_FILTER,
     { start: init.filters, page: init.page, pageSize: init.pageSize, sort: init.sort },
   );
-  // where a dashboard TAT deep link came from (shown as a clearable chip)
   const [tat, setTat] = React.useState<TatSource | null>(init.tat);
-  // the dashboard KPI card a deep link came from (its label), shown the same way
   const [kpi, setKpi] = React.useState<string | null>(init.kpi);
   /** the query string we wrote ourselves (below) — not a new link to read */
   const ownUrl = React.useRef(search);

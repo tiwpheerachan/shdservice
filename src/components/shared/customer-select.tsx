@@ -28,15 +28,7 @@ import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { useTourRestore } from '@/components/tour/tour';
 import { useHydrated } from '@/components/shared/email-text';
 
-/**
- * Customer block used by job / quotation / sale-order forms.
- *
- *   ลูกค้าเดิม  → search-as-you-type (code / name / phone / tax id / email) → pick →
- *                 read-only details + link to the customers page for edits
- *   ลูกค้าใหม่  → inline CustomerFields → "บันทึกลูกค้าใหม่" (POST /api/customers) →
- *                 auto-selected; the server refuses duplicates (phone / email / tax id)
- *                 and the conflicts are shown with a "ใช้ลูกค้ารายนี้" shortcut
- */
+/** ลูกค้าใหม่: the server refuses duplicates (phone / email / tax id) and the conflicts offer "ใช้ลูกค้ารายนี้". */
 type Mode = 'existing' | 'new';
 
 export function CustomerSelect({
@@ -79,7 +71,7 @@ export function CustomerSelect({
       const d = await api<{ rows: Customer[] }>(`/api/customers/lookup${qs({ q: code })}`);
       // the exact code only — a customer deleted meanwhile is not found, never another one in its place
       const hit = d.rows.find((c) => c.code === code) ?? null;
-      // Inactive goes on no new document (owner 2026-10-21) — re-reading the one already on it still works
+      // Inactive goes on no new document — re-reading the one already on it still works
       if (hit?.status === 'Inactive' && hit.code !== value?.code) {
         push({ kind: 'error', title: 'ลูกค้ารายนี้ปิดใช้งาน', desc: `${code} — เปิดใช้งานก่อน หรือเลือกรายอื่น` });
         return null;
@@ -119,7 +111,7 @@ export function CustomerSelect({
       setMode('existing');
     } catch (e) {
       const details = e instanceof ApiError ? (e.details as { conflicts?: CustomerConflict[] } | undefined) : undefined;
-      // the notice + the field's own error say it — no toast (it sat on the dialog's save button), as on /customers
+      // the notice + the field's own error say it — a toast would cover the dialog's save button (as on /customers)
       if (details?.conflicts?.length) {
         setConflicts(details.conflicts);
         fe.setErrors(apiFieldErrors(e) ?? {});
@@ -130,7 +122,6 @@ export function CustomerSelect({
     }
   };
 
-  /* ---------- selected: read-only details ---------- */
   if (value) {
     const c = value;
     return (
@@ -202,7 +193,6 @@ export function CustomerSelect({
 
   if (readOnly) return <p className="text-sm text-muted-foreground">—</p>;
 
-  /* ---------- nothing selected: choose เดิม / ใหม่ ---------- */
   return (
     <div className="space-y-4">
       <div
@@ -261,7 +251,6 @@ export function CustomerSelect({
   );
 }
 
-/* ---------- search-as-you-type (cmdk) ---------- */
 function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNew?: (prefill: string) => void }) {
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(undefined, { label: 'ค้นหาลูกค้า' });
@@ -367,7 +356,7 @@ function CustomerSearch({ onPick, onNew }: { onPick: (c: Customer) => void; onNe
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">ไม่พบลูกค้าที่ตรงกับ "{q.trim()}"</p>
             )}
             {rows.map((c) => (
-              // Inactive goes on no new document (owner 2026-10-21): shown, so nobody adds them again, not choosable
+              // Inactive goes on no new document: shown, so nobody adds them again, not choosable
               <CommandPrimitive.Item
                 key={c.code}
                 value={c.code}

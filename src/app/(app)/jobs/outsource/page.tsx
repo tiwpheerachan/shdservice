@@ -44,7 +44,7 @@ import { useTourRestore } from '@/components/tour/tour';
 
 /** the statuses this page sets (saveOutsource refuses others; the job's own status is kept as an option) */
 const OUTSOURCE_IDS: number[] = [JS.OUTSOURCE_SENT, JS.OUTSOURCE_RECEIVED];
-const OUTSOURCE_FALLBACK = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source')); // until job_statuses loads
+const OUTSOURCE_FALLBACK = JOB_STATUS_OPTIONS.filter((s) => s.includes('Out-Source'));
 /** receiving back needs its date (saveOutsource says the same) */
 const receiveSchema = outsourceActionSchema.refine((v) => !!v.receive?.date, {
   path: ['receive', 'date'],
@@ -61,10 +61,9 @@ function OutsourceForm() {
     : OUTSOURCE_FALLBACK;
   const { userId: meId, can } = useAccess();
   const jobLocked = !can('Job Management', 'edit'); // the shared job sections: commonSections leaves them out
-  // every job that arrives — from the URL, the search bar, or a save (setJob) — fills the form
   const { jobNo, job, loading, error, find, setJob } = useJob({ onRecord: (j) => prefill(j) });
   const { s: form, reset, set } = useJobForm();
-  const act = useWorkflowErrors(() => find(job?.id ?? '')); // stale save → read the same job again
+  const act = useWorkflowErrors(() => find(job?.id ?? ''));
   const [tab, setTab] = React.useState('device');
   const [saving, setSaving] = React.useState(false);
   const [d, setD] = React.useState({
@@ -79,7 +78,6 @@ function OutsourceForm() {
     recvDetail: '',
     status: '',
   });
-  // editing a field clears its error (keys = the payload paths the rules report)
   const ERR_KEY: Partial<Record<keyof typeof d, string>> = {
     sendTo: 'send.to',
     sendDate: 'send.date',
@@ -98,9 +96,8 @@ function OutsourceForm() {
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState<typeof d | null>(null);
   useUnsavedChanges(!!saved && JSON.stringify(d) !== JSON.stringify(saved));
-  useTourRestore(() => d, setD); // a บทสอน leaves the send / receive fields as it found them
+  useTourRestore(() => d, setD);
 
-  // prefill from the job + its latest job_send_forward_dt row
   function prefill(job: JobDetail) {
     reset(fromJob(job));
     const last = job.outsource[job.outsource.length - 1];
@@ -129,9 +126,8 @@ function OutsourceForm() {
   // a legacy row received without a date is saved with the send block only
   const back = !open && job?.outsource.at(-1)?.status === SEND_STATUS.RECEIVED && !!d.recvDate;
 
-  // POST /api/jobs/:id/outsource → job_send_forward_dt (send / receive) + status 14/15 + job_log
   const save = async () => {
-    if (!job) return; // the save bar only shows once a job is loaded (RecordGate)
+    if (!job) return;
     const sendTo = d.sendTo.trim();
     const receiving = !!open && (d.recvDate || d.recvDetail);
     const body = {

@@ -32,7 +32,7 @@ import { JobDetail, LinkStatus } from './shapes';
 const s = z.string();
 const n = z.number();
 const tags = ['Jobs'];
-/** a job in a path: its uuid (ADR 0008) — the number (J…) is searched (GET /data/jobs), never a path; a non-uuid → 404 */
+/** a job in a path: its uuid — the number (J…) is searched (GET /data/jobs), never a path; a non-uuid → 404 */
 const jobId = byUuid('งาน', 'the job (job.id) — not its number');
 const BY_ID = { params: 404 } as const;
 const answer = (what: string) => jsonResponse(what, z.object({ ok: z.literal(true), job: JobDetail }));

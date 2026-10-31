@@ -24,10 +24,10 @@ type Row = { sysCode: string; name: string; status: string; onhand: number; qty:
 
 export default function ReceivePage() {
   const { push } = useToast();
-  const fe = useFormErrors(); // same as every form: the error on screen, one summary toast
+  const fe = useFormErrors();
   const { name: me } = useAccess();
   const [rows, setRows] = React.useState<Row[]>([]);
-  /** a picked part → a line (once; picked again = its quantity + 1). INACTIVE parts are still received (owner rule) */
+  /** a picked part → a line (once; picked again = its quantity + 1). INACTIVE parts are still received */
   const addRow = (p: { sysCode: string; name: string; status: string; onhand: number }) =>
     setRows((s) =>
       s.some((r) => r.sysCode === p.sysCode)
@@ -39,7 +39,6 @@ export default function ReceivePage() {
   const [supplier, setSupplier] = React.useState('');
   const [remark, setRemark] = React.useState('');
   const [saving, setSaving] = React.useState(false);
-  // บทสอน: the header and the typed quantities go back to how they were
   useTourRestore(
     () => ({
       po,
@@ -58,9 +57,8 @@ export default function ReceivePage() {
   );
 
   const typedQty = rows.reduce((n, r) => n + r.qty, 0);
-  useClearOnChange(fe.clear, { lines: typedQty, date }); // typing a quantity / picking a date takes the error away
+  useClearOnChange(fe.clear, { lines: typedQty, date });
 
-  // WHI document: stock_move / stock_move_line + product_stock.quantity_available/remain
   const save = async () => {
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.sysCode, qty: r.qty }));
     const body = { date, poRef: po, supplier, remark, lines };

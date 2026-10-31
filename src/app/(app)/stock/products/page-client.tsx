@@ -93,7 +93,7 @@ export default function ProductsPage() {
   } | null>(null);
   // mount the (lazy) modal on first open and keep it mounted so the close animation still plays
   const [modalUsed, setModalUsed] = React.useState(false);
-  if (detail && !modalUsed) setModalUsed(true); // adjusted while rendering (first open)
+  if (detail && !modalUsed) setModalUsed(true);
   // ?id=<product uuid> (an anomaly link) → that product's dialog, once (the swr answer's callback)
   const linkId = useSearchParams().get('id')?.trim().toLowerCase() ?? '';
   const linkOpened = React.useRef(false);
@@ -107,7 +107,6 @@ export default function ProductsPage() {
     onError: (msg) => push({ kind: 'error', title: 'ไม่พบอะไหล่', desc: msg }),
   });
 
-  // FilterBar (applied on "ค้นหา") + server-side paging (product table 2.5k rows; INACTIVE shown, DELETED hidden)
   const {
     draft,
     setDraft,
@@ -158,9 +157,8 @@ export default function ProductsPage() {
     refetchStats();
   };
 
-  // ยกเลิก = product.record_status (+ status_changed_at / _by)
   const cancelProduct = async (r: Product) => {
-    if (!canDel) return; // the ยกเลิก button only shows with the permission
+    if (!canDel) return;
     const ok = await confirm({
       tone: 'danger',
       title: `ยกเลิกรายการอะไหล่ ${r.sysCode}?`,

@@ -48,18 +48,12 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
 };
 
 /**
- * Set record_status (ACTIVE / INACTIVE / DELETED) on any entity. Nothing is ever
- * hard-deleted (is_active / app_user.deleted / sale_order.document_status were the same fact and are dropped,
- * drizzle/0006):
- *   jobs → DELETED also sets job_status 0 "ยกเลิกข้อมูล" (+ job_log), as the old app did; restoring
- *          puts back the last status before that (job_log; none → 1 งานใหม่, as the old app did) + job_log
- *   sale orders → + cancel stamp (an approved one — stock issued — cannot be cancelled)
- * Restoring a DELETED row is done in SQL only (by decision) — the API still
- * accepts ACTIVE so the existing users-page restore button keeps working.
- * `mayRestore` = the caller holds `del` on the module (customers: is System Admin): taking a row out of DELETED
- * is the reverse of deleting it, so `edit` alone is refused (checked against the row as locked here).
- * `mayCancelOthers` = may cancel a sale order someone else created (System Admin / SO Approve) — a pending
- * order is its creator's, as its edits are.
+ * Set record_status on any entity; nothing is ever hard-deleted. Jobs → DELETED also sets job_status 0
+ * "ยกเลิกข้อมูล" (+ job_log), as legacy did; restoring puts back the last status before that (none → 1 งานใหม่).
+ * Sale orders → + cancel stamp (an approved one — stock issued — cannot be cancelled).
+ * `mayRestore` = the caller holds `del` on the module (customers: System Admin): leaving DELETED is the reverse of
+ * deleting, so `edit` alone is refused. `mayCancelOthers` = may cancel a sale order someone else created (System Admin /
+ * SO Approve) — a pending order is its creator's, as its edits are.
  */
 export async function setRecordStatus(
   table: RecordTable,
@@ -75,9 +69,8 @@ export async function setRecordStatus(
   // a document is ACTIVE or DELETED — INACTIVE left a quotation listed as open with nothing to show it
   if (rs === RS.INACTIVE && (table === 'quotations' || table === 'sale_orders'))
     throw new HttpError(400, 'เอกสารปิดใช้งานไม่ได้ — ลบ (ยกเลิก) หรือกู้คืนเท่านั้น');
-  // ADR 0008: a part / job / quotation / sale order comes as its uuid — from here on its code / number
-  // (what the rest of this function, its messages and its audit line work with)
-  // `pk` = the row's pk (what the part log / job log / job link to since drizzle/0006)
+  // a part / job / quotation / sale order comes as its uuid — from here on its code / number (what the rest of this
+  // function, its messages and its audit line work with); `pk` = the row's pk
   const DOC = { products: 'อะไหล่', jobs: 'งาน', quotations: 'ใบเสนอราคา', sale_orders: 'ใบสั่งขาย' } as const;
   let pk = 0;
   /** the row's uuid when `id` became its number (the audit line carries both) */
@@ -179,7 +172,7 @@ export async function setRecordStatus(
         if (cur.rs !== rs)
           await tx
             .update(appUser)
-            .set(stamp) // deleted = record_status DELETED (app_user.deleted dropped, drizzle/0006)
+            .set(stamp)
             .where(eq(appUser.id, String(id)));
         await log(tx, cur.rs, '', fullName(cur.first, cur.last) || clean(cur.u));
       });

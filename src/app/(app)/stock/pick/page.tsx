@@ -69,7 +69,7 @@ type ReturnLine = {
 
 export default function PickPage() {
   const { push } = useToast();
-  const fe = useFormErrors(); // same as every form: the error under its field, focus, one summary toast
+  const fe = useFormErrors();
   // งานที่ยังไม่ปิด/ไม่ยกเลิกที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (รับคืนได้ทุกสถานะงาน)
   const { data: PENDING_JOB_NOS, ...pendingLookup } = useJobNos(300, 'pending_parts');
   const { data: RETURNABLE_JOB_NOS, ...returnableLookup } = useJobNos(300, 'returnable');
@@ -85,7 +85,6 @@ export default function PickPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [payTo, setPayTo] = React.useState('');
   const [remark, setRemark] = React.useState('');
-  // บทสอน: the document type, its reference, the lines (Get Data / quantities) and the footer go back
   useTourRestore(
     () => ({ docType, ref, lines, loaded, payTo, remark }),
     (v) => {
@@ -130,10 +129,9 @@ export default function PickPage() {
     setRef('');
     setLines([]);
     setLoaded(false);
-    fe.setErrors({}); // another document → the old one's errors no longer apply
+    fe.setErrors({});
   };
 
-  // ดึงรายการค้างจ่ายของเอกสารอ้างอิงจาก DB
   const getData = async () => {
     if (!ref) {
       const e = { ref: 'ต้องเลือกอ้างอิงเลขเอกสาร' };
@@ -315,9 +313,8 @@ export default function PickPage() {
       ),
     },
   ];
-  useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue }); // a value that changes takes its error away
+  useClearOnChange(fe.clear, { ref, payTo, lines: totalIssue });
 
-  // WHO document (type 3/4/5) → stock_move / stock_move_line + quantity_used/remain (+ grant on ใบเบิก)
   const save = async () => {
     const body = {
       type: kind,
@@ -362,7 +359,6 @@ export default function PickPage() {
         description="Stock Module » ตัดจ่ายอะไหล่ตามงานซ่อม / ใบสั่งขาย / อื่นๆ และรับคืนอะไหล่ที่จ่ายไปแล้วเข้าคลัง"
       />
 
-      {/* document header */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
           <Field label="หมายเลขเอกสาร">
@@ -487,7 +483,6 @@ export default function PickPage() {
         }
       />
 
-      {/* footer */}
       <div className="surface p-4">
         <FieldGrid cols={2}>
           {/* a job / sale-order movement's reference is that document (stock_move.reference_out_to is not stored) */}

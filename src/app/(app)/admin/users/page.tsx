@@ -42,7 +42,7 @@ export default function UsersPage() {
   );
   const pendingCount = USERS.filter((u) => u.role === PENDING_ROLE).length;
 
-  // filter bar — applied on ค้นหา, evaluated in the browser (the whole list is loaded)
+  // filtered in the browser: the whole list is loaded
   const NO_FILTER: UserFilter = { name: '', username: '', role: '', status: '' };
   const { draft, setD, filters: filter, apply, reset: resetFilters, narrowed } = useFilterDraft<UserFilter>(NO_FILTER);
   const VISIBLE = React.useMemo(() => {

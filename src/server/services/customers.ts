@@ -59,9 +59,8 @@ type Places = {
 const BANGKOK_CITY_PK = 10;
 
 /**
- * The one-line address, composed on read (ADR 0008 "no redundant data": customer_address is a legacy snapshot —
- * new / edited customers do not write it): address lines + ตำบล / อำเภอ / จังหวัด names + postal code, as the
- * legacy app built it. A row without address lines (a legacy address-only row) reads its stored text.
+ * The one-line address, composed on read (customer_address is a legacy snapshot new / edited customers do not write):
+ * address lines + ตำบล / อำเภอ / จังหวัด names + postal code. A row without address lines reads its stored text.
  */
 function addressLine(r: Row, places?: Places): string {
   const bkk = r.provincePk === BANGKOK_CITY_PK;
@@ -325,11 +324,9 @@ export function getCustomerByUuid(id: string, deleted: DeletedMode = 'all'): Pro
 }
 
 /**
- * The customer a document is written for (getCustomerByCode still returns a deleted one — old documents show
- * theirs): one deleted or set Inactive (owner 2026-10-21) gets nothing new (409). `current` = the customer
- * already on the document (its customer_pk or code): an edit that keeps it still saves. `key` = customer.pk, for the
- * document's FK column (`id` is the uuid the API shows). Read FOR SHARE in the document's
- * write transaction: a delete / Inactive switch (records.ts, FOR UPDATE) running now finishes first, or waits.
+ * The customer a document is written for: one deleted or set Inactive gets nothing new (409), but `current` (the
+ * customer already on the document) still saves. `key` = customer.pk, for the document's FK column. Read FOR SHARE in
+ * the document's write transaction so a concurrent delete / Inactive switch (FOR UPDATE) finishes first, or waits.
  */
 export async function customerForDocument(
   tx: Tx,
@@ -339,7 +336,6 @@ export async function customerForDocument(
   const [j] = await fromCustomer(tx).where(eq(customer.customerCode, code)).limit(1).for('share', { of: customer });
   if (!j) return null;
   const r = j.c;
-  // `key` = customer.pk, what the document's customer_pk column holds (ADR 0008 phase 2)
   const found = { ...joined(j), key: r.pk };
   if (current === r.pk || current === r.customerCode) return found;
   if (r.recordStatus === RS.DELETED) throw new HttpError(409, 'ลูกค้ารายนี้ถูกลบแล้ว เลือกลูกค้ารายอื่น');
@@ -353,10 +349,9 @@ export function getCustomerById(pk: number): Promise<Customer | null> {
   return oneCustomer(eq(customer.pk, pk));
 }
 
-/** the parsed body of POST /api/customers (customerSave in src/server/contract/sales.ts) */
 export type CustomerInput = z.output<typeof customerSave.body>;
 
-/** province / district / sub_district pks of the uuids a save sent; not picked = NULL (FK, drizzle/0006) */
+/** province / district / sub_district pks of the uuids a save sent; not picked = NULL (FK) */
 type PlaceKeys = { provincePk: number | null; districtPk: number | null; subDistrictPk: number | null };
 async function placeKeys(tx: Tx, i: CustomerInput): Promise<PlaceKeys> {
   // one after another: a transaction is one connection (pg: no second query while one runs)
@@ -587,7 +582,7 @@ export async function saveCustomer(i: CustomerInput, byUserPk: number): Promise<
         key: before.id,
         no: before.customerCode,
         summary: `แก้ไขลูกค้า ${name}`,
-        // the address master keys stay out of the log (pk never leaves the server, ADR 0008)
+        // the address master keys stay out of the log (pk never leaves the server)
         changes: diff(before as Record<string, unknown>, set as Record<string, unknown>, {
           skip: ['provincePk', 'districtPk', 'subDistrictPk'],
         }),
@@ -619,10 +614,8 @@ export async function saveCustomer(i: CustomerInput, byUserPk: number): Promise<
   });
 }
 
-/* Address master data for cascading dropdowns */
 export function listProvinces() {
   return cached('provinces', TTL_STATIC, () =>
-    // (the legacy "not chosen" row city_id -1 is gone since drizzle/0006 — not picked = NULL)
     db.select({ id: province.id, name: province.nameTh }).from(province).orderBy(asc(province.nameTh)),
   );
 }

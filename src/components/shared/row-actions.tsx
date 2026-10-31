@@ -7,11 +7,7 @@ import { cn } from '@/lib/utils';
 
 const BTN = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors';
 
-/**
- * The icon buttons of a table row. Going to another page = a link (`viewHref` / `editHref`):
- * client-side navigation, and Ctrl/⌘-click or middle-click opens it in a new tab. Actions that
- * stay on the page (a modal, a confirm) take a callback.
- */
+/** Navigation is a link (`viewHref` / `editHref`) so Ctrl/⌘-click opens a new tab; on-page actions take a callback. */
 export function RowActions({
   onView,
   viewHref,
@@ -27,7 +23,6 @@ export function RowActions({
   editHref?: string;
   onCancel?: () => void;
   onDelete?: () => void;
-  /** e.g. ประวัติงานซ่อมของลูกค้า */
   onHistory?: () => void;
 }) {
   return (

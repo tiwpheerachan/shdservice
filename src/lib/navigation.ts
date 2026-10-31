@@ -7,7 +7,7 @@ import { allowUnload, hasUnsavedChanges } from '@/lib/use-unsaved-changes';
  *  - a new role or approval → reload so the server hands out the new permissions
  *
  * Never send a signed-out visitor straight to /api/sso/login: an app URL that auto-forwards to a
- * Google sign-in is what phishing kits do (Google Web Risk flagged the site for it, 2026-09-18).
+ * Google sign-in is what phishing kits do (Google Web Risk flagged the site for it).
  * The /login page's button is the only way into SSO.
  */
 export function hardNavigate(path: string) {
@@ -20,8 +20,8 @@ export function hardNavigate(path: string) {
 export const SESSION_EXPIRED_EVENT = 'shd:session-expired';
 
 // ออกจากระบบ was clicked: the page is on its way to /api/sso/logout — the 401s that follow (the /me poll,
-// the countdown) are that sign-out, not an expiry. Without this the poll won the race and sent the PC to
-// /login?expired=1&next=<this page>, and the NEXT person signing in landed on the previous user's page.
+// the countdown) are that sign-out, not an expiry. Without this the poll wins the race and sends the PC to
+// /login?expired=1&next=<this page>, and the NEXT person signing in lands on the previous user's page.
 let signingOut = false;
 export function startSignOut() {
   signingOut = true;

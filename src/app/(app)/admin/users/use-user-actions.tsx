@@ -37,7 +37,6 @@ export function useUserActions(refetch: () => void) {
     }
   };
 
-  // ถอนสิทธิ์ / คืนสิทธิ์ — ask first, naming the person
   const setActive = async (r: User, active: boolean) => {
     const ok = await confirm({
       tone: active ? 'default' : 'danger',
@@ -50,7 +49,6 @@ export function useUserActions(refetch: () => void) {
     if (ok) await quickSet(r, { status: active ? 'Active' : 'Inactive' }, active ? 'คืนสิทธิ์แล้ว' : 'ถอนสิทธิ์แล้ว');
   };
 
-  // Soft delete / restore via the generic records endpoint (401-resilient).
   const softSet = async (r: User, deleted: boolean) => {
     if (deleted) {
       const ok = await confirm({

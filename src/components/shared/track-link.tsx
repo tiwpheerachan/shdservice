@@ -11,17 +11,9 @@ import { useAccess } from '@/lib/use-access';
 import { cn } from '@/lib/utils';
 
 /**
- * "ลิงก์ติดตามสำหรับลูกค้า" — staff copy it here and send it in LINE. Opening it shows nothing until the customer passes Turnstile — see app/api/track/*.
- *
- * Lifetime (services/tracking.ts, drizzle/0016): 1 day from issue while unopened, then
- * 15 minutes from the customer's first open, kept alive while the page is in use (≤ 60 minutes
- * from that open). The text below says exactly that (LINK_TEXT). The hint below the link says which state it
- * is in; an expired link cannot be copied — issue a new one. "ดูหน้าที่ลูกค้าเห็น" by a
- * signed-in staff member does not count as the customer's open.
- *
- * Only the link's hash is stored (drizzle/0025): the server returns a link once — on "สร้างลิงก์ใหม่"
- * (the first one too: opening a page never issues one) — and it stays copyable only while this
- * page is open. After that the box says so and offers a new link instead.
+ * Opening the link shows nothing until the customer passes Turnstile (app/api/track/*); lifetime: services/tracking.ts.
+ * Only its hash is stored, so the server returns a link once (on "สร้างลิงก์ใหม่") and it stays copyable only while
+ * this page is open. Staff's "ดูหน้าที่ลูกค้าเห็น" does not count as the customer's open.
  */
 type LinkStatus = {
   state: 'unopened' | 'opened' | 'expired';
@@ -51,7 +43,6 @@ function left(ms: number) {
   return `อีก ${h} ชม.${m % 60 ? ` ${m % 60} นาที` : ''}`;
 }
 
-/** `jobId` = the job's uuid (its API path) */
 export function TrackLink({ jobId, compact }: { jobId: string; compact?: boolean }) {
   const { push } = useToast();
   const confirm = useConfirm();

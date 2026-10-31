@@ -21,7 +21,6 @@ export function jobColumns({
   canEdit: boolean;
   /** ยกเลิกงาน (Job Management del only) — the row menu's last item */
   onCancel?: (job: Job) => void;
-  /** the phone button in the customer cell (in the Action cell on phones): customer info / call log */
   onCall: (job: Job) => void;
 }): Column<Job>[] {
   // phones (below sm) keep เลขที่งาน / สถานะ / Action — the rest pushed them off a 360px screen

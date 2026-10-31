@@ -1,10 +1,10 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-so.mts
- * Sale-order regressions found by multi-user QA (2026-10-21): the slip swapped after an approval, tracking
+ * Sale-order regressions: the slip swapped after an approval, tracking
  * numbers lost to a concurrent save, misleading race messages, deleted products sold. Same harness as
  * scripts/test-domain.mts; its own fixtures (ids 97xx, codes QS*, users qs-*), reset at every start.
  * Storage is a fake Supabase Storage behind globalThis.fetch (a Set of paths), with a slow upload so
- * the race windows the QA hit are wide open.
+ * the race windows are wide open.
  */
 import assert from 'node:assert/strict';
 import { NextRequest } from 'next/server';
@@ -30,7 +30,7 @@ const { POST: approvePOST } = await import('@/app/api/sale-orders/[id]/approve/r
 const { POST: trackingPOST } = await import('@/app/api/sale-orders/[id]/tracking/route');
 const { POST: uploadPOST } = await import('@/app/api/upload/route');
 
-// ---- fake storage: uploads take UPLOAD_MS, removes are instant ----
+// fake storage: uploads take UPLOAD_MS, removes are instant
 const stored = new Set<string>();
 const UPLOAD_MS = 150;
 const objects = `${STORAGE}/storage/v1/object/${BUCKET}`;
@@ -52,7 +52,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 const filesUnder = (prefix: string) => [...stored].filter((p) => p.startsWith(prefix)).sort();
 
-// ---- fixtures ----
 const U = {
   admin: { id: 9701, email: 'qs-admin@example.invalid', type: 'System Admin' },
   seller: { id: 9702, email: 'qs-seller@example.invalid', type: 'QS Seller' },
@@ -130,7 +129,6 @@ await pool.query(`
      WHERE h.stock_move_no ~ ('^' || r.prefix || right(r.pyear::text, 2) || '[0-9]+$')), 0))
    WHERE r.running_type = 'Inventory-Out' AND r.length_year = 2`);
 
-// ---- helpers ----
 async function cookieFor(u: TestUser) {
   const now = Date.now();
   return `${SESSION_COOKIE}=${await signSession({ email: u.email, name: u.email, exp: now + 10 * 60_000, iat: now, sv: SV })}`;
@@ -152,7 +150,7 @@ type Order = {
   lines: { id: string }[];
 };
 const json = async (r: Response): Promise<Res> => ({ status: r.status, body: (await r.json()) as Res['body'] });
-/** an order's / a user's uuid — what the API takes (ADR 0008); an unknown number → a uuid of no order */
+/** an order's / a user's uuid — what the API takes; an unknown number → a uuid of no order */
 const soIdOf = async (no: string) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM sale_order WHERE sale_order_no = $1', [no])).rows[0]?.id ??
   '00000000-0000-7000-8000-000000000000';

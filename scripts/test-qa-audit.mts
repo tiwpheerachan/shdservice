@@ -1,8 +1,8 @@
 /**
- * scripts/test-qa-audit.mts — the audit trail (ADR 0008 "Phase 2 — audit trail"), through the real routes:
+ * scripts/test-qa-audit.mts — the audit trail, through the real routes:
  * sign-in / sign-out / export / role and permission changes land in security_log with who did it as they were then
  * (email, role, request id, session id, the permission used), data changes in audit_log; both are append-only and
- * hashed. R2: a user deactivated or losing a grant between the route's permission check and its write gets 403,
+ * hashed. A user deactivated or losing a grant between the route's permission check and its write gets 403,
  * nothing is written, and one DENIED line names them. A second DB session (`blocker()`) holds the actor's row /
  * grant row so the change lands exactly between check and write.
  *

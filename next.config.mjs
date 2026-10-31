@@ -1,3 +1,10 @@
+import { existsSync } from 'node:fs';
+
+// A file named .env is loaded by Next.js into dev / build / start — production's values belong in .env.prod.local
+// (AGENTS.md). Render has no such file; on a laptop this says so before a variable silently comes from it.
+if (existsSync('.env') && process.env.NODE_ENV !== 'production' && !process.env.RENDER)
+  console.warn('⚠ .env exists — Next.js loads it into npm run dev. Rename it to .env.prod.local (AGENTS.md).');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

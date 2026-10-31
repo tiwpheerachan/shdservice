@@ -1,6 +1,6 @@
 import { qs, type Params } from '@/data/keys';
 
-/** the audit log's filter bar and its list URL (= its swr key) — pure: shared by the page and its server render */
+/** pure: shared by the page and its server render; the list URL is its swr key */
 export type Filters = {
   from: string;
   to: string;

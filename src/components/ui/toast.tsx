@@ -17,9 +17,6 @@ type ToastInput = {
   position?: 'top-center';
 };
 
-/**
- * App toasts — `useToast().push({ kind, title, desc })`, rendered by Sonner (stacking, pause on hover, swipe to dismiss, a11y live region).
- */
 const push = (t: ToastInput) => {
   const fn =
     t.kind === 'error'

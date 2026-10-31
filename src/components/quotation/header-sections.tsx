@@ -15,7 +15,6 @@ import type { FieldErrors } from '@/lib/validation';
 
 type QuoteType = 'A' | 'B';
 
-/** ประเภทใบเสนอราคา — ออกเอกสารในนาม + Type A (Normal) / Type B (VIP) */
 export function QuotationTypeSection({
   type,
   onType,
@@ -28,7 +27,6 @@ export function QuotationTypeSection({
   onType: (t: QuoteType) => void;
   profileId: string;
   onProfile: React.ComponentProps<typeof ProfileSelect>['onChange'];
-  /** the quotation's number once it has one */
   docNo?: string;
   /** why its ออกเอกสารในนาม is fixed (profileLock) */
   profileLocked?: string;
@@ -70,7 +68,6 @@ export function QuotationTypeSection({
   );
 }
 
-/** ข้อมูลลูกค้า — the customer (ชื่อผู้ติดต่อ is gone: quotation.customer_contact_name was dropped in drizzle/0006) */
 export function QuotationCustomerSection({
   customer,
   setCustomer,
@@ -95,7 +92,6 @@ export function QuotationCustomerSection({
   );
 }
 
-/** ข้อมูลใบเสนอราคา — number, date, the job it quotes for (typed + looked up) and that job's status */
 export function QuotationInfoSection({
   no,
   date,

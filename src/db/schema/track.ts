@@ -2,14 +2,14 @@ import { customType, index, inet, integer, pgTable, timestamp, uniqueIndex, varc
 import { pkCol, pkRef, uuidId } from './id';
 
 /**
- * Public tracking security tables (drizzle/0014, 0017, 0019 — hand-written migrations, RLS on,
+ * Public tracking security tables (hand-written migrations, RLS on,
  * no policies: only the app role can touch them). Raw tokens / phones are never stored: sha256 or
  * HMAC only (server/track-guard.ts, server/track-otp.ts). Keys, counters and logs hold IPs as HMACs too.
  * The raw IP is kept in one place: issued_ip (inet) on the short-lived rows — track_ticket (3 min) and
  * track_session (≤ 60 min) are bound to it, track_otp (5 min) and track_doc_ticket (10 min) record it —
  * and it goes with the row: expired tickets / doc tickets on the next issue, sessions past their 60 min
  * on the next sign-in, OTPs a day after they expire (track-guard housekeeping).
- * drizzle/0006: every table got `pk` (identity) + `id`; the former natural keys are UNIQUE; job_no → job_pk.
+ * Every table has `pk` (identity) + `id`; the natural keys are UNIQUE.
  */
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -86,14 +86,14 @@ export const trackOtp = pgTable(
     requestHash: bytea('request_hash').notNull(),
     phoneHash: varchar('phone_hash', { length: 64 }).notNull(),
     customerPks: pkRef('customer_pks').array().notNull(),
-    /** development `log` mode only — our own code, HMAC'd (drizzle/0021) */
+    /** development `log` mode only — our own code, HMAC'd */
     codeHash: bytea('code_hash'),
     attempts: integer('attempts').notNull().default(0),
     issuedIp: inet('issued_ip').notNull(),
     createdAt: at('created_at').notNull().defaultNow(),
     expiresAt: at('expires_at').notNull(),
     consumedAt: at('consumed_at'),
-    /** ThaiBulkSMS OTP service: its token for this request — checked together with the code (drizzle/0021) */
+    /** ThaiBulkSMS OTP service: its token for this request — checked together with the code */
     providerToken: varchar('provider_token', { length: 128 }),
   },
   (t) => [
@@ -133,7 +133,7 @@ export const trackDocTicket = pgTable(
     tokenHash: bytea('token_hash').notNull(),
     jobPk: pkRef('job_pk').notNull(),
     kind: varchar('kind', { length: 16 }).notNull(),
-    /** the document (ADR 0008 decision 11, was `ref`): kind 'quotation' → quotation_hd_pk; 'job' / 'return' = the job itself */
+    /** the document (ADR 0008 decision 11): kind 'quotation' → quotation_hd_pk; 'job' / 'return' = the job itself */
     quotationPk: pkRef('quotation_pk'),
     saleOrderPk: pkRef('sale_order_pk'),
     issuedIp: inet('issued_ip').notNull(),

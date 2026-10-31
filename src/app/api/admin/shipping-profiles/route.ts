@@ -20,7 +20,7 @@ export const POST = handle(async (req: NextRequest) => {
 
 export const DELETE = handle(async (req: NextRequest) => {
   const me = await requireAdmin(req);
-  const { id } = parseQuery(req, shippingProfileDelete); // not a uuid → 404
+  const { id } = parseQuery(req, shippingProfileDelete);
   await deleteShippingProfile(id, me.pk);
   return NextResponse.json({ ok: true });
 });

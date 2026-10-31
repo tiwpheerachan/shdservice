@@ -4,7 +4,6 @@ import { prefetch } from '@/server/prefetch';
 import { NO_FILTER } from './filters';
 import ProductsPage from './page-client';
 
-/** page 1 of the product list and its KPI cards in the HTML */
 export default async function Page() {
   const query = { q: FIRST_PAGE.q, ...NO_FILTER }; // ProductsPage's `query` before any search
   const fallback = await prefetch([

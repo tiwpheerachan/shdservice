@@ -1,7 +1,4 @@
-/**
- * Static option lists for dropdowns and validation — they mirror the legacy lookup values exactly.
- * (Lists that live in a DB master table are read from it at runtime; these are the fixed ones.)
- */
+/** fixed option lists that mirror the legacy lookup values exactly (DB-master lists are read at runtime) */
 /** TAT age buckets (TatRow keys) — dashboard column headers, worded as the legacy table + the job list's
  *  "from the dashboard" note */
 export const TAT_BUCKET_LABEL = {
@@ -27,7 +24,6 @@ export const ROLES: [string, ...string[]] = [
   'รออนุมัติ',
 ];
 
-/* ประเภทงาน (10) — ตรงกับระบบจริง */
 export const JOB_TYPE_OPTIONS = [
   'งานซ่อม',
   'งานส่งต่อศูนย์บริการ',
@@ -41,7 +37,6 @@ export const JOB_TYPE_OPTIONS = [
   'ของหมด',
 ];
 
-/* สถานะงานทั้งหมด (จากระบบจริง) */
 export const JOB_STATUS_OPTIONS = [
   'งานใหม่',
   'ยกเลิกข้อมูล',
@@ -68,7 +63,6 @@ export const JOB_STATUS_OPTIONS = [
   'ปิดงาน (Complete)',
 ];
 
-/* สถานะช่วง "บันทึกงานซ่อม" (12) */
 export const REPAIR_STATUS_OPTIONS = [
   'อยู่ระหว่างดำเนินการ',
   'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่',
@@ -84,7 +78,6 @@ export const REPAIR_STATUS_OPTIONS = [
   'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)',
 ];
 
-/* สถานะช่วง "ปิดงาน-ส่งคืน" (4) */
 export const CLOSE_STATUS_OPTIONS = [
   'ปิดงาน-ส่งคืนสินค้า (รอลงเลขที่พัสดุ)',
   'ปิดงาน-ส่งคืนสินค้า (ลงเลขที่พัสดุแล้ว)',
@@ -92,7 +85,6 @@ export const CLOSE_STATUS_OPTIONS = [
   'ปิดงาน (Complete)',
 ];
 
-/* สถานะใบเสนอราคา (8) */
 export const QUOTATION_STATUS_OPTIONS: [string, ...string[]] = [
   'รอเสนอราคา',
   'เสนอราคาแล้ว',
@@ -104,7 +96,6 @@ export const QUOTATION_STATUS_OPTIONS: [string, ...string[]] = [
   'ลูกค้าตกลงซ่อม รออะไหล่',
 ];
 
-/* Sale Channel (ช่องทางขาย) — ตรงกับระบบจริง */
 export const CHANNELS = [
   'ยังไม่ระบุ',
   'หน้าร้าน', // walk-in: no sale order (WALK_IN_CHANNEL)
@@ -122,7 +113,6 @@ export const CHANNELS = [
 export const WARRANTY_OPTIONS = ['IN', 'OUT'];
 export const RECEIVE_METHODS: [string, ...string[]] = ['Walk-In', 'Carry-In', 'Onsite', 'ไม่ระบุ'];
 
-/* วิธีการส่งคืนสินค้า (5) */
 export const RETURN_METHODS = ['ลูกค้ามารับเอง', 'ส่งไปรษณีย์', 'บริษัทขนส่งเอกชน', 'พนักงานจัดส่ง', 'ไม่ต้องส่งคืน'];
 
 /* วิธีชำระเงินของใบสั่งขาย (= sale_order.payment_type) — COD = ยังไม่มีสลิป ยอดชำระไม่บังคับ (เหมือนระบบเดิม) */
@@ -130,7 +120,6 @@ export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
 export const JOB_PAYMENT_METHODS: [string, ...string[]] = ['เงินโอน', 'เงินสด', 'บัตรเครดิต'];
 
-/* ประเภทเอกสารสต๊อก */
 export const STOCK_MOVE_TYPES = [
   'รับเข้า',
   'รับคืนจากการเบิก',
@@ -145,7 +134,6 @@ export const STOCK_PICK_TYPES = [
   'รับคืนจากการเบิก', // stock_move_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
 ];
 
-/* ลูกค้า */
 export const CUSTOMER_TYPES = ['Dealer', 'Corporate', 'Normal'];
 /* ใช้กลุ่มราคา — DB เก็บ Retail / Wholesale / Special (map ใน services/customers.ts) */
 export const PRICE_GROUPS: [string, ...string[]] = [

@@ -2,7 +2,6 @@ import type { JobDetail } from '@/lib/use-job';
 import { CLOSE_STATUS_OPTIONS } from '@/data/options';
 import { parseSwap, refundDateOf, type jobBalance } from '@/lib/validation/job';
 
-/** ปิดงาน's own fields: payment / deposit refund / return / Serial เครื่องใหม่ (a swap job) / new status */
 export type CloseDraft = {
   payType: string;
   payAmount: string;
@@ -15,7 +14,7 @@ export type CloseDraft = {
   returnType: string;
   returnDate: string;
   courier: string;
-  /** shipping_profile.id; '' = none (a typed courier name) */
+  /** shipping_profile.id; '' = a typed courier name */
   shipperId: string;
   tracking: string;
   returnDetail: string;
@@ -66,19 +65,16 @@ export type Balance = ReturnType<typeof jobBalance>;
 /** the date saved inside job_payment_detail ("ชำระ <date> · …") */
 export const payDateOf = (detail: string) => /^ชำระ (\d{4}-\d{2}-\d{2})/.exec(detail)?.[1] ?? '';
 
-/** รวมเป็นเงินสุทธิ of costRows */
 export const netOf = (rows: { v: number }[]) => rows.reduce((s, x) => s + x.v, 0);
 
 export const LEGACY_ADJUST_LABEL = 'ปรับยอดจากระบบเดิม (VAT / ส่วนลด)';
 
 /**
- * job_total_cost less the sum of its cost columns: the legacy system folded VAT / a discount into the total
- * with no column of its own. The stored total is what is billed (jobBalance, withTotal keeps it until a cost
- * changes), so this row makes the costs add up to it. 0 = the total is the sum.
+ * Legacy folded VAT / a discount into job_total_cost with no column of its own; the stored total is what is billed,
+ * so this row makes the cost columns add up to it. 0 = they already do.
  */
 export const legacyAdjust = (total: number, sum: number) => Math.round((total - sum) * 100) / 100;
 
-/** cost summary straight from the job row — adds up to job_total_cost (legacyAdjust) */
 export const costRows = (job: JobDetail | null | undefined) => {
   const rows = [
     { label: 'รวมค่าอะไหล่', v: job?.partsCost ?? 0 },
@@ -91,15 +87,14 @@ export const costRows = (job: JobDetail | null | undefined) => {
   return adjust ? [...rows, { label: LEGACY_ADJUST_LABEL, v: adjust }] : rows;
 };
 
-/** the close fields as the job stores them (prefill) — `today`: the default refund / return date */
+/** `today`: the default refund / return date */
 export function closeDraftOf(job: JobDetail, shippers: string[], today: string): CloseDraft {
   return {
     // no default method / date: a payment is written only when someone enters one (in-warranty = none)
     payType: job.payment.type,
-    // nothing paid yet → empty (an untouched box is no payment, so it must not show one): choosing the
-    // method fills in what is left to pay (job.amountDue)
+    // empty when nothing is paid: an untouched box must not read as a payment
     payAmount: job.payment.amount > 0 ? String(job.payment.amount) : '',
-    payDate: payDateOf(job.payment.detail), // kept as it is on a re-save
+    payDate: payDateOf(job.payment.detail),
     payNo: job.payment.no,
     payDetail: job.payment.detail,
     // a deposit given back is stored as a negative payment ("คืนมัดจำ <date>"); none yet → the full refund, today
@@ -116,7 +111,6 @@ export function closeDraftOf(job: JobDetail, shippers: string[], today: string):
     shipperId: job.return.shipperId ?? '',
     tracking: job.return.tracking,
     returnDetail: job.return.detail,
-    // the "New S/N" the return note prints (spare_part_replace)
     newSerial: parseSwap(job.sparePartReplace)['New S/N'] ?? '',
     status: CLOSE_STATUS_OPTIONS.includes(job.status) ? job.status : '',
   };

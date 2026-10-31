@@ -73,7 +73,7 @@ export function Topbar({
         <PanelLeft className={cn('h-[18px] w-[18px] transition-transform', collapsed && 'rotate-180')} />
       </button>
 
-      {/* xl: from 768 to 1279 the topbar has no room — it cut the trail to "4. ข้อ…" */}
+      {/* xl: from 768 to 1279 the topbar has no room for the trail */}
       <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm xl:flex">
         {crumb && (
           <>
@@ -152,9 +152,8 @@ export function Topbar({
             <Email value={me?.email} />
           </p>
         </div>
-        {/* plain <a>, NOT <Link>: Next prefetches visible Links, and prefetching
-            /api/sso/logout silently signed the user out after every page load. onClick: the /me poll's
-            401 meanwhile is this sign-out, not an expiry (lib/navigation) */}
+        {/* plain <a>, NOT <Link>: Next prefetches visible Links, and a prefetched /api/sso/logout signs the user out.
+            onClick: the /me poll's 401 meanwhile is this sign-out, not an expiry (lib/navigation) */}
         <a
           href="/api/sso/logout"
           onClick={startSignOut}

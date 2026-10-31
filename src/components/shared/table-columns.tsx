@@ -1,10 +1,6 @@
 import * as React from 'react';
 import type { Column } from '@/components/ui/data-table';
 
-/**
- * Columns that several tables share — one definition so their width rules stay the same everywhere.
- */
-
 /** minimum widths for the text columns people read — the auto table layout squeezes whatever has none */
 export const COL_MIN_WIDTH = { customer: '160px', brandModel: '180px', status: '140px' } as const;
 

@@ -4,13 +4,9 @@ import { BAD_INPUT } from '@/server/http-error';
 import { registry } from './index';
 
 /**
- * The contract, held to what the routes actually send — outside production only.
- *
- * checked() (src/server/auth.ts — handle() uses it) passes every response here: the operation is
- * found by method and path, and the body is parsed with the schema declared for its status. A field
- * the schema does not name is drift as much as a wrong type. Non-JSON bodies (redirects, xlsx) are
- * checked for their media type only. Drift is a log line "API contract drift" under `next dev`, and
- * an exception with API_CONTRACT_STRICT=1 (the tests) — the response itself is never changed.
+ * The contract held to what the routes actually send — outside production only. A field the schema does not name is
+ * drift as much as a wrong type; non-JSON bodies are checked for media type only. Drift logs under `next dev` and
+ * throws with API_CONTRACT_STRICT=1; the response itself is never changed.
  */
 
 type Content = Record<string, { schema?: unknown }>;

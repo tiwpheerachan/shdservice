@@ -2,7 +2,7 @@ import type { ReportValues } from '@/components/shared/report-view';
 import { daysAgo, today } from '@/lib/dates';
 import { jobReportQuery } from '../report-specs';
 
-/** the report's opening filters (last 30 days, Thai calendar) — pure, shared by the page and its server render */
+/** pure: shared by the page and its server render */
 export const START = (): ReportValues => ({ from: daysAgo(30), to: today() });
 /** วันที่ค้นหา: label → dateBy (the first is the default) */
 export const DATES = {

@@ -10,13 +10,7 @@ export const metadata: Metadata = {
 // reads the document profile per request — never at build time (no DB there; a baked copy would go stale)
 export const dynamic = 'force-dynamic';
 
-/**
- * Public shell for the customer tracking pages (no login, no AppShell).
- * Carries the company identity on purpose: an anonymous page that shows repair
- * data must look unmistakably like the company it belongs to — the opposite of
- * a phishing page (see docs §33, the Google Web Risk flag). The identity is the default document
- * profile admins edit (cached list), COMPANY when there is none or the DB is down.
- */
+/** carries the company identity on purpose: an anonymous page showing repair data must look unmistakably like its company — the opposite of a phishing page (Google Web Risk) */
 export default async function TrackLayout({ children }: { children: React.ReactNode }) {
   const co = (await listDocumentProfiles().catch(() => [])).find((p) => p.isDefault) ?? COMPANY;
   // the per-request CSP nonce (src/proxy.ts) — 'strict-dynamic' trusts what this script loads in turn

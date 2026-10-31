@@ -14,11 +14,7 @@ import type { Anomaly, AnomalyPage } from '@/server/services/anomalies';
 
 const PAGE_SIZE = 50;
 
-/**
- * ค่าที่ไม่สมเหตุสมผล — the bell's System Admin section in full, one server page at a time (GET
- * /api/alerts/anomalies/list: category filtered in SQL, ≤ 100 rows). Report only: each row links to its record.
- * ponytail: no Excel export — the export pipeline (server/export.ts) has no resource for it; add one there if asked.
- */
+/** ponytail: no Excel export — server/export.ts has no resource for it; add one there if asked. */
 export default function AnomaliesPage({ category: initial }: { category: string }) {
   const [category, setCategory] = React.useState(initial);
   const [table, setTable] = React.useState<ServerTableState>({ ...FIRST_PAGE, pageSize: PAGE_SIZE });

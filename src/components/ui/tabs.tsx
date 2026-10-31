@@ -4,12 +4,7 @@ import * as React from 'react';
 import { Tabs as TabsPrimitive } from 'radix-ui';
 import { cn } from '@/lib/utils';
 
-/**
- * App tabs (underline style) — Radix Tabs underneath
- * (roving focus, ←/→/Home/End keyboard navigation, proper tab/tabpanel roles).
- * `children` = the active tab's content: it renders in that tab's tabpanel, and every tab has a
- * panel (the inactive ones empty + hidden), so no trigger's aria-controls points at nothing.
- */
+/** Every tab has a panel (inactive ones empty + hidden), so no trigger's aria-controls points at nothing. */
 export function Tabs({
   tabs,
   value,
@@ -23,7 +18,6 @@ export function Tabs({
   onChange: (k: string) => void;
   className?: string;
   children?: React.ReactNode;
-  /** the gap between the tab row and the content */
   contentClassName?: string;
 }) {
   return (

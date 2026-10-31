@@ -12,11 +12,7 @@ import { cn } from '@/lib/utils';
 const FIELD =
   'input:enabled:not([type=hidden]):not([readonly]), select:enabled, textarea:enabled:not([readonly]), [role=combobox]:not(:disabled)';
 
-/**
- * App modal — a Radix Dialog underneath
- * (focus trap, Esc, scroll lock, aria-modal). Controlled without a Trigger, Radix has nothing to
- * give focus back to on close — so the element focused when it opened is remembered and refocused.
- */
+/** Controlled without a Trigger, Radix has nothing to give focus back to: the opener is remembered and refocused. */
 export function Modal({
   open,
   onClose,

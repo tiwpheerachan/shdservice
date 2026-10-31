@@ -4,7 +4,6 @@ import { prefetch } from '@/server/prefetch';
 import { startQuery } from './filters';
 import OpenJobReport from './page-client';
 
-/** the KPIs and page 1 for the opening range in the HTML */
 export default async function Page() {
   const query = startQuery();
   const fallback = await prefetch([

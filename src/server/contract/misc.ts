@@ -139,7 +139,7 @@ export const upload = defineOperation({
       .optional()
       .transform((v) => {
         const id = String(v ?? '').trim();
-        // a uuid (ADR 0008) is read lower-cased, a code / number upper-cased
+        // a uuid is read lower-cased, a code / number upper-cased
         return z.uuid().safeParse(id).success ? id.toLowerCase() : id.toUpperCase();
       })
       .pipe(z.string().min(1, 'id required'))
@@ -220,8 +220,6 @@ export const openapiJson = defineOperation({
     ...SIGNED_IN,
   },
 });
-
-/* ------------------------------------------------------------------ sso -- */
 
 const ssoTags = ['Sign-in'];
 

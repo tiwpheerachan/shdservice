@@ -17,10 +17,9 @@ function NewQuotation() {
   const form = React.useRef<QuotationFormHandle>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // POST /api/quotations → quotation (running Q) + quotation_line
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
+    if (!p || !form.current?.validate()) return;
     setSaving(true);
     try {
       const d = await postJson<{ quotation: { id: string; no: string } }>('/api/quotations', p);

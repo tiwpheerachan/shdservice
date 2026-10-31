@@ -2,30 +2,19 @@ import 'server-only';
 import { LRUCache } from 'lru-cache';
 
 /**
- * In-process cache for small, read-mostly lookups (master lists, staff, statuses, dashboard,
- * alerts), on lru-cache. Single Render instance → no need for anything shared; write paths call
- * `invalidate()` so an edit is visible on the next request, and the TTL bounds staleness from
- * direct SQL edits.
- *
- *  - single-flight: parallel requests for a cold key share ONE load (the dashboard's four panels,
- *    16 dropdowns on a form) instead of racing N identical queries
- *  - stale-while-revalidate: shortly after expiry the last value is returned at once while one
- *    refresh runs in the background — nobody waits for the reload. Older than 2× TTL it is not
- *    served; the caller waits for fresh data
- *  - bounded: at most 500 keys (some keys come from user input, e.g. dashboard date ranges),
- *    least-recently-used first out
- *  - a failed load rejects and is not cached
+ * In-process cache for small read-mostly lookups. Single Render instance, so nothing shared; writes call invalidate(),
+ * the TTL bounds staleness from direct SQL edits. Single-flight per cold key, stale-while-revalidate up to 2× TTL,
+ * at most 500 keys (some come from user input), a failed load is not cached.
  */
 type Box = { v: unknown; at: number };
 type Loader = () => Promise<unknown>;
 
-// ONE store per process, on globalThis: the build loads route handlers (/api) and pages through separate
-// module runtimes (.next/server/chunks vs chunks/ssr), so a module-level store would exist twice — a write
-// through /api would invalidate only the API's copy while a page kept serving its own for up to a TTL.
+// ONE store per process on globalThis: route handlers and pages load in separate module runtimes, so a module-level
+// store would exist twice and an /api write would leave the page's copy stale.
 const g = globalThis as typeof globalThis & { __shdCache?: LRUCache<string, Box, Loader> };
 const store = (g.__shdCache ??= new LRUCache<string, Box, Loader>({
   max: 500,
-  ttl: 60_000, // default; every call passes its own
+  ttl: 60_000,
   allowStale: true,
   fetchMethod: async (_key, _stale, { context }) => ({ v: await context(), at: Date.now() }),
 }));

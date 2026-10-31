@@ -20,10 +20,7 @@ export type Person = {
   status?: string;
 };
 
-/**
- * พิมพ์ชื่อแล้วเลือกคน — ดึงจาก central directory ผ่าน /api/directory/search
- * (API key อยู่ฝั่งเซิร์ฟเวอร์เท่านั้น) เลือกจากรายชื่อจริง ไม่ต้องพิมพ์อีเมลเอง
- */
+/** From the central directory via /api/directory/search (the API key stays server-side). */
 export function PeoplePicker({
   value,
   onChange,
@@ -42,7 +39,6 @@ export function PeoplePicker({
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);
 
-  // close on outside click
   React.useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
@@ -51,8 +47,7 @@ export function PeoplePicker({
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  // debounced directory search (SSO people directory) through swr — the last answer stays on
-  // screen while the next loads, an older answer never wins
+  // debounced through swr: the last answer stays on screen while the next loads, an older answer never wins
   const typed = q.trim();
   const settled = useDebouncedValue(typed, 250);
   const searchable = settled.length >= 2;
@@ -76,7 +71,6 @@ export function PeoplePicker({
     setQ('');
   };
 
-  // selected chip
   if (value) {
     return (
       <div className={cn('flex h-9 items-center gap-2 rounded-md border border-input bg-card px-2.5', className)}>

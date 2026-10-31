@@ -13,21 +13,19 @@ import { useUnsavedChangesGuard } from '@/lib/use-unsaved-changes';
 import { today } from '@/lib/dates';
 import { TourProvider } from '@/components/tour/tour';
 
-// cmdk + a Radix dialog (~16 KB gz) that only Ctrl+K / the search button opens: its own chunk, loaded
-// on first open (that first press still opens it, once the chunk arrives)
+// ~16 KB gz that only Ctrl+K / the search button opens: its own chunk, loaded on first open
 const CommandPalette = dynamic(() => import('./command-palette').then((m) => m.CommandPalette));
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const closeMobile = React.useCallback(() => setMobileOpen(false), []); // stable: the drawer's focus effect keys on it
-  // collapsed sidebar is remembered per browser (and follows a change made in another tab)
   const [collapsedPref, setCollapsedPref] = useLocalStorage('shd-sidebar-collapsed', '0');
   const collapsed = collapsedPref === '1';
   const [palette, setPalette] = React.useState(false);
   // mounted from the first open on (and kept: closing runs Radix's focus return)
   const [paletteUsed, setPaletteUsed] = React.useState(false);
   if (palette && !paletteUsed) setPaletteUsed(true);
-  useUnsavedChangesGuard(); // leaving a form with unsaved edits asks first
+  useUnsavedChangesGuard();
   // a page the user may not open is never rendered (AccessGuard redirects): no 403 API calls first
   const allowed = useAccess().canPath(usePathname());
 

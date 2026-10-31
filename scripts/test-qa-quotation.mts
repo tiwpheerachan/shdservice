@@ -1,6 +1,6 @@
 /**
  * TEST_DATABASE_URL=… API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server npx tsx scripts/test-qa-quotation.mts
- * Quotations brought up to legacy (2026-10-29): per-line ส่วนลด (%) / ส่วนลด (บาท) — a % wins and becomes บาท, a line
+ * Quotations at legacy parity: per-line ส่วนลด (%) / ส่วนลด (บาท) — a % wins and becomes บาท, a line
  * never goes below 0, the header totals take the lines after their discount, quotations without one total exactly as
  * before; ยกเลิกใบเสนอราคา from the list = records API DELETED with `del` and a reason, after which the quotation
  * leaves the list and is neither saved nor printed; ใบเบิกสินค้า (pickSlips) and its header profile (IPA, purpose
@@ -327,7 +327,7 @@ try {
     );
     const b = await saveQuotation(base(), U.admin.id);
     await pool.query(`UPDATE quotation SET quotation_status_id = 2 WHERE quotation_no = $1`, [b.no]); // เสนอราคาแล้ว
-    // by uuid (ADR 0008), trimmed, any case, each once
+    // by uuid, trimmed, any case, each once
     const { slips, skipped } = await pickSlips([` ${b.id.toUpperCase()} `, a.id, b.id]);
     assert.deepEqual(skipped, []);
     assert.deepEqual(

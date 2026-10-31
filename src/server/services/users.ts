@@ -70,7 +70,7 @@ export async function provisionSsoUser(
   userType: string | null;
   isActive: boolean;
   recordStatus: string | null;
-  /** app_user.session_version — stamped into the session cookie (drizzle/0015) */
+  /** app_user.session_version — stamped into the session cookie */
   sessionVersion: number;
   /** a first sign-in: the row was inserted now (the caller logs its CREATE line) */
   created: boolean;
@@ -126,7 +126,7 @@ export async function provisionSsoUser(
       created: false,
     };
 
-  // somchai@a and somchai@b share the local part — fine: ix_username_and_password was dropped (drizzle/0006)
+  // somchai@a and somchai@b share the local part — fine: username is not unique
   const [row] = await w
     .insert(appUser)
     .values({
@@ -190,9 +190,6 @@ export function provisionFailure(e: unknown): { reason: 'user_conflict' | 'db_un
   return constraint ? { reason: 'user_conflict', constraint } : { reason: 'db_unavailable' };
 }
 
-/* ------------------------------------------------------------------ *
- * Mapping app_user → the UI's `User` type
- * ------------------------------------------------------------------ */
 type AppUserRow = typeof appUser.$inferSelect;
 
 export function toUser(r: AppUserRow): User {
@@ -583,9 +580,6 @@ export async function setUserDeleted(id: string, deleted: boolean, actorId = 0) 
   userChanged();
 }
 
-/* ------------------------------------------------------------------ *
- * Permissions (app_config) — role list, matrix, save
- * ------------------------------------------------------------------ */
 export function listRoles(): Promise<string[]> {
   return cached('roles', TTL_MASTER, loadRoles);
 }

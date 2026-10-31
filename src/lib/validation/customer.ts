@@ -97,7 +97,7 @@ export type CustomerPrev = Partial<
  *    one; the format is checked whenever it changed, on an edit too (an unchanged legacy phone stays savable)
  *  - tax ID 13 digits + check digit; postal code 5 digits; email ≤ 50; Line ID; lists for type / price group
  *  - text no longer than its column (address 100 each) — nothing is cut off silently; an unchanged legacy
- *    address passes (C01029's 117-character one-line address shows in บรรทัด 1 and could never be saved)
+ *    address passes (some legacy one-line addresses are longer than บรรทัด 1 allows)
  */
 /** the form's labels + the stored values (customers.ts maps one to the other) */
 const PRICE_GROUP_VALUES = [...PRICE_GROUPS, 'Retail', 'Wholesale', 'Special'];

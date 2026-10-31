@@ -3,12 +3,6 @@ import { Info, AlertTriangle, Lightbulb } from 'lucide-react';
 import { TableScroll } from '@/components/ui/data-table';
 import { cn } from '@/lib/utils';
 
-/* ------------------------------------------------------------------ *
- * Small building blocks for the user guide — plain prose, step lists,
- * field tables, callouts. Kept deliberately simple so the content file
- * reads like a document.
- * ------------------------------------------------------------------ */
-
 export function P({ children, className }: { children: React.ReactNode; className?: string }) {
   return <p className={cn('text-sm leading-relaxed text-foreground/90', className)}>{children}</p>;
 }
@@ -27,7 +21,6 @@ export function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[11px]">{children}</kbd>;
 }
 
-/** Numbered steps — one <li> per step, may contain nested content. */
 export function Steps({ children }: { children: React.ReactNode }) {
   return (
     <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed marker:font-semibold marker:text-primary">

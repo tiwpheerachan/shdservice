@@ -24,13 +24,12 @@ import { ExportButton } from '@/components/shared/export-button';
 import { useTourRestore } from '@/components/tour/tour';
 
 type ModelForm = { code: string; name: string; brand: string; price: string; status: string };
-// filter bar (applied on ค้นหา) — same params go to the table query and the Excel export
+// same params go to the table query and the Excel export
 type ModelFilter = { brand: string; code: string; name: string; status: '' | 'Active' | 'Inactive' };
 const NO_FILTER: ModelFilter = { brand: '', code: '', name: '', status: '' };
 
 export default function ModelsPage() {
   const { push } = useToast();
-  // 1.1k models — server-side paging/search (ACTIVE + INACTIVE, DELETED hidden)
   const { draft, setDraft, filters: filter, apply, reset, narrowed, pageArgs, server } = useServerTable(NO_FILTER);
   const { rows: MODELS, total, loading, refetch, error: loadError } = useModelsPage({ ...pageArgs, ...filter });
   const { data: MANUFACTURERS, ...brandsLookup } = useManufacturers();
@@ -43,7 +42,7 @@ export default function ModelsPage() {
   const set = <K extends keyof ModelForm>(k: K, v: ModelForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const fe = useFormErrors();
   useClearOnChange(fe.clear, form);
-  useTourRestore(() => form, setForm); // a บทสอน puts back what was tried in the dialog
+  useTourRestore(() => form, setForm);
 
   const openForm = (m: Model | null, readOnly = false) => {
     setViewOnly(readOnly);
@@ -53,14 +52,13 @@ export default function ModelsPage() {
       code: m?.code ?? '',
       name: m?.name ?? '',
       brand: m?.brand ?? '', // a new model starts with no brand: the admin must pick it (required)
-      price: m ? String(m.price ?? 0) : '', // an existing model's 0 shows as 0 (1,172 legacy models are priced 0); a new one starts empty
+      price: m ? String(m.price ?? 0) : '', // an existing model's 0 shows as 0 (legacy models are priced 0); a new one starts empty
       status: m?.status ?? 'Active',
     });
     setOpen(true);
   };
 
-  // ยี่ห้อให้เลือก = ยี่ห้อ Active + ยี่ห้อเดิมของรุ่นที่กำลังแก้ (152 รุ่นสังกัดยี่ห้อ Inactive —
-  // ไม่ให้ dropdown เปลี่ยนยี่ห้อโดยไม่ตั้งใจ)
+  // ยี่ห้อ Active + ยี่ห้อเดิมของรุ่นที่กำลังแก้: บางรุ่นสังกัดยี่ห้อ Inactive — ไม่ให้ dropdown เปลี่ยนยี่ห้อโดยไม่ตั้งใจ
   const brandFilterOptions = React.useMemo(
     () => ALL_BRANDS.map((m) => ({ value: m.name, label: m.name })),
     [ALL_BRANDS],
@@ -72,12 +70,12 @@ export default function ModelsPage() {
 
   // model_code มาจาก running_no "Model" (MD00001) — สร้างอัตโนมัติตอนเพิ่ม
   const save = async () => {
-    if (fe.report(fe.run(modelSchema, form))) return; // the API checks the same
+    if (fe.report(fe.run(modelSchema, form))) return;
     setSaving(true);
     try {
       const d = await postJson<{ row: Model }>('/api/masters/models', {
         code: editing?.code || undefined,
-        // the row as the dialog loaded it: another admin's save since → 409 stale instead of being overwritten
+        // the row as loaded: another admin's save since → 409 stale, not overwritten
         expect: editing && {
           name: editing.name,
           brand: editing.brand,
@@ -93,7 +91,7 @@ export default function ModelsPage() {
       push({ kind: 'success', title: 'บันทึกรุ่นสินค้าแล้ว', desc: `${d.row.code} · ${d.row.name}` });
       refetch();
     } catch (e) {
-      if (isStale(e)) refetch(); // the list as stored now; the dialog stays open
+      if (isStale(e)) refetch();
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
       setSaving(false);
@@ -110,7 +108,7 @@ export default function ModelsPage() {
     {
       key: 'brand',
       header: 'Brand Name',
-      hideBelow: 'sm', // phones: code + name + action
+      hideBelow: 'sm',
       cell: (r) => <Badge tone="info">{r.brand}</Badge>,
     },
     {

@@ -10,7 +10,6 @@ import { baht } from '@/lib/utils';
 import type { FieldErrors } from '@/lib/validation';
 import type { computeTotals } from '@/lib/validation/quotation';
 
-/** หมายเหตุ + สถานะใบเสนอราคา (+ a loaded quotation's วันที่ลูกค้าตอบรับ / สร้างโดย) */
 export function QuotationStatusFields({
   remark,
   setRemark,
@@ -26,7 +25,6 @@ export function QuotationStatusFields({
   onStatus: (v: string) => void;
   /** why this status leaves the job where it is ('' = it moves the job) */
   jobNote: string;
-  /** a loaded quotation */
   loaded?: { approveDate?: string; createdBy?: string } | null;
   errors: FieldErrors;
 }) {

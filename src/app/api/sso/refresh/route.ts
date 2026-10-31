@@ -24,11 +24,7 @@ function centralCheckMode(): 'off' | 'log' | 'enforce' {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * Re-read the caller's role/status from app_user and re-issue the session cookie
- * so an admin's approval takes effect without logging out. Used by /pending and
- * the client-side AccessGuard.
- */
+/** re-reads role/status from app_user and re-issues the cookie, so an approval takes effect without signing out */
 export const GET = checked(async (request: NextRequest) => {
   const current = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   // `reason` = why, for the /login note (same as /api/sso/me)
@@ -66,8 +62,7 @@ export const GET = checked(async (request: NextRequest) => {
       }
     } else log.warn('sso central session check unavailable', { userId: u.id });
   } else if (mode === 'log' && !current.sub) {
-    // rollout visibility: a session without sub is never checked (a cookie issued before
-    // sub was stored, or /sso/verify not sending sub) — say so instead of looking like "all fine"
+    // a session without sub is never checked — say so instead of looking like "all fine"
     log.info('sso central session check skipped: no sub', { userId: u.id });
   }
 

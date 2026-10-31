@@ -43,17 +43,12 @@ import {
 import { P, UI, Code, Kbd, Steps, Bullets, Fields, Note, Sub, Status, Flow } from './blocks';
 import { RIGHTS, type Right } from '@/lib/modules';
 
-/* ------------------------------------------------------------------ *
- * คู่มือการใช้งาน OneService — เนื้อหาทั้งหมดอยู่ที่นี่
- * เขียนสำหรับผู้ใช้ทั่วไป (ช่าง / CS / สต๊อก / ฝ่ายขาย / ผู้ดูแล)
- * ไม่ใช้ศัพท์เทคนิค · หัวข้อในกลุ่มที่ติด adminOnly จะเห็นเฉพาะ System Admin · ติด right = เห็นเมื่อมีสิทธิ์พิเศษนั้น
- * ------------------------------------------------------------------ */
+// Written for end users (no technical terms). adminOnly groups: System Admin only; `right`: roles with that special right.
 
 export type Topic = { id: string; title: string; icon: LucideIcon; body: React.ReactNode };
 export type TopicGroup = { id: string; title: string; adminOnly?: boolean; right?: Right; topics: Topic[] };
 
 export const GUIDE: TopicGroup[] = [
-  /* ================================================================ */
   {
     id: 'start',
     title: 'เริ่มต้นใช้งาน',
@@ -290,7 +285,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'jobs',
     title: 'งานบริการ (งานซ่อม)',
@@ -921,7 +915,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'customers',
     title: 'ลูกค้า',
@@ -1015,7 +1008,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'stock',
     title: 'อะไหล่และสต๊อก',
@@ -1170,7 +1162,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'quotation',
     title: 'ใบเสนอราคา',
@@ -1270,7 +1261,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'sale',
     title: 'ใบสั่งขาย',
@@ -1353,7 +1343,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'reports',
     title: 'รายงาน',
@@ -1393,7 +1382,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'admin',
     title: 'ข้อมูลระบบ (ผู้ดูแล)',
@@ -1617,7 +1605,6 @@ export const GUIDE: TopicGroup[] = [
     ],
   },
 
-  /* ================================================================ */
   {
     id: 'general',
     title: 'ทั่วไป',

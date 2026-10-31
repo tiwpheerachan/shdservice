@@ -72,7 +72,7 @@ const R2 = {
 };
 const R2_OBJECTS = `https://${R2.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2.R2_BUCKET}/`;
 
-// ---- fake storage: path → bytes + type; a signed URL serves Range as Supabase does ----
+// fake storage: path → bytes + type; a signed URL serves Range as Supabase does
 type Obj = { bytes: Uint8Array; type: string; size?: number };
 const stored = new Map<string, Obj>();
 const signs: { path: string; expiresIn: number }[] = [];
@@ -80,7 +80,7 @@ let storageDown = false; // Supabase Storage answering 500 (an outage, not a mis
 const { BUCKET } = await import('@/server/storage');
 const api = `${STORAGE}/storage/v1`;
 
-// ---- fake R2: key → bytes + type; every call must carry a SigV4 signature (header or presigned query) ----
+// fake R2: key → bytes + type; every call must carry a SigV4 signature (header or presigned query)
 const r2 = new Map<string, Obj>();
 const r2Calls: { method: string; key: string; signed: 'header' | 'query'; url: string }[] = [];
 async function fakeR2(req: Request): Promise<Response> {
@@ -233,7 +233,6 @@ await pool.query(`
     SELECT (SELECT pk FROM model WHERE model_code = 'TST-M'), v.no, 1, v.rs FROM (VALUES ('QV0001', 'ACTIVE'), ('QV0002', 'DELETED')) v(no, rs);
 `);
 
-// ---- helpers ----
 async function call(
   handler: (req: NextRequest, ctx: never) => Promise<Response>,
   url: string,
@@ -481,7 +480,7 @@ await test('a WebM (an original the browser could not convert) without a thumbna
   assert.equal((await rows(file)).length, 1);
 });
 await test('a file name the server did not issue (another folder, another type) → 400', async () => {
-  // (a name without the leading v is a legacy one — never issued now)
+  // (a name without the leading v is a legacy one — never issued)
   for (const file of [
     '../slip/x.mp4',
     'v20261028120000abcdef0123456789abcd.pdf',
@@ -540,7 +539,7 @@ await test('MEDIA_BASE_URL + MEDIA_SIGNING_KEY: R2 plays through the media Worke
   const freshId = await attach(fresh, 'ACTIVE', 'คลิปใหม่.webm');
   stored.set(path('legacy-clip.mp4'), { bytes: MP4, type: 'video/mp4' });
   for (const only of [{ MEDIA_BASE_URL: MEDIA }, { MEDIA_SIGNING_KEY: KEY }]) {
-    Object.assign(process.env, only); // one alone → as before
+    Object.assign(process.env, only);
     const r = await open(file);
     assert.ok(r.location.startsWith(`${R2_OBJECTS}${file}?`), r.location);
     delete process.env.MEDIA_BASE_URL;
@@ -714,7 +713,7 @@ await test('a picture from the list (/api/attachments/{id}) gets the same day-lo
   const two = await call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(path(pic))}&download=2`);
   assert.equal(two.location, viaPath.location);
   assert.equal(signs.length, 1);
-  // a PDF from the list: 2 minutes, as before
+  // a PDF from the list: 2 minutes
   const pdf = await attach('a.pdf');
   const p = await call(attachmentRoute.GET as never, `/api/attachments/${pdf}`, { params: { id: pdf } });
   assert.deepEqual([p.status, p.cache], [307, 'private, max-age=60']);

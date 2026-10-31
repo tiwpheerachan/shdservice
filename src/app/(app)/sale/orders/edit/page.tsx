@@ -40,7 +40,7 @@ function EditSaleOrder() {
   const confirm = useConfirm();
   const { isAdmin, can, has, userId } = useAccess();
   const sp = useSearchParams();
-  const initialId = sp.get('id') ?? ''; // the order's uuid (ADR 0008)
+  const initialId = sp.get('id') ?? '';
   const form = React.useRef<SaleOrderFormHandle>(null);
   // every record that arrives (loaded or saved) remounts the form with it — the form reads `initial`
   // once, when it mounts, so a new record always starts from a clean form
@@ -60,7 +60,7 @@ function EditSaleOrder() {
     onRecord: () => setVersion((v) => v + 1),
     onLoaded: (d) => {
       push({ kind: 'success', title: 'เรียกข้อมูลใบสั่งขายสำเร็จ', desc: d.no });
-      window.history.replaceState(null, '', `?id=${d.id}`); // a refresh keeps this one
+      window.history.replaceState(null, '', `?id=${d.id}`);
     },
     onMissing: (_, message) => push({ kind: 'error', title: 'ไม่พบใบสั่งขาย', desc: message }),
   });
@@ -85,7 +85,7 @@ function EditSaleOrder() {
 
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !no) return; // the save bar only shows once the document is loaded (RecordGate)
+    if (!p || !no) return;
     if (!form.current?.validate()) return;
     setSaving(true);
     try {
@@ -135,7 +135,7 @@ function EditSaleOrder() {
       setPaidLater('');
     } catch (e) {
       push({ kind: 'error', title: 'แนบสลิปไม่สำเร็จ', desc: errMsg(e) });
-      ok = false; // the file input lets go of the name
+      ok = false;
     }
     void reload();
     return ok;
@@ -181,7 +181,7 @@ function EditSaleOrder() {
   // เลขพัสดุ — only on an approved order (POST /api/sale-orders/:id/tracking; the server checks the format)
   const [tracking, setTracking] = React.useState('');
   const [trackingOf, setTrackingOf] = React.useState<SaleOrderLoaded | null>(null);
-  const te = useFormErrors(); // a bad parcel no. → under the box, with the allowed format
+  const te = useFormErrors();
   if (loaded !== trackingOf) {
     setTrackingOf(loaded);
     setTracking(loaded?.tracking ?? '');
@@ -221,7 +221,7 @@ function EditSaleOrder() {
   const isCreator = !isAdmin && !!userId && (loaded?.creatorIds ?? []).includes(userId);
   const selfReason = !isCreator ? '' : userId === loaded?.createdById ? SELF_APPROVE : SELF_APPROVE_SALES;
   const canApprove = has('SO Approve') && can('Sale Order', 'edit') && !isCreator;
-  const decided = approveId === 3 || approveId === 5; // the reason banner
+  const decided = approveId === 3 || approveId === 5;
   // a waiting order is edited only by its creator (System Admin may) — the server refuses anyone else
   const waitingLocked = approveId === 2 && !isAdmin && userId !== loaded?.createdById;
   const canEditTracking = isAdmin || can('Sale Order', 'edit');

@@ -5,10 +5,9 @@ import { db, type Db, type Tx } from '@/db/client';
 import { HttpError } from './http-error';
 
 /**
- * uuid → row / pk (ADR 0008). The API speaks only the uuid `id`; joins and foreign keys use the bigint
- * `pk` (phase 2, drizzle/0006). The uuid comes from the contract's `uuid()` / `byUuid()`
- * (src/server/contract/common.ts) — already checked and lower-cased.
- * Not found → 404 `ไม่พบ<what>` (`what` = 'งาน', 'ผู้ใช้', 'โปรไฟล์' …), the same answer byUuid gives a non-uuid.
+ * uuid → row / pk. The API speaks only the uuid `id`; joins and foreign keys use the bigint `pk`. The uuid arrives
+ * already checked and lower-cased (contract `uuid()` / `byUuid()`). Not found → 404 `ไม่พบ<what>`, the same answer
+ * byUuid gives a non-uuid.
  */
 
 type WithId = PgTable & { pk: PgColumn; id: PgColumn };

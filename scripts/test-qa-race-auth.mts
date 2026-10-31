@@ -1,7 +1,7 @@
 /**
- * scripts/test-qa-race-auth.mts — users / auth races from the race audit (2026-10-21): a sign-in that undid an
- * admin's role change (G1), the auth caches refilled with data read before an invalidate (G12), usernames
- * differing only in case created at once (G14), a role given to a user while it is being deleted (G15).
+ * scripts/test-qa-race-auth.mts — users / auth races: a sign-in that undid an
+ * admin's role change, the auth caches refilled with data read before an invalidate, usernames
+ * differing only in case created at once, a role given to a user while it is being deleted.
  * A second DB session (`blocker()`) pins a request between its check and its write, so each race is
  * deterministic, not a timing lottery.
  *
@@ -237,7 +237,6 @@ await test('G15 a role deleted while an admin gives it to a user → never a use
   const b = await blocker();
   await b.query('BEGIN');
   await b.query('SELECT 1 FROM app_user WHERE pk = 9932 FOR UPDATE'); // another admin's edit of that user
-  // the API takes the user's uuid (ADR 0008)
   const [{ uid }] = await Q<{ uid: string }>(`SELECT id::text uid FROM app_user WHERE pk = 9932`);
   const give = postUser({ id: uid, role });
   assert.ok(await lockWaiters(1), 'the role change reached the row lock');

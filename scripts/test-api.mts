@@ -50,7 +50,7 @@ const SELLER2 = { email: 'td-seller2@example.invalid' }; // signs out at the end
 const SV = 3; // test-domain's fixture session_version
 const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
 
-/* ---- routes on disk: a request path → its route.ts and params ---- */
+/* a request path → its route.ts and params */
 const ROOT = join(process.cwd(), 'src/app/api');
 function routeFiles(dir = ROOT, prefix = ''): { dir: string; template: string }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -113,7 +113,7 @@ async function call(url: string, init: Init = {}): Promise<{ status: number; bod
   return { status: res.status, body };
 }
 
-/* ---- the audit trail (ADR 0008 "Phase 2 — audit trail", R1): every change leaves its row ---- */
+/* the audit trail: every change leaves its row */
 const trailProblems: string[] = [];
 type Marks = { a: number; s: number };
 const logMarks = async (): Promise<Marks> =>
@@ -190,7 +190,6 @@ async function test(name: string, fn: () => Promise<void>) {
     console.log(`  ✗ ${name}\n      ${e instanceof Error ? e.message.replace(/\n/g, '\n      ') : e}`);
   }
 }
-/** call and expect one of `statuses` */
 const expect = (statuses: number[], url: string, init?: Init) =>
   test(`${init?.method ?? 'GET'} ${url} → ${statuses.join(' / ')}`, async () => {
     const r = await call(url, init);
@@ -216,7 +215,6 @@ try {
 
   console.log('\nLookups, alerts, files, docs');
   await expect([200], '/api/address');
-  // a province / district by its uuid (ADR 0008)
   const place = (
     await pool.query<{ c: string; d: string }>(
       `SELECT c.id::text AS c, d.id::text AS d FROM district d JOIN province c ON c.pk = d.province_pk ORDER BY d.pk LIMIT 1`,
@@ -234,7 +232,7 @@ try {
   await expect([200], '/api/alerts/sale-orders-pending');
   await expect([200], '/api/customers/lookup?q=TDC001');
   await expect([200], '/api/customers/lookup?q=ทดสอบ');
-  // a part by its uuid (ADR 0008); its code — an old link — or an unknown uuid is 404, no redirect
+  // a part by its uuid; its code — an old link — or an unknown uuid is 404, no redirect
   const uuidOf = async (sqlText: string) => (await pool.query<{ id: string }>(sqlText)).rows[0]!.id;
   const tdp1 = await uuidOf(`SELECT id::text AS id FROM product WHERE product_code = 'TDP1'`);
   await expect([200], `/api/products/${tdp1}`);
@@ -272,7 +270,7 @@ try {
     }
     const whole = await productStockCard('TDPCARD');
     assert.deepEqual(lines, JSON.parse(JSON.stringify(whole)));
-    // the balance rule, unchanged: oldest first from 0, each line's before = the line before's after
+    // the balance rule: oldest first from 0, each line's before = the line before's after
     const card = whole as { before: number; income: number; outcome: number; after: number }[];
     for (let i = card.length - 1, bal = 0; i >= 0; i--) {
       const l = card[i]!;
@@ -286,7 +284,7 @@ try {
   await expect([404], '/api/products/NOPE-' + rand);
   // staff filters take a user's uuid (a name still works where the page types one)
   const tdAdmin = await uuidOf(`SELECT id::text AS id FROM app_user WHERE pk = 9101`);
-  // the System Admin audit log (ADR 0008 audit trail), a non-admin refused; security_log has no web route
+  // the System Admin audit log, a non-admin refused; security_log has no web route
   await expect([200], `/api/audit?user=${tdAdmin}`);
   await expect([403], '/api/audit', { as: VIEWER });
   await expect([400], '/api/audit?from=2026-02-30');
@@ -354,7 +352,7 @@ try {
   await expect([200], `/api/data/products?paged=1&creator=${tdAdmin}`);
   await expect([200], `/api/data/report_rows?report=sale_order&createdBy=${tdAdmin}`);
   await expect([200], '/api/export/customers');
-  // an attachment / a job by its uuid (ADR 0008): an old int id / job number → 404, no redirect
+  // an attachment / a job by its uuid: an old int id / job number → 404, no redirect
   await expect([404], '/api/attachments/999999999');
   await expect([404], '/api/attachments/00000000-0000-7000-8000-000000000000', { method: 'DELETE' });
   await expect([400], '/api/files');
@@ -580,7 +578,7 @@ try {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     quotationId = String((r.body.quotation as { id?: string } | undefined)?.id ?? '');
   });
-  // a quotation / sale order by its uuid (ADR 0008); its number — an old link — or an unknown uuid is 404
+  // a quotation / sale order by its uuid; its number — an old link — or an unknown uuid is 404
   if (quotationId) await expect([200], `/api/quotations/${quotationId}`);
   await expect([404], '/api/quotations/NOPE' + rand);
   await expect([404], '/api/quotations/00000000-0000-7000-8000-000000000000');
@@ -724,7 +722,6 @@ try {
   await expect([401], '/api/track/otp/verify', { method: 'POST', body: { requestId: 'x', code: '0000' }, as: null });
 
   console.log('\nInput read through the contract — refused in the words the route always used');
-  /** call and expect exactly this status and JSON body */
   const refuses = (status: number, body: Record<string, unknown>, url: string, init?: Init) =>
     test(`${init?.method ?? 'GET'} ${url} → ${status} ${JSON.stringify(body)}`, async () => {
       const r = await call(url, init);
@@ -742,8 +739,8 @@ try {
   });
   await refuses(404, { error: 'ไม่พบไฟล์แนบ' }, '/api/attachments/id');
   await refuses(404, { error: 'ไม่พบไฟล์แนบ' }, '/api/attachments/id', { method: 'DELETE' });
-  await refuses(404, { error: 'ไม่พบงาน' }, '/api/jobs/J2612164'); // a job's number is no path (ADR 0008)
-  // what the DB cannot take (DAST 2026-10-20): the caller's mistake → 400, not an "unhandled" 500
+  await refuses(404, { error: 'ไม่พบงาน' }, '/api/jobs/J2612164'); // a job's number is no path
+  // what the DB cannot take: the caller's mistake → 400, not an "unhandled" 500
   const badInput = { error: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่' };
   await refuses(400, badInput, '/api/data/jobs?q=a%00b');
   await refuses(400, badInput, '/api/customers/lookup?q=a%00b');
@@ -764,7 +761,7 @@ try {
   await refuses(404, { error: 'unknown master: nope' }, '/api/masters/nope', { method: 'POST', body: { name: 'x' } });
 
   console.log('\nDeleting through /api/admin/records — what a delete would leave behind is refused');
-  // a part / job / quotation / sale order goes by its uuid (ADR 0008) — looked up here by its code / number
+  // a part / job / quotation / sale order goes by its uuid — looked up here by its code / number
   const DOC: Record<string, [string, string]> = {
     products: ['product', 'product_code'],
     jobs: ['job', 'job_no'],
@@ -870,7 +867,7 @@ try {
     const order = got.body.order as { cancelRemark: string; approve: string };
     assert.deepEqual([order.cancelRemark, order.approve], ['TD เหตุผล', 'ยกเลิก']);
   });
-  // QA follow-ups 2026-10-21: only System Admin restores a deleted customer (the delete dialog says so)
+  // only System Admin restores a deleted customer (the delete dialog says so)
   await test('restoring a deleted customer: Customer del alone → 403, System Admin → 200', async () => {
     await pool.query(`DELETE FROM customer WHERE customer_code = 'TDCRST';
       INSERT INTO customer (customer_code, customer_name, phone_number, record_status)

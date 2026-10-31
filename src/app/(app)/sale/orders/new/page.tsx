@@ -16,10 +16,9 @@ export default function NewSaleOrderPage() {
   const form = React.useRef<SaleOrderFormHandle>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // POST /api/sale-orders → sale_order (running SO) + sale_order_line; approve status 1 or 2
   const save = async () => {
     const p = form.current?.payload();
-    if (!p || !form.current?.validate()) return; // every field error at once (the API checks the same)
+    if (!p || !form.current?.validate()) return;
     setSaving(true);
     try {
       const d = await postJson<{ order: { id: string; no: string } }>('/api/sale-orders', p);

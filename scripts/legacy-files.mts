@@ -13,7 +13,7 @@
  * Safe to re-run after every re-dump: files already in the bucket are skipped
  * (checked in ONE query against storage.objects), uploads are upsert.
  *
- * Lives in shdservice/scripts (needs the app's node_modules + .env); the wrapper
+ * Lives in shdservice/scripts (needs the app's node_modules + .env.prod.local); the wrapper
  * setupdata/upload_files.sh runs it from anywhere:
  *   cd shdservice
  *   ../setupdata/upload_files.sh validate
@@ -23,9 +23,12 @@
  *                                               setupdata/backup/bucket first and put back at the same path
  * Source folders default to setupdata/ImagesProduct and setupdata/FileUpload.
  *
- * Env (from shdservice/.env): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)
+ * Env (from shdservice/.env.prod.local): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)
  */
-import 'dotenv/config';
+import { config } from 'dotenv';
+
+// production storage + database: the values in .env.prod.local (never .env — `next dev` would load it)
+config({ path: '.env.prod.local', quiet: true });
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -53,13 +56,13 @@ const FILES_DIR = opt(
   firstDir(path.join(SETUP, 'FileUpload'), path.join(os.homedir(), 'Downloads/FileUpload')),
 ).replace(/^~/, os.homedir());
 const DRY = args.includes('--dry');
-const FORCE = args.includes('--force'); // re-upload even if the object exists
+const FORCE = args.includes('--force');
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'oneservice';
 const CONC = Number(process.env.CONC || 4);
 
 const need = (k: string) => {
   if (!process.env[k]) {
-    console.error(`missing env ${k} (run from shdservice/ so .env is loaded)`);
+    console.error(`missing env ${k} (run from shdservice/ so .env.prod.local is loaded)`);
     process.exit(2);
   }
 };
@@ -95,7 +98,7 @@ const db = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { re
 await db.connect();
 const q = async <T = Record<string, string>,>(s: string) => (await db.query(s)).rows as T[];
 
-/* 1) what the database references (distinct — legacy has duplicate document_attach rows) */
+/* distinct — legacy has duplicate document_attach rows */
 const refs: Ref[] = [];
 const seen = new Set<string>();
 const push = (r: Ref) => {
@@ -122,12 +125,12 @@ for (const r of await q(
 ))
   push({ kind: 'slips', key: r.k, file: r.f, table: 'job' });
 
-/* 2) what the bucket already holds (one query — storage.objects lives in the same Postgres) */
+/* one query — storage.objects lives in the same Postgres */
 const inBucket = new Set(
   (await q<{ name: string }>(`select name from storage.objects where bucket_id='${BUCKET}'`)).map((r) => r.name),
 );
 
-/* 3) what the source folders hold (name → actual file; also lets .jpg refs match .jfif/.jpeg on disk) */
+/* name → actual file; also lets .jpg refs match .jfif/.jpeg on disk */
 const listDir = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => !f.startsWith('.')) : []);
 const stemMap = (files: string[]) => {
   const m = new Map<string, string>();
@@ -143,7 +146,6 @@ const findSrc = (r: Ref) => {
   return m.get(r.file) ?? m.get(r.file.split('.')[0].toLowerCase()) ?? null;
 };
 
-/* 4) classify */
 type Row = Ref & { path: string; exists: boolean; src: string | null };
 const rows: Row[] = refs.map((r) => ({ ...r, path: pathOf(r), exists: inBucket.has(pathOf(r)), src: findSrc(r) }));
 const byKind = (k: Ref['kind']) => rows.filter((r) => r.kind === k);
@@ -223,7 +225,6 @@ if (cmd === 'wipe') {
   process.exit(0);
 }
 
-/* 5) upload */
 const kinds: Ref['kind'][] = kindArg === 'all' ? ['images', 'attachments', 'slips'] : [kindArg as Ref['kind']];
 const todo = rows.filter((r) => kinds.includes(r.kind) && r.src && (FORCE || !r.exists));
 console.log(

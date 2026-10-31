@@ -11,12 +11,8 @@ import { useFieldControl } from '@/components/ui/field';
 export type SymptomOption = { id: string; name: string; count?: number };
 
 /**
- * อาการเสีย — searchable multi-select (cmdk inside a Popover).
- *  - `value` is an ordered list of symptom NAMES; the FIRST one is อาการหลัก
- *    (what job.product_symptom_id stores), the rest go to job_symptom.
- *  - options come pre-sorted by how often they are used; `suggested` (top symptoms
- *    of the chosen model) is shown as its own group on top.
- *  - `multiple={false}` turns it into a single-select (ช่างระบุอาการที่ตรวจพบ).
+ * `value` is an ordered list of symptom NAMES: the first is อาการหลัก (job.product_symptom_id), the rest job_symptom.
+ * `suggested` (the chosen model's top symptoms) shows as its own group on top.
  */
 export function SymptomPicker({
   value,

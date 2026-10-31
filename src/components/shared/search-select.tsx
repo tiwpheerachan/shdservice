@@ -11,16 +11,12 @@ export type SearchOption = { value: string; label: string; sub?: string };
 
 const MAX_ROWS = 100;
 
-/** plain string list → options (value = label) */
 export const strOptions = (list: readonly string[]): SearchOption[] => list.map((v) => ({ value: v, label: v }));
 /** keep a saved value that is no longer in the list (inactive / legacy) selectable, so it still shows */
 export const withCurrent = (opts: SearchOption[], value: string): SearchOption[] =>
   value && !opts.some((o) => o.value === value) ? [{ value, label: value, sub: 'ค่าเดิม' }, ...opts] : opts;
 
-/**
- * Searchable single select (cmdk) — a drop-in for a plain <Select> with a long list.
- * Every typed word must appear in the label or sub text; label-prefix matches first.
- */
+/** Every typed word must appear in the label or sub text; label-prefix matches first. */
 export function SearchSelect({
   options,
   value,

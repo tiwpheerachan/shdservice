@@ -18,16 +18,11 @@ type Row = { id: string; name: string; note: string; file?: string; pending?: Fi
 /** src/server/storage.ts R2_MISSING */
 const VIDEO_OFF = 'ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ';
 type SavedFile = { id: string; name: string; file: string; remark: string };
-/** files = the loaded job's attachments (JobDetail.attachments) */
 export type AttachmentsProps = { jobNo?: string; files?: SavedFile[] };
 
 /**
- * Job attachments (document_attach + Supabase Storage; videos in Cloudflare R2).
- *  - with `jobNo`: uploads immediately and lists the job's existing files
- *  - without (new job): files are queued; the page calls `uploadPending(jobNo)`
- *    from the ref after the job number exists.
- * A video (MP4 / MOV / WebM, ≤ 3 min) is converted here first and goes straight to storage (src/lib/video.ts),
- * with its progress and ยกเลิก on screen; it opens in a player. Staff only, as every attachment.
+ * Without `jobNo` (a new job) files are queued and the page calls `uploadPending(jobNo)` once the number exists.
+ * Videos (≤ 3 min) are converted here first and go straight to storage (src/lib/video.ts).
  */
 export type AttachmentsHandle = { uploadPending: (jobNo: string) => Promise<void> };
 
@@ -123,7 +118,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
 
   React.useImperativeHandle(ref, () => ({
     uploadPending: async (target: string) => {
-      // a file picked but not "แนบไฟล์"-ed yet goes with the job too (it was dropped without a word)
+      // a file picked but not "แนบไฟล์"-ed yet goes with the job too
       const picked = file ? [{ name: file.name, note, pending: file }] : [];
       const pending = [...rows.filter((r) => r.pending), ...picked];
       for (const r of pending) {

@@ -13,7 +13,6 @@ import { baht } from '@/lib/utils';
 import type { FieldErrors } from '@/lib/validation';
 import { useTourRestore } from '@/components/tour/tour';
 
-/** a row of the sale order */
 export type SaleOrderLine = {
   id: number;
   /** a stored line's uuid (sent back with the save: that line is kept / updated); none = a new line */
@@ -38,7 +37,6 @@ function StockNote({ code, qty }: { code: string; qty: number }) {
   );
 }
 
-/** รายการสินค้า — pick a part + qty to add a row; each row's qty / price, its stock and the total */
 export function SaleOrderLines({
   lines,
   setLines,

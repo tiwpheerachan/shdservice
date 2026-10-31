@@ -14,7 +14,6 @@ import { STORE_LOCATION_NAME } from '@/lib/status-ids';
 import { useTourRestore } from '@/components/tour/tour';
 import { type ProductForm, modelRows } from './product-form';
 
-/** a row of GET /api/products/:id's stock card */
 export type StockCardRow = {
   no: string;
   date: string;
@@ -31,7 +30,6 @@ type FormProps = {
   form: ProductForm;
   set: <K extends keyof ProductForm>(k: K, v: ProductForm[K]) => void;
   errors: FieldErrors;
-  /** view mode */
   ro: boolean;
 };
 
@@ -62,7 +60,6 @@ function PriceField({
   );
 }
 
-/** codes, names, category, S/N control, prices, on hand and brand */
 export function ProductFields({ p, seeCost, ...f }: FormProps & { p: Product; seeCost: boolean }) {
   const { form, set, errors, ro } = f;
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
@@ -256,7 +253,6 @@ export function ProductModelChecklist({
   );
 }
 
-/** ใช้สำหรับ สีสินค้า + สถานะ */
 export function ProductColorStatus({ form, set, ro, sysCode }: Omit<FormProps, 'errors'> & { sysCode: string }) {
   const { data: COLORS, ...colorsLookup } = useColors();
   return (
@@ -328,7 +324,6 @@ export function ProductLegacyNotes({ detail }: { detail: Product | null }) {
   );
 }
 
-/** view-only stock tables: on hand now + the stock card */
 export function ProductStockTables({
   p,
   stockCard,

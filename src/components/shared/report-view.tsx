@@ -116,7 +116,7 @@ export function ReportView<T extends Record<string, unknown>>({
   const [values, setValues] = React.useState<ReportValues>(initial);
   const [seenKey, setSeenKey] = React.useState(defaultsKey);
   // only the values a page declares (the applied date range) are taken over — a select / text box keeps what
-  // the user chose (QA 2026-10-27: a new range used to reset them while the table stayed filtered by them)
+  // the user chose (the table is still filtered by them)
   if (seenKey !== defaultsKey) {
     setSeenKey(defaultsKey);
     setValues((v) => ({

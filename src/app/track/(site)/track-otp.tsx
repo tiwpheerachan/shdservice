@@ -10,12 +10,8 @@ import { JobList } from './track-job-list';
 import { cn } from '@/lib/utils';
 
 /**
- * /track after the Cloudflare gate: phone → SMS OTP → this customer's jobs.
- *
- * The session token lives ONLY in this component's memory (a ref) and travels in the
- * `x-track-session` header — refresh / close / come back later = a new OTP. The session
- * starts at 15 minutes; while the customer is actually using the page the keepalive keeps
- * at least 5 minutes on the clock, up to 60 minutes from sign-in (server-enforced).
+ * The session token lives ONLY in memory (a ref), sent as `x-track-session` — refresh / close / come back = a new OTP.
+ * 15 minutes at start; while in use the keepalive keeps ≥ 5 minutes on the clock, up to 60 from sign-in (server-enforced).
  */
 export function TrackOtp({
   getToken,
@@ -32,7 +28,6 @@ export function TrackOtp({
   const s = useTrackSession(getToken);
   const { step, error, busy, signOut } = s;
 
-  /* ---------- views ---------- */
   const errorBox = error && (
     <p
       role="alert"

@@ -61,9 +61,7 @@ export default function PendingPage() {
 
           <div className="animate-element animate-delay-100 flex items-center gap-4">
             <span className="relative grid h-14 w-14 shrink-0 place-items-center">
-              {/* soft brand glow */}
               <span className="bg-brand absolute inset-0 rounded-2xl opacity-40 blur-lg" />
-              {/* pulsing ring */}
               <span className="absolute inset-0 animate-ping rounded-2xl bg-primary/15" />
               <span className="relative grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg ring-1 ring-inset ring-white/20 bg-brand">
                 <Clock className="h-7 w-7" />

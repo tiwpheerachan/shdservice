@@ -30,9 +30,7 @@ import { profileLock } from '@/lib/profile-lock';
 import { useAccess } from '@/lib/use-access';
 import { FIGURES_LOCKED } from '@/lib/validation';
 
-/** Shape returned by GET /api/quotations/:id (subset the form uses). */
 export type QuotationLoaded = {
-  /** the quotation's uuid — its links (edit page, print) */
   id: string;
   no: string;
   date: string;
@@ -49,7 +47,6 @@ export type QuotationLoaded = {
   discountFormula: string;
   vatRate: number;
   lines: {
-    /** the line's uuid */
     id?: string;
     itemType: string;
     code: string;
@@ -61,7 +58,7 @@ export type QuotationLoaded = {
   }[];
   customerDetail: Customer | null;
   job: JobDetail | null;
-  approveDate?: string; // quotation_hd.customer_approve_date
+  approveDate?: string;
   createdBy?: string;
   documentProfileId?: string; // ออกเอกสารในนาม (a profile's uuid)
   version?: number; // row_version — the edit page sends it back with its save
@@ -69,7 +66,6 @@ export type QuotationLoaded = {
   figuresLocked?: boolean;
 };
 
-/** What the page posts to /api/quotations. */
 export type QuotationPayload = {
   no?: string;
   documentProfileId?: string;
@@ -346,7 +342,6 @@ export const QuotationForm = React.forwardRef<
     vatRate,
   });
 
-  // a value that changes — typed or filled in from the job — takes its error away
   const { clear } = fe;
   React.useEffect(() => clear('customerCode'), [customer, clear]);
   React.useEffect(() => clear('jobNo'), [jobRef, clear]);

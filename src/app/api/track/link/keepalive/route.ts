@@ -10,12 +10,7 @@ import { trackLinkKeepalive } from '@/server/contract/track';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/track/link/keepalive { linkToken } → { expiresAt }
- * The /track/<token> page calls this while the customer is actually using it: an opened link
- * keeps ≥ 5 minutes on the clock, never past 60 minutes from its first open. It never reopens
- * an expired link and never opens an unopened one. 410 = the link is no longer live.
- */
+/** an opened link keeps ≥ 5 minutes on the clock, never past 60 minutes from first open; never reopens an expired link or opens an unopened one. 410 = no longer live. */
 export const POST = checked(async (req: NextRequest) => {
   const c = trackCtx(req);
   try {

@@ -8,7 +8,6 @@ import { logJobPrint, printJobNo } from '../job-no';
 
 export const dynamic = 'force-dynamic';
 
-/** the tab / window title names the document (root template: "… · OneService") */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   return { title: `ใบปะหน้าพัสดุ ${(await printJobNo((await params).id)) ?? ''}`.trim() };
 }

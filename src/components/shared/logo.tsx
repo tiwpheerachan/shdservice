@@ -1,10 +1,6 @@
 import { cn } from '@/lib/utils';
 
-/**
- * The real "one service" wordmark — transparent PNG, two variants that swap by
- * theme: navy on light, white on dark. The blue→green check is preserved in both.
- * Set the size with a height class (e.g. `h-9 w-auto`).
- */
+/** Navy on light, white on dark. Size it with a height class (e.g. `h-9 w-auto`). */
 export function Logo({
   className,
   variant,
