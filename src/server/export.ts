@@ -1,6 +1,5 @@
 import 'server-only';
 import { PassThrough, Readable } from 'node:stream';
-import ExcelJS from 'exceljs';
 import type { NextRequest } from 'next/server';
 import { hasRight, HttpError, parseQuery, requireAdmin, requireCan, type CurrentUser } from '@/server/auth';
 import { exportXlsx as exportOperation } from '@/server/contract/data';
@@ -28,6 +27,7 @@ import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/ser
 import { today } from '@/lib/dates';
 import { fieldLabel, fieldValue } from '@/lib/field-labels';
 import { logError } from '@/lib/log';
+import { writeXlsx } from '@/server/xlsx';
 import { rateLimit } from '@/server/rate-limit';
 import { MAX_EXPORT_ROWS } from '@/lib/export-limit';
 import { reportPage, REPORT_MODULE } from '@/server/services/reports';
@@ -443,8 +443,8 @@ let slot: object | null = null;
 
 /**
  * `query` = the request's query as GET /export/{resource} declares it (any other name is a filter, as on /data).
- * Streamed (WorkbookWriter, inline strings): the in-memory Workbook ran out of 400 MB at 20k rows. The slot is freed
- * once the file is written or the client goes away.
+ * Streamed (src/server/xlsx.ts): an in-memory workbook ran out of 400 MB at 20k rows. The slot is freed once the file
+ * is written or the client goes away.
  */
 export async function exportXlsx(
   req: NextRequest,
@@ -533,48 +533,15 @@ export async function exportXlsx(
   const out = new PassThrough({ highWaterMark: 64 * 1024 * 1024 });
   const gone = new Promise<void>((resolve) => out.once('close', resolve)); // done, or the client went away
   void gone.then(release);
-  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true, useSharedStrings: false });
-  wb.creator = 'OneService';
-  wb.created = new Date();
-  const ws = wb.addWorksheet(spec.title.slice(0, 31), { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } }; // written on ws.commit()
-  // number formats on the column itself: a streamed cell takes its column's style when it is created
-  ws.columns = cols.map((c) => ({
-    header: c.header,
-    key: c.key,
-    width: c.width ?? 16,
-    style: c.money ? { numFmt: '#,##0.00' } : c.num ? { numFmt: '#,##0' } : {},
-  }));
-  const head = ws.getRow(1);
-  head.font = { bold: true };
-  head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF9' } };
-  head.commit();
-
   const truncated = total > MAX_ROWS;
-  void (async () => {
-    let n = 0;
-    for (const r of rows.slice(0, MAX_ROWS)) {
-      if (out.destroyed) return; // client went away: stop (the zip would never finish and pin the rows)
-      const line: Record<string, unknown> = {};
-      for (const c of cols) {
-        const v = (r as Record<string, unknown>)[c.key];
-        line[c.key] = c.money || c.num ? Number(v ?? 0) : (v ?? '');
-      }
-      ws.addRow(line).commit();
-      // let the zip stream drain now and then, or every row's XML waits in memory until the loop ends
-      if (++n % 500 === 0) await new Promise(setImmediate);
-    }
-    if (truncated) {
-      const note = ws.addRow([
-        `⚠ แสดง ${MAX_ROWS.toLocaleString('en-US')} แถวแรกเท่านั้น — กรองช่วงวันที่/เงื่อนไขให้แคบลงเพื่อได้ข้อมูลครบ`,
-      ]);
-      note.font = { bold: true, color: { argb: 'FFB45309' } };
-      note.commit();
-    }
-    ws.commit();
-    release(); // every row is in the zip — freed before the client can finish reading, so a next export never races it
-    await Promise.race([wb.commit(), gone]);
-  })()
+  void writeXlsx(out, {
+    title: spec.title,
+    cols,
+    rows: rows.slice(0, MAX_ROWS),
+    note: truncated
+      ? `⚠ แสดง ${MAX_ROWS.toLocaleString('en-US')} แถวแรกเท่านั้น — กรองช่วงวันที่/เงื่อนไขให้แคบลงเพื่อได้ข้อมูลครบ`
+      : undefined,
+  })
     .catch((e) => {
       logError(e, 'export failed mid-stream', { resource }, req);
       out.destroy(e instanceof Error ? e : new Error(String(e)));

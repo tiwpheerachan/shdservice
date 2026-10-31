@@ -1,6 +1,6 @@
 import 'server-only';
 import sharp from 'sharp';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { StorageClient } from '@supabase/storage-js';
 import { AwsClient } from 'aws4fetch';
 import { LRUCache } from 'lru-cache';
 import { NextResponse } from 'next/server';
@@ -8,6 +8,9 @@ import { isoDateTime } from '@/lib/dates';
 import { HttpError } from '@/server/http-error';
 import { logError } from '@/lib/log';
 import { mediaUrl } from '../../workers/media/src/media';
+
+// each upload is a different image: libvips' operation cache (up to 50 MB) is never hit, only held, on 512 MB
+sharp.cache(false);
 
 /**
  * File storage — one PRIVATE Supabase Storage bucket `oneservice`, served only
@@ -184,7 +187,7 @@ export async function optimizeImage(file: File): Promise<File> {
   }
 }
 
-let client: SupabaseClient | null = null;
+let client: StorageClient | null = null;
 let bucketReady: Promise<void> | null = null;
 function storage() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -194,15 +197,13 @@ function storage() {
       503,
       'ระบบจัดเก็บไฟล์ยังไม่ได้ตั้งค่า (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY) — แนบไฟล์ไม่ได้ชั่วคราว',
     );
-  if (!client)
-    client = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      // a hung Storage must not hold upload requests (and memory on a 512 MB instance)
-      global: {
-        fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) }),
-      },
-    });
-  return client.storage;
+  client ??= new StorageClient(
+    new URL('storage/v1', url.replace(/\/?$/, '/')).href,
+    { apikey: key, Authorization: `Bearer ${key}` },
+    // a hung Storage must not hold upload requests (and memory on a 512 MB instance)
+    (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) }),
+  );
+  return client;
 }
 
 /**
@@ -403,7 +404,7 @@ export async function signedUrl(
     logError(error, 'storage signedUrl failed');
     throw new HttpError(503, 'ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง');
   }
-  // supabase-js puts its `download` option into the URL unencoded (a name with & or # would break it)
+  // storage-js's own `download` option encodes the name twice (URLSearchParams, then encodeURI over the whole URL)
   return download
     ? `${data.signedUrl}&download=${download === true ? '' : encodeURIComponent(download)}`
     : data.signedUrl;

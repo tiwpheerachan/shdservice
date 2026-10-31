@@ -72,6 +72,8 @@ export function envProblems(): { required: string[]; optional: string[] } {
         'MAINTENANCE_BYPASS_SECRET missing or under 16 characters — nobody can check the system before opening',
       );
   }
+  if (has('RATE_LIMIT_SCALE'))
+    optional.push(`RATE_LIMIT_SCALE=${env.RATE_LIMIT_SCALE} — every per-user rate limit raised (meant for e2e only)`);
   if (mode === 'log' || mode === 'off')
     optional.push(`ORIGIN_AUTH_MODE=${mode} — requests around Cloudflare are not refused`);
   return { required, optional };

@@ -25,15 +25,13 @@
  *
  * Env (from shdservice/.env.prod.local): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)
  */
-import { config } from 'dotenv';
-
 // production storage + database: the values in .env.prod.local (never .env — `next dev` would load it)
-config({ path: '.env.prod.local', quiet: true });
+process.loadEnvFile('.env.prod.local');
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import pg from 'pg';
-import { createClient } from '@supabase/supabase-js';
+import { StorageClient } from '@supabase/storage-js';
 
 type Ref = { kind: 'images' | 'attachments' | 'slips'; key: string; file: string; table: string };
 
@@ -186,8 +184,10 @@ if (cmd === 'validate') {
   process.exit(0);
 }
 
-const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
-  auth: { persistSession: false },
+const key = process.env.SUPABASE_SECRET_KEY!;
+const sb = new StorageClient(new URL('storage/v1', process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(/\/?$/, '/')).href, {
+  apikey: key,
+  Authorization: `Bearer ${key}`,
 });
 
 if (cmd === 'wipe') {
@@ -204,20 +204,20 @@ if (cmd === 'wipe') {
   }
   const saved = path.join(SETUP, 'backup/bucket');
   for (const p of logos) {
-    const { data, error } = await sb.storage.from(BUCKET).download(p);
+    const { data, error } = await sb.from(BUCKET).download(p);
     if (error) throw new Error(`download ${p}: ${error.message} — nothing deleted`);
     fs.mkdirSync(path.dirname(path.join(saved, p)), { recursive: true });
     fs.writeFileSync(path.join(saved, p), Buffer.from(await data.arrayBuffer()));
   }
   for (let i = 0; i < all.length; i += 1000) {
-    const { error } = await sb.storage.from(BUCKET).remove(all.slice(i, i + 1000));
+    const { error } = await sb.from(BUCKET).remove(all.slice(i, i + 1000));
     if (error) throw new Error(`remove: ${error.message}`);
     console.log(`  ${Math.min(i + 1000, all.length)}/${all.length}`);
   }
   for (const p of logos) {
     const body = fs.readFileSync(path.join(saved, p));
     const type = p.endsWith('.svg') ? 'image/svg+xml' : ct(p);
-    const { error } = await sb.storage.from(BUCKET).upload(p, body, { contentType: type, upsert: true });
+    const { error } = await sb.from(BUCKET).upload(p, body, { contentType: type, upsert: true });
     if (error) throw new Error(`put back ${p}: ${error.message} (the file is in ${saved})`);
   }
   console.log(`bucket ${BUCKET} empty but for ${logos.length} logo(s) (copies in ${saved})`);
@@ -245,7 +245,7 @@ await Promise.all(
       const body = fs.readFileSync(path.join(srcDir(r), r.src!));
       let err: string | null = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const { error } = await sb.storage.from(BUCKET).upload(r.path, body, { contentType: ct(r.src!), upsert: true });
+        const { error } = await sb.from(BUCKET).upload(r.path, body, { contentType: ct(r.src!), upsert: true });
         if (!error) {
           err = null;
           break;

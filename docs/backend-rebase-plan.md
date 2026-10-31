@@ -203,7 +203,7 @@ drizzle/
 scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว journal ค้าง จะ reset ให้เอง
 ```
 
-`.env` เพิ่ม `DATABASE_URL` (Session pooler :5432) · `@supabase/supabase-js` เหลือใช้เฉพาะ Storage ฝั่ง server
+`.env` เพิ่ม `DATABASE_URL` (Session pooler :5432) · `@supabase/storage-js` (Supabase Storage) ฝั่ง server เท่านั้น
 
 ---
 

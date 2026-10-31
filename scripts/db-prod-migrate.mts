@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { parse } from 'dotenv';
+import { parseEnv } from 'node:util';
 import { Client } from 'pg';
 import { dbSsl } from '../src/db/ssl';
 
@@ -19,7 +19,7 @@ export const PROD_ENV_FILE = '.env.prod.local';
 
 /** the production env file's DATABASE_URL on the session pooler (5432): a migration's one long transaction, its NOTICEs, its SETs */
 export function prodUrl(envText: string): string {
-  const url = (parse(envText).DATABASE_URL ?? '').trim();
+  const url = (parseEnv(envText).DATABASE_URL ?? '').trim();
   if (!url.includes(PROD_REF))
     throw new Error(`${PROD_ENV_FILE}'s DATABASE_URL is not the production project (${PROD_REF})`);
   return url.replace(/:6543\//, ':5432/');

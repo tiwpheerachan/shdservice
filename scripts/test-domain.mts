@@ -23,6 +23,7 @@ const migrationPart = (name: string): string => {
 };
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
+import { readSheet } from 'read-excel-file/node';
 import { TEST_DATABASE_URL, assertLocal } from '../tests/db-url.mts';
 
 // the app modules read DATABASE_URL when they are imported (below) — point it at the test DB first
@@ -81,6 +82,9 @@ const U = {
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
 /** a fixture user's app_user.id — the uuid the API, the pages and os_seen carry */
+/** an export as rows of cell values (row 0 = the header), read by a reader that is not our writer */
+const sheetRows = async (exp: Promise<{ stream: ReadableStream<Uint8Array> }>) =>
+  (await readSheet(Buffer.from(await new Response((await exp).stream).arrayBuffer()), { trim: false })) as unknown[][];
 const uuidOf = async (u: TestUser) =>
   (await pool.query<{ id: string }>('SELECT id::text FROM app_user WHERE pk = $1', [u.id])).rows[0]!.id;
 /** SHD's document profile uuid (ออกเอกสารในนาม) */
@@ -2366,7 +2370,6 @@ try {
       const { invalidateGrantCache } = await import('@/server/auth');
       const { GET: productGET } = await import('@/app/api/products/[id]/route');
       const { exportXlsx } = await import('@/server/export');
-      const ExcelJS = (await import('exceljs')).default;
       await db.execute(sql`UPDATE product_stock SET capital_price = 55.00 WHERE product_pk = ${P.a.id}`);
       // TD Seller may view products (the export needs it) but not edit them
       await pool.query(`INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view)
@@ -2390,15 +2393,8 @@ try {
         );
         const rows = (list.body as { rows: Record<string, unknown>[] }).rows;
         assert.ok(rows.length > 0 && rows.every((r) => !('capitalPrice' in r)), 'list JSON');
-        const sheet = async (u: TestUser) => {
-          const buffer = await new Response(
-            (await exportXlsx(await request(`/api/export/products?sysCode=${P.a.code}`, u), 'products')).stream,
-          ).arrayBuffer();
-          const wb = new ExcelJS.Workbook();
-          await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-          const ws = wb.worksheets[0]!;
-          return [1, 2].map((n) => (ws.getRow(n).values as unknown[]).slice(1));
-        };
+        const sheet = async (u: TestUser) =>
+          sheetRows(exportXlsx(await request(`/api/export/products?sysCode=${P.a.code}`, u), 'products'));
         const [head, row] = await sheet(U.seller);
         assert.ok(!head.includes('ราคาทุน'), 'export header');
         assert.ok(!row.includes(55), 'export row');
@@ -3289,7 +3285,6 @@ try {
     const { saveSwapRefund, listJobs } = await import('@/server/services/jobs');
     const { REOPEN_LOCKED, returnDetailOf } = await import('@/lib/validation/job');
     const { exportXlsx } = await import('@/server/export');
-    const ExcelJS = (await import('exceljs')).default;
     const job = (no: string, status: number, customer = `${CUSTOMER} ลูกค้า ทดสอบโดเมน`) =>
       `(${TST_MODEL}, '${no}', ${status}, 9001, '${customer}', 'Model TD', now(), current_date, '1900-01-01')`;
     const part = (no: string, pick: boolean) =>
@@ -3365,13 +3360,7 @@ try {
       assert.equal((await getJob('TDJ0404'))!.return.detail, 'ไปรษณีย์ไทย · TD R3');
     });
     await test('R3 jobs: the job list Excel has มัดจำ and ค้างชำระ (1,300 − deposit 300 − paid 500 = 500)', async () => {
-      const buffer = await new Response(
-        (await exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs')).stream,
-      ).arrayBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-      const ws = wb.worksheets[0]!;
-      const [head, row] = [1, 2].map((n) => (ws.getRow(n).values as unknown[]).slice(1));
+      const [head, row] = await sheetRows(exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs'));
       assert.equal(row[head.indexOf('เลขที่งาน')], 'TDJ0405');
       assert.deepEqual([row[head.indexOf('มัดจำ')], row[head.indexOf('ค้างชำระ')]], [300, 500]);
     });
@@ -3789,23 +3778,16 @@ try {
 
     await test('R5 admin users: ส่งออก Excel takes the filter bar (role + status) — the file = the filtered list', async () => {
       const { exportXlsx } = await import('@/server/export');
-      const ExcelJS = (await import('exceljs')).default;
-      const buffer = await new Response(
-        (await exportXlsx(await request('/api/export/users?role=TD%20Seller&status=Active', U.admin), 'users')).stream,
-      ).arrayBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-      const ws = wb.worksheets[0]!;
-      const head = (ws.getRow(1).values as unknown[]).slice(1);
+      const [head, ...rows] = await sheetRows(
+        exportXlsx(await request('/api/export/users?role=TD%20Seller&status=Active', U.admin), 'users'),
+      );
       // no ID column: the rows are told apart by e-mail
       const emails = new Set<string>();
-      ws.eachRow((r, n) => {
-        const v = (r.values as unknown[]).slice(1);
-        if (n > 1 && v[head.indexOf('อีเมล')] != null) {
+      for (const v of rows)
+        if (v[head.indexOf('อีเมล')] != null) {
           assert.equal(v[head.indexOf('บทบาท')], 'TD Seller');
           emails.add(String(v[head.indexOf('อีเมล')]));
         }
-      });
       assert.ok(emails.has(U.seller.email) && emails.has(U.seller2.email), [...emails].join());
       assert.ok(!emails.has(U.admin.email));
     });
@@ -4413,7 +4395,6 @@ try {
       parseSwap,
     } = await import('@/lib/validation/job');
     const { exportXlsx } = await import('@/server/export');
-    const ExcelJS = (await import('exceljs')).default;
     const job = (no: string, status: number) =>
       `(${TST_MODEL}, '${no}', ${status}, 9001, '${CUSTOMER} ลูกค้า ทดสอบโดเมน', 'Model TD', now(), current_date, '1900-01-01', NULL)`;
     const waitingLine = (no: string) => `(${jobPk(no)}, ${P.a.id}, true, true, 1, 1, now(), ${U.admin.id}, 0, 0)`;
@@ -4790,14 +4771,7 @@ try {
     });
 
     await test('R5 L2: job Excel — ยอดชำระ never negative, a refund in คืนเงิน, ค้างชำระ only on a closed job', async () => {
-      const buffer = await new Response(
-        (await exportXlsx(await request('/api/export/jobs?q=TDJ061', U.admin), 'jobs')).stream,
-      ).arrayBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-      const ws = wb.worksheets[0]!;
-      const head = (ws.getRow(1).values as unknown[]).slice(1);
-      const rows = Array.from({ length: ws.rowCount - 1 }, (_, n) => (ws.getRow(n + 2).values as unknown[]).slice(1));
+      const [head, ...rows] = await sheetRows(exportXlsx(await request('/api/export/jobs?q=TDJ061', U.admin), 'jobs'));
       const money = (no: string) => {
         const r = rows.find((x) => x[head.indexOf('เลขที่งาน')] === no)!;
         return ['ยอดชำระ', 'คืนเงิน', 'ค้างชำระ'].map((h) => r[head.indexOf(h)]);

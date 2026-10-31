@@ -112,6 +112,9 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         /* + the 10mm @page margin (globals.css) = the legacy 10/12/12mm frame; 276mm = a hair under the 277mm
            printable height, so rounding never spills a blank 2nd page */
         @media print { .qt { padding: 0 2mm 2mm; min-height: 276mm; } }
+        /* numbered by the browser on every sheet (a long one runs onto more pages); a page context does not
+           inherit the body's font. Chrome/Edge 131+ — elsewhere no number rather than a wrong one */
+        @page { @top-right { content: "Page : " counter(page) " / " counter(pages); font: 10.5px 'Noto Sans Thai', system-ui, sans-serif; } }
       `}</style>
 
       <header className="flex items-start gap-3">
@@ -133,7 +136,7 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
       <div className="mt-3 flex items-end justify-between">
         <span />
         <h1 className="text-[15px] font-bold">ใบส่งคืนสินค้า / RETURN &amp; REPAIR NOTE</h1>
-        <span className="text-[10.5px]">Page : 1 / 1</span>
+        <span />
       </div>
 
       <table className="grid-b mt-1.5">

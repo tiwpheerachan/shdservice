@@ -22,10 +22,19 @@ export function AutoPrint({ paper = 'A4' }: { paper?: string }) {
     return () => window.removeEventListener('resize', fit);
   }, []);
   React.useEffect(() => {
-    const t = setTimeout(() => {
-      if (new URLSearchParams(window.location.search).get('auto') !== '0') window.print();
-    }, 400);
-    return () => clearTimeout(t);
+    if (new URLSearchParams(window.location.search).get('auto') === '0') return;
+    let gone = false;
+    // a font still on its way prints in the fallback: wait for it (at most 5 s), and at least 400 ms so what fills
+    // in after hydration (an e-mail, see <Email>) is on paper too
+    void Promise.all([
+      Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]),
+      new Promise((r) => setTimeout(r, 400)),
+    ]).then(() => {
+      if (!gone) window.print();
+    });
+    return () => {
+      gone = true;
+    };
   }, []);
   return (
     <div className="no-print mb-4 flex items-center justify-between rounded-lg border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm">

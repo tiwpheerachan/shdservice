@@ -93,7 +93,7 @@ CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push �
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/supabase-js` ใช้เฉพาะ Storage · `swr` (client cache ของ data hooks) · `sharp` (ย่อรูปตอนอัปโหลด) |
+| Dependency | UI: `next`, `react`, `react-dom`, `tailwindcss` v4, **shadcn/ui** (`radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`), `sonner` (toast), `cmdk` (⌘K), `lucide-react` — ดูหัวข้อ "UI kit" ด้านล่าง · ข้อมูล: `drizzle-orm` + `pg` (server เท่านั้น) · `@supabase/storage-js` (Supabase Storage) · `swr` (client cache ของ data hooks) · `sharp` (ย่อรูปตอนอัปโหลด) |
 | Version | ตรึงเวอร์ชันแบบ exact (ไม่มี `^`) ทุกตัว — `npm install` ได้ผลลัพธ์เดิมเสมอ |
 | Type Safety | TypeScript `strict: true` ผ่าน `next build` โดยไม่มี error |
 | Dark mode | สคริปต์ inline ใน `<head>` ตั้ง class ก่อน paint → **ไม่มีจอกระพริบ (FOUC)** |

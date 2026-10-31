@@ -22,7 +22,7 @@
     "test:running-no": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-running-no.mts",
     "test:track": "API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts",
     "test:rate-limit": "tsx scripts/test-rate-limit.mts",
-    "test": "npm run -s test:schemas && npm run -s test:drizzle-ids && npm run -s test:auth && npm run -s test:rate-limit && npm run -s test:openapi && npm run -s test:routes-input && npm run -s test:tours && npm run -s test:db-guard && npm run -s test:media",
+    "test": "npm run -s test:schemas && npm run -s test:drizzle-ids && npm run -s test:auth && npm run -s test:rate-limit && npm run -s test:openapi && npm run -s test:routes-input && npm run -s test:tours && npm run -s test:db-guard && npm run -s test:media && npm run -s test:xlsx && npm run -s test:api-client",
     "test:db-guard": "tsx scripts/test-db-guard.mts",
     "test:drizzle-ids": "tsx scripts/test-drizzle-ids.mts",
     "test:db": "npm run -s test:running-no && npm run -s test:track && npm run -s test:domain && npm run -s test:api && npm run -s test:qa",
@@ -43,17 +43,19 @@
     "test:tours": "tsx scripts/test-tours.mts",
     "test:media": "tsx --test workers/media/src/media.test.ts",
     "test:api": "API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx scripts/test-api.mts",
-    "test:qa": "for f in scripts/test-qa-*.mts; do API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx \"$f\" || exit 1; done"
+    "test:qa": "for f in scripts/test-qa-*.mts; do API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx \"$f\" || exit 1; done",
+    "test:xlsx": "NODE_OPTIONS=--conditions=react-server tsx --test scripts/test-xlsx.mts",
+    "test:api-client": "tsx --test scripts/test-api-client.mts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
-    "@supabase/supabase-js": "2.58.0",
+    "@supabase/storage-js": "2.118.0",
     "aws4fetch": "1.0.20",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "drizzle-orm": "0.45.2",
-    "exceljs": "4.4.0",
+    "fflate": "0.8.3",
     "lru-cache": "11.5.3",
     "lucide-react": "0.469.0",
     "mediabunny": "1.61.4",
@@ -79,13 +81,13 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "dompurify": "3.4.17",
-    "dotenv": "17.4.2",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.3",
     "eslint-config-prettier": "10.1.8",
     "postcss": "8.5.28",
     "prettier": "3.9.9",
+    "read-excel-file": "9.3.14",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.13",
     "typescript": "5.7.3"
@@ -94,9 +96,6 @@
     "node": ">=24"
   },
   "overrides": {
-    "exceljs": {
-      "uuid": "11.1.1"
-    },
     "@hrefcl/apidoc": {
       "puppeteer": "25.14.0",
       "@tailwindcss/typography": {

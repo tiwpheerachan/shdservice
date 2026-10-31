@@ -12,6 +12,8 @@ import { clientIp, ipBucket } from '@/lib/client-ip';
  */
 const buckets = new Map<string, number[]>();
 let lastSweep = 0;
+// e2e drives one user far faster than a person can; its server raises every limit (the env check flags it elsewhere)
+const SCALE = Math.max(1, Number(process.env.RATE_LIMIT_SCALE) || 1);
 /** a ceiling, so the limiter cannot itself become the leak */
 export const MAX_BUCKETS = 20_000;
 
@@ -48,7 +50,7 @@ export async function rateLimit(req: NextRequest, bucket: string, max: number, w
   sweep(now);
   const key = `${bucket}|${await rateLimitKey(req)}`;
   const hits = (buckets.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (hits.length >= max) {
+  if (hits.length >= max * SCALE) {
     const retry = Math.ceil((windowMs - (now - (hits[0] ?? now))) / 1000); // hits is empty only when max <= 0
     throw new HttpError(429, `เรียกใช้งานถี่เกินไป กรุณารอ ${retry} วินาที`, { retryAfter: retry });
   }

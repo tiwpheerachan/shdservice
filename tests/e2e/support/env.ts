@@ -45,6 +45,7 @@ assertLocal(DATABASE_URL);
 export const SERVER_ENV = {
   DATABASE_URL,
   DB_POOL_MAX: '5',
+  RATE_LIMIT_SCALE: '20', // one test user, many screens a second: the per-user limits are sized for a person
   ALLOW_PROD_DB: '',
   APP_BASE_URL: APP_ORIGIN, // http, not https: src/server/env.ts only warns (ENV_STRICT unset)
   RENDER_EXTERNAL_URL: '',

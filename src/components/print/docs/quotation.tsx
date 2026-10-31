@@ -93,6 +93,9 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         /* + the 10mm @page margin (globals.css) = the legacy 10/12/12mm frame; 276mm = a hair under the 277mm
            printable height, so rounding never spills a blank 2nd page */
         @media print { .qt { padding: 0 2mm 2mm; min-height: 276mm; } }
+        /* numbered by the browser on every sheet (a long one runs onto more pages); a page context does not
+           inherit the body's font. Chrome/Edge 131+ — elsewhere no number rather than a wrong one */
+        @page { @top-right { content: "Page : " counter(page) " / " counter(pages); font: 10.5px 'Noto Sans Thai', system-ui, sans-serif; } }
       `}</style>
 
       <header className="flex items-start gap-3">
@@ -115,7 +118,7 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
       <div className="mt-3 flex items-end justify-between">
         <span />
         <h1 className="text-[15px] font-bold">ใบเสนอราคา / QUOTATION</h1>
-        <span className="text-[10.5px]">Page : 1 / 1</span>
+        <span />
       </div>
       {expired && (
         <p className="mx-auto mt-1.5 w-fit -rotate-2 rounded border-[3px] border-red-600 px-4 py-1 text-center text-[18px] font-bold leading-tight text-red-600">

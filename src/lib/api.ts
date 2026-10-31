@@ -75,8 +75,19 @@ async function failure(res: Response): Promise<ApiError> {
   return new ApiError(res.status, data.error || `เกิดข้อผิดพลาด (${res.status})`, data.details);
 }
 
+/** a read over the per-user rate limit (a busy screen, several tabs) waits out a short window once instead of
+ *  leaving an error on screen; a write is never re-sent here — its caller decides */
+const RETRY_READ_WITHIN_S = 5;
+
 export async function api<T = unknown>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await authedFetch(url, init);
+  let res = await authedFetch(url, init);
+  if (res.status === 429 && (init.method ?? 'GET').toUpperCase() === 'GET') {
+    const e = await failure(res);
+    const wait = (e.details as { retryAfter?: number } | undefined)?.retryAfter;
+    if (!wait || wait > RETRY_READ_WITHIN_S) throw e;
+    await new Promise((r) => setTimeout(r, wait * 1000));
+    res = await authedFetch(url, init);
+  }
   if (!res.ok) throw await failure(res);
   const data = (await res.json().catch(() => ({}))) as T;
   if ((init.method ?? 'GET').toUpperCase() !== 'GET') writeListeners.forEach((fn) => fn());
