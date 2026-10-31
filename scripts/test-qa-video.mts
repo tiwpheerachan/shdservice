@@ -206,6 +206,7 @@ const attachmentRoute = await import('@/app/api/attachments/[id]/route');
 const ADMIN = 'qv-admin@example.invalid';
 const VIEWER = 'qv-viewer@example.invalid'; // Job Management view only
 const ADMIN2 = 'qv-admin2@example.invalid'; // 30 uploads a minute per user: the later checks run as another admin
+const NOBODY = 'qv-nobody@example.invalid'; // signed in, no job screen
 const SV = 3;
 await pool.query(`
   INSERT INTO job_status (job_status_id, job_status_name, display_order, job_status_group, is_active)
@@ -217,7 +218,8 @@ await pool.query(`
   INSERT INTO app_user (pk, first_name, last_name, email_address, user_type, record_status, session_version) OVERRIDING SYSTEM VALUE VALUES
     (9881, 'QV', 'admin', '${ADMIN}', 'System Admin', 'ACTIVE', ${SV}),
     (9882, 'QV', 'viewer', '${VIEWER}', 'QV Viewer', 'ACTIVE', ${SV}),
-    (9883, 'QV', 'admin2', '${ADMIN2}', 'System Admin', 'ACTIVE', ${SV})
+    (9883, 'QV', 'admin2', '${ADMIN2}', 'System Admin', 'ACTIVE', ${SV}),
+    (9884, 'QV', 'nobody', '${NOBODY}', 'QV Nobody', 'ACTIVE', ${SV})
     ON CONFLICT (pk) DO UPDATE SET email_address = excluded.email_address, user_type = excluded.user_type,
       record_status = 'ACTIVE', session_version = excluded.session_version, last_login = DEFAULT;
   -- children before parents (RESTRICT, drizzle/0006)
@@ -568,6 +570,70 @@ await test('MEDIA_BASE_URL + MEDIA_SIGNING_KEY: R2 plays through the media Worke
     assert.ok(down.location.startsWith(`${R2_OBJECTS}${file}?`), down.location);
     assert.ok((await open(path('legacy-clip.mp4'))).location.startsWith(`${api}/object/sign/${BUCKET}/`));
   } finally {
+    delete process.env.MEDIA_BASE_URL;
+    delete process.env.MEDIA_SIGNING_KEY;
+  }
+});
+await test('direct=1 (the player falling back): R2 presigned even with the media CDN set — same rights, 60 a minute, logged', async () => {
+  const file = [...r2.keys()].find((p) => r2.has(`${p}.jpg`))!; // a video with its thumbnail
+  const bare = `v20261031100000${'ef'.repeat(10)}.mp4`; // attached, but no thumbnail in R2
+  await attach(bare, 'ACTIVE', 'ไม่มีภาพตัวอย่าง.mp4');
+  const gone = `v20261031100001${'ef'.repeat(10)}.mp4`;
+  await attach(gone, 'DELETED', 'ลบแล้ว.mp4');
+  const direct = (p: string, as?: string, extra = '') =>
+    call(filesRoute.GET as never, `/api/files?path=${encodeURIComponent(p)}&direct=1${extra}`, { as });
+  const lines: string[] = [];
+  const err = console.error;
+  console.error = (...a: unknown[]) => void lines.push(a.map(String).join(' '));
+  const fallbacks = () =>
+    lines
+      .filter((l) => l.includes('"media fallback"'))
+      .map((l) => JSON.parse(l) as { path: string; user: number; reason: string | null });
+  try {
+    // without the media CDN a direct ask is no fallback: answered, not logged
+    assert.equal((await direct(file, ADMIN2)).status, 307);
+    assert.deepEqual(fallbacks(), []);
+    Object.assign(process.env, {
+      MEDIA_BASE_URL: 'https://media.qv.test',
+      MEDIA_SIGNING_KEY: 'qv-media-key-0123456789abcdef0123',
+    });
+    const v = await direct(file, ADMIN2, '&reason=network');
+    const t = await direct(`${file}.jpg`, ADMIN2, '&reason=image');
+    assert.deepEqual([v.status, t.status], [307, 307]);
+    const [vu, tu] = [new URL(v.location), new URL(t.location)];
+    assert.equal(`${vu.origin}${vu.pathname}`, `${R2_OBJECTS}${file}`);
+    assert.equal(`${tu.origin}${tu.pathname}`, `${R2_OBJECTS}${file}.jpg`);
+    assert.deepEqual(
+      [vu, tu].map((u) => u.searchParams.get('X-Amz-Expires')),
+      ['900', '86400'],
+    );
+    assert.equal(v.cache, 'private, max-age=840');
+    // no thumbnail stored: 404 (the row hides its image) — not a presigned URL to nothing, not logged
+    assert.equal((await direct(path(`${bare}.jpg`), ADMIN2, '&reason=image')).status, 404);
+    // the same rights as without it; a reason it does not know is dropped
+    assert.equal((await direct(file, NOBODY)).status, 403);
+    assert.equal((await direct(path(gone), ADMIN2)).status, 404);
+    assert.equal((await direct(file, ADMIN2, '&reason=<script>')).status, 307);
+    // one warning per fallback, with who and why
+    assert.deepEqual(
+      fallbacks().map((l) => [l.path, l.user, l.reason]),
+      [
+        [file, 9883, 'network'],
+        [`${file}.jpg`, 9883, 'image'],
+        [file, 9883, null],
+      ],
+    );
+    // a file outside R2 ignores it (Supabase, nothing logged)
+    stored.set(path('legacy-clip.mp4'), { bytes: MP4, type: 'video/mp4' });
+    assert.ok((await direct(path('legacy-clip.mp4'), ADMIN2)).location.startsWith(`${api}/object/sign/${BUCKET}/`));
+    assert.equal(fallbacks().length, 3);
+    // 60 a minute per user: it cannot route around the edge cache at scale
+    for (let i = 0; i < 60; i++) assert.equal((await direct(file, VIEWER)).status, 307, `call ${i + 1}`);
+    const over = await direct(file, VIEWER);
+    assert.equal(over.status, 429);
+    assert.equal((await open(file, VIEWER)).status, 307); // the media link itself is not limited
+  } finally {
+    console.error = err;
     delete process.env.MEDIA_BASE_URL;
     delete process.env.MEDIA_SIGNING_KEY;
   }

@@ -31,6 +31,9 @@ export type AttachmentsProps = { jobNo?: string; files?: SavedFile[] };
  */
 export type AttachmentsHandle = { uploadPending: (jobNo: string) => Promise<void> };
 
+/** a stored R2 file straight from storage — the fallback when its media CDN link failed (api/files direct=1) */
+const directUrl = (path: string, reason?: string) => `/api/files${qs({ path, direct: '1', reason })}`;
+
 export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>(function Attachments(
   { jobNo, files },
   ref,
@@ -62,7 +65,15 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   const abort = React.useRef<AbortController | null>(null);
   // each picked video converted once: a failed upload (or the queue of a new job) sends the same result again
   const prepared = React.useRef(new WeakMap<File, PreparedVideo>());
-  const [playing, setPlaying] = React.useState<{ name: string; src: string; download?: string } | null>(null);
+  // path: a stored file (/api/files); direct: already fell back from the media CDN; at: where to resume
+  const [playing, setPlaying] = React.useState<{
+    name: string;
+    src: string;
+    download?: string;
+    path?: string;
+    direct?: boolean;
+    at?: number;
+  } | null>(null);
   // why the player stopped: the file is not in storage, or this browser cannot play it
   const [playError, setPlayError] = React.useState<'' | 'missing' | 'unplayable'>('');
   // files queued for a job not saved yet are an unsaved edit (they upload with the job), and so is a file
@@ -292,6 +303,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                             name: r.name,
                             src: fileUrl(path),
                             download: `/api/files${qs({ path, download: '1' })}`,
+                            path,
                           });
                         }}
                         className="inline-flex items-center gap-2 text-left hover:underline"
@@ -301,9 +313,15 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                           alt=""
                           loading="lazy"
                           className="h-9 w-16 shrink-0 rounded bg-muted object-cover"
-                          // no thumbnail: the browser that attached it could not make one
+                          // once: straight from storage (the media CDN failed), then none — the browser that attached it
+                          // could not make one
                           onError={(e) => {
-                            e.currentTarget.hidden = true;
+                            const img = e.currentTarget;
+                            if (img.dataset.direct) img.hidden = true;
+                            else {
+                              img.dataset.direct = '1';
+                              img.src = directUrl(`jobs/${jobNo}/attachments/${r.file}.jpg`, 'image');
+                            }
                           }}
                         />
                         <Film className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -396,10 +414,26 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
               controls
               preload="metadata"
               playsInline
-              onError={async () => {
+              onError={async (e) => {
+                const v = e.currentTarget;
+                // the media CDN failed (403 / 503 / its daily quota / network): once more straight from storage, from
+                // where it stopped
+                if (playing.path && !playing.direct) {
+                  const reason =
+                    (['', 'aborted', 'network', 'decode', 'src'] as const)[v.error?.code ?? 0] || undefined;
+                  setPlaying({ ...playing, src: directUrl(playing.path, reason), direct: true, at: v.currentTime });
+                  return;
+                }
                 // a status probe of our own /api/files URL (not followed to storage): 404 = the file is not there
-                const res = await fetch(playing.src, { redirect: 'manual' }).catch(() => null);
+                // (never the direct one: that would count — and log — a second fallback)
+                const probe = playing.path ? fileUrl(playing.path) : playing.src;
+                const res = await fetch(probe, { redirect: 'manual' }).catch(() => null);
                 setPlayError(res?.status === 404 ? 'missing' : 'unplayable');
+              }}
+              onLoadedMetadata={(e) => {
+                if (!playing.at) return;
+                e.currentTarget.currentTime = playing.at;
+                void e.currentTarget.play().catch(() => {}); // it was playing: carry on (else the user presses play)
               }}
               className="max-h-[70vh] w-full rounded-md bg-black"
             />

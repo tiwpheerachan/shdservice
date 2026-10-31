@@ -267,6 +267,8 @@ function mediaEnv() {
   const key = (process.env.MEDIA_SIGNING_KEY ?? '').trim();
   return base && key ? { base, key } : null;
 }
+/** links go through the media Worker (a `direct` request is then a fallback from it — /api/files logs it) */
+export const mediaOn = () => !!mediaEnv();
 /** a presigned R2 URL (the query carries the signature and `X-Amz-Expires`) */
 const r2Presign = async (client: AwsClient, url: URL, init: RequestInit) =>
   (await client.sign(url, { ...init, aws: { signQuery: true, allHeaders: true } })).url;
@@ -367,18 +369,31 @@ async function firstBytes(res: Response, n: number): Promise<Uint8Array> {
 }
 
 /**
- * A signed GET URL; `download` = sent as a download (a string: the name to save it as). null = the store has no
+ * A signed GET URL; `download` = sent as a download (a string: the name to save it as); `direct` = R2's own presigned
+ * URL even when the media Worker is set (the browser's fallback when a media link failed). null = the store has no
  * such file; any other failure of the store → 503 (logged) — an outage is not a missing file.
  */
 export async function signedUrl(
   path: string,
   seconds = 120,
   download: boolean | string = false,
+  direct = false,
 ): Promise<string | null> {
   if (onR2(path)) {
-    const media = !download && mediaEnv();
+    const media = !download && !direct && mediaEnv();
     if (media) return mediaUrl(media.base, media.key, path, seconds);
     const { client, url } = r2(path);
+    // a direct thumbnail is asked first: a video the browser could not make one for has none, and its 404 must
+    // come back as one (the row hides the image) — not as a presigned URL to nothing, logged as a media failure
+    if (direct && path.endsWith('.jpg')) {
+      const res = await client.fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(15_000) });
+      await res.body?.cancel();
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        logError(new Error(`R2 HEAD answered ${res.status}`), 'storage signedUrl failed');
+        throw new HttpError(503, 'ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง');
+      }
+    }
     url.searchParams.set('X-Amz-Expires', String(seconds));
     if (download) {
       const name =
@@ -424,13 +439,16 @@ const pictures = new LRUCache<string, { url: string; exp: number }>({ max: 5000,
  * file's signed URL that the browser may keep while it is valid — a picture a day (the same URL for both routes), a
  * video 15 minutes, a slip / PDF 2. 404 when the store has no such file (not kept: the next request tries again).
  */
-export async function fileRedirect(path: string, o: { download?: boolean | string; isPublic?: boolean } = {}) {
+export async function fileRedirect(
+  path: string,
+  o: { download?: boolean | string; isPublic?: boolean; direct?: boolean } = {},
+) {
   const picture = PICTURE.test(path) && !SLIP.test(path);
   const ttl = picture ? PICTURE_TTL_S : VIDEO.test(path) ? VIDEO_TTL_S : URL_TTL_S;
-  const key = `${path}\n${o.download || ''}`; // no download: one entry, whatever said so
+  const key = `${path}\n${o.download || ''}\n${o.direct ? 'direct' : ''}`; // no download: one entry, whatever said so
   let signed = picture ? pictures.get(key) : undefined;
   if (!signed) {
-    const url = await signedUrl(path, ttl, o.download);
+    const url = await signedUrl(path, ttl, o.download, o.direct);
     if (!url) throw new HttpError(404, 'ไม่พบไฟล์ (อาจอยู่บนระบบเก่า)');
     signed = { url, exp: Date.now() + ttl * 1000 };
     if (picture) pictures.set(key, signed);

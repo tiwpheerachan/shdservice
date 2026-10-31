@@ -382,6 +382,8 @@ try {
     form: form({ jobNo: 'NOPE' + rand, file: 'v20261028120000abcdef0123456789abcd.mp4' }),
   });
   await expect([404, 503], '/api/files?path=jobs/TDJ0004/attachments/x.mp4&download=1');
+  // direct=1 (the player's fallback from the media CDN) — ignored for a file outside R2
+  await expect([404, 503], '/api/files?path=jobs/TDJ0004/attachments/x.mp4&direct=1&reason=network');
   await test('POST /api/attachments to a deleted job → 409, nothing stored', async () => {
     await pool.query(`DELETE FROM job_attachment WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJDEL');
       DELETE FROM job_status_log WHERE job_pk = (SELECT pk FROM job WHERE job_no = 'TDJDEL'); DELETE FROM job WHERE job_no = 'TDJDEL';

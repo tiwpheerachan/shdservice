@@ -82,7 +82,7 @@ export const files = defineOperation({
   security: SESSION_OR_NONE,
   summary: 'Open a stored file by its storage path (a signed URL)',
   description:
-    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A job attachment (and the `.jpg` thumbnail of a video) opens only while its attachment row is there — removed → 404; `download=1` saves it under its attached name. A picture (jpg / png / webp / svg, never a slip) gets one URL a day shared by everyone, cacheable; a video URL is valid 15 minutes (it plays from it), a slip / PDF 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL — or, when MEDIA_BASE_URL / MEDIA_SIGNING_KEY are set and it is not a download, to a link of the media CDN signed for the same time (workers/media); everything else (legacy .mp4 attachments included) to Supabase Storage.',
+    'Only the folders the app writes can be signed. `shippers/{id}/…` and `profiles/{id}/…` (logos on the public tracking page and customer documents) are public, 120 a minute per IP; jobs / sale-orders / products need a signed-in user who may view that screen (jobs: any job module; sale-orders: Sale Order or Product Pick Stock; products: any product / stock module) — else 403. A job attachment (and the `.jpg` thumbnail of a video) opens only while its attachment row is there — removed → 404; `download=1` saves it under its attached name. A picture (jpg / png / webp / svg, never a slip) gets one URL a day shared by everyone, cacheable; a video URL is valid 15 minutes (it plays from it), a slip / PDF 2. A video attached since the move to Cloudflare R2 (jobs/{no}/attachments/v{14 digits}{20 hex}.mp4|mov|webm) and its `.jpg` thumbnail redirect to an R2 presigned URL — or, when MEDIA_BASE_URL / MEDIA_SIGNING_KEY are set and it is not a download, to a link of the media CDN signed for the same time (workers/media; `direct=1` = R2 presigned anyway, a direct thumbnail that is not there → 404); everything else (legacy .mp4 attachments included) to Supabase Storage.',
   query: z.object({
     path: z
       .string({ error: PATH_REQUIRED })
@@ -97,6 +97,14 @@ export const files = defineOperation({
       )
       .meta({ type: 'string', maxLength: 300, example: 'products/P00230/x.jpg', description: 'Leading `/` ignored.' }),
     download: choice(['1']).meta({ description: '`1` = sent as a download (Content-Disposition: attachment).' }),
+    direct: choice(['1']).meta({
+      description:
+        "`1` = an R2 video / thumbnail from R2's own presigned URL even when the media CDN is set — the player's one fallback when a media link failed (60 a minute per user; logged as `media fallback`). Ignored for files not in R2.",
+    }),
+    reason: choice(['aborted', 'network', 'decode', 'src', 'image']).meta({
+      description:
+        'With `direct=1`: why the media link failed (MediaError code, or `image` for a thumbnail) — logged only.',
+    }),
   }),
   invalid: { query: 400 },
   responses: {

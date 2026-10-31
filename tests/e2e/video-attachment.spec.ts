@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import type { Request } from '@playwright/test';
 import { OWNER_EMAIL, SERVER_ENV } from './support/env';
-import { jobUuid, newJob } from './support/db';
+import { jobUuid, newJob, rows } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 /**
@@ -115,4 +116,69 @@ test('a video is converted, uploaded straight to R2 (cancel, then again), and pl
   expect(await video.evaluate((v: HTMLVideoElement) => Math.round(v.duration))).toBe(2);
   await expect(dialog.getByRole('link', { name: 'ดาวน์โหลด' })).toHaveAttribute('href', /download=1/);
   await expect(dialog.getByText('เล่นวิดีโอนี้ไม่ได้')).toHaveCount(0);
+});
+
+/**
+ * The media CDN down (MEDIA_BASE_URL is a dead origin in e2e — support/env.ts): the server sends the player there,
+ * the browser cannot reach it, and the player asks once for the file straight from storage (api/files direct=1 →
+ * R2's own presigned URL) and plays. R2 is out of reach here too, so the direct answer's target is served by the spec.
+ */
+test('the media CDN failing: the video falls back to R2 once and plays; the thumbnail falls back too', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 2 });
+  const file = `v20261031120000${'cd'.repeat(10)}.webm`;
+  await rows(
+    `INSERT INTO job_attachment (job_pk, original_file_name, system_file_name, record_status)
+     VALUES ((SELECT pk FROM job WHERE job_no = $1), 'คลิปลูกค้า.webm', $2, 'ACTIVE')`,
+    [no, file],
+  );
+  const clip = readFileSync('tests/fixtures/test-pattern.webm');
+  const media: string[] = [];
+  page.on('requestfailed', (r) => {
+    if (r.url().startsWith(SERVER_ENV.MEDIA_BASE_URL)) media.push(r.url());
+  });
+  // only the direct asks are caught: the first ones go to the real server and on to the dead media origin
+  const direct: { path: string; reason: string | null; location: string }[] = [];
+  await page.route(
+    (url) => url.pathname === '/api/files' && url.searchParams.get('direct') === '1',
+    async (route) => {
+      const q = new URL(route.request().url()).searchParams;
+      const path = q.get('path')!;
+      if (path.endsWith('.jpg')) {
+        // no thumbnail was stored for this row (and the server would ask R2 whether there is one)
+        direct.push({ path, reason: q.get('reason'), location: '' });
+        return route.fulfill({ status: 404, json: { error: 'ไม่พบไฟล์' } });
+      }
+      const res = await route.fetch({ maxRedirects: 0 }); // the real server's answer
+      direct.push({ path, reason: q.get('reason'), location: res.headers()['location'] ?? '' });
+      return route.fulfill({ body: clip, contentType: 'video/webm' }); // what R2 would serve there
+    },
+  );
+
+  await signIn(page, OWNER_EMAIL);
+  await page.goto(`/jobs/edit?id=${await jobUuid(no)}`);
+  const row = page.getByRole('button', { name: 'คลิปลูกค้า.webm' });
+  await row.scrollIntoViewIfNeeded(); // its thumbnail is loading=lazy: below the fold on a phone it never loads
+  await expect(row.locator('img')).toBeHidden(); // its thumbnail: media failed, then none in storage
+  await row.click();
+  const dialog = page.getByRole('dialog', { name: 'คลิปลูกค้า.webm' });
+  const video = dialog.locator('video');
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0);
+  expect(await video.evaluate((v: HTMLVideoElement) => Math.round(v.duration))).toBe(2);
+  await expect(dialog.getByText('เล่นวิดีโอนี้ไม่ได้')).toHaveCount(0);
+
+  const path = `jobs/${no}/attachments/${file}`;
+  // the server signed a media link (tried, unreachable) for both, then answered the one direct ask each with R2
+  expect(media.some((u) => u.startsWith(`${SERVER_ENV.MEDIA_BASE_URL}/${path}?exp=`) && /&sig=/.test(u))).toBe(true);
+  expect(media.some((u) => u.startsWith(`${SERVER_ENV.MEDIA_BASE_URL}/${path}.jpg?exp=`))).toBe(true);
+  expect(direct.map((d) => [d.path, d.reason])).toEqual([
+    [`${path}.jpg`, 'image'],
+    [path, expect.stringMatching(/^(network|src)$/)],
+  ]);
+  expect(direct[1]!.location).toMatch(
+    new RegExp(
+      `^https://${SERVER_ENV.R2_ACCOUNT_ID}\\.r2\\.cloudflarestorage\\.com/${SERVER_ENV.R2_BUCKET}/${path}\\?.*X-Amz-Expires=900`,
+    ),
+  );
 });

@@ -14,7 +14,8 @@ import {
 } from '@/server/auth';
 import type { Module } from '@/lib/modules';
 import { files } from '@/server/contract/misc';
-import { fileRedirect, filePath } from '@/server/storage';
+import { fileRedirect, filePath, mediaOn, onR2 } from '@/server/storage';
+import { log } from '@/lib/log';
 import { RS } from '@/server/record-status';
 import { rateLimit } from '@/server/rate-limit';
 
@@ -47,13 +48,15 @@ const ATTACHMENT = /^jobs\/([^/]+)\/attachments\/([^/]+)$/;
 
 export const GET = handle(async (req: NextRequest) => {
   // leading "/" dropped; empty, over 300, "..", a control character or a backslash → 400 "path required"
-  const { path, download } = parseQuery(req, files);
+  const { path, download, direct, reason } = parseQuery(req, files);
 
   const isPublic = PUBLIC_PATH.test(path);
+  let userPk: number | null = null;
   // anonymous callers get a Supabase signing call per request — cap it (a page shows a few logos)
   if (isPublic) await rateLimit(req, 'files-public', 120);
   else {
     const user = await requireUser(req);
+    userPk = user.pk;
     // a staff file is readable by whoever may view the screen it belongs to
     const modules = STAFF_PATHS.find(([re]) => re.test(path))?.[1];
     if (!modules) throw new HttpError(404, 'ไม่พบไฟล์');
@@ -86,5 +89,11 @@ export const GET = handle(async (req: NextRequest) => {
   // mov|webm under jobs/{no}/attachments/ — and its thumbnail ({file}.jpg) are in Cloudflare R2 (a presigned GET;
   // download=1 adds response-content-disposition=attachment). Every other path is in Supabase — images, PDFs,
   // slips, logos, and the legacy .mp4 attachments (their names have no leading `v`), which keep opening from there.
-  return fileRedirect(path, { download: download === '1' && (name || true), isPublic });
+  // direct=1 (an R2 file only): the player's fallback when the media Worker's link failed — R2's own presigned URL,
+  // capped per user so it cannot route around the edge cache at scale; one log line when it really was a fallback
+  const isDirect = direct === '1' && onR2(path);
+  if (isDirect) await rateLimit(req, 'files-direct', 60);
+  const res = await fileRedirect(path, { download: download === '1' && (name || true), isPublic, direct: isDirect });
+  if (isDirect && mediaOn()) log.warn('media fallback', { path, user: userPk, reason: reason ?? null });
+  return res;
 });

@@ -69,6 +69,10 @@ export const SERVER_ENV = {
   R2_ACCESS_KEY_ID: 'e2e-no-r2',
   R2_SECRET_ACCESS_KEY: 'e2e-no-r2',
   R2_BUCKET: 'oneservice-e2e-videos',
+  // the media Worker (workers/media) is DOWN here: its links point at a port nothing answers (an https origin, so the
+  // CSP allows it) — every video / thumbnail falls back to R2 directly (api/files direct=1, video-attachment.spec)
+  MEDIA_BASE_URL: 'https://127.0.0.1:9',
+  MEDIA_SIGNING_KEY: 'e2e-media-signing-key-0123456789abcdef',
   // Cloudflare's always-pass test keys — production refuses them, so /track stays closed here
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: '1x00000000000000000000BB',
   TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
