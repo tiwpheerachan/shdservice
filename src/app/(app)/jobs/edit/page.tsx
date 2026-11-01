@@ -21,6 +21,7 @@ import {
   useJobForm,
   fromJob,
   toJobInput,
+  LegacyLockNotice,
 } from '@/components/shared/job-form';
 import { useToast } from '@/components/ui/toast';
 import { RecordGate } from '@/components/shared/record-gate';
@@ -81,6 +82,7 @@ function EditJobForm() {
       />
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="edit-job-no">
+        <LegacyLockNotice />
         <CustomerSection />
         <JobOpenSection jobNo={job?.no} status={job?.status ?? 'อยู่ระหว่างดำเนินการ'} />
         <ProductSection variant="open" />

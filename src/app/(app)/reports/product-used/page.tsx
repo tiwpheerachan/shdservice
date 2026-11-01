@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   useIssuedLinesPage,
   useIssuedStats,
+  usePartLogSummary,
   useCategories,
   useReportRows,
   type IssuedLine,
@@ -50,7 +51,7 @@ const ORDER_STATUSES = ['เบิก', 'ขอคืน', 'จ่ายแล�
 
 type Common = Omit<
   React.ComponentProps<typeof ReportView<IssuedLine>>,
-  'columns' | 'rows' | 'rowKey' | 'loading' | 'error' | 'onRetry' | 'server' | 'onExport'
+  'columns' | 'rows' | 'rowKey' | 'loading' | 'error' | 'onRetry' | 'server' | 'onExport' | 'kpis'
 > & {
   pageArgs: PageParams;
   server: Omit<ServerTable, 'total'>;
@@ -64,9 +65,17 @@ function LogReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Com
   const filters = { from: f.from, to: f.to, code: f.code, name: f.name, jobNo: f.jobNo, status: f.status };
   const { rows, total, loading, error, refetch } = useReportRows('product_used', { ...pageArgs, ...filters });
   const columns = useReportColumns('product_used');
+  const { data: sum, error: sumError } = usePartLogSummary({ ...filters, q });
+  const S = sum[0];
   return (
     <ReportView<ReportRow>
       {...view}
+      kpis={kpisOr(sumError, [
+        { label: 'รายการ', value: int(S?.lines ?? 0), tone: 'primary' },
+        { label: 'จำนวนที่ขอเบิก', value: `${int(S?.requested ?? 0)} ชิ้น` },
+        { label: 'จำนวนที่จ่ายแล้ว', value: `${int(S?.granted ?? 0)} ชิ้น` },
+        { label: 'จำนวนที่รับคืน', value: `${int(S?.returned ?? 0)} ชิ้น` },
+      ])}
       onExport={canExport ? reportExport('report_product_used', { ...filters, q }, 'report-product-used') : undefined}
       columns={columns}
       rows={rows}
@@ -82,9 +91,21 @@ function LogReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Com
 function NetReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Common & { f: ReportValues }) {
   const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
   const { rows, total, loading, error, refetch } = useIssuedLinesPage({ ...pageArgs, ...filters });
+  const { data: sum, error: sumError } = useIssuedStats({ ...filters, q });
+  const S = sum[0];
   return (
     <ReportView<IssuedLine>
       {...view}
+      kpis={kpisOr(sumError, [
+        { label: 'รายการเคลื่อนไหว (สุทธิ)', value: int(S?.lines ?? 0), tone: 'primary' },
+        { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(S?.qty ?? 0)} ชิ้น` },
+        {
+          label: 'มูลค่าสุทธิ (ราคา ณ วันเบิก)',
+          value: baht(S?.value ?? 0),
+          sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
+        },
+        { label: 'อะไหล่ที่ใช้บ่อยสุด', value: S?.top ?? '—' },
+      ])}
       onExport={canExport ? reportExport('issued_lines', { ...filters, q }, 'report-product-used') : undefined}
       columns={netColumns}
       rows={rows}
@@ -105,17 +126,9 @@ export default function Page() {
     pageArgs,
     server,
   } = useServerTable<ReportValues>({ from: daysAgo(30), to: today() });
-  // KPIs: the special right Report alone (the net issue over the range); table + exports: Report too
+  // KPIs, table and exports: the special right Report alone — each mode's cards count the rows its table shows
   const access = useReportAccess(null, 'Report');
-  const { data: sum, error: sumError } = useIssuedStats({
-    from: f.from,
-    to: f.to,
-    category: f.category,
-    code: f.code,
-    q: table.q,
-  });
   const { data: CATEGORIES, ...categoriesLookup } = useCategories();
-  const S = sum[0];
   const props: Common & { f: ReportValues } = {
     f,
     pageArgs,
@@ -144,16 +157,6 @@ export default function Page() {
       },
     ],
     onApply: setF,
-    kpis: kpisOr(sumError, [
-      { label: 'รายการเคลื่อนไหว (สุทธิ)', value: int(S?.lines ?? 0), tone: 'primary' },
-      { label: 'จำนวนที่เบิกสุทธิ (หักรับคืน)', value: `${int(S?.qty ?? 0)} ชิ้น` },
-      {
-        label: 'มูลค่าสุทธิ (ราคา ณ วันเบิก)',
-        value: baht(S?.value ?? 0),
-        sub: S?.todayPriced ? `* ${int(S.todayPriced)} รายการไม่มีราคาที่บันทึกไว้ ใช้ราคาปัจจุบัน` : undefined,
-      },
-      { label: 'อะไหล่ที่ใช้บ่อยสุด', value: S?.top ?? '—' },
-    ]),
   };
   return f.mode === NET ? <NetReport {...props} /> : <LogReport {...props} />;
 }

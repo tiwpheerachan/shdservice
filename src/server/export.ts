@@ -5,7 +5,7 @@ import { hasRight, HttpError, parseQuery, requireAdmin, requireCan, type Current
 import { exportXlsx as exportOperation } from '@/server/contract/data';
 import { parsePageQuery, searchOf } from '@/server/paging';
 import { parseStatusMode } from '@/server/record-status';
-import { noRight, type Module } from '@/lib/modules';
+import { moduleLabel, noRight, type Module } from '@/lib/modules';
 import { listSimple, isSimpleKind, listSymptoms, listModels } from '@/server/services/masters';
 import { listSystemUsers } from '@/server/services/users';
 import { listCustomers, customerFiltersFromQuery, pageCustomers } from '@/server/services/customers';
@@ -26,6 +26,7 @@ import { listQuotations, quotationFiltersFromQuery, pageQuotations } from '@/ser
 import { listSaleOrders, saleOrderFiltersFromQuery, pageSaleOrders } from '@/server/services/sale-orders';
 import { today } from '@/lib/dates';
 import { fieldLabel, fieldValue } from '@/lib/field-labels';
+import { auditActionLabel, auditRecordNo } from '@/lib/audit-actions';
 import { logError } from '@/lib/log';
 import { writeXlsx } from '@/server/xlsx';
 import { rateLimit } from '@/server/rate-limit';
@@ -121,6 +122,9 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'returnTracking', header: 'เลขพัสดุ', width: 18 },
       { key: 'partsCost', header: 'ค่าอะไหล่', width: 12, money: true },
       { key: 'serviceCost', header: 'ค่าบริการ', width: 12, money: true },
+      { key: 'toolCost', header: 'ค่าเครื่องมือพิเศษ', width: 14, money: true },
+      { key: 'deliveryCost', header: 'ค่าขนส่ง', width: 12, money: true },
+      { key: 'boxCost', header: 'ค่ากล่องพัสดุ', width: 12, money: true },
       { key: 'amount', header: 'รวมสุทธิ', width: 12, money: true },
       { key: 'paymentType', header: 'วิธีชำระ', width: 12 },
       { key: 'paymentAmount', header: 'ยอดชำระ', width: 12, money: true },
@@ -142,6 +146,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'brandModel', header: 'ยี่ห้อ/รุ่น', width: 26 },
       { key: 'partsAmount', header: 'ค่าอะไหล่', width: 12, money: true },
       { key: 'serviceAmount', header: 'ค่าบริการ', width: 12, money: true },
+      { key: 'deliveryAmount', header: 'ค่าขนส่ง', width: 12, money: true },
       { key: 'discountAmount', header: 'ส่วนลด', width: 12, money: true },
       { key: 'vatAmount', header: 'VAT', width: 10, money: true },
       { key: 'amount', header: 'สุทธิ', width: 12, money: true },
@@ -229,11 +234,9 @@ SPECS.audit_log = {
     { key: 'email', header: 'อีเมล', width: 28 },
     { key: 'role', header: 'ตำแหน่ง (ขณะนั้น)', width: 18 },
     { key: 'department', header: 'แผนก (ขณะนั้น)', width: 18 },
-    { key: 'action', header: 'การกระทำ', width: 10 },
+    { key: 'action', header: 'การกระทำ', width: 14 },
     { key: 'module', header: 'โมดูล', width: 20 },
-    { key: 'entity', header: 'ตาราง', width: 16 },
     { key: 'no', header: 'เลขที่', width: 16 },
-    { key: 'key', header: 'รหัสรายการ', width: 16 },
     { key: 'summary', header: 'รายละเอียด', width: 60 },
     { key: 'changesText', header: 'ค่าที่เปลี่ยน', width: 60 },
     { key: 'reason', header: 'เหตุผล', width: 30 },
@@ -375,6 +378,9 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         })
       ).map((r) => ({
         ...r,
+        action: auditActionLabel(r),
+        module: moduleLabel(r.module),
+        no: auditRecordNo(r),
         changesText: r.changes
           ? Object.entries(r.changes)
               .map(([k, [a, b]]) => `${fieldLabel(k)}: ${fieldValue(a)} → ${fieldValue(b)}`)

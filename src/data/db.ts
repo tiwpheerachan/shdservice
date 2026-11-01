@@ -334,6 +334,9 @@ export const useIssuedLinesPage = (params: PageParams) => usePagedTable<IssuedLi
 export type IssuedStats = { lines: number; qty: number; value: number; todayPriced: number; top: string };
 export const useIssuedStats = (params: Params = {}) =>
   useTable<IssuedStats>('issued_stats', undefined, 'exclude', params);
+export type PartLogSummary = { lines: number; requested: number; granted: number; returned: number };
+export const usePartLogSummary = (params: Params = {}) =>
+  useTable<PartLogSummary>('part_log_summary', undefined, 'exclude', params);
 
 export type JobSummary = {
   total: number;

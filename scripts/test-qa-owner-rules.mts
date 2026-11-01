@@ -27,6 +27,7 @@ const { invalidate } = await import('@/server/cache');
 const { nextRunningNo } = await import('@/db/running-no');
 const { createJob, getJob, closeJob, saveRepair } = await import('@/server/services/jobs');
 const { saveQuotation, getQuotation } = await import('@/server/services/quotations');
+const { parseDiscount } = await import('@/lib/validation/quotation');
 const { saveSaleOrder, approveSaleOrder, getSaleOrder, setTracking } = await import('@/server/services/sale-orders');
 const { saveCustomer, getCustomerByCode } = await import('@/server/services/customers');
 const { issueForJob, listMovements } = await import('@/server/services/stock');
@@ -610,7 +611,7 @@ try {
     );
     assert.equal((await jobMoney(lj.no)).paid, '100.00');
   });
-  await test('quotation: figuresLocked; the clerk changing a recorded line → 403; adding a line → allowed; admin → allowed', async () => {
+  await test('quotation: figuresLocked; the clerk changing a line, adding one or filling an empty discount → 403; admin → allowed', async () => {
     const q = (await getQuotation(lq.no))!;
     assert.equal(q.figuresLocked, true);
     // the stored lines go back by their id (a line without one is a new line)
@@ -629,15 +630,23 @@ try {
       ),
       403,
     );
+    const withLine = quote(lj.no, {
+      no: lq.no,
+      version: q.version,
+      lines: [qLine({ id: partId }), svc, qLine({ detail: 'QOR เพิ่ม' })],
+    });
+    assert.equal(await statusOf(saveQuotation(withLine, CLERK.id)), 403, 'a new line');
+    const discounted = quote(lj.no, {
+      no: lq.no,
+      version: q.version,
+      lines: [qLine({ id: partId }), svc],
+      discountType: 'ส่วนลดรวม',
+      discountValue: 10,
+      discountUnit: '%',
+    });
+    assert.equal(await statusOf(saveQuotation(discounted, CLERK.id)), 403, 'an empty discount filled in');
     assert.equal(await net(), before);
-    const added = await saveQuotation(
-      quote(lj.no, {
-        no: lq.no,
-        version: q.version,
-        lines: [qLine({ id: partId }), svc, qLine({ detail: 'QOR เพิ่ม' })],
-      }),
-      CLERK.id,
-    );
+    const added = await saveQuotation(withLine, ADMIN.id, true);
     assert.equal(added.lines.length, 3);
     const from = await one<{ m: string }>(sql`SELECT coalesce(max(pk), 0)::text AS m FROM audit_log`);
     await saveQuotation(
@@ -650,6 +659,63 @@ try {
             AND entity = 'quotation'`,
     );
     assert.ok(a.n >= 1);
+  });
+  await test('quotation: the clerk saving only remark + status (as the form sends it back) → allowed, no figure rewritten', async () => {
+    // the comparisons most likely to drift: a legacy "200บาท" header discount and a % line discount
+    await pool.query(
+      `UPDATE quotation SET discount_type = 'ส่วนลดรวม', discount_formula = '200บาท' WHERE quotation_no = $1`,
+      [lq.no],
+    );
+    await pool.query(
+      `UPDATE quotation_line SET unit_price_discount_percent = 10, unit_price_discount = 10
+        WHERE item_type = 'SparePart' AND quotation_pk = (SELECT pk FROM quotation WHERE quotation_no = $1)`,
+      [lq.no],
+    );
+    const q = (await getQuotation(lq.no))!;
+    assert.equal(q.figuresLocked, true);
+    const d = parseDiscount(q.discountType, q.discountFormula);
+    const figures = async () =>
+      (
+        await pool.query(
+          `SELECT h.net_amount::text, h.discount_formula, l.pk, l.quantity::text, l.unit_price::text,
+                  l.unit_price_discount::text, l.total_price::text
+             FROM quotation h JOIN quotation_line l ON l.quotation_pk = h.pk
+            WHERE h.quotation_no = $1 ORDER BY l.pk`,
+          [lq.no],
+        )
+      ).rows;
+    const before = await figures();
+    const saved = await saveQuotation(
+      {
+        no: q.no,
+        version: q.version,
+        type: q.type,
+        customerCode: CUSTOMER,
+        jobNo: lj.no,
+        lines: q.lines.map((l) => ({
+          id: l.id,
+          code: l.code,
+          detail: l.detail,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          itemType: l.itemType,
+          unit: 'หน่วย',
+          discount: l.discount ?? 0,
+          discountPercent: l.discountPercent ?? 0,
+        })),
+        serviceAmount: q.serviceAmount ?? 0,
+        discountType: d.value > 0 ? d.type : 'ไม่มีส่วนลด',
+        discountValue: d.value,
+        discountUnit: d.unit,
+        vatRate: q.vatRate,
+        remark: 'QOR แก้หมายเหตุอย่างเดียว',
+        status: 'เสนอราคาแล้ว',
+      } as Parameters<typeof saveQuotation>[0],
+      CLERK.id,
+    );
+    assert.equal(saved.remark, 'QOR แก้หมายเหตุอย่างเดียว');
+    assert.equal(saved.status, 'เสนอราคาแล้ว');
+    assert.deepEqual(await figures(), before);
   });
   await test('sale order: figuresLocked; the clerk changing a recorded line → 403; System Admin → allowed', async () => {
     const o = (await getSaleOrder(ls.no))!;

@@ -317,6 +317,15 @@ html[data-tour] div:has(> [role='alertdialog']) {
 [data-tour-offer] {
   bottom: 1rem;
 }
+/* not over an open form (it would cover its buttons; a modal makes it unreachable, and a click on it closed the
+   form with what was typed): back once the form is closed. A popover's own role=dialog is not a form (tour.tsx DIALOG) */
+html:has(
+    [role='dialog'][data-state='open']:not([data-radix-popper-content-wrapper] *),
+    [role='alertdialog'][data-state='open']
+  )
+  [data-tour-offer] {
+  display: none;
+}
 html:has([data-sticky-actions]:not([hidden] *)) [data-tour-offer] {
   bottom: calc(var(--actions-h) + 5.5rem);
 }

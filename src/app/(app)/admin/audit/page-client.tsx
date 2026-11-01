@@ -10,38 +10,30 @@ import { Badge, type Tone } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
-import { useApi, useAuditModules, useRoles, type AuditRow } from '@/data/db';
+import { useApi, useAuditModules, useRoles } from '@/data/db';
 import { Identity, type AuditLogRow } from './identity';
 import { exportXlsx } from '@/lib/api';
 import { useServerTable } from '@/lib/use-server-table';
 import { NO_FILTER, PAGE_SIZE, listKey } from './filters';
 import { fieldLabel, fieldValue } from '@/lib/field-labels';
 import { moduleLabel } from '@/lib/modules';
+import { AUDIT_ACTION_LABEL, auditActionLabel, auditRecordNo } from '@/lib/audit-actions';
 import { ExportButton } from '@/components/shared/export-button';
 import { WithEmails } from '@/components/shared/email';
-/** the server maps rows written under pre-0006 entity names (audit.ts LEGACY_ENTITY) */
-const isSaleOrder = (entity: string) => entity === 'sale_order';
-/** the server reads a legacy sale-order deny / send-back (logged APPROVE) as STATUS */
-const actionOf = (r: Pick<AuditRow, 'action'>) => r.action;
-/** a sale order's DELETE is its cancel */
-const actionLabel = (r: Pick<AuditRow, 'action' | 'entity' | 'changes'>) =>
-  r.action === 'DELETE' && isSaleOrder(r.entity) ? 'ยกเลิก' : (ACTION[actionOf(r)]?.label ?? r.action);
-
-const ACTION: Record<string, { label: string; tone: Tone }> = {
-  CREATE: { label: 'เพิ่ม', tone: 'success' },
-  UPDATE: { label: 'แก้ไข', tone: 'info' },
-  DELETE: { label: 'ลบ', tone: 'danger' },
-  STATUS: { label: 'เปลี่ยนสถานะ', tone: 'warning' },
-  APPROVE: { label: 'อนุมัติ', tone: 'primary' },
-  ASSIGN: { label: 'มอบหมาย', tone: 'info' },
-  ISSUE: { label: 'จ่ายสต๊อก', tone: 'warning' },
-  RECEIVE: { label: 'รับเข้า', tone: 'success' },
-  RETURN: { label: 'รับคืน', tone: 'success' },
-  UPLOAD: { label: 'แนบไฟล์', tone: 'neutral' },
-  // legacy rows only — sign-in / export / print are logged to security_log, not shown here
-  LOGIN: { label: 'เข้าสู่ระบบ', tone: 'neutral' },
-  LOGIN_FAILED: { label: 'เข้าสู่ระบบไม่สำเร็จ', tone: 'danger' },
-  EXPORT: { label: 'ส่งออก Excel', tone: 'warning' },
+const TONE: Record<string, Tone> = {
+  CREATE: 'success',
+  UPDATE: 'info',
+  DELETE: 'danger',
+  STATUS: 'warning',
+  APPROVE: 'primary',
+  ASSIGN: 'info',
+  ISSUE: 'warning',
+  RECEIVE: 'success',
+  RETURN: 'success',
+  UPLOAD: 'neutral',
+  LOGIN: 'neutral',
+  LOGIN_FAILED: 'danger',
+  EXPORT: 'warning',
 };
 
 export default function AuditPage() {
@@ -76,8 +68,8 @@ export default function AuditPage() {
       header: 'การกระทำ',
       width: '120px',
       cell: (r) => (
-        <Badge tone={ACTION[actionOf(r)]?.tone ?? 'neutral'} dot>
-          {actionLabel(r)}
+        <Badge tone={TONE[r.action] ?? 'neutral'} dot>
+          {auditActionLabel(r)}
         </Badge>
       ),
     },
@@ -89,7 +81,7 @@ export default function AuditPage() {
       hideBelow: 'sm', // phones: เวลา / ผู้ใช้ / การกระทำ only, or the user name gets squeezed
       cell: (r) => (
         <span className="num font-medium">
-          <WithEmails text={r.no || r.key} />
+          <WithEmails text={auditRecordNo(r)} />
         </span>
       ),
     },
@@ -161,7 +153,7 @@ export default function AuditPage() {
             emptyLabel="ทั้งหมด"
             value={draft.action}
             onChange={(v) => setD('action', v)}
-            options={Object.entries(ACTION).map(([k, v]) => ({ value: k, label: v.label, sub: k }))}
+            options={Object.entries(AUDIT_ACTION_LABEL).map(([k, label]) => ({ value: k, label, sub: k }))}
           />
         </Field>
         <Field label="เลขที่ / รหัส">
@@ -207,7 +199,7 @@ export default function AuditPage() {
       <Modal
         open={!!detail}
         onClose={() => setDetail(null)}
-        title={detail ? `${actionLabel(detail)} · ${detail.no || detail.key}` : ''}
+        title={detail ? [auditActionLabel(detail), auditRecordNo(detail)].filter(Boolean).join(' · ') : ''}
         description={detail ? `${detail.at} · ${detail.user || '—'} · ${detail.summary}` : undefined}
         size="lg"
       >

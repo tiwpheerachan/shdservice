@@ -79,6 +79,8 @@ const U = {
   manager: { id: 9108, email: 'td-manager@example.invalid', type: 'Manager', status: 'ACTIVE' }, // SO approver
   seller2: { id: 9109, email: 'td-seller2@example.invalid', type: 'TD Seller', status: 'ACTIVE' }, // another CS
   engineer: { id: 9110, email: 'td-engineer@example.invalid', type: 'Engineer', status: 'ACTIVE' }, // takes jobs (R4)
+  // a 2nd admin: its own export quota (the suite's admin has used its 5 a minute by the end)
+  admin2: { id: 9111, email: 'td-admin2@example.invalid', type: 'System Admin', status: 'ACTIVE' },
 } as const;
 type TestUser = (typeof U)[keyof typeof U];
 /** a fixture user's app_user.id — the uuid the API, the pages and os_seen carry */
@@ -1496,7 +1498,7 @@ try {
     ((await data(resource, params)) as Record<string, number>[])[0];
   const rowsTotal = async (resource: string, params: Record<string, string>) =>
     ((await data(resource, { ...params, paged: '1' })) as { total: number }).total;
-  await test('job_summary / sale_order_summary / quotation_summary / issued_stats with q = the paged table total', async () => {
+  await test('job_summary / sale_order_summary / quotation_summary / issued_stats / part_log_summary with q = the paged table total', async () => {
     const jobs = { ...FEB, q: 'TDJ0102' };
     assert.equal((await card('job_summary', jobs)).total, 1);
     assert.equal(await rowsTotal('jobs', jobs), 1);
@@ -1506,6 +1508,9 @@ try {
     assert.deepEqual([(await card('quotation_summary', qt)).total, await rowsTotal('quotations', qt)], [1, 1]);
     const used = { ...MARCH, q: 'TDW0002' };
     assert.deepEqual([(await card('issued_stats', used)).lines, await rowsTotal('issued_lines', used)], [1, 1]);
+    const log = { ...MARCH, q: 'TDJ0011' };
+    assert.deepEqual(await card('part_log_summary', log), { lines: 1, requested: 2, granted: 2, returned: 1 });
+    assert.equal(await rowsTotal('report_rows', { ...log, report: 'product_used' }), 1);
   });
   await test('quotation list boxes: each its own condition (contains), ANDed — table and card alike', async () => {
     // TDQ0001 + TDQ0002: both of CUSTOMER (TDC001, ลูกค้า ทดสอบโดเมน), no job → no IMEI
@@ -3295,7 +3300,7 @@ try {
                ${job('TDJ0406', 2, `${CUSTOMER} ลูกค้า R3 โทร 089-999-3466`)};
       INSERT INTO job_part (job_pk, product_pk, is_quotation, is_special, request_qty, job_part_status_id, request_date, requested_by_app_user_pk, grant_qty, return_qty)
         VALUES ${part('TDJ0402', true)}, ${part('TDJ0402', false)};
-      UPDATE job SET service_cost = 1300, spare_part_total_cost = 0, job_total_cost = 1300, deposit_cost = 300,
+      UPDATE job SET service_cost = 1000, delivery_cost = 200, carton_box_cost = 100, spare_part_total_cost = 0, job_total_cost = 1300, deposit_cost = 300,
                      job_payment_type = 'เงินสด', job_payment_amount = 500 WHERE job_no = 'TDJ0405';`);
     await test('R3 jobs: a closed job re-saved with its own status stays closed; an open status → 409 (not System Admin); admin may', async () => {
       const [s20, s5] = [await statusName(20), await statusName(5)];
@@ -3363,6 +3368,30 @@ try {
       const [head, row] = await sheetRows(exportXlsx(await request('/api/export/jobs?q=TDJ0405', U.admin), 'jobs'));
       assert.equal(row[head.indexOf('เลขที่งาน')], 'TDJ0405');
       assert.deepEqual([row[head.indexOf('มัดจำ')], row[head.indexOf('ค้างชำระ')]], [300, 500]);
+      // every cost the total is made of has its column: the row adds up to รวมสุทธิ
+      const costs = ['ค่าอะไหล่', 'ค่าบริการ', 'ค่าเครื่องมือพิเศษ', 'ค่าขนส่ง', 'ค่ากล่องพัสดุ'].map(
+        (h) => row[head.indexOf(h)],
+      );
+      assert.deepEqual(costs, [0, 1000, 0, 200, 100]);
+      assert.equal(row[head.indexOf('รวมสุทธิ')], 1300);
+    });
+    await test('R3 quotations: the Excel has ค่าขนส่ง (its Delivery lines), so the row adds up to สุทธิ', async () => {
+      await pool.query(`
+        WITH q AS (
+          INSERT INTO quotation (quotation_no, customer_pk, spare_part_amount, service_amount, sum_exclude_amount, discount_amount, vat_amount, net_amount, quotation_status_id, create_date, created_by_app_user_pk)
+          VALUES ('TDQ0405', 9001, 300, 200, 550, 50, 0, 500, 1, now(), ${U.admin.id}) RETURNING pk)
+        INSERT INTO quotation_line (quotation_pk, line_number, item_type, item_code, item_detail, quantity, unit_price, total_price)
+        SELECT pk, 1, 'SparePart', 'TDP', 'part', 1, 300, 300 FROM q UNION ALL
+        SELECT pk, 2, 'Delivery', 'SVD0001', 'ค่าขนส่ง', 1, 50, 50 FROM q`);
+      // admin2: U.admin's exports in this run already reach the per-minute export limit (rateLimit 'export', 5)
+      const [head, row] = await sheetRows(
+        exportXlsx(await request('/api/export/quotations?q=TDQ0405', U.admin2), 'quotations'),
+      );
+      const v = (h: string) => row[head.indexOf(h)];
+      assert.deepEqual(
+        ['ค่าอะไหล่', 'ค่าบริการ', 'ค่าขนส่ง', 'ส่วนลด', 'VAT', 'สุทธิ'].map(v),
+        [300, 200, 50, 50, 0, 500],
+      );
     });
     await test('R3 jobs: a phone typed as +66… finds "089-999-3466" (search box and phone filter)', async () => {
       const found = async (f: Parameters<typeof listJobs>[0]) => (await listJobs(f)).some((j) => j.no === 'TDJ0406');
@@ -6539,6 +6568,21 @@ try {
       assert.equal(code128('A'), '11010010000' + '10100011000' + '10001011000' + '1100011101011');
       assert.equal(code128('J2614824').length, 10 * 11 + 13, 'start + 8 + check: 11 modules each, the stop 13');
       assert.throws(() => code128('งาน'), /cannot encode/);
+    });
+
+    await test('audit log Excel: what people read — Thai actions, document numbers, never an internal id or table name', async () => {
+      const { exportXlsx } = await import('@/server/export');
+      const { AUDIT_ACTION_LABEL } = await import('@/lib/audit-actions');
+      const [head, ...all] = await sheetRows(exportXlsx(await request('/api/export/audit_log', U.admin2), 'audit_log'));
+      const rows = all.filter((r) => !String(r[0]).startsWith('⚠')); // the 20,000-row note: audit_log only grows
+      assert.ok(rows.length > 0, 'the run above wrote audit rows');
+      assert.ok(!head.includes('ตาราง') && !head.includes('รหัสรายการ'), String(head));
+      const labels = new Set([...Object.values(AUDIT_ACTION_LABEL), 'ยกเลิก']);
+      for (const r of rows)
+        assert.ok(labels.has(String(r[head.indexOf('การกระทำ')])), String(r[head.indexOf('การกระทำ')]));
+      const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+      for (const r of rows)
+        assert.ok(!uuid.test(String(r[head.indexOf('เลขที่')] ?? '')), String(r[head.indexOf('เลขที่')]));
     });
   }
 } finally {

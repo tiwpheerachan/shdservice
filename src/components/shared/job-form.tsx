@@ -1099,6 +1099,22 @@ export function JobEditLock({
   );
 }
 
+/** a legacy job, said once at the top: its recorded money / qty fields are greyed out for all but System Admin */
+export function LegacyLockNotice() {
+  const { s } = useJobForm();
+  const { isAdmin } = useAccess();
+  if (!s.legacy || isAdmin) return null;
+  return (
+    <p
+      role="note"
+      className="flex items-center gap-2 rounded-lg border border-info/30 bg-info-soft px-4 py-3 text-sm text-info"
+    >
+      <Lock className="h-4 w-4 shrink-0" aria-hidden />
+      {FIGURES_LOCKED}
+    </p>
+  );
+}
+
 /** FormActions `denied` on a screen the role may open but not save */
 export const VIEW_ONLY = 'ไม่มีสิทธิ์แก้ไข — ดูข้อมูลได้อย่างเดียว';
 

@@ -19,6 +19,7 @@ import {
   commonSections,
   useWorkflowErrors,
   JobEditLock,
+  LegacyLockNotice,
 } from '@/components/shared/job-form';
 import { Tabs } from '@/components/ui/tabs';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
@@ -195,6 +196,7 @@ function OutsourceForm() {
       />
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="outsource-job-no">
+        <LegacyLockNotice />
         <CustomerSection readOnly />
 
         <Section title="ข้อมูลการเปิดงานซ่อม" icon={ClipboardList}>

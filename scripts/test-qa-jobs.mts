@@ -393,6 +393,18 @@ try {
     assert.ok(await found('', { customer: 'ชื่อใหม่' }), 'customer filter');
     assert.ok(await found('029850001'), 'the phone as it was at opening');
   });
+  await test('a job opened in the new app (no customer_detail) is found by the customer code — ประวัติงานซ่อม on /customers', async () => {
+    const { code } = (
+      await db.execute<{ code: string }>(sql`SELECT customer_code AS code FROM customer WHERE pk = 9851`)
+    ).rows[0]!;
+    await db.execute(sql`UPDATE job SET customer_detail = NULL WHERE job_no = ${J(13)}`);
+    const found = async (f: Record<string, string>) =>
+      (await pageJobs({ page: 1, pageSize: 100, q: '', f: {} }, filtersFromQuery(f))).rows.some((r) => r.no === J(13));
+    assert.ok(await found({ customer: code }), 'customer filter: code');
+    assert.ok(await found({ customer: '089-985-7777' }), 'customer filter: phone');
+    assert.ok(await found({ customer: 'ชื่อใหม่' }), 'customer filter: name');
+    assert.ok(!(await found({ customer: 'ZZ-NOBODY' })), 'another customer');
+  });
 
   console.log('\n10 · reopening a closed job clears its close date');
   await test('Finished → ซ่อมเสร็จ: job_closed_date back to 1900, no closer, both in the STATUS history row', async () => {

@@ -86,6 +86,8 @@ const listSelect = {
   warranty: job.productWarranty,
   parts: quotation.sparePartAmount,
   service: quotation.serviceAmount,
+  // Delivery lines: in sum_exclude_amount but not spare_part_amount, and no header column of their own
+  delivery: sql<string>`(select coalesce(sum(${quotationLine.totalPrice}), 0) from ${quotationLine} where ${quotationLine.quotationPk} = ${quotation.pk} and ${quotationLine.itemType} = 'Delivery')`,
   discount: quotation.discountAmount,
   vat: quotation.vatAmount,
   approveDate: quotation.customerApproveDate,
@@ -113,6 +115,7 @@ function toQuotation(r: ListRow): Quotation {
     warranty: r.warranty ?? '',
     partsAmount: num(r.parts),
     serviceAmount: num(r.service),
+    deliveryAmount: num(r.delivery),
     discountAmount: num(r.discount),
     vatAmount: num(r.vat),
     approveDate: fmtDateTime(r.approveDate),
@@ -406,9 +409,9 @@ const snapshotOf = (c: { name: string; address: string; taxId: string; phone: st
 export type QuotationInput = z.output<typeof quotationSave.body>;
 
 /**
- * `isAdmin`: System Admin — the only one who may change what a legacy quotation already recorded (assertFiguresEditable):
- * its lines' qty / price / discount and a service amount / discount / VAT it holds. New lines, an empty figure filled in
- * and the status flow stay everyone's. A save that changes no figure keeps the stored totals (never recomputed).
+ * `isAdmin`: System Admin — the only one who may change a legacy quotation's money figures (assertFiguresEditable):
+ * its lines and their qty / price / discount, the service amount, discount and VAT. The status flow, remark and the
+ * rest stay everyone's. A save that changes no figure keeps the stored totals (never recomputed).
  */
 export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin = false): Promise<QuotationDetail> {
   // same rules as the form (lib/validation/quotation); an old quotation without a job may stay without one
@@ -584,19 +587,11 @@ export async function saveQuotation(i: QuotationInput, byUserId: number, isAdmin
     // a matched line's changed columns, read as the audit diff reads them ("100" = "100.00", trimmed); its code as
     // printed (the product's on a product line) — an unchanged code keeps the stored item_code / product_pk
     const lineSets = dtRows.map((r, k) => (matched[k] ? diff({ ...matched[k], itemCode: matched[k].code }, r) : null));
-    // what is already recorded changes: a recorded line (changed / deleted), or a service / discount / VAT it holds
-    if (
-      prev &&
-      (old.some((_, i) => !used.has(i)) ||
-        lines.some((_, k) => matched[k] && !same(k)) ||
-        (num(prev.serviceAmount) !== 0 && num(prev.serviceAmount) !== service) ||
-        (was!.value > 0 && discountChanged) ||
-        ((prev.vatRate ?? 0) !== 0 && prev.vatRate !== vatRate))
-    )
-      await assertFiguresEditable({ isAdmin }, 'quotation', prev.pk);
     // no figure changed → the stored totals stay as they are
     const figuresChanged =
       !prev || !linesSame || num(prev.serviceAmount) !== service || discountChanged || (prev.vatRate ?? 0) !== vatRate;
+    // any figure of a legacy quotation — a line added / changed / deleted, an empty service / discount / VAT filled in
+    if (prev && figuresChanged) await assertFiguresEditable({ isAdmin }, 'quotation', prev.pk);
     const figures = {
       sparePartAmount: money(parts),
       serviceAmount: money(service),

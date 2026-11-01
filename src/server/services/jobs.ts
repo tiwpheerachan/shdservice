@@ -553,6 +553,9 @@ const listSelect = {
   quotationNo: quotation.quotationNo,
   serviceCost: job.serviceCost,
   partsCost: job.sparePartTotalCost,
+  toolCost: job.serviceToolCost,
+  deliveryCost: job.deliveryCost,
+  boxCost: job.cartonBoxCost,
   deposit: job.depositCost,
 };
 
@@ -602,6 +605,9 @@ function toJob(r: ListRow): JobListRow {
     quotationNo: r.quotationNo ?? '',
     serviceCost: num(r.serviceCost),
     partsCost: num(r.partsCost),
+    toolCost: num(r.toolCost),
+    deliveryCost: num(r.deliveryCost),
+    boxCost: num(r.boxCost),
     modelDetail: r.modelDetail ?? '',
     deposit: num(r.deposit),
     outstanding: jobBalance(num(r.amount), num(r.deposit), num(r.paymentAmount)).outstanding,
@@ -763,6 +769,8 @@ export function jobWhere(q: string, f: JobFilters) {
   const term = q.trim();
   // a phone typed as digits ("0814969925") also finds "081-4969925" — same match as f.phone below
   const termDigits = /^[\d๐-๙\s()+-]+$/.test(term) ? phoneDigits(term) : '';
+  const customerTerm = f.customer?.trim() ?? '';
+  const customerDigits = /^[\d๐-๙\s()+-]+$/.test(customerTerm) ? phoneDigits(customerTerm) : '';
   const phone = phoneDigits(f.phone ?? '');
   const from = ymd(f.from),
     to = ymd(f.to),
@@ -844,8 +852,15 @@ export function jobWhere(q: string, f: JobFilters) {
     f.createdBy && isUuid(f.createdBy) ? eq(job.createdByAppUserPk, userIdOf(f.createdBy)) : undefined,
     f.customer
       ? or(
-          ilike(job.customerDetail, likeTerm(f.customer.trim())),
-          customerNow(ilike(customer.customerName, likeTerm(f.customer.trim()))),
+          ilike(job.customerDetail, likeTerm(customerTerm)),
+          // a new job has no customer_detail ("code name phone"): its customer's own code / name / phone
+          customerNow(
+            or(
+              ilike(customer.customerName, likeTerm(customerTerm)),
+              ilike(customer.customerCode, likeTerm(customerTerm)),
+              customerDigits.length >= 4 ? customerPhoneHas(customerDigits) : undefined,
+            ),
+          ),
         )
       : undefined,
     // digits only on both sides — customer_detail keeps the phone as typed ("081-4969925"); drizzle/0024 index
@@ -3284,7 +3299,7 @@ async function computeDashboard(from: string, to: string, type = '') {
   const dashGroups = Object.entries(G)
     .map(([g, meta]) => {
       const n = Number(groups.find((x) => x.group === g)?.n ?? 0);
-      return { ...meta, sub: g, jobs: n, percent: Math.round((n / total) * 1000) / 10 };
+      return { ...meta, sub: g, jobs: n, percent: Math.round((n / total) * 10000) / 100 }; // shown to 2 places
     })
     .sort((a, b) => a.ord - b.ord);
 

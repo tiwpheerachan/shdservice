@@ -14,6 +14,7 @@ import {
   commonSections,
   useWorkflowErrors,
   useMoneyLock,
+  LegacyLockNotice,
 } from '@/components/shared/job-form';
 import { useConfirm } from '@/components/ui/confirm';
 import { useAccess } from '@/lib/use-access';
@@ -233,6 +234,7 @@ function CloseForm() {
             {shut}
           </p>
         )}
+        <LegacyLockNotice />
         <CustomerSection readOnly />
 
         <CloseJobInfoSection job={job} />

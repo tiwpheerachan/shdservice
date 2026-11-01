@@ -318,6 +318,8 @@ try {
       assert.equal((await K.read(no)).lines[0]!.code, P2, 'the read shows the new part');
     });
     await test(`${K.name}: a line added to a LEGACY document — every recorded line row stays byte-identical, one row inserted`, async () => {
+      // a legacy quotation's figures are System Admin's alone, a new line too; a sale order takes new lines from anyone
+      const adder = K.name === 'quotation' ? ADMIN : CLERK;
       const [hd, dt] = K.tables;
       const pks = await one<{ h: string; d: string }>(
         sql`SELECT (SELECT max(pk) FROM ${sql.raw(hd)})::text AS h, (SELECT max(pk) FROM ${sql.raw(dt)})::text AS d`,
@@ -329,7 +331,11 @@ try {
       assert.equal(before.length, 2);
       assert.deepEqual(K.codeOf(before[0]!), [P1, 9581], 'the legacy rows hold the code text');
       const d = await K.read(K.legacyNo);
-      await K.save(K.legacyNo, d.version, [...d.lines, { code: P2, qty: 1 }], CLERK);
+      if (adder === ADMIN) {
+        assert.equal(await statusOf(K.save(K.legacyNo, d.version, [...d.lines, { code: P2, qty: 1 }], CLERK)), 403);
+        assert.deepEqual(await K.rows(K.legacyNo), before);
+      }
+      await K.save(K.legacyNo, d.version, [...d.lines, { code: P2, qty: 1 }], adder);
       const after = await K.rows(K.legacyNo);
       assert.equal(after.length, 3);
       assert.deepEqual(after.slice(0, 2), before, 'pk, id, code text and figures of the recorded lines unchanged');

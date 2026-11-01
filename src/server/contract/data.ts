@@ -239,6 +239,21 @@ resource(
   issuedFilters,
 );
 resource(
+  'part_log_summary',
+  'Totals of the product-used log (รายงานการเบิกจ่ายอะไหล่ แบบอ้างอิงงานซ่อม) — the same rows as report_rows?report=product_used',
+  viewOn('Report'),
+  one(z.object({ lines: n, requested: n, granted: n, returned: n })),
+  {
+    q,
+    from: ymd,
+    to: ymd,
+    code: s.optional(),
+    name: s.optional(),
+    jobNo: s.optional(),
+    status: s.optional(),
+  },
+);
+resource(
   'movements',
   'Stock documents (WHI / WHO)',
   viewOn('Product Onhand', 'Product Receive Stock', 'Product Pick Stock'),

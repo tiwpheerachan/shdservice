@@ -250,6 +250,9 @@ const jobRow = {
   quotationNo: s.optional(),
   serviceCost: n.optional(),
   partsCost: n.optional(),
+  toolCost: n.optional(),
+  deliveryCost: n.optional(),
+  boxCost: n.optional(),
   modelDetail: s.optional(),
   /** the job's customer (customer.id) — the call-log button looks it up; none on a job without one */
   customerId: u.optional(),
@@ -273,6 +276,7 @@ const quotationRow = {
   warranty: s.optional(),
   partsAmount: n.optional(),
   serviceAmount: n.optional(),
+  deliveryAmount: n.optional(),
   discountAmount: n.optional(),
   vatAmount: n.optional(),
   approveDate: s.optional(),

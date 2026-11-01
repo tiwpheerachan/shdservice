@@ -33,6 +33,7 @@ import {
 } from '@/server/services/stock';
 import {
   jobReportSummary,
+  partLogSummary,
   quotationReportSummary,
   saleOrderReportSummary,
   reportPage,
@@ -80,6 +81,7 @@ const READ_ACCESS: Record<string, readonly Module[]> = {
   movements: ['Product Onhand', 'Product Receive Stock', 'Product Pick Stock'],
   issued_lines: ['Report'],
   issued_stats: ['Report'],
+  part_log_summary: ['Report'],
   job_summary: ['Report'],
   quotation_summary: ['Report'],
   sale_order_summary: ['Report'],
@@ -213,6 +215,8 @@ export async function readResource(
             ref: p.f.ref,
             limit,
           });
+    case 'part_log_summary':
+      return [await partLogSummary(p.q, p.f)];
     case 'job_summary':
       return [await jobReportSummary(filtersFromQuery(p.f), p.q, p.f)];
     case 'quotation_summary':

@@ -132,11 +132,9 @@ export const QuotationForm = React.forwardRef<
   const { push } = useToast();
   const fe = useFormErrors();
   const { isAdmin } = useAccess();
-  // a legacy quotation's recorded figures are System Admin's alone (legacy-lock.ts): its loaded lines (ids 2…n+1,
-  // below every added one) and a service / discount / VAT it holds — new lines and the rest stay editable
+  // a legacy quotation's money figures are System Admin's alone (legacy-lock.ts): its lines, service, discount and
+  // VAT — the status, remark and the rest stay editable
   const figuresLocked = !!initial?.figuresLocked && !isAdmin;
-  const loadedLines = initial?.lines.length ?? 0;
-  const lineLocked = (l: Line) => figuresLocked && l.id <= loadedLines + 1;
   // an existing quotation fills the form when it mounts — the edit page remounts the form (key) for
   // every quotation it loads or saves, so this is the one place the form takes `initial`
   const [type, setType] = React.useState<'A' | 'B'>(() =>
@@ -424,10 +422,12 @@ export const QuotationForm = React.forwardRef<
         icon={Calculator}
         description={figuresLocked ? FIGURES_LOCKED : undefined}
         actions={
-          <Button size="sm" variant="outline" onClick={add}>
-            <Plus className="h-3.5 w-3.5" />
-            เพิ่มรายการ
-          </Button>
+          !figuresLocked && (
+            <Button size="sm" variant="outline" onClick={add}>
+              <Plus className="h-3.5 w-3.5" />
+              เพิ่มรายการ
+            </Button>
+          )
         }
         bodyClassName="p-0"
       >
@@ -437,7 +437,7 @@ export const QuotationForm = React.forwardRef<
           errors={fe.errors}
           clear={fe.clear}
           showZero={!!initial}
-          locked={lineLocked}
+          locked={() => figuresLocked}
         />
 
         <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-2">
@@ -472,11 +472,7 @@ export const QuotationForm = React.forwardRef<
             errors={fe.errors}
             clear={fe.clear}
             showZero={!!initial}
-            locked={{
-              service: figuresLocked && !!initial?.serviceAmount,
-              discount: figuresLocked && loadedDiscount.value > 0,
-              vat: figuresLocked && !!initial?.vatRate,
-            }}
+            locked={{ service: figuresLocked, discount: figuresLocked, vat: figuresLocked }}
           />
         </div>
       </Section>

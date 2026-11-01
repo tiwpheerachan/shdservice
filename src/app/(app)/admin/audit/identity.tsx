@@ -24,7 +24,7 @@ export function Identity({ r }: { r: Omit<AuditLogRow, keyof AuditRow | 'reason'
       ) : null,
     ],
     ['ตำแหน่ง / แผนก (ขณะนั้น)', [r.role, r.department].filter(Boolean).join(' · ') || null],
-    ['เลขที่ / id', [r.no, r.entityId].filter(Boolean).join(' · ') || null],
+    ['เลขที่', r.no || null],
   ];
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">

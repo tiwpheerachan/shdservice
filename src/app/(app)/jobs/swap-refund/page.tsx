@@ -19,6 +19,7 @@ import {
   commonSections,
   useWorkflowErrors,
   useMoneyLock,
+  LegacyLockNotice,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { Tabs } from '@/components/ui/tabs';
@@ -177,6 +178,7 @@ function SwapRefundForm() {
       />
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="swap-job-no">
+        <LegacyLockNotice />
         <CustomerSection readOnly />
 
         <Section title="ข้อมูลการเปิดงาน" icon={ClipboardList}>

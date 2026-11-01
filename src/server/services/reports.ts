@@ -510,27 +510,48 @@ async function saleLineRows(p: PageQuery, limit: number, offset: number): Promis
   return { total: totalOf(counted), rows: rows.map(soOut) };
 }
 
-/** the job part log (job_part): every เบิก / ขอคืน / จ่ายแล้ว / คืนแล้ว line, dated by its request */
-async function partLogRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
-  const f = p.f;
-  const L = jobPart;
-  const term = p.q.trim();
-  const w = and(
+/** the product-used log (แบบอ้างอิงงานซ่อม): one row per job_part line — its table, Excel and summary card */
+function partLogWhere(q: string, f: Raw) {
+  const term = q.trim();
+  return and(
     term ? or(has(product.productCode, term), has(product.productName, term), has(job.jobNo, term)) : undefined,
     f.code?.trim() ? or(has(product.productCode, f.code), has(product.productVendorCode, f.code)) : undefined,
     f.name?.trim() ? or(has(product.productName, f.name), has(product.productNameEn, f.name)) : undefined,
     has(job.jobNo, f.jobNo),
     f.status ? sql`trim(${jobPartStatus.jobPartStatusName}) = ${f.status.trim()}` : undefined,
-    fromTo(L.requestDate, f),
+    fromTo(jobPart.requestDate, f),
   );
-  const joins = <T extends PgSelect>(x: T) =>
-    x
-      .innerJoin(job, eq(job.pk, L.jobPk))
-      .leftJoin(product, eq(product.pk, L.productPk))
-      .leftJoin(jobPartStatus, eq(jobPartStatus.jobPartStatusId, L.jobPartStatusId));
+}
+const partLogJoins = <T extends PgSelect>(x: T) =>
+  x
+    .innerJoin(job, eq(job.pk, jobPart.jobPk))
+    .leftJoin(product, eq(product.pk, jobPart.productPk))
+    .leftJoin(jobPartStatus, eq(jobPartStatus.jobPartStatusId, jobPart.jobPartStatusId));
+
+export async function partLogSummary(q: string, f: Raw) {
+  const [r] = await withStatementTimeout((tx) =>
+    partLogJoins(
+      tx
+        .select({
+          lines: count(),
+          requested: sql<string>`coalesce(sum(${jobPart.requestQty}),0)`,
+          granted: sql<string>`coalesce(sum(${jobPart.grantQty}),0)`,
+          returned: sql<string>`coalesce(sum(${jobPart.returnQty}),0)`,
+        })
+        .from(jobPart)
+        .$dynamic(),
+    ).where(partLogWhere(q, f)),
+  );
+  if (!r) throw new Error('aggregate returned no row');
+  return { lines: Number(r.lines), requested: num(r.requested), granted: num(r.granted), returned: num(r.returned) };
+}
+
+async function partLogRows(p: PageQuery, limit: number, offset: number): Promise<Q> {
+  const L = jobPart;
+  const w = partLogWhere(p.q, p.f);
   const [counted, rows] = await Promise.all([
-    joins(db.select({ total: count() }).from(L).$dynamic()).where(w),
-    joins(
+    partLogJoins(db.select({ total: count() }).from(L).$dynamic()).where(w),
+    partLogJoins(
       db
         .select({
           code: product.productCode,

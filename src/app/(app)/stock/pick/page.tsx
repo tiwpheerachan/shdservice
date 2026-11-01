@@ -78,6 +78,8 @@ export default function PickPage() {
   const SALE_ORDERS = pickOrders.data?.rows ?? [];
   const { data: STAFF, ...staffLookup } = useStaff();
   const [saving, setSaving] = React.useState(false);
+  // a second click lands before `saving` disables the button: one save, one toast
+  const busy = React.useRef(false);
 
   const [docType, setDocType] = React.useState(DOC_TYPES[0]);
   const [ref, setRef] = React.useState('');
@@ -173,7 +175,14 @@ export default function PickPage() {
           })),
         );
         setLoaded(true);
-        push({ kind: 'success', title: 'ดึงรายการเบิกแล้ว', desc: `${ref} — ${d.rows.length} รายการ` });
+        if (d.rows.length)
+          push({ kind: 'success', title: 'ดึงรายการเบิกแล้ว', desc: `${ref} — ${d.rows.length} รายการ` });
+        else
+          push({
+            kind: 'info',
+            title: `${ref} ไม่มีอะไหล่รอจ่าย`,
+            desc: 'ตรวจเลขที่งาน หรืองานนี้ยังไม่ได้ขอเบิกอะไหล่',
+          });
       } else {
         const d = await api<{ rows: SoLine[] }>(`/api/stock/pick-lines${qs({ type: 'sale', ref })}`);
         const rows = d.rows.filter((r) => !r.picked);
@@ -331,7 +340,8 @@ export default function PickPage() {
       e.lines = isReturn ? 'ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ' : 'ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ';
     else if (overCount) e.lines = `จำนวนเกิน ${overCount} รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก`;
     fe.setErrors(e);
-    if (fe.report(e)) return;
+    if (fe.report(e) || busy.current) return;
+    busy.current = true;
     setSaving(true);
     try {
       const d = await postJson<{ no: string; total: number }>('/api/stock/issue', body);
@@ -348,6 +358,7 @@ export default function PickPage() {
     } catch (e) {
       if (!fe.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
+      busy.current = false;
       setSaving(false);
     }
   };

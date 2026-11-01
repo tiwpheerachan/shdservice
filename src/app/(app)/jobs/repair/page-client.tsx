@@ -19,6 +19,7 @@ import {
   useWorkflowErrors,
   useMoneyLock,
   JobEditLock,
+  LegacyLockNotice,
 } from '@/components/shared/job-form';
 import { useAccess } from '@/lib/use-access';
 import { useToast } from '@/components/ui/toast';
@@ -97,8 +98,9 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
   const act = useWorkflowErrors(() => find(job?.id ?? ''));
   const { can } = useAccess();
   // a closed job: part lines / prices stay as they are (Job Money After Close may change them) — new lines may
-  // always be added (a legacy line's own qty / price: figuresLocked on the line)
-  const lock = useMoneyLock();
+  // always be added (a legacy line's own qty / price: figuresLocked on the line). Without Job Repair's edit right the
+  // parts are read-only, like the save button
+  const lock = useMoneyLock() ?? (can('Job Repair', 'edit') ? undefined : VIEW_ONLY);
   // what prefill last put on screen (the job as loaded / saved) — anything else is an unsaved edit
   const [saved, setSaved] = React.useState(() => (initial ? repairStateOf(initial, 0) : null));
   const [lines, setLines] = React.useState<Line[]>(() => saved?.lines ?? []);
@@ -210,6 +212,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
       />
 
       <RecordGate ready={!!job} loading={loading} error={error} noun="งาน" searchId="repair-job-no">
+        <LegacyLockNotice />
         <CustomerSection readOnly />
 
         <RepairJobInfoSection job={job} />

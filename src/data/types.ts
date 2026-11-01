@@ -153,6 +153,9 @@ export type Job = {
   quotationNo?: string;
   serviceCost?: number;
   partsCost?: number;
+  toolCost?: number;
+  deliveryCost?: number;
+  boxCost?: number;
   modelDetail?: string;
   /** the job's customer (customer.id) — none on a job without one */
   customerId?: string;
@@ -174,6 +177,7 @@ export type Quotation = {
   warranty?: string;
   partsAmount?: number;
   serviceAmount?: number;
+  deliveryAmount?: number;
   discountAmount?: number;
   vatAmount?: number;
   approveDate?: string;

@@ -10052,6 +10052,162 @@
         }
       }
     },
+    "/data/part_log_summary": {
+      "get": {
+        "tags": [
+          "Data"
+        ],
+        "summary": "Totals of the product-used log (รายงานการเบิกจ่ายอะไหล่ แบบอ้างอิงงานซ่อม) — the same rows as report_rows?report=product_used",
+        "description": "View on Report.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Free-text search."
+            },
+            "required": false,
+            "description": "Free-text search.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "jobNo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "lines": {
+                        "type": "number"
+                      },
+                      "requested": {
+                        "type": "number"
+                      },
+                      "granted": {
+                        "type": "number"
+                      },
+                      "returned": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "lines",
+                      "requested",
+                      "granted",
+                      "returned"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A date filter that is not a real day (YYYY-MM-DD) — `details.fields`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/data/permissions": {
       "get": {
         "tags": [
@@ -18342,6 +18498,9 @@
           "serviceAmount": {
             "type": "number"
           },
+          "deliveryAmount": {
+            "type": "number"
+          },
           "discountAmount": {
             "type": "number"
           },
@@ -19963,6 +20122,15 @@
           "partsCost": {
             "type": "number"
           },
+          "toolCost": {
+            "type": "number"
+          },
+          "deliveryCost": {
+            "type": "number"
+          },
+          "boxCost": {
+            "type": "number"
+          },
           "modelDetail": {
             "type": "string"
           },
@@ -20044,6 +20212,9 @@
             "type": "number"
           },
           "serviceAmount": {
+            "type": "number"
+          },
+          "deliveryAmount": {
             "type": "number"
           },
           "discountAmount": {
