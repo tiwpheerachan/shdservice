@@ -5,9 +5,9 @@
  * folders on the old web server. This tool matches those names against the
  * (current) database and uploads each file to the path the new app expects:
  *
- *   product.pictrue_file_name            ImagesProduct/  →  products/{product_code}/{file}
- *   document_attach.system_file_name     FileUpload/     →  jobs/{job_no}/attachments/{file}
- *   sale_out_hd.slip_file_name           FileUpload/     →  sale-orders/{so_no}/slip/{file}
+ *   product.picture_file_name            ImagesProduct/  →  products/{product_code}/{file}
+ *   job_attachment.system_file_name      FileUpload/     →  jobs/{job_no}/attachments/{file}
+ *   sale_order.slip_file_name            FileUpload/     →  sale-orders/{so_no}/slip/{file}
  *   job.job_payment_slip_file_name       FileUpload/     →  jobs/{job_no}/slip/{file}
  *
  * Safe to re-run after every re-dump: files already in the bucket are skipped
@@ -24,9 +24,12 @@
  * Source folders default to setupdata/ImagesProduct and setupdata/FileUpload.
  *
  * Env (from shdservice/.env.prod.local): DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_STORAGE_BUCKET (default oneservice)
+ * --dev: the local dev DB + the dev bucket from .env.development.local instead (the bucket must exist, never `oneservice`);
+ *        the profile logos come from setupdata/backup/bucket
  */
+const DEV = process.argv.includes('--dev');
 // production storage + database: the values in .env.prod.local (never .env — `next dev` would load it)
-process.loadEnvFile('.env.prod.local');
+process.loadEnvFile(DEV ? '.env.development.local' : '.env.prod.local');
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -60,13 +63,20 @@ const CONC = Number(process.env.CONC || 4);
 
 const need = (k: string) => {
   if (!process.env[k]) {
-    console.error(`missing env ${k} (run from shdservice/ so .env.prod.local is loaded)`);
+    console.error(
+      `missing env ${k} (run from shdservice/ so ${DEV ? '.env.development.local' : '.env.prod.local'} is loaded)`,
+    );
     process.exit(2);
   }
 };
 need('DATABASE_URL');
 need('NEXT_PUBLIC_SUPABASE_URL');
 need('SUPABASE_SECRET_KEY');
+// the dev bucket lives in the production Supabase project: one wrong env value and a wipe empties the real one
+if (DEV && (BUCKET === 'oneservice' || !/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL!))) {
+  console.error("--dev needs the local DATABASE_URL and SUPABASE_STORAGE_BUCKET other than production's oneservice");
+  process.exit(2);
+}
 
 const pathOf = (r: Ref) =>
   r.kind === 'images'
@@ -92,11 +102,20 @@ const ct = (f: string) => {
             : 'image/jpeg';
 };
 
-const db = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const db = new pg.Client({
+  connectionString: process.env.DATABASE_URL,
+  ssl: DEV ? false : { rejectUnauthorized: false },
+});
 await db.connect();
 const q = async <T = Record<string, string>,>(s: string) => (await db.query(s)).rows as T[];
 
-/* distinct — legacy has duplicate document_attach rows */
+const key = process.env.SUPABASE_SECRET_KEY!;
+const sb = new StorageClient(new URL('storage/v1', process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(/\/?$/, '/')).href, {
+  apikey: key,
+  Authorization: `Bearer ${key}`,
+});
+
+/* distinct — legacy has duplicate attachment rows */
 const refs: Ref[] = [];
 const seen = new Set<string>();
 const push = (r: Ref) => {
@@ -107,26 +126,44 @@ const push = (r: Ref) => {
   }
 };
 for (const r of await q(
-  `select product_code k, pictrue_file_name f from product where coalesce(pictrue_file_name,'') not in ('', 'no-image.gif')`,
+  `select product_code k, picture_file_name f from product where coalesce(picture_file_name,'') not in ('', 'no-image.gif')`,
 ))
   push({ kind: 'images', key: r.k, file: r.f, table: 'product' });
 for (const r of await q(
-  `select reference_item_code k, system_file_name f from document_attach where reference_topic='Jobs' and coalesce(system_file_name,'')<>''`,
+  `select j.job_no k, a.system_file_name f from job_attachment a join job j on j.pk = a.job_pk where coalesce(a.system_file_name,'')<>''`,
 ))
-  push({ kind: 'attachments', key: r.k, file: r.f, table: 'document_attach' });
+  push({ kind: 'attachments', key: r.k, file: r.f, table: 'job_attachment' });
 for (const r of await q(
-  `select sale_out_hd_no k, slip_file_name f from sale_out_hd where coalesce(slip_file_name,'')<>''`,
+  `select sale_order_no k, slip_file_name f from sale_order where coalesce(slip_file_name,'')<>''`,
 ))
-  push({ kind: 'slips', key: r.k, file: r.f, table: 'sale_out_hd' });
+  push({ kind: 'slips', key: r.k, file: r.f, table: 'sale_order' });
 for (const r of await q(
   `select job_no k, job_payment_slip_file_name f from job where coalesce(job_payment_slip_file_name,'')<>''`,
 ))
   push({ kind: 'slips', key: r.k, file: r.f, table: 'job' });
 
-/* one query — storage.objects lives in the same Postgres */
-const inBucket = new Set(
-  (await q<{ name: string }>(`select name from storage.objects where bucket_id='${BUCKET}'`)).map((r) => r.name),
-);
+async function bucketObjects(): Promise<string[]> {
+  /* one query — storage.objects lives in the same Postgres */
+  if (!DEV)
+    return (await q<{ name: string }>(`select name from storage.objects where bucket_id='${BUCKET}'`)).map(
+      (r) => r.name,
+    );
+  // the dev DB is the local docker one (no storage schema): list through the Storage API
+  const { error } = await sb.getBucket(BUCKET);
+  if (error) {
+    console.error(`bucket ${BUCKET}: ${error.message} — create it (private) in Supabase → Storage first`);
+    process.exit(2);
+  }
+  const names: string[] = [];
+  for (let cursor: string | undefined; ;) {
+    const { data, error } = await sb.from(BUCKET).listV2({ limit: 1000, cursor });
+    if (error) throw new Error(`list ${BUCKET}: ${error.message}`);
+    names.push(...data.objects.map((o) => o.key ?? o.name));
+    if (!data.hasNext) return names;
+    cursor = data.nextCursor;
+  }
+}
+const inBucket = new Set(await bucketObjects());
 
 /* name → actual file; also lets .jpg refs match .jfif/.jpeg on disk */
 const listDir = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => !f.startsWith('.')) : []);
@@ -184,13 +221,9 @@ if (cmd === 'validate') {
   process.exit(0);
 }
 
-const key = process.env.SUPABASE_SECRET_KEY!;
-const sb = new StorageClient(new URL('storage/v1', process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(/\/?$/, '/')).href, {
-  apikey: key,
-  Authorization: `Bearer ${key}`,
-});
-
 if (cmd === 'wipe') {
+  // its logo copies would overwrite production's in setupdata/backup/bucket — and a new dev bucket has nothing to wipe
+  if (DEV) throw new Error('wipe is production-only');
   const lost = logos.filter((p) => !inBucket.has(p));
   if (lost.length)
     throw new Error(`logos the profiles point to are not in the bucket — nothing deleted: ${lost.join(', ')}`);
@@ -227,6 +260,19 @@ if (cmd === 'wipe') {
 
 const kinds: Ref['kind'][] = kindArg === 'all' ? ['images', 'attachments', 'slips'] : [kindArg as Ref['kind']];
 const todo = rows.filter((r) => kinds.includes(r.kind) && r.src && (FORCE || !r.exists));
+if (DEV) {
+  // the dev bucket starts empty: the logos the copied profiles point to, from the copies the last prod wipe saved
+  const saved = path.join(SETUP, 'backup/bucket');
+  for (const p of logos.filter((p) => !inBucket.has(p) && fs.existsSync(path.join(saved, p)))) {
+    const { error } = DRY
+      ? { error: null }
+      : await sb.from(BUCKET).upload(p, fs.readFileSync(path.join(saved, p)), {
+          contentType: p.endsWith('.svg') ? 'image/svg+xml' : ct(p),
+          upsert: true,
+        });
+    console.log(`${DRY ? '[dry-run] would put' : 'put'} logo ${p}${error ? ` — FAILED: ${error.message}` : ''}`);
+  }
+}
 console.log(
   `\n${DRY ? '[dry-run] would upload' : 'uploading'} ${todo.length} file(s) (${kinds.join(', ')})${FORCE ? ' [force]' : ''}`,
 );

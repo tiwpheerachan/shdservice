@@ -18,7 +18,7 @@ import {
 import { cached } from '@/server/cache';
 import { RS } from '@/server/record-status';
 import { num } from '@/server/mappers/format';
-import { PART } from '@/lib/status-ids';
+import { AS, PART } from '@/lib/status-ids';
 import { offsetOf, type PageQuery } from '@/server/paging';
 
 /**
@@ -29,7 +29,8 @@ import { offsetOf, type PageQuery } from '@/server/paging';
  * The formulas are the ones the code writes with — nothing invented:
  *  - quotation: spare_part_amount = Σ non-Delivery line total_price; sum_exclude_amount = Σ every line
  *    total_price + service_amount (quotations.ts saveQuotation → computeTotals). Discount / VAT steps not checked.
- *  - sale_order: total_base_amount = Σ line amount; net_amount = total_base + fee_amount (sale-orders.ts save)
+ *  - sale_order: total_base_amount = Σ line amount; net_amount = total_base + fee_amount (sale-orders.ts save); a
+ *    payment recorded (> 0) on a live, not denied order = its net — the form refuses more, and legacy typos (25 for 250)
  *  - job: spare_part_total_cost = Σ spare_part_total_price of ticked-เบิก, not cancelled lines (stock.ts
  *    partsTotalOf); job_total_cost = parts + service + tool + delivery + box (jobs.ts withTotal) — the
  *    legacy rows that added 7% VAT show up here, as they should
@@ -43,6 +44,7 @@ import { offsetOf, type PageQuery } from '@/server/paging';
 export const ANOMALY_CATEGORIES = {
   quotation_total: 'ยอดใบเสนอราคาไม่ตรงกับรายการ',
   sale_order_total: 'ยอดใบสั่งขายไม่ตรงกับรายการ',
+  sale_order_paid: 'ยอดรับเงินใบสั่งขายไม่ตรงกับยอดสุทธิ',
   job_parts_total: 'ค่าอะไหล่ของงานไม่ตรงกับรายการเบิก',
   job_total: 'รวมเป็นเงินสุทธิของงานไม่ตรงกับค่าใช้จ่าย',
   stock_negative: 'สต๊อกคงเหลือติดลบ',
@@ -157,6 +159,15 @@ const CHECKS: Check[] = [
       from ${saleOrder} left join ${soLines} l on l.spk = ${saleOrder.pk}
       where ${notDeleted(saleOrder.recordStatus)}
         and ${r2(sql`${saleOrder.netAmount}`)} <> ${r2(sql`coalesce(l.lines, 0) + coalesce(${saleOrder.feeAmount}, 0)`)}`,
+  },
+  {
+    category: 'sale_order_paid',
+    href: link.saleOrder,
+    say: (a, b) => `รับเงิน ${baht(a)} ≠ ยอดสุทธิ ${baht(b)}`,
+    q: sql`select ${saleOrder.id}, ${saleOrder.saleOrderNo}, ${saleOrder.paymentAmount}, ${saleOrder.netAmount}, null, ${saleOrder.pk}
+      from ${saleOrder}
+      where ${notDeleted(saleOrder.recordStatus)} and ${saleOrder.approveStatusId} is distinct from ${AS.DENIED}
+        and coalesce(${saleOrder.paymentAmount}, 0) > 0 and ${r2(sql`${saleOrder.paymentAmount}`)} <> ${r2(sql`${saleOrder.netAmount}`)}`,
   },
   {
     category: 'job_parts_total',

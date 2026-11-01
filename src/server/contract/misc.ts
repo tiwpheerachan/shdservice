@@ -11,6 +11,8 @@ import {
   notFound,
   redirect,
   uuid,
+  FILE_LINK,
+  fileNotFound,
 } from './common';
 import { defineOperation, type Operation } from './registry';
 import { clean, moneyField } from '@/lib/validation';
@@ -106,6 +108,7 @@ export const files = defineOperation({
         'With `direct=1`: why the media link failed (MediaError code, or `image` for a thumbnail) — logged only.',
     }),
   }),
+  ...FILE_LINK,
   invalid: { query: 400 },
   responses: {
     307: redirect('To the signed URL (cacheable while it is valid).'),
@@ -114,7 +117,7 @@ export const files = defineOperation({
     503: errorResponse(
       'The database did not answer, or file storage failed — `ระบบจัดเก็บไฟล์ขัดข้อง ลองใหม่ภายหลัง` (not a missing file).',
     ),
-    ...notFound('Not a folder the app writes, no such file (or still on the old system), or a removed attachment.'),
+    ...fileNotFound('Not a folder the app writes, no such file (or still on the old system), or a removed attachment.'),
     ...RATE_LIMITED,
   },
 });

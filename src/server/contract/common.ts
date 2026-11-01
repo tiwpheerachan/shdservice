@@ -99,6 +99,21 @@ export const RATE_LIMITED = {
 
 export const notFound = (what: string) => ({ 404: errorResponse(what) });
 
+/** A file link (src/server/storage.ts orMissingPage): opened in a tab, a missing file is a page in Thai, not the JSON. */
+export const FILE_LINK = {
+  headers: z.object({
+    'Sec-Fetch-Dest': z.string().optional().meta({
+      description: 'Set by the browser. `document` (a link opened in a tab) turns the 404 into a page in Thai.',
+    }),
+  }),
+};
+export const fileNotFound = (what: string) => ({
+  404: {
+    description: `${what} Opened in a tab (Sec-Fetch-Dest: document): a page in Thai instead of the JSON.`,
+    content: { 'application/json': { schema: ErrorBody }, 'text/html': { schema: { type: 'string' as const } } },
+  },
+});
+
 /** Create POSTs that take an Idempotency-Key (src/server/idempotency.ts reads it with `headers` below). */
 export const IDEMPOTENCY = {
   headers: z.object({

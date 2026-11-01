@@ -10,6 +10,7 @@ const n = z.number();
 const KEYS = [
   'quotation_total',
   'sale_order_total',
+  'sale_order_paid',
   'job_parts_total',
   'job_total',
   'stock_negative',

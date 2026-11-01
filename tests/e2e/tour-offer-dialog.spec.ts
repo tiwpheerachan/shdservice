@@ -28,3 +28,24 @@ test('the tour offer never sits over an open form: hidden while it is open, back
   await page.waitForTimeout(500);
   await expect(form.getByLabel('ชื่อลูกค้า')).toHaveValue('E2E ลูกค้า ยังอยู่');
 });
+
+test('the tour offer steps aside for a view dialog too (product details), already up when it opens', async ({
+  page,
+}) => {
+  await signIn(page, OWNER_EMAIL);
+  await tourOn();
+  await page.goto('/stock/products');
+  const offer = page.locator('[data-tour-offer]');
+  await page.getByRole('button', { name: 'ดูรายละเอียด' }).first().click();
+  // the offer is a (non-modal) dialog itself: the modal is the one Radix marks open
+  const dialog = page.getByRole('dialog').and(page.locator('[data-state="open"]'));
+  await expect(dialog).toBeVisible();
+  await expect(offer).toBeAttached();
+  await expect(offer).toBeHidden();
+  await dialog.getByRole('button', { name: 'ปิด' }).first().click();
+  await expect(dialog).toBeHidden();
+  await expect(offer).toBeVisible();
+  await page.getByRole('button', { name: 'ดูรายละเอียด' }).first().click();
+  await expect(dialog).toBeVisible();
+  await expect(offer).toBeHidden();
+});

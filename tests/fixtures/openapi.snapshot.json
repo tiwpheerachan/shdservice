@@ -286,6 +286,16 @@
             "description": "document_attach.id",
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set by the browser. `document` (a link opened in a tab) turns the 404 into a page in Thai."
+            },
+            "required": false,
+            "description": "Set by the browser. `document` (a link opened in a tab) turns the 404 into a page in Thai.",
+            "name": "Sec-Fetch-Dest",
+            "in": "header"
           }
         ],
         "responses": {
@@ -321,11 +331,16 @@
             }
           },
           "404": {
-            "description": "No such attachment (or it was removed), a legacy row without a file name, or the file is still on the old system.",
+            "description": "No such attachment (or it was removed), a legacy row without a file name, or the file is still on the old system. Opened in a tab (Sec-Fetch-Dest: document): a page in Thai instead of the JSON.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -6018,6 +6033,7 @@
                             "enum": [
                               "quotation_total",
                               "sale_order_total",
+                              "sale_order_paid",
                               "job_parts_total",
                               "job_total",
                               "stock_negative",
@@ -6051,6 +6067,7 @@
                             "enum": [
                               "quotation_total",
                               "sale_order_total",
+                              "sale_order_paid",
                               "job_parts_total",
                               "job_total",
                               "stock_negative",
@@ -6166,6 +6183,7 @@
               "enum": [
                 "quotation_total",
                 "sale_order_total",
+                "sale_order_paid",
                 "job_parts_total",
                 "job_total",
                 "stock_negative",
@@ -6203,6 +6221,7 @@
                             "enum": [
                               "quotation_total",
                               "sale_order_total",
+                              "sale_order_paid",
                               "job_parts_total",
                               "job_total",
                               "stock_negative",
@@ -6236,6 +6255,7 @@
                             "enum": [
                               "quotation_total",
                               "sale_order_total",
+                              "sale_order_paid",
                               "job_parts_total",
                               "job_total",
                               "stock_negative",
@@ -6650,6 +6670,16 @@
             "description": "With `direct=1`: why the media link failed (MediaError code, or `image` for a thumbnail) — logged only.",
             "name": "reason",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set by the browser. `document` (a link opened in a tab) turns the 404 into a page in Thai."
+            },
+            "required": false,
+            "description": "Set by the browser. `document` (a link opened in a tab) turns the 404 into a page in Thai.",
+            "name": "Sec-Fetch-Dest",
+            "in": "header"
           }
         ],
         "responses": {
@@ -6695,11 +6725,16 @@
             }
           },
           "404": {
-            "description": "Not a folder the app writes, no such file (or still on the old system), or a removed attachment.",
+            "description": "Not a folder the app writes, no such file (or still on the old system), or a removed attachment. Opened in a tab (Sec-Fetch-Dest: document): a page in Thai instead of the JSON.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }

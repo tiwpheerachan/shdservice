@@ -199,8 +199,10 @@ export const POST = handle(async (req: NextRequest) => {
               ...(paid !== null ? { paymentAmount: [row.paid === null ? null : num(row.paid), paid] } : {}),
             },
           });
-          // only ever delete this order's own slip folder (a stored path is data, not a command)
-          return row.old?.startsWith(`sale-orders/${no}/slip/`) ? row.old : null;
+          // only ever delete this order's own slip folder (a stored path is data, not a command); a legacy bare
+          // name is the file legacy-files.mts put in that folder
+          const old = row.old && resolvePath(row.old, (f) => filePath.saleOrderSlip(no, f));
+          return old?.startsWith(`sale-orders/${no}/slip/`) ? old : null;
         }),
       );
       return NextResponse.json({ ok: true, path, file: sys });
@@ -230,7 +232,8 @@ export const POST = handle(async (req: NextRequest) => {
             changes: { jobPaymentSlipFileName: [row.old, path] },
           });
           // a closed job's previous slip stays in storage as evidence (the audit line names it)
-          return !(await jobClosed(row.status)) && row.old?.startsWith(`jobs/${id}/slip/`) ? row.old : null;
+          const old = row.old && resolvePath(row.old, (f) => filePath.jobSlip(id, f));
+          return !(await jobClosed(row.status)) && old?.startsWith(`jobs/${id}/slip/`) ? old : null;
         }),
       );
       return NextResponse.json({ ok: true, path, file: sys });

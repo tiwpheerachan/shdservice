@@ -451,6 +451,24 @@ export async function fileRedirect(
   });
 }
 
+const MISSING_PAGE = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ไม่พบไฟล์ · OneService</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#f6f7f9;color:#1f2937}main{max-width:28rem;padding:2rem 1.5rem;text-align:center}h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;color:#4b5563;line-height:1.6}@media (prefers-color-scheme:dark){body{background:#111318;color:#e5e7eb}p{color:#9ca3af}}</style></head>
+<body><main><h1>ไม่พบไฟล์</h1><p>ไฟล์นี้ไม่ได้ย้ายมาจากระบบเก่า หรือถูกลบไปแล้ว — ปิดแท็บนี้แล้วกลับไปทำงานต่อได้</p></main></body></html>`;
+
+/** A file link opened in a tab (Sec-Fetch-Dest: document) that finds no file: a page in Thai, not the JSON 404 —
+ *  pictures in a page and API callers still get the JSON. */
+export async function orMissingPage(dest: string | undefined, open: () => Promise<Response>): Promise<Response> {
+  try {
+    return await open();
+  } catch (e) {
+    if (dest !== 'document' || !(e instanceof HttpError) || e.status !== 404) throw e;
+    return new NextResponse(MISSING_PAGE, {
+      status: 404,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+}
+
 export async function removeFile(path: string): Promise<void> {
   // a leftover object is not worth failing the save that replaced it — logged, then dropped
   if (onR2(path)) {

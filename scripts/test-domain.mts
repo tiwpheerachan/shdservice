@@ -4285,6 +4285,44 @@ try {
       }
     });
 
+    await test('SO slip: a legacy bare file name is served from the order slip path (legacy-files uploads it there); a full path stays', async () => {
+      const o = await newSO(U.seller);
+      await db.execute(sql`UPDATE sale_order SET slip_file_name = '20261030130350.jpg' WHERE sale_order_no = ${o.no}`);
+      assert.equal((await getSaleOrder(o.no))!.slip, `sale-orders/${o.no}/slip/20261030130350.jpg`);
+      await db.execute(
+        sql`UPDATE sale_order SET slip_file_name = ${`sale-orders/${o.no}/slip/new.png`} WHERE sale_order_no = ${o.no}`,
+      );
+      assert.equal((await getSaleOrder(o.no))!.slip, `sale-orders/${o.no}/slip/new.png`);
+    });
+
+    await test('anomalies: a sale order paid ≠ its net is flagged (the legacy 25-for-250 typo); paid = net, unpaid or denied are not', async () => {
+      const { anomalyPage } = await import('@/server/services/anomalies');
+      const flagged = async () =>
+        (await anomalyPage({ page: 1, pageSize: 500 }, 'sale_order_paid')).rows.map((r) => [
+          r.ref,
+          r.stored,
+          r.expected,
+        ]);
+      const [typo, exact, unpaid, denied] = [
+        await newSO(U.seller),
+        await newSO(U.seller),
+        await newSO(U.seller),
+        await newSO(U.seller),
+      ];
+      const set = (no: string, paid: number | null, approve?: number) =>
+        db.execute(sql`UPDATE sale_order SET net_amount = 250, payment_amount = ${paid},
+          approve_status_id = coalesce(${approve ?? null}::int, approve_status_id) WHERE sale_order_no = ${no}`);
+      await set(typo.no, 25);
+      await set(exact.no, 250);
+      await set(unpaid.no, null);
+      await set(denied.no, 25, 5);
+      const rows = await flagged();
+      assert.deepEqual(
+        rows.filter(([ref]) => [typo.no, exact.no, unpaid.no, denied.no].includes(ref as string)),
+        [[typo.no, 25, 250]],
+      );
+    });
+
     await test('R5 customers: a stored "+66 89 …" is found by "089…" and a new "089…" is a duplicate of it; a new +66 number is saved 0-prefixed', async () => {
       const local = `08${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`; // a mobile nobody has
       await pool.query(`

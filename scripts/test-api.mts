@@ -80,7 +80,10 @@ type Init = {
   audit?: false;
 };
 
-async function call(url: string, init: Init = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+async function call(
+  url: string,
+  init: Init = {},
+): Promise<{ status: number; body: Record<string, unknown>; type: string }> {
   const method = init.method ?? 'GET';
   const pathname = new URL(url, 'https://svc.example.test').pathname;
   const route = ROUTES.find((r) => r.pattern.test(pathname));
@@ -110,7 +113,7 @@ async function call(url: string, init: Init = {}): Promise<{ status: number; bod
   // a missing / wrong trail row is collected, not thrown: the flow goes on, the last test lists every one
   if (before)
     await checkTrail(method, pathname, res.status, who, before).catch((e: Error) => trailProblems.push(e.message));
-  return { status: res.status, body };
+  return { status: res.status, body, type };
 }
 
 /* the audit trail: every change leaves its row */
@@ -357,6 +360,15 @@ try {
   await expect([404], '/api/attachments/00000000-0000-7000-8000-000000000000', { method: 'DELETE' });
   await expect([400], '/api/files');
   await expect([404, 503], '/api/files?path=products/TDP1/x.jpg');
+  await test('a missing file opened in a tab (Sec-Fetch-Dest: document) → a page in Thai; fetched by code → the JSON 404', async () => {
+    const tab = { headers: { 'sec-fetch-dest': 'document' } };
+    for (const url of ['/api/files?path=nope/x.jpg', '/api/attachments/00000000-0000-7000-8000-000000000000']) {
+      const page = await call(url, tab);
+      assert.deepEqual([page.status, page.type.split(';')[0]], [404, 'text/html'], url);
+      const json = await call(url, { headers: { 'sec-fetch-dest': 'image' } });
+      assert.deepEqual([json.status, typeof json.body.error], [404, 'string'], url);
+    }
+  });
   await expect([200], '/api/openapi.json');
   await expect([200], '/api/health', { as: null });
   await expect([200], '/api/health');

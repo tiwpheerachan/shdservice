@@ -44,6 +44,7 @@ import { assertValid } from '@/server/validate';
 import { z } from 'zod';
 import type { saleOrderSave } from '@/server/contract/sales';
 import { staffOrKeep } from './users';
+import { filePath, resolvePath } from '@/server/storage';
 
 export { AS };
 
@@ -382,7 +383,8 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     })),
     totalBase: num(hd.totalBaseAmount),
     fee: num(hd.feeAmount),
-    slip: hd.slipFileName ?? '',
+    // a legacy row holds the bare file name; the reload put that file at the order's slip path
+    slip: hd.slipFileName ? resolvePath(hd.slipFileName, (f) => filePath.saleOrderSlip(hd.saleOrderNo ?? no, f)) : '',
     approveRemark: hd.approveRemark ?? '',
     createdBy: fullName(made?.first, made?.last),
     createdById: made?.id ?? null,

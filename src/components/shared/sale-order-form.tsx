@@ -403,8 +403,6 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                       <a href={fileUrl(slip)} target="_blank" rel="noreferrer" className="text-primary hover:underline">
                         ดูสลิป
                       </a>
-                    ) : slip ? (
-                      `สลิปอยู่บนระบบเก่า: ${slip}`
                     ) : canAttachLater ? (
                       'ยังไม่มีสลิป — แนบได้ที่ส่วน "แนบสลิปการชำระเงิน" ด้านล่าง'
                     ) : (
@@ -440,8 +438,7 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                     pendingSlip
                       ? `จะอัปโหลดหลังบันทึก: ${slip}`
                       : initial
-                        ? `อัปโหลดแล้วบันทึกเข้าระบบทันที${slip ? ' (แทนที่สลิปเดิม)' : ''}` +
-                          (slip && !slip.includes('/') ? ` · สลิปเดิมอยู่บนระบบเก่า: ${slip}` : '') // a legacy row: a bare file name, the file is not here
+                        ? `อัปโหลดแล้วบันทึกเข้าระบบทันที${slip ? ' (แทนที่สลิปเดิม)' : ''}`
                         : undefined
                   }
                 >

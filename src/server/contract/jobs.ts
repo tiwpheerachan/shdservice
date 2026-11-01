@@ -23,6 +23,8 @@ import {
   redirect,
   uuid,
   version,
+  FILE_LINK,
+  fileNotFound,
 } from './common';
 import { defineOperation } from './registry';
 import { JobDetail, LinkStatus } from './shapes';
@@ -551,12 +553,13 @@ export const attachmentGet = defineOperation({
   description:
     'Any job module. The same answer as GET /files for its path: a picture a day (cacheable), a video 15 minutes, a PDF 2.',
   params: attachmentId,
+  ...FILE_LINK,
   invalid: { params: 404 },
   responses: {
     307: redirect('To a signed URL of the file (cacheable while it is valid).'),
     ...SIGNED_IN,
     503: errorResponse(STORE_DOWN),
-    ...notFound(
+    ...fileNotFound(
       'No such attachment (or it was removed), a legacy row without a file name, or the file is still on the old system.',
     ),
   },
