@@ -294,6 +294,9 @@ test('Enter in a lit box of a dialog step runs nothing: the dialog and the card 
 }) => {
   await signIn(page, OWNER_EMAIL);
   await page.goto('/admin/permissions');
+  // the tour keeps the steps whose fields are on the page when ? is pressed: a slow runner pressed it while the
+  // page was still loading and got the welcome card alone (1 / 1, no ถัดไป)
+  await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: 'สอนการใช้งานหน้านี้' }).click();
   await stepTo(page, (t) => t.startsWith('เพิ่มตำแหน่ง *')); // the dialog's first step (the tour opens it)
   const name = page.getByRole('dialog').getByLabel('ชื่อตำแหน่ง');
