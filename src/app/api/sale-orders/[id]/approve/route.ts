@@ -6,7 +6,7 @@ import { approveSaleOrder, saleOrderNoOf } from '@/server/services/sale-orders';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** อนุมัติ / ปฏิเสธ / ส่งกลับแก้ไข — approval issues stock (WHO type 4). */
+/** อนุมัติ / ปฏิเสธ / ส่งกลับแก้ไข — moves no stock: Stock issues the WHO at POST /api/stock/issue (type sale). */
 export const POST = handle(async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
   const user = await requireCan(req, 'Sale Order', 'edit');
   const { id } = await parseParams(ctx, saleOrderApprove);

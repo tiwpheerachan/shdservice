@@ -165,7 +165,9 @@ test('the repair form is filled in the HTML itself, and hydrates without a misma
   await expect(line).toContainText('1,500.00');
   await expect(line.getByLabel(`จำนวน แบบ A ${part.code}`)).toHaveValue('1');
   await expect(page.getByRole('link', { name: file })).toBeVisible();
-  await expect(page.getByText(hint, { exact: true })).toBeVisible();
+  // the staff list may miss prefetch's 1.5 s budget on a slow runner (the API is cut off here, so it can't come
+  // later): the hint is there either way — its full text was checked in the HTML above
+  await expect(page.getByText(/^เฉพาะผู้มีสิทธิ์ "รับงานซ่อม"/)).toBeVisible();
   await page.waitForLoadState('networkidle');
   // the symptom lists are read once a symptom picker is used, not with the page
   const symptomLists = (p: string) => /^\/api\/data\/(symptoms|symptom_stats|model_symptoms)$/.test(p);

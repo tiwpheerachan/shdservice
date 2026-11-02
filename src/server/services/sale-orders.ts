@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, count, desc, eq, getTableColumns, gte, ilike, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, getTableColumns, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import { alias, type PgSelect } from 'drizzle-orm/pg-core';
 import { db, type Tx, writeTx } from '@/db/client';
 import { AS, INV, ITEM_UNIT } from '@/lib/status-ids';
@@ -25,7 +25,6 @@ import { fmtDateTime, money, nowThai, num, str, type FieldData } from '@/server/
 import { assertFiguresEditable, isLegacyRow } from '@/server/legacy-lock';
 import { customerForDocument, getCustomerById, addressNames } from './customers';
 import { issuingProfile, profileIdOf } from './document-profiles';
-import { issueForSaleOrder, productsChanged } from './stock';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
 import {
   cleanTracking,
@@ -53,10 +52,11 @@ const seller = alias(appUser, 'creator');
 const approver = alias(appUser, 'approver');
 /** the stock document a line was picked on (sale_order_line.pick_stock_move_pk) */
 const pickDoc = alias(stockMove, 'pick_doc');
-/** the order's ใบเบิก: the WHO (type 4) issued for it */
+/** the order's ใบเบิก: the WHO (type 4) issued for it. `${saleOrder}.pk`, not `${saleOrder.pk}`: drizzle leaves a
+ *  column unqualified in a single-table select, and inside this subquery a bare "pk" is stock_move's */
 export const stockDoc = sql<
   string | null
->`(select m.stock_move_no from stock_move m where m.sale_order_pk = ${saleOrder.pk}
+>`(select m.stock_move_no from stock_move m where m.sale_order_pk = ${saleOrder}.pk
   and m.stock_move_type_id = ${INV.OUT_SALE} order by m.pk limit 1)`;
 /** the customer as the order shows it: the snapshot taken at approval, else (a draft / waiting order) the customer now */
 const customerName = sql<string | null>`coalesce(${saleOrder.customerName}, ${customer.customerName})`;
@@ -481,7 +481,7 @@ export async function saveSaleOrder(
       .filter((l) => str(l.code))
       .map((l) => {
         const p = byCode.get(str(l.code));
-        // a service only when no product has the code: a real part sent as 'Service' would skip the approval's stock issue
+        // a service only when no product has the code: a real part sent as 'Service' would never be issued from stock
         const isService = !p && (l.type === 'Service' || !!str(l.name));
         if (!p && !isService) throw new HttpError(400, `ไม่พบรหัสสินค้า ${l.code}`);
         return {
@@ -738,9 +738,10 @@ export { SELF_APPROVE, SELF_APPROVE_SALES, NOT_APPROVER, SUBMIT_CREATOR_ONLY };
 export const REASON_REQUIRED = 'ต้องระบุเหตุผล';
 
 /**
- * Approval: 4 อนุมัติ → stock goes out (WHO type 4) at this moment, as the legacy data shows; 5 ปฏิเสธ / 3 แก้ไขข้อมูล
- * just stamp the decision (with a required reason). Only SO Approve (System Admin always) decides, only a waiting (2)
- * order, never its creator or salesperson (System Admin may).
+ * Approval: 4 อนุมัติ / 5 ปฏิเสธ / 3 แก้ไขข้อมูล stamp the decision (deny / send back with a required reason). Approving
+ * moves no stock: the Stock team issues the WHO (type 4) afterwards at จ่ายออกตามใบสั่งขาย (issueForSaleOrder), as
+ * legacy did — so too little stock never blocks an approval. Only SO Approve (System Admin always) decides, only a
+ * waiting (2) order, never its creator or salesperson (System Admin may).
  */
 export async function approveSaleOrder(
   no: string,
@@ -802,28 +803,14 @@ export async function approveSaleOrder(
       key: no,
       summary:
         decision === 'approve'
-          ? 'อนุมัติใบสั่งขาย (ตัดสต๊อก)'
+          ? 'อนุมัติใบสั่งขาย'
           : decision === 'deny'
             ? `ปฏิเสธใบสั่งขาย · ${reason}`
             : `ส่งกลับแก้ไข · ${reason}`,
       reason: reason || null,
       changes: { approveStatusId: [hd.approveStatusId, statusId] },
     });
-    if (decision === 'approve') {
-      const hasGoods = await tx
-        .select({ n: count() })
-        .from(saleOrderLine)
-        .where(and(eq(saleOrderLine.saleOrderPk, hd.pk), isNotNull(saleOrderLine.productPk)));
-      if (Number(hasGoods[0]?.n ?? 0) > 0)
-        await issueForSaleOrder({ soNo: no }, byUserId, tx).catch((e) => {
-          // adjustQty's "สต๊อก X ไม่พอ (คงเหลือ N)" — say what to do about it
-          if (e instanceof HttpError && e.status === 409 && e.message.includes('ไม่พอ'))
-            throw new HttpError(409, `${e.message} — รับเข้าอะไหล่ที่ เมนูรับเข้า ก่อนอนุมัติ`, e.details);
-          throw e;
-        });
-    }
   });
-  if (decision === 'approve') productsChanged(); // stock went out in our tx — now committed
   return (await getSaleOrder(no))!;
 }
 

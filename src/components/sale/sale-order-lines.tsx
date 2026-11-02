@@ -32,7 +32,7 @@ function StockNote({ code, qty }: { code: string; qty: number }) {
   return (
     <span className={short ? 'block text-xs font-medium text-warning' : 'block text-xs text-muted-foreground'}>
       คงเหลือ {onhand}
-      {short && ' — ไม่พออนุมัติ: รับเข้าอะไหล่ที่ เมนูรับเข้า ก่อน'}
+      {short && ' — ไม่พอจ่าย: อนุมัติได้ แต่สต๊อกจ่ายออกได้เมื่อรับเข้าแล้ว'}
     </span>
   );
 }

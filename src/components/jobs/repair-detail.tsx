@@ -99,7 +99,8 @@ export function JobCloseInfoSection({ job }: { job: JobDetail | null }) {
         </Field>
         <Field label="วันที่ส่งคืน">
           <ReadOnly>
-            <span className="num">{r.date || '—'}</span>
+            {/* the return date carries no time (legacy JobReturnDate is a date) */}
+            <span className="num">{r.date.slice(0, 10) || '—'}</span>
           </ReadOnly>
         </Field>
         <Field label="หมายเลขพัสดุ (ส่งคืน)">

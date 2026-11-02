@@ -124,7 +124,7 @@ export const stockIssue = defineOperation({
   tags: ['Stock'],
   summary: 'Issue parts (ตัดจ่าย → WHO), or take parts back from a job (`type: "return"` → WHI)',
   description:
-    'Product Pick Stock add. Rules: `issueSchema` (src/lib/validation/stock.ts); `payTo` must be the good-stock store or a current staff name. `job` lines name `logId`, `sale` lines `dtId`, `other` lines `code`. Takes an Idempotency-Key.',
+    'Product Pick Stock add. Rules: `issueSchema` (src/lib/validation/stock.ts); `payTo` must be the good-stock store or a current staff name. `job` lines name `logId`, `sale` lines `dtId`, `other` lines `code`. `sale` issues the whole order in one WHO: every line still to issue at its full qty (400 otherwise), 409 naming each short part when stock is short. Takes an Idempotency-Key.',
   headers: IDEMPOTENCY.headers,
   invalid: IDEMPOTENCY.invalid,
   body: issueSchema,

@@ -73,7 +73,7 @@ export default function PickPage() {
   // งานที่ยังไม่ปิด/ไม่ยกเลิกที่มีรายการค้างเบิก / งานที่มีอะไหล่จ่ายไปแล้วให้รับคืน (รับคืนได้ทุกสถานะงาน)
   const { data: PENDING_JOB_NOS, ...pendingLookup } = useJobNos(300, 'pending_parts');
   const { data: RETURNABLE_JOB_NOS, ...returnableLookup } = useJobNos(300, 'returnable');
-  // ใบสั่งขายที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย (อนุมัติ = ตัดสต๊อกให้แล้ว จึงมักว่าง)
+  // ใบสั่งขายที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย
   const pickOrders = useApi<{ rows: string[] }>('/api/stock/pick-orders', { fresh: true });
   const SALE_ORDERS = pickOrders.data?.rows ?? [];
   const { data: STAFF, ...staffLookup } = useStaff();
@@ -192,21 +192,22 @@ export default function PickPage() {
             docNo: ref,
             code: r.code,
             name: r.name,
-            pickStatus: r.onhand === 0 ? 'รออะไหล่' : 'รอจ่าย',
+            // the whole order goes out at once (issueForSaleOrder): every line at its full qty, short = waits
+            pickStatus: r.onhand < r.need ? 'รออะไหล่' : 'รอจ่าย',
             onhand: r.onhand,
             need: r.need,
-            issue: 0,
+            issue: r.need,
             dtId: r.dtId,
           })),
         );
         setLoaded(true);
-        // 0 lines: say why instead of a green "done" — approving the order already issued its stock
+        // 0 lines: say why instead of a green "done" — its lines were issued already
         if (rows.length) push({ kind: 'success', title: 'ดึงรายการแล้ว', desc: `${ref} — ${rows.length} รายการ` });
         else if (done.length)
           push({
             kind: 'info',
             title: 'ไม่มีรายการค้างจ่าย',
-            desc: `ใบสั่งขายนี้ตัดสต๊อกตอนอนุมัติแล้ว (${done.join(', ')})`,
+            desc: `ใบสั่งขายนี้จ่ายออกครบแล้ว (${done.join(', ')})`,
           });
         else push({ kind: 'info', title: 'ไม่มีรายการค้างจ่าย', desc: `${ref} ไม่มีรายการสินค้า (มีแต่ค่าบริการ)` });
       }
@@ -309,6 +310,7 @@ export default function PickPage() {
             aria-invalid={!!overMsg(l) || undefined}
             placeholder="0"
             value={l.issue}
+            readOnly={kind === 'sale'}
             disabled={!isReturn && l.onhand === 0}
             onChange={(n) => setIssue(l.logId ?? l.dtId ?? l.code, n)}
             className="ml-auto h-8 w-24"
@@ -338,7 +340,11 @@ export default function PickPage() {
     const e = { ...fe.run(issueSchema, body) };
     if (totalIssue === 0)
       e.lines = isReturn ? 'ต้องระบุจำนวนรับคืนอย่างน้อย 1 รายการ' : 'ต้องระบุจำนวนจ่ายออกอย่างน้อย 1 รายการ';
-    else if (overCount) e.lines = `จำนวนเกิน ${overCount} รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก`;
+    else if (overCount)
+      e.lines =
+        kind === 'sale'
+          ? `สต๊อกไม่พอ ${overCount} รายการ — ใบสั่งขายต้องจ่ายครบทั้งใบในครั้งเดียว รับเข้าอะไหล่ก่อน`
+          : `จำนวนเกิน ${overCount} รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก`;
     fe.setErrors(e);
     if (fe.report(e) || busy.current) return;
     busy.current = true;
@@ -441,8 +447,8 @@ export default function PickPage() {
           {kind === 'sale' && (
             <p role="status" className="col-span-full text-2xs text-muted-foreground">
               {!refOptions.length && !pickOrders.loading
-                ? 'ไม่มีใบสั่งขายที่ต้องจ่ายที่นี่ — ใบสั่งขายที่อนุมัติแล้วถูกตัดสต๊อกให้ตอนอนุมัติเรียบร้อย ไม่ต้องจ่ายออกซ้ำ'
-                : 'อนุมัติใบสั่งขายแล้วระบบตัดสต๊อกให้ทันที — ที่นี่จึงแสดงเฉพาะใบที่อนุมัติแล้วแต่ยังมีรายการค้างจ่าย'}
+                ? 'ไม่มีใบสั่งขายรอจ่าย — ใบสั่งขายที่อนุมัติแล้วจะขึ้นที่นี่จนกว่าจะจ่ายออกครบ'
+                : 'ใบสั่งขายที่อนุมัติแล้วรอทีมสต๊อกจ่ายออก — เลือกใบ กด Get Data แล้วบันทึก จ่ายครบทั้งใบในครั้งเดียว (สร้างเอกสาร WHO)'}
             </p>
           )}
         </FieldGrid>

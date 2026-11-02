@@ -30,7 +30,7 @@ const { saveQuotation, getQuotation } = await import('@/server/services/quotatio
 const { parseDiscount } = await import('@/lib/validation/quotation');
 const { saveSaleOrder, approveSaleOrder, getSaleOrder, setTracking } = await import('@/server/services/sale-orders');
 const { saveCustomer, getCustomerByCode } = await import('@/server/services/customers');
-const { issueForJob, listMovements } = await import('@/server/services/stock');
+const { issueForJob, issueForSaleOrder, listMovements } = await import('@/server/services/stock');
 
 const ADMIN = { id: 9501, email: 'qor-admin@example.invalid', isAdmin: true, userType: 'System Admin' };
 const CLERK = { id: 9502, email: 'qor-clerk@example.invalid', isAdmin: false, userType: 'QOR Clerk' };
@@ -336,7 +336,7 @@ try {
     assert.match((await getCustomerByCode(c.code))!.address, /77 ซอย QOR/);
   });
   await test("a job's / a sale order's stock move: reference_out_to NULL — the list shows the job / order number", async () => {
-    // a part requested on the job, then issued (WHO type 3); the order approved (WHO type 4)
+    // a part requested on the job, then issued (WHO type 3); the order approved, then issued by Stock (WHO type 4)
     const j = (await getJob(jobNo))!;
     await saveRepair(
       jobNo,
@@ -354,6 +354,7 @@ try {
     const o = (await getSaleOrder(soNo))!;
     await saveSaleOrder(await so({ no: soNo, version: o.version, submit: true }), { pk: ADMIN.id, isAdmin: true });
     await approveSaleOrder(soNo, 'approve', '', ADMIN);
+    await issueForSaleOrder({ soNo }, ADMIN.id);
     const moves = (
       await db.execute<{ no: string; out: string | null; job: string | null; so: string | null }>(
         sql`SELECT m.stock_move_no AS no, m.reference_out_to AS out, j.job_no AS job, s.sale_order_no AS so

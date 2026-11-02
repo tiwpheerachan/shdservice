@@ -12,7 +12,7 @@ import { clean } from '@/lib/validation';
 import { RS, statusStamp, statusSummary, type RecordStatus } from '@/server/record-status';
 import { isSimpleKind, setModelStatus, setSimpleStatus, setSymptomStatus } from './masters';
 import { productsChanged } from './stock';
-import { AS } from './sale-orders';
+import { AS, stockDoc } from './sale-orders';
 import { DELETED_USER_MSG } from './users';
 import { AGREED_QUOTATION_STATUSES, agreedQuotationPk, jobNotFound, logStatus } from './jobs';
 
@@ -50,7 +50,7 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
 /**
  * Set record_status on any entity; nothing is ever hard-deleted. Jobs → DELETED also sets job_status 0
  * "ยกเลิกข้อมูล" (+ job_log), as legacy did; restoring puts back the last status before that (none → 1 งานใหม่).
- * Sale orders → + cancel stamp (an approved one — stock issued — cannot be cancelled).
+ * Sale orders → + cancel stamp (an approved one only while Stock has issued no WHO for it).
  * `mayRestore` = the caller holds `del` on the module (customers: System Admin): leaving DELETED is the reverse of
  * deleting, so `edit` alone is refused. `mayCancelOthers` = may cancel a sale order someone else created (System Admin /
  * SO Approve) — a pending order is its creator's, as its edits are.
@@ -344,11 +344,15 @@ export async function setRecordStatus(
         // the creator cancels their own while it is draft / waiting / sent back
         if (rs === RS.DELETED && !mayCancelOthers && cur.by !== byUserId)
           throw new HttpError(403, 'ยกเลิกได้เฉพาะผู้สร้างใบสั่งขาย ผู้อนุมัติ หรือผู้ดูแลระบบ');
-        if (rs === RS.DELETED && cur.ap === AS.APPROVED)
-          throw new HttpError(
-            409,
-            'ใบสั่งขายนี้อนุมัติแล้ว ตัดสต็อกไปแล้ว — ยกเลิกไม่ได้ ต้องรับคืนสินค้าเข้าสต็อกก่อน',
-          );
+        if (rs === RS.DELETED && cur.ap === AS.APPROVED) {
+          // approval was the approver's decision: its creator alone cancels it no longer
+          if (!mayCancelOthers)
+            throw new HttpError(403, 'ใบสั่งขายที่อนุมัติแล้ว ยกเลิกได้เฉพาะผู้อนุมัติหรือผู้ดูแลระบบ');
+          // its own statement, after the lock: issueForSaleOrder locks the same row first, so a WHO it just
+          // committed is seen here (a subquery in the locking SELECT would read the snapshot from before the wait)
+          const [doc] = await tx.select({ no: stockDoc }).from(saleOrder).where(eq(saleOrder.pk, pk));
+          if (doc?.no) throw new HttpError(409, `ใบสั่งขายนี้จ่ายสต๊อกแล้ว (${doc.no}) — ยกเลิกไม่ได้`);
+        }
         // denied is final, as approved (saveSaleOrder / approveSaleOrder refuse it too; legacy never cancelled one)
         if (rs === RS.DELETED && cur.ap === AS.DENIED)
           throw new HttpError(409, 'ใบสั่งขายนี้ถูกปฏิเสธแล้ว — ยกเลิกไม่ได้');
