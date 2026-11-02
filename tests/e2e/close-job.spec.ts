@@ -60,6 +60,7 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
   await expect(amount).toHaveValue('600.00');
 
   await page.getByLabel('วิธีการส่งคืนสินค้า').selectOption(RETURN_TYPE);
+  await page.getByLabel('หมายเลขพัสดุ').fill('TH0401E2ETEST');
   await page.getByLabel('โปรดระบุ สถานะงาน').selectOption(CLOSE_STATUS);
   await page.getByRole('button', { name: 'ยืนยันปิดงาน' }).click();
   await expect(page.getByText('ปิดงานและบันทึกการส่งคืนเรียบร้อย')).toBeVisible();
@@ -75,6 +76,18 @@ test('closing a repaired job: the amount due is prefilled, the payment and the c
     total: 800,
   });
   expect(await logsOf(no)).toEqual([{ status: 24, by: closer }]);
+
+  // the job's own page (ดูรายละเอียด) shows what the close recorded, like legacy's Job Info Detail
+  // (the cashier has no Job Repair right: the owner opens it)
+  await signIn(page, OWNER_EMAIL);
+  await page.goto(`/jobs/repair?id=${await jobUuid(no)}`);
+  const closeInfo = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'การชำระเงินและการส่งคืนสินค้า' }) });
+  await expect(closeInfo).toContainText('เงินโอน');
+  await expect(closeInfo).toContainText('600.00');
+  await expect(closeInfo).toContainText(RETURN_TYPE);
+  await expect(closeInfo).toContainText('TH0401E2ETEST');
 
   // the return note (พิมพ์ใบส่งคืน opens this page; auto=0: no print dialog)
   await page.goto(`/print/job/${await jobUuid(no)}/return?auto=0`);

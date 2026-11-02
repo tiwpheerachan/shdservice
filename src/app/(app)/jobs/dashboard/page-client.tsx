@@ -174,7 +174,7 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
   // the range in the URL (page.tsx reads it): Back from a TAT / KPI link comes back to it; the default stays bare
   React.useEffect(() => {
     const p = new URLSearchParams();
-    if (range.from !== daysAgo(29) || range.to !== today() || range.type) {
+    if (range.from || range.to || range.type) {
       p.set('from', range.from);
       p.set('to', range.to);
       if (range.type) p.set('type', range.type);
@@ -418,16 +418,20 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
                 >
                   สถานะงาน
                 </th>
-                <th scope="colgroup" colSpan={dayCols.length} className="px-4 pt-2.5 pb-1.5 text-center font-medium">
+                <th
+                  scope="colgroup"
+                  colSpan={dayCols.length}
+                  className="border-l px-4 pt-2.5 pb-1.5 text-center font-medium"
+                >
                   TAT (วันเปิดงาน ถึง วันส่งคืน)
                 </th>
-                <th scope="col" rowSpan={2} className="py-2.5 pr-5 pl-4 text-right font-medium">
+                <th scope="col" rowSpan={2} className="border-l py-2.5 pr-5 pl-4 text-center font-medium">
                   Total
                 </th>
               </tr>
               <tr>
                 {dayCols.map((c) => (
-                  <th key={c.k} scope="col" className="px-4 py-2 text-right font-medium whitespace-nowrap">
+                  <th key={c.k} scope="col" className="border-l px-4 py-2 text-center font-medium whitespace-nowrap">
                     {c.label}
                   </th>
                 ))}
@@ -457,11 +461,11 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
                       {r.status}
                     </th>
                     {dayCols.map((c) => (
-                      <td key={c.k} className="num px-4 py-2.5 text-right tabular-nums">
+                      <td key={c.k} className="num border-l px-4 py-2.5 text-center tabular-nums">
                         <TatNum n={r[c.k]} href={tatHref(range, status, c.k)} />
                       </td>
                     ))}
-                    <td className="num py-2.5 pr-5 pl-4 text-right font-semibold tabular-nums">
+                    <td className="num border-l py-2.5 pr-5 pl-4 text-center font-semibold tabular-nums">
                       <TatNum n={r.total} href={tatHref(range, status)} />
                     </td>
                   </tr>
@@ -479,11 +483,11 @@ export default function DashboardPage({ initial }: { initial: { from: string; to
                     Total
                   </th>
                   {dayCols.map((c) => (
-                    <td key={c.k} className="num px-4 py-2.5 text-right font-medium tabular-nums">
+                    <td key={c.k} className="num border-l px-4 py-2.5 text-center font-medium tabular-nums">
                       <TatNum n={grand[c.k]} href={tatHref(range, undefined, c.k)} />
                     </td>
                   ))}
-                  <td className="num py-2.5 pr-5 pl-4 text-right font-semibold tabular-nums text-primary">
+                  <td className="num border-l py-2.5 pr-5 pl-4 text-center font-semibold tabular-nums text-primary">
                     <TatNum n={grand.total} href={tatHref(range)} />
                   </td>
                 </tr>

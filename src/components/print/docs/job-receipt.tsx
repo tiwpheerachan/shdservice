@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getJob } from '@/server/services/jobs';
-import { PrintFrame, Box, KV, Signatures, money } from '@/components/print/print-frame';
-import { REPAIR_TERMS } from '@/lib/company';
+import { PrintFrame, Box, KV, money } from '@/components/print/print-frame';
+import { REPAIR_PICKUP_NOTE, REPAIR_TERMS } from '@/lib/company';
 import { profileForDocument } from '@/server/services/document-profiles';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { listShippingProfiles } from '@/server/services/shipping-profiles';
@@ -31,106 +31,131 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
         { label: 'สถานะ', value: j.status },
       ]}
     >
-      {/* the job number as Code 128 (as the legacy sheet): scanned at the counter to call the job up */}
-      <div className="-mt-2 flex flex-col items-end">
-        <svg
-          viewBox={`-10 0 ${bars.length + 20} 1`}
-          preserveAspectRatio="none"
-          shapeRendering="crispEdges"
-          className="h-[12mm] w-[52mm]"
-          role="img"
-          aria-label={`บาร์โค้ด ${j.no}`}
-        >
-          {[...bars.matchAll(/1+/g)].map((m) => (
-            <rect key={m.index} x={m.index} width={m[0].length} height={1} fill="#000" />
-          ))}
-        </svg>
-        <p className="num text-[11px] tracking-[0.2em]">{j.no}</p>
-      </div>
-
-      <Box title="ข้อมูลลูกค้า">
-        <KV
-          items={[
-            { k: 'รหัสลูกค้า', v: c?.code },
-            { k: 'ชื่อลูกค้า', v: c?.name },
-            { k: 'โทรศัพท์', v: c?.phone },
-            { k: 'Line ID', v: c?.line },
-            { k: 'ที่อยู่', v: c?.address },
-            { k: 'อีเมล', v: c?.email, email: true },
-          ]}
-        />
-      </Box>
-
-      <Box title="ข้อมูลสินค้า">
-        <KV
-          cols={3}
-          items={[
-            { k: 'ยี่ห้อ / รุ่น', v: [j.brand, j.modelName].filter(Boolean).join(' ') },
-            { k: 'รุ่นย่อย', v: j.modelDetail },
-            { k: 'ประเภทสินค้า', v: j.productType },
-            { k: 'Serial No.', v: j.serial },
-            { k: 'IMEI', v: j.imei },
-            {
-              k: 'การรับประกัน',
-              v: j.warranty
-                ? `${j.warranty === 'IN' ? 'ในประกัน' : 'นอกประกัน'}${j.expireDate ? ` (หมดอายุ ${j.expireDate})` : ''}`
-                : '',
-            },
-            { k: 'ซื้อจากช่องทาง', v: [j.channel, j.shopName].filter(Boolean).join(' · ') },
-            { k: 'เลขคำสั่งซื้อ', v: j.so },
-            { k: 'วันที่ซื้อ', v: j.saleOrderDate },
-            { k: 'รับเข้าโดย', v: j.receptionType },
-            { k: 'เลขพัสดุ / ขนส่ง', v: [j.receptionTrackingNo, shipper].filter(Boolean).join(' · ') },
-          ]}
-        />
-        <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
-          <p>
-            <span className="text-neutral-500">อุปกรณ์ที่นำส่ง:</span> {j.equipment || '—'}
-          </p>
-          <p>
-            <span className="text-neutral-500">จุดตำหนิ / สภาพภายนอก:</span> {j.fault || '—'}
-          </p>
+      {/* the customer signs it on one A4 sheet: tighter than the frame's default spacing */}
+      <div className="space-y-2 text-[11px] leading-snug">
+        {/* the job number as Code 128 (as the legacy sheet): scanned at the counter to call the job up */}
+        <div className="-mt-2 flex flex-col items-end">
+          <svg
+            viewBox={`-10 0 ${bars.length + 20} 1`}
+            preserveAspectRatio="none"
+            shapeRendering="crispEdges"
+            className="h-[12mm] w-[52mm]"
+            role="img"
+            aria-label={`บาร์โค้ด ${j.no}`}
+          >
+            {[...bars.matchAll(/1+/g)].map((m) => (
+              <rect key={m.index} x={m.index} width={m[0].length} height={1} fill="#000" />
+            ))}
+          </svg>
+          <p className="num text-[11px] tracking-[0.2em]">{j.no}</p>
         </div>
-      </Box>
 
-      <Box title="อาการเสียที่แจ้ง">
-        <p>
-          <span className="text-neutral-500">อาการเสียมาตรฐาน:</span> {j.symptoms.length ? j.symptoms.join(', ') : '—'}
-        </p>
-        <p>
-          <span className="text-neutral-500">อาการเสียอื่น ๆ:</span> {j.symptomOther || '—'}
-        </p>
-        {/* staff's own note (job_remark) — the staff copy only */}
-        {!forCustomer && (
+        <Box title="ข้อมูลลูกค้า">
+          <KV
+            items={[
+              { k: 'รหัสลูกค้า', v: c?.code },
+              { k: 'ชื่อลูกค้า', v: c?.name },
+              { k: 'โทรศัพท์', v: c?.phone },
+              { k: 'Line ID', v: c?.line },
+              { k: 'ที่อยู่', v: c?.address },
+              { k: 'อีเมล', v: c?.email, email: true },
+            ]}
+          />
+        </Box>
+
+        <Box title="ข้อมูลสินค้า">
+          <KV
+            cols={3}
+            items={[
+              { k: 'ยี่ห้อ / รุ่น', v: [j.brand, j.modelName].filter(Boolean).join(' ') },
+              { k: 'รุ่นย่อย', v: j.modelDetail },
+              { k: 'ประเภทสินค้า', v: j.productType },
+              { k: 'Serial No.', v: j.serial },
+              { k: 'IMEI', v: j.imei },
+              {
+                k: 'การรับประกัน',
+                v: j.warranty
+                  ? `${j.warranty === 'IN' ? 'ในประกัน' : 'นอกประกัน'}${j.expireDate ? ` (หมดอายุ ${j.expireDate})` : ''}`
+                  : '',
+              },
+              { k: 'ซื้อจากช่องทาง', v: [j.channel, j.shopName].filter(Boolean).join(' · ') },
+              { k: 'เลขคำสั่งซื้อ', v: j.so },
+              { k: 'วันที่ซื้อ', v: j.saleOrderDate },
+              { k: 'รับเข้าโดย', v: j.receptionType },
+              { k: 'เลขพัสดุ / ขนส่ง', v: [j.receptionTrackingNo, shipper].filter(Boolean).join(' · ') },
+            ]}
+          />
+          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
+            <p>
+              <span className="text-neutral-500">อุปกรณ์ที่นำส่ง:</span> {j.equipment || '—'}
+            </p>
+            <p>
+              <span className="text-neutral-500">จุดตำหนิ / สภาพภายนอก:</span> {j.fault || '—'}
+            </p>
+          </div>
+        </Box>
+
+        <Box title="อาการเสียที่แจ้ง">
           <p>
-            <span className="text-neutral-500">หมายเหตุ:</span> {j.remark || '—'}
+            <span className="text-neutral-500">อาการเสียมาตรฐาน:</span>{' '}
+            {j.symptoms.length ? j.symptoms.join(', ') : '—'}
           </p>
-        )}
-      </Box>
+          <p>
+            <span className="text-neutral-500">อาการเสียอื่น ๆ:</span> {j.symptomOther || '—'}
+          </p>
+          {/* staff's own note (job_remark) — the staff copy only */}
+          {!forCustomer && (
+            <p>
+              <span className="text-neutral-500">หมายเหตุ:</span> {j.remark || '—'}
+            </p>
+          )}
+        </Box>
 
-      <Box title="ประเภทงาน / ค่าใช้จ่ายเบื้องต้น">
-        <KV
-          cols={3}
-          items={[
-            { k: 'ประเภทงานหลัก', v: j.jobType },
-            { k: 'งานย่อย', v: j.jobTypeDetail },
-            { k: 'ช่างผู้รับผิดชอบ', v: j.engineer },
-            { k: 'ค่าประเมินซ่อม', v: j.estimateCost ? `${money(j.estimateCost)} บาท` : '' },
-            { k: 'ค่ามัดจำ', v: j.depositCost ? `${money(j.depositCost)} บาท` : '' },
-            { k: 'กำหนดเสร็จโดยประมาณ', v: j.dueDate },
-          ]}
-        />
-      </Box>
+        <Box title="ประเภทงาน / ค่าใช้จ่ายเบื้องต้น">
+          <KV
+            cols={3}
+            items={[
+              { k: 'ประเภทงานหลัก', v: j.jobType },
+              { k: 'งานย่อย', v: j.jobTypeDetail },
+              { k: 'ช่างผู้รับผิดชอบ', v: j.engineer },
+              { k: 'ค่าประเมินซ่อม', v: j.estimateCost ? `${money(j.estimateCost)} บาท` : '' },
+              { k: 'ค่ามัดจำ', v: j.depositCost ? `${money(j.depositCost)} บาท` : '' },
+              { k: 'กำหนดเสร็จโดยประมาณ', v: j.dueDate },
+            ]}
+          />
+        </Box>
 
-      <Box title="เงื่อนไขการรับซ่อม">
-        <ol className="list-decimal space-y-0.5 pl-5 text-[11px]">
-          {REPAIR_TERMS.map((t) => (
-            <li key={t}>{t}</li>
-          ))}
-        </ol>
-      </Box>
+        {/* content too long for one sheet moves the terms over with the signatures, never the signatures alone */}
+        <div className="break-inside-avoid">
+          <Box title="เงื่อนไขการรับซ่อม">
+            <ol className="list-decimal space-y-0.5 pl-5 text-[11px]">
+              {REPAIR_TERMS.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ol>
+          </Box>
 
-      <Signatures left="ลงชื่อลูกค้า" right="ลงชื่อผู้รับงาน" />
+          <p className="mt-1.5">
+            {REPAIR_PICKUP_NOTE} *** ลงชื่อผู้รับเครื่องคืน (เขียนตัวบรรจง)
+            <span className="ml-1 inline-block w-56 border-b border-dotted border-neutral-500" />
+          </p>
+
+          {/* as the legacy slip: the receiving staff's name printed under the line (staff copy only) */}
+          <div className="mt-3 grid grid-cols-3 items-end gap-6 text-center">
+            {[
+              { who: forCustomer ? '' : j.createByName, role: 'พนง.รับเครื่องซ่อม' },
+              { who: '', role: 'ลูกค้าแจ้งซ่อม' },
+            ].map((s) => (
+              <div key={s.role}>
+                <div className="mx-auto h-6 w-48 border-b border-dotted border-neutral-500" />
+                <p>({s.who || ' '.repeat(24)})</p>
+                <p className="text-neutral-500">{s.role}</p>
+              </div>
+            ))}
+            <p className="text-right text-neutral-500">(สำหรับศูนย์บริการ)</p>
+          </div>
+        </div>
+      </div>
     </PrintFrame>
   );
 }

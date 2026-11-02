@@ -1,4 +1,5 @@
 import { OWNER_EMAIL } from './support/env';
+import { jobUuid, newJob } from './support/db';
 import { expect, signIn, test } from './support/fixtures';
 
 test('the owner opens a job: a job number is issued and the job is in the list', async ({ page }) => {
@@ -37,4 +38,17 @@ test('the owner opens a job: a job number is issued and the job is in the list',
   await page.goto('/jobs/list');
   await expect(page.getByRole('heading', { name: 'รายการงานทั้งหมด' })).toBeVisible();
   await expect(page.getByText(no, { exact: true }).first()).toBeVisible();
+});
+
+test('a repaired job not closed yet: the row menu offers พิมพ์ใบปิดงานซ่อม (every status, as legacy)', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 5 }); // ซ่อมเสร็จ — group Repaired, not Finished
+  await signIn(page, OWNER_EMAIL);
+  await page.goto(`/jobs/list?no=${no}`);
+  await page.getByRole('button', { name: `เพิ่มเติม ${no}` }).click();
+  await expect(page.getByRole('link', { name: 'พิมพ์ใบปิดงานซ่อม' })).toHaveAttribute(
+    'href',
+    `/print/job/${await jobUuid(no)}/repair-close`,
+  );
 });
