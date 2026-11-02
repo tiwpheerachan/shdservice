@@ -273,6 +273,14 @@ function EditSaleOrder() {
                 </span>
               )}
             </div>
+            {/* approval no longer issues stock: say where the order is in Stock's step (and why it can't be cancelled) */}
+            {approveId === 4 && !loaded.cancelled && (
+              <p role="note" className="text-sm text-muted-foreground">
+                {loaded.stockDoc
+                  ? `สต๊อกจ่ายแล้ว: ${loaded.stockDoc} — ยกเลิกใบสั่งขายไม่ได้`
+                  : 'รอสต๊อกจ่าย (ตัดจ่ายอะไหล่ → ตามใบสั่งขาย)'}
+              </p>
+            )}
             {loaded.cancelled && (
               <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
                 {SO_CANCELLED} — แก้ไข อนุมัติ หรือพิมพ์ไม่ได้
@@ -289,7 +297,7 @@ function EditSaleOrder() {
           </div>
         )}
         <SaleOrderForm key={version} ref={form} soNo={no || undefined} initial={loaded} />
-        {approveId === 4 && (
+        {approveId === 4 && !loaded?.cancelled && (
           <Section title="เลขพัสดุ (Tracking)" icon={Truck}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <Field label="เลขพัสดุ" className="flex-1 sm:max-w-xs" error={te.errors.tracking}>

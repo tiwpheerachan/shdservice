@@ -31,6 +31,7 @@ export const JS = {
   REPAIRED_NO_FAULT: 22,
   CLOSED_OUTSOURCE: 23,
   CLOSED_WAIT_PICKUP: 24,
+  IN_PROGRESS_NO_FAULT: 25,
 } as const;
 
 /** job_status.job_status_group values */

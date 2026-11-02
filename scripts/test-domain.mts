@@ -240,7 +240,8 @@ async function seed() {
                             (21, 'ปิดงานซ่อม (Refund : คืนเงินลูกค้า)', 53, 'Finished', false),
                             (22, 'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)', 46, 'Repaired', true),
                             (23, 'ปิดงานซ่อม (Out-Source)', 54, 'Finished', false),
-                            (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true)) v(id, name, ord, grp, act)
+                            (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true),
+                            (25, 'อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย', 43, 'Pending', true)) v(id, name, ord, grp, act)
        WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
 
     -- the fixture jobs, every job / quotation / sale order a previous run created for a fixture customer (TDC*), and
@@ -3777,7 +3778,7 @@ try {
       );
       assert.equal(j.status, 'กำลังตรวจสอบ / ซ่อม', 'not the internal status name');
     });
-    await test('R5 track: status words for 6 / 17 / 18 / 19 / 22 — 6 is not "ยกเลิกรายการ"; every id 0–24 has one', async () => {
+    await test('R5 track: status words for 6 / 17 / 18 / 19 / 22 / 25 — 6 is not "ยกเลิกรายการ"; every id 0–25 has one', async () => {
       // job_status_group as in the legacy dump; every other id is Pending
       const group: Record<number, string> = { 0: 'Cancel' };
       for (const id of [5, 6, 9, 18, 19, 22]) group[id] = 'Repaired';
@@ -3790,7 +3791,9 @@ try {
       assert.equal(label(18), 'เปลี่ยนเครื่องใหม่ — เตรียมส่งคืน');
       assert.equal(label(19), 'คืนเงินแล้ว');
       assert.equal(label(22), 'ตรวจแล้วไม่พบอาการเสีย — เตรียมส่งคืน');
-      for (let id = 0; id <= 24; id++) {
+      assert.equal(label(25), 'ตรวจแล้วไม่พบอาการเสีย — ศูนย์กำลังดำเนินการ');
+      assert.equal(tracking.stepOf(25, 'Pending'), 'diagnosing');
+      for (let id = 0; id <= 25; id++) {
         assert.ok(label(id), `status ${id} has words`);
         assert.equal(tracking.stepOf(id, group[id] ?? 'Pending') === null, id === 0, `only 0 is cancelled (${id})`);
       }
@@ -3968,6 +3971,8 @@ try {
       assert.ok(!(await saleOrdersToPick()).includes(open), 'off the pick list');
       assert.equal(await statusOf(issueForSaleOrder({ soNo: open }, U.picker.id)), 409);
       assert.equal((await qty(P.a.code)).remain, 10, 'nothing went out');
+      // nothing ships on a cancelled order: no tracking number either
+      assert.equal(await statusOf(setTracking(open, 'TH123456789', U.admin.id)), 409);
 
       const issued = await approve(await order());
       const who = await issueForSaleOrder({ soNo: issued }, U.picker.id);
@@ -4674,9 +4679,9 @@ try {
         400,
         { status: STATUS_DELETE_ONLY },
       ]);
-      // Swap: 2 / 17 / 18 / 14, Refund: 2 / 19 / 14 (legacy's lists + Out-Source) — ซ่อมเสร็จ / 19 on a swap, 18 / 17
+      // Swap: 2 / 17 / 18 / 25 / 14, Refund: 2 / 19 / 25 / 14 (legacy's lists + no fault found + Out-Source) — ซ่อมเสร็จ / 19 on a swap, 18 / 17
       // on a refund refused
-      const [s17, s18, s19] = [await statusName(17), await statusName(18), await statusName(19)];
+      const [s17, s18, s19, s25] = await Promise.all([17, 18, 19, 25].map(statusName));
       const refund = { refundAmount: 100, refundMethod: 'เงินสด' };
       for (const [body, why] of [
         [{ ...swap, status: s5 }, 'swap → ซ่อมเสร็จ'],
@@ -4703,10 +4708,26 @@ try {
       // the Swap / Refund page offers the same list the server takes (job_status names, 18 not renamed; this seed
       // names 2 'กำลังดำเนินการ', the real table 'อยู่ระหว่างดำเนินการ')
       const s2 = 'อยู่ระหว่างดำเนินการ';
-      assert.deepEqual(SWAP_STATUS_OPTIONS, { swap: [s2, s17, s18, s14], refund: [s2, s19, s14] });
+      assert.deepEqual(SWAP_STATUS_OPTIONS, {
+        swap: [s2, s17, s18, s25, s14],
+        refund: [s2, s19, s25, s14],
+      });
       // a device that goes to a service centre: ส่งซ่อม Out-Source แล้ว from the Swap / Refund page
       await saveSwapRefund('TDJ0605', { ...swap, status: s14 }, U.admin.id);
       assert.equal((await jobRow('TDJ0605')).s, 14);
+    });
+
+    await test('R5 H4b: อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย (25) saves from Swap and from Refund', async () => {
+      await pool.query(`
+        INSERT INTO job (model_pk, job_no, job_status_id, customer_pk, customer_detail, product_model_name, job_create_date, job_reception_date, job_closed_date, engineer_app_user_pk)
+          VALUES ${job('TDJ0618', 2)}, ${job('TDJ0619', 2)};`);
+      const s25 = await statusName(25);
+      const swap = await fieldsOf(saveSwapRefund('TDJ0618', { newSerial: 'TDR5SWAP25', status: s25 }, U.admin.id));
+      assert.equal(swap.status, 200, JSON.stringify(swap));
+      const refund = { refundAmount: 100, refundMethod: 'เงินสด', status: s25 };
+      const r = await fieldsOf(saveSwapRefund('TDJ0619', refund, U.admin.id));
+      assert.equal(r.status, 200, JSON.stringify(r));
+      assert.deepEqual([(await jobRow('TDJ0618')).s, (await jobRow('TDJ0619')).s], [25, 25]);
     });
 
     await test("R5 H5: Swap without a New Serial saves; the job's own status (outside the list) re-saves; close writes Serial เครื่องใหม่", async () => {
