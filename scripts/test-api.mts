@@ -651,6 +651,19 @@ try {
   await expect([200], '/api/stock/pick-lines?type=return&ref=TDJ0002');
   await expect([400], '/api/stock/pick-lines?type=job');
   await expect([200], '/api/stock/pick-orders');
+  await test('the approved order: listed for Stock, issued by POST /api/stock/issue type=sale → 201, then shows its WHO', async () => {
+    const orders = await call('/api/stock/pick-orders');
+    assert.ok((orders.body.rows as string[]).includes(soNo), 'approval moved no stock: waiting for Stock');
+    const lines = await call(`/api/stock/pick-lines?type=sale&ref=${soNo}`);
+    const [line] = lines.body.rows as { dtId: string; need: number }[];
+    const r = await call('/api/stock/issue', {
+      method: 'POST',
+      body: { type: 'sale', ref: soNo, lines: [{ dtId: line!.dtId, qty: line!.need }] },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const order = await call(`/api/sale-orders/${soId}`);
+    assert.equal((order.body.order as { stockDoc: string }).stockDoc, r.body.no);
+  });
 
   console.log('\nAdmin');
   await expect([200], '/api/admin/users');

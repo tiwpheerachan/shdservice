@@ -58,6 +58,8 @@ export type SaleOrderLoaded = {
   approvedBy?: string;
   approveDate?: string;
   tracking?: string;
+  /** the WHO Stock issued it on ('' = not issued yet) */
+  stockDoc?: string;
   /** stamped when the tracking no. is saved */
   deliveryDate?: string;
   /** who may not decide on it (the server refuses them; System Admin may) */

@@ -225,7 +225,7 @@ export const saleOrderApprove = defineOperation({
   tags: ['Sale orders'],
   summary: 'Approve, deny, or send back a sale order (อนุมัติ / ปฏิเสธ / ส่งกลับแก้ไข)',
   description:
-    'Sale Order edit + the special right SO Approve; never your own order. Approving issues the stock (a WHO document). Rules: `approveSchema` (src/lib/validation/stock.ts); a remark is required to deny.',
+    'Sale Order edit + the special right SO Approve; never your own order. Approving moves no stock — the Stock team issues it afterwards (`POST /stock/issue`, `type: "sale"`), so too little stock does not block it. Rules: `approveSchema` (src/lib/validation/stock.ts); a remark is required to deny.',
   params: soId,
   invalid: { params: 404 },
   body: approveSchema.extend({ version }),

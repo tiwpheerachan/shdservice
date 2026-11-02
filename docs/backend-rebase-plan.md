@@ -114,7 +114,7 @@
 | รับเข้าอะไหล่ | 1 รับเข้า (WHI) | PO/Supplier ใน `inventory_remark` | available += q, remain += q |
 | รับคืนจากการเบิก (งานซ่อมคืนอะไหล่) | 2 (WHI) | job_no | used −= q, remain += q · `job_order_spare_part_log` → 5 คืนแล้ว |
 | จ่ายออกตามงานซ่อม (ตัดจ่ายให้ใบเบิก) | 3 (WHO) | job_no | used += q, remain −= q, booking −= q · log → 3 จ่ายแล้ว (grant_qty/date/by) |
-| จ่ายออกตามใบสั่งขาย (ตอนอนุมัติ SO) | 4 (WHO) | SO no | used += q, remain −= q · `sale_out_dt.pick_inventory_no`, `sale_out_hd.reference_no` = WHO |
+| จ่ายออกตามใบสั่งขาย (ทีมสต๊อก หลังอนุมัติ SO) | 4 (WHO) | SO no | used += q, remain −= q · `sale_out_dt.pick_inventory_no`, `sale_out_hd.reference_no` = WHO |
 | จ่ายออกอื่นๆ | 5 (WHO) | `reference_out_to` ข้อความ | used += q, remain −= q |
 
 **ใบเบิกอะไหล่ในงานซ่อม (`job_order_spare_part_log`)**: ช่างเพิ่มรายการ → status 1 เบิก (`request_qty/date/by`, booking += q, `is_quotation`/`is_special` = ตาราง A, `*_b` = ตาราง B, job → 11 เริ่มเบิกอะไหล่) → คลังตัดจ่ายที่หน้า "ตัดจ่ายอะไหล่" ประเภท "จ่ายออกตามงานซ่อม" (ดึงรายการค้างของ job_no นั้น) → 3 จ่ายแล้ว; เมื่อจ่ายครบทุกรายการ job → 10 เบิกจ่ายอะไหล่ครบแล้ว
@@ -141,7 +141,7 @@
 
 - เลข SO running · `document_type='SaleOrder'` · ลูกค้า snapshot ลง header (`customer_id/code/card_id/name/address/phone`) · `payment_type` (โอนเงิน/เงินสด/บัตรเครดิต), `payment_amount`, `slip_file_name` · `vat_rat=0` ทุกใบ · `net_amount = total_base_amount + fee_amount − rounding`
 - รายการ: `sale_out_dt` (`product_id/code`, `product_type` SparePart|Service, `retail_price`, `sale_out_price`, `sale_out_quantity`, `amount_dt`, `onhand_item_id = product_none_serial.item_id`)
-- Flow อนุมัติ (`approve_status`): 1 กำลังจัดทำ → 2 รออนุมัติ (บันทึก) → 4 อนุมัติแล้ว (`approve_date/by`; **ตัดสต๊อก WHO type 4 ตอนอนุมัติ** — 2,813/3,756 ใบ WHO ถูกสร้างวันเดียวกับ approve) / 5 ปฏิเสธ · 3 แก้ไขข้อมูล = ส่งกลับแก้
+- Flow อนุมัติ (`approve_status`): 1 กำลังจัดทำ → 2 รออนุมัติ (บันทึก) → 4 อนุมัติแล้ว (`approve_date/by`; อนุมัติไม่ตัดสต๊อก — **ทีมสต๊อกออก WHO type 4 ทีหลัง** ที่ ตัดจ่ายอะไหล่ → จ่ายออกตามใบสั่งขาย ตามระบบเดิม: ทุกใบ WHO สร้างโดยสต๊อก วันเดียวกันหรือวันถัดไป ไม่ใช่ผู้อนุมัติ) / 5 ปฏิเสธ · 3 แก้ไขข้อมูล = ส่งกลับแก้
 - `is_sale_out=true`, `sale_out_date/by` = เวลาบันทึก · `document_status=true` (ยกเลิก = false + `document_cancel_*`)
 - mapping `SaleOrder`: `no ← sale_out_hd_no` · `date ← document_create_date` · `customer ← customer_name` · `amount ← net_amount` · `sales ← app_user(document_create_by)` · `approve ← approve_name_th` · `stockDoc ← reference_no` · `tracking ← delivery_tracking_no`
 
@@ -268,7 +268,7 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 - รับเข้า: PO ไม่บังคับ (ระบบเดิมว่างทั้ง 6,309 ใบ)
 - modal อะไหล่: แสดง `product_none_serial.remark` (log ปรับสต๊อกเดิม 971 แถว) และ `cancel_remark/date/by` แบบอ่านอย่างเดียว
 - รูปอะไหล่เดิม: อัปโหลด 786/822 ไฟล์จาก `~/Downloads/ImagesProduct` ขึ้น bucket `oneservice` ที่ `products/{code}/{ชื่อไฟล์เดิม}` (ไม่แก้ DB); 36 รายการไม่มีไฟล์ต้นทาง (รายชื่อในแชท) สคริปต์ `img-upload.mts` อยู่ใน scratchpad
-- ไม่ทำ: `category.shot_code`, `manufacturer.logo_name`, `model.tier_id`, `product_serial`/`model_part` (ว่างทั้งหมด); ไม่มีหน้า "ปรับยอด" (ใช้รับเข้า/จ่ายอื่นๆ แทน); ข้อมูลเก่าผิดปกติ (remain ติดลบ 5, drift 6, SO อนุมัติแล้วไม่ตัดสต๊อก 3 ใบปี 2024) รอเคลียร์ตอน re-dump
+- ไม่ทำ: `category.shot_code`, `manufacturer.logo_name`, `model.tier_id`, `product_serial`/`model_part` (ว่างทั้งหมด); ไม่มีหน้า "ปรับยอด" (ใช้รับเข้า/จ่ายอื่นๆ แทน); ข้อมูลเก่าผิดปกติ (remain ติดลบ 5, drift 6) รอเคลียร์ตอน re-dump · SO อนุมัติแล้วยังไม่มี WHO 3 ใบปี 2024 ไม่ใช่ความผิดปกติแล้ว: รออยู่ในคิว จ่ายออกตามใบสั่งขาย ของสต๊อก (จ่ายหรือยกเลิกได้)
 **ลูกค้า** (43,529 แถว ครบ; ทุก job.customer_id มีลูกค้า)
 - ปุ่ม "ประวัติงานซ่อม" ในแถวลูกค้า → `/jobs/list?customer=CODE` (หน้ารายการงานอ่าน param มาเติมฟิลเตอร์ลูกค้า)
 - เพิ่มลูกค้าใหม่: ถ้าเบอร์ซ้ำกับลูกค้าเดิม (ซ้ำอยู่ 1,843 เบอร์/3,973 ราย) แสดง toast เตือนพร้อมรหัสเดิม ไม่บล็อก

@@ -575,17 +575,41 @@ try {
     assert.equal(r.status, 409);
     assert.deepEqual(await qty(P.a.code), before);
   });
-  await test('approve → 200 and stock goes out once; approve again → 409 and stock does not move', async () => {
+  await test('approve → 200 and moves no stock (no WHO); approve again → 409', async () => {
     assert.ok(soNo, 'needs the order above');
     const approve = async () =>
       soApprovePOST(
         await request(`/api/sale-orders/${soNo}/approve`, U.admin, { method: 'POST', body: { decision: 'approve' } }),
         { params: Promise.resolve({ id: await uuidBy('sale_order', soNo) }) },
       );
+    const before = await qty(P.a.code);
     const first = await approve();
     assert.equal(first.status, 200, JSON.stringify(await first.json()));
-    assert.equal((await qty(P.a.code)).remain, 8);
+    assert.deepEqual(await qty(P.a.code), before);
+    const { getSaleOrder } = await import('@/server/services/sale-orders');
+    assert.equal((await getSaleOrder(soNo))!.stockDoc, '', 'no WHO yet');
     assert.equal((await approve()).status, 409);
+    assert.deepEqual(await qty(P.a.code), before);
+  });
+  await test('Stock issues the approved order (POST /api/stock/issue type=sale) → 201 WHO, stock goes out once', async () => {
+    assert.ok(soNo, 'needs the order above');
+    const issue = async () =>
+      json(
+        await stockIssuePOST(
+          await request('/api/stock/issue', U.picker, {
+            method: 'POST',
+            body: { type: 'sale', ref: soNo, lines: [{ dtId: soDtId, qty: 2 }] },
+          }),
+        ),
+      );
+    const r = await issue();
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.match(String(r.body.no), /^WHO/);
+    assert.equal((await qty(P.a.code)).remain, 8);
+    const { getSaleOrder } = await import('@/server/services/sale-orders');
+    assert.equal((await getSaleOrder(soNo))!.stockDoc, r.body.no, 'the order shows its WHO');
+    const again = await issue();
+    assert.equal(again.status, 409, JSON.stringify(again.body));
     assert.equal((await qty(P.a.code)).remain, 8);
   });
   await test('ออกเอกสารในนาม: an approved order → 409 (fixed), a draft → 200', async () => {
@@ -2006,7 +2030,7 @@ try {
           { params: Promise.resolve({ id: await uuidBy('sale_order', no) }) },
         )
       ).status;
-    await test('R1: a denied sale order cannot be approved / sent back / re-saved (409, no stock out); approve ∥ deny → one wins', async () => {
+    await test('R1: a denied sale order cannot be approved / sent back / re-saved (409); approve ∥ deny → one wins', async () => {
       await setStock(P.b.code, 10);
       const no = await newSO(P.b.code);
       assert.equal(await decide(no, 'deny'), 200);
@@ -2036,7 +2060,7 @@ try {
       const race = await newSO(P.b.code);
       const both = await Promise.all([decide(race, 'approve'), decide(race, 'deny')]);
       assert.deepEqual([...both].sort(), [200, 409]);
-      assert.equal((await qty(P.b.code)).remain, both[0] === 200 ? 9 : 10);
+      assert.equal((await qty(P.b.code)).remain, 10, 'a decision moves no stock');
     });
 
     // address master rows (the test DB has none): Bangkok names carry their own แขวง / เขต prefix
@@ -2429,7 +2453,7 @@ try {
       assert.ok(!(await jobsWithPendingParts()).includes(jobNo), 'dropdown');
       assert.deepEqual(await qty(P.a.code), before, 'nothing went out');
     });
-    await test('R2 stock: an approved sale order (issued at approval) is not offered to จ่ายออกตามใบสั่งขาย; issuing again → 409 naming the WHO', async () => {
+    await test('R2 stock: an approved order is offered to จ่ายออกตามใบสั่งขาย until Stock issues it; issuing again → 409 naming the WHO', async () => {
       const { GET: pickOrdersGET } = await import('@/app/api/stock/pick-orders/route');
       await setStock(P.b.code, 10);
       const created = await json(
@@ -2452,25 +2476,80 @@ try {
         { params: Promise.resolve({ id: await uuidBy('sale_order', no) }) },
       );
       assert.equal(approved.status, 200);
-      const [line] = await listSaleOrderPickLines(no);
-      assert.ok(line.picked && line.pickNo, 'approval issued the line');
+      assert.equal((await qty(P.b.code)).remain, 10, 'approval moved no stock');
       const offered = async () =>
         (
           (await json(await pickOrdersGET(await request('/api/stock/pick-orders', U.picker)))).body.rows as string[]
         ).includes(no);
+      assert.ok(await offered(), 'offered: approved, nothing issued');
+      assert.ok((await saleOrdersToPick()).includes(no));
+      const [before] = await listSaleOrderPickLines(no);
+      assert.ok(!before.picked && !before.pickNo, 'still to issue');
+      const done = await issueForSaleOrder({ soNo: no }, U.picker.id);
+      assert.equal((await qty(P.b.code)).remain, 9, 'stock went out once');
+      const [line] = await listSaleOrderPickLines(no);
+      assert.equal(line.pickNo, done.no);
       assert.ok(!(await offered()), 'not offered: nothing left to issue');
       const err = await issueForSaleOrder({ soNo: no }, U.admin.id).catch((e: unknown) => e);
       assert.ok(err instanceof HttpError && err.status === 409 && err.message.includes(line.pickNo), String(err));
-      assert.equal((await qty(P.b.code)).remain, 9, 'stock went out once');
-      // a legacy approved order with a line no WHO issued yet is offered
-      await db.execute(
-        sql`UPDATE sale_order_line SET pick_stock_move_pk = NULL WHERE sale_order_pk = (SELECT pk FROM sale_order WHERE sale_order_no = ${no})`,
+      assert.equal((await qty(P.b.code)).remain, 9, 'still once');
+    });
+    await test('R2 stock: approving with too little stock succeeds; Stock issues the whole order only — short → 409, nothing moves; partial → 400; after stock arrives → once', async () => {
+      await setStock(P.a.code, 10);
+      await setStock(P.b.code, 1);
+      const created = await json(
+        await soPOST(
+          await request('/api/sale-orders', U.admin, {
+            method: 'POST',
+            body: {
+              customerCode: CUSTOMER,
+              salesId: await uuidOf(U.admin),
+              submit: true,
+              lines: [
+                { code: P.a.code, qty: 1 },
+                { code: P.b.code, qty: 3 },
+              ],
+            },
+          }),
+        ),
       );
-      assert.ok(await offered(), 'offered while a line is left');
-      assert.ok((await saleOrdersToPick()).includes(no));
-      await db.execute(
-        sql`UPDATE sale_order_line SET pick_stock_move_pk = (SELECT pk FROM stock_move WHERE stock_move_no = ${line.pickNo}) WHERE sale_order_pk = (SELECT pk FROM sale_order WHERE sale_order_no = ${no})`,
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const no = (created.body.order as { no: string }).no;
+      const approved = await soApprovePOST(
+        await request(`/api/sale-orders/${no}/approve`, U.admin, { method: 'POST', body: { decision: 'approve' } }),
+        { params: Promise.resolve({ id: await uuidBy('sale_order', no) }) },
       );
+      assert.equal(approved.status, 200, 'too little stock does not block the approval');
+      const [a, b] = await listSaleOrderPickLines(no);
+      const both = (qb: number) => [
+        { dtId: a!.dtId, qty: 1 },
+        { dtId: b!.dtId, qty: qb },
+      ];
+      const unmoved = async () => {
+        assert.deepEqual([(await qty(P.a.code)).remain, (await qty(P.b.code)).remain], [10, 1], 'nothing went out');
+        assert.ok((await saleOrdersToPick()).includes(no), 'still waiting for Stock');
+      };
+      const short = await issueForSaleOrder({ soNo: no, lines: both(3) }, U.picker.id).catch((e: unknown) => e);
+      assert.ok(short instanceof HttpError && short.status === 409, String(short));
+      assert.match(short.message, new RegExp(`${P.b.code} ต้องการ 3 คงเหลือ 1`));
+      assert.doesNotMatch(short.message, new RegExp(P.a.code), 'names the short part only');
+      await unmoved();
+      // a part of a line, or some lines only, is never issued (it would be stamped as done)
+      for (const lines of [both(1), [{ dtId: a!.dtId, qty: 1 }]]) {
+        const partial = await issueForSaleOrder({ soNo: no, lines }, U.picker.id).catch((e: unknown) => e);
+        assert.ok(partial instanceof HttpError && partial.status === 400, String(partial));
+        await unmoved();
+      }
+      await setStock(P.b.code, 5); // the parts arrive
+      const done = await issueForSaleOrder({ soNo: no, lines: both(3) }, U.picker.id);
+      assert.equal(done.total, 4);
+      assert.deepEqual([(await qty(P.a.code)).remain, (await qty(P.b.code)).remain], [9, 2]);
+      assert.deepEqual(
+        (await listSaleOrderPickLines(no)).map((l) => l.pickNo),
+        [done.no, done.no],
+        'one WHO for the whole order',
+      );
+      assert.ok(!(await saleOrdersToPick()).includes(no));
     });
   }
   console.log('\nRound 2 — sale orders + quotations + customers');
@@ -2526,7 +2605,7 @@ try {
       // someone else (a Manager on an admin-made order) approves; System Admin approves its own
       assert.equal((await decideAs(U.manager, await createSO(U.admin, U.admin.id, true), 'approve')).status, 200);
       assert.equal((await decideAs(U.admin, await createSO(U.admin, U.admin.id, true), 'approve')).status, 200);
-      assert.equal((await qty(P.a.code)).remain, 8);
+      assert.equal((await qty(P.a.code)).remain, 10, 'approval moves no stock');
     });
 
     await test('R2 SO: deny / send back need a reason (400 under remark); the reason, who and when are on the order', async () => {
@@ -3446,7 +3525,7 @@ try {
       assert.equal((await qty(P.a.code)).remain, 10, 'nothing went out');
       const ok = await decide(U.manager, no, 'approve');
       assert.equal(ok.status, 200, JSON.stringify(ok.body));
-      assert.equal((await qty(P.a.code)).remain, 9);
+      assert.equal((await qty(P.a.code)).remain, 10, 'approval moves no stock');
     });
 
     await test('R4 SO: only the creator sends it for approval — someone else 403 (a plain save keeps the status); creator / System Admin 200', async () => {
@@ -3841,7 +3920,8 @@ try {
       assert.equal(await rs(), 'INACTIVE');
     });
 
-    await test('R5 records: an approved sale order (stock issued) cannot be cancelled; a waiting one can', async () => {
+    await test('R5 records: an approved sale order is cancelled only before Stock issues it (approver / admin, not its creator); then off the pick list', async () => {
+      const { saleOrdersToPick, issueForSaleOrder } = await import('@/server/services/stock');
       await setStock(P.a.code, 10);
       const order = async () => {
         const body = {
@@ -3854,39 +3934,50 @@ try {
         assert.equal(r.status, 201, JSON.stringify(r.body));
         return (r.body.order as { no: string }).no;
       };
-      const approved = await order();
-      const ok = await soApprovePOST(
-        await request(`/api/sale-orders/${approved}/approve`, U.admin, {
-          method: 'POST',
-          body: { decision: 'approve' },
-        }),
-        { params: Promise.resolve({ id: await uuidBy('sale_order', approved) }) },
-      );
-      assert.equal(ok.status, 200);
-      const cancel = await records(U.admin, {
-        table: 'sale_orders',
-        id: await uuidBy('sale_order', approved),
-        status: 'DELETED',
-      });
-      assert.equal(cancel.status, 409, JSON.stringify(cancel.body));
-      const [hd] = (
-        await db.execute<{ rs: string }>(
-          sql`SELECT record_status AS rs FROM sale_order WHERE sale_order_no = ${approved}`,
-        )
-      ).rows;
-      assert.deepEqual(hd, { rs: 'ACTIVE' });
-      const waiting = await order();
-      assert.equal(
+      const approve = async (no: string) => {
+        const ok = await soApprovePOST(
+          await request(`/api/sale-orders/${no}/approve`, U.admin, { method: 'POST', body: { decision: 'approve' } }),
+          { params: Promise.resolve({ id: await uuidBy('sale_order', no) }) },
+        );
+        assert.equal(ok.status, 200);
+        return no;
+      };
+      const cancel = async (u: TestUser, no: string) =>
+        records(u, {
+          table: 'sale_orders',
+          id: await uuidBy('sale_order', no),
+          status: 'DELETED',
+          remark: 'TD ยกเลิก',
+        });
+      const hdOf = async (no: string) =>
         (
-          await records(U.admin, {
-            table: 'sale_orders',
-            id: await uuidBy('sale_order', waiting),
-            status: 'DELETED',
-            remark: 'TD ยกเลิก',
-          })
-        ).status,
-        200,
-      );
+          await db.execute<{ rs: string; remark: string; by: number | null }>(
+            sql`SELECT record_status AS rs, document_cancel_remark AS remark, cancelled_by_app_user_pk::int AS by
+                  FROM sale_order WHERE sale_order_no = ${no}`,
+          )
+        ).rows[0];
+
+      const open = await approve(await order());
+      assert.ok((await saleOrdersToPick()).includes(open));
+      const byCreator = await cancel(U.seller, open);
+      assert.equal(byCreator.status, 403, JSON.stringify(byCreator.body));
+      assert.equal((await hdOf(open)).rs, 'ACTIVE');
+      const ok = await cancel(U.admin, open);
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.deepEqual({ ...(await hdOf(open)) }, { rs: 'DELETED', remark: 'TD ยกเลิก', by: U.admin.id });
+      assert.ok(!(await saleOrdersToPick()).includes(open), 'off the pick list');
+      assert.equal(await statusOf(issueForSaleOrder({ soNo: open }, U.picker.id)), 409);
+      assert.equal((await qty(P.a.code)).remain, 10, 'nothing went out');
+
+      const issued = await approve(await order());
+      const who = await issueForSaleOrder({ soNo: issued }, U.picker.id);
+      const refused = await cancel(U.admin, issued);
+      assert.equal(refused.status, 409, JSON.stringify(refused.body));
+      assert.match(String(refused.body.error), new RegExp(who.no));
+      assert.equal((await hdOf(issued)).rs, 'ACTIVE');
+
+      const waiting = await order();
+      assert.equal((await cancel(U.admin, waiting)).status, 200);
     });
 
     await test('R5 records: restoring a deleted job puts back its status before the delete (job_status_log), else 1 งานใหม่', async () => {
@@ -4039,7 +4130,7 @@ try {
       assert.equal((await edit(U.admin, U.manager.id, 80)).status, 200, 'System Admin');
     });
 
-    await test('R5 SO: an approval with the version on screen — the creator changed qty 1 → 8 since → 409, nothing issued; the current version → 200', async () => {
+    await test('R5 SO: an approval with the version on screen — the creator changed qty 1 → 8 since → 409; the current version → 200, Stock issues the 8', async () => {
       await setStock(P.a.code, 10);
       const o = await newSO(U.seller);
       const onScreen = (await getSaleOrder(o.no))!.version; // the Manager opens it
@@ -4058,7 +4149,9 @@ try {
       const now = (changed.body.order as Order).version;
       const ok = await decide(U.manager, o.no, { decision: 'approve', version: now });
       assert.equal(ok.status, 200, JSON.stringify(ok.body));
-      assert.equal((await qty(P.a.code)).remain, 2, 'the 8 the Manager saw');
+      assert.equal((await qty(P.a.code)).remain, 10, 'approval moves no stock');
+      await issueForSaleOrder({ soNo: o.no }, U.picker.id);
+      assert.equal((await qty(P.a.code)).remain, 2, 'Stock issues the 8 the Manager saw');
     });
 
     await test('R5 SO: a cancelled (DELETED) order cannot be edited, approved or issued (409), stock untouched', async () => {
@@ -4245,11 +4338,12 @@ try {
       await pool.query(`UPDATE sale_order SET customer_pk = 9001 WHERE sale_order_no = '${no}'`); // seed cleanup (+ TDC501 deletable)
     });
 
-    await test('R5 SO: a real product sent as type Service is still a product line — the approval issues it', async () => {
+    await test('R5 SO: a real product sent as type Service is still a product line — Stock issues it', async () => {
       await setStock(P.a.code, 10);
       const o = await newSO(U.admin, { lines: [{ code: P.a.code, qty: 1, price: 100, type: 'Service', name: 'TD' }] });
       assert.equal((await dtOf(o.no))[0].type, 'SparePart');
       assert.equal((await decide(U.admin, o.no, { decision: 'approve' })).status, 200);
+      await issueForSaleOrder({ soNo: o.no }, U.picker.id);
       assert.equal((await qty(P.a.code)).remain, 9);
     });
 
@@ -5236,7 +5330,7 @@ try {
         assert.deepEqual((await getSaleOrder(no))!.approverRoles, ['Manager', 'TD Seller']);
         const ok = await approve(U.seller2, no); // created + sold by U.seller, decided by another TD Seller
         assert.equal(ok.status, 200, JSON.stringify(ok.body));
-        assert.equal((await qty(P.a.code)).remain, 9);
+        assert.equal((await qty(P.a.code)).remain, 10, 'approval moves no stock');
         await tick('Manager', 'SO Approve', false);
         const r = await approve(U.manager, await create());
         assert.deepEqual([r.status, r.body.error], [403, NOT_APPROVER]);

@@ -492,6 +492,11 @@ async function lockedStock(tx: Tx, productIds: number[]) {
   const onhand = new Map(rows.map((r) => [r.pk, r.quantityRemain]));
   const changed = new Set<StockRow>();
   return {
+    /** on hand now (undefined: no stock row — adjust says so) */
+    remain: (productId: number) => {
+      const row = byProduct.get(productId);
+      return row && (row.quantityRemain ?? 0);
+    },
     async adjust(productId: number, d: QtyDelta) {
       const row = byProduct.get(productId);
       if (!row) throw await noStockRow(tx, productId);
@@ -1159,8 +1164,8 @@ const soGoodsLine = isNotNull(saleOrderLine.productPk);
 /** a product line no WHO has issued yet */
 const soLineToPick = and(soGoodsLine, isNull(saleOrderLine.pickStockMovePk));
 
-/** จ่ายออกตามใบสั่งขาย's list: approved orders with a product line still to issue. Approving an order
- *  issues its stock (approveSaleOrder), so this is what approval left behind — usually nothing. */
+/** จ่ายออกตามใบสั่งขาย's list: approved orders with a product line still to issue — approval moves no stock, the
+ *  Stock team issues it here. */
 export async function saleOrdersToPick(limit = 300): Promise<string[]> {
   const rows = await db
     .selectDistinct({ no: saleOrder.saleOrderNo })
@@ -1208,12 +1213,11 @@ export async function listSaleOrderPickLines(soNo: string): Promise<SoPickLine[]
 export async function issueForSaleOrder(
   i: { soNo: string; remark?: string; payTo?: string; lines?: { dtId: string; qty: number }[] },
   byUserId: number,
-  tx?: Tx,
 ): Promise<{ no: string; total: number }> {
-  const run = async (t: Tx) => {
+  return writeTx(async (t) => {
     // header first — the same lock order as saveSaleOrder / approveSaleOrder (no deadlock);
-    // only an APPROVED order may take stock out (the UI filters, the API must too: a pick on a
-    // waiting order, then an edit + approve, would take the stock out twice)
+    // only an APPROVED order may take stock out (the UI filters, the API must too: before approval its lines can
+    // still change, so a pick then an edit would issue what the order no longer holds)
     const [hd] = await t
       .select({ pk: saleOrder.pk, approve: saleOrder.approveStatusId, status: saleOrder.recordStatus })
       .from(saleOrder)
@@ -1233,13 +1237,29 @@ export async function issueForSaleOrder(
       t,
       dts.flatMap((d) => (d.pickStockMovePk == null && d.productPk ? [d.productPk] : [])),
     );
+    // the whole order in one WHO, every line in full (legacy: each order has exactly one) — a part of a line would
+    // be stamped as issued and its rest never go out
+    const open = dts.filter((d) => d.pickStockMovePk == null && d.saleOutQuantity > 0);
+    const partial = want ? open.filter((d) => want.get(d.id) !== d.saleOutQuantity) : [];
+    if (partial.length)
+      throw new HttpError(
+        400,
+        `ใบสั่งขายต้องจ่ายครบทุกรายการในครั้งเดียว — ${partial.map((d) => `${d.code} จ่าย ${d.saleOutQuantity}`).join(', ')}`,
+      );
+    const need = new Map<number, { code: string; qty: number }>();
+    for (const d of open)
+      if (d.productPk)
+        need.set(d.productPk, { code: d.code ?? '', qty: (need.get(d.productPk)?.qty ?? 0) + d.saleOutQuantity });
+    const short = [...need].flatMap(([pk, n]) => {
+      const left = stock.remain(pk);
+      return left !== undefined && n.qty > left ? [`${n.code} ต้องการ ${n.qty} คงเหลือ ${left}`] : [];
+    });
+    if (short.length)
+      throw new HttpError(409, `สต๊อกไม่พอจ่ายใบสั่งขาย ${i.soNo} ทั้งใบ — ${short.join(', ')} · รับเข้าอะไหล่ก่อน`);
     const mv: (StockLine & { pk: number })[] = [];
     const picked: number[] = [];
-    for (const d of dts) {
-      if (d.pickStockMovePk != null) continue;
-      const qty = want ? (want.get(d.id) ?? 0) : d.saleOutQuantity;
-      if (qty <= 0) continue;
-      if (qty > d.saleOutQuantity) throw new HttpError(400, `จ่ายเกินจำนวนในใบสั่งขาย (${d.code})`);
+    for (const d of open) {
+      const qty = d.saleOutQuantity;
       if (!d.productPk) throw new HttpError(400, `รายการ ${d.code} ไม่มี product_id`);
       await stock.adjust(d.productPk, { used: qty });
       mv.push({ code: d.code ?? '', qty, pk: d.productPk });
@@ -1247,7 +1267,7 @@ export async function issueForSaleOrder(
     }
     await stock.flush();
     if (!mv.length) {
-      // approving the order issued it already — say so instead of a bare "nothing to issue"
+      // every line was issued already — say by which WHO instead of a bare "nothing to issue"
       if (dts.length && dts.every((d) => d.pickStockMovePk != null)) {
         const done = await t
           .select({ no: stockMove.stockMoveNo })
@@ -1283,9 +1303,7 @@ export async function issueForSaleOrder(
     });
     await t.update(saleOrderLine).set({ pickStockMovePk: pickPk }).where(inArray(saleOrderLine.pk, picked));
     return { no, total: mv.reduce((s, l) => s + l.qty, 0) };
-  };
-  // with the caller's tx, the caller calls productsChanged() after its commit
-  return tx ? run(tx) : writeTx(run).finally(productsChanged);
+  }).finally(productsChanged);
 }
 
 /**

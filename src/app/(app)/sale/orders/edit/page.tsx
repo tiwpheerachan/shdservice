@@ -141,21 +141,21 @@ function EditSaleOrder() {
     return ok;
   };
 
-  // อนุมัติ → ตัดสต๊อก (WHO type 4) ทันที ตามพฤติกรรมระบบเดิม
   const decide = async (decision: 'approve' | 'deny' | 'reject', remark = '') => {
     if (!no) return;
     const label = LABEL[decision];
     if (decision === 'approve') {
       const ok = await confirm({
         title: `อนุมัติใบสั่งขาย ${no}?`,
-        description: 'ระบบจะตัดสต๊อกตามรายการในใบทันที (สร้างเอกสารจ่ายออก WHO) และแก้ไขรายการไม่ได้อีก',
-        confirmLabel: 'อนุมัติ (ตัดสต๊อก)',
+        description:
+          'ใบจะเป็น "อนุมัติแล้ว" และแก้ไขรายการไม่ได้อีก — ทีมสต๊อกจ่ายสินค้าออก (WHO) ที่ เมนูตัดจ่ายอะไหล่ → จ่ายออกตามใบสั่งขาย',
+        confirmLabel: 'อนุมัติ',
       });
       if (!ok) return;
     }
     setSaving(true);
     try {
-      // the version on screen: the creator saved since (other lines / qty) → 409, nothing is issued
+      // the version on screen: the creator saved since (other lines / qty) → 409, nothing is decided
       const d = await postJson<{ order: SaleOrderLoaded }>(`/api/sale-orders/${id}/approve`, {
         decision,
         remark,
@@ -225,14 +225,15 @@ function EditSaleOrder() {
   // a waiting order is edited only by its creator (System Admin may) — the server refuses anyone else
   const waitingLocked = approveId === 2 && !isAdmin && userId !== loaded?.createdById;
   const canEditTracking = isAdmin || can('Sale Order', 'edit');
-  // who may cancel — the records API's rule: Sale Order delete, and System Admin / SO Approve, or the creator;
-  // never a closed (approved = stock issued, or denied) or cancelled one
+  // who may cancel — the records API's rule: Sale Order delete, and System Admin / SO Approve, or the creator (not
+  // once approved); never a denied, cancelled or stock-issued (WHO) one
+  const approvedOpen = approveId === 4 && !loaded?.stockDoc;
   const canCancel =
     !!loaded &&
     !loaded.cancelled &&
-    !closed &&
+    (!closed || approvedOpen) &&
     can('Sale Order', 'edit') &&
-    (isAdmin || has('SO Approve') || userId === loaded.createdById);
+    (isAdmin || has('SO Approve') || (!approvedOpen && userId === loaded.createdById));
 
   return (
     <>
@@ -416,7 +417,7 @@ function EditSaleOrder() {
                     ปฏิเสธ
                   </Button>
                   <Button size="md" type="button" onClick={() => decide('approve')} disabled={saving}>
-                    อนุมัติ (ตัดสต๊อก)
+                    อนุมัติ
                   </Button>
                 </>
               ) : null}

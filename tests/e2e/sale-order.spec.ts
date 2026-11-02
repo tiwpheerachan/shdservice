@@ -1,12 +1,12 @@
 import type { Page } from '@playwright/test';
-import { E2E_CUSTOMER, MANAGER_EMAIL, SELLER_EMAIL } from './support/env';
+import { E2E_CUSTOMER, MANAGER_EMAIL, SELLER_EMAIL, STOCK_EMAIL } from './support/env';
 import { movementsOf, newPart, one, stockOf, userId, userUuid } from './support/db';
-import { call, expect, signIn, switchUser, test } from './support/fixtures';
+import { call, dismissToasts, expect, signIn, switchUser, test } from './support/fixtures';
 
 /**
  * ใบสั่งขาย: a seller keys an order in and sends it for approval; a manager (special right SO Approve)
- * decides. Approval takes the stock out — one จ่ายออกตามใบสั่งขาย movement (inventory type 4), once, however
- * often it is sent. The creator never approves their own order; deny / send back need a reason and move nothing.
+ * decides. Approval moves no stock: the Stock team then issues it on ตัดจ่ายอะไหล่ → จ่ายออกตามใบสั่งขาย — one
+ * movement (inventory type 4), once. The creator never approves their own order; deny / send back need a reason.
  */
 const PRICE = 150;
 
@@ -51,13 +51,26 @@ async function approve(page: Page, no: string, decision: 'approve' | 'deny' | 'r
   return call(page, 'POST', `/api/sale-orders/${id}/approve`, { decision, remark, version });
 }
 
+/** ตัดจ่ายอะไหล่ → จ่ายออกตามใบสั่งขาย: the order from the list of approved orders waiting, Get Data */
+async function pickOrder(page: Page, no: string) {
+  await page.goto('/stock/pick');
+  await expect(page.getByRole('heading', { name: 'ตัดจ่ายอะไหล่' })).toBeVisible();
+  await page.getByLabel('ประเภทเอกสาร').selectOption('จ่ายออกตามใบสั่งขาย');
+  await page.getByRole('combobox', { name: /^อ้างอิงเลขเอกสาร/ }).click();
+  await page.keyboard.type(no);
+  await page.getByRole('option', { name: no }).click();
+  await page.getByRole('button', { name: 'Get Data' }).click();
+}
+
 async function openOrder(page: Page, no: string) {
   await page.goto(`/sale/orders/edit?id=${await soId(no)}`);
   await expect(page.getByRole('heading', { name: 'แก้ไขใบสั่งขาย' })).toBeVisible();
   await expect(page.getByText(no, { exact: true })).toBeVisible();
 }
 
-test('a seller sends an order for approval; the manager approves it and the stock goes out once', async ({ page }) => {
+test('a seller sends an order for approval; the manager approves it (no stock moves); Stock issues it once', async ({
+  page,
+}) => {
   const part = await newPart({ remain: 10, price: PRICE });
   const [seller, manager] = [await userId(SELLER_EMAIL), await userId(MANAGER_EMAIL)];
 
@@ -94,25 +107,86 @@ test('a seller sends an order for approval; the manager approves it and the stoc
 
   await switchUser(page, MANAGER_EMAIL);
   await openOrder(page, no);
-  await page.getByRole('button', { name: 'อนุมัติ (ตัดสต๊อก)' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'อนุมัติ (ตัดสต๊อก)' }).click();
+  await page.getByRole('button', { name: 'อนุมัติ', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'อนุมัติ', exact: true }).click();
   await expect(page.getByText('อนุมัติแล้ว').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'อนุมัติ (ตัดสต๊อก)' })).toHaveCount(0); // final: no decision left
+  await expect(page.getByRole('button', { name: 'อนุมัติ', exact: true })).toHaveCount(0); // final: no decision left
 
   expect(await orderState(no)).toMatchObject({ approve: 4, approve_by: manager });
-  const out = await movementsOf(no);
-  expect(out).toEqual([{ no: expect.stringMatching(/^WHO\d+$/), type: 4, code: part.code, qty: 3 }]);
-  expect(await stockOf(part.code)).toEqual({ available: 10, used: 3, booking: 0, remain: 7 });
+  expect(await movementsOf(no)).toEqual([]); // approval moves no stock
+  expect(await stockOf(part.code)).toEqual({ available: 10, used: 0, booking: 0, remain: 10 });
 
-  // approving again (a second tab, a stale screen) is refused and takes nothing more
+  // approving again (a second tab, a stale screen) is refused
   const again = await approve(page, no, 'approve');
   expect(again.status).toBe(409);
   expect(again.body.error).toBe('อนุมัติไปแล้ว');
+
+  // ตัดจ่ายอะไหล่: Stock issues the approved order
+  await switchUser(page, STOCK_EMAIL);
+  await pickOrder(page, no);
+  const row = page.getByRole('row', { name: new RegExp(part.code) });
+  await expect(row).toContainText('รอจ่าย');
+  // the whole order in one go: every line at its full qty, not editable
+  await expect(row.getByLabel(`จำนวนจ่ายออก ${part.code}`)).toHaveValue('3');
+  await expect(row.getByLabel(`จำนวนจ่ายออก ${part.code}`)).not.toBeEditable();
+  await expect(page.getByLabel('จ่ายให้')).toHaveCount(0); // the order is the movement's party
+  await dismissToasts(page);
+  await page.getByRole('button', { name: 'บันทึกการจ่ายออก' }).click();
+  await expect(page.getByText('บันทึกการจ่ายออกแล้ว 3 ชิ้น')).toBeVisible();
+
+  const out = await movementsOf(no);
+  expect(out).toEqual([{ no: expect.stringMatching(/^WHO\d+$/), type: 4, code: part.code, qty: 3 }]);
+  expect(await stockOf(part.code)).toEqual({ available: 10, used: 3, booking: 0, remain: 7 });
+  // the order shows its WHO (the list's เลขจ่ายสต๊อก) and is no longer waiting for Stock
+  const { body } = await call(page, 'GET', `/api/sale-orders/${await soId(no)}`);
+  expect((body.order as { stockDoc: string }).stockDoc).toBe(out[0]!.no);
+  expect(((await call(page, 'GET', '/api/stock/pick-orders')).body.rows as string[]).includes(no)).toBe(false);
+  const [line] = (await call(page, 'GET', `/api/stock/pick-lines?type=sale&ref=${no}`)).body.rows as { dtId: string }[];
+  const twice = await call(page, 'POST', '/api/stock/issue', {
+    type: 'sale',
+    ref: no,
+    lines: [{ dtId: line!.dtId, qty: 3 }],
+  });
+  expect(twice.status).toBe(409); // "ตัดสต๊อกครบแล้ว (WHO…)"
+  expect(twice.body.error).toContain(out[0]!.no);
   expect(await movementsOf(no)).toEqual(out);
   expect((await stockOf(part.code)).remain).toBe(7);
 });
 
-test('two approvals of the same order at once (double click): one wins, the stock goes out once', async ({ page }) => {
+test('an order approved with too little stock: the approval passes, Stock cannot issue it until the parts arrive', async ({
+  page,
+}) => {
+  const part = await newPart({ remain: 1, price: PRICE });
+  await signIn(page, SELLER_EMAIL);
+  const no = await createOrder(page, part.code, 3, SELLER_EMAIL);
+
+  await switchUser(page, MANAGER_EMAIL);
+  expect((await approve(page, no, 'approve')).status).toBe(200);
+  expect(await movementsOf(no)).toEqual([]);
+
+  await switchUser(page, STOCK_EMAIL);
+  await pickOrder(page, no);
+  const row = page.getByRole('row', { name: new RegExp(part.code) });
+  await expect(row).toContainText('รออะไหล่');
+  await expect(row).toContainText('เกินจำนวนคงเหลือในสต๊อก (มี 1)');
+  await dismissToasts(page);
+  await page.getByRole('button', { name: 'บันทึกการจ่ายออก' }).click();
+  await expect(page.getByText('สต๊อกไม่พอ 1 รายการ').first()).toBeVisible();
+  // the API refuses it too: the whole order or nothing
+  const [line] = (await call(page, 'GET', `/api/stock/pick-lines?type=sale&ref=${no}`)).body.rows as { dtId: string }[];
+  const short = await call(page, 'POST', '/api/stock/issue', {
+    type: 'sale',
+    ref: no,
+    lines: [{ dtId: line!.dtId, qty: 3 }],
+  });
+  expect(short.status).toBe(409);
+  expect(short.body.error).toContain(`${part.code} ต้องการ 3 คงเหลือ 1`);
+  expect(((await call(page, 'GET', '/api/stock/pick-orders')).body.rows as string[]).includes(no)).toBe(true);
+  expect(await movementsOf(no)).toEqual([]);
+  expect((await stockOf(part.code)).remain).toBe(1);
+});
+
+test('two approvals of the same order at once (double click): one wins, no stock moves', async ({ page }) => {
   const part = await newPart({ remain: 10, price: PRICE });
   await signIn(page, SELLER_EMAIL);
   const no = await createOrder(page, part.code, 2, SELLER_EMAIL);
@@ -135,8 +209,9 @@ test('two approvals of the same order at once (double click): one wins, the stoc
     { id, version },
   );
   expect(statuses.sort()).toEqual([200, 409]);
-  expect(await movementsOf(no)).toEqual([{ no: expect.stringMatching(/^WHO\d+$/), type: 4, code: part.code, qty: 2 }]);
-  expect(await stockOf(part.code)).toEqual({ available: 10, used: 2, booking: 0, remain: 8 });
+  expect((await orderState(no)).approve).toBe(4);
+  expect(await movementsOf(no)).toEqual([]);
+  expect(await stockOf(part.code)).toEqual({ available: 10, used: 0, booking: 0, remain: 10 });
 });
 
 test('the creator of an order cannot approve it: no buttons, the API refuses, nothing moves', async ({ page }) => {
@@ -146,7 +221,7 @@ test('the creator of an order cannot approve it: no buttons, the API refuses, no
 
   await openOrder(page, no);
   await expect(page.getByText('คุณเป็นผู้สร้างใบสั่งขายนี้ อนุมัติเองไม่ได้', { exact: false })).toBeVisible();
-  for (const name of ['อนุมัติ (ตัดสต๊อก)', 'ปฏิเสธ', 'ส่งกลับแก้ไข'])
+  for (const name of ['อนุมัติ', 'ปฏิเสธ', 'ส่งกลับแก้ไข'])
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
 
   const r = await approve(page, no, 'approve');
