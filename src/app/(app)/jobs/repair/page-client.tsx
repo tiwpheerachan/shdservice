@@ -30,7 +30,13 @@ import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { QuoteLink } from '@/components/jobs/quote-link';
 import { RepairPartsSection } from '@/components/jobs/repair-parts';
-import { RepairDetailSection, RepairJobInfoSection, type RepairDetail } from '@/components/jobs/repair-detail';
+import type { PartPlan } from '@/components/jobs/repair-parts-picker';
+import {
+  JobCloseInfoSection,
+  RepairDetailSection,
+  RepairJobInfoSection,
+  type RepairDetail,
+} from '@/components/jobs/repair-detail';
 import { type Line, chargedTotal, legacyPartsTotal, partsBlockOf } from '@/components/jobs/repair-lines';
 import { postJson, errMsg } from '@/lib/api';
 import { repairActionSchema } from '@/lib/validation/job';
@@ -165,7 +171,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
     }
   };
 
-  const addPart = (p: PickableProduct) => {
+  const addPart = (p: PickableProduct, plan?: PartPlan) => {
     setLines((s) => [
       ...s,
       {
@@ -180,6 +186,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
         bQuote: false,
         bQty: 0,
         status: p.onhand > 0 ? 'พร้อมเบิก' : 'รออะไหล่',
+        ...plan,
       },
     ]);
   };
@@ -227,6 +234,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
 
         {/* the costs save with the repair itself (body), the rest of the shared sections only with the right */}
         <CostSummary partsTotal={charged} action={act} />
+        <JobCloseInfoSection job={job} />
         <JobEditLock locked={!can('Job Management', 'edit')}>
           <OtherInfoSection />
         </JobEditLock>

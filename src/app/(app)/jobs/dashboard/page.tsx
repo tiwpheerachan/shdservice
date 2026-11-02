@@ -1,19 +1,18 @@
 import { Prefetched } from '@/data/db';
 import { tableKey } from '@/data/keys';
-import { daysAgo, today } from '@/lib/dates';
 import { prefetch } from '@/server/prefetch';
 import DashboardPage from './page-client';
 
 export default async function Page({ searchParams }: { searchParams: Promise<Record<string, string | string[]>> }) {
-  // none = the last 30 days, every type (Thai calendar, lib/dates); ?from=&to= both empty = ทั้งหมด
+  // none = ทั้งหมด (every date, as the legacy dashboard), every type; ?from=&to= set a range (Thai calendar, lib/dates)
   const q = await searchParams;
   const day = (k: string) => {
     const v = q[k];
     return typeof v === 'string' && (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : undefined;
   };
   const range = {
-    from: day('from') ?? daysAgo(29),
-    to: day('to') ?? today(),
+    from: day('from') ?? '',
+    to: day('to') ?? '',
     type: typeof q.type === 'string' ? q.type : '',
   };
   const fallback = await prefetch([

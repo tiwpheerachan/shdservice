@@ -4,7 +4,7 @@ import { userFromCookies, canViewAny, JOB_MODULES } from '@/server/auth';
 export const dynamic = 'force-dynamic';
 
 /**
- * Every job print view (receipt, /return, /label — customer name, address, phone) needs
+ * Every job print view (receipt, /return, /repair-close, /label — customer name, address, phone) needs
  * "view" on a job screen, the same rule as GET /api/jobs/[id]. app/print/layout.tsx
  * only checks sign-in + approval.
  */

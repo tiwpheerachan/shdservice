@@ -4,6 +4,8 @@ import * as React from 'react';
 import { Plus, Trash2, Stethoscope } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { ProductPicker } from '@/components/shared/product-picker';
+import { useJobForm } from '@/components/shared/job-form';
+import { useModels } from '@/data/db';
 import { Badge } from '@/components/ui/badge';
 import { TableScroll } from '@/components/ui/data-table';
 import { Checkbox, NumberInput } from '@/components/ui/input';
@@ -11,6 +13,7 @@ import type { PickableProduct } from '@/lib/product-match';
 import type { FieldErrors } from '@/lib/validation';
 import { baht, cn } from '@/lib/utils';
 import { type Line, amountA, partTone, planOf, quoteTotal, statusOf, tickPlan } from './repair-lines';
+import { ModelPartsPicker, type PartPlan, type PickedPart } from './repair-parts-picker';
 
 type Action = { errors: FieldErrors; clear: (key: string) => void };
 type RowProps = {
@@ -32,7 +35,8 @@ export function RepairPartsSection({
 }: {
   lines: Line[];
   setLines: React.Dispatch<React.SetStateAction<Line[]>>;
-  onAdd: (p: PickableProduct) => void;
+  /** `plan`: เบิก / เสนอ / Qty the new line starts with (the model list's ticks); none = the search's defaults */
+  onAdd: (p: PickableProduct, plan?: PartPlan) => void;
   /** a closed job: part lines / prices stay as they are */
   lock?: string;
   act: Action;
@@ -52,6 +56,15 @@ export function RepairPartsSection({
     setDup(open?.id ?? null);
     if (!open) onAdd(p); // an issued line of it → a new line is the way to ask for more
   };
+  const { s: form } = useJobForm();
+  // the list ProductSection reads already (same key): the model's name, its code until it loads
+  const { data: models } = useModels('active', { brand: form.brand, enabled: !!form.brand });
+  const modelName = models.find((m) => m.code === form.modelCode)?.name ?? form.modelCode;
+  const openCodes = new Set(lines.filter((l) => !l.locked && !l.issued).map((l) => l.code));
+  const pickMany = (picked: PickedPart[]) => {
+    setDup(null);
+    for (const { product, plan } of picked) onAdd(product, plan);
+  };
   const dupRow = lines.findIndex((l) => l.id === dup);
   const dupLine = lines[dupRow];
   const partErrors = Object.entries(act.errors).filter(([k]) => k.startsWith('parts.'));
@@ -66,13 +79,15 @@ export function RepairPartsSection({
     >
       {!lock && (
         <div className="border-b border-border p-3">
-          <div className="flex items-center gap-2">
-            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <ProductPicker
-              onPick={(p) => p?.product && pick(p.product)}
-              placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
-              className="sm:max-w-xl"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-1 basis-64 items-center gap-2 sm:max-w-xl">
+              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <ProductPicker
+                onPick={(p) => p?.product && pick(p.product)}
+                placeholder="เพิ่มอะไหล่ — ค้นหา ชื่อ / รหัส / เลข part / ยี่ห้อ…"
+              />
+            </div>
+            <ModelPartsPicker model={form.modelCode} name={modelName} added={openCodes} onConfirm={pickMany} />
           </div>
           <p role="status" className="text-xs text-warning empty:hidden">
             {dupLine && `${dupLine.code} อยู่ในรายการแล้ว (แถว ${dupRow + 1}) — แก้จำนวนที่แถวเดิม`}

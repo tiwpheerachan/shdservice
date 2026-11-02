@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Wrench } from 'lucide-react';
+import { PackageCheck, Wrench } from 'lucide-react';
 import { Section } from '@/components/shared/section';
 import { useJobForm, useSymptomLists } from '@/components/shared/job-form';
 import { SearchSelect, strOptions } from '@/components/shared/search-select';
@@ -10,7 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { Field, FieldGrid, ReadOnly } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { REPAIR_STATUS_OPTIONS } from '@/data/options';
+import { fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
+import { baht } from '@/lib/utils';
 import type { JobDetail } from '@/lib/use-job';
 import type { FieldErrors } from '@/lib/validation';
 import { REOPEN_LOCKED } from '@/lib/validation/job';
@@ -53,6 +55,60 @@ export function RepairJobInfoSection({ job }: { job: JobDetail | null }) {
               {job?.status ?? '—'}
             </Badge>
           </ReadOnly>
+        </Field>
+      </FieldGrid>
+    </Section>
+  );
+}
+
+/** What the close recorded (payment + return), read-only — legacy shows it in Job Info Detail › ข้อมูลการดำเนินงาน */
+export function JobCloseInfoSection({ job }: { job: JobDetail | null }) {
+  const p = job?.payment;
+  const r = job?.return;
+  if (!p || !r || !(p.type || p.amount || p.no || p.slip || r.type || r.date || r.tracking)) return null;
+  return (
+    <Section title="การชำระเงินและการส่งคืนสินค้า" icon={PackageCheck}>
+      <FieldGrid>
+        <Field label="วิธีการชำระเงิน">
+          <ReadOnly>{p.type || '—'}</ReadOnly>
+        </Field>
+        <Field label="จำนวนเงิน">
+          <ReadOnly>
+            <span className="num">{baht(p.amount)}</span>
+          </ReadOnly>
+        </Field>
+        <Field label="หมายเลขอ้างอิง">
+          <ReadOnly>{p.no || '—'}</ReadOnly>
+        </Field>
+        <Field label="ไฟล์สลิป">
+          <ReadOnly>
+            {p.slip ? (
+              <a href={fileUrl(p.slip)} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                ดูสลิป
+              </a>
+            ) : (
+              '—'
+            )}
+          </ReadOnly>
+        </Field>
+        <Field label="รายละเอียดการชำระเงิน" wide>
+          <ReadOnly>{p.detail || '—'}</ReadOnly>
+        </Field>
+        <Field label="วิธีการส่งคืนสินค้า">
+          <ReadOnly>{r.type || '—'}</ReadOnly>
+        </Field>
+        <Field label="วันที่ส่งคืน">
+          <ReadOnly>
+            <span className="num">{r.date || '—'}</span>
+          </ReadOnly>
+        </Field>
+        <Field label="หมายเลขพัสดุ (ส่งคืน)">
+          <ReadOnly>
+            <span className="num select-all">{r.tracking || '—'}</span>
+          </ReadOnly>
+        </Field>
+        <Field label="รายละเอียดการส่งคืน">
+          <ReadOnly>{r.detail || '—'}</ReadOnly>
         </Field>
       </FieldGrid>
     </Section>

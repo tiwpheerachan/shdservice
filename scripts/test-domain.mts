@@ -4580,13 +4580,15 @@ try {
         400,
         { status: STATUS_DELETE_ONLY },
       ]);
-      // Swap: 17 / 18 only, Refund: 17 / 19 only — ซ่อมเสร็จ / 19 on a swap, 18 on a refund refused
+      // Swap: 2 / 17 / 18 / 14, Refund: 2 / 19 / 14 (legacy's lists + Out-Source) — ซ่อมเสร็จ / 19 on a swap, 18 / 17
+      // on a refund refused
       const [s17, s18, s19] = [await statusName(17), await statusName(18), await statusName(19)];
       const refund = { refundAmount: 100, refundMethod: 'เงินสด' };
       for (const [body, why] of [
         [{ ...swap, status: s5 }, 'swap → ซ่อมเสร็จ'],
         [{ ...swap, status: s19 }, 'swap → 19'],
         [{ ...refund, status: s18 }, 'refund → 18'],
+        [{ ...refund, status: s17 }, 'refund → 17'],
       ] as const)
         assert.deepEqual(
           await err(saveSwapRefund('TDJ0605', body, U.admin.id)),
@@ -4604,8 +4606,13 @@ try {
       };
       assert.deepEqual(await err(updateJob('TDJ0605', edit, U.admin.id)), [400, { status: EDIT_STATUS_ONLY }]);
       assert.deepEqual([(await jobRow('TDJ0605')).s, await logRows('TDJ0605')], [2, []]);
-      // the Swap / Refund page offers the same list the server takes (job_status names, 18 not renamed)
-      assert.deepEqual(SWAP_STATUS_OPTIONS, { swap: [s17, s18], refund: [s17, s19] });
+      // the Swap / Refund page offers the same list the server takes (job_status names, 18 not renamed; this seed
+      // names 2 'กำลังดำเนินการ', the real table 'อยู่ระหว่างดำเนินการ')
+      const s2 = 'อยู่ระหว่างดำเนินการ';
+      assert.deepEqual(SWAP_STATUS_OPTIONS, { swap: [s2, s17, s18, s14], refund: [s2, s19, s14] });
+      // a device that goes to a service centre: ส่งซ่อม Out-Source แล้ว from the Swap / Refund page
+      await saveSwapRefund('TDJ0605', { ...swap, status: s14 }, U.admin.id);
+      assert.equal((await jobRow('TDJ0605')).s, 14);
     });
 
     await test("R5 H5: Swap without a New Serial saves; the job's own status (outside the list) re-saves; close writes Serial เครื่องใหม่", async () => {

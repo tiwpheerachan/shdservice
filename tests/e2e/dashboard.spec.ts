@@ -19,9 +19,12 @@ test('a TAT number opens its jobs; Back and a reload keep the dashboard range', 
     [no, DAY],
   );
   await signIn(page, OWNER_EMAIL);
+  // none = ทั้งหมด (every date, as the legacy dashboard): a bare URL; a preset writes its range into it
   await page.goto('/jobs/dashboard');
-  await page.getByRole('button', { name: 'ทั้งหมด' }).first().click();
-  await expect(page).toHaveURL(/from=&to=/);
+  await expect(page.getByRole('button', { name: 'ทั้งหมด' }).first()).toHaveClass(/text-primary/);
+  await expect(page).not.toHaveURL(/from=/);
+  await page.getByRole('button', { name: '30 วัน' }).click();
+  await expect(page).toHaveURL(/from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/);
 
   await page.goto(`/jobs/dashboard?from=${DAY}&to=${DAY}`);
   const cell = page.locator(TAT).first();

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { MoreHorizontal, Printer, Wrench, PackageCheck, FileText, Ban } from 'lucide-react';
+import { MoreHorizontal, Printer, Wrench, PackageCheck, FileText, Undo2, Ban } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/shadcn/popover';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
@@ -35,8 +35,10 @@ export function JobRowMenu({ job, onCancel }: { job: Job; onCancel?: (job: Job) 
     canLink({ href: '/jobs/close', need: 'edit' })
       ? [{ label: 'บันทึกปิดงาน-ส่งคืนสินค้า', icon: PackageCheck, href: `/jobs/close?id=${id}` }]
       : []),
+    // every status, like พิมพ์ใบรับงาน (legacy: the repaired job's sheet is printed before the close is keyed)
+    { label: 'พิมพ์ใบปิดงานซ่อม', icon: FileText, href: `/print/job/${id}/repair-close` },
     ...(group === JOB_GROUP.FINISHED
-      ? [{ label: 'พิมพ์ใบปิดงาน / ใบส่งคืน', icon: FileText, href: `/print/job/${id}/return` }]
+      ? [{ label: 'พิมพ์ใบส่งคืนสินค้า', icon: Undo2, href: `/print/job/${id}/return` }]
       : []),
   ];
   return (
