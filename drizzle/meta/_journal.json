@@ -50,6 +50,13 @@
       "when": 1762041600000,
       "tag": "0006_bigint_pk",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1762128000000,
+      "tag": "0007_job_status_no_fault_in_progress",
+      "breakpoints": true
     }
   ]
 }

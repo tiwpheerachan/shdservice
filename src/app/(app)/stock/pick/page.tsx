@@ -343,10 +343,15 @@ export default function PickPage() {
     else if (overCount)
       e.lines =
         kind === 'sale'
-          ? `สต๊อกไม่พอ ${overCount} รายการ — ใบสั่งขายต้องจ่ายครบทั้งใบในครั้งเดียว รับเข้าอะไหล่ก่อน`
+          ? `สต๊อกไม่พอ ${overCount} รายการ (${lines
+              .filter((l) => l.issue > maxOf(l))
+              .map((l) => `${l.code} ต้องการ ${int(l.need)} คงเหลือ ${int(l.onhand)}`)
+              .join(', ')}) — ใบสั่งขายต้องจ่ายครบทั้งใบในครั้งเดียว รับเข้าอะไหล่ก่อน`
           : `จำนวนเกิน ${overCount} รายการ — แก้ช่องที่มีข้อความสีแดงก่อนบันทึก`;
     fe.setErrors(e);
-    if (fe.report(e) || busy.current) return;
+    // the quantities of a sale order can't be edited here: name the shortage, not "a field is wrong"
+    if (fe.report(e, kind === 'sale' && overCount ? 'สต๊อกไม่พอจ่ายใบสั่งขายทั้งใบ' : undefined) || busy.current)
+      return;
     busy.current = true;
     setSaving(true);
     try {

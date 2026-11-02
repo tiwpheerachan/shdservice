@@ -66,7 +66,7 @@ const linkExpiresAt = sql<string>`CASE WHEN ${job.trackOpenedAt} IS NOT NULL
 const linkLive = sql<boolean>`(${job.trackTokenAt} IS NOT NULL AND ${linkExpiresAt} > now())`;
 
 /**
- * 25 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere).
+ * 26 internal statuses → 5 customer-facing steps (group first, then the few ids that read better elsewhere).
  * ลูกค้าไม่ตกลงซ่อม (6) is not a cancelled job: the device still goes back (group Repaired → "ซ่อมเสร็จ" step, own label).
  */
 export function stepOf(statusId: number, group: string): TrackStepKey | null {
@@ -98,6 +98,7 @@ export function statusLabel(statusId: number, step: TrackStepKey | null, lastQuo
   if (statusId === JS.CLOSED_REFUND) return 'คืนเงินแล้ว — ปิดงาน';
   // รับคืนเข้าสต๊อกแล้ว: the device was taken in for a swap / refund (next: 18 or 19)
   if (statusId === JS.RETURNED_TO_STOCK) return 'รับเครื่องเข้าคลังแล้ว — รอเปลี่ยนเครื่องหรือคืนเงิน';
+  if (statusId === JS.IN_PROGRESS_NO_FAULT) return 'ตรวจแล้วไม่พบอาการเสีย — ศูนย์กำลังดำเนินการ';
   if (statusId === JS.QUOTED && lastQuote && quoteExpired(lastQuote.st, lastQuote.at, statusId))
     return `ใบเสนอราคา${QUOTE_EXPIRED_TEXT}`;
   if (statusId === JS.QUOTED) return 'รอคำตอบจากคุณ (ใบเสนอราคา)';

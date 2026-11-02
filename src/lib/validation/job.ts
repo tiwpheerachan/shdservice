@@ -427,18 +427,20 @@ export const STATUS_CLOSE_ONLY = 'เปลี่ยนเป็นสถาน�
 export const STATUS_DELETE_ONLY = 'ยกเลิกข้อมูลงานได้เฉพาะ System Admin (ลบงาน) เท่านั้น';
 /** บันทึกงานซ่อม: REPAIR_STATUS_OPTIONS only (saveRepair, by id) */
 export const REPAIR_STATUS_ONLY = 'หน้านี้เลือกได้เฉพาะสถานะในรายการของหน้า บันทึกงานซ่อม';
-/** Swap / Refund's list by mode — legacy's per job type (Swap 2 + 17 + 18 / Refund 2 + 19) plus 14 for a device that
- *  goes to a service centre; saveSwapRefund takes these ids (SWAP_STATUS_IDS); the job's own status re-saved still passes */
+/** Swap / Refund's list by mode — legacy's per job type (Swap 2 + 17 + 18 / Refund 2 + 19) plus 25 (no fault found) and
+ *  14 for a device that goes to a service centre; saveSwapRefund takes these ids (SWAP_STATUS_IDS); the job's own status re-saved still passes */
 export const SWAP_STATUS_OPTIONS = {
   swap: [
     'อยู่ระหว่างดำเนินการ',
     'อยู่ระหว่างดำเนินการ - รับคืนเข้าสต๊อกแล้ว',
     'อยู่ระหว่างดำเนินการ - เบิกสินค้าใหม่แล้ว',
+    'อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย',
     'อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว',
   ],
   refund: [
     'อยู่ระหว่างดำเนินการ',
     'อยู่ระหว่างดำเนินการ - เบิกจ่ายเงินแล้ว',
+    'อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย',
     'อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว',
   ],
 };

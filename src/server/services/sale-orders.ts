@@ -827,12 +827,15 @@ export async function setTracking(
         pk: saleOrder.pk,
         tracking: saleOrder.deliveryTrackingNo,
         approve: saleOrder.approveStatusId,
+        status: saleOrder.recordStatus,
         rowVersion: saleOrder.rowVersion,
       })
       .from(saleOrder)
       .where(eq(saleOrder.saleOrderNo, no))
       .for('update');
     if (!before) throw new HttpError(404, 'ไม่พบใบสั่งขาย ' + no);
+    // an approved order can be cancelled before Stock issues it: nothing ships on a cancelled one
+    if (before.status === RS.DELETED) throw new HttpError(409, `${SO_CANCELLED} ใส่เลขพัสดุไม่ได้`);
     if (before.approve !== AS.APPROVED) throw new HttpError(409, 'ใส่เลขพัสดุได้เมื่อใบสั่งขายอนุมัติแล้วเท่านั้น');
     assertVersion(version, before.rowVersion);
     assertValid(trackingSchema(before.tracking), { tracking });

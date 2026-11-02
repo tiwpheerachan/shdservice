@@ -109,7 +109,8 @@ export default async function seed(): Promise<void> {
         (21, 'ปิดงานซ่อม (Refund : คืนเงินลูกค้า)', 53, 'Finished', false),
         (22, 'ซ่อมเสร็จ (ไม่พบอาการเสีย ขอส่งคืน)', 46, 'Repaired', true),
         (23, 'ปิดงานซ่อม (Out-Source)', 54, 'Finished', false),
-        (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true)
+        (24, 'ปิดงาน-รอลูกค้ามารับที่ศูนย์บริการ', 24, 'Finished', true),
+        (25, 'อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย', 43, 'Pending', true)
       ON CONFLICT DO NOTHING;
       -- stock movements point at these (foreign keys, drizzle/0031): src/lib/status-ids.ts INV / STORE_LOCATION_ID
       INSERT INTO stock_move_type (stock_move_type_id, stock_move_type_name, movement_action_type, movement_action, is_active)
