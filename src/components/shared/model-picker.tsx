@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/pop
 import type { Model } from '@/data/types';
 import { cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
+import { useSeededQuery } from '@/lib/use-seeded-query';
 
 const MAX_ROWS = 80;
 
@@ -67,8 +68,12 @@ export function ModelPicker({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(id, { label: placeholder });
   const popupId = React.useId();
-  const [q, setQ] = React.useState('');
-  const rows = React.useMemo(() => matchModels(models, q), [models, q]);
+  const { q, setQ, query, seed } = useSeededQuery();
+  const rows = React.useMemo(() => matchModels(models, query), [models, query]);
+  const show = () => {
+    setOpen(true);
+    seed(value); // the chosen model code, selected to copy
+  };
   const selected = value ? models.find((m) => m.code === value) : undefined;
 
   const itemCls =
@@ -78,8 +83,11 @@ export function ModelPicker({
     <Popover
       open={open}
       onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setQ('');
+        if (o) show();
+        else {
+          setOpen(false);
+          setQ('');
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -92,7 +100,7 @@ export function ModelPicker({
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') {
               e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
-              setOpen(true);
+              show();
             }
           }}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm transition-[border-color,box-shadow] focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20"
@@ -128,6 +136,7 @@ export function ModelPicker({
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
               autoFocus
+              onFocus={(e) => e.currentTarget.select()}
               value={q}
               onValueChange={setQ}
               placeholder="พิมพ์รหัสรุ่น ชื่อรุ่น หรือยี่ห้อ…"
@@ -147,7 +156,7 @@ export function ModelPicker({
           <CommandPrimitive.List className="max-h-80 overflow-y-auto p-1.5">
             {rows.length === 0 ? (
               <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                {models.length === 0 ? 'กำลังโหลดรายการรุ่น…' : `ไม่พบรุ่นที่ตรงกับ "${q.trim()}"`}
+                {models.length === 0 ? 'กำลังโหลดรายการรุ่น…' : `ไม่พบรุ่นที่ตรงกับ "${query.trim()}"`}
               </p>
             ) : (
               rows.map((m) => (
