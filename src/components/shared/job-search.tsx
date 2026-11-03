@@ -11,6 +11,7 @@ import { useApi } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn, SEARCH_MIN_CHARS, SEARCH_MIN_HINT } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
+import { useSeededQuery } from '@/lib/use-seeded-query';
 
 /** Each job screen narrows the dropdown to what it can act on; typing a full job no always loads that job. */
 export type JobSearchScope = 'all' | 'unassigned' | 'open' | 'closable';
@@ -43,7 +44,7 @@ export function JobSearch({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(id, { label: 'ค้นหางาน' });
   const popupId = React.useId();
-  const [q, setQ] = React.useState('');
+  const { q, setQ, query, seed } = useSeededQuery();
   // a job loaded by any route (a pick, the auto-pick of a full job no, the URL) closes the dropdown
   const [shown, setShown] = React.useState(value);
   if (value !== shown) {
@@ -54,7 +55,7 @@ export function JobSearch({
   const { params, hint } = SCOPE[scope];
 
   // same matcher as the job list, newest first, max 10; swr keeps the last answer on screen and never lets an older one win
-  const typed = q.trim();
+  const typed = query.trim();
   const settled = useDebouncedValue(typed, 300);
   const searchable = settled.length >= SEARCH_MIN_CHARS;
   const found = useApi<{ rows: Job[] }>(
@@ -67,7 +68,7 @@ export function JobSearch({
       // a full job no picks itself as soon as the lookup confirms it (or, when it is outside this
       // screen's scope, on Enter — the page then loads it directly and reports what it finds)
       onSuccess: (d) => {
-        const term = q.trim().toUpperCase();
+        const term = query.trim().toUpperCase();
         const hit = JOB_NO.test(term) && d.rows.find((r) => r.no === term);
         if (hit) pick(hit.id, hit.no);
       },
@@ -85,15 +86,23 @@ export function JobSearch({
     void onPick(job.trim(), no);
   };
 
-  const term = q.trim();
+  const show = () => {
+    setOpen(true);
+    seed(value ?? ''); // the loaded job no, selected to copy
+  };
+
+  const term = query.trim();
   const exactOutside = JOB_NO.test(term.toUpperCase()) && !loading && !rows.some((r) => r.no === term.toUpperCase());
 
   return (
     <Popover
       open={open}
       onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setQ('');
+        if (o) show();
+        else {
+          setOpen(false);
+          setQ('');
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -106,7 +115,7 @@ export function JobSearch({
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') {
               e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
-              setOpen(true);
+              show();
             }
           }}
           className={cn(
@@ -136,6 +145,7 @@ export function JobSearch({
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
               autoFocus
+              onFocus={(e) => e.currentTarget.select()}
               value={q}
               onValueChange={setQ}
               onKeyDown={(e) => {

@@ -207,6 +207,22 @@ test('a swapped job: Serial เครื่องใหม่ prefilled, optiona
   await expect(page.getByRole('row', { name: /New S\/N : NEW00001/ }).first()).toBeVisible();
 });
 
+test('the job no box opens holding the loaded job no, selected to copy; it searches only once edited', async ({
+  page,
+}) => {
+  const no = await newJob({ status: 5 }); // repaired: listed by this page's search
+  await openClose(page, no);
+  await page.getByRole('combobox', { name: 'ระบุ หมายเลขงาน' }).click();
+  const box = page.getByPlaceholder(/พิมพ์เลขงาน ชื่อลูกค้า/);
+  await expect(box).toHaveValue(no);
+  await expect(box).toBeFocused();
+  expect(await box.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, no.length]);
+  await expect(page.getByText(/พิมพ์อย่างน้อย/)).toBeVisible(); // the held no searches nothing
+  await box.press('Backspace');
+  await box.pressSequentially(no.slice(0, -1));
+  await expect(page.getByRole('option', { name: new RegExp(no) })).toBeVisible(); // typed: it searches
+});
+
 test('ประวัติการแก้ไข on the Out-Source, Swap / Refund and close pages', async ({ page }) => {
   const no = await newJob({ status: 5 });
   await signIn(page, OWNER_EMAIL);
