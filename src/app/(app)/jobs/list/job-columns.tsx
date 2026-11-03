@@ -101,7 +101,7 @@ export function jobColumns({
           <StatusBadge status={r.status} group={r.statusGroup} wrap />
           {r.isBounce && (
             <Badge tone="warning" className="px-1.5">
-              งานเด้ง
+              งานซ่อมซ้ำ
             </Badge>
           )}
         </span>

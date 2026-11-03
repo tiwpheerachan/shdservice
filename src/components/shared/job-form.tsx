@@ -83,7 +83,7 @@ export type JobFormState = {
   statusGroup: string;
   jobType: string;
   jobTypeDetail: string;
-  isBounce: boolean; // งานเด้ง
+  isBounce: boolean; // งานซ่อมซ้ำ
   documentProfileId: string; // ออกเอกสารในนาม — document_profile.id ('' = default)
   so: string;
   channel: string;
@@ -601,7 +601,7 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
             ))}
           </datalist>
         </Field>
-        <Field label="งานเด้ง" wide group="group">
+        <Field label="งานซ่อมซ้ำ" wide group="group">
           <label className="flex h-9 w-fit cursor-pointer items-center gap-2 text-sm">
             <Checkbox checked={s.isBounce} onChange={(e) => set('isBounce', e.target.checked)} />
             สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ
