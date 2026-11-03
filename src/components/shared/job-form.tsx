@@ -1050,7 +1050,6 @@ export function OtherInfoSection({ showTech = true }: { showTech?: boolean }) {
         )}
         <Field
           label="วันประเมินซ่อมเสร็จ"
-          required
           error={errors.dueDate}
           hint={s.dueDateAuto ? 'ตาม SLA ของประเภทงาน (ยังไม่มีผู้กำหนด) — เลือกวันเองได้' : undefined}
         >
