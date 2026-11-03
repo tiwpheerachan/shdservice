@@ -47,7 +47,6 @@ function EditJobForm() {
 
   const go = (v: string) => find(v);
 
-  // status is not sent: it moves through the workflow screens, and a stale value must never roll back a newer one
   const save = async () => {
     if (!job) return;
     if (report(validate())) return; // a required field that had a value must keep one
@@ -55,7 +54,7 @@ function EditJobForm() {
     try {
       const d = await patchJson<{ job: JobDetail }>(`/api/jobs/${job.id}`, {
         ...toJobInput(s),
-        status: undefined,
+        status: s.status.trim() !== job.status.trim() ? s.status : undefined, // picked here, else untouched
       });
       setJob(d.job);
       push({ kind: 'success', title: 'บันทึกการแก้ไขงานแล้ว', desc: d.job.no });

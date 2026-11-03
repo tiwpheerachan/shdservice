@@ -110,7 +110,6 @@ import {
   REPAIR_STATUS_ONLY,
   SWAP_STATUS_ONLY,
   CLOSE_STATUS_ONLY,
-  EDIT_STATUS_ONLY,
   partCharge,
   NOT_ENGINEER,
   REFUND_DETAIL,
@@ -1989,8 +1988,8 @@ async function applyJobEdit(
   byUserId: number,
 ): Promise<JobRow> {
   const { i, was, lk, c, newStatus } = edit;
-  // the edit page shows the status only — "unchanged" = the row as locked, not as read before the lock
-  await assertPageStatus(newStatus, existing.jobStatusId, [], EDIT_STATUS_ONLY);
+  // any open status (closing = ปิดงาน, ยกเลิกข้อมูล = delete); a stale form is the version check's 409
+  await assertPageStatus(newStatus, existing.jobStatusId, null);
   // under the job lock (job → customer / user): a delete running now finishes first, or waits for this save
   const cust = i.customerCode ? await customerForDocument(tx, str(i.customerCode), existing.customerPk) : null;
   // a new engineer on a job that already has one: only when the user confirmed it (takeOver)

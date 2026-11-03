@@ -4557,7 +4557,6 @@ try {
       swapRefundOf,
       STATUS_CLOSE_ONLY,
       STATUS_DELETE_ONLY,
-      EDIT_STATUS_ONLY,
       REPAIR_STATUS_ONLY,
       SWAP_STATUS_OPTIONS,
       SWAP_STATUS_ONLY,
@@ -4704,9 +4703,13 @@ try {
         jobType: j.jobType,
         dueDate: j.dueDate,
         warrantyMonth: j.warrantyMonth,
-        status: s5,
+        status: s20,
       };
-      assert.deepEqual(await err(updateJob('TDJ0605', edit, U.admin.id)), [400, { status: EDIT_STATUS_ONLY }]);
+      assert.deepEqual(await err(updateJob('TDJ0605', edit, U.admin.id)), [400, { status: STATUS_CLOSE_ONLY }]);
+      assert.deepEqual(await err(updateJob('TDJ0605', { ...edit, status: s0 }, U.admin.id)), [
+        400,
+        { status: STATUS_DELETE_ONLY },
+      ]);
       assert.deepEqual([(await jobRow('TDJ0605')).s, await logRows('TDJ0605')], [2, []]);
       // the Swap / Refund page offers the same list the server takes (job_status names, 18 not renamed; this seed
       // names 2 'กำลังดำเนินการ', the real table 'อยู่ระหว่างดำเนินการ')
@@ -4718,6 +4721,10 @@ try {
       // a device that goes to a service centre: ส่งซ่อม Out-Source แล้ว from the Swap / Refund page
       await saveSwapRefund('TDJ0605', { ...swap, status: s14 }, U.admin.id);
       assert.equal((await jobRow('TDJ0605')).s, 14);
+      // แก้ไขข้อมูลงาน moves an open job to any open status, with its job_log row
+      const moved = await fieldsOf(updateJob('TDJ0605', { ...edit, status: await statusName(2) }, U.admin.id));
+      assert.equal(moved.status, 200, JSON.stringify(moved));
+      assert.deepEqual([(await jobRow('TDJ0605')).s, await logRows('TDJ0605')], [2, [14, 2]]);
     });
 
     await test('R5 H4b: อยู่ระหว่างดำเนินการ - ไม่พบอาการเสีย (25) saves from Swap and from Refund', async () => {
@@ -6390,7 +6397,7 @@ try {
   );
   {
     const { saveSwapRefund, addAttachment, attachmentName } = await import('@/server/services/jobs');
-    const { CLOSE_STATUS_ONLY, SWAP_STATUS_ONLY, EDIT_STATUS_ONLY } = await import('@/lib/validation/job');
+    const { CLOSE_STATUS_ONLY, SWAP_STATUS_ONLY } = await import('@/lib/validation/job');
     const { audit } = await import('@/server/audit');
     const { invalidate } = await import('@/server/cache');
     const job = (no: string, status: number) =>
@@ -6458,7 +6465,7 @@ try {
         c.release();
       }
       assert.deepEqual([(await stored('TDJQ02')).s, await logRows('TDJQ02')], [17, []]);
-      // แก้ไขข้อมูลงาน the same way: its status (display only) read as 17, moved to 5 meanwhile → 400, stays 5
+      // แก้ไขข้อมูลงาน: the form read 17 (its version), moved to 5 meanwhile → the stale form's 17 is a 409, stays 5
       const j = (await getJob('TDJQ02'))!;
       const edit = {
         customerCode: CUSTOMER,
@@ -6466,6 +6473,7 @@ try {
         jobType: j.jobType,
         dueDate: j.dueDate,
         warrantyMonth: j.warrantyMonth,
+        version: j.version,
       };
       const d = await pool.connect();
       try {
@@ -6475,7 +6483,7 @@ try {
         await new Promise((r) => setTimeout(r, 300));
         await d.query('COMMIT');
         const r = await saving;
-        assert.deepEqual([r.status, r.fields], [400, { status: EDIT_STATUS_ONLY }]);
+        assert.equal(r.status, 409, JSON.stringify(r));
       } finally {
         d.release();
       }

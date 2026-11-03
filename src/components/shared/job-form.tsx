@@ -47,6 +47,7 @@ import {
   useModels,
   useSymptoms,
   useStaff,
+  useJobStatuses,
 } from '@/data/db';
 import { baht, cn } from '@/lib/utils';
 import { isStale, errMsg } from '@/lib/api';
@@ -72,6 +73,7 @@ import { isoDateTime } from '@/lib/dates';
 import { useLeave, useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
+import { JOB_GROUP, JS } from '@/lib/status-ids';
 
 export type JobFormState = {
   customer: Customer | null;
@@ -537,10 +539,11 @@ export function CustomerSection({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-/** status is shown only: it changes through the workflow screens */
+/** a new job's status is shown only; an existing one's picks any open status (closing = ปิดงาน, ยกเลิก = delete) */
 export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: string }) {
   const { s, set, adopt, errors } = useJobForm();
   const { data: JOB_TYPES, ...jobTypesLookup } = useJobTypes();
+  const { data: STATUSES, ...statusesLookup } = useJobStatuses();
   const { data: JOB_TYPE_DETAILS, ...typeDetailsLookup } = useJobTypeDetails();
   const { name: me } = useAccess();
   const shownStatus = s.status || status || 'งานใหม่';
@@ -569,13 +572,30 @@ export function JobOpenSection({ status, jobNo }: { status?: string; jobNo?: str
         <Field label="เปิดงานโดย">
           <ReadOnly>{s.createByName || me || '—'}</ReadOnly>
         </Field>
-        <Field label="สถานะงาน">
-          <ReadOnly>
-            <Badge tone="info" dot>
-              {shownStatus}
-            </Badge>
-          </ReadOnly>
-        </Field>
+        {jobNo ? (
+          <Field label="สถานะงาน" error={errors.status} lookup={statusesLookup}>
+            <SearchSelect
+              value={s.status.trim()}
+              onChange={(v) => set('status', v)}
+              options={withCurrent(
+                STATUSES.filter((x) => x.active && x.id !== JS.CANCELLED && x.group !== JOB_GROUP.FINISHED).map(
+                  (x) => ({ value: x.name, label: x.name }),
+                ),
+                s.status.trim(),
+              )}
+              minWidth={360}
+              searchPlaceholder="พิมพ์ชื่อสถานะ…"
+            />
+          </Field>
+        ) : (
+          <Field label="สถานะงาน">
+            <ReadOnly>
+              <Badge tone="info" dot>
+                {shownStatus}
+              </Badge>
+            </ReadOnly>
+          </Field>
+        )}
         <Field label="ประเภทงานหลัก" required error={errors.jobType} className="lg:col-span-2" lookup={jobTypesLookup}>
           <SearchSelect
             value={s.jobType}
