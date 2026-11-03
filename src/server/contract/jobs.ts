@@ -105,7 +105,7 @@ const SeenJob = z.object({
   no: s,
   date: s.meta({ description: 'Opened on, YYYY-MM-DD.' }),
   sameCustomer: z.boolean(),
-  bounce: z.boolean().meta({ description: 'Ticked งานเด้ง.' }),
+  bounce: z.boolean().meta({ description: 'Ticked งานซ่อมซ้ำ.' }),
   model: s,
 });
 

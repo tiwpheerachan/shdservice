@@ -131,7 +131,7 @@ export type Job = {
   amount: number;
   statusId?: number;
   statusGroup?: string;
-  isBounce?: boolean; // job.is_job_bounce — งานเด้ง (สินค้ากลับมาซ่อมซ้ำ)
+  isBounce?: boolean; // job.is_job_bounce — งานซ่อมซ้ำ
   serial?: string;
   channel?: string;
   receptionType?: string;

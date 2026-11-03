@@ -130,7 +130,7 @@ test('the page is locked, nothing is saved, the form goes back to how it was, th
       await page.getByRole('combobox', { name: 'อุปกรณ์ (ที่นำส่ง)' }).fill('ลองระหว่างบทสอน');
       await page.getByRole('combobox', { name: 'จุดตำหนิ' }).fill('ลองแก้ระหว่างบทสอน');
     }
-    if (title === 'งานเด้ง') {
+    if (title === 'งานซ่อมซ้ำ') {
       // a lit checkbox (a <button role=checkbox>) ticks like any lit field
       await page.getByRole('checkbox', { name: /เคยเข้าซ่อมแล้วกลับมาซ้ำ/ }).click();
       await expect(page.getByRole('checkbox', { name: /เคยเข้าซ่อมแล้วกลับมาซ้ำ/ })).toBeChecked();

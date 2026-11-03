@@ -221,12 +221,12 @@ export function SerialField({ f, c }: Checked) {
       {seen.length > 0 && (
         <Warn
           action={
-            sameCustomer && !s.isBounce ? { label: 'ติ๊กงานเด้ง', onClick: () => patch({ isBounce: true }) } : undefined
+            sameCustomer && !s.isBounce ? { label: 'ติ๊กงานซ่อมซ้ำ', onClick: () => patch({ isBounce: true }) } : undefined
           }
         >
           S/N นี้เคยเข้าซ่อมแล้ว: <JobLinks jobs={seen} /> <span className="whitespace-nowrap">(เปิดแท็บใหม่)</span>
           {sameCustomer ? ' — ลูกค้าคนเดิม' : s.customer ? ' — เป็นงานของลูกค้าคนอื่น ตรวจ S/N อีกครั้ง' : ''}
-          {sameCustomer && s.isBounce && ' · ติ๊กงานเด้งแล้ว ✓'}
+          {sameCustomer && s.isBounce && ' · ติ๊กงานซ่อมซ้ำแล้ว ✓'}
         </Warn>
       )}
       {c?.serial.looksLike && <Warn>S/N แบบนี้มักเป็นของ {c.serial.looksLike} — ตรวจยี่ห้อ / S/N อีกครั้ง</Warn>}

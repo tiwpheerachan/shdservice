@@ -25,7 +25,7 @@ test('a Serial typed with the keyboard left on Thai: one tap writes what was mea
   await expect(page.getByText('แป้นพิมพ์เป็นภาษาไทยหรือเปล่า')).toHaveCount(0);
 });
 
-test('a Serial already on another job: the warning links that job, ติ๊กงานเด้ง in one tap, and the save still goes through', async ({
+test('a Serial already on another job: the warning links that job, ติ๊กงานซ่อมซ้ำ in one tap, and the save still goes through', async ({
   page,
 }) => {
   const earlier = await newJob({ status: 9 }); // its serial: SN-<no> (newJob)
@@ -42,9 +42,9 @@ test('a Serial already on another job: the warning links that job, ติ๊ก�
   await expect(link).toHaveAttribute('href', `/jobs/edit?id=${await jobUuid(earlier)}`);
   await expect(link).toHaveAttribute('target', '_blank');
 
-  await warning.getByRole('button', { name: 'ติ๊กงานเด้ง' }).click();
+  await warning.getByRole('button', { name: 'ติ๊กงานซ่อมซ้ำ' }).click();
   await expect(page.getByRole('checkbox', { name: 'สินค้าเครื่องนี้เคยเข้าซ่อมแล้วกลับมาซ้ำ' })).toBeChecked();
-  await expect(warning.getByRole('button', { name: 'ติ๊กงานเด้ง' })).toHaveCount(0);
+  await expect(warning.getByRole('button', { name: 'ติ๊กงานซ่อมซ้ำ' })).toHaveCount(0);
 
   await saveEdit(page); // a warning, not a refusal
   const saved = await one<{ serial: string; bounce: boolean }>(

@@ -67,7 +67,7 @@ CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push �
 | `drizzle/0004_indexes.sql` | index สำหรับ filter/รายงาน + `pg_trgm` GIN สำหรับช่องค้นหา (ILIKE) |
 | `drizzle/0005_product_type_description.sql` | เพิ่ม `product_type.product_type_description` (ช่องรายละเอียดของหน้า ประเภทเครื่องซ่อม) |
 | `drizzle/0006_audit_log.sql` | ตาราง `audit_log` (append-only, trigger กัน UPDATE/DELETE) — ประวัติทุกการเขียนของแอป ดูที่ ข้อมูลระบบ → ประวัติการใช้งาน |
-| `drizzle/0008_job_filter_indexes.sql` | index สำหรับตัวกรองหน้ารายการงาน (ยี่ห้อ/รุ่น/งานย่อย/ผู้เปิด/วันรับเครื่อง/warranty/งานเด้ง/เลขพัสดุ) |
+| `drizzle/0008_job_filter_indexes.sql` | index สำหรับตัวกรองหน้ารายการงาน (ยี่ห้อ/รุ่น/งานย่อย/ผู้เปิด/วันรับเครื่อง/warranty/งานซ่อมซ้ำ/เลขพัสดุ) |
 | `drizzle/0013_shipping_profile.sql` | `shipping_profile` (โลโก้ + ลิงก์ติดตามของบริษัทขนส่ง) + `job.return_shipper_id` — โลโก้/ปุ่มติดตามพัสดุในหน้า `/track` |
 | `drizzle/0012_job_track_token.sql` | `job.track_token/track_token_at` — ลิงก์ติดตามสาธารณะของลูกค้า (`/track/<token>`) + backfill ทุกงาน |
 | `drizzle/0011_document_profile_code_live.sql` | รหัสโปรไฟล์ unique เฉพาะแถวที่ยังไม่ลบ (ลบแล้วใช้รหัสเดิมซ้ำได้) |

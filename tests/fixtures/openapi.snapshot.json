@@ -2960,7 +2960,7 @@
                               },
                               "bounce": {
                                 "type": "boolean",
-                                "description": "Ticked งานเด้ง."
+                                "description": "Ticked งานซ่อมซ้ำ."
                               },
                               "model": {
                                 "type": "string"
@@ -3017,7 +3017,7 @@
                               },
                               "bounce": {
                                 "type": "boolean",
-                                "description": "Ticked งานเด้ง."
+                                "description": "Ticked งานซ่อมซ้ำ."
                               },
                               "model": {
                                 "type": "string"
