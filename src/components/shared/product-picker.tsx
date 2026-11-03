@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { MAX_ROWS, matchProducts, type PickableProduct } from '@/lib/product-match';
 import { baht, cn } from '@/lib/utils';
 import { useFieldControl } from '@/components/ui/field';
+import { useSeededQuery } from '@/lib/use-seeded-query';
 import { useProductSearch } from '@/data/db';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 
@@ -52,8 +53,8 @@ export function ProductPicker({
   const [open, setOpen] = React.useState(false);
   const field = useFieldControl(id, { label: placeholder });
   const popupId = React.useId();
-  const [q, setQ] = React.useState('');
-  const term = q.trim();
+  const { q, setQ, query, seed } = useSeededQuery();
+  const term = query.trim();
 
   // the server matches the longest word against code / part no / names / brand / category (stock.ts productSearch);
   // the other words narrow the results here with the same matcher
@@ -85,6 +86,10 @@ export function ProductPicker({
     setOpen(false);
     setQ('');
   };
+  const show = () => {
+    setOpen(true);
+    seed(value ?? ''); // the chosen part code, selected to copy
+  };
   const pickProduct = (p: PickableProduct) => pick({ code: p.sysCode, name: p.name, price: p.price, product: p });
   const pickExtra = (e: ExtraItem) => pick({ code: e.code, name: e.name, price: e.price });
 
@@ -95,8 +100,11 @@ export function ProductPicker({
     <Popover
       open={open}
       onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setQ('');
+        if (o) show();
+        else {
+          setOpen(false);
+          setQ('');
+        }
       }}
     >
       {/* the clear × is a sibling of the combobox (no button inside a button), laid over its right end */}
@@ -111,7 +119,7 @@ export function ProductPicker({
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {
                 e.preventDefault(); // ↓ / Alt+↓ open it, as on a native select
-                setOpen(true);
+                show();
               }
             }}
             className={cn(
@@ -165,6 +173,7 @@ export function ProductPicker({
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
               autoFocus
+              onFocus={(e) => e.currentTarget.select()}
               value={q}
               onValueChange={setQ}
               placeholder="พิมพ์ชื่ออะไหล่ รหัส เลข part ยี่ห้อ หรือหมวด (หลายคำได้)…"
