@@ -1887,7 +1887,7 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
         documentProfilePk: profile.pk,
         customerPk: cust.key,
         customerDueDate: tsOrNull(i.dueDate),
-        dueDateSetByUser: true, // required on a new job — the user picked it
+        dueDateSetByUser: tsOrNull(i.dueDate) !== null, // left empty → the job type's SLA
         jobCreateDate: now,
         createdByAppUserPk: byUserId,
         jobTypePk: lk.jobTypeId,
@@ -2009,7 +2009,7 @@ async function applyJobEdit(
     // the due date is written (and becomes "picked by a user") only when it was changed: saving
     // an old job untouched keeps its SLA-based due date instead of freezing a date nobody chose
     ...(i.dueDate !== undefined && str(i.dueDate) !== (was.due ?? '')
-      ? { customerDueDate: tsOrNull(i.dueDate), dueDateSetByUser: true }
+      ? { customerDueDate: tsOrNull(i.dueDate), dueDateSetByUser: tsOrNull(i.dueDate) !== null }
       : {}),
     ...(lk.jobTypeId ? { jobTypePk: lk.jobTypeId } : {}),
     jobTypeDetail: clean(i.jobTypeDetail),

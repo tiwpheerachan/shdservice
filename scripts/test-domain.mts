@@ -3032,7 +3032,7 @@ try {
       assert.deepEqual({ ...(await eng('TDJ0305')) }, { e: U.engineer.id, s: 2 });
       assert.deepEqual(await logRows('TDJ0305'), [2]);
     });
-    await test('R2 jobs: walk-in (หน้าร้าน) opens without SO no. / SO date / expire date; another channel → 400 for those', async () => {
+    await test('R2 jobs: walk-in (หน้าร้าน) opens without SO no. / SO date / expire date; another channel → 400 for those; no due date → the SLA', async () => {
       const [m] = (await db.execute<{ c: string }>(sql`SELECT model_code AS c FROM model LIMIT 1`)).rows;
       const [jt] = (await db.execute<{ n: string }>(sql`SELECT job_type_name AS n FROM job_type LIMIT 1`)).rows;
       const input = {
@@ -3052,6 +3052,9 @@ try {
         [other.status, Object.keys(other.fields ?? {}).sort()],
         [400, ['expireDate', 'saleOrderDate', 'so']],
       );
+      const noDue = await createJob({ ...input, channel: WALK_IN_CHANNEL, dueDate: '' }, U.admin.id);
+      assert.equal(noDue.dueDateAuto, true, 'no due date picked → the job type SLA');
+      assert.match(noDue.dueDate, /\S/, 'the SLA due date is shown');
     });
   }
   console.log('\nRound 3 — customer /track + print documents');

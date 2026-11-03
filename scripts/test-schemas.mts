@@ -124,8 +124,8 @@ test('warranty months: whole numbers only (12.5 used to be cut to 12)', () => {
   assert.deepEqual(errorsOf(jobSchema(), { ...fullJob, warrantyMonth: '12' }), {});
 });
 test('costs must not be negative', () => assert.ok(errorsOf(jobSchema(), { ...fullJob, serviceCost: -5 }).serviceCost));
-test('a new job needs its due date (วันประเมินซ่อมเสร็จ) — ISSUE-013', () => {
-  assert.equal(errorsOf(jobSchema(), { ...fullJob, dueDate: '' }).dueDate, 'ต้องระบุวันประเมินซ่อมเสร็จ');
+test('the due date (วันประเมินซ่อมเสร็จ) is optional — empty falls back to the SLA', () => {
+  assert.equal(errorsOf(jobSchema(), { ...fullJob, dueDate: '' }).dueDate, undefined);
   assert.ok(errorsOf(jobSchema(), { ...fullJob, dueDate: '8/9/2026' }).dueDate, 'a date, not any text');
 });
 
