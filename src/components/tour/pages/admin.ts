@@ -1,3 +1,4 @@
+import { TEXT_MAX } from '@/lib/validation';
 import type { Step, Tour } from '../tours';
 
 /** บทสอน — see tours.ts for the target syntax and the rules every tour follows */
@@ -141,7 +142,7 @@ const MASTERS: Record<string, Tour> = {
     welcome: 'สีเป็นตัวเลือกช่อง ใช้สำหรับ สีสินค้า ในข้อมูลอะไหล่',
     nameLabel: 'ชื่อสี',
     example: 'Midnight Black',
-    detailMax: 100,
+    detailMax: TEXT_MAX,
   }),
   '/admin/job-types': simpleList({
     title: 'ประเภทงานซ่อม',
@@ -149,7 +150,7 @@ const MASTERS: Record<string, Tour> = {
       'ประเภทงานเป็นตัวเลือกช่อง ประเภทงานหลัก ตอนเปิดงาน และใช้กรองรายการงาน / รายงาน · SLA ใช้กับงานที่ไม่มีวันประเมินซ่อมเสร็จ (ไม่ได้กรอก หรืองานจากระบบเดิม)',
     nameLabel: 'ประเภทงานซ่อม',
     example: 'ซ่อมในประกัน',
-    detailMax: 100,
+    detailMax: TEXT_MAX,
     extra: [
       {
         target: 'field:SLA (วัน)',
@@ -164,14 +165,14 @@ const MASTERS: Record<string, Tour> = {
     welcome: 'ประเภทเครื่องเป็นตัวเลือกช่อง ประเภทสินค้า ในข้อมูลสินค้าของงานซ่อม',
     nameLabel: 'ประเภทเครื่องซ่อม',
     example: 'โทรศัพท์มือถือ',
-    detailMax: 100,
+    detailMax: TEXT_MAX,
   }),
   '/admin/symptoms': simpleList({
     title: 'อาการเสีย มาตรฐาน',
     welcome: 'อาการเสียเป็นตัวเลือกช่อง อาการเสียหลัก (มาตรฐาน) ตอนเปิดงาน และใช้ในรายงานงานซ่อม',
     nameLabel: 'อาการเสีย',
     example: 'เปิดไม่ติด',
-    detailMax: 100,
+    detailMax: TEXT_MAX,
     extra: [
       {
         target: 'field:กลุ่มอาการเสีย',

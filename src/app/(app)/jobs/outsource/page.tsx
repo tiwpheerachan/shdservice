@@ -40,7 +40,8 @@ import { jobIdParam } from '@/data/keys';
 import { useAccess } from '@/lib/use-access';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/job';
+import { textHint } from '@/lib/validation';
+import { jobNoteHint, outsourceActionSchema, RECEIVE_DATE_REQUIRED } from '@/lib/validation/job';
 import { useTourRestore } from '@/components/tour/tour';
 
 /** the statuses this page sets (saveOutsource refuses others; the job's own status is kept as an option) */
@@ -242,21 +243,21 @@ function OutsourceForm() {
                 <JobEditLock locked={jobLocked} className="col-span-full">
                   <MainSymptomField />
                 </JobEditLock>
-                <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2" error={act.errors.symptomOther}>
-                  <Textarea
-                    rows={2}
-                    maxLength={200}
-                    value={form.symptomOther}
-                    onChange={(e) => set('symptomOther', e.target.value)}
-                  />
+                <Field
+                  label="อาการเสีย (อื่นๆ)"
+                  className="lg:col-span-2"
+                  error={act.errors.symptomOther}
+                  hint={jobNoteHint(form.symptomOther)}
+                >
+                  <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
                 </Field>
-                <Field label="วิธีการซ่อมเบื้องต้น" wide error={act.errors.repairDetail}>
-                  <Textarea
-                    rows={3}
-                    maxLength={200}
-                    value={d.repairDetail}
-                    onChange={(e) => upd({ repairDetail: e.target.value })}
-                  />
+                <Field
+                  label="วิธีการซ่อมเบื้องต้น"
+                  wide
+                  error={act.errors.repairDetail}
+                  hint={jobNoteHint(d.repairDetail)}
+                >
+                  <Textarea rows={3} value={d.repairDetail} onChange={(e) => upd({ repairDetail: e.target.value })} />
                 </Field>
               </FieldGrid>
             </Section>
@@ -297,13 +298,8 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้ส่ง…"
               />
             </Field>
-            <Field label="หมายเหตุการส่ง" wide error={act.errors['send.detail']}>
-              <Textarea
-                rows={2}
-                maxLength={100}
-                value={d.sendDetail}
-                onChange={(e) => upd({ sendDetail: e.target.value })}
-              />
+            <Field label="หมายเหตุการส่ง" wide error={act.errors['send.detail']} hint={textHint(d.sendDetail)}>
+              <Textarea rows={2} value={d.sendDetail} onChange={(e) => upd({ sendDetail: e.target.value })} />
             </Field>
           </FieldGrid>
         </Section>
@@ -325,13 +321,8 @@ function OutsourceForm() {
                 searchPlaceholder="พิมพ์ชื่อผู้รับ…"
               />
             </Field>
-            <Field label="หมายเหตุการรับคืน" wide error={act.errors['receive.detail']}>
-              <Textarea
-                rows={2}
-                maxLength={100}
-                value={d.recvDetail}
-                onChange={(e) => upd({ recvDetail: e.target.value })}
-              />
+            <Field label="หมายเหตุการรับคืน" wide error={act.errors['receive.detail']} hint={textHint(d.recvDetail)}>
+              <Textarea rows={2} value={d.recvDetail} onChange={(e) => upd({ recvDetail: e.target.value })} />
             </Field>
             <Field label="โปรดระบุ สถานะงานซ่อม" required wide error={act.errors.status}>
               <SearchSelect

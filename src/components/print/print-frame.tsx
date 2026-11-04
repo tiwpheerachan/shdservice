@@ -50,7 +50,7 @@ export function PrintFrame({
           </dl>
         </div>
       </header>
-      <main className="mt-4 space-y-4 text-[12px] leading-relaxed">{children}</main>
+      <main className="mt-4 space-y-4 wrap-break-word text-[12px] leading-relaxed">{children}</main>
     </div>
   );
 }

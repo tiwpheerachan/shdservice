@@ -21,7 +21,7 @@ import { baht } from '@/lib/utils';
 import { useServerTable } from '@/lib/use-server-table';
 import { useAccess } from '@/lib/use-access';
 import { errMsg, exportXlsx, postJson } from '@/lib/api';
-import { cleanCode } from '@/lib/validation';
+import { cleanCode, TEXT_MAX } from '@/lib/validation';
 import { brandModelColumn, COL_MIN_WIDTH, DateTimeCell } from '@/components/shared/table-columns';
 import { ExportButton } from '@/components/shared/export-button';
 import { QUOTATION_TONE as TONE } from '@/components/shared/quotation-form';
@@ -358,8 +358,13 @@ export default function QuotationListPage() {
           </>
         }
       >
-        <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร`}>
-          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Field
+          label="เหตุผล"
+          required
+          hint={`${reason.length}/${TEXT_MAX} ตัวอักษร`}
+          error={reason.trim().length > TEXT_MAX ? `เหตุผลยาวเกิน ${TEXT_MAX} ตัวอักษร` : undefined}
+        >
+          <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Modal>
     </>

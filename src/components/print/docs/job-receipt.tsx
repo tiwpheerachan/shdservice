@@ -1,14 +1,15 @@
 import { notFound } from 'next/navigation';
-import { getJob } from '@/server/services/jobs';
+import { getJob, type JobDetail } from '@/server/services/jobs';
 import { PrintFrame, Box, KV, money } from '@/components/print/print-frame';
 import { REPAIR_PICKUP_NOTE, REPAIR_TERMS } from '@/lib/company';
-import { profileForDocument } from '@/server/services/document-profiles';
+import { ParcelSheet } from '@/components/print/shipping-label';
+import { profileForDocument, type DocumentProfile } from '@/server/services/document-profiles';
 import { jobForCustomer, receivedDateOf } from '@/server/services/tracking';
 import { listShippingProfiles } from '@/server/services/shipping-profiles';
 import { shipperFor } from '@/lib/shipper';
 import { code128 } from '@/lib/code128';
 
-/** `forCustomer` = opened from /track: no staff names / notes. */
+/** `forCustomer` = opened from /track: no staff names / notes, no parcel page. */
 export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustomer?: boolean }) {
   const found = await getJob(no);
   if (!found) notFound();
@@ -18,7 +19,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
   // a legacy courier name ("THAIPOST") printed as its profile (ไปรษณีย์ไทย), as /track shows it
   const shipper = shipperFor(await listShippingProfiles(false), j.receptionShipper)?.nameTh || j.receptionShipper;
   const bars = code128(j.no);
-  return (
+  const receipt = (
     <PrintFrame
       company={co}
       title="ใบรับงานซ่อม"
@@ -105,7 +106,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
           </p>
           {/* staff's own note (job_remark) — the staff copy only */}
           {!forCustomer && (
-            <p>
+            <p className="whitespace-pre-line">
               <span className="text-neutral-500">หมายเหตุ:</span> {j.remark || '—'}
             </p>
           )}
@@ -157,5 +158,32 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
         </div>
       </div>
     </PrintFrame>
+  );
+  return forCustomer ? (
+    receipt
+  ) : (
+    <>
+      {receipt}
+      <ParcelPage j={j} co={co} />
+    </>
+  );
+}
+
+function ParcelPage({ j, co }: { j: JobDetail; co: DocumentProfile }) {
+  const c = j.customer;
+  const so = j.so.trim();
+  return (
+    <div className="mt-6 print:mt-0 [page:parcel]">
+      {/* the frame is wider than A4's 10mm margins leave: the named page gives it the room. Anything in flow after
+          it (the toaster) has another page name, so it would start a blank sheet of its own */}
+      <style>{'@page parcel { margin: 0; } @media print { .print-root ~ * { display: none; } }'}</style>
+      <ParcelSheet
+        profile={co}
+        docNo={so ? `(เลขคำสั่งซื้อ : ${so})` : j.no}
+        name={c?.name ?? ''}
+        address={c?.address ?? ''}
+        phone={c?.phone ?? ''}
+      />
+    </div>
   );
 }

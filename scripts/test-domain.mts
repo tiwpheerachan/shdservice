@@ -146,6 +146,7 @@ function purgeSql(p: { jobs?: string; quotes?: string; sos?: string; moves?: str
     DELETE FROM job_part WHERE job_pk IN (${jobs});
     DELETE FROM job_call_log WHERE job_pk IN (${jobs});
     DELETE FROM job_symptom WHERE job_pk IN (${jobs});
+    DELETE FROM job_engineer_symptom WHERE job_pk IN (${jobs});
     DELETE FROM job_attachment WHERE job_pk IN (${jobs});
     DELETE FROM job_close_temp WHERE ref_job_pk IN (${jobs});
     DELETE FROM job_return_dt WHERE job_pk IN (${jobs});
@@ -2620,7 +2621,7 @@ try {
         assert.deepEqual((r.body.details as { fields: object }).fields, { remark: REASON_REQUIRED });
       }
       assert.equal(await approveIdOf(no), 2, 'nothing decided');
-      assert.equal((await decideAs(U.admin, no, 'reject', 'x'.repeat(101))).status, 400, '> 100 (the column)');
+      assert.equal((await decideAs(U.admin, no, 'reject', 'x'.repeat(501))).status, 400, '> 500 (the column)');
       const ok = await decideAs(U.admin, no, 'deny', '  ราคาผิด  ');
       assert.equal(ok.status, 200, JSON.stringify(ok.body));
       const o = (await getSaleOrder(no))!;
@@ -6617,7 +6618,7 @@ try {
       }
     });
 
-    await test('QA 7: an attachment name is cut to 50 characters keeping its extension, never splitting an emoji; remark ≤ 100', async () => {
+    await test('QA 7: an attachment name is cut to 50 characters keeping its extension, never splitting an emoji; the remark stored whole', async () => {
       const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
       const long = `${'รายงาน'.repeat(4)}${'😀'.repeat(30)}.pdf`; // 58 characters, 88 UTF-16 units
       const name = attachmentName(long);
@@ -6625,16 +6626,16 @@ try {
       assert.ok(name.endsWith('😀.pdf') && !lone.test(name) && !name.includes('�'), name);
       assert.equal(attachmentName('short.png'), 'short.png');
       assert.equal(Array.from(attachmentName('x'.repeat(60))).length, 50, 'no extension: just cut');
-      const remark = '😀'.repeat(120);
+      const remark = '😀'.repeat(250);
       const { id, ...answer } = await addAttachment('TDJQ08', long, 'qa-system.pdf', remark, U.admin.id);
-      assert.deepEqual(answer, { name, remark: '😀'.repeat(100) }, 'the answer = what was stored');
+      assert.deepEqual(answer, { name, remark }, 'the answer = what was stored');
       const [row] = (
         await db.execute<{ n: string; r: string }>(
           sql`SELECT original_file_name AS n, remark AS r FROM job_attachment WHERE id = ${id}`,
         )
       ).rows;
       assert.equal(row!.n, name);
-      assert.equal(row!.r, '😀'.repeat(100));
+      assert.equal(row!.r, remark);
     });
   }
   console.log('\nJob list parity with legacy — ยกเลิกงาน (reason required) + Code 128 on ใบรับงาน');
@@ -6754,6 +6755,209 @@ try {
       const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
       for (const r of rows)
         assert.ok(!uuid.test(String(r[head.indexOf('เลขที่')] ?? '')), String(r[head.indexOf('เลขที่')]));
+    });
+  }
+
+  {
+    console.log('\nอาการเสียที่ตรวจพบ — job.engineer_symptom_pk = the first, job_engineer_symptom = the others');
+    const [A, B, C] = ['TD ตรวจพบ ก', 'TD ตรวจพบ ข', 'TD ตรวจพบ ค'] as const;
+    await pool.query(
+      `INSERT INTO symptom (symptom_name, record_status)
+       SELECT n, 'ACTIVE' FROM unnest($1::text[]) n WHERE NOT EXISTS (SELECT 1 FROM symptom s WHERE s.symptom_name = n)`,
+      [[A, B, C]],
+    );
+    const freshJob = async (no: string, first?: string) => {
+      await pool.query(purgeSql({ jobs: `SELECT pk FROM job WHERE job_no = '${no}'` }));
+      await pool.query(
+        `INSERT INTO job (model_pk, job_no, job_status_id, record_status, engineer_symptom_pk)
+         VALUES (${TST_MODEL}, $1, 2, 'ACTIVE', (SELECT pk FROM symptom WHERE symptom_name = $2 ORDER BY pk LIMIT 1))`,
+        [no, first ?? null],
+      );
+      return (await getJob(no))!;
+    };
+    const firstName = async (no: string) =>
+      (
+        await pool.query<{ n: string | null }>(
+          `SELECT s.symptom_name AS n FROM job j LEFT JOIN symptom s ON s.pk = j.engineer_symptom_pk WHERE j.job_no = $1`,
+          [no],
+        )
+      ).rows[0]!.n;
+    const restCount = async (no: string) =>
+      (await pool.query<{ n: number }>(`SELECT count(*)::int n FROM job_engineer_symptom WHERE job_pk = ${jobPk(no)}`))
+        .rows[0]!.n;
+
+    await test('the picker × clears it: an empty value is "none", not "unchanged"', async () => {
+      const j = await freshJob('TDJES1', A);
+      assert.equal(
+        (await fieldsOf(saveRepair('TDJES1', { status: j.status, engineerSymptom: '' }, U.admin.id))).status,
+        200,
+      );
+      assert.equal(await firstName('TDJES1'), null);
+    });
+
+    await test('a name not in the list is refused under its field, nothing written', async () => {
+      const j = await freshJob('TDJES2', A);
+      const r = await fieldsOf(saveRepair('TDJES2', { status: j.status, engineerSymptom: 'TD-NOPE' }, U.admin.id));
+      assert.equal(r.status, 400, JSON.stringify(r));
+      assert.deepEqual(Object.keys(r.fields ?? {}), ['engineerSymptom']);
+      assert.equal(await firstName('TDJES2'), A);
+      const list = await fieldsOf(
+        saveRepair('TDJES2', { status: j.status, engineerSymptoms: [B, 'TD-NOPE'] }, U.admin.id),
+      );
+      assert.equal(list.status, 400, JSON.stringify(list));
+      assert.deepEqual(Object.keys(list.fields ?? {}), ['engineerSymptoms']);
+      assert.equal(await firstName('TDJES2'), A);
+      assert.equal(await restCount('TDJES2'), 0);
+    });
+
+    await test('several: the column holds the first, the table the others, read back in the order chosen', async () => {
+      const j = await freshJob('TDJES3');
+      const k = await saveRepair('TDJES3', { status: j.status, engineerSymptoms: [B, C, A] }, U.admin.id);
+      assert.deepEqual(k.engineerSymptoms, [B, C, A]);
+      assert.equal(k.engineerSymptom, B);
+      assert.equal(await firstName('TDJES3'), B);
+      assert.equal(await restCount('TDJES3'), 2);
+      assert.deepEqual((await getJob('TDJES3'))!.engineerSymptoms, [B, C, A]);
+      const { jobForCustomer } = await import('@/server/services/tracking');
+      assert.deepEqual(jobForCustomer(k).engineerSymptoms, [B, C, A], 'master names: on the customer copy too');
+    });
+
+    await test('saved again unchanged: no version, no history row, the rows not rewritten', async () => {
+      const j = await freshJob('TDJES4');
+      await saveRepair('TDJES4', { status: j.status, engineerSymptoms: [A, B] }, U.admin.id);
+      const trail = async () => ({
+        version: (await getJob('TDJES4'))!.version,
+        audit: (
+          await pool.query<{ n: number }>(
+            `SELECT count(*)::int n FROM audit_log WHERE entity = 'job' AND entity_key = 'TDJES4'`,
+          )
+        ).rows[0]!.n,
+        rows: (
+          await pool.query(
+            `SELECT r.pk::int FROM job_engineer_symptom r JOIN job j ON j.pk = r.job_pk WHERE j.job_no = 'TDJES4'`,
+          )
+        ).rows,
+      });
+      const before = await trail();
+      await saveRepair('TDJES4', { status: j.status, engineerSymptoms: [A, B], engineerSymptom: A }, U.admin.id);
+      assert.deepEqual(await trail(), before);
+    });
+
+    await test('only another symptom changed: the version moves (a page loaded before gets 409), history by name', async () => {
+      const j = await freshJob('TDJES5');
+      const k = await saveRepair('TDJES5', { status: j.status, engineerSymptoms: [A, B] }, U.admin.id);
+      const m = await saveRepair(
+        'TDJES5',
+        { status: j.status, engineerSymptoms: [A, C], version: k.version },
+        U.admin.id,
+      );
+      assert.equal(m.version, k.version + 1);
+      assert.deepEqual(m.engineerSymptoms, [A, C]);
+      assert.deepEqual(m.history.find((h) => h.changes?.engineerSymptomId)?.changes?.engineerSymptomId, [
+        `${A}, ${B}`,
+        `${A}, ${C}`,
+      ]);
+      const stale = await fieldsOf(
+        saveRepair('TDJES5', { status: j.status, engineerSymptoms: [A], version: k.version }, U.admin.id),
+      );
+      assert.equal(stale.status, 409);
+      assert.deepEqual((await getJob('TDJES5'))!.engineerSymptoms, [A, C], 'nothing written');
+    });
+
+    await test('an empty list clears the column and the table, and says so in the history', async () => {
+      const j = await freshJob('TDJES6');
+      await saveRepair('TDJES6', { status: j.status, engineerSymptoms: [A, B, C] }, U.admin.id);
+      const k = await saveRepair('TDJES6', { status: j.status, engineerSymptoms: [] }, U.admin.id);
+      assert.deepEqual([k.engineerSymptoms, k.engineerSymptom], [[], '']);
+      assert.equal(await firstName('TDJES6'), null);
+      assert.equal(await restCount('TDJES6'), 0);
+      assert.deepEqual(k.history.find((h) => h.changes?.engineerSymptomId)?.changes?.engineerSymptomId, [
+        `${A}, ${B}, ${C}`,
+        null,
+      ]);
+    });
+
+    await test('a body with engineerSymptom alone (an older page, an API caller) sets the first, keeps the others, no repeat', async () => {
+      const j = await freshJob('TDJES7');
+      await saveRepair('TDJES7', { status: j.status, engineerSymptoms: [A, B, C] }, U.admin.id);
+      const k = await saveRepair('TDJES7', { status: j.status, engineerSymptom: C }, U.admin.id);
+      assert.deepEqual(k.engineerSymptoms, [C, B]);
+      assert.equal(await firstName('TDJES7'), C);
+      const left = await saveRepair('TDJES7', { status: j.status }, U.admin.id);
+      assert.deepEqual(left.engineerSymptoms, [C, B], 'left out = unchanged');
+    });
+
+    await test('a name with a twin keeps the job its own row; a legacy edge space reads trimmed and resaves as no change', async () => {
+      const twin = 'TD ตรวจพบ แฝด';
+      await pool.query(
+        `INSERT INTO symptom (symptom_name, record_status)
+        SELECT $1, 'ACTIVE' FROM generate_series(1, 2 - (SELECT count(*)::int FROM symptom WHERE symptom_name = $1))`,
+        [twin],
+      );
+      const spaced = `${A} ปลาย\n`;
+      await pool.query(
+        `INSERT INTO symptom (symptom_name, record_status)
+        SELECT $1::varchar, 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM symptom WHERE symptom_name = $1)`,
+        [spaced],
+      );
+      const j = await freshJob('TDJES8', spaced);
+      assert.deepEqual(j.engineerSymptoms, [spaced.trim()]);
+      const own = (
+        await pool.query<{ pk: number }>(
+          `SELECT pk::int FROM symptom WHERE symptom_name = $1 ORDER BY pk DESC LIMIT 1`,
+          [twin],
+        )
+      ).rows[0]!.pk;
+      await pool.query(`INSERT INTO job_engineer_symptom (job_pk, symptom_pk) VALUES (${jobPk('TDJES8')}, $1)`, [own]);
+      const before = (await getJob('TDJES8'))!;
+      assert.deepEqual(before.engineerSymptoms, [spaced.trim(), twin]);
+      const k = await saveRepair('TDJES8', { status: j.status, engineerSymptoms: before.engineerSymptoms }, U.admin.id);
+      assert.equal(await firstName('TDJES8'), spaced, 'the stored row, not re-pointed');
+      const rest = await pool.query<{ s: number }>(
+        `SELECT symptom_pk::int AS s FROM job_engineer_symptom WHERE job_pk = ${jobPk('TDJES8')}`,
+      );
+      assert.deepEqual(rest.rows, [{ s: own }], 'the younger twin stays');
+      assert.equal(
+        k.history.some((h) => h.changes?.engineerSymptomId),
+        false,
+        'no history row',
+      );
+    });
+
+    await test('money columns stay as they were when found symptoms are saved or cleared', async () => {
+      const j = await freshJob('TDJES9');
+      await pool.query(`UPDATE job SET service_cost = 1500.50, service_tool_cost = 20.25, delivery_cost = 30, carton_box_cost = 10,
+        spare_part_total_cost = 40.75, deposit_cost = 100, estimate_cost = 700, job_payment_amount = 50 WHERE job_no = 'TDJES9'`);
+      // the plain save first: whatever a repair save itself derives is not what this compares
+      await saveRepair('TDJES9', { status: j.status }, U.admin.id);
+      const money = async () =>
+        (
+          await pool.query(`SELECT service_cost, service_tool_cost, delivery_cost, carton_box_cost, spare_part_total_cost,
+            job_total_cost, deposit_cost, estimate_cost, job_payment_amount FROM job WHERE job_no = 'TDJES9'`)
+        ).rows[0];
+      const before = await money();
+      await saveRepair('TDJES9', { status: j.status, engineerSymptoms: [A, B, C] }, U.admin.id);
+      assert.deepEqual(await money(), before);
+      await saveRepair('TDJES9', { status: j.status, engineerSymptoms: [C] }, U.admin.id);
+      assert.deepEqual(await money(), before);
+      await saveRepair('TDJES9', { status: j.status, engineerSymptoms: [] }, U.admin.id);
+      assert.deepEqual(await money(), before);
+    });
+
+    await test('out-source: engineerSymptom sets the first, empty clears it, an unknown name is refused; the others stay', async () => {
+      const j = await freshJob('TDJES10');
+      await saveRepair('TDJES10', { status: j.status, engineerSymptoms: [A, B] }, U.admin.id);
+      const page = {
+        status: await statusName(14),
+        send: { to: 'TD Vendor ES', date: '2026-10-20', by: await uuidOf(U.admin) },
+      };
+      const r = await fieldsOf(saveOutsource('TDJES10', { ...page, engineerSymptom: 'TD-NOPE' }, U.admin.id));
+      assert.equal(r.status, 400, JSON.stringify(r));
+      assert.deepEqual(Object.keys(r.fields ?? {}), ['engineerSymptom']);
+      const set = await saveOutsource('TDJES10', { ...page, engineerSymptom: C }, U.admin.id);
+      assert.deepEqual(set.engineerSymptoms, [C, B]);
+      const none = await saveOutsource('TDJES10', { ...page, engineerSymptom: '' }, U.admin.id);
+      assert.deepEqual(none.engineerSymptoms, [B]);
     });
   }
 } finally {

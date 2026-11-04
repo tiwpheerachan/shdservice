@@ -285,6 +285,9 @@ export async function setRecordStatus(
         // a second cancel (a stale list) must not add a second reason to the history
         if (rs === RS.DELETED && cur.rs === RS.DELETED)
           throw new HttpError(409, 'งานนี้ถูกยกเลิกไปแล้ว — โหลดหน้าใหม่');
+        // the API takes TEXT_MAX (a quotation's / sale order's reason)
+        if (rs === RS.DELETED && clean(remark).length > 200)
+          throw new HttpError(400, 'เหตุผลยาวเกิน 200 ตัวอักษร', { fields: { remark: 'เหตุผลยาวเกิน 200 ตัวอักษร' } });
         if (rs === RS.DELETED) {
           // parts still waiting for stock, or issued and not back: deleting would leave the booking held and the
           // stock out against a job no list shows
@@ -362,9 +365,6 @@ export async function setRecordStatus(
         // the edit page asks for it and shows it — the API must not cancel without one either
         if (rs === RS.DELETED && !reason)
           throw new HttpError(400, 'ระบุเหตุผลที่ยกเลิก', { fields: { remark: 'ระบุเหตุผลที่ยกเลิก' } });
-        // document_cancel_remark is varchar(100); the API takes 200 (a job's / quotation's reason)
-        if (reason.length > 100)
-          throw new HttpError(400, 'เหตุผลยาวเกิน 100 ตัวอักษร', { fields: { remark: 'เหตุผลยาวเกิน 100 ตัวอักษร' } });
         if (cur.rs !== rs)
           await tx
             .update(saleOrder)

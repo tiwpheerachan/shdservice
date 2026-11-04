@@ -608,7 +608,7 @@ async function insertMovement(
       // a job / sale-order movement's reference IS that document (job_pk / sale_order_pk): NULL here; จ่ายออกอื่นๆ / a
       // receipt keep the typed name. The forms' schemas keep it within the column
       referenceOutTo: h.jobPk != null || h.saleOrderPk != null ? null : clean(h.outTo).slice(0, 50),
-      remark: clean(h.remark).slice(0, 100),
+      remark: clean(h.remark), // receiveSchema / issueSchema: fits the column
       createDate: h.date ? `${h.date} ${nowThai().slice(11)}` : nowThai(),
       createdByAppUserPk: byUserId,
     })
@@ -672,7 +672,7 @@ export async function receiveStock(
   i: { date?: string; poRef?: string | null; supplier?: string | null; remark?: string | null; lines: StockLine[] },
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
-  // receiveSchema: supplier ≤ 40 + remark ≤ 47 → fits stock_move.remark varchar(100)
+  // receiveSchema: supplier + remark fit stock_move.remark
   const remark = [clean(i.supplier) ? `Supplier: ${clean(i.supplier)}` : '', clean(i.remark)]
     .filter(Boolean)
     .join(' · ');

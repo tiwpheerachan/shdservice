@@ -158,6 +158,8 @@ export default async function seed(): Promise<void> {
           FROM customer c WHERE c.customer_code = 'CE2E01'
         ON CONFLICT (job_no) DO NOTHING;
       ${ensure('symptom', { symptom_name: "'E2E เปิดไม่ติด'", record_status: "'ACTIVE'" })}
+      ${ensure('symptom', { symptom_name: "'E2E ตรวจพบ จอไม่ติด'", record_status: "'ACTIVE'" })}
+      ${ensure('symptom', { symptom_name: "'E2E ตรวจพบ แบตบวม'", record_status: "'ACTIVE'" })}
 
       -- the non-admin role: Job Management view only — no Customer
       DELETE FROM role_permission WHERE user_type = '${E2E_ROLE}';

@@ -24,9 +24,9 @@ import type { ReportRow } from '../report-specs';
 const netColumns: Column<IssuedLine>[] = [
   { key: 'doc', header: 'Document No.', width: '130px', cell: (r) => <span className="num font-medium">{r.doc}</span> },
   { key: 'date', header: 'วันที่', width: '140px', cell: (r) => <span className="num text-xs">{r.date}</span> },
-  { key: 'type', header: 'ประเภทเอกสาร', hideBelow: 'lg', cell: (r) => <Badge tone="info">{r.type}</Badge> },
+  { key: 'type', header: 'ประเภทเอกสาร', cell: (r) => <Badge tone="info">{r.type}</Badge> },
   { key: 'code', header: 'รหัสอะไหล่', width: '110px', cell: (r) => <span className="num">{r.code}</span> },
-  { key: 'item', header: 'ชื่ออะไหล่', cell: (r) => <span className="line-clamp-1 max-w-[300px]">{r.item}</span> },
+  { key: 'item', header: 'ชื่ออะไหล่', minWidth: '220px' },
   { key: 'qty', header: 'จำนวน', align: 'right', width: '90px', value: (r) => r.qty },
   {
     key: 'value',
@@ -41,7 +41,7 @@ const netColumns: Column<IssuedLine>[] = [
       </span>
     ),
   },
-  { key: 'by', header: 'ผู้ทำรายการ', hideBelow: 'xl' },
+  { key: 'by', header: 'ผู้ทำรายการ' },
 ];
 
 const LOG = 'อ้างอิงงานซ่อม (เบิก / ขอคืน / จ่ายแล้ว)';

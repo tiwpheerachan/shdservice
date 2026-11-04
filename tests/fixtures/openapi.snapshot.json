@@ -107,7 +107,7 @@
                   },
                   "remark": {
                     "type": "string",
-                    "description": "Read up to 100 characters (the column; the rest is dropped)."
+                    "description": "At most 500 characters (the column); longer → 400, nothing is stored."
                   }
                 },
                 "required": [
@@ -630,7 +630,7 @@
                   },
                   "remark": {
                     "type": "string",
-                    "description": "Read up to 100 characters (the column; the rest is dropped)."
+                    "description": "At most 500 characters (the column); longer → 400, nothing is stored."
                   },
                   "thumb": {
                     "type": "string",
@@ -1852,7 +1852,7 @@
                   },
                   "engineerSymptom": {
                     "type": "string",
-                    "description": "อาการเสียที่ตรวจพบ (a symptom name)"
+                    "description": "อาการเสียที่ตรวจพบ, the first one (a symptom name; left out = unchanged, empty = none)"
                   },
                   "job": {
                     "$ref": "#/components/schemas/JobInput"
@@ -2169,7 +2169,14 @@
                   },
                   "engineerSymptom": {
                     "type": "string",
-                    "description": "อาการเสียที่ตรวจพบ (a symptom name)"
+                    "description": "อาการเสียที่ตรวจพบ, the first one (a symptom name; left out = unchanged, empty = none)"
+                  },
+                  "engineerSymptoms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "อาการเสียที่ตรวจพบ, all of them (symptom names; empty = none). Wins over engineerSymptom"
                   },
                   "job": {
                     "$ref": "#/components/schemas/JobInput"
@@ -14069,7 +14076,7 @@
                   "remark": {
                     "type": "string",
                     "nullable": true,
-                    "description": "DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark (≤ 100), a job / quotation on its history line. Other tables ignore it."
+                    "description": "DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark, a job (≤ 200) / quotation on its history line. Other tables ignore it."
                   }
                 },
                 "required": [
@@ -17488,7 +17495,14 @@
             "type": "string"
           },
           "engineerSymptom": {
-            "type": "string"
+            "type": "string",
+            "description": "The first of engineerSymptoms"
+          },
+          "engineerSymptoms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "repairDetail": {
             "type": "string"
@@ -17879,6 +17893,7 @@
           "engineerId",
           "engineer",
           "engineerSymptom",
+          "engineerSymptoms",
           "repairDetail",
           "engineerRemark",
           "repairedDate",
@@ -18986,15 +19001,6 @@
               "email": {
                 "type": "string"
               },
-              "subDistrict": {
-                "type": "string"
-              },
-              "district": {
-                "type": "string"
-              },
-              "province": {
-                "type": "string"
-              },
               "status": {
                 "type": "string",
                 "description": "the customer's status now (Active / Inactive …)"
@@ -19008,9 +19014,6 @@
               "phone",
               "line",
               "email",
-              "subDistrict",
-              "district",
-              "province",
               "status"
             ]
           },

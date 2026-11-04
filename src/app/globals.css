@@ -275,7 +275,6 @@
     background-clip: content-box;
   }
 
-  input[type='date']::-webkit-calendar-picker-indicator,
   input[type='datetime-local']::-webkit-calendar-picker-indicator,
   input[type='time']::-webkit-calendar-picker-indicator {
     opacity: 0.6; /* dark: color-scheme draws it light */

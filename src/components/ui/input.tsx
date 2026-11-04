@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { Upload } from 'lucide-react';
+import { CalendarDays, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { dmyToIso, isoToDmy, maskDmy } from '@/lib/dates';
 import { useFieldControl } from './field';
 import { useUploading } from '@/lib/api';
 import { Checkbox as ShadcnCheckbox } from '@/components/shadcn/checkbox';
@@ -18,10 +19,89 @@ const base =
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => {
     const field = useFieldControl(props.id);
+    if (props.type === 'date') return <DateInput ref={ref} className={className} {...props} {...field} />;
     return <input ref={ref} className={cn(base, 'h-9 px-3 text-base md:text-sm', className)} {...props} {...field} />;
   },
 );
 Input.displayName = 'Input';
+
+/**
+ * dd/mm/yyyy on every machine: a native date box draws itself in the browser's locale (mm/dd on some), so a day and a
+ * month can be typed the wrong way round. The native box stays, unseen under the icon: it opens the calendar and is the
+ * one that fires onChange, so callers still get a real event with "YYYY-MM-DD".
+ * What the form holds changes only on a whole, real day or an empty box; leaving a half-typed box shows that value again.
+ */
+const DateInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, value, onChange, min, max, disabled, readOnly, onFocus, onBlur, ...props }, ref) => {
+    const native = React.useRef<HTMLInputElement>(null);
+    const [draft, setDraft] = React.useState<string | null>(null);
+    const iso = String(value ?? '');
+    const commit = (next: string) => {
+      if (next === iso || !native.current) return;
+      // React sees a change only through the prototype's setter, not `el.value = …`
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(native.current, next);
+      native.current.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    return (
+      <div className={cn('relative h-9 w-full text-base md:text-sm', className)}>
+        <input
+          ref={ref}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="dd/mm/yyyy"
+          disabled={disabled}
+          readOnly={readOnly}
+          {...props}
+          value={draft ?? isoToDmy(iso)}
+          onChange={(e) => {
+            const text = maskDmy(e.target.value);
+            setDraft(text);
+            const whole = text ? dmyToIso(text) : '';
+            if (whole !== null) commit(whole);
+          }}
+          onFocus={(e) => {
+            e.currentTarget.select();
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setDraft(null);
+            onBlur?.(e);
+          }}
+          className={cn(base, 'h-full pl-3 pr-8')}
+        />
+        <CalendarDays
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground',
+            (disabled || readOnly) && 'opacity-50',
+          )}
+        />
+        <input
+          ref={native}
+          type={type}
+          value={iso}
+          min={min}
+          max={max}
+          disabled={disabled || readOnly}
+          tabIndex={-1}
+          aria-hidden
+          onChange={(e) => {
+            setDraft(null);
+            onChange?.(e);
+          }}
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker();
+            } catch {} // no showPicker (old browsers): their own tap on the box opens it
+          }}
+          className="absolute inset-y-0 right-0 w-8 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+        />
+      </div>
+    );
+  },
+);
+DateInput.displayName = 'DateInput';
 
 /** an amount as money looks: "800.00" ('' stays '') */
 export function moneyShown(value: string | number | undefined | null): string | number {

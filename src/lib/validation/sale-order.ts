@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { maxText, moneyField, trackingField } from './index';
+import { maxText, moneyField, TEXT_MAX, trackingField } from './index';
 import { isFilled } from './job';
 import { PAYMENT_METHODS } from '@/data/options';
 import { noRight } from '@/lib/modules';
@@ -30,7 +30,7 @@ export const overpaidMessage = (total: number) =>
  *    (payment_amount numeric(11,2) — 1e9 would fail the save as a 500)
  *  - payment type from the list; no default type or amount (nothing paid until the user says so);
  *    an amount needs its type and may not exceed the lines' total + `prev.fee` (the server re-checks the net)
- *  - remark ≤ 100 (the column — nothing is cut off silently)
+ *  - remark ≤ TEXT_MAX (the column — nothing is cut off silently)
  * Line errors are keyed "lines.<row>.qty" / "lines.<row>.price" (row = position on screen).
  */
 export function saleOrderSchema(
@@ -64,7 +64,7 @@ export function saleOrderSchema(
           ),
         paymentAmount: moneyField('จำนวนเงินที่ชำระ', 10_000_000),
         fee: moneyField('ค่าธรรมเนียม'),
-        remark: maxText(100, 'หมายเหตุ'),
+        remark: maxText(TEXT_MAX, 'หมายเหตุ'),
         tracking: trackingField(prev?.tracking),
       })
       // required checks here, not on the fields: a missing key must not stop the other rules

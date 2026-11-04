@@ -16,7 +16,7 @@ import { postJson, errMsg } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
 import { addDays, today } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
-import { receiveSchema } from '@/lib/validation/stock';
+import { RECEIVE_REMARK_MAX, receiveSchema } from '@/lib/validation/stock';
 import { useTourRestore } from '@/components/tour/tour';
 
 /** a receipt line: a part picked with the server search (never the whole catalog) and its quantity */
@@ -206,7 +206,7 @@ export default function ReceivePage() {
               <option>คลังสินค้าดี</option>
             </Select>
           </Field>
-          {/* supplier + remark share one 100-char column — the counters show the room left (nothing is cut) */}
+          {/* supplier + remark share one column — the counters show the room left (nothing is cut) */}
           <Field label="ผู้จัดส่ง / Supplier" error={fe.errors.supplier} hint={`${supplier.length}/40 ตัวอักษร`}>
             <Input
               placeholder="ชื่อผู้จัดส่ง"
@@ -221,10 +221,14 @@ export default function ReceivePage() {
           <Field label="รับเข้าโดย">
             <Input readOnly value={me || '—'} />
           </Field>
-          <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/47 ตัวอักษร`}>
+          <Field
+            label="หมายเหตุ"
+            wide
+            error={fe.errors.remark}
+            hint={`${remark.length}/${RECEIVE_REMARK_MAX} ตัวอักษร`}
+          >
             <Textarea
               rows={2}
-              maxLength={47}
               placeholder="รายละเอียดเพิ่มเติม เช่น เลข Lot, สภาพสินค้า"
               value={remark}
               onChange={(e) => {

@@ -229,9 +229,9 @@ try {
     assert.deepEqual([(await hd(o.no)).rs, (await hd(o.no)).remark], ['DELETED', 'ลูกค้าเปลี่ยนใจ']);
     assert.match((await lastAudit(o.no)).summary, /ลูกค้าเปลี่ยนใจ/);
   });
-  await test('a reason over 100 characters is a 400, nothing changes', async () => {
+  await test('a reason over 500 characters is a 400, nothing changes', async () => {
     const o = await create(U.seller, { submit: false });
-    const r = await cancel(U.seller, o.no, 'ก'.repeat(101));
+    const r = await cancel(U.seller, o.no, 'ก'.repeat(501));
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.equal((await hd(o.no)).rs, 'ACTIVE');
   });

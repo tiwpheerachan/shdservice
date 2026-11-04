@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { clean, cleanCode, maxNote, maxText, moneyField } from './index';
+import { clean, cleanCode, maxNote, maxText, moneyField, TEXT_MAX } from './index';
 import { isFilled } from './job';
 
 /**
@@ -9,7 +9,7 @@ import { isFilled } from './job';
  *  - job no J + 7 digits (the only * on the form): a new quotation needs one; an existing one that
  *    has one must keep one ("never worse"); an unchanged legacy value passes; the API also checks
  *    that the job exists
- *  - lines: qty a whole 1–9999, unit price money, detail ≤ 100, type SparePart / Service / Delivery, unit ≤ 10,
+ *  - lines: qty a whole 1–9999, unit price money, detail ≤ TEXT_MAX, type SparePart / Service / Delivery, unit ≤ 10,
  *    discount (บาท) money ≤ qty × price, discount % 0–100 (lineAmount); service money; discount 0–100 % (บาท: money); VAT 0 or 7 %;
  *    contact ≤ 100; remark ≤ 1000 — nothing is cut off silently
  *  - a new quotation starts as รอเสนอราคา / เสนอราคาแล้ว (the customer answers a quotation that was sent)
@@ -24,7 +24,7 @@ export const NEW_QUOTATION_STATUSES = ['รอเสนอราคา', 'เส
 
 /** a quotation line's own rules (discount ≤ the line's amount: quotationSchema, it needs qty and price) */
 export const quotationLine = z.looseObject({
-  detail: maxText(100, 'รายละเอียด'),
+  detail: maxText(TEXT_MAX, 'รายละเอียด'),
   qty: z
     .union([z.number(), z.string()])
     .refine((v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 9999, 'จำนวนต้องเป็นจำนวนเต็ม 1–9999'),
@@ -56,7 +56,7 @@ export const quotationFields = z.looseObject({
     .optional()
     .refine((v) => v === undefined || v === '' || [0, 7].includes(Number(v)), 'ภาษีมูลค่าเพิ่มต้องเป็น 0 หรือ 7 %'),
   remark: maxNote(1000, 'หมายเหตุ'),
-  approveRemark: maxText(100, 'หมายเหตุการตอบรับ'),
+  approveRemark: maxText(TEXT_MAX, 'หมายเหตุการตอบรับ'),
 });
 
 export function quotationSchema(prevJobNo?: string | null) {

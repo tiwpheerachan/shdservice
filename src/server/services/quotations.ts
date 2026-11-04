@@ -34,6 +34,7 @@ import { audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, type FieldData } from '@/server/mappers/format';
 import { customerForDocument, getCustomerById } from './customers';
+import { withoutBlankLabels } from '@/lib/validation/customer';
 import { issuingProfile, profileIdOf } from './document-profiles';
 import { followQuotation, getJob, jobModelName, jobStatuses } from './jobs';
 import { JOB_CLOSED_STATUSES } from './stock';
@@ -354,7 +355,7 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
       ? {
           ...(live ?? { code: r.customerCode ?? '', email: '', line: '', status: 'Active' as const }),
           name: hd.customerName,
-          address: hd.customerAddress ?? '',
+          address: withoutBlankLabels(hd.customerAddress ?? ''),
           taxId: hd.customerTaxId ?? '',
           phone: hd.customerPhone ?? '',
         }
@@ -398,10 +399,10 @@ export async function getQuotation(no: string): Promise<QuotationDetail | null> 
   };
 }
 
-/** quotation.customer_* — the customer as they were when they agreed (lengths as the columns) */
+/** quotation.customer_* — the customer as they were when they agreed (lengths as the columns; the address fits whole) */
 const snapshotOf = (c: { name: string; address: string; taxId: string; phone: string }) => ({
   customerName: c.name.slice(0, 200),
-  customerAddress: c.address.slice(0, 500),
+  customerAddress: c.address,
   customerTaxId: c.taxId.slice(0, 20),
   customerPhone: c.phone.slice(0, 50),
 });

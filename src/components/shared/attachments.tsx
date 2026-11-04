@@ -12,11 +12,13 @@ import { ApiError, del, errMsg, fileUrl, qs, upload as send } from '@/lib/api';
 import { MAY_NOT_PLAY, isVideo, isVideoFile, prepareVideo, uploadVideo, type PreparedVideo } from '@/lib/video';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import { useAccess } from '@/lib/use-access';
+import { clean, TEXT_MAX } from '@/lib/validation';
 
 /** `id` = document_attach.id (uuid); a queued file (`pending`, not uploaded yet) has a client-only `tmp-…` key */
 type Row = { id: string; name: string; note: string; file?: string; pending?: File };
 /** src/server/storage.ts R2_MISSING */
 const VIDEO_OFF = 'ยังไม่ได้ตั้งค่าที่เก็บวิดีโอ — ติดต่อผู้ดูแลระบบ';
+const NOTE_TOO_LONG = `คำอธิบายยาวเกิน ${TEXT_MAX} ตัวอักษร`;
 type SavedFile = { id: string; name: string; file: string; remark: string };
 export type AttachmentsProps = { jobNo?: string; files?: SavedFile[] };
 
@@ -111,6 +113,8 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
   };
   const sendVideo = (target: string, f: File, remark: string) =>
     withProgress(async (signal) => {
+      // the video goes to storage before the row: said here, not after the upload
+      if (clean(remark).length > TEXT_MAX) throw new Error(NOTE_TOO_LONG);
       const v = await prepare(f, signal);
       setProgress({ label: 'กำลังอัปโหลด…', pct: 0 });
       return uploadVideo(target, v, remark, (pct) => setProgress({ label: 'กำลังอัปโหลด…', pct }), signal);
@@ -138,6 +142,10 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
 
   const add = async () => {
     if (!file) return;
+    if (clean(note).length > TEXT_MAX) {
+      push({ kind: 'error', title: 'แนบไฟล์ไม่สำเร็จ', desc: NOTE_TOO_LONG });
+      return;
+    }
     const video = isVideo(file);
     if (!video && file.size > 10 * 1024 * 1024) {
       push({ kind: 'error', title: 'ไฟล์ใหญ่เกิน 10MB', desc: file.name });
@@ -237,7 +245,6 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
             onChange={(e) => setNote(e.target.value)}
             placeholder="คำอธิบายเพิ่มเติม"
             aria-label="คำอธิบายไฟล์แนบ"
-            maxLength={100} // document_attach.remark
             className="sm:w-64"
           />
           <Button variant="outline" size="md" onClick={add} disabled={!file || busy}>
@@ -271,7 +278,7 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
             <tr className="border-b border-border bg-muted/60 text-2xs uppercase tracking-wide text-muted-foreground">
               {/* a phone: # hidden, the description under the file name — nothing off-screen */}
               <th className="hidden w-10 px-3 py-2 text-left sm:table-cell">#</th>
-              <th className="px-3 py-2 text-left">เอกสารแนบ</th>
+              <th className="min-w-40 px-3 py-2 text-left">เอกสารแนบ</th>
               <th className="hidden px-3 py-2 text-left sm:table-cell">คำอธิบายเพิ่มเติม</th>
               <th className="w-16 px-3 py-2 text-center sm:w-20">Action</th>
             </tr>
@@ -357,9 +364,11 @@ export const Attachments = React.forwardRef<AttachmentsHandle, AttachmentsProps>
                         </span>
                       </span>
                     )}
-                    {r.note && <p className="mt-0.5 text-xs text-muted-foreground sm:hidden">{r.note}</p>}
+                    {r.note && <p className="mt-0.5 wrap-anywhere text-xs text-muted-foreground sm:hidden">{r.note}</p>}
                   </td>
-                  <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{r.note || '—'}</td>
+                  <td className="hidden wrap-anywhere px-3 py-2 text-muted-foreground sm:table-cell">
+                    {r.note || '—'}
+                  </td>
                   <td className="px-3 py-2 text-center">
                     {(r.pending || canDelete) && (
                       <button

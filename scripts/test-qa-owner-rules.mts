@@ -30,7 +30,14 @@ const { saveQuotation, getQuotation } = await import('@/server/services/quotatio
 const { parseDiscount } = await import('@/lib/validation/quotation');
 const { saveSaleOrder, approveSaleOrder, getSaleOrder, setTracking } = await import('@/server/services/sale-orders');
 const { saveCustomer, getCustomerByCode } = await import('@/server/services/customers');
-const { issueForJob, issueForSaleOrder, listMovements } = await import('@/server/services/stock');
+const { issueForJob, issueForSaleOrder, issueOther, listMovements, receiveStock } =
+  await import('@/server/services/stock');
+const { addAttachment, saveOutsource } = await import('@/server/services/jobs');
+const { saveSimple, saveSymptom } = await import('@/server/services/masters');
+const { setRecordStatus } = await import('@/server/services/records');
+const { TEXT_MAX } = await import('@/lib/validation');
+const { RECEIVE_REMARK_MAX } = await import('@/lib/validation/stock');
+const { paymentDetailOf, returnDetailOf } = await import('@/lib/validation/job');
 
 const ADMIN = { id: 9501, email: 'qor-admin@example.invalid', isAdmin: true, userType: 'System Admin' };
 const CLERK = { id: 9502, email: 'qor-clerk@example.invalid', isAdmin: false, userType: 'QOR Clerk' };
@@ -59,6 +66,8 @@ async function seed() {
         (11, 'อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่', 33, 'Pending', true),
         (12, 'อยู่ระหว่างการซ่อม - ลูกค้าตกลงซ่อม', 38, 'Pending', true),
         (13, 'อยู่ระหว่างการซ่อม - รอเสนอราคา', 36, 'Pending', true),
+        (14, 'อยู่ระหว่างการซ่อม - ส่งซ่อม Out-Source แล้ว', 39, 'Pending', true),
+        (15, 'อยู่ระหว่างการซ่อม - รับคืนจาก Out-Source แล้ว', 40, 'Pending', true),
         (20, 'ปิดงาน (Complete)', 20, 'Finished', true)) v(id, name, ord, grp, act)
        WHERE NOT EXISTS (SELECT 1 FROM job_status s WHERE s.job_status_id = v.id);
     INSERT INTO quotation_status (quotation_status_id, quotation_status_name)
@@ -740,6 +749,186 @@ try {
     assert.equal((await getSaleOrder(fresh.no))!.figuresLocked, false);
     const nj = await newJob();
     assert.deepEqual((await getJob(nj.no, CLERK.id))!.figuresLocked, []);
+  });
+
+  console.log('\n(d) free text past the old 100, through the real services, to the column and back');
+  const long = (c: string, n = TEXT_MAX) => c.repeat(n);
+  await test('customer: 500 + 500 address saved and read back; saved again unchanged writes nothing', async () => {
+    const c = await saveCustomer(
+      {
+        name: 'QOR-NEW ที่อยู่ยาว',
+        phone: '0815559777',
+        type: 'Normal',
+        address1: long('ก'),
+        address2: long('ข'),
+      } as never,
+      ADMIN.id,
+    );
+    const saved = (await getCustomerByCode(c.code))!;
+    assert.deepEqual([saved.address1, saved.address2], [long('ก'), long('ข')]);
+    assert.equal(saved.address, `${long('ก')} ${long('ข')}`);
+    const before = await one<{ v: number }>(sql`SELECT row_version AS v FROM customer WHERE customer_code = ${c.code}`);
+    await saveCustomer({ ...saved, version: saved.version } as never, ADMIN.id);
+    const after = await one<{ v: number }>(sql`SELECT row_version AS v FROM customer WHERE customer_code = ${c.code}`);
+    assert.equal(after.v, before.v, 'no write');
+  });
+  await test('the longest composed address fits both snapshots whole, as sale order approval and an agreed quotation take them', async () => {
+    const place = (c: string) => long(c, 50);
+    const [prov] = (
+      await pool.query(`INSERT INTO province (name_en, name_th, region) VALUES ('Q', $1, 'Q') RETURNING pk`, [
+        place('จ'),
+      ])
+    ).rows;
+    const [dist] = (
+      await pool.query(
+        `INSERT INTO district (province_pk, name_en, name_th, postal_code) VALUES ($1, 'Q', $2, '10270') RETURNING pk`,
+        [prov.pk, place('อ')],
+      )
+    ).rows;
+    const [sub] = (
+      await pool.query(
+        `INSERT INTO sub_district (district_pk, name_en, name_th, postal_code) VALUES ($1, 'Q', $2, '10270') RETURNING pk`,
+        [dist.pk, place('ต')],
+      )
+    ).rows;
+    await pool.query(
+      `UPDATE customer SET customer_address1 = $1, customer_address2 = $2, province_pk = $3, district_pk = $4, sub_district_pk = $5,
+              postal_code = '10270' WHERE pk = 9501`,
+      [long('ก'), long('ข'), prov.pk, dist.pk, sub.pk],
+    );
+    const whole = `${long('ก')} ${long('ข')} ต.${place('ต')} อ.${place('อ')} จ.${place('จ')} 10270`;
+    assert.equal(whole.length, 1166, 'the largest the columns compose outside Bangkok (Bangkok: 1167)');
+    try {
+      const draft = await saveSaleOrder(await so({ submit: true }), { pk: ADMIN.id, isAdmin: true });
+      await approveSaleOrder(draft.no, 'approve', '', ADMIN);
+      const s = await one<{ a: string }>(
+        sql`SELECT customer_address AS a FROM sale_order WHERE sale_order_no = ${draft.no}`,
+      );
+      assert.equal(s.a, whole, 'sale order');
+      assert.equal((await getSaleOrder(draft.no))!.customerDetail.address, whole, 'as it prints');
+      const j = await newJob();
+      let q = await saveQuotation(quote(j.no, { status: 'เสนอราคาแล้ว' }), ADMIN.id, true);
+      q = await saveQuotation(quote(j.no, { no: q.no, version: q.version, status: 'ลูกค้าตกลงซ่อม' }), ADMIN.id, true);
+      const t = await one<{ a: string }>(sql`SELECT customer_address AS a FROM quotation WHERE quotation_no = ${q.no}`);
+      assert.equal(t.a, whole, 'quotation');
+      assert.equal((await getQuotation(q.no))!.customerDetail?.address, whole, 'as it prints');
+    } finally {
+      await pool.query(
+        `UPDATE customer SET customer_address1 = '9/1 ถนน QOR', customer_address2 = NULL, province_pk = NULL, district_pk = NULL,
+                sub_district_pk = NULL, postal_code = NULL WHERE pk = 9501`,
+      );
+      await pool.query(`DELETE FROM sub_district WHERE pk = $1`, [sub.pk]);
+      await pool.query(`DELETE FROM district WHERE pk = $1`, [dist.pk]);
+      await pool.query(`DELETE FROM province WHERE pk = $1`, [prov.pk]);
+    }
+  });
+  await test('job: อุปกรณ์ / จุดตำหนิ / Shop Name, out-source notes and a file note hold 500; 501 is refused', async () => {
+    const j = await newJob(ADMIN.id, { equipment: long('ก'), fault: long('ข'), shopName: long('ค') });
+    const read = (await getJob(j.no))!;
+    assert.deepEqual([read.equipment, read.fault, read.shopName], [long('ก'), long('ข'), long('ค')]);
+    assert.equal(await statusOf(newJob(ADMIN.id, { equipment: long('ก', 501) })), 400);
+    const sent = await saveOutsource(
+      j.no,
+      { status: await statusName(14), send: { to: 'ร้าน QOR', date: today(), detail: long('ง') } },
+      ADMIN.id,
+    );
+    assert.equal(sent.outsource.at(-1)?.sendDetail, long('ง'));
+    const back = await saveOutsource(
+      j.no,
+      { status: await statusName(15), receive: { date: today(), detail: long('จ') } },
+      ADMIN.id,
+    );
+    assert.equal(back.outsource.at(-1)?.receiveDetail, long('จ'));
+    const a = await addAttachment(j.no, 'a.pdf', 'qor-long.pdf', long('ฉ'), ADMIN.id);
+    assert.equal(a.remark, long('ฉ'));
+    const row = await one<{ r: string }>(sql`SELECT remark AS r FROM job_attachment WHERE id = ${a.id}`);
+    assert.equal(row.r, long('ฉ'));
+  });
+  await test('close: payment and return notes at the combined 500 round-trip: saved, read, saved again, unchanged', async () => {
+    const j = await newJob();
+    await pool.query(`UPDATE job SET job_status_id = 5 WHERE job_no = $1`, [j.no]);
+    const date = today();
+    const courier = 'Kerry Express';
+    const payNote = long('ก', TEXT_MAX - paymentDetailOf(date, '-').length + 1);
+    const retNote = long('ข', TEXT_MAX - returnDetailOf(courier, '-').length + 1);
+    const body = (version: number, pay: string, ret: string) =>
+      ({
+        status: 'ปิดงาน (Complete)',
+        payment: { type: 'เงินสด', amount: 100, date, no: '', detail: pay },
+        return: { type: 'รับเอง', date, courier, detail: ret },
+        version,
+      }) as never;
+    let cur = (await getJob(j.no))!;
+    cur = await closeJob(j.no, body(cur.version, payNote, retNote), ADMIN.id);
+    assert.equal(cur.payment.detail, `ชำระ ${date} · ${payNote}`);
+    assert.equal(cur.payment.detail.length, TEXT_MAX);
+    assert.equal(cur.return.detail, `${courier} · ${retNote}`);
+    assert.equal(cur.return.detail.length, TEXT_MAX);
+    cur = await closeJob(j.no, body(cur.version, cur.payment.detail, cur.return.detail), ADMIN.id);
+    assert.equal(cur.payment.detail.length, TEXT_MAX, 'the date is not put in front twice');
+    assert.equal(cur.return.detail.length, TEXT_MAX, 'the courier is not put in front twice');
+  });
+  await test('sale order: remark, deny reason and cancel reason hold 500', async () => {
+    const reason = long('ข');
+    const d = await saveSaleOrder(await so({ remark: long('ก'), submit: true }), { pk: ADMIN.id, isAdmin: true });
+    assert.equal((await getSaleOrder(d.no))!.remark, long('ก'));
+    await approveSaleOrder(d.no, 'reject', reason, ADMIN);
+    assert.equal((await getSaleOrder(d.no))!.approveRemark, reason);
+    const o = await saveSaleOrder(await so(), { pk: ADMIN.id, isAdmin: true });
+    await setRecordStatus('sale_orders', o.id!, 'DELETED', ADMIN.id, true, true, long('ค'));
+    assert.equal((await getSaleOrder(o.no))!.cancelRemark, long('ค'));
+  });
+  await test('quotation: line detail, the customer answer and the cancel reason hold 500; a job reason stays at 200', async () => {
+    const j = await newJob();
+    const q = await saveQuotation(
+      quote(j.no, { status: 'เสนอราคาแล้ว', approveRemark: long('ข'), lines: [qLine({ detail: long('ก') })] }),
+      ADMIN.id,
+      true,
+    );
+    const read = (await getQuotation(q.no))!;
+    assert.equal(read.lines[0]!.detail, long('ก'));
+    assert.equal(read.approveRemark, long('ข'));
+    await setRecordStatus('quotations', q.id!, 'DELETED', ADMIN.id, true, true, long('ค'));
+    const line = await one<{ r: string; m: { remark?: string } }>(
+      sql`SELECT reason AS r, meta AS m FROM audit_log WHERE entity = 'quotation' AND entity_no = ${q.no} AND action = 'DELETE' ORDER BY pk DESC LIMIT 1`,
+    );
+    assert.ok(JSON.stringify(line).includes(long('ค')), 'the reason whole on the history line');
+    const k = await newJob();
+    const jobId = (await getJob(k.no))!.id;
+    assert.equal(await statusOf(setRecordStatus('jobs', jobId, 'DELETED', ADMIN.id, true, true, long('ก', 201))), 400);
+    await setRecordStatus('jobs', jobId, 'DELETED', ADMIN.id, true, true, long('ก', 200));
+  });
+  await test('stock: Supplier 40 + หมายเหตุ fills the column exactly and splits back; a pick note holds 500; quantities as ever', async () => {
+    const stock = () => one<{ r: number }>(sql`SELECT quantity_remain AS r FROM product_stock WHERE product_pk = 9501`);
+    const start = (await stock()).r;
+    const remark = long('ข', RECEIVE_REMARK_MAX);
+    const r = await receiveStock(
+      { date: today(), supplier: long('ก', 40), remark, lines: [{ code: PART, qty: 2 }] },
+      ADMIN.id,
+    );
+    const m = await one<{ r: string }>(sql`SELECT remark AS r FROM stock_move WHERE stock_move_no = ${r.no}`);
+    assert.equal(m.r, `Supplier: ${long('ก', 40)} · ${remark}`);
+    assert.equal(m.r.length, TEXT_MAX);
+    const o = await issueOther({ payTo: 'QOR', remark: long('ค'), lines: [{ code: PART, qty: 1 }] }, ADMIN.id);
+    const m2 = await one<{ r: string }>(sql`SELECT remark AS r FROM stock_move WHERE stock_move_no = ${o.no}`);
+    assert.equal(m2.r, long('ค'));
+    assert.equal((await stock()).r, start + 1, '+2 received, -1 issued');
+  });
+  await test('masters: รายละเอียด of สี / ประเภทงาน / ประเภทเครื่อง / อาการเสีย holds 500, refuses 501; หมวดหมู่ stays 50', async () => {
+    for (const kind of ['colors', 'job_types', 'product_types'] as const) {
+      const name = `QOR ${kind} ${Date.now()}`;
+      const extra = kind === 'job_types' ? { days: '3' } : {};
+      const row = await saveSimple(kind, { name, detail: long('ก'), ...extra }, ADMIN.id);
+      assert.equal(row.detail, long('ก'), kind);
+      assert.equal(
+        await statusOf(saveSimple(kind, { name: `${name} x`, detail: long('ก', 501), ...extra }, ADMIN.id)),
+        400,
+      );
+    }
+    const sym = await saveSymptom({ name: `QOR อาการ ${Date.now()}`, detail: long('ก') }, ADMIN.id);
+    assert.equal(sym.detail, long('ก'));
+    assert.equal(await statusOf(saveSymptom({ name: `QOR อ ${Date.now()}`, detail: long('ก', 501) }, ADMIN.id)), 400);
+    assert.equal(await statusOf(saveSimple('categories', { name: 'QOR cat', detail: long('ก', 51) }, ADMIN.id)), 400);
   });
 } finally {
   for (const b of boundaryBefore) await moveBoundary(b.t, b.m);

@@ -234,17 +234,17 @@ try {
   });
 
   console.log('\nBug 9 — nothing cut silently');
-  await test('an address line over 100 characters → 400 under address1, nothing saved (never cut)', async () => {
+  await test('an address line over 500 characters → 400 under address1, nothing saved (never cut)', async () => {
     const name = `QC-CUST long address ${rnd(6)}`;
-    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(101) });
+    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(501) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.ok((r.body.details as { fields?: Record<string, string> }).fields?.address1, JSON.stringify(r.body));
     assert.equal((await rowsWith(`SELECT 1 FROM customer WHERE customer_name = $1`, [name])).length, 0);
   });
-  await test('two full address lines (100 + 100) → saved whole; no one-line copy stored (customer_address)', async () => {
+  await test('two full address lines (500 + 500) → saved whole; no one-line copy stored (customer_address)', async () => {
     // the one-line customer_address is a legacy snapshot: a new row never writes it, so its 200 is no limit
     const name = `QC-CUST two lines ${rnd(6)}`;
-    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(100), address2: 'ข'.repeat(100) });
+    const r = await save({ name, phone: mobile(), address1: 'ก'.repeat(500), address2: 'ข'.repeat(500) });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.deepEqual(
       await rowsWith(
@@ -252,7 +252,7 @@ try {
           WHERE customer_name = $1`,
         [name],
       ),
-      [{ a1: 100, a2: 100, one: null }],
+      [{ a1: 500, a2: 500, one: null }],
     );
   });
   await test('a 201-character name → 400 (the server never cuts it)', async () => {

@@ -4,13 +4,14 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { validate, summary, isRealDate, typedOnThai } from '@/lib/validation/index';
+import { validate, summary, isRealDate, typedOnThai, TEXT_MAX } from '@/lib/validation/index';
 import {
   jobSchema as jobSchemaOf,
   filledRequired,
   missingRequired,
   isRequiredFilled,
   JOB_REQUIRED_KEYS,
+  JOB_NOTE_MAX,
   repairActionSchema,
   outsourceActionSchema,
   swapRefundSchema,
@@ -40,9 +41,17 @@ import {
   userSchema,
   productSchema,
   documentProfileSchema,
+  MASTER_DETAIL_MAX,
   shippingProfileSchema,
 } from '@/lib/validation/admin';
-import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '@/lib/validation/stock';
+import {
+  receiveSchema,
+  issueSchema,
+  assignSchema,
+  approveSchema,
+  callLogSchema,
+  RECEIVE_REMARK_MAX,
+} from '@/lib/validation/stock';
 import { fileProblem, LOGO_TYPES } from '@/server/storage';
 import { readdirSync, readFileSync } from 'node:fs';
 import { clampInt, orderBy, ymd } from '@/server/paging';
@@ -720,15 +729,15 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.deepEqual(errorsOf(customerSchema(), { ...cust, taxId: '1 2345 67890 12 1' }), {});
     assert.deepEqual(errorsOf(customerSchema({ ...cust, taxId: '0-1234' }), { ...cust, taxId: '0-1234' }), {});
   });
-  test('customer: email ≤ 50, Line ID, address ≤ 100, type / price group from the lists', () => {
+  test('customer: email ≤ 50, Line ID, address ≤ TEXT_MAX, type / price group from the lists', () => {
     assert.ok(errorsOf(customerSchema(), { ...cust, email: `${'a'.repeat(45)}@b.com` }).email);
     assert.deepEqual(errorsOf(customerSchema(), { ...cust, email: ' A@B.CO ' }), {});
     assert.deepEqual(errorsOf(customerSchema(), { ...cust, line: '@shd.th' }), {});
     assert.ok(errorsOf(customerSchema(), { ...cust, line: 'ไลน์ ของฉัน' }).line);
     assert.deepEqual(errorsOf(customerSchema({ ...cust, line: 'ไลน์ เก่า' }), { ...cust, line: 'ไลน์ เก่า' }), {});
-    assert.ok(errorsOf(customerSchema(), { ...cust, address1: 'ก'.repeat(101) }).address1);
-    // a legacy one-line address over 100 (C01029: 117) saves untouched; edited, it must fit
-    const longAddr = 'ก'.repeat(117);
+    assert.ok(errorsOf(customerSchema(), { ...cust, address1: 'ก'.repeat(TEXT_MAX + 1) }).address1);
+    // a stored address over the limit saves untouched; edited, it must fit
+    const longAddr = 'ก'.repeat(TEXT_MAX + 17);
     assert.deepEqual(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr }), {});
     assert.ok(errorsOf(customerSchema({ ...cust, address: longAddr }), { ...cust, address1: longAddr + 'x' }).address1);
     assert.ok(
@@ -751,10 +760,12 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.ok(errorsOf(quotationSchema(), { ...qq, vatRate: 5 }).vatRate);
     assert.deepEqual(errorsOf(quotationSchema(), { ...qq, vatRate: 0 }), {});
   });
-  test('quotation: money ≤ 1,000,000; contact / line detail ≤ 100; remark ≤ 1000', () => {
+  test('quotation: money ≤ 1,000,000; contact ≤ 100, line detail ≤ TEXT_MAX; remark ≤ 1000', () => {
     assert.ok(errorsOf(quotationSchema(), { ...qq, lines: [{ qty: 1, unitPrice: 1e9 }] })['lines.0.unitPrice']);
     assert.ok(errorsOf(quotationSchema(), { ...qq, contactName: 'ก'.repeat(101) }).contactName);
-    assert.ok(errorsOf(quotationSchema(), { ...qq, lines: [{ qty: 1, detail: 'ก'.repeat(101) }] })['lines.0.detail']);
+    assert.ok(
+      errorsOf(quotationSchema(), { ...qq, lines: [{ qty: 1, detail: 'ก'.repeat(TEXT_MAX + 1) }] })['lines.0.detail'],
+    );
     assert.ok(errorsOf(quotationSchema(), { ...qq, remark: 'ก'.repeat(1001) }).remark);
     assert.deepEqual(errorsOf(quotationSchema(), { ...qq, remark: 'ก'.repeat(1000) }), {});
   });
@@ -764,7 +775,7 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     salesId: '0190c0de-0000-7000-8000-000000000007',
     lines: [{ code: 'P1', qty: 1, price: 100 }],
   };
-  test('sale order: qty 1–1000, paid ≤ 10,000,000 (1e9 was a 500), remark ≤ 100, payment type from the list', () => {
+  test('sale order: qty 1–1000, paid ≤ 10,000,000 (1e9 was a 500), remark ≤ TEXT_MAX, payment type from the list', () => {
     assert.ok(errorsOf(saleOrderSchema(), { ...order, lines: [{ code: 'P1', qty: 1001 }] })['lines.0.qty']);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentAmount: 1e9 }).paymentAmount);
     // the cap holds on an order big enough to be paid 10,000,000 (paying more than the total is refused)
@@ -777,7 +788,7 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
       }),
       {},
     );
-    assert.ok(errorsOf(saleOrderSchema(), { ...order, remark: 'ก'.repeat(101) }).remark);
+    assert.ok(errorsOf(saleOrderSchema(), { ...order, remark: 'ก'.repeat(TEXT_MAX + 1) }).remark);
     assert.ok(errorsOf(saleOrderSchema(), { ...order, paymentType: 'บิทคอยน์' }).paymentType);
     assert.deepEqual(
       errorsOf(saleOrderSchema({ paymentType: 'ยังไม่ชำระเงิน' }), { ...order, paymentType: 'ยังไม่ชำระเงิน' }),
@@ -793,24 +804,27 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
   });
 
   const lines = [{ code: 'P1', qty: 1 }];
-  test('receive: PO ref ≤ 50 of A-Z 0-9 / - (51 refused, not cut); supplier ≤ 40, remark ≤ 47; not a future date', () => {
+  test('receive: PO ref ≤ 50 of A-Z 0-9 / - (51 refused, not cut); supplier ≤ 40, remark ≤ the rest of the column; not a future date', () => {
     const r = (x: Record<string, unknown>) => errorsOf(receiveSchema, { date: today(), lines, ...x });
     assert.deepEqual(r({ poRef: 'po-2600/01' }), {});
     assert.ok(r({ poRef: 'P'.repeat(51) }).poRef);
     assert.ok(r({ poRef: 'ใบสั่งซื้อ 1' }).poRef);
     assert.ok(r({ supplier: 'ก'.repeat(41) }).supplier);
-    assert.ok(r({ remark: 'ก'.repeat(48) }).remark);
+    assert.equal(RECEIVE_REMARK_MAX, 447);
+    assert.equal(`Supplier: ${'ก'.repeat(40)} · ${'ก'.repeat(RECEIVE_REMARK_MAX)}`.length, TEXT_MAX);
+    assert.equal(r({ remark: 'ก'.repeat(RECEIVE_REMARK_MAX) }).remark, undefined);
+    assert.ok(r({ remark: 'ก'.repeat(RECEIVE_REMARK_MAX + 1) }).remark);
     assert.equal(r({ date: addDays(today(), 1) }).date, 'วันที่รับเข้าต้องไม่เกินวันนี้');
   });
-  test('pick: job ref J + 7 digits, SO ref SO + digits; remark ≤ 100; approve remark ≤ 100', () => {
+  test('pick: job ref J + 7 digits, SO ref SO + digits; remark and approve remark ≤ TEXT_MAX', () => {
     const i = (x: Record<string, unknown>) => errorsOf(issueSchema, { payTo: 'คลังสินค้าดี', lines, ...x });
     assert.deepEqual(i({ type: 'job', ref: 'J2600001' }), {});
     assert.ok(i({ type: 'job', ref: 'SO2600001' }).ref);
     assert.ok(i({ type: 'return', ref: 'J26' }).ref);
     assert.deepEqual(i({ type: 'sale', ref: 'SO2600001' }), {});
     assert.ok(i({ type: 'sale', ref: 'J2600001' }).ref);
-    assert.ok(i({ type: 'other', remark: 'ก'.repeat(101) }).remark);
-    assert.ok(errorsOf(approveSchema, { decision: 'deny', remark: 'ก'.repeat(101) }).remark);
+    assert.ok(i({ type: 'other', remark: 'ก'.repeat(TEXT_MAX + 1) }).remark);
+    assert.ok(errorsOf(approveSchema, { decision: 'deny', remark: 'ก'.repeat(TEXT_MAX + 1) }).remark);
   });
 
   const user = { name: 'สมชาย ใจดี', role: 'Engineer' };
@@ -943,22 +957,22 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.deepEqual(errorsOf(schema, { ...v, dueDate: '2026-12-01' }), {});
     assert.ok(errorsOf(schema, { ...v, dueDate: '2025-01-09' }).dueDate);
   });
-  test('J: text lengths = the column (Shop 100, รุ่นย่อย 200, อุปกรณ์ / จุดตำหนิ 100, อาการอื่นๆ 200, หมายเหตุ 2000)', () => {
+  test('J: text lengths = the column (Shop TEXT_MAX, รุ่นย่อย 200, อุปกรณ์ / จุดตำหนิ TEXT_MAX, อาการอื่นๆ / หมายเหตุ JOB_NOTE_MAX)', () => {
     const at = (k: string, n: number) => errorsOf(jobSchema(), { ...fullJob, [k]: 'ก'.repeat(n) })[k];
     for (const [k, max] of [
-      ['shopName', 100],
+      ['shopName', TEXT_MAX],
       ['modelDetail', 200],
-      ['equipment', 100],
-      ['fault', 100],
-      ['symptomOther', 200],
-      ['remark', 2000],
+      ['equipment', TEXT_MAX],
+      ['fault', TEXT_MAX],
+      ['symptomOther', JOB_NOTE_MAX],
+      ['remark', JOB_NOTE_MAX],
       ['jobTypeDetail', 50],
     ] as const) {
       assert.equal(at(k, max), undefined, `${k} ${max}`);
       assert.ok(at(k, max + 1), `${k} ${max + 1}`);
     }
     assert.equal(
-      errorsOf(jobSchema(), { ...fullJob, shopName: `  ${'ก'.repeat(100)}  ` }).shopName,
+      errorsOf(jobSchema(), { ...fullJob, shopName: `  ${'ก'.repeat(TEXT_MAX)}  ` }).shopName,
       undefined,
       'trimmed',
     );
@@ -972,11 +986,30 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     const e = errorsOf(repairActionSchema, { status: 'x', toolCost: 2_000_000, parts: [part(5_000_000, 1001)] });
     assert.deepEqual(Object.keys(e).sort(), ['parts.0.a.qty', 'parts.0.unitPrice', 'toolCost']);
   });
+  test('J: อาการเสีย (อื่นๆ) / หมายเหตุ / วิธีการซ่อม take JOB_NOTE_MAX characters on every form, and no more', () => {
+    assert.equal(JOB_NOTE_MAX, 2000);
+    const close = { status: 'x', return: { type: 'y', date: '2026-10-01' } };
+    const send = { to: 'ร้าน A', date: '2026-10-01' };
+    const forms = [
+      (v: string) => errorsOf(jobSchema([]), { symptomOther: v }).symptomOther,
+      (v: string) => errorsOf(jobSchema([]), { remark: v }).remark,
+      (v: string) => errorsOf(repairActionSchema, { status: 'x', repairDetail: v }).repairDetail,
+      (v: string) => errorsOf(repairActionSchema, { status: 'x', engineerRemark: v }).engineerRemark,
+      (v: string) => errorsOf(outsourceActionSchema, { status: 'x', send, symptomOther: v }).symptomOther,
+      (v: string) => errorsOf(outsourceActionSchema, { status: 'x', send, repairDetail: v }).repairDetail,
+      (v: string) => errorsOf(swapRefundSchema(), { status: 'x', inspection: v }).inspection,
+      (v: string) => errorsOf(closeSchema(), { ...close, repairDetail: v }).repairDetail,
+    ];
+    for (const refused of forms) {
+      assert.equal(refused('ก'.repeat(JOB_NOTE_MAX)), undefined);
+      assert.ok(refused('ก'.repeat(JOB_NOTE_MAX + 1)));
+    }
+  });
   test('J: repair / outsource text ≤ the column; new serial follows the serial rule', () => {
     const r = errorsOf(repairActionSchema, {
       status: 'x',
-      repairDetail: 'ก'.repeat(201),
-      engineerRemark: 'ก'.repeat(201),
+      repairDetail: 'ก'.repeat(JOB_NOTE_MAX + 1),
+      engineerRemark: 'ก'.repeat(JOB_NOTE_MAX + 1),
       newSerial: 'SN ใหม่',
     });
     assert.deepEqual(Object.keys(r).sort(), ['engineerRemark', 'newSerial', 'repairDetail']);
@@ -986,13 +1019,13 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     );
     const o = errorsOf(outsourceActionSchema, {
       status: 'x',
-      repairDetail: 'ก'.repeat(201),
-      symptomOther: 'ก'.repeat(201),
-      send: { to: 'ร'.repeat(51), date: '2026-10-01', detail: 'ก'.repeat(101) },
+      repairDetail: 'ก'.repeat(JOB_NOTE_MAX + 1),
+      symptomOther: 'ก'.repeat(JOB_NOTE_MAX + 1),
+      send: { to: 'ร'.repeat(51), date: '2026-10-01', detail: 'ก'.repeat(TEXT_MAX + 1) },
     });
     assert.deepEqual(Object.keys(o).sort(), ['repairDetail', 'send.detail', 'send.to', 'symptomOther']);
     assert.ok(
-      errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '', detail: 'ก'.repeat(101) } })[
+      errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '', detail: 'ก'.repeat(TEXT_MAX + 1) } })[
         'receive.detail'
       ],
     );
@@ -1005,7 +1038,7 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
       ['docNo', 'เบิก 123'],
       ['newSerial', 'ใหม่'],
       ['swapDate', '2026-02-30'],
-      ['inspection', 'ก'.repeat(201)],
+      ['inspection', 'ก'.repeat(JOB_NOTE_MAX + 1)],
     ] as const)
       assert.ok(errorsOf(swapRefundSchema(), { ...swap, [k]: bad })[k], k);
     const prev = { newSerial: 'รอเลขใหม่', docNo: 'เบิก 123', refundRef: 'บัญชี ก' };
@@ -1018,7 +1051,7 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.ok(errorsOf(swapRefundSchema(), { ...refund, refundAmount: '1000000.5' }).refundAmount);
     assert.ok(errorsOf(swapRefundSchema(), { ...refund, refundAmount: 10, refundRef: 'บัญชี#1' }).refundRef);
   });
-  test('J: close — receipt no, parcel no (6–40), date; detail + its prefix ≤ 100; legacy values unchanged pass', () => {
+  test('J: close — receipt no, parcel no (6–40), date; detail + its prefix ≤ TEXT_MAX; legacy values unchanged pass', () => {
     const body = {
       status: 'ปิดงาน (Complete)',
       payment: { type: 'เงินสด', amount: '1500.50', date: '2026-10-01', no: 'RC-001' },
@@ -1027,8 +1060,8 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.deepEqual(errorsOf(closeSchema(), body), {});
     const bad = errorsOf(closeSchema(), {
       ...body,
-      payment: { ...body.payment, no: 'ใบเสร็จ 1', date: '2026-02-30', detail: 'ก'.repeat(90) },
-      return: { ...body.return, tracking: 'ส่งแล้ว', courier: 'Flash', detail: 'ก'.repeat(95) },
+      payment: { ...body.payment, no: 'ใบเสร็จ 1', date: '2026-02-30', detail: 'ก'.repeat(TEXT_MAX - 10) },
+      return: { ...body.return, tracking: 'ส่งแล้ว', courier: 'Flash', detail: 'ก'.repeat(TEXT_MAX - 5) },
     });
     assert.deepEqual(Object.keys(bad).sort(), [
       'payment.date',
@@ -1044,7 +1077,7 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     };
     assert.deepEqual(errorsOf(closeSchema({ payNo: 'ใบเสร็จ 1', tracking: 'ส่งแล้ว' }), legacy), {});
   });
-  test('J: close details are not prefixed twice when saved again (they used to grow and be cut at 100)', () => {
+  test('J: close details are not prefixed twice when saved again (they used to grow and be cut)', () => {
     assert.equal(paymentDetailOf('2026-10-15', 'ชำระ 2026-10-01 · โอนแล้ว'), 'ชำระ 2026-10-15 · โอนแล้ว');
     assert.equal(paymentDetailOf('2026-10-15', 'ชำระ 2026-10-01'), 'ชำระ 2026-10-15');
     assert.equal(paymentDetailOf('', ' โอนแล้ว '), 'โอนแล้ว');
@@ -1053,23 +1086,23 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.equal(returnDetailOf('', 'ฝากหน้าบ้าน'), 'ฝากหน้าบ้าน');
     assert.deepEqual(parseSwap('New S/N: AB12\nยอดเงินคืน: 10.00'), { 'New S/N': 'AB12', ยอดเงินคืน: '10.00' });
   });
-  test('R8 close: a note input takes 100 less what the save puts in front — the most it takes always saves', () => {
+  test('R8 close: a note input takes TEXT_MAX less what the save puts in front — the most it takes always saves', () => {
     const pay = (date: string, note: string) => {
       const max = noteMaxLength((n) => paymentDetailOf(date, n), note);
       const full = note || 'ก'.repeat(max); // a typed-in note this long saves, one more character does not
-      assert.ok(paymentDetailOf(date, full.padEnd(max, 'ก')).length <= 100, date);
-      assert.ok(paymentDetailOf(date, full.padEnd(max + 1, 'ก')).length > 100, date);
+      assert.ok(paymentDetailOf(date, full.padEnd(max, 'ก')).length <= TEXT_MAX, date);
+      assert.ok(paymentDetailOf(date, full.padEnd(max + 1, 'ก')).length > TEXT_MAX, date);
       return max;
     };
-    assert.equal(pay('2026-10-15', ''), 100 - 'ชำระ 2026-10-15 · '.length);
-    assert.equal(pay('', ''), 100, 'no date → nothing in front');
-    assert.equal(pay('2026-10-15', 'ชำระ 2026-10-01 · โอน'), 100, 'a loaded note keeps its own date part');
+    assert.equal(pay('2026-10-15', ''), TEXT_MAX - 'ชำระ 2026-10-15 · '.length);
+    assert.equal(pay('', ''), TEXT_MAX, 'no date → nothing in front');
+    assert.equal(pay('2026-10-15', 'ชำระ 2026-10-01 · โอน'), TEXT_MAX, 'a loaded note keeps its own date part');
     const ret = (courier: string) => noteMaxLength((n) => returnDetailOf(courier, n), '');
-    assert.equal(ret('Kerry Express'), 100 - 'Kerry Express · '.length);
-    assert.equal(ret(''), 100);
+    assert.equal(ret('Kerry Express'), TEXT_MAX - 'Kerry Express · '.length);
+    assert.equal(ret(''), TEXT_MAX);
     assert.equal(
       noteMaxLength((n) => returnDetailOf('Flash', n), 'Flash · ฝาก'),
-      100,
+      TEXT_MAX,
       'already starts with it',
     );
   });
@@ -1150,4 +1183,83 @@ test('contract `version`: parsed to what assertVersion reads (a number, or none)
   assert.deepEqual([v(7), v('7'), v(''), v(null), v(undefined)], [7, 7, undefined, undefined, undefined]);
   assert.ok(Number.isNaN(v('x')), 'not a 400: assertVersion compares NaN → 409 stale, as before');
   assert.equal(version.safeParse(true).success, false);
+});
+
+test('every free-text field raised from 100: 500 accepted, 501 refused', () => {
+  assert.equal(TEXT_MAX, 500);
+  const close = { status: 'x', return: { type: 'y', date: '2026-10-01' } };
+  const send = { to: 'ร้าน A', date: '2026-10-01' };
+  const cust = { name: 'ก', phone: '0812345678' };
+  const forms: [string, (v: string) => string | undefined][] = [
+    ['customer address1', (v) => errorsOf(customerSchema(), { ...cust, address1: v }).address1],
+    ['customer address2', (v) => errorsOf(customerSchema(), { ...cust, address2: v }).address2],
+    ['job shop', (v) => errorsOf(jobSchema([]), { shopName: v }).shopName],
+    ['job equipment', (v) => errorsOf(jobSchema([]), { equipment: v }).equipment],
+    ['job fault', (v) => errorsOf(jobSchema([]), { fault: v }).fault],
+    [
+      'send detail',
+      (v) => errorsOf(outsourceActionSchema, { status: 'x', send: { ...send, detail: v } })['send.detail'],
+    ],
+    [
+      'receive detail',
+      (v) => errorsOf(outsourceActionSchema, { status: 'x', receive: { detail: v } })['receive.detail'],
+    ],
+    [
+      'close return',
+      (v) => errorsOf(closeSchema(), { ...close, return: { ...close.return, detail: v } })['return.detail'],
+    ],
+    [
+      'close payment',
+      (v) => errorsOf(closeSchema(), { ...close, payment: { type: 'เงินสด', detail: v } })['payment.detail'],
+    ],
+    ['sale order remark', (v) => errorsOf(saleOrderSchema(), { remark: v }).remark],
+    ['sale order approve', (v) => errorsOf(approveSchema, { decision: 'deny', remark: v }).remark],
+    ['quotation line', (v) => errorsOf(quotationSchema(), { lines: [{ qty: 1, detail: v }] })['lines.0.detail']],
+    ['quotation approve', (v) => errorsOf(quotationSchema(), { approveRemark: v }).approveRemark],
+    ['stock pick', (v) => errorsOf(issueSchema, { type: 'other', remark: v }).remark],
+    ['master detail', (v) => errorsOf(masterSchema(), { name: 'x', detail: v }).detail],
+  ];
+  for (const [name, error] of forms) {
+    assert.equal(error('ก'.repeat(TEXT_MAX)), undefined, `${name} 500`);
+    assert.ok(error('ก'.repeat(TEXT_MAX + 1)), `${name} 501`);
+  }
+  for (const kind of ['colors', 'job_types', 'product_types', 'symptoms'] as const)
+    assert.equal(MASTER_DETAIL_MAX[kind], TEXT_MAX);
+  for (const kind of ['categories', 'manufacturers'] as const) assert.equal(MASTER_DETAIL_MAX[kind], 50);
+});
+
+test('the close page: a note at the most it takes round-trips: saved, loaded back, saved again', () => {
+  const date = '2026-10-15';
+  const note = 'ก'.repeat(noteMaxLength((n) => paymentDetailOf(date, n), ''));
+  const stored = paymentDetailOf(date, note);
+  assert.equal(stored.length, TEXT_MAX);
+  assert.equal(paymentDetailOf(date, stored), stored, 'the date is not added twice');
+  assert.equal(paymentDetailOf('2026-10-16', stored).length, TEXT_MAX, 'another date of the same length still fits');
+  const courier = 'Kerry Express';
+  const ret = returnDetailOf(courier, 'ข'.repeat(noteMaxLength((n) => returnDetailOf(courier, n), '')));
+  assert.equal(ret.length, TEXT_MAX);
+  assert.equal(returnDetailOf(courier, ret), ret, 'the courier is not added twice');
+});
+
+test("a cancel reason: the API takes 500, 501 is refused (a job's own 200: setRecordStatus)", async () => {
+  const { recordStatus } = await import('@/server/contract/admin');
+  const at = (n: number) =>
+    recordStatus.body.safeParse({ table: 'sale_orders', id: 'x', remark: 'ก'.repeat(n) }).success;
+  assert.equal(at(TEXT_MAX), true);
+  assert.equal(at(TEXT_MAX + 1), false);
+});
+
+test('attachment remark: over the limit is refused, never cut (upload and video confirm)', async () => {
+  const { attachmentAdd, attachmentVideoConfirm } = await import('@/server/contract/jobs');
+  const file = new File(['x'], 'a.pdf');
+  const video = 'v20261028120000abcdef0123456789abcd.mp4';
+  for (const [form, base] of [
+    [attachmentAdd.form, { file, jobNo: 'J1' }],
+    [attachmentVideoConfirm.form, { file: video, jobNo: 'J1' }],
+  ] as const) {
+    const at = (n: number) => form.safeParse({ ...base, remark: 'ก'.repeat(n) });
+    const ok = at(500);
+    assert.ok(ok.success && ok.data.remark === 'ก'.repeat(500), 'all 500 kept');
+    assert.equal(at(501).success, false, '501 refused');
+  }
 });

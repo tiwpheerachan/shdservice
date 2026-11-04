@@ -30,7 +30,7 @@ import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { SELF_APPROVE, SELF_APPROVE_SALES, SO_CANCELLED, WAITING_CREATOR_ONLY } from '@/lib/validation/sale-order';
 import { trackingSchema } from '@/lib/validation/stock';
-import { trackingAccepts } from '@/lib/validation';
+import { TEXT_MAX, trackingAccepts } from '@/lib/validation';
 import { CodeInput } from '@/components/shared/code-input';
 import { useTourRestore } from '@/components/tour/tour';
 import { profileLock } from '@/lib/profile-lock';
@@ -267,7 +267,7 @@ function EditSaleOrder() {
                 <span className="text-muted-foreground">รอผู้สร้างกด ส่งขออนุมัติ</span>
               )}
               {approveId === 4 && loaded.approvedBy && (
-                <span className="text-muted-foreground">
+                <span className="wrap-anywhere text-muted-foreground">
                   โดย {loaded.approvedBy} วันที่ {loaded.approveDate}
                   {loaded.approveRemark && ` · หมายเหตุ: ${loaded.approveRemark}`}
                 </span>
@@ -282,13 +282,13 @@ function EditSaleOrder() {
               </p>
             )}
             {loaded.cancelled && (
-              <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+              <p role="note" className="wrap-anywhere rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
                 {SO_CANCELLED} — แก้ไข อนุมัติ หรือพิมพ์ไม่ได้
                 {loaded.cancelRemark && ` · เหตุผล: ${loaded.cancelRemark}`}
               </p>
             )}
             {decided && (
-              <p role="note" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+              <p role="note" className="wrap-anywhere rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
                 {approveId === 3 ? 'ส่งกลับแก้ไข' : 'ปฏิเสธ'}: {loaded.approveRemark || '(ไม่ได้ระบุเหตุผล)'}
                 {loaded.approvedBy && ` — โดย ${loaded.approvedBy}`}
                 {loaded.approveDate && ` วันที่ ${loaded.approveDate}`}
@@ -461,8 +461,13 @@ function EditSaleOrder() {
           </>
         }
       >
-        <Field label="เหตุผล" required hint={`${reason.length}/100 ตัวอักษร — ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้`}>
-          <Textarea rows={3} maxLength={100} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Field
+          label="เหตุผล"
+          required
+          hint={`${reason.length}/${TEXT_MAX} ตัวอักษร — ทุกคนที่เปิดใบนี้จะเห็นเหตุผลนี้`}
+          error={reason.trim().length > TEXT_MAX ? `เหตุผลยาวเกิน ${TEXT_MAX} ตัวอักษร` : undefined}
+        >
+          <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Modal>
     </>

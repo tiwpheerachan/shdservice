@@ -62,7 +62,8 @@ export function QuotationLineTable({
                 <td className="num px-3 py-2 text-muted-foreground">{i + 1}</td>
                 <td className="px-3 py-2">
                   {/* a locked line's product is recorded too (it sets the price): the picker's controls disabled */}
-                  <fieldset disabled={locked(l)} className="contents">
+                  {/* the width held here: a long line text would widen the column and push the money off the screen */}
+                  <fieldset disabled={locked(l)} className="w-[264px] min-w-0">
                     <ProductPicker
                       value={l.code}
                       fallbackName={l.name}
@@ -82,7 +83,6 @@ export function QuotationLineTable({
                 <td className="px-3 py-2">
                   <Input
                     aria-invalid={!!errors[`lines.${i}.detail`] || undefined}
-                    maxLength={100}
                     value={l.name}
                     onChange={(e) => {
                       upd(l.id, { name: e.target.value });

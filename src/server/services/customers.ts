@@ -21,6 +21,7 @@ import {
   phoneDigitVariants,
   taxIdDigits,
   withPrefix,
+  withoutBlankLabels,
   ADDRESS_PREFIXES,
 } from '@/lib/validation/customer';
 import { clean } from '@/lib/validation';
@@ -75,8 +76,9 @@ function addressLine(r: Row, places?: Places): string {
   ]
     .filter(Boolean)
     .join(' ');
-  if (str(r.customerAddress1) || str(r.customerAddress2)) return line;
-  return r.customerAddress?.trim() || line;
+  const composed = withoutBlankLabels(line);
+  if (str(r.customerAddress1) || str(r.customerAddress2)) return composed;
+  return withoutBlankLabels(r.customerAddress?.trim() ?? '') || composed;
 }
 
 /** withPrefix() in SQL: `prefix` + the name, unless it already starts with one of its level's prefixes */
@@ -360,21 +362,6 @@ async function placeKeys(tx: Tx, i: CustomerInput): Promise<PlaceKeys> {
     districtPk: i.districtId ? await pkOf(district, i.districtId, 'เขต / อำเภอ', tx) : null,
     subDistrictPk: i.subDistrictId ? await pkOf(subDistrict, i.subDistrictId, 'แขวง / ตำบล', tx) : null,
   };
-}
-
-/** ตำบล / อำเภอ / จังหวัด names for a customer's address uuids (a Customer as getCustomerByCode returns it) —
- *  blanks when not picked (legacy customers). */
-export async function addressNames(c: Pick<Customer, 'cityId' | 'districtId' | 'subDistrictId'> | null | undefined) {
-  const pick = async (q: Promise<{ n: string }[]> | null) => (q ? ((await q)[0]?.n ?? '') : '');
-  const sdId = c?.subDistrictId,
-    dId = c?.districtId,
-    cId = c?.cityId;
-  const [sdName, dName, pName] = await Promise.all([
-    pick(sdId ? db.select({ n: subDistrict.nameTh }).from(subDistrict).where(eq(subDistrict.id, sdId)).limit(1) : null),
-    pick(dId ? db.select({ n: district.nameTh }).from(district).where(eq(district.id, dId)).limit(1) : null),
-    pick(cId ? db.select({ n: province.nameTh }).from(province).where(eq(province.id, cId)).limit(1) : null),
-  ]);
-  return { subDistrict: sdName, district: dName, province: pName };
 }
 
 export type CustomerConflict = {

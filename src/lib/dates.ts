@@ -49,3 +49,31 @@ export function addDays(ymd: string, n: number): string {
 export function daysAgo(n: number): string {
   return addDays(today(), -n);
 }
+
+/** "2026-10-05" → "05/10/2026"; anything else is shown as it is */
+export function isoToDmy(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+/**
+ * What the date box shows while it is typed in: digits as dd/mm/yyyy, "5/" taken as day 05, and a pasted
+ * "2026-10-05" read as that date.
+ */
+export function maskDmy(raw: string): string {
+  const text = isoToDmy(raw.trim());
+  const digits = text
+    .replace(/^(\d)\D/, '0$1')
+    .replace(/^(\d\d)\D?(\d)\D/, '$10$2')
+    .replace(/\D/g, '')
+    .slice(0, 8);
+  return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
+}
+
+/** "05/10/2026" → "2026-10-05"; null = not a whole, real day. A Buddhist year (2569) is refused, not guessed at. */
+export function dmyToIso(text: string): string | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+  if (!m || Number(m[3]) < 1900 || Number(m[3]) > 2199) return null;
+  const iso = `${m[3]}-${m[2]}-${m[1]}`;
+  return addDays(iso, 0) === iso ? iso : null;
+}

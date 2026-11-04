@@ -36,7 +36,14 @@ import { RecordKey } from '@/lib/use-record';
 import { jobIdParam } from '@/data/keys';
 import { postJson, errMsg } from '@/lib/api';
 import { today as thaiToday } from '@/lib/dates';
-import { parseSwap, serialAccepts, swapRefundOf, swapRefundSchema, SWAP_STATUS_OPTIONS } from '@/lib/validation/job';
+import {
+  jobNoteHint,
+  parseSwap,
+  serialAccepts,
+  swapRefundOf,
+  swapRefundSchema,
+  SWAP_STATUS_OPTIONS,
+} from '@/lib/validation/job';
 import { CodeInput } from '@/components/shared/code-input';
 import { JobLinks, useJobChecks, Warn } from '@/components/jobs/job-checks';
 import { useTourRestore } from '@/components/tour/tour';
@@ -220,16 +227,16 @@ function SwapRefundForm() {
             <Section title="รายละเอียดการซ่อม" icon={ClipboardList}>
               <FieldGrid>
                 <MainSymptomField />
-                <Field label="อาการเสีย (อื่นๆ)" className="lg:col-span-2">
+                <Field
+                  label="อาการเสีย (อื่นๆ)"
+                  className="lg:col-span-2"
+                  error={act.errors.symptomOther}
+                  hint={jobNoteHint(form.symptomOther)}
+                >
                   <Textarea rows={2} value={form.symptomOther} onChange={(e) => set('symptomOther', e.target.value)} />
                 </Field>
-                <Field label="ผลการตรวจสอบ" wide error={act.errors.inspection}>
-                  <Textarea
-                    rows={3}
-                    maxLength={200}
-                    value={d.inspection}
-                    onChange={(e) => upd({ inspection: e.target.value })}
-                  />
+                <Field label="ผลการตรวจสอบ" wide error={act.errors.inspection} hint={jobNoteHint(d.inspection)}>
+                  <Textarea rows={3} value={d.inspection} onChange={(e) => upd({ inspection: e.target.value })} />
                 </Field>
               </FieldGrid>
             </Section>

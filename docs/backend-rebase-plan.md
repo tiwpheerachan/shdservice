@@ -361,8 +361,8 @@ scripts/migrate.ts     # npm run db:migrate — ถ้า reload แล้ว jo
 
 ## 29. พิมพ์ใบสั่งขาย = ใบปะหน้าพัสดุ A5 (2026-09-17)
 - ต้นแบบ `setupdata/sales_order/SO2600769_165248.pdf` (595×420pt = A5 แนวนอน) — ระบบเดิม "พิมพ์ใบสั่งขาย" คือใบปะหน้าพัสดุ ไม่ใช่เอกสารรายการสินค้า → `/print/sale-order/[no]` เขียนใหม่ทั้งหน้าแทนเอกสาร A4 ที่ทำไว้ตอน rebase (ตัดทิ้ง ตามที่ผู้ใช้ยืนยัน)
-- หน้า: `@page A5 landscape` · กรอบ 1.5px (ซ้าย/ขวา 5mm, บน 23mm, สูง 92mm ตามสัดส่วนต้นฉบับ) · โลโก้สัญลักษณ์ SHD ซ้ายบน + เลข SO ขวาบน · ผู้ส่ง 4 บรรทัด (`COMPANY.nameTh`, `addressLines[2]`, โทร) · "กรุณานำส่ง" + ชื่อ/ที่อยู่/เบอร์ ที่บันทึกในใบสั่งขาย (`sale_out_hd.customer_*` snapshot) · บรรทัด "ต. อ. จ." เติมชื่อจาก `mt_sub_district/mt_district/mt_city` ของลูกค้า ถ้าไม่ได้เลือกไว้พิมพ์ว่างเหมือนต้นฉบับ
-- `getSaleOrder().customerDetail` เพิ่ม `subDistrict / district / province` · `COMPANY.addressLines`
+- หน้า: `@page A5 landscape` · กรอบ 1.5px (ซ้าย/ขวา 5mm, บน 23mm, สูง 92mm ตามสัดส่วนต้นฉบับ) · โลโก้สัญลักษณ์ SHD ซ้ายบน + เลข SO ขวาบน · ผู้ส่ง 4 บรรทัด (`COMPANY.nameTh`, `addressLines[2]`, โทร) · "กรุณานำส่ง" + ชื่อ/ที่อยู่/เบอร์ ที่บันทึกในใบสั่งขาย (`sale_out_hd.customer_*` snapshot)
+- `COMPANY.addressLines`
 - ไม่ทำ: ตราประทับ, เอกสารใบสั่งขายเต็ม (ถ้าต้องการภายหลังกู้จาก git `a363a7d` ได้)
 
 ## 30. ใบส่งคืนสินค้า + ใบปะหน้าพัสดุของงาน (2026-09-17)

@@ -257,9 +257,9 @@ function CustomersPageInner() {
       header: 'ที่อยู่',
       hideBelow: 'lg',
       cell: (r) => (
-        <span className="line-clamp-2 flex max-w-[360px] gap-1.5 text-muted-foreground">
+        <span className="flex max-w-[360px] gap-1.5 text-muted-foreground" title={r.address}>
           <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
-          {r.address}
+          <span className="line-clamp-2 min-w-0 wrap-anywhere">{r.address}</span>
         </span>
       ),
     },

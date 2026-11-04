@@ -465,6 +465,7 @@ try {
   await expect([400], `${J4}/close`, { method: 'POST', body: {} });
   await expect([400], `${J4}/outsource`, { method: 'POST', body: {} });
   await expect([400], `${J4}/repair`, { method: 'POST', body: {} });
+  await expect([400], `${J4}/repair`, { method: 'POST', body: { engineerSymptoms: 'not a list' } });
   await expect([400], `${J4}/swap-refund`, { method: 'POST', body: {} });
   await test("POST /api/jobs/TDJ0004/swap-refund → 400: a status off the Swap list (19 = Refund's); no New Serial asked", async () => {
     const { n } = (

@@ -66,13 +66,15 @@ export async function RepairCloseDoc({ no }: { no: string }) {
         </dl>
 
         <section className="rounded border border-neutral-400">
-          <h2 className="border-b border-neutral-400 bg-neutral-100 px-3 py-1 font-semibold">รายละเอียดการซ่อม</h2>
+          <h2 className="break-after-avoid border-b border-neutral-400 bg-neutral-100 px-3 py-1 font-semibold">
+            รายละเอียดการซ่อม
+          </h2>
           <dl className="space-y-0.5 px-3 py-2">
             <div className="grid grid-cols-2 gap-6">
               <Row k="ชื่อนายช่าง" v={dash(j.repairedBy || j.engineer)} />
               <Row k="วันที่ซ่อมเสร็จ" v={<span className="num">{dash(j.repairedDate)}</span>} />
             </div>
-            <Row k="อาการเสีย ที่พบ" v={dash(j.engineerSymptom)} />
+            <Row k="อาการเสีย ที่พบ" v={dash(j.engineerSymptoms.join(', '))} />
             <Row k="วิธีการซ่อม" v={dash(j.repairDetail)} />
             <Row
               k="รายการอะไหล่ ที่ใช้"
@@ -82,7 +84,7 @@ export async function RepairCloseDoc({ no }: { no: string }) {
                     {parts.map((p) => (
                       <li key={p.logId} className="flex gap-2">
                         <span className="num">{p.code}</span>
-                        <span className="flex-1">{p.name}</span>
+                        <span className="min-w-0 flex-1 wrap-anywhere">{p.name}</span>
                         <span className="num">x {used(p)}</span>
                       </li>
                     ))}
