@@ -10,7 +10,7 @@ import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/options';
 import type { Customer } from '@/data/types';
 import { TTL_MASTER, useApi, useProvinces } from '@/data/db';
 import { errMsg, postJson, qs } from '@/lib/api';
-import type { FieldErrors } from '@/lib/validation';
+import { TEXT_MAX, type FieldErrors } from '@/lib/validation';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useToast } from '@/components/ui/toast';
@@ -250,7 +250,7 @@ export function CustomerFields({
         hint={
           editing && !editing.cityId && form.address1
             ? 'ที่อยู่เดิมจากระบบเก่ายังไม่แยกจังหวัด/อำเภอ — ถ้าจะเลือกจังหวัดด้านล่าง กรุณาตัดส่วนตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ออกจากช่องนี้ก่อน ไม่เช่นนั้นที่อยู่จะซ้ำ'
-            : count(form.address1, 100)
+            : count(form.address1, TEXT_MAX)
         }
       >
         <Textarea
@@ -261,7 +261,7 @@ export function CustomerFields({
         />
       </Field>
 
-      <Field label="ซอย - ถนน" error={errors.address2} hint={count(form.address2, 100)}>
+      <Field label="ซอย - ถนน" error={errors.address2} hint={count(form.address2, TEXT_MAX)}>
         <Input value={form.address2} onChange={(e) => set('address2', e.target.value)} placeholder="ซอย / ถนน" />
       </Field>
       <Field label="จังหวัด" lookup={lookups.provinces}>

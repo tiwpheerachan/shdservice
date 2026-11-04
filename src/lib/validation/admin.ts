@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { clean, cleanCode, codeField, maxText, moneyField } from './index';
+import { clean, cleanCode, codeField, maxText, moneyField, TEXT_MAX } from './index';
 import { isFilled } from './job';
 import { isThaiTaxId, phoneFormatOk, taxIdDigits } from './customer';
 
@@ -29,10 +29,10 @@ export const MASTER_NAME_LABEL = {
 export const MASTER_DETAIL_MAX: Record<keyof typeof MASTER_NAME_LABEL, number> = {
   categories: 50,
   manufacturers: 50,
-  colors: 100,
-  job_types: 100,
-  product_types: 100,
-  symptoms: 100,
+  colors: TEXT_MAX,
+  job_types: TEXT_MAX,
+  product_types: TEXT_MAX,
+  symptoms: TEXT_MAX,
 };
 
 /** master / model names compare ignoring case and every space ("POCO F5" = "poco  f5" = "POCOF5") */
@@ -46,7 +46,7 @@ export function masterSchema(nameLabel = 'ชื่อ', opts: { days?: boolean;
     .looseObject({
       name: z.string().optional(),
       days: z.union([z.string(), z.number()]).optional(),
-      detail: maxText(opts.detailMax ?? 100, 'รายละเอียด '),
+      detail: maxText(opts.detailMax ?? TEXT_MAX, 'รายละเอียด '),
       group: maxText(50, 'กลุ่ม '),
     })
     .superRefine((v, ctx) => {

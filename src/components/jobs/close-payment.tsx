@@ -168,7 +168,7 @@ function PaymentFields({
   slip: string;
   onPickSlip: Parameters<typeof FileInput>[0]['onFile'];
 }) {
-  // the save puts the payment date in front of the note (one varchar(100))
+  // the save puts the payment date in front of the note (one column)
   const payDetailMax = noteMaxLength((n) => paymentDetailOf(d.payDate, n), d.payDetail);
   return (
     <FieldGrid cols={2}>
@@ -243,13 +243,7 @@ function PaymentFields({
         error={errors['payment.detail']}
         hint={`${d.payDetail.length}/${payDetailMax} ตัวอักษร${d.payDate ? ' (บันทึกพร้อมวันที่ชำระ)' : ''}`}
       >
-        <Textarea
-          rows={2}
-          maxLength={payDetailMax}
-          value={d.payDetail}
-          disabled={!!lock}
-          onChange={(e) => upd({ payDetail: e.target.value })}
-        />
+        <Textarea rows={2} value={d.payDetail} disabled={!!lock} onChange={(e) => upd({ payDetail: e.target.value })} />
       </Field>
     </FieldGrid>
   );

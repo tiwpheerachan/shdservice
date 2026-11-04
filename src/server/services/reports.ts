@@ -1,5 +1,6 @@
 import 'server-only';
 import { customerAddressSql } from '@/server/services/customers';
+import { withoutBlankLabels } from '@/lib/validation/customer';
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type AnyColumn } from 'drizzle-orm';
 import { alias, type PgSelect } from 'drizzle-orm/pg-core';
 import { db, withStatementTimeout, type Tx } from '@/db/client';
@@ -474,6 +475,7 @@ async function saleRows(p: PageQuery, limit: number, offset: number): Promise<Q>
     total: totalOf(counted),
     rows: rows.map((r) => ({
       ...soOut(r),
+      address: r.address && withoutBlankLabels(r.address),
       approveDate: fmtDateTime(r.approveDate),
       deliveryDate: fmtDateTime(r.deliveryDate),
     })),

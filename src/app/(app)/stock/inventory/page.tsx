@@ -118,7 +118,11 @@ export default function InventoryPage() {
       key: 'remark',
       header: 'Remark',
       hideBelow: 'xl',
-      cell: (r) => <span className="text-muted-foreground">{r.remark || '—'}</span>,
+      cell: (r) => (
+        <span className="line-clamp-2 max-w-[360px] wrap-anywhere text-muted-foreground" title={r.remark}>
+          {r.remark || '—'}
+        </span>
+      ),
     },
     {
       key: 'action',
@@ -281,7 +285,7 @@ export default function InventoryPage() {
                 </table>
               </TableScroll>
             </div>
-            <p className="text-xs text-muted-foreground">หมายเหตุ: {viewDoc.remark || '—'}</p>
+            <p className="wrap-anywhere text-xs text-muted-foreground">หมายเหตุ: {viewDoc.remark || '—'}</p>
           </div>
         )}
       </Modal>

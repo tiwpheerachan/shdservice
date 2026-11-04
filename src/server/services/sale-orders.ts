@@ -23,7 +23,8 @@ import { actorName, audit, diff } from '@/server/audit';
 import { orderBy, likeTerm, offsetOf, totalOf, ymd, type Page, type PageQuery } from '@/server/paging';
 import { fmtDateTime, money, nowThai, num, str, type FieldData } from '@/server/mappers/format';
 import { assertFiguresEditable, isLegacyRow } from '@/server/legacy-lock';
-import { customerForDocument, getCustomerById, addressNames } from './customers';
+import { customerForDocument, getCustomerById } from './customers';
+import { withoutBlankLabels } from '@/lib/validation/customer';
 import { issuingProfile, profileIdOf } from './document-profiles';
 import { RS, statusFilter, type StatusMode } from '@/server/record-status';
 import {
@@ -246,10 +247,6 @@ export type SaleOrderDetail = SaleOrder & {
     phone: string;
     line: string;
     email: string;
-    /** ตำบล / อำเภอ / จังหวัด names from the customer master (blank when the customer has no province picked) — for the shipping label's "ต. อ. จ." line */
-    subDistrict: string;
-    district: string;
-    province: string;
     /** the customer's status now — an Inactive one gets the picker's notice on the form */
     status: string;
   };
@@ -350,7 +347,6 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
     profileIdOf(hd.documentProfilePk),
     isLegacyRow('sale_order', hd.pk),
   ]);
-  const { subDistrict, district, province } = await addressNames(cust);
   // one source: the snapshot taken at approval (legacy orders: when the customer was picked), else the customer now
   const snap = hd.customerName != null;
   return {
@@ -359,13 +355,10 @@ export async function getSaleOrder(no: string): Promise<SaleOrderDetail | null> 
       code: r.customerCode ?? '',
       taxId: (snap ? hd.customerCardId : cust?.taxId) ?? '',
       name: (snap ? hd.customerName : cust?.name) ?? '',
-      address: (snap ? hd.customerAddress : cust?.address) ?? '',
+      address: snap ? withoutBlankLabels(hd.customerAddress ?? '') : (cust?.address ?? ''),
       phone: (snap ? hd.customerPhoneNumber : cust?.phone) ?? '',
       line: cust?.line ?? '',
       email: cust?.email ?? '',
-      subDistrict,
-      district,
-      province,
       status: cust?.status ?? 'Active',
     },
     cancelRemark: hd.documentCancelRemark ?? '',
@@ -783,7 +776,7 @@ export async function approveSaleOrder(
     const snapshot = live && {
       customerCardId: live.taxId.slice(0, 50),
       customerName: live.name.slice(0, 200),
-      customerAddress: live.address.slice(0, 500),
+      customerAddress: live.address,
       customerPhoneNumber: live.phone.slice(0, 50),
     };
     await tx
@@ -792,7 +785,7 @@ export async function approveSaleOrder(
         approveStatusId: statusId,
         approveDate: nowThai(),
         approvedByAppUserPk: byUserId,
-        approveRemark: reason, // approveSchema: ≤ 100 (the column)
+        approveRemark: reason, // approveSchema: ≤ the column
         ...snapshot,
       })
       .where(eq(saleOrder.pk, hd.pk));

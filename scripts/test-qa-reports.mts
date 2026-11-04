@@ -17,7 +17,8 @@ const { pool } = await import('@/db/client');
 const { signSession, SESSION_COOKIE } = await import('@/lib/session');
 const { reportPage, jobReportSummary, quotationReportSummary, saleOrderReportSummary } =
   await import('@/server/services/reports');
-const { filtersFromQuery } = await import('@/server/services/jobs');
+const { closeJob, filtersFromQuery, saveRepair } = await import('@/server/services/jobs');
+const { today } = await import('@/lib/dates');
 const { quotationFiltersFromQuery } = await import('@/server/services/quotations');
 const { saleOrderFiltersFromQuery } = await import('@/server/services/sale-orders');
 const { REPORT_SPECS, JOB_BOUNCE, ONHAND_ALL_COLORS, jobReportQuery, modelsOfBrand } =
@@ -41,8 +42,9 @@ const STAFF = [
 ];
 
 await pool.query(`
-  DELETE FROM role_permission WHERE user_type IN ('QRP Report', 'QRP Jobs', 'QRP Stock');
+  DELETE FROM role_permission WHERE user_type IN ('QRP Report', 'QRP Jobs', 'QRP Stock', 'QRP Staff');
   INSERT INTO role_permission (user_type, module_name, can_insert, can_edit, can_delete, can_view) VALUES
+    ('QRP Staff', 'Job Take', false, false, false, true),
     ('QRP Report', 'Report', false, false, false, true),
     ('QRP Jobs', 'Job Management', false, false, false, true),
     ('QRP Stock', 'Report', false, false, false, true),
@@ -86,7 +88,8 @@ await pool.query(`
   DELETE FROM sale_order_line WHERE sale_order_pk IN (SELECT pk FROM sale_order WHERE sale_order_no LIKE 'QRPSO%');
   DELETE FROM stock_move WHERE stock_move_no = 'WHO-QRP';
   DELETE FROM sale_order WHERE sale_order_no LIKE 'QRPSO%';
-  DELETE FROM job WHERE job_no LIKE 'QRPJ%';
+  DELETE FROM job_status_log WHERE job_pk IN (SELECT pk FROM job WHERE job_no LIKE 'QRPR%');
+  DELETE FROM job WHERE job_no LIKE 'QRPJ%' OR job_no LIKE 'QRPR%';
   DELETE FROM product_compatible_model WHERE product_pk BETWEEN 9941 AND 9943;
   DELETE FROM product_stock WHERE product_pk BETWEEN 9941 AND 9943;
   DELETE FROM product WHERE pk BETWEEN 9941 AND 9943 OR product_code LIKE 'QRPP%';
@@ -299,6 +302,47 @@ await test('repair_job: by วันที่ซ่อมเสร็จ, with t
     [r.receptionDate, r.so, r.partsReplaced, r.repairDetail, r.engineerRemark, r.repairedDate, r.remark],
     ['2026-09-11', 'SO-QRP-1', 'จอ LCD', 'เปลี่ยนจอ', 'ok', '2026-09-15 10:00', 'หมายเหตุ QRP'],
   );
+});
+await test("ช่างค้น วันนี้ + ชื่อตัวเอง + ซ่อมเสร็จ: a job opened earlier, saved through the repair page; the engineer is the job's, not who saved; cards = rows = export", async () => {
+  await pool.query(`
+    INSERT INTO job (job_no, record_status, job_create_date, job_status_id, engineer_app_user_pk, model_pk)
+    SELECT v.no, 'ACTIVE', '2026-10-27 16:28', 1, v.eng::bigint, (SELECT pk FROM model WHERE model_code = 'TST-M')
+      FROM (VALUES ('QRPR01', null), ('QRPR02', null), ('QRPR03', '9941')) v(no, eng)`);
+  await saveRepair('QRPR01', { status: 'ซ่อมเสร็จ' } as never, 9942); // Job Take: takes the job with no engineer
+  await saveRepair('QRPR02', { status: 'ซ่อมเสร็จ' } as never, U.admin.id); // no Job Take: the job keeps no engineer
+  await saveRepair('QRPR03', { status: 'ซ่อมเสร็จ' } as never, 9942); // someone else's job: it stays theirs
+  const t = today();
+  const f = { no: 'QRPR', dateBy: 'repaired', from: t, to: t, statusId: '5' };
+  const seen = async (engineer: string) => {
+    const g = engineer ? { ...f, engineer } : f;
+    const rows = col(await run('repair_job', g));
+    assert.equal((await jobReportSummary(filtersFromQuery(g), '', g)).total, rows.length, 'cards = rows');
+    return rows;
+  };
+  assert.deepEqual(await seen(''), ['QRPR03', 'QRPR02', 'QRPR01']);
+  assert.deepEqual(await seen(await uuidOf(9942)), ['QRPR01']);
+  const doc = await (
+    await get(
+      'export',
+      'report_repair_job',
+      `${new URLSearchParams({ ...f, engineer: await uuidOf(9942) })}&format=doc`,
+      U.admin2,
+    )
+  ).text();
+  assert.ok(
+    doc.includes('QRPR01') && !doc.includes('QRPR02') && !doc.includes('QRPR03'),
+    'the export has the same rows',
+  );
+  assert.deepEqual(await seen(await uuidOf(9941)), ['QRPR03']);
+  assert.deepEqual(await seen(await uuidOf(U.admin.id)), []);
+  // สถานะงาน = the status now: closed the same day, it leaves ซ่อมเสร็จ and keeps its repair date
+  await closeJob(
+    'QRPR01',
+    { status: 'ปิดงาน (Complete)', payment: { type: 'เงินสด' }, return: { type: 'รับเอง', date: t } } as never,
+    9943,
+  );
+  assert.deepEqual(await seen(await uuidOf(9942)), []);
+  assert.deepEqual(col(await run('repair_job', { ...f, statusId: '', engineer: await uuidOf(9942) })), ['QRPR01']);
 });
 await test('close_job: closed jobs by วันที่ปิดงานซ่อม, closer + payment columns', async () => {
   const rows = await run('close_job', { ...J, dateBy: 'closed', statusGroup: 'Finished' });

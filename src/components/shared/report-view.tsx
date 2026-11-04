@@ -261,7 +261,7 @@ export function ReportView<T extends Record<string, unknown>>({
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {kpis.map((k) => (
             <div key={k.label} className="surface p-4">
-              <p className="truncate text-2xs text-muted-foreground">{k.label}</p>
+              <p className="text-2xs text-muted-foreground">{k.label}</p>
               <p className={cn('num mt-1 text-xl font-semibold tracking-tight', k.tone && toneMap[k.tone])}>
                 {k.value}
               </p>

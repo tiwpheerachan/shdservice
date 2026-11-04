@@ -15,10 +15,11 @@ import type { JobChecks } from '@/server/services/job-checks';
 import { today } from '@/lib/dates';
 import { shipperFor } from '@/lib/shipper';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
-import { clean, cleanCode } from '@/lib/validation';
+import { clean, cleanCode, textHint } from '@/lib/validation';
 import {
   imeiAccepts,
   isRequiredFor,
+  jobNoteHint,
   NO_SERIAL,
   serialAccepts,
   soAccepts,
@@ -309,23 +310,15 @@ export function NoteField({
   f: { s, set, errors },
   k,
   label,
-  maxLength,
   placeholder,
 }: P & {
   k: 'symptomOther' | 'remark';
   label: string;
-  maxLength: number;
   placeholder?: string;
 }) {
   return (
-    <Field label={label} className="lg:col-span-2" error={errors[k]}>
-      <Textarea
-        rows={2}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        value={s[k]}
-        onChange={(e) => set(k, e.target.value)}
-      />
+    <Field label={label} className="lg:col-span-2" error={errors[k]} hint={jobNoteHint(s[k])}>
+      <Textarea rows={2} placeholder={placeholder} value={s[k]} onChange={(e) => set(k, e.target.value)} />
     </Field>
   );
 }
@@ -373,10 +366,9 @@ export function SuggestNoteField({
   placeholder,
 }: P & { k: 'equipment' | 'fault'; label: string; placeholder: string }) {
   return (
-    <Field label={label} className="lg:col-span-2" error={errors[k]}>
+    <Field label={label} className="lg:col-span-2" error={errors[k]} hint={textHint(s[k])}>
       <SuggestInput
         field={k === 'equipment' ? 'accessories' : 'defects'}
-        maxLength={100}
         placeholder={placeholder}
         value={s[k]}
         onChange={(e) => set(k, e.target.value)}
@@ -388,10 +380,9 @@ export function SuggestNoteField({
 /** Shop Name of เปิดงาน: free text (511 spellings in the legacy data), the names typed before as suggestions */
 export function ShopSuggestField({ f: { s, set, errors }, c }: Checked) {
   return (
-    <Field label="Shop Name" error={errors.shopName}>
+    <Field label="Shop Name" error={errors.shopName} hint={textHint(s.shopName)}>
       <SuggestInput
         field="shop"
-        maxLength={100}
         placeholder="- - เลือกหรือพิมพ์ - -"
         value={s.shopName}
         onChange={(e) => set('shopName', e.target.value)}
@@ -404,13 +395,8 @@ export function ShopSuggestField({ f: { s, set, errors }, c }: Checked) {
 /** Shop Name elsewhere: a plain input */
 export function ShopPlainField({ f: { s, set, errors } }: P) {
   return (
-    <Field label="Shop Name" error={errors.shopName}>
-      <Input
-        placeholder="ชื่อร้านค้า"
-        maxLength={100}
-        value={s.shopName}
-        onChange={(e) => set('shopName', e.target.value)}
-      />
+    <Field label="Shop Name" error={errors.shopName} hint={textHint(s.shopName)}>
+      <Input placeholder="ชื่อร้านค้า" value={s.shopName} onChange={(e) => set('shopName', e.target.value)} />
     </Field>
   );
 }

@@ -730,8 +730,8 @@ export function ProductSection({
       <SuggestNoteField f={f} k="equipment" label="อุปกรณ์ (ที่นำส่ง)" placeholder="เช่น อะแดปเตอร์, รีโมท, กล่อง" />
       <SuggestNoteField f={f} k="fault" label="จุดตำหนิ" placeholder="รอยขีดข่วน / รอยบุบ ฯลฯ" />
       <MainSymptomField />
-      <NoteField f={f} k="symptomOther" label="อาการเสีย (อื่นๆ)" maxLength={200} />
-      <NoteField f={f} k="remark" label="หมายเหตุ" maxLength={2000} />
+      <NoteField f={f} k="symptomOther" label="อาการเสีย (อื่นๆ)" />
+      <NoteField f={f} k="remark" label="หมายเหตุ" />
     </>
   );
 

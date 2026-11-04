@@ -46,17 +46,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     });
     const c = o.customerDetail;
     const co = await profileForDocument(o.documentProfileId);
-    return (
-      <ShippingLabel
-        profile={co}
-        docNo={o.no}
-        name={c.name}
-        address={c.address}
-        phone={c.phone}
-        subDistrict={c.subDistrict}
-        district={c.district}
-        province={c.province}
-      />
-    );
+    return <ShippingLabel profile={co} docNo={o.no} name={c.name} address={c.address} phone={c.phone} />;
   });
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { documentProfileSchema, shippingProfileSchema, userFields } from '@/lib/validation/admin';
-import { maxText } from '@/lib/validation';
+import { maxText, TEXT_MAX } from '@/lib/validation';
 import {
   CONFLICT,
   JSON_BODY,
@@ -193,9 +193,9 @@ export const recordStatus = defineOperation({
     ),
     status: choice(['ACTIVE', 'INACTIVE', 'DELETED']).meta({ description: 'Anything else: decided by `deleted`.' }),
     deleted: flag.meta({ description: 'Without `status`: `true` = DELETED, otherwise ACTIVE.' }),
-    remark: maxText(200, 'เหตุผล').meta({
+    remark: maxText(TEXT_MAX, 'เหตุผล').meta({
       description:
-        'DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark (≤ 100), a job / quotation on its history line. Other tables ignore it.',
+        'DELETED on jobs / quotations / sale_orders: the reason, required (400 without one) — a sale order keeps it in document_cancel_remark, a job (≤ 200) / quotation on its history line. Other tables ignore it.',
     }),
   }),
   invalid: { body: 400 },

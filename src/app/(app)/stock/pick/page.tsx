@@ -18,6 +18,7 @@ import { api, postJson, errMsg, qs } from '@/lib/api';
 import { useMountTime } from '@/lib/use-client';
 import { isoDateTime } from '@/lib/dates';
 import { useClearOnChange, useFormErrors } from '@/lib/use-form-errors';
+import { TEXT_MAX } from '@/lib/validation';
 import { issueSchema } from '@/lib/validation/stock';
 import { useTourRestore } from '@/components/tour/tour';
 
@@ -518,9 +519,8 @@ export default function PickPage() {
               />
             </Field>
           )}
-          <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
+          <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/${TEXT_MAX} ตัวอักษร`}>
             <Input
-              maxLength={100}
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
               placeholder={isReturn ? 'หมายเหตุการรับคืน…' : 'หมายเหตุการจ่ายออก…'}

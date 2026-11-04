@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { cleanCode, codeField, isoDateString, maxText } from './index';
+import { cleanCode, codeField, isoDateString, maxText, TEXT_MAX } from './index';
 import { noRepeatedLine, REPEATED_LINE } from './job';
 import { JOB_NO_RE } from './quotation';
 import { trackingField } from './sale-order';
@@ -25,15 +25,18 @@ const text = (max: number) =>
 const lines = <T extends z.ZodRawShape>(shape: T) =>
   z.array(z.looseObject(shape)).min(1, 'ต้องมีอย่างน้อย 1 รายการ').max(500, 'รายการมากเกิน 500 บรรทัด');
 
-/** รับเข้า: supplier + remark share inventory_remark varchar(100) as "Supplier: X · remark" (10 + 40 + 3 + 47) */
+const SUPPLIER_MAX = 40;
+/** รับเข้า: supplier + remark share stock_move.remark as "Supplier: X · remark" — the column less the rest (10 + 40 + 3) */
+export const RECEIVE_REMARK_MAX = TEXT_MAX - 'Supplier: '.length - SUPPLIER_MAX - ' · '.length;
+
 export const receiveSchema = z.looseObject({
   // back-dating within a year (a late-keyed delivery); older is a typo (2025 → 2015) that would sit in old reports
   date: isoDateString('ต้องระบุวันที่รับเข้า')
     .refine((d) => d <= today(), 'วันที่รับเข้าต้องไม่เกินวันนี้')
     .refine((d) => d >= addDays(today(), -365), 'วันที่รับเข้าย้อนหลังได้ไม่เกิน 1 ปี'),
   poRef: codeField(/^[A-Z0-9][A-Z0-9/-]{0,49}$/, 'เลขที่ PO ใช้ได้เฉพาะ A-Z 0-9 / - (ไม่เกิน 50 ตัว)'),
-  supplier: maxText(40, 'Supplier '),
-  remark: maxText(47, 'หมายเหตุ '),
+  supplier: maxText(SUPPLIER_MAX, 'Supplier '),
+  remark: maxText(RECEIVE_REMARK_MAX, 'หมายเหตุ '),
   lines: lines({ code: z.string().min(1, 'ต้องระบุรหัสอะไหล่').max(50), qty }),
 });
 
@@ -52,7 +55,7 @@ export const issueSchema = z
       .max(50, 'ยาวเกิน 50 ตัวอักษร')
       .nullish()
       .transform((v) => v ?? ''),
-    remark: maxText(100, 'หมายเหตุ '),
+    remark: maxText(TEXT_MAX, 'หมายเหตุ '),
     lines: lines({ logId: rowId.nullish(), dtId: rowId.nullish(), code: z.string().max(50).nullish(), qty }).refine(
       noRepeatedLine,
       REPEATED_LINE,
@@ -79,7 +82,7 @@ export const assignSchema = z.looseObject({
 
 export const approveSchema = z.looseObject({
   decision: z.enum(['approve', 'deny', 'reject'], 'การอนุมัติไม่ถูกต้อง'),
-  remark: maxText(100, 'หมายเหตุ '), // sale_order.approve_remark varchar(100)
+  remark: maxText(TEXT_MAX, 'หมายเหตุ '),
 });
 
 /** เลขพัสดุของใบสั่งขาย — `prev` = the number stored now (an unchanged legacy value passes) */

@@ -70,6 +70,8 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
       <style>{`
         .qt table { border-collapse: collapse; width: 100%; }
         .qt th, .qt td { border: 0; padding: 0; background: transparent; font-weight: inherit; vertical-align: top; }
+        /* an unbroken run wraps: it would otherwise widen the table past the paper and take the money columns with it */
+        .qt td { overflow-wrap: anywhere; }
         .qt .grid-b { border: 1px solid #000; }
         /* explicit cell rules — Tailwind border/padding utilities lose to the .qt td reset above */
         .qt td.pad { padding: 4px 8px 3px; }
@@ -87,7 +89,9 @@ export async function QuotationDoc({ no, forCustomer }: { no: string; forCustome
         /* the item table stretches so the page is always one full A4 like the legacy form */
         .qt { display: flex; flex-direction: column; }
         .qt .items-wrap { flex: 1 1 auto; display: flex; flex-direction: column; }
-        .qt .items { flex: 1 1 auto; height: 100%; }
+        /* no height: 100% — a table running onto a next sheet would keep that height and lie over what follows it */
+        .qt .items { flex: 1 1 auto; }
+        .qt .items tbody tr:not(.fill), .qt .sum { break-inside: avoid; }
         .qt .items tbody tr.fill { height: 100%; }
         .qt .items tbody tr.fill td { height: 100%; }
         /* + the 10mm @page margin (globals.css) = the legacy 10/12/12mm frame; 276mm = a hair under the 277mm

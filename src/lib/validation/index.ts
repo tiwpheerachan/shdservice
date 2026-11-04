@@ -127,6 +127,11 @@ export const trackingField = (prev?: string | null) =>
       return !c || TRACKING_RE.test(c) || (prev != null && c === cleanTracking(prev));
     }, 'เลขพัสดุใช้ได้เฉพาะ A-Z 0-9 และ - (6–40 ตัว ไม่มีภาษาไทยหรือช่องว่าง)');
 
+/** the forms' free-text boxes (remarks, addresses, อุปกรณ์ …): varchar(500) columns, a longer value is refused */
+export const TEXT_MAX = 500;
+/** those boxes have no maxLength (it cut a paste silently): the rules refuse in Thai; a count once near the limit */
+export const textHint = (v: string) => (v.length > TEXT_MAX - 50 ? `${v.length} / ${TEXT_MAX} ตัวอักษร` : undefined);
+
 /** free text of at most `max` characters (after clean) — the column length, so nothing is cut silently */
 export const maxText = (max: number, label = '') =>
   z

@@ -19,6 +19,7 @@ import { postJson, errMsg, exportXlsx, isStale } from '@/lib/api';
 import { useTable } from '@/data/db';
 import { useAccess } from '@/lib/use-access';
 import { useFormErrors, useClearOnChange } from '@/lib/use-form-errors';
+import { TEXT_MAX, textHint } from '@/lib/validation';
 import { MASTER_DETAIL_MAX, masterSchema } from '@/lib/validation/admin';
 import { ExportButton } from '@/components/shared/export-button';
 import { useFilterDraft } from '@/lib/use-filter-draft';
@@ -436,9 +437,9 @@ export function MasterTable({ config }: { config: MasterConfig }) {
             </Field>
           )}
           {config.detailLabel && (
-            <Field label={config.detailLabel} wide error={fe.errors.detail}>
+            <Field label={config.detailLabel} wide error={fe.errors.detail} hint={textHint(form.detail)}>
               <Textarea
-                maxLength={MASTER_DETAIL_MAX[config.kind]}
+                maxLength={MASTER_DETAIL_MAX[config.kind] < TEXT_MAX ? MASTER_DETAIL_MAX[config.kind] : undefined}
                 value={form.detail}
                 onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
                 rows={3}

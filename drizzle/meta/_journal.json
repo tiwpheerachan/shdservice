@@ -57,6 +57,34 @@
       "when": 1762128000000,
       "tag": "0007_job_status_no_fault_in_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1762214400000,
+      "tag": "0008_job_note_length",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1762300800000,
+      "tag": "0009_job_engineer_symptom",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1762387200000,
+      "tag": "0010_free_text_length",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1762473600000,
+      "tag": "0011_merge_duplicate_engineers",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import type { Column } from '@/components/ui/data-table';
 import type { Params } from '@/data/keys';
 import { exportXlsx } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
-import { baht, int } from '@/lib/utils';
+import { baht, cn, int } from '@/lib/utils';
 import { REPORT_SPECS, type ReportKey, type ReportRow } from './report-specs';
 
 /** a report's table columns from its spec, in the legacy order; ราคาทุน only with Product Cost (the API leaves it
@@ -29,7 +29,18 @@ export function useReportColumns(report: ReportKey): Column<ReportRow>[] {
               const v = r[c.key];
               if (c.money) return baht(Number(v ?? 0));
               if (c.num) return int(Number(v ?? 0));
-              return <span className="line-clamp-2">{v}</span>;
+              // the whole text, line breaks kept; only a very long note scrolls inside its cell, so its row stays
+              // readable — paper gets all of it. A code column (job no, serial) keeps a code on one line
+              return (
+                <span
+                  className={cn(
+                    'block max-h-48 overflow-y-auto whitespace-pre-wrap print:max-h-none print:overflow-visible',
+                    (c.width ?? 0) >= 22 ? '[overflow-wrap:anywhere]' : 'break-words',
+                  )}
+                >
+                  {v}
+                </span>
+              );
             },
           };
         }),

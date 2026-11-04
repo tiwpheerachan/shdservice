@@ -15,10 +15,10 @@ import { useAccess } from '@/lib/use-access';
 import { baht } from '@/lib/utils';
 import type { JobDetail } from '@/lib/use-job';
 import type { FieldErrors } from '@/lib/validation';
-import { REOPEN_LOCKED } from '@/lib/validation/job';
+import { jobNoteHint, REOPEN_LOCKED } from '@/lib/validation/job';
 
 export type RepairDetail = {
-  engineerSymptom: string;
+  engineerSymptoms: string[];
   repairDetail: string;
   engineerRemark: string;
   newSerial: string;
@@ -146,20 +146,37 @@ export function RepairDetailSection({
   return (
     <Section title="รายละเอียดการซ่อม" icon={Wrench}>
       <FieldGrid>
-        <Field label="อาการเสียที่ตรวจพบ" wide hint="เลือกได้ 1 อาการ" lookup={symptomLists.lookup}>
+        <Field
+          label="อาการเสียที่ตรวจพบ"
+          wide
+          error={act.errors.engineerSymptoms}
+          hint={
+            detail.engineerSymptoms.length
+              ? `เลือกแล้ว ${detail.engineerSymptoms.length} อาการ`
+              : 'ค้นหาแล้วติ๊กได้หลายอาการ'
+          }
+          lookup={symptomLists.lookup}
+        >
           <SymptomPicker
-            multiple={false}
-            value={detail.engineerSymptom ? [detail.engineerSymptom] : []}
-            onChange={(names) => setDetail((d) => ({ ...d, engineerSymptom: names[0] ?? '' }))}
+            primary={false}
+            value={detail.engineerSymptoms}
+            onChange={(names) => {
+              setDetail((d) => ({ ...d, engineerSymptoms: names }));
+              act.clear('engineerSymptoms');
+            }}
             {...symptomLists.picker}
             suggestedLabel="อาการที่พบบ่อยของรุ่นนี้"
             placeholder="พิมพ์ค้นหาอาการที่ตรวจพบ…"
           />
         </Field>
-        <Field label="วิธีการซ่อม" className="lg:col-span-2" error={act.errors.repairDetail}>
+        <Field
+          label="วิธีการซ่อม"
+          className="lg:col-span-2"
+          error={act.errors.repairDetail}
+          hint={jobNoteHint(detail.repairDetail)}
+        >
           <Textarea
             rows={3}
-            maxLength={200}
             placeholder="อธิบายขั้นตอนการซ่อมที่ดำเนินการ"
             value={detail.repairDetail}
             onChange={(e) => {
@@ -168,10 +185,14 @@ export function RepairDetailSection({
             }}
           />
         </Field>
-        <Field label="หมายเหตุ" className="lg:col-span-2" error={act.errors.engineerRemark}>
+        <Field
+          label="หมายเหตุ"
+          className="lg:col-span-2"
+          error={act.errors.engineerRemark}
+          hint={jobNoteHint(detail.engineerRemark)}
+        >
           <Textarea
             rows={3}
-            maxLength={200}
             value={detail.engineerRemark}
             onChange={(e) => {
               setDetail((d) => ({ ...d, engineerRemark: e.target.value }));

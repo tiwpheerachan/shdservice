@@ -21,6 +21,7 @@ export function SymptomPicker({
   suggested = [],
   suggestedLabel = 'อาการที่พบบ่อยของรุ่นนี้',
   multiple = true,
+  primary = true,
   disabled = false,
   placeholder = 'พิมพ์ค้นหาอาการเสีย… เช่น แบต, จอ, ชาร์จ',
   loading = false,
@@ -32,6 +33,8 @@ export function SymptomPicker({
   suggested?: SymptomOption[];
   suggestedLabel?: string;
   multiple?: boolean;
+  /** the first chip is อาการหลัก (★); false = a plain list, nothing marked */
+  primary?: boolean;
   disabled?: boolean;
   placeholder?: string;
   /** the options are on their way — the list says so instead of "ไม่พบ" */
@@ -101,12 +104,12 @@ export function SymptomPicker({
               key={name}
               className={cn(
                 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
-                i === 0 && multiple
+                i === 0 && primary
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-card text-foreground',
               )}
             >
-              {multiple &&
+              {primary &&
                 (i === 0 ? (
                   <Star className="h-3 w-3 fill-current" aria-label="อาการหลัก" />
                 ) : (
@@ -241,7 +244,7 @@ export function SymptomPicker({
             </CommandPrimitive.List>
             {multiple && (
               <div className="flex items-center justify-between border-t border-border px-3 py-1.5 text-2xs text-muted-foreground">
-                <span>Enter = เลือก/ยกเลิก · ★ ตัวแรก = อาการหลัก</span>
+                <span>Enter = เลือก/ยกเลิก{primary && ' · ★ ตัวแรก = อาการหลัก'}</span>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}

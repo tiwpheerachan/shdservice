@@ -102,7 +102,7 @@ export function CloseReturnSection({
   const { data: SHIPPING, ...shippingLookup } = useShippingProfiles();
   // still at the out-source vendor → the server refuses the close; say so before the user fills the form
   const outsourceOut = !!job?.outsource.some((o) => o.status === SEND_STATUS.SENT);
-  // the save puts the courier in front of the note (one varchar(100))
+  // the save puts the courier in front of the note (one column)
   const returnDetailMax = noteMaxLength((n) => returnDetailOf(d.courier, n), d.returnDetail);
 
   return (
@@ -193,12 +193,7 @@ export function CloseReturnSection({
           error={errors['return.detail']}
           hint={`${d.returnDetail.length}/${returnDetailMax} ตัวอักษร${d.courier ? ' (บันทึกพร้อมชื่อบริษัทขนส่ง)' : ''}`}
         >
-          <Textarea
-            rows={2}
-            maxLength={returnDetailMax}
-            value={d.returnDetail}
-            onChange={(e) => upd({ returnDetail: e.target.value })}
-          />
+          <Textarea rows={2} value={d.returnDetail} onChange={(e) => upd({ returnDetail: e.target.value })} />
         </Field>
         <Field
           label="โปรดระบุ สถานะงาน"

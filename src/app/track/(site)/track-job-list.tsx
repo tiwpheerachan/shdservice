@@ -167,14 +167,15 @@ function ListFilters({
           </option>
         ))}
       </Select>
-      <div className="flex items-center gap-1.5">
+      {/* 130px holds a whole dd/mm/yyyy beside the icon: a narrow phone takes the pair on two lines */}
+      <div className="flex flex-wrap items-center gap-1.5">
         <Input
           type="date"
           value={filters.from}
           max={filters.to || undefined}
           onChange={(e) => setFilter('from', e.target.value)}
           aria-label="รับเครื่องตั้งแต่วันที่"
-          className="h-11 min-w-0 px-2 text-base"
+          className="h-11 min-w-[130px] flex-1 text-base"
         />
         <span className="shrink-0 text-xs text-muted-foreground">ถึง</span>
         <Input
@@ -183,7 +184,7 @@ function ListFilters({
           min={filters.from || undefined}
           onChange={(e) => setFilter('to', e.target.value)}
           aria-label="รับเครื่องถึงวันที่"
-          className="h-11 min-w-0 px-2 text-base"
+          className="h-11 min-w-[130px] flex-1 text-base"
         />
       </div>
       {reversed && (

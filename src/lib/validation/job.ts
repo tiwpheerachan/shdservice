@@ -1,7 +1,17 @@
 import * as z from 'zod';
 import { addDays, today } from '@/lib/dates';
 import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
-import { clean, codeField, cleanCode, isoDateString, maxNote, maxText, moneyField, trackingField } from './index';
+import {
+  clean,
+  codeField,
+  cleanCode,
+  isoDateString,
+  maxNote,
+  maxText,
+  moneyField,
+  TEXT_MAX,
+  trackingField,
+} from './index';
 import { rightLabel } from '@/lib/modules';
 import { JOB_GROUP, JS } from '@/lib/status-ids';
 // only used inside the factories below, so sale-order.ts importing isFilled from here has no cycle problem
@@ -118,6 +128,12 @@ export const JOB_COLUMN_LABEL: Record<string, string> = {
   file: 'ไฟล์',
 };
 
+/** อาการเสีย (อื่นๆ) / หมายเหตุ / วิธีการซ่อม, every form: the shortest of these columns is varchar(2000) */
+export const JOB_NOTE_MAX = 2000;
+/** those boxes have no maxLength (it cut a paste silently): the rules refuse in Thai; a count once near the limit */
+export const jobNoteHint = (v: string) =>
+  v.length > JOB_NOTE_MAX - 100 ? `${v.length} / ${JOB_NOTE_MAX} ตัวอักษร` : undefined;
+
 const text = z.string().optional();
 const date = z.union([z.literal(''), isoDateString()]).optional();
 // the message names the field: the toast lists messages without their field
@@ -144,7 +160,7 @@ const jobInputShape = z.object({
   status: text,
   so: text,
   channel: text,
-  shopName: maxText(100, 'Shop Name '),
+  shopName: maxText(TEXT_MAX, 'Shop Name '),
   saleOrderDate: date,
   warrantyMonth: wholeLike('รับประกัน (เดือน) '),
   expireDate: date,
@@ -160,11 +176,11 @@ const jobInputShape = z.object({
   receptionTrackingNo: text,
   receptionShipper: text,
   receptionType: text,
-  equipment: maxText(100, 'อุปกรณ์ '),
-  fault: maxText(100, 'จุดตำหนิ '),
+  equipment: maxText(TEXT_MAX, 'อุปกรณ์ '),
+  fault: maxText(TEXT_MAX, 'จุดตำหนิ '),
   symptoms: z.array(z.string()).optional(),
-  symptomOther: maxText(200, 'อาการเสีย (อื่นๆ) '),
-  remark: maxNote(2000, 'หมายเหตุ '),
+  symptomOther: maxText(JOB_NOTE_MAX, 'อาการเสีย (อื่นๆ) '),
+  remark: maxNote(JOB_NOTE_MAX, 'หมายเหตุ '),
   estimateCost: moneyField('ค่าประเมินงานซ่อม'),
   depositCost: moneyField('ค่ามัดจำงานซ่อม'),
   serviceCost: moneyField('ค่าบริการการซ่อม'),
@@ -353,8 +369,8 @@ export const noRepeatedLine = (lines: Record<string, unknown>[]) => {
 /** บันทึกงานซ่อม → POST /api/jobs/:no/repair (money 0–1,000,000, part qty whole 0–1000, text ≤ its column) */
 export const repairActionSchema = z.looseObject({
   status: req('โปรดระบุสถานะงานซ่อม'),
-  repairDetail: maxNote(200, 'วิธีการซ่อม '),
-  engineerRemark: maxNote(200, 'หมายเหตุ '),
+  repairDetail: maxNote(JOB_NOTE_MAX, 'วิธีการซ่อม '),
+  engineerRemark: maxNote(JOB_NOTE_MAX, 'หมายเหตุ '),
   newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG),
   serviceCost: moneyField('ค่าบริการการซ่อม'),
   toolCost: moneyField('ค่าเครื่องมือพิเศษ'),
@@ -370,18 +386,18 @@ export const repairActionSchema = z.looseObject({
 export const outsourceActionSchema = z
   .looseObject({
     status: z.string().optional(),
-    symptomOther: maxText(200, 'อาการเสีย (อื่นๆ) '),
-    repairDetail: maxNote(200, 'วิธีการซ่อม '),
+    symptomOther: maxText(JOB_NOTE_MAX, 'อาการเสีย (อื่นๆ) '),
+    repairDetail: maxNote(JOB_NOTE_MAX, 'วิธีการซ่อม '),
     send: z
       .looseObject({
         to: req('ต้องระบุ ส่งไปยัง').refine((v) => clean(v).length <= 50, 'ส่งไปยัง ยาวเกิน 50 ตัวอักษร'),
         date: isoDateString('ต้องระบุวันที่ส่ง'),
         by: staffId('ต้องเลือกผู้ส่ง'),
-        detail: maxNote(100, 'หมายเหตุการส่ง '),
+        detail: maxNote(TEXT_MAX, 'หมายเหตุการส่ง '),
       })
       .optional(),
     receive: z
-      .looseObject({ by: staffId('ต้องเลือกผู้รับ'), date, detail: maxNote(100, 'หมายเหตุการรับคืน ') })
+      .looseObject({ by: staffId('ต้องเลือกผู้รับ'), date, detail: maxNote(TEXT_MAX, 'หมายเหตุการรับคืน ') })
       .optional(),
   })
   .superRefine((v, ctx) => {
@@ -478,7 +494,7 @@ export function swapRefundSchema(
   return z
     .looseObject({
       status: z.string().optional(),
-      inspection: maxNote(200, 'ผลการตรวจสอบ '),
+      inspection: maxNote(JOB_NOTE_MAX, 'ผลการตรวจสอบ '),
       newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG, prev.newSerial),
       docNo: codeField(DOC_NO_RE, 'เลขที่เอกสารใช้ได้เฉพาะ A-Z 0-9 / . _ - (ไม่เกิน 50 ตัว)', prev.docNo),
       swapDate: date,
@@ -549,12 +565,12 @@ export function returnDetailOf(courier?: string | null, note?: string | null) {
 }
 /**
  * The maxLength of a note input the save puts something in front of (paymentDetailOf / returnDetailOf as
- * `detailOf`): 100 less what it adds — so what can be typed always saves. An empty note counts as typed
+ * `detailOf`): TEXT_MAX less what it adds — so what can be typed always saves. An empty note counts as typed
  * (the " · " comes with its first character).
  */
 export function noteMaxLength(detailOf: (note: string) => string, note: string) {
   const n = clean(note) || '-';
-  return 100 - detailOf(n).length + n.length;
+  return TEXT_MAX - detailOf(n).length + n.length;
 }
 
 /** the close page's payment fields (as loaded / as on screen) */
@@ -591,7 +607,7 @@ export function closeSchema(
   return z
     .looseObject({
       status: req('โปรดระบุสถานะงาน'),
-      repairDetail: maxNote(200, 'วิธีการซ่อม '),
+      repairDetail: maxNote(JOB_NOTE_MAX, 'วิธีการซ่อม '),
       // Serial เครื่องใหม่ of a swap job: never required, checked only when typed
       newSerial: codeField(NEW_SERIAL_RE, NEW_SERIAL_MSG, prev.newSerial),
       payment: z
@@ -640,18 +656,18 @@ export function closeSchema(
         });
       if (v.status === STATUS_CLOSED_TRACKED && !isFilled(v.return.tracking))
         ctx.addIssue({ code: 'custom', path: ['return', 'tracking'], message: 'ต้องระบุหมายเลขพัสดุ' });
-      // both go into a varchar(100) with what is put in front of them
-      if (v.payment && paymentDetailOf(v.payment.date, v.payment.detail).length > 100)
+      // both go into a varchar(TEXT_MAX) with what is put in front of them
+      if (v.payment && paymentDetailOf(v.payment.date, v.payment.detail).length > TEXT_MAX)
         ctx.addIssue({
           code: 'custom',
           path: ['payment', 'detail'],
-          message: 'หมายเหตุยาวเกิน (รวมวันที่ชำระไม่เกิน 100 ตัวอักษร)',
+          message: `หมายเหตุยาวเกิน (รวมวันที่ชำระไม่เกิน ${TEXT_MAX} ตัวอักษร)`,
         });
-      if (returnDetailOf(v.return.courier, v.return.detail).length > 100)
+      if (returnDetailOf(v.return.courier, v.return.detail).length > TEXT_MAX)
         ctx.addIssue({
           code: 'custom',
           path: ['return', 'detail'],
-          message: 'รายละเอียดการส่งคืนยาวเกิน (รวมชื่อบริษัทขนส่งไม่เกิน 100 ตัวอักษร)',
+          message: `รายละเอียดการส่งคืนยาวเกิน (รวมชื่อบริษัทขนส่งไม่เกิน ${TEXT_MAX} ตัวอักษร)`,
         });
     });
 }

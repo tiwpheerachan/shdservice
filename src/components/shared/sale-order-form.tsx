@@ -15,7 +15,7 @@ import { useStaff } from '@/data/db';
 import { baht } from '@/lib/utils';
 import { errMsg, uploadFile, fileUrl } from '@/lib/api';
 import { useAccess } from '@/lib/use-access';
-import { FIGURES_LOCKED } from '@/lib/validation';
+import { FIGURES_LOCKED, TEXT_MAX } from '@/lib/validation';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
 import {
@@ -464,8 +464,8 @@ export const SaleOrderForm = React.forwardRef<SaleOrderFormHandle, { soNo?: stri
                 </Field>
               </>
             )}
-            <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/100 ตัวอักษร`}>
-              <Textarea rows={2} maxLength={100} value={remark} onChange={(e) => setRemark(e.target.value)} />
+            <Field label="หมายเหตุ" wide error={fe.errors.remark} hint={`${remark.length}/${TEXT_MAX} ตัวอักษร`}>
+              <Textarea rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />
             </Field>
             {!readOnly && (
               <Field

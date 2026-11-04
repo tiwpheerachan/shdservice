@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { clean, type FieldErrors } from './index';
+import { clean, TEXT_MAX, type FieldErrors } from './index';
 import { CUSTOMER_TYPES, PRICE_GROUPS } from '@/data/options';
 
 /**
@@ -64,7 +64,25 @@ export const ADDRESS_PREFIXES = [
 export function withPrefix(prefix: string, name: string): string {
   const n = name.trim();
   const own = ADDRESS_PREFIXES.find((f) => f.includes(prefix)) ?? [];
-  return !prefix || own.some((p) => n.startsWith(p)) ? n : prefix + n;
+  return !n || !prefix || own.some((p) => n.startsWith(p)) ? n : prefix + n;
+}
+
+const ADDRESS_LABEL = ADDRESS_PREFIXES.flat().join('|').replace(/\./g, '\\.');
+// Legacy rows hold a dropdown's "- - Please Select - -" as their ตำบล / อำเภอ / จังหวัด.
+const SELECT_PLACEHOLDER = /[-\s]*please\s*select[-\s]*/gi;
+// A label is blank when the end, a postcode or another label follows it. (?!\S\.): "ต. จ.ป.ร." is a ตำบล's name.
+const BLANK_LABEL = new RegExp(
+  `(^|\\s)(?:ต\\.อ\\.จ\\.|${ADDRESS_LABEL})(?:\\s*[-–—]+)?(?=\\s+(?:${ADDRESS_LABEL})(?!\\S\\.)|\\s*\\d{5}(?:\\s|$)|\\s*$)`,
+  'g',
+);
+/**
+ * Stored address text as it may be shown: without placeholders and labels that name nothing. Removes only those, so
+ * it can cost a label but never a name; text with nothing to remove comes back as it was (line breaks included).
+ * ponytail: a building lettered "จ." at the very end of an address reads as a blank label; none in the data.
+ */
+export function withoutBlankLabels(address: string): string {
+  const out = address.replace(SELECT_PLACEHOLDER, ' ').replace(BLANK_LABEL, '$1');
+  return out === address ? address : out.replace(/\s+/g, ' ').trim();
 }
 
 /** ลูกค้าบุคคล (not นิติบุคคล / ตัวแทน) — only they must give a mobile: a company may give its office line */
@@ -96,8 +114,7 @@ export type CustomerPrev = Partial<
  *    OTP key), a Corporate / Dealer one may give a landline; an existing customer that has one must keep
  *    one; the format is checked whenever it changed, on an edit too (an unchanged legacy phone stays savable)
  *  - tax ID 13 digits + check digit; postal code 5 digits; email ≤ 50; Line ID; lists for type / price group
- *  - text no longer than its column (address 100 each) — nothing is cut off silently; an unchanged legacy
- *    address passes (some legacy one-line addresses are longer than บรรทัด 1 allows)
+ *  - text no longer than its column (address TEXT_MAX each) — nothing is cut off silently
  */
 /** the form's labels + the stored values (customers.ts maps one to the other) */
 const PRICE_GROUP_VALUES = [...PRICE_GROUPS, 'Retail', 'Wholesale', 'Special'];
@@ -139,10 +156,10 @@ export function customerSchema(prev?: CustomerPrev | null) {
 
         // the form shows a legacy address-only row's one-line address in บรรทัด 1 (toCustomerForm)
         const address1 = clean(v.address1);
-        if (address1.length > 100 && address1 !== clean(prev?.address1 || prev?.address))
-          bad('address1', 'ที่อยู่ ยาวเกิน 100 ตัวอักษร');
-        if (clean(v.address2).length > 100 && !same('address2', v.address2))
-          bad('address2', 'ซอย - ถนน ยาวเกิน 100 ตัวอักษร');
+        if (address1.length > TEXT_MAX && address1 !== clean(prev?.address1 || prev?.address))
+          bad('address1', `ที่อยู่ ยาวเกิน ${TEXT_MAX} ตัวอักษร`);
+        if (clean(v.address2).length > TEXT_MAX && !same('address2', v.address2))
+          bad('address2', `ซอย - ถนน ยาวเกิน ${TEXT_MAX} ตัวอักษร`);
 
         const postal = clean(v.postalCode);
         if (postal && !/^\d{5}$/.test(postal) && !same('postalCode', postal))

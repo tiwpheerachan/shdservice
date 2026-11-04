@@ -6,6 +6,7 @@ import {
   repairActionSchema,
   swapRefundSchema,
 } from '@/lib/validation/job';
+import { clean, TEXT_MAX } from '@/lib/validation';
 import { assignSchema, callLogSchema } from '@/lib/validation/stock';
 import {
   CONFLICT,
@@ -291,7 +292,9 @@ export const jobOutsource = defineOperation({
   params: jobId,
   invalid: BY_ID,
   body: outsourceActionSchema.safeExtend({
-    engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
+    engineerSymptom: optText.meta({
+      description: 'อาการเสียที่ตรวจพบ, the first one (a symptom name; left out = unchanged, empty = none)',
+    }),
     receive: outsourceActionSchema.shape.receive.unwrap().extend({ from: optText }).optional(),
     job: pageJob,
     version,
@@ -320,7 +323,12 @@ export const jobRepair = defineOperation({
   params: jobId,
   invalid: BY_ID,
   body: repairActionSchema.extend({
-    engineerSymptom: optText.meta({ description: 'อาการเสียที่ตรวจพบ (a symptom name)' }),
+    engineerSymptom: optText.meta({
+      description: 'อาการเสียที่ตรวจพบ, the first one (a symptom name; left out = unchanged, empty = none)',
+    }),
+    engineerSymptoms: z.array(s).optional().meta({
+      description: 'อาการเสียที่ตรวจพบ, all of them (symptom names; empty = none). Wins over engineerSymptom',
+    }),
     parts: z
       .array(
         repairPart.extend({
@@ -417,8 +425,12 @@ const attachJobNo = z
 const attachRemark = z
   .unknown()
   .optional()
-  .transform((v) => String(v ?? '').slice(0, 100))
-  .meta({ type: 'string', description: 'Read up to 100 characters (the column; the rest is dropped).' });
+  .transform((v) => clean(String(v ?? '')))
+  .refine((v) => v.length <= TEXT_MAX, `หมายเหตุยาวเกิน ${TEXT_MAX} ตัวอักษร`)
+  .meta({
+    type: 'string',
+    description: `At most ${TEXT_MAX} characters (the column); longer → 400, nothing is stored.`,
+  });
 const AttachmentRow = z.object({
   ok: z.literal(true),
   row: z.object({ id: z.uuid(), name: s, file: s.meta({ description: 'the stored file name' }), remark: s }),

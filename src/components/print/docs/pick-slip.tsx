@@ -36,8 +36,10 @@ export async function PickSlipDoc({ ids }: { ids: string[] }) {
         .ps-sheet { width: 297mm; min-height: 210mm; margin: 0 auto 6mm; padding: 10mm 12mm; background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / 0.15); }
         .ps table { border-collapse: collapse; width: 100%; }
         .ps td, .ps th { border: 1px solid #000; padding: 3px 6px; font-weight: inherit; background: transparent; }
+        /* an unbroken run wraps: it would otherwise widen the table past the paper and take the money columns with it */
+        .ps td { overflow-wrap: anywhere; }
         .ps .items th { text-align: center; font-weight: 600; }
-        .ps .items tbody tr { height: 22px; }
+        .ps .items tbody tr { height: 22px; break-inside: avoid; }
         .ps .sign td, .ps .sign { border: 0; }
         @media print {
           .ps-sheet { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; break-after: page; }
@@ -120,7 +122,7 @@ export async function PickSlipDoc({ ids }: { ids: string[] }) {
                 </tr>
               </tbody>
             </table>
-            <div className="mt-4 flex items-start justify-between gap-6">
+            <div className="mt-4 flex break-inside-avoid items-start justify-between gap-6">
               <div className="grid min-w-0 flex-1 grid-cols-3 gap-4 pt-6 text-center">
                 {['ผู้เบิกสินค้า', 'ผู้รับสินค้า', 'ผู้อนุมัติ'].map((who) => (
                   <div key={who}>

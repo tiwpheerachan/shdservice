@@ -433,12 +433,15 @@ await test('a thumbnail over 1 MB sent without content-length (chunked) → 413,
   assert.equal(r2.has(`${path(file)}.jpg`), false);
   assert.equal((await rows(file)).length, 0);
 });
-await test('a remark is kept to its column: 100 characters', async () => {
+await test('a remark: 501 characters refused and nothing attached, never cut; 500 kept whole', async () => {
   const file = await fresh('video/mp4', ADMIN2);
   put(file, { bytes: MP4, type: 'video/mp4' });
-  const r = await confirm(file, { remark: 'ก'.repeat(150) }, ADMIN2);
+  const over = await confirm(file, { remark: 'ก'.repeat(501) }, ADMIN2);
+  assert.equal(over.status, 400, JSON.stringify(over.body));
+  assert.equal((await rows(file)).length, 0);
+  const r = await confirm(file, { remark: 'ก'.repeat(500) }, ADMIN2);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.deepEqual(await rows(file), [{ remark: 'ก'.repeat(100) }]);
+  assert.deepEqual(await rows(file), [{ remark: 'ก'.repeat(500) }]);
 });
 await test('a real MP4 + JPEG thumbnail → attached (row, thumbnail beside it); confirming it again → 409, kept', async () => {
   const file = await fresh();

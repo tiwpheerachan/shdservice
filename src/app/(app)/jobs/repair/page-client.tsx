@@ -45,7 +45,7 @@ import { profileLock } from '@/lib/profile-lock';
 import { unpack } from '@/lib/obscure';
 
 const NO_DETAIL: RepairDetail = {
-  engineerSymptom: '',
+  engineerSymptoms: [],
   repairDetail: '',
   engineerRemark: '',
   newSerial: '',
@@ -56,7 +56,7 @@ const NO_DETAIL: RepairDetail = {
 function repairStateOf(job: JobDetail, lastId: number): { detail: RepairDetail; lines: Line[] } {
   return {
     detail: {
-      engineerSymptom: job.engineerSymptom,
+      engineerSymptoms: job.engineerSymptoms,
       repairDetail: job.repairDetail,
       engineerRemark: job.engineerRemark,
       newSerial: '',

@@ -38,6 +38,7 @@ import {
   jobOutsource,
   jobStatus,
   jobSymptom,
+  jobEngineerSymptom,
   jobType,
   brand,
   model,
@@ -1063,7 +1064,9 @@ export type JobDetail = {
   /** app_user.id of the assignee; null = nobody */
   engineerId: string | null;
   engineer: string;
+  /** the first of engineerSymptoms: what older pages and API callers read */
   engineerSymptom: string;
+  engineerSymptoms: string[];
   repairDetail: string;
   engineerRemark: string;
   repairedDate: string;
@@ -1236,6 +1239,12 @@ function jobDetailRelated(jobNo: string, j: JobRow) {
       .from(jobSymptom)
       .leftJoin(symptom, eq(symptom.pk, jobSymptom.symptomPk))
       .where(eq(jobSymptom.jobPk, j.pk)),
+    db
+      .select({ name: symptom.symptomName })
+      .from(jobEngineerSymptom)
+      .innerJoin(symptom, eq(symptom.pk, jobEngineerSymptom.symptomPk))
+      .where(eq(jobEngineerSymptom.jobPk, j.pk))
+      .orderBy(asc(jobEngineerSymptom.pk)),
     (async () => {
       const sendBy = alias(appUser, 'send_by');
       const recvBy = alias(appUser, 'recv_by');
@@ -1294,9 +1303,14 @@ function toJobDetail(
 ): JobDetail {
   const j = r.j;
   const bal = jobBalance(num(j.jobTotalCost), num(j.depositCost), num(j.jobPaymentAmount));
-  const [cust, syms, fwd, parts, partTotals, atts, logs, history] = related;
+  const [cust, syms, foundRest, fwd, parts, partTotals, atts, logs, history] = related;
 
   const symptoms = syms.length ? syms.map((s) => s.name ?? '').filter(Boolean) : r.symptomName ? [r.symptomName] : [];
+  // trimmed: the picker's options are, and a legacy trailing space would show the job's own symptom as unticked.
+  // A Set: an older page may have set the column to one of the others
+  const engineerSymptoms = [
+    ...new Set([r.engSymptom, ...foundRest.map((f) => f.name)].map((n) => (n ?? '').trim()).filter(Boolean)),
+  ];
 
   return {
     id: j.id,
@@ -1361,7 +1375,8 @@ function toJobDetail(
     dueDateAuto: !j.dueDateSetByUser,
     engineerId: r.engId,
     engineer: fullName(r.engFirst, r.engLast),
-    engineerSymptom: r.engSymptom ?? '',
+    engineerSymptom: engineerSymptoms[0] ?? '',
+    engineerSymptoms,
     repairDetail: j.engineerRepairDetail ?? '',
     engineerRemark: j.engineerRemark ?? '',
     repairedDate: fmtDateTime(j.jobRepairedDate),
@@ -1772,13 +1787,63 @@ async function symptomChange(tx: Tx, j: JobRow, ids: number[]): Promise<AuditCha
   const key = (list: number[]) => [...list].sort().join(',');
   if (key(now) === key(ids)) return null;
   await writeSymptoms(tx, j.pk, ids);
+  return { productSymptomId: await namesPair(tx, now, ids) };
+}
+
+/** two lists of symptoms as the history shows them: by name, never a pk */
+async function namesPair(tx: Tx, was: number[], now: number[]): Promise<[unknown, unknown]> {
   const named = await tx
     .select({ id: symptom.pk, name: symptom.symptomName })
     .from(symptom)
-    .where(inArray(symptom.pk, [...now, ...ids]));
+    .where(inArray(symptom.pk, [...was, ...now]));
   const names = (list: number[]) =>
     list.map((id) => named.find((n) => n.id === id)?.name?.trim() ?? '').join(', ') || null;
-  return { productSymptomId: [names(now), names(ids)] };
+  return [names(was), names(now)];
+}
+
+/**
+ * Symptom names → pks in that order, repeats dropped; of twins the job's own (`mine`: symptomFirst). A name not in the
+ * list is refused under `field`, never skipped.
+ */
+async function foundSymptomPks(names: string[], field: string, mine: SQL): Promise<number[]> {
+  const wanted = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (!wanted.length) return [];
+  const rows = await db
+    .select({ id: symptom.pk, name: sql<string>`${trimmed(symptom.symptomName)}` })
+    .from(symptom)
+    .where(inArray(trimmed(symptom.symptomName), wanted))
+    .orderBy(...symptomFirst(mine));
+  const unknown = wanted.filter((n) => !rows.some((s) => s.name === n));
+  if (unknown.length) {
+    const message = `ไม่พบอาการเสีย "${unknown.join('", "')}" ในรายการ`;
+    throw new HttpError(400, message, { fields: { [field]: message } });
+  }
+  return [...new Set(wanted.map((n) => rows.find((s) => s.name === n)!.id))];
+}
+
+/** the one found symptom an older page or an API caller names: left out = stays (undefined), empty = none (null) */
+async function oneFoundSymptom(name: string | undefined, stored: number | null) {
+  if (name === undefined) return undefined;
+  const [pk] = await foundSymptomPks([name], 'engineerSymptom', eq(symptom.pk, stored ?? 0));
+  return pk ?? null;
+}
+
+/**
+ * The found symptoms set to `ids`: all but the first go in job_engineer_symptom, the first is the caller's to write on
+ * job.engineer_symptom_pk. Returns the history pair by name (engineerSymptomId), null = same.
+ */
+async function foundSymptomChange(tx: Tx, j: JobRow, ids: number[]): Promise<AuditChanges | null> {
+  const rows = await tx
+    .select({ id: jobEngineerSymptom.symptomPk })
+    .from(jobEngineerSymptom)
+    .where(eq(jobEngineerSymptom.jobPk, j.pk))
+    .orderBy(asc(jobEngineerSymptom.pk));
+  const now = [...new Set([...(j.engineerSymptomPk != null ? [j.engineerSymptomPk] : []), ...rows.map((r) => r.id)])];
+  if (now.join() === ids.join()) return null;
+  await tx.delete(jobEngineerSymptom).where(eq(jobEngineerSymptom.jobPk, j.pk));
+  if (ids.length > 1)
+    await tx.insert(jobEngineerSymptom).values(ids.slice(1).map((symptomPk) => ({ jobPk: j.pk, symptomPk })));
+  return { engineerSymptomId: await namesPair(tx, now, ids) };
 }
 
 /**
@@ -2224,7 +2289,7 @@ function swapShown(detail: string): string {
 function repairValues(
   j: JobRow,
   i: RepairInput,
-  o: { es: { id: number } | undefined; takes: boolean; partsTotal: number; byUserId: number },
+  o: { es: number | null | undefined; takes: boolean; partsTotal: number; byUserId: number },
 ) {
   const { es, takes, partsTotal, byUserId } = o;
   const service = i.serviceCost !== undefined ? num(i.serviceCost) : num(j.serviceCost);
@@ -2232,7 +2297,7 @@ function repairValues(
   const delivery = i.deliveryCost !== undefined ? num(i.deliveryCost) : num(j.deliveryCost);
   const box = i.boxCost !== undefined ? num(i.boxCost) : num(j.cartonBoxCost);
   return {
-    ...(es ? { engineerSymptomPk: es.id } : {}),
+    ...(es !== undefined ? { engineerSymptomPk: es } : {}),
     ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
     ...(i.engineerRemark !== undefined ? { engineerRemark: cleanText(i.engineerRemark) } : {}),
     // a new serial goes to job.new_serial_no (บันทึกซ่อม never removes one)
@@ -2514,18 +2579,18 @@ async function syncPartLines(
 export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number): Promise<JobDetail> {
   assertValid(repairActionSchema, i);
   const [cur] = await db
-    .select({ eng: job.engineerAppUserPk, es: job.engineerSymptomPk })
+    .select({ pk: job.pk, eng: job.engineerAppUserPk, es: job.engineerSymptomPk })
     .from(job)
     .where(eq(job.jobNo, jobNo));
   if (!cur) throw jobNotFound(jobNo);
-  const [es] = i.engineerSymptom
-    ? await db
-        .select({ id: symptom.pk })
-        .from(symptom)
-        .where(nameIs(symptom.symptomName, i.engineerSymptom))
-        .orderBy(...symptomFirst(eq(symptom.pk, cur.es ?? 0)))
-        .limit(1)
-    : [];
+  const found =
+    i.engineerSymptoms &&
+    (await foundSymptomPks(
+      i.engineerSymptoms,
+      'engineerSymptoms',
+      sql`${symptom.pk} = ${cur.es ?? 0} or ${symptom.pk} in (select ${jobEngineerSymptom.symptomPk} from ${jobEngineerSymptom} where ${jobEngineerSymptom.jobPk} = ${cur.pk})`,
+    ));
+  const es = found ? (found[0] ?? null) : await oneFoundSymptom(i.engineerSymptom, cur.es);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   // nobody on the job yet: who saves the repair takes it when their role has Job Take (another role does not)
   const meTakes = cur.eng == null && (await userHasRight(byUserId, 'Job Take'));
@@ -2563,13 +2628,21 @@ export async function saveRepair(jobNo: string, i: RepairInput, byUserId: number
     const changed = withTotal(j, changedOnly(j, repairValues(j, i, { es, takes, partsTotal, byUserId })), legacy);
     const toWrite = locked ? keepMoney(j, changed) : changed;
     await assertJobFigures(byUserId, j, toWrite);
-    if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
+    const foundNow = found ? await foundSymptomChange(tx, j, found) : null;
+    // only the other symptoms changed = no job column moved: the page that loaded this job must still see an edit
+    if (foundNow)
+      await tx
+        .update(job)
+        .set({ ...toWrite, rowVersion: sql`${job.rowVersion} + 1` })
+        .where(eq(job.jobNo, jobNo));
+    else if (Object.keys(toWrite).length) await tx.update(job).set(toWrite).where(eq(job.jobNo, jobNo));
     // the take-over has its own ASSIGN row; the part lines added / cancelled / changed are in it by code and qty
     const [partsFrom, partsTo] = parts.partsLog;
     const changes = {
       ...(await jobDiff(tx, j as Record<string, unknown>, toWrite as Record<string, unknown>, {
-        skip: ['engineerAppUserPk'],
+        skip: ['engineerAppUserPk', ...(found ? ['engineerSymptomPk'] : [])],
       })),
+      ...foundNow,
       ...(partsTo.length ? { parts: [partsFrom.join(', ') || null, partsTo.join(', ')] as [unknown, unknown] } : {}),
     };
     if (Object.keys(changes).length || parts.partsChanged)
@@ -2756,14 +2829,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
   assertValid(outsourceActionSchema, i);
   const [cur] = await db.select({ es: job.engineerSymptomPk }).from(job).where(eq(job.jobNo, jobNo));
   if (!cur) throw jobNotFound(jobNo);
-  const [es] = i.engineerSymptom
-    ? await db
-        .select({ id: symptom.pk })
-        .from(symptom)
-        .where(nameIs(symptom.symptomName, i.engineerSymptom))
-        .orderBy(...symptomFirst(eq(symptom.pk, cur.es ?? 0)))
-        .limit(1)
-    : [];
+  const es = await oneFoundSymptom(i.engineerSymptom, cur.es);
   const newStatus = i.status ? await statusIdByName(i.status) : undefined;
   if (i.receive && !i.receive.date)
     throw new HttpError(400, RECEIVE_DATE_REQUIRED, { fields: { 'receive.date': RECEIVE_DATE_REQUIRED } });
@@ -2803,7 +2869,7 @@ export async function saveOutsource(jobNo: string, i: OutsourceInput, byUserId: 
     if (i.receive?.date && sentOn && i.receive.date < sentOn)
       throw new HttpError(400, RECEIVE_BEFORE_SEND, { fields: { 'receive.date': RECEIVE_BEFORE_SEND } });
     const asked = {
-      ...(es ? { engineerSymptomPk: es.id } : {}),
+      ...(es !== undefined ? { engineerSymptomPk: es } : {}),
       ...(i.symptomOther !== undefined ? { productSymptomOther: clean(i.symptomOther) } : {}),
       ...(i.repairDetail !== undefined ? { engineerRepairDetail: cleanText(i.repairDetail) } : {}),
     };
@@ -3103,8 +3169,7 @@ export async function addAttachment(
   byUserId = 0,
 ) {
   const name = attachmentName(originalName);
-  const note = cutChars(remark, 100);
-  // what was stored (name / remark cut to the columns) — the answer shows exactly that
+  // what was stored (the name cut to its column; the contract refused a longer remark) — the answer shows exactly that
   return writeTx(async (tx) => {
     // the job checked again under a share lock (the route's check ran before the upload): a delete running
     // now finishes first, or waits for this row — the caller removes the stored file when this refuses
@@ -3121,7 +3186,7 @@ export async function addAttachment(
         jobPk: j.pk,
         originalFileName: name,
         systemFileName: systemName.slice(0, 50),
-        remark: note,
+        remark,
       })
       .returning({ id: jobAttachment.id });
     if (!row) throw new Error('job_attachment insert returned no row');
@@ -3133,7 +3198,7 @@ export async function addAttachment(
       summary: `แนบไฟล์ ${name}`,
       changes: { file: [null, systemName] },
     });
-    return { id: row.id, name, remark: note };
+    return { id: row.id, name, remark };
   });
 }
 
@@ -3390,7 +3455,10 @@ function usedValues(field: SuggestedField): Promise<string[]> {
     const rows = await db
       .select({ v, n: count() })
       .from(job)
-      .where(and(ne(job.recordStatus, RS.DELETED), sql`length(btrim(coalesce(${SUGGESTED[field]}, ''))) >= 2`))
+      // a long note is one job's text, not a name to offer back
+      .where(
+        and(ne(job.recordStatus, RS.DELETED), sql`length(btrim(coalesce(${SUGGESTED[field]}, ''))) between 2 and 100`),
+      )
       .groupBy(v)
       .orderBy(desc(count()), v);
     // spellings of one name (dreameofficial / Dreame Official Store / DREAME…) offered once, as most of them write

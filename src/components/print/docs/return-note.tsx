@@ -89,6 +89,8 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
       <style>{`
         .qt table { border-collapse: collapse; width: 100%; }
         .qt th, .qt td { border: 0; padding: 0; background: transparent; font-weight: inherit; vertical-align: top; }
+        /* an unbroken run wraps: it would otherwise widen the table past the paper and take the money columns with it */
+        .qt td { overflow-wrap: anywhere; }
         .qt .grid-b { border: 1px solid #000; }
         .qt td.pad { padding: 4px 8px 3px; }
         .qt td.sig { padding: 8px 12px; }
@@ -106,7 +108,9 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         .qt .sum td.words { background: #d4d4d4; }
         .qt { display: flex; flex-direction: column; }
         .qt .items-wrap { flex: 1 1 auto; display: flex; flex-direction: column; }
-        .qt .items { flex: 1 1 auto; height: 100%; }
+        /* no height: 100% — a table running onto a next sheet would keep that height and lie over what follows it */
+        .qt .items { flex: 1 1 auto; }
+        .qt .items tbody tr:not(.fill), .qt .sum { break-inside: avoid; }
         .qt .items tbody tr.fill { height: 100%; }
         .qt .items tbody tr.fill td { height: 100%; }
         /* + the 10mm @page margin (globals.css) = the legacy 10/12/12mm frame; 276mm = a hair under the 277mm
@@ -233,15 +237,15 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         <tbody>
           <tr>
             <td className="k pt-1">อาการที่แจ้ง :</td>
-            <td className="pt-1">{or(j.symptoms.join(', ') || j.symptomOther, '—')}</td>
+            <td className="pt-1 wrap-anywhere">{or(j.symptoms.join(', ') || j.symptomOther, '—')}</td>
           </tr>
           <tr>
             <td className="k">อาการที่ตรวจพบ :</td>
-            <td>{or(j.engineerSymptom, '—')}</td>
+            <td className="wrap-anywhere">{or(j.engineerSymptoms.join(', '), '—')}</td>
           </tr>
           <tr>
             <td className="k pb-1">วิธีการซ่อม :</td>
-            <td className="whitespace-pre-line pb-1">
+            <td className="whitespace-pre-line wrap-anywhere pb-1">
               {or(j.repairDetail, '—')}
               {j.engineerRemark ? ` (${j.engineerRemark})` : ''}
             </td>
@@ -425,47 +429,52 @@ export async function ReturnNoteDoc({ no, forCustomer }: { no: string; forCustom
         </tbody>
       </table>
 
-      <table className="grid-b mt-1.5">
-        <tbody>
-          <tr>
-            <td className="w-[58%] br sig text-center">
-              <p className="text-[10.5px]">ได้ตรวจสอบและรับสินค้าคืนเรียบร้อยแล้ว</p>
-              <p className="mt-3 font-semibold">ผู้รับสินค้า (ลูกค้า)</p>
-              <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
-                <span>(</span>
-                <span>)</span>
-              </p>
-              <p className="mt-2">
-                วันที่{' '}
-                <span className="inline-block w-[120px] border-b border-black text-center">
-                  &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
-                </span>
-              </p>
-            </td>
-            <td className="sig">
-              <p className="text-center font-semibold">
-                ในนาม
-                <br />
-                {co.nameTh}
-              </p>
-              <div className="mt-5 flex items-end gap-2">
-                <span className="font-semibold">ผู้ส่งคืน :</span>
-                <span className="flex-1 border-b border-black" />
-              </div>
-              {!forCustomer && <p className="mt-1 text-center">( {or(fullName(closer?.first, closer?.last), '—')} )</p>}
-              <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      {/* a note long enough to reach the next sheet moves the terms over with the signatures */}
+      <div className="break-inside-avoid">
+        <table className="grid-b mt-1.5">
+          <tbody>
+            <tr>
+              <td className="w-[58%] br sig text-center">
+                <p className="text-[10.5px]">ได้ตรวจสอบและรับสินค้าคืนเรียบร้อยแล้ว</p>
+                <p className="mt-3 font-semibold">ผู้รับสินค้า (ลูกค้า)</p>
+                <p className="mx-auto mt-6 flex w-[240px] justify-between border-t border-black pt-0.5">
+                  <span>(</span>
+                  <span>)</span>
+                </p>
+                <p className="mt-2">
+                  วันที่{' '}
+                  <span className="inline-block w-[120px] border-b border-black text-center">
+                    &nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;
+                  </span>
+                </p>
+              </td>
+              <td className="sig">
+                <p className="text-center font-semibold">
+                  ในนาม
+                  <br />
+                  {co.nameTh}
+                </p>
+                <div className="mt-5 flex items-end gap-2">
+                  <span className="font-semibold">ผู้ส่งคืน :</span>
+                  <span className="flex-1 border-b border-black" />
+                </div>
+                {!forCustomer && (
+                  <p className="mt-1 text-center">( {or(fullName(closer?.first, closer?.last), '—')} )</p>
+                )}
+                <p className="num mt-2 text-center text-[10px]">{contactLine}</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-      <div className="mt-1.5 flex items-start justify-between gap-6 text-[9.5px] text-neutral-700">
-        <ol className="list-decimal pl-4">
-          {RETURN_TERMS.map((t) => (
-            <li key={t}>{t}</li>
-          ))}
-        </ol>
-        <span className="shrink-0">Printing Date : {stamp()}</span>
+        <div className="mt-1.5 flex items-start justify-between gap-6 text-[9.5px] text-neutral-700">
+          <ol className="list-decimal pl-4">
+            {RETURN_TERMS.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ol>
+          <span className="shrink-0">Printing Date : {stamp()}</span>
+        </div>
       </div>
     </main>
   );
