@@ -17,7 +17,7 @@
 - `npm run db:migrate:deploy` — Render pre-deploy เท่านั้น (`--deploy` ต้องมี `RENDER`) · `db:migrate` เดิมทำแบบเดียวกัน
   (Render dashboard ยังเรียกชื่อเดิมจนกว่าจะแก้เป็น `db:migrate:deploy`) — จากเครื่องถูกปฏิเสธพร้อมบอกสองคำสั่งข้างบน
 - การโหลดข้อมูลใหม่ทั้งหมด (`--reset`, ล้างฐาน) ยังเป็นของ `setupdata/load_supabase.sh` เท่านั้น
-- เทสต์: `npm run test:db-guard` (อยู่ใน `npm test`)
+- เทสต์: `tests/unit/db-guard.test.mts` (อยู่ใน `npm test`)
 
 ## Consequences
 

@@ -1,5 +1,5 @@
 /**
- * npm run test:routes-input — every route reads its input through the parse helpers of src/server/auth.ts
+ * Every route reads its input through the parse helpers of src/server/auth.ts
  * (parseParams / parseQuery / parseHeaders / parseBody / parseForm / parseTrackBody), against the schemas its
  * operation declares in src/server/contract, and never by hand. Pure: reads the route files.
  *
@@ -12,6 +12,7 @@
  * user-agent (the audit line). Cookies are the session, described by the document's security scheme.
  */
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -40,21 +41,7 @@ const BY_HAND: Array<[RegExp, string]> = [
   ],
 ];
 
-let passed = 0;
-const failures: string[] = [];
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } catch (e) {
-    failures.push(name);
-    console.log(`  ✗ ${name}\n      ${e instanceof Error ? e.message : e}`);
-  }
-}
-
 const files = routes();
-console.log('\nRoutes read their input through src/server/contract');
 test('finds the routes it checks', () => assert.ok(files.length > 50, `${files.length} route files`));
 
 test('no route reads params / query / headers / body by hand', () => {
@@ -98,6 +85,3 @@ test('the patterns catch what they are for', () => {
   ])
     assert.ok(!caught(src), src);
 });
-
-console.log(`\n${passed} passed, ${failures.length} failed (${files.length} route files)`);
-if (failures.length) process.exit(1);

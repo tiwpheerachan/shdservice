@@ -157,6 +157,7 @@ Effort: S < 2 ชม. · M ครึ่ง–1 วัน · L > 1 วัน
   ✅ 2026-10-14: `tests/docker-compose.yml` (port 55442), `tests/prepare-db.mts` (pgcrypto + migrate), `tests/db-url.mts` guard localhost, `tests/seed.mts` · `test-track` ไม่อ่าน `.env` แล้ว — 81/81 ผ่าน
 - [x] **P1-CI-2 `npm test`** · S — `tsx --test` (node:test, ไม่ต้องเพิ่ม dep) · เริ่มจาก test pure: session, origin-auth, dates, thai-baht, paging, safeNext
   ✅ 2026-10-14: `npm test` (schemas + auth) · `npm run test:db` (running-no + track)
+  ✅ 2026-11-03: ย้ายเป็น vitest ([adr/0010](../adr/0010-vitest-test-runner.md)) — เฟส 1: เทสต์ไม่ใช้ DB 11 ไฟล์ → `tests/unit/` (205 เคส) · เฟส 2–3 (DB, test-qa-*) ยังรอ
 - [x] **P1-CI-3 Test สำคัญที่ต้องมี DB** · M — running-no (20 tx พร้อมกัน, ข้ามปี), api-guard (ทุก route เรียก require*), auth/permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ
   ✅ 2026-10-14: `scripts/test-domain.mts` 25 เคส: permission matrix (can/canViewAny/requireView + `/api/data` ตาม role, pending, INACTIVE, session_version), สต็อกห้ามติดลบ (409, rollback ทั้งเอกสาร), SO อนุมัติซ้ำ/เบิกก่อนอนุมัติ/แก้หลังอนุมัติ = 409, deadlock 20 movement, job race (1 job_log) · พิสูจน์ว่า test ล้มจริงเมื่อถอด lockStock/lockJob/เช็ก
   ✅ 2026-10-14: บางส่วน: api-guard (static, ทุก handler ใน `test:auth`), running-no, track 81 เคส · ยังขาด: permission matrix, stock ห้ามติดลบ, SO approve ซ้ำ

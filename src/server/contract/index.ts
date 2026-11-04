@@ -1,6 +1,6 @@
 /**
  * Every family of operations, imported for the registrations it makes. A family missing here is
- * missing from the document — scripts/test-openapi.mts notices: its routes would be undocumented.
+ * missing from the document — tests/unit/openapi.test.mts notices: its routes would be undocumented.
  */
 import './jobs';
 import './sales';

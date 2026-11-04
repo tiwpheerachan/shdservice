@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { strFromU8, unzipSync } from 'fflate';

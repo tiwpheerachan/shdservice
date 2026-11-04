@@ -43,11 +43,14 @@ npm run dev                                          # http://localhost:3000
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `npm test` | test ที่ไม่ใช้ DB: validation (`test:schemas`), redirect หลัง login (`test:auth`), rate limiter IPv6 /64 + เพดาน map (`test:rate-limit`) |
+| `npm test` | test ที่ไม่ใช้ DB (vitest project `unit`, `tests/unit/` + `workers/**/*.test.ts`): validation, redirect หลัง login, rate limiter, สัญญา API / OpenAPI snapshot, db guard, xlsx, media worker ฯลฯ |
+| `npm run test:watch` | `npm test` แบบ watch — รันใหม่เมื่อไฟล์เปลี่ยน |
 | `npm run db:test:up` | เปิด Postgres ทิ้งได้ใน Docker (`tests/docker-compose.yml`, port 55442, tmpfs) |
 | `npm run db:test:prepare` | ทำให้เหมือน Supabase เปล่า (pgcrypto) + รัน migration ทั้งหมด |
 | `npm run test:db` | test ที่ใช้ DB: เลขเอกสารไม่ซ้ำเมื่อยิงพร้อมกัน (`test:running-no`), ความปลอดภัย /track (`test:track`), สิทธิ์ตาม role / สต็อกห้ามติดลบ / SO อนุมัติซ้ำ / deadlock / job race (`test:domain`) |
 | `npm run e2e` | Playwright บน production build + fake SSO (`tests/e2e`) — login, /pending, สิทธิ์ตาม role, เปิดงาน, open redirect, ไม่มี CSP violation · ครั้งแรก `npx playwright install chromium` |
+
+รันไฟล์เดียว / เคสเดียว: `npx vitest run tests/unit/auth.test.mts` · `npx vitest run tests/unit/schemas.test.mts -t 'tax ID'` · เทสต์ใหม่ที่ไม่ใช้ DB → `tests/unit/<ชื่อ>.test.ts` (`import { test } from 'vitest'`) · ที่ใช้ DB ยังอยู่ใน `scripts/test-*.mts` จนกว่าจะย้าย ([adr/0010](adr/0010-vitest-test-runner.md))
 
 test ที่ใช้ DB / e2e **ปฏิเสธทุก DB ที่ไม่ใช่ localhost `*_test`** (`tests/db-url.mts`) — ไม่อ่าน `.env` เลย · test:db กับ e2e ใช้ DB เดียวกัน รันทีละอย่าง
 CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `yuu`: lint → tsc → `npm test` → migrate + รันซ้ำทั้งหมด (`--reset`) → `test:db` → `npm audit` (high) → build · job `e2e` (Playwright) · gitleaks

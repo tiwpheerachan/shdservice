@@ -1,9 +1,9 @@
 /**
- * npm run test:media — the media link (media.ts: what the app signs is what the Worker accepts), Range parsing, and
- * the Worker against an in-memory R2 bucket and edge cache. node:test, no Workers runtime needed.
+ * The media link (media.ts: what the app signs is what the Worker accepts), Range parsing, and
+ * the Worker against an in-memory R2 bucket and edge cache. No Workers runtime needed.
  */
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { MAX_LINK_S, mediaSigOk, mediaUrl, parseRange } from './media';
 import worker, { type Env } from './index';
 

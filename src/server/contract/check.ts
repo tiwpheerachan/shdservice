@@ -29,7 +29,7 @@ export const checked = new Set<string>();
 export async function responseProblem(request: Request, response: Response): Promise<string | undefined> {
   const { pathname } = new URL(request.url);
   const route = routes.find((each) => each.method === request.method && each.pattern.test(pathname));
-  // not an operation (e.g. /api/data/<unknown>) — scripts/test-openapi.mts is what insists every route is one
+  // not an operation (e.g. /api/data/<unknown>) — tests/unit/openapi.test.mts is what insists every route is one
   if (!route) return undefined;
 
   const name = `${route.method} ${route.path} ${response.status}`;

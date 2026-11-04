@@ -13,7 +13,7 @@
 - cache: `src/server/cache.ts` (lru-cache, ≤ 500 key, TTL ต่อ call, single-flight, stale-while-revalidate) · write path เรียก `invalidate()`
 - rate limit: `src/server/rate-limit.ts` sliding window ใน `Map` · key = อีเมลใน session หรือ IP (IPv6 นับต่อ /64 — `ipBucket()` ใน `src/lib/client-ip.ts`) · 429 + `retryAfter`
   export 5/นาที · `/api/data/*` 240/นาที · `/api/customers/lookup` 120/นาที · directory 30/นาที
-- map ของ rate limit มีเพดาน 20,000 bucket: เต็มแล้วทิ้ง key ที่เงียบเกิน 5 นาที แล้วถ้ายังเต็มทิ้ง 1/10 ที่เก่าสุด (ไม่ล้างทั้งหมด — ไม่งั้นคนเปิด 20,000 key รีเซ็ตทุกคนได้) — `npm run test:rate-limit`
+- map ของ rate limit มีเพดาน 20,000 bucket: เต็มแล้วทิ้ง key ที่เงียบเกิน 5 นาที แล้วถ้ายังเต็มทิ้ง 1/10 ที่เก่าสุด (ไม่ล้างทั้งหมด — ไม่งั้นคนเปิด 20,000 key รีเซ็ตทุกคนได้) — `tests/unit/rate-limit.test.mts` (npm test)
 - **ไม่ใช่** security boundary — auth/permission ยังเช็กทุก request · `/track` สาธารณะใช้ rate limit ใน Postgres แทน (ADR 0004)
 
 ## Consequences

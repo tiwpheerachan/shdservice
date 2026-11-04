@@ -1,23 +1,14 @@
 /**
- * npm run test:db-guard — the database you migrate is said out loud: db:migrate / db:migrate:deploy
+ * The database you migrate is said out loud: db:migrate / db:migrate:deploy
  * only on Render, db:prod:migrate only at the production project (session pooler), never --reset with --prod, and no
  * journal reset at all (forced or the automatic re-run) when the URL is the production project.
  * No database is touched: every refusal happens before a connection.
  */
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { PROD_REF, pending, prodUrl } from './db-prod-migrate.mts';
+import { PROD_REF, pending, prodUrl } from '../../scripts/db-prod-migrate.mts';
 
-let failed = 0;
-const test = (name: string, fn: () => void) => {
-  try {
-    fn();
-    console.log(`  ✓ ${name}`);
-  } catch (e) {
-    failed++;
-    console.log(`  ✗ ${name}\n      ${e instanceof Error ? e.message : e}`);
-  }
-};
 /** migrate.ts as a script, with an env that has no Render and a database nobody listens on */
 const migrate = (args: string[], env: Record<string, string> = {}) =>
   spawnSync('npx', ['tsx', 'scripts/migrate.ts', ...args], {
@@ -74,6 +65,3 @@ test('pending: the journal entries newer than the last recorded one', () => {
   assert.deepEqual(pending(j, 3), []);
   assert.deepEqual(pending(j, null), ['0000_init', '0001_a', '0002_b']);
 });
-
-console.log(failed ? `${failed} failed` : 'all passed (0 failed)');
-process.exit(failed ? 1 : 0);
