@@ -13,6 +13,7 @@ import {
   type PageParams,
 } from '@/data/db';
 import type { Column, ServerTable } from '@/components/ui/data-table';
+import { STOCK_PICK_TYPES } from '@/data/options';
 import { baht, int } from '@/lib/utils';
 import { daysAgo, today } from '@/lib/dates';
 import { kpisOr, useReportAccess } from '../report-access';
@@ -89,7 +90,7 @@ function LogReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Com
 }
 
 function NetReport({ pageArgs, server, canTable, canExport, q, f, ...view }: Common & { f: ReportValues }) {
-  const filters = { from: f.from, to: f.to, category: f.category, code: f.code };
+  const filters = { from: f.from, to: f.to, category: f.category, code: f.code, moveType: f.moveType };
   const { rows, total, loading, error, refetch } = useIssuedLinesPage({ ...pageArgs, ...filters });
   const { data: sum, error: sumError } = useIssuedStats({ ...filters, q });
   const S = sum[0];
@@ -154,6 +155,12 @@ export default function Page() {
         label: 'หมวดหมู่ (แบบเบิกจ่ายสุทธิ)',
         options: ['ทั้งหมด', ...CATEGORIES.map((c) => c.name)],
         lookup: categoriesLookup,
+      },
+      {
+        kind: 'select',
+        key: 'moveType',
+        label: 'ประเภทเอกสาร (แบบเบิกจ่ายสุทธิ)',
+        options: ['ทั้งหมด', ...STOCK_PICK_TYPES],
       },
     ],
     onApply: setF,

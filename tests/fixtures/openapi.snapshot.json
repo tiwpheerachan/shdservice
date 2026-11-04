@@ -5240,6 +5240,7 @@
                       "job",
                       "sale",
                       "other",
+                      "claim",
                       "return"
                     ]
                   },
@@ -7827,6 +7828,14 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "moveType",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "description": "Free-text search."
             },
@@ -7983,6 +7992,14 @@
             },
             "required": false,
             "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "moveType",
             "in": "query"
           },
           {

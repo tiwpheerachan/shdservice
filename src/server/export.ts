@@ -362,6 +362,7 @@ async function loadRows(sp: URLSearchParams, resource: string, user: CurrentUser
         from: f.from,
         to: f.to,
         category: f.category,
+        moveType: f.moveType,
         code: f.code || p.q,
         limit: MAX_ROWS,
       });
@@ -426,7 +427,9 @@ async function totalRows(sp: URLSearchParams, resource: string, user: CurrentUse
       return (await pageMovements(p, { from: f.from, to: f.to, type: f.type, code: f.code, doc: f.doc, ref: f.ref }))
         .total;
     case 'issued_lines':
-      return (await pageIssuedLines(p, { from: f.from, to: f.to, category: f.category, code: f.code })).total;
+      return (
+        await pageIssuedLines(p, { from: f.from, to: f.to, category: f.category, code: f.code, moveType: f.moveType })
+      ).total;
     case 'audit_log':
       return (
         await pageAudit(p, {

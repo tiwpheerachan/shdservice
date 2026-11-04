@@ -121,17 +121,20 @@ export const PAYMENT_METHODS: [string, ...string[]] = ['โอนเงิน', 
 /* วิธีชำระเงินตอนปิดงาน — job.job_payment_type ของระบบเดิมใช้ "เงินโอน" / "เงินสด" */
 export const JOB_PAYMENT_METHODS: [string, ...string[]] = ['เงินโอน', 'เงินสด', 'บัตรเครดิต'];
 
+export const STOCK_CLAIM_TYPE = 'จ่ายออกตามงานเบิกอะไหล่เคลม';
 export const STOCK_MOVE_TYPES = [
   'รับเข้า',
   'รับคืนจากการเบิก',
   'จ่ายออกตามงานซ่อม',
   'จ่ายออกตามใบสั่งขาย',
   'จ่ายออกอื่นๆ',
+  STOCK_CLAIM_TYPE,
 ];
 export const STOCK_PICK_TYPES = [
   'จ่ายออกตามงานซ่อม',
   'จ่ายออกตามใบสั่งขาย',
   'จ่ายออกอื่นๆ',
+  STOCK_CLAIM_TYPE,
   'รับคืนจากการเบิก', // stock_move_type 2 — คืนอะไหล่ที่จ่ายไปแล้วกลับเข้าคลัง
 ];
 
