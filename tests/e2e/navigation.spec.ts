@@ -17,7 +17,7 @@ const push = (page: Page, href: string) =>
 
 const STATUS = 'อยู่ระหว่างการซ่อม - รอเสนอราคา';
 
-test('Back after a save shows the saved job, and the repair page saves again after Forward (no 409)', async ({
+test('a saved repair goes to the job list showing the new status; Back reads the job again and saves (no 409)', async ({
   page,
 }) => {
   const no = await newJob({ status: 2 }); // กำลังดำเนินการ
@@ -35,27 +35,46 @@ test('Back after a save shows the saved job, and the repair page saves again aft
   await page.getByRole('button', { name: 'บันทึกงานซ่อม' }).click();
   await expect(page.getByText('บันทึกงานซ่อมเรียบร้อย')).toBeVisible();
 
-  // Back replays the list's payload (the old status): the list shows the saved one
-  await page.goBack();
-  await expect(row).toContainText(STATUS);
-  await expect(row).not.toContainText('กำลังดำเนินการ');
+  // a saved repair goes on to the job list
+  await expect(page).toHaveURL(/\/jobs\/list$/);
 
-  // Forward replays the repair page's payload (the job before the save): the job is read again, not taken
+  // Back replays the repair page's payload (the job before the save): the job is read again, not taken
   // from the payload — and saves on the current version
   const id = await jobUuid(no);
   const reread = page.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith(`/api/jobs/${id}`));
-  await page.goForward();
+  await page.goBack();
   await reread;
   await expect(page.getByLabel('สถานะงานซ่อม (ปัจจุบัน)')).toContainText(STATUS);
   await page.getByLabel('วิธีการซ่อม').fill('E2E after Forward');
   await dismissToasts(page);
   await page.getByRole('button', { name: 'บันทึกงานซ่อม' }).click();
   await expect(page.getByText('บันทึกงานซ่อมเรียบร้อย')).toBeVisible();
+  await expect(page).toHaveURL(/\/jobs\/list$/);
   expect(
     await one<{ remark: string }>('SELECT engineer_repair_detail AS remark FROM job WHERE job_no = $1', [no]),
   ).toEqual({
     remark: 'E2E after Forward',
   });
+});
+
+test('a saved repair lands on the job list it came from, already showing the new status', async ({ page }) => {
+  const no = await newJob({ status: 2 }); // กำลังดำเนินการ
+  await one(`UPDATE job SET job_create_date = now() + interval '1 day' WHERE job_no = $1 RETURNING pk`, [no]);
+  await signIn(page, OWNER_EMAIL);
+  await page.goto('/jobs/list'); // this list is fresh: only the save may refresh it
+  const row = page.getByRole('row', { name: new RegExp(no) });
+  await expect(row).toContainText('กำลังดำเนินการ');
+
+  await row.getByRole('link', { name: no }).click();
+  await page.getByRole('combobox', { name: /^สถานะงานซ่อม/ }).click();
+  await page.getByRole('option', { name: STATUS, exact: true }).click();
+  await dismissToasts(page);
+  await page.getByRole('button', { name: 'บันทึกงานซ่อม' }).click();
+
+  await expect(page).toHaveURL(/\/jobs\/list$/);
+  await expect(page.getByText('บันทึกงานซ่อมเรียบร้อย')).toBeVisible();
+  await expect(row).toContainText(STATUS);
+  await expect(row).not.toContainText('กำลังดำเนินการ');
 });
 
 test('a link to another record on the same screen shows that record', async ({ page }) => {

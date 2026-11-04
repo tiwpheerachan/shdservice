@@ -26,6 +26,7 @@ import { useToast } from '@/components/ui/toast';
 import type { PickableProduct } from '@/lib/product-match';
 import { RecordGate } from '@/components/shared/record-gate';
 import { useUnsavedChanges } from '@/lib/use-unsaved-changes';
+import { useRouter } from 'next/navigation';
 import { useJob, type JobDetail } from '@/lib/use-job';
 import { PrintButton } from '@/components/shared/print-button';
 import { QuoteLink } from '@/components/jobs/quote-link';
@@ -90,6 +91,7 @@ function repairStateOf(job: JobDetail, lastId: number): { detail: RepairDetail; 
 /** `initial`: the job that came with the page — the form starts filled from it (server HTML = hydrated tree) */
 function RepairForm({ initial }: { initial?: JobDetail }) {
   const { push } = useToast();
+  const router = useRouter();
   // the job the form was built from: its mount onRecord (useRecord hands the page's record over once) is
   // already on screen; every other job that arrives — search bar, a save (setJob), a re-read — fills the form
   const builtFrom = React.useRef(initial);
@@ -164,6 +166,7 @@ function RepairForm({ initial }: { initial?: JobDetail }) {
       });
       setJob(d.job);
       push({ kind: 'success', title: 'บันทึกงานซ่อมเรียบร้อย', desc: `${d.job.no} · ${d.job.status}` });
+      router.push('/jobs/list');
     } catch (e) {
       if (!act.fromApi(e)) push({ kind: 'error', title: 'บันทึกไม่สำเร็จ', desc: errMsg(e) });
     } finally {
