@@ -17,14 +17,10 @@
     "db:studio": "drizzle-kit studio",
     "files:validate": "tsx scripts/legacy-files.mts validate",
     "files:upload": "tsx scripts/legacy-files.mts upload all",
-    "test:schemas": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-schemas.mts",
-    "test:auth": "tsx scripts/test-auth.mts",
     "test:running-no": "NODE_OPTIONS=--conditions=react-server tsx scripts/test-running-no.mts",
     "test:track": "API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx scripts/test-track.mts",
-    "test:rate-limit": "tsx scripts/test-rate-limit.mts",
-    "test": "npm run -s test:schemas && npm run -s test:drizzle-ids && npm run -s test:auth && npm run -s test:rate-limit && npm run -s test:openapi && npm run -s test:routes-input && npm run -s test:tours && npm run -s test:db-guard && npm run -s test:media && npm run -s test:xlsx && npm run -s test:api-client",
-    "test:db-guard": "tsx scripts/test-db-guard.mts",
-    "test:drizzle-ids": "tsx scripts/test-drizzle-ids.mts",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
     "test:db": "npm run -s test:running-no && npm run -s test:track && npm run -s test:domain && npm run -s test:api && npm run -s test:qa",
     "e2e": "playwright test",
     "db:test:up": "docker compose -f tests/docker-compose.yml -p oneservice-test up -d --wait",
@@ -38,14 +34,9 @@
     "db:dev:down": "docker compose -f docker-compose.yml down",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:openapi": "tsx scripts/test-openapi.mts",
-    "test:routes-input": "tsx scripts/test-routes-input.mts",
-    "test:tours": "tsx scripts/test-tours.mts",
-    "test:media": "tsx --test workers/media/src/media.test.ts",
+    "test:openapi": "vitest run --project unit tests/unit/openapi.test.mts",
     "test:api": "API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx scripts/test-api.mts",
-    "test:qa": "for f in scripts/test-qa-*.mts; do API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx \"$f\" || exit 1; done",
-    "test:xlsx": "NODE_OPTIONS=--conditions=react-server tsx --test scripts/test-xlsx.mts",
-    "test:api-client": "tsx --test scripts/test-api-client.mts"
+    "test:qa": "for f in scripts/test-qa-*.mts; do API_CONTRACT_STRICT=1 NODE_OPTIONS=--conditions=react-server tsx \"$f\" || exit 1; done"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
@@ -90,7 +81,8 @@
     "read-excel-file": "9.3.14",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.13",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": ">=24"

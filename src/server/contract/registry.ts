@@ -3,7 +3,7 @@ import type { z } from 'zod';
 
 /**
  * Every operation of /api, declared once: the OpenAPI document, /api-docs and the response check are built from it,
- * and routes parse their input ONLY with these schemas (scripts/test-routes-input.mts), so a documented field is one
+ * and routes parse their input ONLY with these schemas (tests/unit/routes-input.test.mts), so a documented field is one
  * the route reads. Declarations live in <family>.ts — a route.ts may export only its verbs and segment config.
  *
  * No 'server-only' import: scripts/build-api-docs.ts and the tests load this with plain tsx. Nothing a client

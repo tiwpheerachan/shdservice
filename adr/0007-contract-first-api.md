@@ -14,7 +14,7 @@
   (`{error, details?: {fields | stale | retryAfter | conflicts}, ref?}` ของ `handle()`) · `GET /api/data/{resource}` ประกาศแยกต่อ resource เพราะแต่ละอันตอบคนละรูป
 - **สัญญาคือสิ่งที่ route อ่าน input จริง** (เจ้าของ: "เอกสารกับของจริงเป็นสิ่งเดียวกัน", แบบ OneLink ADR 0008): ทุก route อ่าน
   params / query / headers / body / form ผ่าน `parseParams` / `parseQuery` / `parseHeaders` / `parseBody` / `parseForm` /
-  `parseTrackBody` (`src/server/auth.ts`) ด้วย schema ของ operation ตัวเองเท่านั้น — `scripts/test-routes-input.mts` (npm test)
+  `parseTrackBody` (`src/server/auth.ts`) ด้วย schema ของ operation ตัวเองเท่านั้น — `tests/unit/routes-input.test.mts` (npm test)
   ล้มถ้า route อ่าน `req.json()` / `readJson` / `searchParams.get` / `await ctx.params` / `headers.get` เอง (ยกเว้น header ระดับ
   transport: content-length, host, sec-fetch-site, user-agent) · `Idempotency-Key` อ่านใน `idempotent()` ด้วย schema เดียวกันใน `common.ts`
 - input ที่ไม่ผ่าน schema ตอบแบบเดิมของ route นั้นทุกตัวอักษร: ค่าเริ่มต้น = 400 "กรอกข้อมูลไม่ครบ N ช่อง" + `details.fields`
@@ -28,7 +28,7 @@
   ผู้ใช้ที่อนุมัติแล้วทุกคน, CSP nonce ต่อ response, Try it ยิง host เดียวกันด้วย session ของผู้ดู, คู่มือไทย/อังกฤษใน `docs/api/guides`)
 - **คำตอบถูกตรวจกับสัญญา** นอก production: `checked()` ใน `src/server/auth.ts` (รวมอยู่ใน `handle()`) → `src/server/contract/check.ts` ·
   `next dev` = log `API contract drift` · test (`API_CONTRACT_STRICT=1`) = throw · production ไม่ตรวจเลย (`checked` คืน handler เดิม)
-- `scripts/test-openapi.mts` (npm test): ทุก route file มีในสัญญาด้วย verb ตรงกัน และกลับกัน, ชื่อ resource ของ `/data` ตรงกับ `resources.ts`,
+- `tests/unit/openapi.test.mts` (npm test): ทุก route file มีในสัญญาด้วย verb ตรงกัน และกลับกัน, ชื่อ resource ของ `/data` ตรงกับ `resources.ts`,
   endpoint สาธารณะ = `/health`, `/sso/*`, `/track/*` และ snapshot `tests/fixtures/openapi.snapshot.json` · `scripts/test-api.mts` (test:db) เรียกทุก operation กับ DB ทดสอบ
   และตรึงคำตอบเมื่อ input ไม่ผ่าน (ข้อความเดิมของ route)
 - **type parity**: `scripts/test-response-types.ts` — `z.input` ของ response schema ต้อง**เท่ากับ** type ของ service (Date → string)

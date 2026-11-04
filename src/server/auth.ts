@@ -421,7 +421,7 @@ export async function readJson<T = Record<string, unknown>>(req: NextRequest): P
   }
 }
 
-// Read request input ONLY through these, with the operation's schemas (scripts/test-routes-input.mts enforces it).
+// Read request input ONLY through these, with the operation's schemas (tests/unit/routes-input.test.mts enforces it).
 // Call them where the route always read that part: a check's place decides which of 401 / 403 / 400 / 404 comes first.
 type Declares<K extends Part, S> = { [P in K]: S } & { invalid?: Invalid };
 

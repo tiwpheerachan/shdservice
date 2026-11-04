@@ -1,9 +1,10 @@
 /**
- * npm run test:schemas — the form rules in src/lib/validation (shared by the pages and the API).
+ * The form rules in src/lib/validation (shared by the pages and the API).
  * Pure: no DB, no network.
  */
 import assert from 'node:assert/strict';
-import { validate, summary, isRealDate, typedOnThai } from '../src/lib/validation/index.ts';
+import { test } from 'vitest';
+import { validate, summary, isRealDate, typedOnThai } from '@/lib/validation/index';
 import {
   jobSchema as jobSchemaOf,
   filledRequired,
@@ -27,11 +28,11 @@ import {
   soAccepts,
   type JobCheck,
   type JobRequiredKey,
-} from '../src/lib/validation/job.ts';
-import { customerSchema, conflictErrors } from '../src/lib/validation/customer.ts';
-import { quoteJobNote } from '../src/lib/quote-job.ts';
-import { quotationSchema } from '../src/lib/validation/quotation.ts';
-import { saleOrderSchema } from '../src/lib/validation/sale-order.ts';
+} from '@/lib/validation/job';
+import { customerSchema, conflictErrors, phoneFormatOk } from '@/lib/validation/customer';
+import { quoteJobNote } from '@/lib/quote-job';
+import { quotationSchema } from '@/lib/validation/quotation';
+import { saleOrderSchema } from '@/lib/validation/sale-order';
 import {
   masterSchema,
   masterNameKey,
@@ -40,26 +41,14 @@ import {
   productSchema,
   documentProfileSchema,
   shippingProfileSchema,
-} from '../src/lib/validation/admin.ts';
-import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '../src/lib/validation/stock.ts';
-import { fileProblem, LOGO_TYPES } from '../src/server/storage.ts';
+} from '@/lib/validation/admin';
+import { receiveSchema, issueSchema, assignSchema, approveSchema, callLogSchema } from '@/lib/validation/stock';
+import { fileProblem, LOGO_TYPES } from '@/server/storage';
 import { readdirSync, readFileSync } from 'node:fs';
-import { clampInt, orderBy, ymd } from '../src/server/paging.ts';
-import { version } from '../src/server/contract/common.ts';
+import { clampInt, orderBy, ymd } from '@/server/paging';
+import { version } from '@/server/contract/common';
 import { sql } from 'drizzle-orm';
 
-let passed = 0;
-const failures: string[] = [];
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } catch (e) {
-    failures.push(name);
-    console.log(`  ✗ ${name}\n      ${e instanceof Error ? e.message : e}`);
-  }
-}
 const errorsOf = (schema: Parameters<typeof validate>[0], data: unknown) => {
   const v = validate(schema, data);
   return v.ok ? {} : v.errors;
@@ -85,7 +74,6 @@ const fullJob = {
   dueDate: '2026-09-08',
 };
 
-console.log('\nJob — new job (every required field)');
 test('a complete job passes', () => assert.deepEqual(errorsOf(jobSchema(), fullJob), {}));
 test('an empty job reports all 11 required fields at once, in form order (Serial No. is not one)', () => {
   const e = errorsOf(jobSchema(), {});
@@ -129,7 +117,6 @@ test('the due date (วันประเมินซ่อมเสร็จ) i
   assert.ok(errorsOf(jobSchema(), { ...fullJob, dueDate: '8/9/2026' }).dueDate, 'a date, not any text');
 });
 
-console.log('\nJob — edit (never worse than before)');
 const legacy = { ...fullJob, serial: '', so: '' }; // an old swap job saved without these
 test('an old job may keep its empty fields', () => {
   const before = filledRequired(legacy);
@@ -147,7 +134,6 @@ test('legacy placeholders "0" / "-" in text fields count as empty (warranty mont
   assert.deepEqual(missingRequired({ ...fullJob, warrantyMonth: 0 }), []);
 });
 
-console.log('\nWorkflow screens');
 test('repair: status required', () => {
   assert.ok(errorsOf(repairActionSchema, { repairDetail: 'x' }).status);
   assert.deepEqual(errorsOf(repairActionSchema, { status: 'ซ่อมเสร็จ', parts: [] }), {});
@@ -291,7 +277,6 @@ test('outsource: send / receive dates must be real days', () => {
   assert.deepEqual(errorsOf(outsourceActionSchema, { status: 'x', receive: { date: '', detail: 'ok' } }), {});
 });
 
-console.log('\nCustomer');
 test('name and phone required for a new customer', () => {
   assert.deepEqual(Object.keys(errorsOf(customerSchema(), { name: ' ', phone: '' })).sort(), ['name', 'phone']);
   assert.deepEqual(errorsOf(customerSchema(), { name: 'สมชาย', phone: '0812345678', email: '' }), {});
@@ -307,6 +292,8 @@ test('phone / postcode / tax ID: digits, not letters (legacy formats with dashes
   for (const ok of ['0812345678', '081-234-5678', '081 234 5678', '+66 81 234 5678', '02-123-4567 / 081-234-5678'])
     assert.deepEqual(e({ phone: ok }), {}, ok);
   for (const bad of ['abcdefg', '0812', '081-ABC-5678']) assert.ok(e({ phone: bad }).phone, bad);
+  // read number by number: a run past 11 digits is no phone, even when the total looks like two numbers
+  for (const bad of ['086-417-29530611474570', '081234567890']) assert.equal(phoneFormatOk(bad), false, bad);
   assert.ok(e({ phone: '0812345678', postalCode: 'abc' }).postalCode);
   assert.deepEqual(e({ phone: '0812345678', postalCode: '10110' }), {});
   assert.ok(e({ phone: '0812345678', taxId: '12345' }).taxId);
@@ -317,7 +304,6 @@ test('a 409 clash becomes a message under the clashing field', () => {
   assert.match(e.phone, /C00001/);
 });
 
-console.log('\nQuotation');
 const q = {
   customerCode: 'C00001',
   jobNo: 'J2612164',
@@ -358,7 +344,6 @@ test('numbers: qty > 0 per row, no negatives, discount and VAT ≤ 100', () => {
   ]);
 });
 
-console.log('\nSale order');
 const so = {
   customerCode: 'C00001',
   salesId: '0190c0de-0000-7000-8000-000000000007',
@@ -391,7 +376,6 @@ test('qty a whole number (1.5 used to be cut to 1); salesperson a uuid string', 
   assert.ok(errorsOf(saleOrderSchema(), { ...so, salesId: 7 }).salesId, 'an old int id');
 });
 
-console.log('\nBack office');
 test('document / shipping profile: code + Thai name; tracking link https with {no}', () => {
   assert.deepEqual(errorsOf(documentProfileSchema, { code: ' ', nameTh: '' }), {
     code: 'ต้องระบุรหัสโปรไฟล์ (เช่น SHD)',
@@ -438,7 +422,6 @@ test('spare part: Thai name; prices not negative', () => {
   );
 });
 
-console.log('\nSummary title');
 test('toast title says missing / wrong / both', () => {
   assert.equal(
     summary({ a: 'ต้องเลือกลูกค้า', b: 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ', c: 'โปรดระบุสถานะงาน' }),
@@ -448,7 +431,6 @@ test('toast title says missing / wrong / both', () => {
   assert.equal(summary({ a: 'ต้องเลือกลูกค้า', b: 'จำนวนต้องมากกว่า 0' }), 'กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง 2 ช่อง');
 });
 
-console.log('\nAPI called with missing keys');
 test('an empty body still reports every rule (no early stop)', () => {
   assert.deepEqual(Object.keys(errorsOf(quotationSchema(), {})).sort(), ['customerCode', 'jobNo']);
   assert.deepEqual(Object.keys(errorsOf(customerSchema(), {})).sort(), ['name', 'phone']);
@@ -457,7 +439,6 @@ test('an empty body still reports every rule (no early stop)', () => {
   assert.deepEqual(Object.keys(errorsOf(saleOrderSchema(), {})).sort(), ['customerCode', 'lines', 'salesId']);
 });
 
-console.log('\nStock / assign / approve / call-log bodies (routes that had no schema)');
 const ok = (schema: Parameters<typeof validate>[0], data: unknown) => validate(schema, data).ok;
 test("qty: whole numbers 0–100,000 only (1.5 / -1 / 1e9 / 'abc' refused, '3' accepted)", () => {
   const body = (qty: unknown) => ({ date: '2026-10-01', lines: [{ code: 'P00001', qty }] });
@@ -522,7 +503,6 @@ test('assign needs jobs + an engineer id; call log needs text', () => {
   assert.equal(ok(callLogSchema, { detail: 'x'.repeat(200) }), true);
 });
 
-console.log('\nUploaded files are what their type says (src/server/storage.ts fileProblem)');
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PDF = new TextEncoder().encode('%PDF-1.7\n');
 const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
@@ -542,7 +522,6 @@ for (const [name, file, accepted] of fileChecks) {
 const pdfAsImage = await fileProblem(new File([PDF], 'a.pdf', { type: 'application/pdf' }), new Set(['image/png']));
 test('images-only kinds refuse a real PDF', () => assert.ok(pdfAsImage));
 
-console.log('\nA logo may be an SVG — a plain drawing only (fileProblem with LOGO_TYPES)');
 const svgFile = (text: string) => new File([text], 'logo.svg', { type: 'image/svg+xml' });
 // real courier logos (tests/fixtures/logos — exported from Illustrator & co: xml prolog, comments, DOCTYPE)
 for (const f of readdirSync('tests/fixtures/logos')) {
@@ -598,7 +577,6 @@ for (const [name, text, accepted] of svgChecks) {
     assert.equal(problem === null, accepted, problem ?? ''));
 }
 
-console.log('\nQuery params cannot crash a list (src/server/paging.ts)');
 test('limit: junk / NaN → default, else clamped to 1..max', () => {
   assert.equal(clampInt(null, 300, 1000), 300);
   assert.equal(clampInt('abc', 300, 1000), 300);
@@ -630,10 +608,9 @@ test('dates: only real YYYY-MM-DD pass, anything else = no filter', () => {
     assert.equal(ymd(bad), undefined, String(bad));
 });
 
-console.log('\nLegacy data: invisible characters in phones, บาท discounts on quotations');
 {
-  const { normalizePhone } = await import('../src/lib/validation/customer.ts');
-  const { parseDiscount, computeTotals } = await import('../src/lib/validation/quotation.ts');
+  const { normalizePhone } = await import('@/lib/validation/customer');
+  const { parseDiscount, computeTotals } = await import('@/lib/validation/quotation');
   test('phone: zero-width / bidi / BOM stripped, en/em dash → "-", trimmed — then the rule passes', () => {
     assert.equal(normalizePhone(' 081\u200B-234\u2060-5678\uFEFF '), '081-234-5678');
     assert.equal(normalizePhone('\u202A02\u2013123\u20144567\u202C'), '02-123-4567');
@@ -677,12 +654,11 @@ console.log('\nLegacy data: invisible characters in phones, บาท discounts 
   }
 }
 
-console.log('\nField formats (agent P): products, customers, quotation, sale order, stock, admin');
 {
-  const { cleanMfgCode } = await import('../src/lib/validation/admin.ts');
-  const { isThaiTaxId } = await import('../src/lib/validation/customer.ts');
-  const { trackingSchema } = await import('../src/lib/validation/stock.ts');
-  const { today, addDays } = await import('../src/lib/dates.ts');
+  const { cleanMfgCode } = await import('@/lib/validation/admin');
+  const { isThaiTaxId } = await import('@/lib/validation/customer');
+  const { trackingSchema } = await import('@/lib/validation/stock');
+  const { today, addDays } = await import('@/lib/dates');
   const part = { name: 'แบตเตอรี่' };
   const mfgErr = (mfgCode: unknown, prev?: string) =>
     errorsOf(productSchema(prev ? { mfgCode: prev } : null), { ...part, mfgCode }).mfgCode;
@@ -866,7 +842,6 @@ console.log('\nField formats (agent P): products, customers, quotation, sale ord
   });
 }
 
-console.log('\nField formats (agent J): jobs, workflow screens, call log, masters');
 {
   // an edit of an old job: what it stores now (prev) + when it was opened
   const editOf = (prev: Record<string, unknown>, openDate = '2025-01-10') => {
@@ -1176,6 +1151,3 @@ test('contract `version`: parsed to what assertVersion reads (a number, or none)
   assert.ok(Number.isNaN(v('x')), 'not a 400: assertVersion compares NaN → 409 stale, as before');
   assert.equal(version.safeParse(true).success, false);
 });
-
-console.log(`\n${passed} passed, ${failures.length} failed`);
-process.exit(failures.length ? 1 : 0);

@@ -8,12 +8,13 @@
  *  - no parameter or property anywhere in it (requests, responses, nested) is named `pk` / `*_pk` / `*Pk` (or the
  *    plural): the bigint `pk` never leaves the backend, the API speaks `id` uuid only;
  *  - the document equals tests/fixtures/openapi.snapshot.json, so every change to it shows in review.
- *    After an intended change: npm run test:openapi -- --update
+ *    After an intended change: npm run test:openapi -- --update (vitest's own snapshot update)
  *
  * Response shapes are held to the real answers by scripts/test-api.mts (test:db).
  */
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { expect, test } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { openapi } from '@/server/contract/openapi';
 
@@ -43,20 +44,6 @@ const paths = openapi.paths as Record<string, Record<string, { security?: unknow
 /** the route file that serves a documented path */
 const fileOf = (path: string) => routes.find((r) => r.pattern.test(path));
 
-let passed = 0;
-const failures: string[] = [];
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } catch (e) {
-    failures.push(name);
-    console.log(`  ✗ ${name}\n      ${e instanceof Error ? e.message : e}`);
-  }
-}
-
-console.log('\nOpenAPI document vs src/app/api');
 test('finds the routes it checks', () => assert.ok(routes.length > 50, `${routes.length} route files`));
 
 test('every route file is described, with exactly the verbs it exports', () => {
@@ -163,18 +150,6 @@ test('every $ref it uses is defined', () => {
   );
 });
 
-test(`the document equals ${SNAPSHOT} (npm run test:openapi -- --update after an intended change)`, () => {
-  const now = `${JSON.stringify(openapi, null, 2)}\n`;
-  if (process.argv.includes('--update')) writeFileSync(SNAPSHOT, now);
-  let before = '';
-  try {
-    before = readFileSync(SNAPSHOT, 'utf8');
-  } catch {
-    // no snapshot yet: the assertion below says how to make one
-  }
-  assert.ok(before === now, 'the document changed — review the diff, then run: npm run test:openapi -- --update');
+test(`the document equals ${SNAPSHOT} (npm run test:openapi -- --update after an intended change)`, async () => {
+  await expect(`${JSON.stringify(openapi, null, 2)}\n`).toMatchFileSnapshot(`../../${SNAPSHOT}`);
 });
-
-const operations = Object.values(paths).flatMap((item) => Object.keys(item)).length;
-console.log(`\n${passed} passed, ${failures.length} failed (${operations} operations described)`);
-if (failures.length) process.exit(1);

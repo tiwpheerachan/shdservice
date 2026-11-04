@@ -14,6 +14,7 @@
 | 0007 | [API แบบ contract-first: zod → OpenAPI → /api-docs, คำตอบถูกตรวจกับสัญญา](0007-contract-first-api.md) | Accepted |
 | 0008 | [`pk bigint` ภายใน + `id uuid v7` ภายนอก ทุกตาราง (แบบ OneLink) — หลังเลิกใช้ระบบเก่า](0008-bigint-pk-uuid7-id.md) | Deferred |
 | 0009 | [Migrate ฐานที่ระบุชื่อเอง: dev / prod (ถามก่อน) / deploy — แบบ OneLink](0009-migrate-target-said-out-loud.md) | Accepted |
+| 0010 | [เทสต์รันด้วย vitest (แบบ OneLink) ย้ายจากสคริปต์ tsx ทีละเฟส](0010-vitest-test-runner.md) | Accepted (เฟส 1) |
 
 ## เขียน ADR ใหม่
 

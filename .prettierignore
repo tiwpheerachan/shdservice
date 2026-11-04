@@ -10,7 +10,7 @@ package-lock.json
 next-env.d.ts
 tsconfig.tsbuildinfo
 public
-# generated: the API docs build, and the OpenAPI snapshot (written by scripts/test-openapi.mts)
+# generated: the API docs build, and the OpenAPI snapshot (written by tests/unit/openapi.test.mts)
 .apidoc
 tests/fixtures/openapi.snapshot.json
 # Markdown docs keep their author's layout (Thai prose, tables)
