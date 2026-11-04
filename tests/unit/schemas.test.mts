@@ -491,6 +491,12 @@ test('issue: จ่ายให้ required for "other" only (job / SO / return 
   for (const type of ['job', 'sale', 'return'])
     assert.equal(errorsOf(issueSchema, { type, payTo: '  ', lines }).payTo, undefined, type);
   assert.equal(errorsOf(issueSchema, { type: 'other', payTo: null, lines }).payTo, 'ต้องเลือก จ่ายให้');
+  assert.equal(
+    errorsOf(issueSchema, { type: 'claim', lines }).payTo,
+    'ต้องเลือก จ่ายให้',
+    'a claim names its recipient too',
+  );
+  assert.ok(validate(issueSchema, { type: 'claim', payTo: 'ช่าง', lines }).ok);
   assert.ok(errorsOf(issueSchema, { type: 'other', payTo: 'x'.repeat(51), lines }).payTo);
   assert.deepEqual(Object.keys(errorsOf(issueSchema, { type: 'other', lines: [] })).sort(), ['lines', 'payTo']);
   const v = validate(issueSchema, { type: 'other', payTo: ' คลังสินค้าดี ', lines });

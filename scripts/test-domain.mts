@@ -1725,6 +1725,36 @@ try {
       assert.equal(r.status, 400);
       assert.ok((r.body.details as { fields: Record<string, string> }).fields.payTo);
     });
+    await test('stock issue: a claim takes stock as type 6, on no job or sale order, and the report tells it apart', async () => {
+      const { listStaff } = await import('@/server/services/users');
+      const { pageIssuedLines } = await import('@/server/services/stock');
+      await setStock(P.a.code, 10);
+      const before = await qty(P.a.code);
+      const payTo = (await listStaff())[0]!.name;
+      const r = await json(
+        await stockIssuePOST(
+          await request('/api/stock/issue', U.admin, {
+            method: 'POST',
+            body: { type: 'claim', payTo, remark: 'เคลม TD', lines: [{ code: P.a.code, qty: 2 }] },
+          }),
+        ),
+      );
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      const no = r.body.no as string;
+      const [m] = (
+        await db.execute(
+          sql`SELECT stock_move_type_id t, job_pk, sale_order_pk, reference_out_to o FROM stock_move WHERE stock_move_no = ${no}`,
+        )
+      ).rows as { t: number; job_pk: number | null; sale_order_pk: number | null; o: string }[];
+      assert.deepEqual(m, { t: 6, job_pk: null, sale_order_pk: null, o: payTo });
+      assert.equal((await qty(P.a.code)).remain, before.remain - 2);
+      const docs = async (moveType: string) =>
+        (
+          await pageIssuedLines({ q: '', page: 1, pageSize: 100, f: {} } as never, { code: P.a.code, moveType })
+        ).rows.map((x) => x.doc);
+      assert.ok((await docs('จ่ายออกตามงานเบิกอะไหล่เคลม')).includes(no), 'the claim filter finds it');
+      assert.ok(!(await docs('จ่ายออกอื่นๆ')).includes(no), 'จ่ายออกอื่นๆ does not');
+    });
     await test('user: a new user with an existing email → 409 under email, the other user unchanged', async () => {
       const before = (await db.execute(sql`SELECT * FROM app_user WHERE pk = ${U.clerk.id}`)).rows[0];
       const r = await fieldsOf(

@@ -59,6 +59,7 @@ export const INV = {
   OUT_JOB: 3, // จ่ายออกตามงานซ่อม
   OUT_SALE: 4, // จ่ายออกตามใบสั่งขาย
   OUT_OTHER: 5, // จ่ายออกอื่นๆ
+  OUT_CLAIM: 6, // จ่ายออกตามงานเบิกอะไหล่เคลม
 } as const;
 
 /** job_part.job_part_status_id */

@@ -45,9 +45,9 @@ const PICK_REF: Record<string, RegExp> = { job: JOB_NO_RE, return: JOB_NO_RE, sa
 
 export const issueSchema = z
   .looseObject({
-    type: z.enum(['job', 'sale', 'other', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
+    type: z.enum(['job', 'sale', 'other', 'claim', 'return'], 'ประเภทการเบิกไม่ถูกต้อง'),
     ref: text(50),
-    // จ่ายให้: required for จ่ายออกอื่นๆ only (stock_move.reference_out_to, 50) — a job / sale-order / return
+    // จ่ายให้: required for จ่ายออกอื่นๆ / เคลม only (stock_move.reference_out_to, 50) — a job / sale-order / return
     // movement's reference is that document (job_pk / sale_order_pk), nothing is stored for it
     payTo: z
       .string()
@@ -61,7 +61,7 @@ export const issueSchema = z
       REPEATED_LINE,
     ),
   })
-  .refine((v) => v.type !== 'other' || !!v.payTo, {
+  .refine((v) => (v.type !== 'other' && v.type !== 'claim') || !!v.payTo, {
     path: ['payTo'],
     error: (iss) => ((iss.input as { type?: unknown }).type === 'return' ? 'ต้องเลือก รับคืนจาก' : 'ต้องเลือก จ่ายให้'),
     when: (p) => typeof p.value === 'object' && p.value !== null, // also when another field failed: every error at once

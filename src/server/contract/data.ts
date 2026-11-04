@@ -219,7 +219,7 @@ const customerFilters = {
 };
 resource('customers', 'Customers', viewOn('Customer'), list(Customer), customerFilters, Customer);
 
-const issuedFilters = { from: ymd, to: ymd, category: s.optional(), code: s.optional(), q };
+const issuedFilters = { from: ymd, to: ymd, category: s.optional(), code: s.optional(), moveType: s.optional(), q };
 resource(
   'issued_lines',
   'Issued part lines (รายงานการเบิกอะไหล่)',

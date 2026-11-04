@@ -12,7 +12,7 @@ import { SearchSelect, strOptions } from '@/components/shared/search-select';
 import { ProductPicker } from '@/components/shared/product-picker';
 import { useToast } from '@/components/ui/toast';
 import { useApi, useJobNos, useStaff } from '@/data/db';
-import { STOCK_PICK_TYPES } from '@/data/options';
+import { STOCK_CLAIM_TYPE, STOCK_PICK_TYPES } from '@/data/options';
 import { int, cn } from '@/lib/utils';
 import { api, postJson, errMsg, qs } from '@/lib/api';
 import { useMountTime } from '@/lib/use-client';
@@ -22,7 +22,7 @@ import { TEXT_MAX } from '@/lib/validation';
 import { issueSchema } from '@/lib/validation/stock';
 import { useTourRestore } from '@/components/tour/tour';
 
-const DOC_TYPES = STOCK_PICK_TYPES; // = stock_move_type 3 / 4 / 5
+const DOC_TYPES = STOCK_PICK_TYPES; // = stock_move_type 3 / 4 / 5 / 6
 /** รับคืนจากการเบิก is by job: a WHO document no. (or a job nothing went out to) has nothing to return */
 const RETURN_REF_HINT = 'ใส่เลขงาน (J…) ที่เคยเบิกอะไหล่ — ไม่ใช่เลขเอกสารจ่ายออก (WHO…)';
 
@@ -329,7 +329,7 @@ export default function PickPage() {
 
   const save = async () => {
     const body = {
-      type: kind,
+      type: docType === STOCK_CLAIM_TYPE ? ('claim' as const) : kind, // on screen a claim is จ่ายออกอื่นๆ: parts picked by hand
       ref,
       payTo,
       remark,

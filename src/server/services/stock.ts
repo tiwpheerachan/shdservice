@@ -690,20 +690,23 @@ export async function receiveStock(
   );
 }
 
-/** จ่ายออกอื่นๆ → WHO (type 5). */
+/**
+ * จ่ายออกอื่นๆ → WHO (type 5); `claim`: จ่ายออกตามงานเบิกอะไหล่เคลม (type 6). Neither touches a job or a sale order, so
+ * nothing here can reach what a customer is billed.
+ */
 export async function issueOther(
-  i: { payTo: string; remark?: string; lines: StockLine[] },
+  i: { payTo: string; remark?: string; lines: StockLine[]; claim?: boolean },
   byUserId: number,
 ): Promise<{ no: string; total: number }> {
   return moveByCode(
     i.lines,
     'ยังไม่ได้ระบุจำนวนจ่ายออก',
     'used',
-    { typeId: INV.OUT_OTHER, outTo: i.payTo, remark: i.remark },
+    { typeId: i.claim ? INV.OUT_CLAIM : INV.OUT_OTHER, outTo: i.payTo, remark: i.remark },
     (total) => ({
       action: 'ISSUE',
       module: 'Product Pick Stock',
-      summary: `จ่ายออกอื่นๆ ให้ ${str(i.payTo)} · ${total} ชิ้น`,
+      summary: `${i.claim ? 'จ่ายออกตามงานเบิกอะไหล่เคลม' : 'จ่ายออกอื่นๆ'} ให้ ${str(i.payTo)} · ${total} ชิ้น`,
     }),
     byUserId,
   );
@@ -1776,9 +1779,9 @@ export async function pageMovements(p: PageQuery, f: MovementFilters): Promise<P
   };
 }
 
-export type IssuedFilters = { from?: string; to?: string; category?: string; code?: string };
+export type IssuedFilters = { from?: string; to?: string; category?: string; code?: string; moveType?: string };
 
-/** a line's qty in the report: issued (3/4/5) counts up, รับคืนจากการเบิก (2) counts back down */
+/** a line's qty in the report: issued (3/4/5/6) counts up, รับคืนจากการเบิก (2) counts back down */
 const issuedQty = sql<string>`(case when ${stockMove.stockMoveTypeId} = ${sql.raw(String(INV.RETURN_FROM_JOB))} then -${stockMoveLine.itemQuantity} else ${stockMoveLine.itemQuantity} end)`;
 /**
  * The unit price stored when the part went out: the job's part line (job_part, issue and
@@ -1799,7 +1802,13 @@ function issuedWhere(q: string, f: IssuedFilters) {
   const from = ymd(f.from),
     to = ymd(f.to);
   return and(
-    inArray(stockMove.stockMoveTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER, INV.RETURN_FROM_JOB]),
+    inArray(stockMove.stockMoveTypeId, [INV.OUT_JOB, INV.OUT_SALE, INV.OUT_OTHER, INV.OUT_CLAIM, INV.RETURN_FROM_JOB]),
+    f.moveType
+      ? eq(
+          stockMove.stockMoveTypeId,
+          sql`(select ${stockMoveType.stockMoveTypeId} from ${stockMoveType} where ${stockMoveType.stockMoveTypeName} = ${f.moveType})`,
+        )
+      : undefined,
     from ? gte(stockMove.createDate, `${from} 00:00:00`) : undefined,
     to ? lte(stockMove.createDate, `${to} 23:59:59`) : undefined,
     f.category ? eq(category.categoryName, f.category) : undefined,

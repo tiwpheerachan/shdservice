@@ -192,16 +192,31 @@ export async function readResource(
     }
     case 'issued_lines':
       return paged
-        ? pageIssuedLines(p, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })
+        ? pageIssuedLines(p, {
+            from: p.f.from,
+            to: p.f.to,
+            category: p.f.category,
+            code: p.f.code,
+            moveType: p.f.moveType,
+          })
         : listIssuedLines({
             from: p.f.from,
             to: p.f.to,
             category: p.f.category,
+            moveType: p.f.moveType,
             code: p.f.code || p.q,
             limit,
           });
     case 'issued_stats':
-      return [await issuedStats(p.q, { from: p.f.from, to: p.f.to, category: p.f.category, code: p.f.code })];
+      return [
+        await issuedStats(p.q, {
+          from: p.f.from,
+          to: p.f.to,
+          category: p.f.category,
+          code: p.f.code,
+          moveType: p.f.moveType,
+        }),
+      ];
     case 'movements':
       return paged
         ? pageMovements(p, { from: p.f.from, to: p.f.to, type: p.f.type, code: p.f.code, doc: p.f.doc, ref: p.f.ref })
