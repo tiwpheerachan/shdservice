@@ -21,8 +21,8 @@ async function repairedJob(detail: string) {
 /** a phone folds the filter bar */
 async function showFilters(page: import('@playwright/test').Page) {
   await expect(page.getByRole('heading', { name: 'รายงานการซ่อม' })).toBeVisible();
-  const show = page.getByRole('button', { name: 'แสดงตัวกรอง' });
-  if (await show.isVisible()) await show.click();
+  // by width, not isVisible(): before hydration a phone's button still reads ซ่อนตัวกรอง, then the bar folds itself
+  if (page.viewportSize()!.width < 768) await page.getByRole('button', { name: 'แสดงตัวกรอง' }).click();
 }
 
 async function openReport(page: import('@playwright/test').Page, no: string) {
