@@ -92,6 +92,13 @@
       "when": 1762560000000,
       "tag": "0012_stock_move_type_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1762646400000,
+      "tag": "0013_move_open_items_to_active_accounts",
+      "breakpoints": true
     }
   ]
 }

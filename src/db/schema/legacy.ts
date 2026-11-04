@@ -966,6 +966,22 @@ export const jobEngineerSymptom = pgTable(
   (table) => [uniqueIndex('ux_job_engineer_symptom_job_pk_symptom_pk').on(table.jobPk, table.symptomPk)],
 );
 
+/** who a row moved from: migration 0013 (a person's open items, legacy account → SSO account), so it can be moved back */
+export const accountMoveLog = pgTable(
+  'account_move_log',
+  {
+    pk: pkCol(),
+    id: uuidId(),
+    tableName: text('table_name').notNull(),
+    columnName: text('column_name').notNull(),
+    rowRef: bigint('row_ref', { mode: 'number' }).notNull(),
+    oldAppUserPk: pkRef('old_app_user_pk').notNull(),
+    newAppUserPk: pkRef('new_app_user_pk').notNull(),
+    movedAt: timestamp('moved_at', { mode: 'string' }).notNull(),
+  },
+  (table) => [uniqueIndex('ux_account_move_log_row').on(table.tableName, table.columnName, table.rowRef)],
+);
+
 export const recordStatus = pgTable(
   'record_status',
   {
