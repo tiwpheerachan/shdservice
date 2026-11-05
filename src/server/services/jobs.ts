@@ -3313,6 +3313,12 @@ async function computeDashboard(from: string, to: string, type = '') {
     const [opened, closed] = await Promise.all([perPeriod(job.jobCreateDate), perPeriod(job.jobClosedDate)]);
     return periodKeys(lo, hi, daily).map((k) => ({ k, open: opened.get(k) ?? 0, close: closed.get(k) ?? 0 }));
   };
+  // mainSymptomPk's rule, read once for all jobs: this panel counts every job, so asking per job is a lookup for each
+  const firstSymptom = db
+    .selectDistinctOn([jobSymptom.jobPk], { jobPk: jobSymptom.jobPk, symptomPk: jobSymptom.symptomPk })
+    .from(jobSymptom)
+    .orderBy(jobSymptom.jobPk, jobSymptom.pk)
+    .as('first_symptom');
   // the four panels are independent: run them side by side (the page waits for the slowest, not the sum)
   const [groups, tat, trend, top] = await Promise.all([
     db
@@ -3342,10 +3348,11 @@ async function computeDashboard(from: string, to: string, type = '') {
     db
       .select({ name: symptom.symptomName, n: count() })
       .from(job)
-      .innerJoin(symptom, eq(symptom.pk, mainSymptomPk))
+      .leftJoin(firstSymptom, eq(firstSymptom.jobPk, job.pk))
+      .innerJoin(symptom, eq(symptom.pk, sql`coalesce(${firstSymptom.symptomPk}, ${job.reportedSymptomPk})`))
       .where(createdIn)
       .groupBy(symptom.symptomName)
-      .orderBy(desc(count()))
+      .orderBy(desc(count()), asc(symptom.symptomName))
       .limit(8),
   ]);
   const total = groups.reduce((s, g) => s + Number(g.n), 0) || 1;
