@@ -1,0 +1,25 @@
+{
+  "name": "OneService API",
+  "version": "1.0.0",
+  "title": "OneService API",
+  "description": "API ของระบบงานซ่อม OneService (SHD) สำหรับทีมพัฒนา · The OneService repair-service API, for the internal team",
+  "template": {
+    "showRequiredLabels": true,
+    "withGenerator": false
+  },
+  "header": {
+    "title": "OneService",
+    "content": "<p><strong>OneService API</strong> — API ชุดเดียวกับที่ทุกหน้าของระบบเรียกใช้ · The same API every OneService page calls.</p><p>เริ่มที่ / Start with: <em>🇹🇭 เริ่มต้นใช้งาน</em> · <em>🇬🇧 Getting started</em></p>"
+  },
+  "footer": {
+    "title": "Source",
+    "content": "<p>สร้างจาก <code>src/server/contract</code> ด้วย <code>npm run docs:api</code> · Generated from <code>src/server/contract</code> by <code>npm run docs:api</code>.</p>"
+  },
+  "i18n": {
+    "enabled": true,
+    "defaultLang": "th",
+    "availableLangs": ["th", "en"],
+    "showLanguageSelector": true,
+    "fallbackToDefault": true
+  }
+}

@@ -1,8 +1,18 @@
 node_modules
 .next
+.next-*
 out
 .env*
 !.env.example
+!.env.development.example
 *.log
 .DS_Store
 next-env.d.ts
+
+# End-to-end build and reports (npm run e2e) — traces hold session cookies too
+/playwright-report
+/test-results
+.apidoc
+
+# tsc incremental cache — rewritten on every run
+*.tsbuildinfo

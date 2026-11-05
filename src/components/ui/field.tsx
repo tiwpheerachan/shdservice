@@ -1,5 +1,63 @@
-import * as React from "react";
-import { cn } from "@/lib/utils";
+'use client';
+
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+
+/**
+ * The label is tied to the FIRST form control mounted inside (via useFieldControl), with aria-describedby / aria-invalid;
+ * a control with its own `id` keeps it. Controls register in a layout effect, never during render: a render React
+ * throws away must not leave the label pointing at nothing. A read-only value is named by aria-labelledby; `group`
+ * makes the wrapper a named radiogroup / group.
+ */
+type FieldCtx = {
+  id: string;
+  labelId: string;
+  describedBy?: string;
+  invalid: boolean;
+  /** the Field shows a visible label (its owner is named by it) */
+  labelled: boolean;
+  /** the control that owns the label: the first one registered that is still mounted */
+  owner: string | null;
+  /** a control announces itself (labelable = a real form control); returns its unregister */
+  register: (token: string, labelable: boolean) => () => void;
+};
+const FieldContext = React.createContext<FieldCtx | null>(null);
+
+export type FieldControlProps = {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
+  'aria-labelledby'?: string;
+  'aria-label'?: string;
+};
+
+/**
+ * For form controls: the props that tie this control to the surrounding Field's label.
+ * Only the first control in a Field gets them; outside a Field it returns just `{ id }`.
+ * `labelable: false` — not a form control (a read-only value): named by aria-labelledby instead.
+ * `label` — the name to fall back on (aria-label) when no visible label names the control: it is
+ *   not in a Field, or its Field has no `label`. Outside a Field an own `id` means the page labels it.
+ */
+export function useFieldControl(ownId?: string, opts: { labelable?: boolean; label?: string } = {}): FieldControlProps {
+  const labelable = opts.labelable ?? true;
+  const ctx = React.useContext(FieldContext);
+  const token = React.useId();
+  const register = ctx?.register;
+  React.useLayoutEffect(() => register?.(token, labelable), [register, token, labelable]);
+  const primary = !!ctx && ctx.owner === token;
+  // never an `aria-label: undefined` key: spread after a caller's own aria-label it would erase it
+  const fallback = opts.label ? { 'aria-label': opts.label } : {};
+  if (!primary) return ownId ? { id: ownId } : fallback;
+  return {
+    id: ownId ?? ctx.id,
+    'aria-describedby': ctx.describedBy,
+    'aria-invalid': ctx.invalid || undefined,
+    ...(ctx.labelled ? (labelable ? {} : { 'aria-labelledby': ctx.labelId }) : fallback),
+  };
+}
+
+/** what a lookup hook returns besides its rows (useJobTypes(), useManufacturers(), … — see TableState) */
+export type Lookup = { error: string | null; refetch: () => void };
 
 export function Field({
   label,
@@ -10,33 +68,123 @@ export function Field({
   className,
   children,
   wide,
+  group,
+  lookup,
 }: {
   label?: string;
   required?: boolean;
   hint?: string;
   error?: string;
+  /** only needed when the control is NOT rendered inside this Field */
   htmlFor?: string;
   className?: string;
   children: React.ReactNode;
   wide?: boolean;
+  /** the children are options with their own labels (radios / checkboxes) — the label names the group */
+  group?: 'radiogroup' | 'group';
+  /** the lookup(s) the control's options come from: a failed load says so under the control, with a retry */
+  lookup?: Lookup | Lookup[];
 }) {
+  const auto = React.useId();
+  const labelId = `${auto}-label`;
+  // a single child that brings its own id (e.g. <ProductPicker id="so-product" />) keeps it
+  const childId =
+    React.isValidElement<{ id?: unknown }>(children) && typeof children.props.id === 'string'
+      ? children.props.id
+      : undefined;
+  const id = htmlFor ?? childId ?? `${auto}-control`;
+  const hintId = hint && !error ? `${auto}-hint` : undefined;
+  const errorId = error ? `${auto}-error` : undefined;
+  // controls in mount order (layout effects run in tree order → the first control in the markup
+  // registers first); unmounting the owner hands the label to the next one
+  const [owner, setOwner] = React.useState<{ token: string; labelable: boolean } | null>(null);
+  const registered = React.useRef<{ token: string; labelable: boolean }[]>([]);
+  const register = React.useCallback((token: string, labelable: boolean) => {
+    registered.current = [...registered.current, { token, labelable }];
+    setOwner(registered.current[0] ?? null); // never empty here: just appended
+    return () => {
+      registered.current = registered.current.filter((r) => r.token !== token);
+      setOwner(registered.current[0] ?? null);
+    };
+  }, []);
+  const ctx = React.useMemo<FieldCtx>(
+    () => ({
+      id,
+      labelId,
+      describedBy: errorId ?? hintId,
+      invalid: !!error,
+      labelled: !!label,
+      owner: owner?.token ?? null,
+      register,
+    }),
+    [id, labelId, errorId, hintId, error, label, owner, register],
+  );
+  // `for` only when it reaches a real form control: one that registered as labelable, or an id the
+  // page named itself (htmlFor / the child's own id)
+  const labelFor = htmlFor ?? childId ?? (!group && owner?.labelable ? id : undefined);
+
   return (
-    <div className={cn("min-w-0", wide && "col-span-full", className)}>
+    <div className={cn('min-w-0', wide && 'col-span-full', className)}>
       {label && (
         <label
-          htmlFor={htmlFor}
+          id={labelId}
+          htmlFor={labelFor}
           className="mb-1.5 flex items-center gap-1 text-xs font-medium text-muted-foreground"
         >
-          {required && <span className="text-danger">*</span>}
+          {required && (
+            <span className="text-danger" aria-hidden>
+              *
+            </span>
+          )}
           {label}
+          {required && <span className="sr-only">(จำเป็น)</span>}
         </label>
       )}
-      {children}
-      {hint && !error && (
-        <p className="mt-1 text-2xs text-muted-foreground">{hint}</p>
+      <FieldContext.Provider value={ctx}>
+        {group ? (
+          <div
+            role={group}
+            aria-labelledby={label ? labelId : undefined}
+            aria-describedby={errorId ?? hintId}
+            aria-required={group === 'radiogroup' && required ? true : undefined}
+          >
+            {children}
+          </div>
+        ) : (
+          children
+        )}
+      </FieldContext.Provider>
+      {lookup && <LookupError {...lookupState(lookup)} />}
+      {hintId && (
+        <p id={hintId} className="mt-1 text-2xs text-muted-foreground">
+          {hint}
+        </p>
       )}
-      {error && <p className="mt-1 text-2xs text-danger">{error}</p>}
+      {errorId && (
+        <p id={errorId} role="alert" className="mt-1 text-2xs text-danger">
+          {error}
+        </p>
+      )}
     </div>
+  );
+}
+
+/** several lookups behind one control: the first failure is shown, retry re-reads every failed one */
+function lookupState(lookup: Lookup | Lookup[]) {
+  const failed = (Array.isArray(lookup) ? lookup : [lookup]).filter((l) => l.error);
+  return { error: failed[0]?.error ?? null, onRetry: () => failed.forEach((l) => l.refetch()) };
+}
+
+/** a dropdown whose list failed to load says so — not a silent empty list — with a retry (inside its Field) */
+export function LookupError({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  if (!error) return null;
+  return (
+    <p role="alert" className="mt-1 text-2xs text-danger">
+      โหลดรายการไม่สำเร็จ{' '}
+      <button type="button" onClick={onRetry} className="font-medium underline underline-offset-2 hover:no-underline">
+        ลองใหม่
+      </button>
+    </p>
   );
 }
 
@@ -50,20 +198,23 @@ export function FieldGrid({
   children: React.ReactNode;
 }) {
   const map = {
-    2: "sm:grid-cols-2",
-    3: "sm:grid-cols-2 lg:grid-cols-3",
-    4: "sm:grid-cols-2 lg:grid-cols-4",
+    2: 'sm:grid-cols-2',
+    3: 'sm:grid-cols-2 lg:grid-cols-3',
+    4: 'sm:grid-cols-2 lg:grid-cols-4',
   } as const;
-  return (
-    <div className={cn("grid grid-cols-1 gap-x-4 gap-y-3.5", map[cols], className)}>
-      {children}
-    </div>
-  );
+  return <div className={cn('grid grid-cols-1 gap-x-4 gap-y-3.5', map[cols], className)}>{children}</div>;
 }
 
+/** a value shown in a Field that cannot be edited — announced as "<label>, read-only, <value>" */
 export function ReadOnly({ children }: { children: React.ReactNode }) {
+  const field = useFieldControl(undefined, { labelable: false });
   return (
-    <div className="flex h-9 items-center rounded-md border border-border bg-muted/60 px-3 text-sm text-foreground">
+    <div
+      {...field}
+      role="textbox"
+      aria-readonly="true"
+      className="flex min-h-9 items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-sm text-foreground"
+    >
       {children || <span className="text-muted-foreground">—</span>}
     </div>
   );

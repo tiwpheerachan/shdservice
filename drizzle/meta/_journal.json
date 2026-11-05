@@ -1,0 +1,118 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1757900039000,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1761609600000,
+      "tag": "0001_shipping_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1761696000000,
+      "tag": "0002_legacy_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1761782400000,
+      "tag": "0003_merge_legacy_users_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1761868800000,
+      "tag": "0004_document_profile_purpose",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1761955200000,
+      "tag": "0005_uuid7_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1762041600000,
+      "tag": "0006_bigint_pk",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1762128000000,
+      "tag": "0007_job_status_no_fault_in_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1762214400000,
+      "tag": "0008_job_note_length",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1762300800000,
+      "tag": "0009_job_engineer_symptom",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1762387200000,
+      "tag": "0010_free_text_length",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1762473600000,
+      "tag": "0011_merge_duplicate_engineers",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1762560000000,
+      "tag": "0012_stock_move_type_claim",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1762646400000,
+      "tag": "0013_move_open_items_to_active_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1762732800000,
+      "tag": "0014_move_open_items_bonus_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1762819200000,
+      "tag": "0015_move_history_to_active_accounts",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,40 +1,65 @@
-import Link from "next/link";
-import { LogIn, ShieldCheck } from "lucide-react";
-import { Logo } from "@/components/shared/logo";
-import { AuthSplit } from "@/components/ui/sign-in";
+import { cookies } from 'next/headers';
+import { safeNext, SSO_ORIGIN } from '@/lib/sso';
+import { SESSION_COOKIE, verifySession } from '@/lib/session';
+import { resolveUser } from '@/server/auth';
+import { COMPANY } from '@/lib/company';
+import { listDocumentProfiles } from '@/server/services/document-profiles';
+import { LogIn, ShieldCheck } from 'lucide-react';
+import { Logo } from '@/components/shared/logo';
+import { AuthSplit } from '@/components/ui/sign-in';
 
-export const metadata = { title: "เข้าสู่ระบบ" };
-export const dynamic = "force-dynamic";
+export const metadata = { title: 'เข้าสู่ระบบ', robots: { index: false, follow: false } };
+export const dynamic = 'force-dynamic';
 
-const HERO = "/hero-shd.jpg";
+const HERO = '/hero-shd.jpg';
 
 const ERRORS: Record<string, string> = {
-  state_mismatch: "เซสชันหมดอายุระหว่างเข้าสู่ระบบ กรุณาลองใหม่",
-  missing_code: "ไม่ได้รับรหัสยืนยันจากระบบกลาง",
-  no_email: "บัญชีนี้ไม่มีอีเมลในระบบกลาง",
-  server_not_configured: "ยังไม่ได้ตั้งค่า CENTRAL_API_KEY บนเซิร์ฟเวอร์",
-  verify_unreachable: "เชื่อมต่อระบบกลางไม่ได้ ลองใหม่อีกครั้ง",
+  state_mismatch: 'ลิงก์เข้าสู่ระบบหมดอายุหรือถูกใช้ไปแล้ว กรุณากดเข้าสู่ระบบอีกครั้ง',
+  missing_code: 'ไม่ได้รับรหัสยืนยันจากระบบกลาง',
+  no_email: 'บัญชีนี้ไม่มีอีเมลในระบบกลาง',
+  server_not_configured: 'ระบบยังตั้งค่าการเข้าสู่ระบบไม่ครบ (SSO_CLIENT_SECRET) กรุณาแจ้งผู้ดูแลระบบ',
+  verify_unreachable: 'เชื่อมต่อระบบกลางไม่ได้ ลองใหม่อีกครั้ง',
+  // /sso/verify's own answers (callback → verify_<status>)
+  verify_400: 'รหัสยืนยันหมดอายุหรือถูกใช้ไปแล้ว กรุณากดเข้าสู่ระบบอีกครั้ง',
+  verify_401: 'ระบบกลางไม่รู้จักแอปนี้ (การตั้งค่าแอปไม่ถูกต้อง) กรุณาแจ้งผู้ดูแลระบบ',
+  verify_403: 'บัญชีนี้ไม่มีสิทธิ์เข้าแอปนี้ หรือถูกปิดการใช้งานในระบบกลาง กรุณาติดต่อผู้ดูแลระบบ',
+  verify_500: 'ระบบกลางขัดข้องชั่วคราว ลองใหม่อีกครั้ง',
+  verify_502: 'ระบบกลางขัดข้องชั่วคราว ลองใหม่อีกครั้ง',
+  verify_503: 'ระบบกลางขัดข้องชั่วคราว ลองใหม่อีกครั้ง',
+  db_unavailable: 'ระบบฐานข้อมูลไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง',
+  user_conflict: 'สร้างบัญชีไม่สำเร็จ — แจ้งผู้ดูแลระบบ (รหัส user_conflict)',
 };
+
+/** the session cookie still verifies but the server refuses it — signed out on another device (logout
+ *  bumps session_version) or the account's email changed. The app layout's redirect only says expired=1,
+ *  so it is told apart here; DB down → not known, the plain "expired" note. */
+async function refusedElsewhere() {
+  const s = await verifySession((await cookies()).get(SESSION_COOKIE)?.value);
+  return !!s && (await resolveUser(s).catch(() => undefined)) === null;
+}
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; bye?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; bye?: string; expired?: string; reason?: string }>;
 }) {
   const sp = await searchParams;
-  const next = sp.next ?? "/jobs/dashboard";
-  const err = sp.error
-    ? ERRORS[sp.error] ?? `เข้าสู่ระบบไม่สำเร็จ (${sp.error})`
-    : null;
+  const next = safeNext(sp.next);
+  // ?reason=elsewhere from /api/sso/me|refresh (lib/navigation toLogin); ออกจากระบบ here (?bye=1) wins
+  const elsewhere = !sp.bye && (sp.reason === 'elsewhere' || (!!sp.expired && (await refusedElsewhere())));
+  // only known codes are shown — never echo a URL parameter back onto the page
+  const err = sp.error ? (ERRORS[sp.error] ?? 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') : null;
+  // who runs this site: the default document profile admins edit; COMPANY when there is none / the DB is down
+  const co = (await listDocumentProfiles().catch(() => [])).find((p) => p.isDefault) ?? COMPANY;
 
   return (
     <main className="auth-page">
       <AuthSplit heroImageSrc={HERO} fit="contain">
         <div className="flex flex-col gap-6">
-          <Logo variant="navy" className="h-9 w-auto self-start animate-element" />
+          <Logo variant="navy" className="h-9 w-auto self-start animate-rise" />
 
           <div>
-            <h1 className="animate-element animate-delay-100 text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h1 className="animate-rise animate-delay-100 text-3xl font-semibold tracking-tight sm:text-4xl">
               ยินดีต้อนรับ
             </h1>
             <p className="animate-element animate-delay-200 mt-2 text-muted-foreground">
@@ -42,6 +67,18 @@ export default async function LoginPage({
             </p>
           </div>
 
+          {elsewhere ? (
+            <p className="animate-element rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs text-warning">
+              คุณออกจากระบบจากอุปกรณ์อื่นแล้ว หรือผู้ดูแลระบบแก้ไขบัญชีของคุณ — กรุณาเข้าสู่ระบบใหม่
+            </p>
+          ) : (
+            sp.expired &&
+            !sp.bye && (
+              <p className="animate-element rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs text-warning">
+                เซสชันหมดอายุเนื่องจากไม่มีการใช้งานเกิน 30 นาที กรุณาเข้าสู่ระบบอีกครั้ง
+              </p>
+            )
+          )}
           {sp.bye && (
             <p className="animate-element rounded-xl border border-border bg-muted/50 px-3 py-2 text-center text-xs text-muted-foreground">
               ออกจากระบบเรียบร้อยแล้ว
@@ -53,19 +90,38 @@ export default async function LoginPage({
             </p>
           )}
 
-          <Link
+          {/* plain <a>: a Next <Link> would prefetch /api/sso/login and mint a stray state */}
+          <a
             href={`/api/sso/login?next=${encodeURIComponent(next)}`}
-            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
-            style={{ background: "linear-gradient(90deg,#43a6f8,#55d5a1)" }}
+            rel="nofollow"
+            className="animate-element animate-delay-300 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-lg transition-opacity [--brand-angle:90deg] bg-brand-ink hover:opacity-90"
           >
             <LogIn className="h-4 w-4" />
             เข้าสู่ระบบด้วย SHD SSO
-          </Link>
+          </a>
 
           <p className="animate-element animate-delay-400 flex items-center justify-center gap-1.5 text-2xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            ยืนยันตัวตนผ่าน sso.shd-technology.co.th
+            ยืนยันตัวตนผ่านระบบกลางของบริษัท ({new URL(SSO_ORIGIN).host}) — ระบบนี้ไม่ขอรหัสผ่านของคุณ
           </p>
+
+          {/* who runs this site — a plain statement of identity for people (and reviewers) landing here */}
+          <div className="animate-element animate-delay-400 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
+            <p className="font-medium text-foreground">
+              {co.nameTh} · {co.nameEn}
+            </p>
+            <p>{co.address}</p>
+            <p>
+              โทร {co.phone} · เว็บไซต์{' '}
+              <a href="https://shd-technology.co.th" className="underline" rel="noopener">
+                shd-technology.co.th
+              </a>
+            </p>
+            <p className="mt-1">
+              OneService เป็นระบบภายในสำหรับพนักงาน SHD Technology เท่านั้น — Internal after-sales service system for
+              SHD Technology staff. Not affiliated with Google.
+            </p>
+          </div>
         </div>
       </AuthSplit>
     </main>

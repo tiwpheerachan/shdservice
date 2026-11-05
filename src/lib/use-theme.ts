@@ -1,42 +1,46 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from 'react';
+import { useIsClient, useLocalStorage } from '@/lib/use-client';
 
-export type ThemeMode = "light" | "dark" | "system";
-const KEY = "shd-theme";
+export type ThemeMode = 'light' | 'dark' | 'system';
+const KEY = 'shd-theme';
+const MODES: readonly ThemeMode[] = ['light', 'dark', 'system'];
 
 function apply(mode: ThemeMode) {
-  const dark =
-    mode === "dark" ||
-    (mode === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
+  const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.classList.toggle('dark', dark);
   document.documentElement.dataset.themeMode = mode;
+  // the browser bar follows the app's choice, not only the OS (layout.tsx viewport.themeColor)
+  document
+    .querySelectorAll('meta[name="theme-color"]')
+    .forEach((m) => m.setAttribute('content', dark ? '#0c111d' : '#f3f6f9'));
 }
 
+/**
+ * Light / dark / follow the OS. The choice lives in localStorage (the inline theme script paints it
+ * before React loads); every tab follows a change made in another one.
+ */
 export function useTheme() {
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [mounted, setMounted] = useState(false);
+  const [stored, setStored] = useLocalStorage(KEY, 'system');
+  const mode: ThemeMode = MODES.includes(stored as ThemeMode) ? (stored as ThemeMode) : 'system';
+  const mounted = useIsClient();
 
+  // paint the page whenever the mode changes (here or in another tab)
   useEffect(() => {
-    const stored = (localStorage.getItem(KEY) as ThemeMode | null) ?? "system";
-    setMode(stored);
-    setMounted(true);
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      if ((localStorage.getItem(KEY) as ThemeMode | null) === "system" || !localStorage.getItem(KEY)) {
-        apply("system");
-      }
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
+    apply(mode);
+  }, [mode]);
 
-  const set = useCallback((m: ThemeMode) => {
-    localStorage.setItem(KEY, m);
-    setMode(m);
-    apply(m);
-  }, []);
+  // "system": follow the OS switching between light and dark
+  useEffect(() => {
+    if (mode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => apply('system');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [mode]);
+
+  const set = useCallback((m: ThemeMode) => setStored(m), [setStored]);
 
   return { mode, setMode: set, mounted };
 }
