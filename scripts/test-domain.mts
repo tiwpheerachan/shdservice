@@ -6989,6 +6989,36 @@ try {
       const none = await saveOutsource('TDJES10', { ...page, engineerSymptom: '' }, U.admin.id);
       assert.deepEqual(none.engineerSymptoms, [B]);
     });
+
+    await test('dashboard top symptoms: the first job_symptom row by pk, else reported_symptom_pk; a deleted job does not count; a tie goes by name', async () => {
+      const { dashboard } = await import('@/server/services/jobs');
+      const DAY = '1999-04-09';
+      const seed = async (no: string, rows: string[], reported: string | null, status = 'ACTIVE') => {
+        await freshJob(no);
+        await pool.query(
+          `UPDATE job SET job_create_date = $2::date + time '10:00', record_status = $3,
+             reported_symptom_pk = (SELECT pk FROM symptom WHERE symptom_name = $4 ORDER BY pk LIMIT 1) WHERE job_no = $1`,
+          [no, DAY, status, reported],
+        );
+        for (const name of rows)
+          await pool.query(
+            `INSERT INTO job_symptom (job_pk, symptom_pk) VALUES (${jobPk(no)}, (SELECT pk FROM symptom WHERE symptom_name = $1 ORDER BY pk LIMIT 1))`,
+            [name],
+          );
+      };
+      await seed('TDJES11', [A, B], C); // the row wins over reported_symptom_pk; only the first row counts
+      await seed('TDJES12', [A], null);
+      await seed('TDJES13', [], B); // no row: the legacy one
+      await seed('TDJES14', [C], null, 'DELETED');
+      await seed('TDJES15', [], null); // no symptom at all: not on the panel
+      await seed('TDJES16', [C, A], null); // first by pk, not the lowest symptom
+      const { topSymptoms } = await dashboard({ from: DAY, to: DAY });
+      assert.deepEqual(topSymptoms, [
+        { name: A, count: 2 },
+        { name: B, count: 1 },
+        { name: C, count: 1 },
+      ]);
+    });
   }
 } finally {
   // fixtures above insert symptoms / brands with explicit ids: move the sequences past them, or the next
