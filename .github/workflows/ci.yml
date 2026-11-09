@@ -83,6 +83,14 @@ jobs:
       - name: Dependency audit
         run: npm audit --omit=dev --audit-level=moderate
 
+      # Next's build cache, as in the e2e job (there under .next-e2e)
+      - name: Cache Next build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**', 'public/**', 'next.config.mjs', 'tsconfig.json') }}
+          restore-keys: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
       # Last and slowest. Pointed at the CI database so nothing can reach a real one.
       - name: Build
         run: npm run build
@@ -152,9 +160,19 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      # browsers come from the cache; their system libraries are not cached and install every time
+      # browsers come from the cache; their system libraries are not cached and install every time.
+      # Headless runs use chromium's headless shell only, so the full browser is never downloaded.
       - name: Install chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
+
+      # Next's build cache (.next-e2e = DIST_DIR): unchanged modules are not compiled again. A stale
+      # entry costs nothing but time — Next checks each one — and a miss falls back to the lockfile's.
+      - name: Cache Next build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .next-e2e/cache
+          key: next-e2e-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**', 'public/**', 'next.config.mjs', 'tsconfig.json') }}
+          restore-keys: next-e2e-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
 
       - name: E2E
         run: npm run e2e -- --project=${{ matrix.project }}
