@@ -567,6 +567,8 @@ function Runner({
         aria-modal="true"
         aria-labelledby="tour-title"
         aria-describedby="tour-body"
+        // still looking for this step's fields (a dialog opening): the e2e walk waits on it instead of a fixed time
+        data-looking={step.target && !els.length && tick <= 40 ? '' : undefined}
         className="group pointer-events-auto fixed z-71 w-[min(400px,calc(100vw-24px))] rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-pop dark:border-primary/30 data-compact:flex data-compact:w-[min(720px,calc(100vw-24px))] data-compact:flex-wrap data-compact:items-center data-compact:gap-x-4 data-compact:gap-y-2 data-compact:p-3 transition-opacity data-ghost:pointer-events-none data-ghost:opacity-20"
       >
         {/* small (a short screen / no room): one line — title, step count, อ่านคำอธิบาย — and the buttons */}

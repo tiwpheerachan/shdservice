@@ -160,6 +160,44 @@ export async function offerShown(page: Page) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * The step has settled: its fields are found (the card's data-looking is gone) and the card, the lit fields and the
+ * scroll held still for 4 frames with no finite animation running (a dialog opening, a smooth scroll). Spinners
+ * (infinite) do not count. Capped at 3 s — the checks then run on whatever is there and say what is wrong.
+ */
+async function settled(page: Page) {
+  await expect(card(page)).not.toHaveAttribute('data-looking');
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        const snap = () =>
+          JSON.stringify([
+            scrollX,
+            scrollY,
+            ...[...document.querySelectorAll('[aria-describedby="tour-body"], [data-tour-target]')].map((e) => {
+              const r = e.getBoundingClientRect();
+              return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+            }),
+          ]);
+        const busy = () =>
+          document
+            .getAnimations()
+            .some((a) => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity);
+        const t0 = performance.now();
+        let last = '';
+        let still = 0;
+        const tick = () => {
+          const s = snap();
+          still = s === last && !busy() ? still + 1 : 0;
+          last = s;
+          if (still >= 4 || performance.now() - t0 > 3000) done();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
 export async function walkTour(page: Page, start: 'button' | 'offer' = 'button'): Promise<number> {
   await page.evaluate(() => delete (window as Window & { __tourPrev?: Element }).__tourPrev);
   if (start === 'offer') await offerShown(page);
@@ -167,7 +205,7 @@ export async function walkTour(page: Page, start: 'button' | 'offer' = 'button')
   const n = Number((await card(page).locator('.num').locator('visible=true').first().innerText()).split('/')[1]);
   for (let k = 1; k <= n; k++) {
     await expect(card(page)).toContainText(`${k} / ${n}`);
-    await page.waitForTimeout(450); // the scroll to the step (a dialog opening) settles
+    await settled(page);
     const title = await card(page).locator('#tour-title').innerText();
     const g = await checkStep(page);
     expect(g.order, `"${title}" comes after the step before it in reading order`).toBe(true);
